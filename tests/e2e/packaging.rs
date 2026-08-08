@@ -1,11 +1,14 @@
 //! The npm distribution's journeys.
 //!
-//! `scripts/npm-build.mjs` assembles the real packages from the real binary, and
-//! the committed launcher runs under a real node, resolving its platform package
-//! through node's own module resolution. Nothing about the resolution is
-//! simulated — which matters, because the launcher's whole job is that
-//! resolution, and it is the one part of the pipeline a release job would
+//! Every test here reaches the command a user typed: the packages are assembled
+//! for real, and the committed launcher runs under a real node, resolving its
+//! platform package through node's own module resolution. Nothing about that
+//! resolution is simulated — which matters, because the launcher's whole job is
+//! that resolution, and it is the one part of the pipeline a release job would
 //! otherwise discover broken in public.
+//!
+//! What the *packages* must contain, rather than what running them does, is
+//! `tests/packaging.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -110,40 +113,6 @@ fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn the_launcher_stamps_the_crate_version_into_every_package() {
-    let root = tempfile::tempdir().expect("temp dir");
-    install(root.path(), true);
-    let manifest: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(
-            root.path()
-                .join("node_modules/onepipeline-ui-cli/package.json"),
-        )
-        .expect("read launcher manifest"),
-    )
-    .expect("parse launcher manifest");
-    assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
-    // Every optionalDependency is pinned to the exact version this release
-    // publishes, so an install can never pair a launcher with a stale binary.
-    for (name, pinned) in manifest["optionalDependencies"]
-        .as_object()
-        .expect("optionalDependencies")
-    {
-        assert_eq!(
-            pinned,
-            env!("CARGO_PKG_VERSION"),
-            "{name} is not pinned to this version"
-        );
-    }
-    assert!(
-        manifest["optionalDependencies"]
-            .get(host_package())
-            .is_some(),
-        "the launcher does not declare {}",
-        host_package()
-    );
-}
-
-#[test]
 fn the_launcher_runs_the_binary_its_platform_package_carries() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
@@ -193,24 +162,4 @@ fn a_missing_platform_package_fails_with_the_other_install_paths() {
         "{stderr}"
     );
     assert!(stderr.contains("cargo install onepipeline-ui"), "{stderr}");
-}
-
-#[test]
-fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
-    let output = Command::new("node")
-        .arg(repo_root().join("scripts/npm-build.mjs"))
-        .args([
-            "platform",
-            "--target",
-            "riscv64gc-unknown-linux-gnu",
-            "--binary",
-            "/dev/null",
-        ])
-        .current_dir(repo_root())
-        .output()
-        .expect("node is on PATH");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unknown target"), "{stderr}");
-    assert!(stderr.contains("ACTION:"), "{stderr}");
 }

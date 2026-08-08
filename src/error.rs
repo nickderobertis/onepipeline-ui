@@ -7,7 +7,7 @@
 
 use thiserror::Error;
 
-use crate::contract::{ErrorBody, ErrorEnvelope};
+use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, RunId};
 
 /// A failure of a read route.
 ///
@@ -33,13 +33,13 @@ pub enum ApiError {
     InvalidDispatchId(String),
     /// No run is recorded under that identifier.
     #[error("no recorded run {0}")]
-    RunNotFound(String),
+    RunNotFound(RunId),
     /// The run has no conversation under that identifier.
     #[error("no recorded conversation {0}")]
-    ConversationNotFound(String),
+    ConversationNotFound(ConversationId),
     /// The run has no artifact under that identifier.
     #[error("no recorded artifact {0}")]
-    ArtifactNotFound(String),
+    ArtifactNotFound(ArtifactId),
     /// The run's recorded state could not be projected into a payload.
     #[error("projection failed: {0}")]
     ProjectionFailed(String),

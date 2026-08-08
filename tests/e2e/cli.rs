@@ -76,6 +76,26 @@ fn serve_needs_a_runs_root() {
 }
 
 #[test]
+fn a_runs_root_that_does_not_exist_is_rejected_before_anything_starts() {
+    cli()
+        .args(["serve", "--runs-root", "/no/such/runs/root"])
+        .assert()
+        .code(USAGE)
+        .stderr(contains("/no/such/runs/root does not exist"));
+}
+
+#[test]
+fn a_runs_root_that_is_a_file_is_rejected() {
+    let file = tempfile::NamedTempFile::new().expect("temp file");
+    cli()
+        .args(["serve", "--runs-root"])
+        .arg(file.path())
+        .assert()
+        .code(USAGE)
+        .stderr(contains("is not a directory"));
+}
+
+#[test]
 fn a_bind_address_is_validated_at_the_edge() {
     let runs = tempfile::tempdir().expect("temp dir");
     cli()

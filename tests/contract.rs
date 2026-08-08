@@ -17,7 +17,7 @@ use onepipeline_ui::api::ReadApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_NOT_IMPLEMENTED};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame, Health,
-    NodeId, RunId, RunQuery, TimelineQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    HealthStatus, NodeId, RunId, RunQuery, TimelineQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use onepipeline_ui::ApiError;
 use serde_json::Value;
@@ -102,7 +102,7 @@ fn every_route_has_a_fixture() {
 fn the_health_body_round_trips() {
     let raw = read_fixture("healthz.json");
     let health: Health = serde_json::from_str(&raw).expect("parse healthz.json");
-    assert_eq!(health.status, "ok");
+    assert_eq!(health.status, HealthStatus::Ok);
     assert_eq!(canonical(&health), raw);
 }
 
@@ -192,13 +192,14 @@ fn the_error_envelope_round_trips_and_matches_the_error_it_renders() {
     let raw = read_fixture("error.json");
     let envelope: ErrorEnvelope = serde_json::from_str(&raw).expect("parse error.json");
     assert_eq!(canonical(&envelope), raw);
-    let error = ApiError::RunNotFound("run-20260807-a1b2c3".to_owned());
+    let error = ApiError::RunNotFound(RunId::try_from("run-20260807-a1b2c3").expect("valid"));
     assert_eq!(error.envelope(), envelope);
 }
 
 #[test]
 fn every_error_maps_to_its_code_and_status() {
     let reason = "why".to_owned();
+    let id = "why-1";
     let cases: [(ApiError, &str, u16); 10] = [
         (
             ApiError::InvalidRunId(reason.clone()),
@@ -225,14 +226,18 @@ fn every_error_maps_to_its_code_and_status() {
             "invalid_dispatch_id",
             422,
         ),
-        (ApiError::RunNotFound(reason.clone()), "run_not_found", 404),
         (
-            ApiError::ConversationNotFound(reason.clone()),
+            ApiError::RunNotFound(RunId::try_from(id).expect("valid")),
+            "run_not_found",
+            404,
+        ),
+        (
+            ApiError::ConversationNotFound(ConversationId::try_from(id).expect("valid")),
             "conversation_not_found",
             404,
         ),
         (
-            ApiError::ArtifactNotFound(reason.clone()),
+            ApiError::ArtifactNotFound(ArtifactId::try_from(id).expect("valid")),
             "artifact_not_found",
             404,
         ),
@@ -348,10 +353,11 @@ fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
 
 #[test]
 fn the_serve_surface_parses_and_defaults_to_loopback() {
-    let cli = Cli::try_parse_from(["onepipeline-ui", "serve", "--runs-root", "/srv/runs"])
-        .expect("parse");
+    let runs = tempfile::tempdir().expect("temp dir");
+    let root = runs.path().to_str().expect("utf-8 path");
+    let cli = Cli::try_parse_from(["onepipeline-ui", "serve", "--runs-root", root]).expect("parse");
     let Command::Serve(args) = &cli.command;
-    assert_eq!(args.runs_root, PathBuf::from("/srv/runs"));
+    assert_eq!(args.runs_root, PathBuf::from(root));
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(cli.command.name(), "serve");
 
@@ -359,7 +365,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
         "onepipeline-ui",
         "serve",
         "--runs-root",
-        "/srv/runs",
+        root,
         "--bind",
         "0.0.0.0:9000",
     ])
@@ -396,7 +402,7 @@ impl ReadApi for Unimplemented {
 
     fn health(&self) -> Health {
         Health {
-            status: "ok".to_owned(),
+            status: HealthStatus::Ok,
         }
     }
 
@@ -405,11 +411,11 @@ impl ReadApi for Unimplemented {
     }
 
     fn run(&self, run: &RunId, _query: &RunQuery) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.to_string()))
+        Err(ApiError::RunNotFound(run.clone()))
     }
 
     fn timeline(&self, run: &RunId, _query: &TimelineQuery) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.to_string()))
+        Err(ApiError::RunNotFound(run.clone()))
     }
 
     fn conversation(
@@ -417,11 +423,11 @@ impl ReadApi for Unimplemented {
         _run: &RunId,
         conversation: &ConversationId,
     ) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::ConversationNotFound(conversation.to_string()))
+        Err(ApiError::ConversationNotFound(conversation.clone()))
     }
 
     fn artifact(&self, _run: &RunId, artifact: &ArtifactId) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::ArtifactNotFound(artifact.to_string()))
+        Err(ApiError::ArtifactNotFound(artifact.clone()))
     }
 
     fn events(&self) -> Result<Self::Events, ApiError> {
@@ -433,7 +439,7 @@ impl ReadApi for Unimplemented {
 fn the_read_trait_covers_every_route_and_is_implementable() {
     let api = Unimplemented;
     let run = RunId::try_from("run-1").expect("valid");
-    assert_eq!(api.health().status, "ok");
+    assert_eq!(api.health().status, HealthStatus::Ok);
     assert_eq!(api.runs().expect_err("stub").status(), 500);
     assert_eq!(
         api.run(

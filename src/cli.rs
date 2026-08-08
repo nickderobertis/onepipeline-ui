@@ -47,7 +47,12 @@ impl Command {
 #[derive(Debug, Clone, PartialEq, Eq, Args, Serialize, Deserialize)]
 pub struct ServeArgs {
     /// Directory holding the recorded runs to serve.
-    #[arg(long, value_name = "DIR")]
+    ///
+    /// Validated here, at the command line, so a typo'd path is a usage error
+    /// before anything binds a port. A value that arrives through serde instead
+    /// is validated by whatever opens it, which is the same boundary one step
+    /// later.
+    #[arg(long, value_name = "DIR", value_parser = readable_directory)]
     pub runs_root: PathBuf,
 
     /// Address to bind, as `HOST:PORT`.
@@ -61,4 +66,16 @@ pub struct ServeArgs {
 
 fn default_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8765))
+}
+
+/// Accept `value` only if it names a directory that can be read today.
+fn readable_directory(value: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(value);
+    if path.is_dir() {
+        Ok(path)
+    } else if path.exists() {
+        Err(format!("{value} is not a directory"))
+    } else {
+        Err(format!("{value} does not exist"))
+    }
 }

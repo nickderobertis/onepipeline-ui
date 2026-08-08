@@ -6,9 +6,13 @@
 //! built by maturin inside the release workflow, where a name or binding that
 //! had drifted would surface as a public, half-published release. These
 //! assertions are what make that drift fail here instead.
+//!
+//! The two `npm_build` tests below assemble a package without running it: what
+//! a released package must *contain*. Running the launcher a user installed is
+//! `tests/e2e/packaging.rs`.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn read(relative: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
@@ -118,4 +122,63 @@ fn every_secret_the_workflows_read_is_in_the_manifest() {
         manifest["destinations"][0]["repository"], "nickderobertis/onepipeline-ui",
         "the manifest syncs to another repository"
     );
+}
+
+/// Run `scripts/npm-build.mjs` and return the package directory it printed.
+fn npm_build(args: &[&str]) -> std::process::Output {
+    std::process::Command::new("node")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/npm-build.mjs"))
+        .args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("node is on PATH")
+}
+
+#[test]
+fn the_assembled_launcher_pins_every_platform_package_to_the_crate_version() {
+    let out = tempfile::tempdir().expect("temp dir");
+    let built = npm_build(&[
+        "launcher",
+        "--out",
+        out.path().to_str().expect("utf-8 path"),
+    ]);
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let dir = PathBuf::from(String::from_utf8(built.stdout).expect("utf-8 path").trim());
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("package.json")).expect("read manifest"))
+            .expect("parse manifest");
+    let version = env!("CARGO_PKG_VERSION");
+    assert_eq!(
+        manifest["version"], version,
+        "the launcher carries a version of its own"
+    );
+    // Pinned exactly, so an install can never pair a launcher with a stale
+    // binary — the failure npm's own semver resolution would otherwise allow.
+    let optional = manifest["optionalDependencies"]
+        .as_object()
+        .expect("optionalDependencies");
+    assert!(!optional.is_empty());
+    for (name, pinned) in optional {
+        assert_eq!(pinned, version, "{name} is not pinned to this version");
+    }
+}
+
+#[test]
+fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
+    let out = npm_build(&[
+        "platform",
+        "--target",
+        "riscv64gc-unknown-linux-gnu",
+        "--binary",
+        "/dev/null",
+    ]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unknown target"), "{stderr}");
+    assert!(stderr.contains("ACTION:"), "{stderr}");
 }

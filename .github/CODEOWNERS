@@ -3,8 +3,7 @@
 # One maintainer owns everything today, so the per-subtree lines below are not
 # redundant with the catch-all: they are where a subtree's owner changes when the
 # frontend app lands, and they keep that change to a single line. Adding a
-# project means adding its line here, next to its `project.json` and nested
-# `AGENTS.md`.
+# project means adding its line here, next to its `project.json`.
 
 * @nickderobertis
 
