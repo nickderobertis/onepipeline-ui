@@ -377,14 +377,36 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
 #[test]
 fn the_serve_surface_is_also_the_config_schema() {
     let runs = tempfile::tempdir().expect("temp dir");
-    let root = runs.path().to_str().expect("utf-8 path");
+    assert_config_names_the_same_root(runs.path());
+}
+
+/// A root whose own name is a JSON escape sequence, which the encoded form has
+/// to survive. Unix-only because Windows forbids both characters in a file
+/// name — but this is exactly the Windows shape, where every separator in
+/// `C:\Users\...` is the `\` this covers.
+#[cfg(unix)]
+#[test]
+fn a_runs_root_whose_name_needs_json_escaping_round_trips() {
+    let parent = tempfile::tempdir().expect("temp dir");
+    let runs = parent.path().join(r#"runs\u0041"quoted"#);
+    fs::create_dir(&runs).expect("create the awkwardly named root");
+    assert_config_names_the_same_root(&runs);
+}
+
+/// A configuration file naming `root` parses to it, defaults its bind address,
+/// and re-serializes to the same document.
+fn assert_config_names_the_same_root(root: &Path) {
+    // Encoded by serde rather than interpolated raw: a root carrying a `\` — a
+    // separator in every Windows path — is an escape inside a JSON string, so
+    // pasting one in makes this a parse error rather than a schema claim.
+    let encoded = serde_json::to_string(root).expect("encode the root as JSON");
     let args: ServeArgs =
-        serde_json::from_str(&format!(r#"{{"runs_root":"{root}"}}"#)).expect("parse config");
-    assert_eq!(args.runs_root.as_path(), runs.path());
+        serde_json::from_str(&format!(r#"{{"runs_root":{encoded}}}"#)).expect("parse config");
+    assert_eq!(args.runs_root.as_path(), root);
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(
         serde_json::to_string(&args).expect("serialize"),
-        format!(r#"{{"runs_root":"{root}","bind":"127.0.0.1:8765"}}"#)
+        format!(r#"{{"runs_root":{encoded},"bind":"127.0.0.1:8765"}}"#)
     );
 }
 
