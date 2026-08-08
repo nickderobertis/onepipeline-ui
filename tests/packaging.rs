@@ -124,7 +124,6 @@ fn every_secret_the_workflows_read_is_in_the_manifest() {
     );
 }
 
-/// Run `scripts/npm-build.mjs` and return the package directory it printed.
 fn npm_build(args: &[&str]) -> std::process::Output {
     std::process::Command::new("node")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/npm-build.mjs"))
