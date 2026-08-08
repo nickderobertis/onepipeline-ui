@@ -1,0 +1,115 @@
+name: Published smoke
+
+# Install what the registries and the GitHub Release are serving *right now* and
+# run it.
+#
+# `release.yml`'s verify jobs prove a version at the moment it is published, and
+# then never look again. Everything that can break afterwards — a yanked platform
+# package, an npm dist-tag moved to a build that never shipped, a wheel PyPI
+# stopped serving for one platform — is invisible until a user hits it, because
+# nothing in this repository installs from a registry between releases.
+#
+# So this runs the identical `scripts/smoke-published.sh` those jobs run, against
+# `latest` rather than a tag, on Linux, both macOS architectures, and Windows,
+# once a week. The registry's own idea of the version (`pip show`, `npm view`) is
+# what the binary is held to, so a package whose metadata and payload disagree
+# fails here rather than confusing someone reading `--version`.
+#
+# Deliberately cheap: a checkout, the language runtime that owns the installer,
+# `pip install` / `npm install -g`, and bash. No Rust toolchain, no build, no
+# cache — a sweep that took ten minutes a platform would be the first thing
+# switched off, and this one has to keep running while nobody is looking.
+#
+# NOT a required check, and it cannot become one: branch protection lists
+# contexts a *pull request* reports, and nothing here runs on one. See AGENTS.md.
+#
+# llmlint: ignore-file[changed_behavior_has_e2e] this workflow is a schedule, two
+# registry installs, and a call to scripts/smoke-published.sh. The script is what holds
+# the behaviour, and it is driven for real against the compiled binary on every pull
+# request by ci.yml's `install` job. What is left here is the trigger and the two
+# installs, which only a hosted runner and a live registry can exercise; simulating
+# either would put the simulation under test.
+#
+# llmlint: ignore-file[live_tier_compiles_and_requires_credential] there is no
+# credential to require: every step reads a public registry anonymously, and the jobs
+# are switched by the same PYPI_PUBLISH / NPM_PUBLISH repository variables that decide
+# whether this project publishes to those registries at all. A repo that publishes
+# nowhere has nothing to smoke, and a weekly red run for an absent package is how a
+# sweep gets switched off.
+
+on:
+  schedule:
+    # Mondays, early UTC: a break found at the start of the week gets a week to
+    # be fixed in, and an off-the-hour minute keeps this out of the queue every
+    # other cron job on GitHub is in.
+    - cron: "37 6 * * 1"
+  # The manual entry point — after a registry incident, or to confirm a fix
+  # without waiting for Monday.
+  workflow_dispatch:
+
+# Nothing by default. Each job asks for `contents: read` because it checks out
+# the smoke script.
+permissions: {}
+
+concurrency:
+  group: published-smoke
+  cancel-in-progress: false
+
+jobs:
+  pypi:
+    name: pypi (${{ matrix.os }})
+    if: ${{ vars.PYPI_PUBLISH == 'true' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install what PyPI serves as latest
+        run: pip install --no-cache-dir onepipeline-ui-cli
+      # The registry's own metadata is the expectation, so a package whose
+      # recorded version and shipped binary disagree fails here.
+      - name: Smoke-test it against the version PyPI recorded
+        run: |
+          ver="$(pip show onepipeline-ui-cli | awk '/^Version:/ {print $2}')"
+          [ -n "$ver" ] || { echo "::error::pip reported no version for onepipeline-ui-cli"; exit 1; }
+          bash scripts/smoke-published.sh \
+            --expect-version "$ver" \
+            --label "PyPI onepipeline-ui-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"
+
+  npm:
+    name: npm (${{ matrix.os }})
+    if: ${{ vars.NPM_PUBLISH == 'true' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install what npm serves as latest
+        run: npm install -g --prefer-online onepipeline-ui-cli
+      - name: Smoke-test it against the version npm recorded
+        run: |
+          ver="$(npm view onepipeline-ui-cli version)"
+          [ -n "$ver" ] || { echo "::error::npm reported no version for onepipeline-ui-cli"; exit 1; }
+          bash scripts/smoke-published.sh \
+            --expect-version "$ver" \
+            --label "npm onepipeline-ui-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"

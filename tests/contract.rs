@@ -1,0 +1,468 @@
+//! The contract tests: `docs/contract.md` is the source of truth, and these
+//! hold the crate's types to it.
+//!
+//! Each fixture under `tests/fixtures/` is one endpoint's response body. What
+//! they pin is the **envelope** — the schema-version preamble and its
+//! byte-for-byte serialization. Their payload bodies carry only the payload
+//! facts the contract itself names (session attribution on the run list,
+//! `dispatch_id` at schema 10, an empty `conversations` for the opt-out) and are
+//! not a claim about the onepipeline SDK's record shapes; those land with the
+//! SDK, which is where anything presentation-worthy is computed.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use clap::Parser;
+use onepipeline_ui::api::ReadApi;
+use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_NOT_IMPLEMENTED};
+use onepipeline_ui::contract::{
+    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame, Health,
+    NodeId, RunId, RunQuery, TimelineQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+};
+use onepipeline_ui::ApiError;
+use serde_json::Value;
+
+/// The fixture file each route's response body is pinned in.
+const ROUTE_FIXTURES: [(&str, &str); 7] = [
+    (routes::HEALTHZ, "healthz.json"),
+    (routes::RUNS, "runs.json"),
+    (routes::RUN, "run.json"),
+    (routes::RUN_TIMELINE, "run-timeline.json"),
+    (routes::RUN_CONVERSATION, "run-conversation.json"),
+    (routes::RUN_ARTIFACT, "run-artifact.json"),
+    (routes::EVENTS, "events.json"),
+];
+
+fn fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+fn read_fixture(name: &str) -> String {
+    let path = fixture_dir().join(name);
+    fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
+}
+
+fn contract_text() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/contract.md");
+    fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
+}
+
+/// Re-serialize `value` the way a fixture is written: pretty, one trailing newline.
+fn canonical<T: serde::Serialize>(value: &T) -> String {
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(value).expect("serialize")
+    )
+}
+
+#[test]
+fn every_route_the_contract_documents_is_in_the_route_table() {
+    let contract = contract_text();
+    for route in routes::ALL {
+        // The contract writes `{run}` and `{id}` exactly as the route templates do.
+        assert!(
+            contract.contains(route),
+            "docs/contract.md does not document the route {route}"
+        );
+    }
+}
+
+#[test]
+fn the_route_table_documents_no_route_the_contract_does_not() {
+    let contract = contract_text();
+    let documented: Vec<&str> = contract
+        .lines()
+        .filter_map(|line| line.strip_prefix("GET "))
+        .map(|rest| rest.split_whitespace().next().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        documented,
+        routes::ALL.to_vec(),
+        "the route table and docs/contract.md list different routes, or list them in a different order"
+    );
+}
+
+#[test]
+fn every_route_has_a_fixture() {
+    let mapped: Vec<&str> = ROUTE_FIXTURES.iter().map(|(route, _)| *route).collect();
+    assert_eq!(
+        mapped,
+        routes::ALL.to_vec(),
+        "a route has no pinned fixture"
+    );
+    for (route, fixture) in ROUTE_FIXTURES {
+        assert!(
+            fixture_dir().join(fixture).is_file(),
+            "{route} has no fixture at tests/fixtures/{fixture}"
+        );
+    }
+}
+
+#[test]
+fn the_health_body_round_trips() {
+    let raw = read_fixture("healthz.json");
+    let health: Health = serde_json::from_str(&raw).expect("parse healthz.json");
+    assert_eq!(health.status, "ok");
+    assert_eq!(canonical(&health), raw);
+}
+
+#[test]
+fn every_enveloped_fixture_round_trips_byte_for_byte() {
+    for (route, fixture) in ROUTE_FIXTURES {
+        if route == routes::HEALTHZ || route == routes::EVENTS {
+            continue; // Not enveloped, and enveloped one level down, respectively.
+        }
+        let raw = read_fixture(fixture);
+        let envelope: Envelope<Value> =
+            serde_json::from_str(&raw).unwrap_or_else(|err| panic!("parse {fixture}: {err}"));
+        assert_eq!(envelope.api_version, API_VERSION, "{fixture}");
+        assert_eq!(
+            envelope.telemetry_schema_version, TELEMETRY_SCHEMA_VERSION,
+            "{fixture}"
+        );
+        assert_eq!(canonical(&envelope), raw, "{fixture} does not round-trip");
+    }
+}
+
+#[test]
+fn the_schema_version_the_envelope_carries_is_ten() {
+    // The contract names the version in prose; the constant is what is served.
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 10);
+    assert!(contract_text().contains("schema 10"));
+    assert_eq!(API_VERSION, 2);
+    assert!(routes::RUNS.starts_with("/api/v2/"));
+}
+
+#[test]
+fn the_event_frame_round_trips_and_opens_with_a_snapshot() {
+    let raw = read_fixture("events.json");
+    let frame: EventFrame = serde_json::from_str(&raw).expect("parse events.json");
+    assert_eq!(
+        frame.id, 0,
+        "a connection's first frame is its fresh snapshot"
+    );
+    assert_eq!(
+        frame.data.telemetry_schema_version,
+        TELEMETRY_SCHEMA_VERSION
+    );
+    assert!(
+        frame.data.payload.get("runs").is_some(),
+        "the snapshot carries the state a fresh connection needs"
+    );
+    assert_eq!(canonical(&frame), raw);
+}
+
+#[test]
+fn the_run_list_carries_session_attribution() {
+    let raw = read_fixture("runs.json");
+    let envelope: Envelope<Value> = serde_json::from_str(&raw).expect("parse runs.json");
+    let runs = envelope.payload["runs"]
+        .as_array()
+        .expect("runs is an array");
+    assert!(!runs.is_empty());
+    for run in runs {
+        RunId::try_from(run["run_id"].as_str().expect("run_id is a string")).expect("valid run id");
+        assert!(
+            run.get("session").is_some(),
+            "every run carries its session attribution"
+        );
+    }
+}
+
+#[test]
+fn schema_ten_carries_a_dispatch_id() {
+    let raw = read_fixture("run-timeline.json");
+    let envelope: Envelope<Value> = serde_json::from_str(&raw).expect("parse run-timeline.json");
+    let spans = envelope.payload["spans"]
+        .as_array()
+        .expect("spans is an array");
+    let dispatch = spans[0]["dispatch_id"]
+        .as_str()
+        .expect("dispatch_id is a string");
+    assert_eq!(
+        DispatchId::try_from(dispatch)
+            .expect("valid dispatch id")
+            .as_str(),
+        dispatch
+    );
+}
+
+#[test]
+fn the_error_envelope_round_trips_and_matches_the_error_it_renders() {
+    let raw = read_fixture("error.json");
+    let envelope: ErrorEnvelope = serde_json::from_str(&raw).expect("parse error.json");
+    assert_eq!(canonical(&envelope), raw);
+    let error = ApiError::RunNotFound("run-20260807-a1b2c3".to_owned());
+    assert_eq!(error.envelope(), envelope);
+}
+
+#[test]
+fn every_error_maps_to_its_code_and_status() {
+    let reason = "why".to_owned();
+    let cases: [(ApiError, &str, u16); 10] = [
+        (
+            ApiError::InvalidRunId(reason.clone()),
+            "invalid_run_id",
+            422,
+        ),
+        (
+            ApiError::InvalidNodeId(reason.clone()),
+            "invalid_node_id",
+            422,
+        ),
+        (
+            ApiError::InvalidConversationId(reason.clone()),
+            "invalid_conversation_id",
+            422,
+        ),
+        (
+            ApiError::InvalidArtifactId(reason.clone()),
+            "invalid_artifact_id",
+            422,
+        ),
+        (
+            ApiError::InvalidDispatchId(reason.clone()),
+            "invalid_dispatch_id",
+            422,
+        ),
+        (ApiError::RunNotFound(reason.clone()), "run_not_found", 404),
+        (
+            ApiError::ConversationNotFound(reason.clone()),
+            "conversation_not_found",
+            404,
+        ),
+        (
+            ApiError::ArtifactNotFound(reason.clone()),
+            "artifact_not_found",
+            404,
+        ),
+        (
+            ApiError::ProjectionFailed(reason.clone()),
+            "projection_error",
+            409,
+        ),
+        (ApiError::Read(reason), "read_error", 500),
+    ];
+    for (error, code, status) in cases {
+        assert_eq!(error.code(), code);
+        assert_eq!(error.status(), status);
+        let rendered = error.envelope();
+        assert_eq!(rendered.error.code, code);
+        assert_eq!(rendered.error.message, error.to_string());
+        assert!(rendered.error.message.contains("why"));
+    }
+}
+
+#[test]
+fn identifiers_accept_a_bare_path_segment() {
+    for value in ["run-20260807-a1b2c3", "node_1", "a.b", "x"] {
+        assert_eq!(RunId::try_from(value).expect("accepted").as_str(), value);
+        assert_eq!(RunId::try_from(value).expect("accepted").to_string(), value);
+        assert_eq!(
+            String::from(RunId::try_from(value).expect("accepted")),
+            value
+        );
+    }
+}
+
+#[test]
+fn identifiers_reject_anything_that_is_not_one() {
+    let too_long = "a".repeat(129);
+    let cases: [(&str, &str); 6] = [
+        ("", "must not be empty"),
+        (&too_long, "at most 128"),
+        ("a/b", "ASCII letters"),
+        ("../etc", "ASCII letters"),
+        ("a b", "ASCII letters"),
+        (".hidden", "must not start"),
+    ];
+    for (value, expected) in cases {
+        let error = RunId::try_from(value).expect_err("rejected");
+        assert_eq!(error.code(), "invalid_run_id");
+        assert!(error.to_string().contains(expected), "{value:?} -> {error}");
+    }
+    // Each identifier reports itself, so a client learns which one was wrong.
+    assert_eq!(
+        NodeId::try_from("a/b").expect_err("rejected").code(),
+        "invalid_node_id"
+    );
+    assert_eq!(
+        ConversationId::try_from("a/b")
+            .expect_err("rejected")
+            .code(),
+        "invalid_conversation_id"
+    );
+    assert_eq!(
+        ArtifactId::try_from("a/b").expect_err("rejected").code(),
+        "invalid_artifact_id"
+    );
+    assert_eq!(
+        DispatchId::try_from("a/b").expect_err("rejected").code(),
+        "invalid_dispatch_id"
+    );
+}
+
+#[test]
+fn identifiers_are_validated_when_they_are_deserialized() {
+    let ok: RunId = serde_json::from_str("\"run-1\"").expect("accepted");
+    assert_eq!(ok.as_str(), "run-1");
+    let err = serde_json::from_str::<RunId>("\"../etc\"").expect_err("rejected");
+    assert!(err.to_string().contains("invalid run id"), "{err}");
+    assert_eq!(serde_json::to_string(&ok).expect("serialize"), "\"run-1\"");
+}
+
+#[test]
+fn the_run_query_serves_conversations_unless_asked_not_to() {
+    let default: RunQuery = serde_json::from_str("{}").expect("parse");
+    assert!(default.include_conversations, "the opt-out is opt-in");
+    let opted_out: RunQuery =
+        serde_json::from_str(r#"{"include_conversations":false}"#).expect("parse");
+    assert!(!opted_out.include_conversations);
+    assert_eq!(
+        serde_json::to_string(&opted_out).expect("serialize"),
+        r#"{"include_conversations":false}"#
+    );
+}
+
+#[test]
+fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
+    let run: TimelineQuery = serde_json::from_str(r#"{"scope":"run"}"#).expect("parse");
+    assert_eq!(run, TimelineQuery::Run);
+    let node: TimelineQuery =
+        serde_json::from_str(r#"{"scope":"node","node":"contract-interface"}"#).expect("parse");
+    assert_eq!(
+        node,
+        TimelineQuery::Node {
+            node: NodeId::try_from("contract-interface").unwrap()
+        }
+    );
+    assert_eq!(
+        serde_json::to_string(&node).expect("serialize"),
+        r#"{"scope":"node","node":"contract-interface"}"#
+    );
+    // `scope=node` with no node, and a scope the contract does not define, are
+    // both unrepresentable rather than validated after parsing.
+    assert!(serde_json::from_str::<TimelineQuery>(r#"{"scope":"node"}"#).is_err());
+    assert!(serde_json::from_str::<TimelineQuery>(r#"{"scope":"round"}"#).is_err());
+}
+
+#[test]
+fn the_serve_surface_parses_and_defaults_to_loopback() {
+    let cli = Cli::try_parse_from(["onepipeline-ui", "serve", "--runs-root", "/srv/runs"])
+        .expect("parse");
+    let Command::Serve(args) = &cli.command;
+    assert_eq!(args.runs_root, PathBuf::from("/srv/runs"));
+    assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
+    assert_eq!(cli.command.name(), "serve");
+
+    let bound = Cli::try_parse_from([
+        "onepipeline-ui",
+        "serve",
+        "--runs-root",
+        "/srv/runs",
+        "--bind",
+        "0.0.0.0:9000",
+    ])
+    .expect("parse");
+    let Command::Serve(args) = &bound.command;
+    assert_eq!(args.bind.to_string(), "0.0.0.0:9000");
+}
+
+#[test]
+fn the_serve_surface_is_also_the_config_schema() {
+    let args: ServeArgs =
+        serde_json::from_str(r#"{"runs_root":"/srv/runs"}"#).expect("parse config");
+    assert_eq!(args.runs_root, PathBuf::from("/srv/runs"));
+    assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
+    assert_eq!(
+        serde_json::to_string(&args).expect("serialize"),
+        r#"{"runs_root":"/srv/runs","bind":"127.0.0.1:8765"}"#
+    );
+}
+
+#[test]
+fn the_not_implemented_status_is_distinct_from_success_and_usage() {
+    assert_ne!(EXIT_NOT_IMPLEMENTED, 0);
+    assert_ne!(EXIT_NOT_IMPLEMENTED, 2);
+}
+
+/// The trait is what the axum server and the SDK-backed store are written
+/// against, so it has to be implementable; this proves it is object-safe enough
+/// to hold a real store and that its method shapes line up with the contract.
+struct Unimplemented;
+
+impl ReadApi for Unimplemented {
+    type Events = std::vec::IntoIter<EventFrame>;
+
+    fn health(&self) -> Health {
+        Health {
+            status: "ok".to_owned(),
+        }
+    }
+
+    fn runs(&self) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
+    }
+
+    fn run(&self, run: &RunId, _query: &RunQuery) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.to_string()))
+    }
+
+    fn timeline(&self, run: &RunId, _query: &TimelineQuery) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.to_string()))
+    }
+
+    fn conversation(
+        &self,
+        _run: &RunId,
+        conversation: &ConversationId,
+    ) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::ConversationNotFound(conversation.to_string()))
+    }
+
+    fn artifact(&self, _run: &RunId, artifact: &ArtifactId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::ArtifactNotFound(artifact.to_string()))
+    }
+
+    fn events(&self) -> Result<Self::Events, ApiError> {
+        Ok(Vec::new().into_iter())
+    }
+}
+
+#[test]
+fn the_read_trait_covers_every_route_and_is_implementable() {
+    let api = Unimplemented;
+    let run = RunId::try_from("run-1").expect("valid");
+    assert_eq!(api.health().status, "ok");
+    assert_eq!(api.runs().expect_err("stub").status(), 500);
+    assert_eq!(
+        api.run(
+            &run,
+            &RunQuery {
+                include_conversations: true
+            }
+        )
+        .expect_err("stub")
+        .code(),
+        "run_not_found"
+    );
+    assert_eq!(
+        api.timeline(&run, &TimelineQuery::Run)
+            .expect_err("stub")
+            .status(),
+        404
+    );
+    assert_eq!(
+        api.conversation(&run, &ConversationId::try_from("c-1").expect("valid"))
+            .expect_err("stub")
+            .code(),
+        "conversation_not_found"
+    );
+    assert_eq!(
+        api.artifact(&run, &ArtifactId::try_from("a-1").expect("valid"))
+            .expect_err("stub")
+            .code(),
+        "artifact_not_found"
+    );
+    assert_eq!(api.events().expect("stub").count(), 0);
+}

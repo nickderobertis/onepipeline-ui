@@ -1,0 +1,27 @@
+# Review routing for the project graph. Last matching pattern wins.
+#
+# One maintainer owns everything today, so the per-subtree lines below are not
+# redundant with the catch-all: they are where a subtree's owner changes when the
+# frontend app lands, and they keep that change to a single line. Adding a
+# project means adding its line here, next to its `project.json` and nested
+# `AGENTS.md`.
+
+* @nickderobertis
+
+# The Rust crate — the published artifact and the versioned wire contract.
+/src/                    @nickderobertis
+/tests/                  @nickderobertis
+/docs/contract.md        @nickderobertis
+/Cargo.toml              @nickderobertis
+
+# The distribution wrappers.
+/npm/onepipeline-ui/     @nickderobertis
+/pyproject.toml          @nickderobertis
+
+# The orchestration and release surfaces, where a mistake is repo-wide.
+/.github/                @nickderobertis
+/scripts/                @nickderobertis
+/nx.json                 @nickderobertis
+/project.json            @nickderobertis
+/justfile                @nickderobertis
+/release-plz.toml        @nickderobertis

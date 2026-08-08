@@ -1,0 +1,20 @@
+/target
+/.dev
+# The Nx orchestrator's own install and computation cache. `scripts/nx.sh`
+# re-creates node_modules from the committed lockfile whenever it is missing.
+/node_modules
+/.nx
+# Assembled by scripts/npm-build.mjs and by maturin; the committed sources are
+# npm/onepipeline-ui/ and pyproject.toml.
+/npm/dist
+/dist
+# Coverage instrumentation writes these wherever an instrumented binary happens
+# to run, which for the e2e journeys is a temporary directory. They are raw
+# counter dumps, never sources.
+*.profraw
+# Composed once during buildout and deliberately not committed (see AGENTS.md /
+# the create-repo skill): the one-time llmlint structural tier.
+llmlint.buildout.yml
+REPO_PLAN.md
+# Local sync bookkeeping for gh-secrets (per-machine; the manifest itself is tracked)
+.gh-secrets-state.json

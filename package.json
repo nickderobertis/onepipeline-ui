@@ -1,0 +1,9 @@
+{
+  "name": "onepipeline-ui-workspace",
+  "private": true,
+  "description": "Nx project graph for the onepipeline-ui monorepo. Not published; it carries the orchestrator and nothing else. Every deliverable's version comes from Cargo.toml.",
+  "license": "MIT",
+  "devDependencies": {
+    "nx": "^23.1.1"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 10,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "runs": [
+    {
+      "run_id": "run-20260807-a1b2c3",
+      "session": "claude-code:3f9a1c2e"
+    },
+    {
+      "run_id": "run-20260807-d4e5f6",
+      "session": null
+    }
+  ]
+}
