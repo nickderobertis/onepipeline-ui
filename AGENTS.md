@@ -2,8 +2,7 @@
 
 Durable instructions for humans and agents working in this repo. Write for a
 future maintainer, not as a session log. Deterministic steps live in `scripts/`
-and the `justfile`; this file holds the judgment. Rules scoped to a subtree go in
-that subtree's `AGENTS.md` (see `tests/AGENTS.md`).
+and the `justfile`; this file holds the judgment.
 
 > `CLAUDE.md` is a symlink to this file — edit `AGENTS.md` only.
 
@@ -97,8 +96,9 @@ differ from these — a nested `AGENTS.md`.
 - The gate is strict: no warnings-only mode anywhere. A diagnostic is an error or
   a suppression with a written reason at the narrowest scope the tool allows.
 - **Coverage is enforced at 95% line coverage**; the gate fails below it.
-- **Tests are realistic, not mocked, and complete, not minimal** — see
-  `tests/AGENTS.md`.
+- **Tests are realistic, not mocked, and complete, not minimal.** Nothing under
+  test is stubbed, and a change is not done until a real journey covers it —
+  happy path and at least one failure a user can cause.
 - **Validate external input at its trust boundary.** Every `{...}` a route
   interpolates is a validated identifier newtype constructible only through
   `TryFrom`; a raw `String` must never reach storage, and a runs root is a

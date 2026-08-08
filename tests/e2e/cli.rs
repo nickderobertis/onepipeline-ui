@@ -98,6 +98,30 @@ fn a_runs_root_that_is_a_file_is_rejected() {
         .stderr(contains("is not a readable directory: not a directory"));
 }
 
+/// A directory that exists but cannot be opened. Unix-only: this is a POSIX
+/// permission bit, and Windows denies a directory read through an ACL the same
+/// journey cannot set.
+#[cfg(unix)]
+#[test]
+fn a_runs_root_that_cannot_be_read_is_rejected() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let runs = tempfile::tempdir().expect("temp dir");
+    std::fs::set_permissions(runs.path(), std::fs::Permissions::from_mode(0o000))
+        .expect("drop the read bit");
+    let assertion = cli()
+        .args(["serve", "--runs-root"])
+        .arg(runs.path())
+        .assert();
+    // Restored before asserting, so a failure here cannot also leave an
+    // unremovable directory behind.
+    std::fs::set_permissions(runs.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("restore the read bit");
+    assertion
+        .code(USAGE)
+        .stderr(contains("is not a readable directory: permission denied"));
+}
+
 #[test]
 fn a_bind_address_is_validated_at_the_edge() {
     let runs = tempfile::tempdir().expect("temp dir");
