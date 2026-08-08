@@ -13,19 +13,20 @@ the onepipeline SDK, and the frontend that reads it. One crate
 (`onepipeline-ui`, library + CLI) ships on crates.io and, as thin
 prebuilt-binary wrappers, on PyPI and npm as `onepipeline-ui-cli`.
 
-**It is landed interface-only today.** `src/` renders
-[`docs/contract.md`](docs/contract.md) as types with nothing behind them;
-`onepipeline-ui serve` exits `70`. Two rules outlive that phase:
+Two rules govern what may be written here:
 
-- **The contract is the source of truth, in that direction only.** If the code
-  and `docs/contract.md` disagree, the code is wrong. The contract is quoted in
-  from a decision made outside this repo — never edited to suit the code, and
-  never to satisfy a lint.
+- **[`docs/contract.md`](docs/contract.md) is the source of truth, in that
+  direction only.** If the code and the contract disagree, the code is wrong.
+  The contract is quoted in from a decision made outside this repo — never
+  edited to suit the code, and never to satisfy a lint.
 - **Payload records come from the onepipeline SDK, not from here.** Anything
   presentation-worthy is computed in the SDK/CLI first, so the agent reading the
   CLI has at least the visibility the human in the UI has. That is why payloads
   are `serde_json::Value` and this crate owns only the envelope: inventing record
   types here would put a second source of truth in the wrong repo.
+
+The server itself is not built yet — `serve` exits `70` — so a change that adds
+behaviour is the first one, not another one.
 
 ## Two standing goals on every task
 
@@ -59,14 +60,11 @@ and because nothing else recovers *why* the tooling is what it is.
 ## Command surface
 
 `just --list` is the index; do not hand-roll equivalents. **`just gate` is the
-complete pre-push bar** — the deterministic `just check` plus the diff-scoped
-llmlint tier. `just deps-check` is deliberately outside both: it needs a network
-advisory database, and the gate stays offline.
+pre-push bar.** `just deps-check` is deliberately outside it: it needs a network
+advisory database, and the gate stays offline and deterministic.
 
-The repo-wide verbs delegate to Nx, which fans one uniformly-named target across
-every project; what a target *does* stays with its project. Adding a project
-means adding its `project.json`, its `CODEOWNERS` line, and — where its rules
-differ from these — a nested `AGENTS.md`.
+Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx
+fans one uniformly-named target across all of them.
 
 ## Commits, releases, and merging
 
