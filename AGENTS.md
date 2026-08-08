@@ -25,9 +25,6 @@ Two rules govern what may be written here:
   are `serde_json::Value` and this crate owns only the envelope: inventing record
   types here would put a second source of truth in the wrong repo.
 
-The server itself is not built yet — `serve` exits `70` — so a change that adds
-behaviour is the first one, not another one.
-
 ## Two standing goals on every task
 
 The user drives product features and their request is the priority — but carry
