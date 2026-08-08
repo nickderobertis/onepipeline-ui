@@ -357,7 +357,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
     let root = runs.path().to_str().expect("utf-8 path");
     let cli = Cli::try_parse_from(["onepipeline-ui", "serve", "--runs-root", root]).expect("parse");
     let Command::Serve(args) = &cli.command;
-    assert_eq!(args.runs_root, PathBuf::from(root));
+    assert_eq!(args.runs_root.as_path(), runs.path());
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(cli.command.name(), "serve");
 
@@ -376,13 +376,25 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
 
 #[test]
 fn the_serve_surface_is_also_the_config_schema() {
+    let runs = tempfile::tempdir().expect("temp dir");
+    let root = runs.path().to_str().expect("utf-8 path");
     let args: ServeArgs =
-        serde_json::from_str(r#"{"runs_root":"/srv/runs"}"#).expect("parse config");
-    assert_eq!(args.runs_root, PathBuf::from("/srv/runs"));
+        serde_json::from_str(&format!(r#"{{"runs_root":"{root}"}}"#)).expect("parse config");
+    assert_eq!(args.runs_root.as_path(), runs.path());
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(
         serde_json::to_string(&args).expect("serialize"),
-        r#"{"runs_root":"/srv/runs","bind":"127.0.0.1:8765"}"#
+        format!(r#"{{"runs_root":"{root}","bind":"127.0.0.1:8765"}}"#)
+    );
+}
+
+#[test]
+fn a_config_file_cannot_name_a_runs_root_the_cli_would_reject() {
+    let err = serde_json::from_str::<ServeArgs>(r#"{"runs_root":"/no/such/runs/root"}"#)
+        .expect_err("rejected");
+    assert!(
+        err.to_string().contains("is not a readable directory"),
+        "{err}"
     );
 }
 

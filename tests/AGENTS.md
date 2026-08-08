@@ -1,7 +1,6 @@
 # tests/AGENTS.md
 
-This repo runs on agents, so the suite is the only QA loop. Rules for this
-subtree; the repo-wide ones are in the root `AGENTS.md`.
+This repo runs on agents, so the suite is the only QA loop.
 
 ## Never mock the layer under test
 
@@ -31,6 +30,3 @@ and its serialization. Their payload bodies carry only the facts
 `dispatch_id` at schema 10, an empty `conversations` for the opt-out — and are
 **not** a claim about the onepipeline SDK's record shapes. Do not grow them into
 one; the SDK owns those.
-
-Regenerate a fixture by hand, in `serde_json` pretty form with a trailing
-newline, and let the round-trip assertion tell you if the formatting is wrong.

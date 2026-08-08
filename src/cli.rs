@@ -2,10 +2,13 @@
 //!
 //! [`ServeArgs`] is both: clap parses it from the command line, and serde reads
 //! the same shape from a configuration file, so the two can never describe
-//! different servers.
+//! different servers — and both reach the run store through [`RunsRoot`], which
+//! only exists once the directory has been read.
 
+use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -47,13 +50,8 @@ impl Command {
 #[derive(Debug, Clone, PartialEq, Eq, Args, Serialize, Deserialize)]
 pub struct ServeArgs {
     /// Directory holding the recorded runs to serve.
-    ///
-    /// Validated here, at the command line, so a typo'd path is a usage error
-    /// before anything binds a port. A value that arrives through serde instead
-    /// is validated by whatever opens it, which is the same boundary one step
-    /// later.
-    #[arg(long, value_name = "DIR", value_parser = readable_directory)]
-    pub runs_root: PathBuf,
+    #[arg(long, value_name = "DIR")]
+    pub runs_root: RunsRoot,
 
     /// Address to bind, as `HOST:PORT`.
     ///
@@ -68,14 +66,50 @@ fn default_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8765))
 }
 
-/// Accept `value` only if it names a directory that can be read today.
-fn readable_directory(value: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(value);
-    if path.is_dir() {
-        Ok(path)
-    } else if path.exists() {
-        Err(format!("{value} is not a directory"))
-    } else {
-        Err(format!("{value} does not exist"))
+/// A runs directory this process has read.
+///
+/// The check is the `read_dir` the server does anyway, so a path that is
+/// missing, is not a directory, or cannot be opened is a usage error at the
+/// command line rather than a failure after the port is bound. The CLI and a
+/// configuration file both construct it the same way, so neither can carry a
+/// root the other would reject.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "PathBuf", into = "PathBuf")]
+pub struct RunsRoot(PathBuf);
+
+impl RunsRoot {
+    /// The directory, as a path.
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl TryFrom<PathBuf> for RunsRoot {
+    type Error = String;
+
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        match fs::read_dir(&path) {
+            Ok(_) => Ok(Self(path)),
+            Err(err) => Err(format!(
+                "{} is not a readable directory: {}",
+                path.display(),
+                err.kind()
+            )),
+        }
+    }
+}
+
+impl FromStr for RunsRoot {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(PathBuf::from(value))
+    }
+}
+
+impl From<RunsRoot> for PathBuf {
+    fn from(value: RunsRoot) -> Self {
+        value.0
     }
 }

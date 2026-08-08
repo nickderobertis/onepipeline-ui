@@ -11,12 +11,9 @@
 # a speed optimisation, and a speed optimisation that can silently skip a check
 # is a correctness hole.
 #
-# llmlint: ignore-file[tool_output_is_signal] the fallback notices below are the
-# point of the script, not chatter around it. Every one of them says "affected
-# selection did not apply, so this ran everything" — the one fact a reader of a
-# green run needs and cannot recover afterwards, because a full sweep and a
-# scoped sweep look identical once they pass. They go to stderr, so the
-# machine-readable answer on stdout stays a single line either way.
+# llmlint: ignore-file[tool_output_is_signal] the fallback notices say "this ran
+# everything, not the affected set" — unrecoverable once green, since both sweeps
+# then look identical. They go to stderr; stdout stays one line.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

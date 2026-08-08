@@ -77,13 +77,14 @@ pub enum HealthStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope<T> {
     /// The major API version, always [`API_VERSION`] when this crate serves it.
-    // llmlint: ignore[invalid_states_unrepresentable] both version fields are `u32` on purpose: this type is the *parsing* side of the schema-version discipline as well as the serving side, and a client can only refuse a version it does not understand if that version is representable long enough to be read and named in the refusal. A type admitting only the current constant would turn "server is newer than me" into an indistinguishable parse error.
+    // llmlint: ignore-block[invalid_states_unrepresentable] this type parses as well as serves, and a version it does not know must survive being read to be named in the refusal.
     pub api_version: u32,
     /// The payload's telemetry schema version, always [`TELEMETRY_SCHEMA_VERSION`]
     /// when this crate serves it.
     pub telemetry_schema_version: u32,
+    // llmlint: ignore-end[invalid_states_unrepresentable]
     /// When the server read the state this payload describes, as RFC 3339.
-    // llmlint: ignore[invalid_states_unrepresentable] a date-time type would need a dependency this interface-only crate does not carry, and — the deciding reason — it would *re-render* the instant on serialization, so a `Z` that arrived as `+00:00` would come back changed. The fixtures pin this envelope byte for byte (`tests/contract.rs`), which a re-rendering type cannot satisfy.
+    // llmlint: ignore[invalid_states_unrepresentable] a date-time type re-renders the instant, and the fixtures pin this envelope byte for byte.
     pub observed_at: String,
     /// The endpoint's own payload, sourced from the onepipeline SDK.
     #[serde(flatten)]
@@ -101,7 +102,7 @@ pub struct ErrorEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorBody {
     /// A stable code a client can branch on, e.g. `run_not_found`.
-    // llmlint: ignore[invalid_states_unrepresentable] the enum tying a code to its status is [`ApiError`], and `ApiError::envelope` is the only thing in this crate that builds one. This struct is the *wire* form, which a client also parses: a code a newer server introduced has to survive being read so it can be logged, and an enum here would fail the whole response instead.
+    // llmlint: ignore[invalid_states_unrepresentable] [`ApiError`] is the enum tying a code to its status; this is the wire form, where a code a newer server introduced must survive parsing.
     pub code: String,
     /// A message safe to show a user: never a path or record contents.
     pub message: String,

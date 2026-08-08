@@ -101,8 +101,10 @@ differ from these — a nested `AGENTS.md`.
   `tests/AGENTS.md`.
 - **Validate external input at its trust boundary.** Every `{...}` a route
   interpolates is a validated identifier newtype constructible only through
-  `TryFrom`; a raw `String` must never reach storage. CLI arguments are validated
-  by their `value_parser`, before anything binds a port.
+  `TryFrom`; a raw `String` must never reach storage, and a runs root is a
+  `RunsRoot`, which exists only once the directory has been read. Both the CLI
+  and a config file construct them the same way, so neither can carry a value
+  the other would reject.
 - **Exit codes are a contract**: `0` on success, `2` on a usage error, `70` when
   a command parsed but is not implemented. `scripts/smoke-published.sh` asserts
   all three against every published artifact, on every platform.

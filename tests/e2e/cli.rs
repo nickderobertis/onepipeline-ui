@@ -81,7 +81,7 @@ fn a_runs_root_that_does_not_exist_is_rejected_before_anything_starts() {
         .args(["serve", "--runs-root", "/no/such/runs/root"])
         .assert()
         .code(USAGE)
-        .stderr(contains("/no/such/runs/root does not exist"));
+        .stderr(contains("/no/such/runs/root is not a readable directory"));
 }
 
 #[test]
@@ -92,7 +92,10 @@ fn a_runs_root_that_is_a_file_is_rejected() {
         .arg(file.path())
         .assert()
         .code(USAGE)
-        .stderr(contains("is not a directory"));
+        // The reason the OS gave, not one this crate guessed: a root that
+        // exists but is a file, one whose permissions deny the read, and one
+        // that is missing all reach the user as what actually stopped them.
+        .stderr(contains("is not a readable directory: not a directory"));
 }
 
 #[test]

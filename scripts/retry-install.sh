@@ -20,11 +20,9 @@
 # Quiet on success: one line naming the attempt it took. On exhaustion: the last
 # attempt's own output, then the error and what to do about it.
 #
-# llmlint: ignore-file[tool_output_is_signal] a run that needed retries keeps one line
-# per failed attempt even when a later one succeeds, and that is deliberate: those lines
-# are the only record of how long a registry took to converge, which is what turned three
-# red releases into a diagnosis. A first-attempt success — the normal case — still emits
-# exactly one line.
+# llmlint: ignore-file[tool_output_is_signal] a failed attempt's line survives a later
+# success on purpose: it is the only record of how long the registry took to converge.
+# A first-attempt success still emits exactly one line.
 #
 # Usage:
 #   retry-install.sh [--budget S] [--first-delay S] [--max-delay S]
