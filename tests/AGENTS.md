@@ -5,9 +5,20 @@ This repo runs on agents, so the suite is the only QA loop.
 ## Never mock the layer under test
 
 `tests/e2e/` spawns the compiled binary as a subprocess and asserts on exit code,
-stdout, and stderr, and runs the committed npm launcher under a real node through
-node's own module resolution. Nothing under test is stubbed. A green mocked suite
-would be worse than none here — nobody clicks through this product.
+stdout, and stderr; starts that binary on a real port and reads the bytes it
+serves over a socket; and runs the committed npm launcher under a real node
+through node's own module resolution. Nothing under test is stubbed. A green
+mocked suite would be worse than none here — nobody clicks through this product.
+
+The run directories the server journeys read are built by
+`tests/support/fixture_run.rs`, and they are the files the onepipeline SDK itself
+writes — a launch record, a merged `events.jsonl`, `round-NN/plan.json`,
+`round-NN/result.json`. They are deliberately not a stub of the SDK: an SDK build
+that changed those files fails here rather than in production.
+
+`tests/support/http.rs` is hand-rolled for the same reason. A client library
+would decide what a non-2xx means and how much of a stream to buffer, and both
+are what the journeys assert.
 
 A new CLI verb, flag, or route is not done until its journey lands in
 `tests/e2e/`: the happy path **and** at least one failure the user can cause.
@@ -21,12 +32,16 @@ A new CLI verb, flag, or route is not done until its journey lands in
   artifact; without this they would only disagree in public, mid-release.
 - `tests/contract.rs` — the crate against `docs/contract.md`.
 
-## The fixtures pin the envelope, not the records
+## The fixtures are goldens, not hand-written claims
 
-`tests/fixtures/` holds one response body per route, and each must round-trip
-**byte for byte**. What that pins is the envelope: the schema-version preamble
-and its serialization. Their payload bodies carry only the facts
-`docs/contract.md` itself names — session attribution on the run list,
-`dispatch_id` at schema 10, an empty `conversations` for the opt-out — and are
-**not** a claim about the onepipeline SDK's record shapes. Do not grow them into
-one; the SDK owns those.
+`tests/fixtures/` holds one response body per route, and every one of them is
+what this server actually made of the recorded run in
+`tests/support/fixture_run.rs`. They are not written by hand and must not be
+edited by hand: `every_route_serves_the_payload_its_golden_pins` regenerates
+them from a real read when you run it with `UPDATE_CONTRACT_FIXTURES=1`.
+
+That is the schema-version discipline in practice. A payload change shows up as
+a golden diff in the same commit, which is where the decision to make it is
+either obvious or obviously wrong. The one field a golden cannot pin is
+`observed_at` — the instant of the read — so the comparison normalizes it and
+holds everything else byte for byte.

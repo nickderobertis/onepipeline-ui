@@ -1,23 +1,31 @@
 #!/usr/bin/env node
-// Build the npm packages that distribute the prebuilt onepipeline-ui binary — the
-// direct analogue of the maturin PyPI wheels (see pyproject.toml). The layout
-// mirrors esbuild/@biomejs and every other "carry the native binary" npm tool:
+// Build the npm packages this repository publishes. There are two deliverables,
+// split by what they contain.
 //
-//   onepipeline-ui-cli                 launcher package (npm/onepipeline-ui, committed)
-//     bin/onepipeline-ui.js            resolves + execs the platform binary
-//     optionalDependencies:        one per Rust target in release.yml's matrix
-//       onepipeline-ui-cli-linux-x64
-//       onepipeline-ui-cli-linux-arm64
-//       onepipeline-ui-cli-darwin-x64
-//       onepipeline-ui-cli-darwin-arm64
-//       onepipeline-ui-cli-win32-x64   each carries the matching prebuilt binary
+// The first distributes the prebuilt onepipeline-api binary — the direct analogue of
+// the maturin PyPI wheels (see pyproject.toml). Its layout mirrors esbuild/@biomejs
+// and every other "carry the native binary" npm tool:
+//
+//   onepipeline-api-cli                launcher package (npm/onepipeline-api-cli, committed)
+//     bin/onepipeline-api.js            resolves + execs the platform binary
+//     optionalDependencies:            one per Rust target in release.yml's matrix
+//       onepipeline-api-cli-linux-x64
+//       onepipeline-api-cli-linux-arm64
+//       onepipeline-api-cli-darwin-x64
+//       onepipeline-api-cli-darwin-arm64
+//       onepipeline-api-cli-win32-x64  each carries the matching prebuilt binary
 //
 // The platform packages are UNSCOPED on purpose: a `@scope/` name needs an npm
 // organization, which a publish token cannot create.
 //
 // npm installs only the optional dependency whose `os`/`cpu` match the host, so
-// `npm install -g onepipeline-ui-cli` is a seconds-fast binary install — the same
+// `npm install -g onepipeline-api-cli` is a seconds-fast binary install — the same
 // promise the wheels make on PyPI.
+//
+// The second is `onepipeline-ui` itself: the built frontend, assembled by the `ui`
+// mode below from `apps/dag-ui/dist`. It carries no binary and no dependencies — a
+// Vite bundle inlines what it needs — so it is the committed manifest plus that
+// directory, and nothing else.
 //
 // The version is sourced from Cargo.toml (release-plz stays the single version
 // driver, exactly like the wheels' `dynamic = ["version"]`); pass --version to
@@ -28,8 +36,9 @@
 //   node scripts/npm-build.mjs platform --target <triple> --binary <path> \
 //        [--version <v>] [--out <dir>]
 //   node scripts/npm-build.mjs launcher [--version <v>] [--out <dir>]
+//   node scripts/npm-build.mjs ui [--bundle <dir>] [--version <v>] [--out <dir>]
 //
-// Both modes print the created package directory on stdout.
+// Every mode prints the created package directory on stdout.
 
 import {
   chmodSync,
@@ -48,8 +57,8 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Rust target triple -> npm platform package facts. Keys must match the release
 // matrix in .github/workflows/release.yml; the (platform, arch) pair must match
-// the PACKAGES map in npm/onepipeline-ui/bin/onepipeline-ui.js and the
-// optionalDependencies in npm/onepipeline-ui/package.json.
+// the PACKAGES map in npm/onepipeline-api-cli/bin/onepipeline-api.js and the
+// optionalDependencies in npm/onepipeline-api-cli/package.json.
 const TARGETS = {
   "x86_64-unknown-linux-gnu": { platform: "linux", arch: "x64", exe: false },
   "aarch64-unknown-linux-gnu": { platform: "linux", arch: "arm64", exe: false },
@@ -158,19 +167,19 @@ function buildPlatform(args) {
   const target =
     args.target || die("platform: --target <triple> is required", `pass --target with one of: ${Object.keys(TARGETS).join(", ")}`);
   const binary =
-    args.binary || die("platform: --binary <path> is required", "pass --binary the path to the built onepipeline-ui for that target");
+    args.binary || die("platform: --binary <path> is required", "pass --binary the path to the built onepipeline-api for that target");
   const facts =
     TARGETS[target] || die(`platform: unknown target ${target}`, `pass one of: ${Object.keys(TARGETS).join(", ")}`);
   const version = resolveVersion(args);
   const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
 
-  const pkgName = `onepipeline-ui-cli-${facts.platform}-${facts.arch}`;
+  const pkgName = `onepipeline-api-cli-${facts.platform}-${facts.arch}`;
   const pkgDir = join(outRoot, pkgName);
   const binDir = join(pkgDir, "bin");
-  const binName = facts.exe ? "onepipeline-ui.exe" : "onepipeline-ui";
+  const binName = facts.exe ? "onepipeline-api.exe" : "onepipeline-api";
 
   // Resolve the source binary with a `.exe` fallback: a bash caller may pass the
-  // extensionless path (Git Bash's `test -x` matches onepipeline-ui.exe
+  // extensionless path (Git Bash's `test -x` matches onepipeline-api.exe
   // transparently, but Node's copyFileSync needs the real name).
   let srcBin = resolve(binary);
   if (!existsSync(srcBin) && existsSync(`${srcBin}.exe`)) srcBin = `${srcBin}.exe`;
@@ -195,7 +204,7 @@ function buildPlatform(args) {
   writeJson(join(pkgDir, "package.json"), {
     name: pkgName,
     version,
-    description: `Prebuilt onepipeline-ui binary for ${facts.platform} ${facts.arch}.`,
+    description: `Prebuilt onepipeline-api binary for ${facts.platform} ${facts.arch}.`,
     homepage: REPOSITORY,
     license: "MIT",
     author: "Nick DeRobertis",
@@ -210,9 +219,9 @@ function buildPlatform(args) {
   attempt(`cannot write the ${pkgName} README`, "check that --out is writable", () =>
     writeFileSync(
       join(pkgDir, "README.md"),
-    `# ${pkgName}\n\nPrebuilt \`onepipeline-ui\` binary for ${facts.platform} ${facts.arch}.\n` +
+    `# ${pkgName}\n\nPrebuilt \`onepipeline-api\` binary for ${facts.platform} ${facts.arch}.\n` +
       "This is a platform-specific dependency of " +
-        "[`onepipeline-ui-cli`](https://www.npmjs.com/package/onepipeline-ui-cli); install " +
+        "[`onepipeline-api-cli`](https://www.npmjs.com/package/onepipeline-api-cli); install " +
         "that instead.\n"
     )
   );
@@ -223,12 +232,12 @@ function buildPlatform(args) {
 function buildLauncher(args) {
   const version = resolveVersion(args);
   const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
-  const src = join(REPO_ROOT, "npm", "onepipeline-ui");
-  const dest = join(outRoot, "onepipeline-ui-cli");
+  const src = join(REPO_ROOT, "npm", "onepipeline-api-cli");
+  const dest = join(outRoot, "onepipeline-api-cli");
 
   attempt(
     `cannot copy the committed launcher from ${src}`,
-    "restore npm/onepipeline-ui from git, and check that --out is writable",
+    "restore npm/onepipeline-api-cli from git, and check that --out is writable",
     () => {
       rmSync(dest, { recursive: true, force: true });
       mkdirSync(outRoot, { recursive: true });
@@ -243,7 +252,7 @@ function buildLauncher(args) {
   const manifestPath = join(dest, "package.json");
   const manifest = attempt(
     "the committed launcher manifest is missing or is not JSON",
-    "restore npm/onepipeline-ui/package.json from git",
+    "restore npm/onepipeline-api-cli/package.json from git",
     () => JSON.parse(readFileSync(manifestPath, "utf8"))
   );
   manifest.version = version;
@@ -255,14 +264,62 @@ function buildLauncher(args) {
   process.stdout.write(`${dest}\n`);
 }
 
+// Assemble the frontend package: the committed manifest plus the bundle Vite built.
+// The bundle is an input rather than something built here — `just build` (Nx's
+// `dag-ui:build`) owns that step, and running it from inside a packaging script would
+// be a second place the frontend gets built.
+function buildUi(args) {
+  const version = resolveVersion(args);
+  const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
+  const src = join(REPO_ROOT, "npm", "onepipeline-ui");
+  // `--bundle` names the built view; it defaults to where Nx puts it. Explicit so
+  // a release can assemble from a downloaded artifact, and so the "nothing was
+  // built" refusal below can be exercised without emptying the checkout.
+  const bundle = resolve(args.bundle || join(REPO_ROOT, "apps", "dag-ui", "dist"));
+  const dest = join(outRoot, "onepipeline-ui");
+
+  if (!existsSync(join(bundle, "index.html"))) {
+    die(
+      `ui: no built frontend at ${bundle}`,
+      "build it first: just build"
+    );
+  }
+
+  attempt(
+    `cannot assemble the frontend package under ${outRoot}`,
+    "restore npm/onepipeline-ui from git, and check that --out is writable",
+    () => {
+      rmSync(dest, { recursive: true, force: true });
+      mkdirSync(outRoot, { recursive: true });
+      cpSync(src, dest, { recursive: true });
+      cpSync(bundle, join(dest, "dist"), { recursive: true });
+    }
+  );
+
+  // The same placeholder discipline the launcher follows: the committed manifest
+  // carries no real number, so release-plz stays the single version driver.
+  const manifestPath = join(dest, "package.json");
+  const manifest = attempt(
+    "the committed frontend manifest is missing or is not JSON",
+    "restore npm/onepipeline-ui/package.json from git",
+    () => JSON.parse(readFileSync(manifestPath, "utf8"))
+  );
+  manifest.version = version;
+  writeJson(manifestPath, manifest);
+
+  process.stdout.write(`${dest}\n`);
+}
+
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "platform") {
   buildPlatform(parseArgs(rest, ["target", "binary", "version", "out"]));
 } else if (mode === "launcher") {
   buildLauncher(parseArgs(rest, ["version", "out"]));
+} else if (mode === "ui") {
+  buildUi(parseArgs(rest, ["version", "out", "bundle"]));
 } else {
   die(
     `unknown mode ${mode === undefined ? "(none given)" : mode}`,
-    "run `npm-build.mjs platform --target <triple> --binary <path> [--version <v>] [--out <dir>]` or `npm-build.mjs launcher [--version <v>] [--out <dir>]`"
+    "run `npm-build.mjs platform --target <triple> --binary <path> [--version <v>] [--out <dir>]`, `npm-build.mjs launcher [--version <v>] [--out <dir>]`, or `npm-build.mjs ui [--version <v>] [--out <dir>]`"
   );
 }

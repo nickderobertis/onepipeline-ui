@@ -75,16 +75,16 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install what PyPI serves as latest
-        run: pip install --no-cache-dir onepipeline-ui-cli
+        run: pip install --no-cache-dir onepipeline-api-cli
       # The registry's own metadata is the expectation, so a package whose
       # recorded version and shipped binary disagree fails here.
       - name: Smoke-test it against the version PyPI recorded
         run: |
-          ver="$(pip show onepipeline-ui-cli | awk '/^Version:/ {print $2}')"
-          [ -n "$ver" ] || { echo "::error::pip reported no version for onepipeline-ui-cli"; exit 1; }
+          ver="$(pip show onepipeline-api-cli | awk '/^Version:/ {print $2}')"
+          [ -n "$ver" ] || { echo "::error::pip reported no version for onepipeline-api-cli"; exit 1; }
           bash scripts/smoke-published.sh \
             --expect-version "$ver" \
-            --label "PyPI onepipeline-ui-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"
+            --label "PyPI onepipeline-api-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"
 
   npm:
     name: npm (${{ matrix.os }})
@@ -103,13 +103,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - name: Install what npm serves as latest
-        run: npm install -g --prefer-online onepipeline-ui-cli
+        run: npm install -g --prefer-online onepipeline-api-cli
       - name: Smoke-test it against the version npm recorded
         run: |
-          ver="$(npm view onepipeline-ui-cli version)"
-          [ -n "$ver" ] || { echo "::error::npm reported no version for onepipeline-ui-cli"; exit 1; }
+          ver="$(npm view onepipeline-api-cli version)"
+          [ -n "$ver" ] || { echo "::error::npm reported no version for onepipeline-api-cli"; exit 1; }
           bash scripts/smoke-published.sh \
             --expect-version "$ver" \
-            --label "npm onepipeline-ui-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"
+            --label "npm onepipeline-api-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"

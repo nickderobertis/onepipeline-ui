@@ -5,6 +5,7 @@
 //! a code that disagree. The codes are the ones the existing `/api/v2` clients
 //! already branch on; the copied frontend re-points without touching them.
 
+use axum::http::StatusCode;
 use thiserror::Error;
 
 use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, RunId};
@@ -16,6 +17,15 @@ use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, RunI
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ApiError {
+    /// The path names no route this server serves.
+    ///
+    /// A route rather than a record: a client parsing every response the same
+    /// way must not meet a framework's own 404 body when it mistypes a path.
+    #[error("no such route")]
+    NoSuchRoute,
+    /// A query parameter is not one this route accepts.
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
     /// The run identifier in the path is not a usable one.
     #[error("invalid run id: {0}")]
     InvalidRunId(String),
@@ -53,6 +63,8 @@ impl ApiError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
+            Self::NoSuchRoute => "no_such_route",
+            Self::InvalidRequest(_) => "invalid_request",
             Self::InvalidRunId(_) => "invalid_run_id",
             Self::InvalidNodeId(_) => "invalid_node_id",
             Self::InvalidConversationId(_) => "invalid_conversation_id",
@@ -67,17 +79,26 @@ impl ApiError {
     }
 
     /// The HTTP status this failure is served with.
+    ///
+    /// The status type rather than a number: every arm here is a status that
+    /// exists, and a route rebuilding one from an integer would have to decide
+    /// what to do when it did not — a branch nothing can reach and nothing can
+    /// test.
     #[must_use]
-    pub fn status(&self) -> u16 {
+    pub fn status(&self) -> StatusCode {
         match self {
-            Self::InvalidRunId(_)
+            Self::InvalidRequest(_)
+            | Self::InvalidRunId(_)
             | Self::InvalidNodeId(_)
             | Self::InvalidConversationId(_)
             | Self::InvalidArtifactId(_)
-            | Self::InvalidDispatchId(_) => 422,
-            Self::RunNotFound(_) | Self::ConversationNotFound(_) | Self::ArtifactNotFound(_) => 404,
-            Self::ProjectionFailed(_) => 409,
-            Self::Read(_) => 500,
+            | Self::InvalidDispatchId(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::NoSuchRoute
+            | Self::RunNotFound(_)
+            | Self::ConversationNotFound(_)
+            | Self::ArtifactNotFound(_) => StatusCode::NOT_FOUND,
+            Self::ProjectionFailed(_) => StatusCode::CONFLICT,
+            Self::Read(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 

@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: extractions/setup-just@v3
       - name: Which projects the diff reaches
         id: affected
@@ -59,7 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -94,16 +94,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest
       - name: Bootstrap
         run: just bootstrap
-      - name: Format + lint
-        run: just fmt-check && just lint
-      - name: Tests (contract + e2e)
-        run: just test-quick
+      - name: Quality gate (platform-sensitive tiers)
+        run: just check-cross
 
   # The declared MSRV is a promise to consumers, so prove it rather than
   # document it: a floor that only lives in Cargo.toml drifts the first time a
@@ -164,6 +162,12 @@ jobs:
       # On a PR, the change is not on the remote yet, so `--path .` is the only
       # way to install *this* revision.
       - name: Install (this revision)
+        # Denied here for the same reason release.yml denies them on every build
+        # it does: this is a release-profile compile of the whole crate on three
+        # platforms, and the gate's own build is a debug one on Linux — so a
+        # warning that only appears this way has no other job to surface it.
+        env:
+          RUSTFLAGS: "-D warnings"
         run: cargo install --path . --locked
       - name: Smoke-test the installed binary
         run: |
@@ -198,7 +202,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       # oneharness.toml's primary harness. Without a harness binary on PATH,
       # llmlint has nothing to drive and the job would fail with no findings —
       # which reads like a clean run. Pinned rather than floating: an upstream

@@ -2,10 +2,10 @@
 # The one entry point to this workspace's Nx.
 #
 # Nx lives in `node_modules/.bin`, which a fresh clone does not have, so every
-# invocation heals through a locked install first. That is what lets `just check`
-# work from a clean clone without a separate "install the orchestrator" step, and
-# what keeps one recipe from failing with `nx: command not found` while another
-# quietly repaired it.
+# invocation heals through `scripts/workspace-install.sh` first. That is what lets
+# `just check` work from a clean clone without a separate "install the orchestrator"
+# step, and what keeps one recipe from failing with `nx: command not found` while
+# another quietly repaired it.
 #
 # Nx's own streams are handed straight through: every target here shells out to a
 # language-native tool (cargo, clippy, rustdoc), whose diagnostics already name
@@ -13,6 +13,11 @@
 #
 # Nx orchestrates targets; it is never a runtime dependency of the scripts it
 # runs.
+# llmlint: ignore-file[tool_output_is_signal] this is the wrapper, not a step: every
+# target it fans out shells to cargo, clippy, rustdoc, biome, tsc, vitest or
+# playwright, and their diagnostics are the whole reason a reader ran it. Quieting
+# the successful ones would also quiet which project a failing one was, because Nx
+# is what names the project.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,20 +35,7 @@ export NX_DAEMON="${NX_DAEMON-false}"
 # for housekeeping: this workspace's pinned Nx is the only one that may run.
 export NX_USE_LOCAL=true
 
-if [ ! -e node_modules/.bin/nx ] && [ ! -e node_modules/.bin/nx.cmd ]; then
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "nx: npm not found; cannot install the pinned Nx the project graph needs" >&2
-    echo "ACTION: install Node.js 20+ (https://nodejs.org/) and re-run 'just bootstrap'" >&2
-    exit 1
-  fi
-  # Installer chatter is not this command's output: callers such as
-  # `nx show projects --json` read stdout for Nx's answer.
-  if ! npm ci --silent --no-audit --no-fund >&2; then
-    echo "nx: 'npm ci' failed in $ROOT" >&2
-    echo "ACTION: check network access to the npm registry, then re-run 'just bootstrap'" >&2
-    exit 1
-  fi
-fi
+bash "$ROOT/scripts/workspace-install.sh" || exit 1
 
 # The npm-written shim rather than a path inside the package: Nx has moved its
 # bin entry between releases, and the shim is the one name that cannot.

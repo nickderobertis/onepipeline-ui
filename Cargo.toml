@@ -29,8 +29,12 @@ include = [
   "/docs/contract.md",
 ]
 
+# The command an operator types. Deliberately not the crate name: the crate and
+# the npm package of built frontend assets are both `onepipeline-ui`, and only
+# one of them can own a command called that. This binary serves the read API, so
+# it is `onepipeline-api` — `tests/packaging.rs` holds every distribution to it.
 [[bin]]
-name = "onepipeline-ui"
+name = "onepipeline-api"
 path = "src/main.rs"
 
 [lib]
@@ -38,16 +42,24 @@ name = "onepipeline_ui"
 path = "src/lib.rs"
 
 [dependencies]
+axum = "0.8"
 clap = { version = "4.6", features = ["derive"] }
+futures-core = "0.3"
+onepipeline = "0.1.1"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
 # contract tests compare to `docs/contract.md`.
 serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
 thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+tokio-stream = "0.1"
 
 [dev-dependencies]
 assert_cmd = "2"
+libc = "0.2"
 predicates = "3"
 tempfile = "3"
 

@@ -25,6 +25,19 @@ allow = [
     # helpers pull in (bstr, memchr, regex-automata). Each is dual-licensed
     # Unlicense OR MIT; both are permissive and compatible.
     "Unlicense",
+    # The TLS stack the onepipeline SDK reaches the network through
+    # (ureq -> rustls -> ring): `untrusted` and `rustls-webpki` are ISC,
+    # `subtle` is BSD-3-Clause. `matchit`, axum's router, is MIT AND
+    # BSD-3-Clause. All four are OSI-approved, FSF-free, and impose only
+    # attribution — the same bar as the MIT this binary ships under.
+    "ISC",
+    "BSD-3-Clause",
+    # Mozilla's CA root bundle, as `webpki-roots` and `webpki-root-certs`. It
+    # arrives with the onepipeline SDK (onepipeline -> oneagentgraph -> ureq),
+    # and it licenses *data* — the certificate list — not code: CDLA-Permissive
+    # 2.0 places no condition at all on what a recipient does with it, and none
+    # on this binary. Reviewed when `onepipeline` was first depended on.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 exceptions = []

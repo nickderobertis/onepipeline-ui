@@ -1,0 +1,30 @@
+{
+  "name": "onepipeline-api-cli",
+  "version": "0.0.0-managed",
+  "description": "Read API and browser view for onepipeline runs.",
+  "keywords": ["cli", "api", "telemetry", "observability", "onepipeline"],
+  "homepage": "https://github.com/nickderobertis/onepipeline-ui",
+  "bugs": "https://github.com/nickderobertis/onepipeline-ui/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nickderobertis/onepipeline-ui.git"
+  },
+  "license": "MIT",
+  "author": "Nick DeRobertis",
+  "bin": {
+    "onepipeline-api": "bin/onepipeline-api.js"
+  },
+  "files": [
+    "bin/onepipeline-api.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "onepipeline-api-cli-linux-x64": "0.0.0-managed",
+    "onepipeline-api-cli-linux-arm64": "0.0.0-managed",
+    "onepipeline-api-cli-darwin-x64": "0.0.0-managed",
+    "onepipeline-api-cli-darwin-arm64": "0.0.0-managed",
+    "onepipeline-api-cli-win32-x64": "0.0.0-managed"
+  }
+}

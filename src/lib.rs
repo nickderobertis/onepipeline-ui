@@ -1,18 +1,20 @@
-//! The `onepipeline-ui` read API, as a Rust interface.
+//! The `onepipeline-ui` read API: an axum server wrapping the onepipeline SDK.
 //!
 //! [`docs/contract.md`](https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md)
 //! is the source of truth for the HTTP surface; everything here is its Rust
-//! rendering. This crate currently lands that rendering **only** — the contract
-//! types, the route table, the query surface, the error contract, the
-//! [`ReadApi`](api::ReadApi) trait an axum server will be built over, and the
-//! CLI argument surface. No request is served yet and `onepipeline-ui serve`
-//! refuses with a "not implemented" error; `tests/contract.rs` holds the types
-//! to the contract text in the meantime.
+//! rendering. [`contract`] is the wire vocabulary — routes, envelope,
+//! identifiers, queries — [`api::ReadApi`] is the trait one method per route,
+//! [`store::RunStore`] implements it over a runs root through the SDK's
+//! [`views`](onepipeline::views), and [`server`] is the axum router that serves
+//! it. `tests/contract.rs` holds the types to the contract text and
+//! `tests/e2e/` drives the compiled binary over real HTTP.
 //!
 //! Payloads are carried as [`serde_json::Value`] on purpose. Anything the API
 //! computes that is presentation-worthy lands in the onepipeline SDK/CLI first,
-//! so the typed records arrive with that dependency rather than being invented
-//! here; what this crate owns, and what the fixtures pin, is the envelope.
+//! so the typed records arrive from there rather than being invented here; what
+//! this crate owns, and what the fixtures pin, is the envelope. [`payload`] is
+//! the projection from the SDK's records onto the wire, and AGENTS.md lists
+//! every derivation in it that is proposed for the SDK.
 
 #![deny(missing_docs)]
 
@@ -20,5 +22,8 @@ pub mod api;
 pub mod cli;
 pub mod contract;
 pub mod error;
+pub mod payload;
+pub mod server;
+pub mod store;
 
 pub use error::ApiError;

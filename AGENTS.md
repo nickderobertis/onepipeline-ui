@@ -9,9 +9,17 @@ and the `justfile`; this file holds the judgment.
 ## What this repo is
 
 The read API and browser view for onepipeline runs: a Rust (axum) server wrapping
-the onepipeline SDK, and the frontend that reads it. One crate
-(`onepipeline-ui`, library + CLI) ships on crates.io and, as thin
-prebuilt-binary wrappers, on PyPI and npm as `onepipeline-ui-cli`.
+the onepipeline SDK, and the frontend that reads it.
+
+Two things ship, split by what they contain. The crate `onepipeline-ui`
+(library + CLI) goes to crates.io and, as thin prebuilt-binary wrappers, to PyPI
+and npm as **`onepipeline-api-cli`** — that is the read-API server. The React
+app goes to npm alone as **`onepipeline-ui`**, which carries the built frontend
+rather than a binary. The crate keeps its `onepipeline-ui` name, matching the
+repository; the command it installs is **`onepipeline-api`**, because a command
+called `onepipeline-ui` would be handed out by the wrapper while the package
+actually named `onepipeline-ui` installs no command at all. `tests/packaging.rs`
+holds every distribution to that split.
 
 Two rules govern what may be written here:
 
@@ -90,7 +98,9 @@ fans one uniformly-named target across all of them.
 
 - The gate is strict: no warnings-only mode anywhere. A diagnostic is an error or
   a suppression with a written reason at the narrowest scope the tool allows.
-- **Coverage is enforced at 95% line coverage**; the gate fails below it.
+- **Coverage is enforced at 95% line coverage**; the gate fails below it. That
+  is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend is held
+  to its journeys rather than to a number.
 - **Tests are realistic, not mocked, and complete, not minimal.** Nothing under
   test is stubbed, and a change is not done until a real journey covers it —
   happy path and at least one failure a user can cause.

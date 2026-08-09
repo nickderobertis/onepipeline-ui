@@ -1,9 +1,19 @@
 {
   "name": "onepipeline-ui-workspace",
   "private": true,
-  "description": "Nx project graph for the onepipeline-ui monorepo. Not published; it carries the orchestrator and nothing else. Every deliverable's version comes from Cargo.toml.",
+  "description": "Nx project graph for the onepipeline-ui monorepo. Not published; it carries the orchestrator and the frontend workspaces. Every deliverable's version comes from Cargo.toml.",
   "license": "MIT",
+  "workspaces": ["apps/*", "packages/*"],
   "devDependencies": {
-    "nx": "^23.1.1"
+    "@biomejs/biome": "2.5.5",
+    "@nx/eslint": "23.1.1",
+    "@nx/eslint-plugin": "23.1.1",
+    "@nx/js": "23.1.1",
+    "@types/node": "26.2.0",
+    "eslint": "9.39.2",
+    "nx": "^23.1.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.1"
   }
 }

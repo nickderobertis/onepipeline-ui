@@ -21,6 +21,21 @@ pub const API_VERSION: u32 = 2;
 /// carries `dispatch_id` (see [`DispatchId`]).
 pub const TELEMETRY_SCHEMA_VERSION: u32 = 10;
 
+/// The timeline payload's own schema version, carried beside the API's.
+///
+/// It moves independently of [`TELEMETRY_SCHEMA_VERSION`] because it says which
+/// *meaning* of the span list this is: version 1 served the role pair only on a
+/// `dispatch` span, so a client could read "carries roles" as "is a dispatch".
+/// Version 2 serves it on a `scope=run` rollup too, naming the category the
+/// rollup summarizes, and that inference no longer holds.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 2;
+
+/// The largest run-list page any request can ask for.
+///
+/// A bound rather than a limit anyone will meet: it exists so a crafted `limit`
+/// cannot turn one request into an unbounded read of every recorded run.
+pub const RUNS_PAGE_LIMIT: usize = 50;
+
 /// The routes `docs/contract.md` defines, as axum path templates.
 pub mod routes {
     /// Liveness that never touches run storage.
@@ -108,17 +123,143 @@ pub struct ErrorBody {
     pub message: String,
 }
 
+/// The closed `event:` vocabulary `GET /api/v2/events` names its frames with.
+///
+/// Closed because a client dispatches on it: an event name it does not know is
+/// a frame it silently drops, so a name added here has to be added there too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SseEvent {
+    /// The run list, as it stands right now. The first frame of every
+    /// connection, so a reconnecting client never sits on state it missed.
+    #[serde(rename = "snapshot")]
+    Snapshot,
+    /// One run's recorded state moved; the client refetches its detail.
+    #[serde(rename = "run.changed")]
+    RunChanged,
+    /// One watched run's transcripts moved.
+    #[serde(rename = "conversation.changed")]
+    ConversationChanged,
+    /// A run left the runs root; the client stops polling it.
+    #[serde(rename = "run.removed")]
+    RunRemoved,
+}
+
+impl SseEvent {
+    /// The name this event is written as in an SSE `event:` line.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Snapshot => "snapshot",
+            Self::RunChanged => "run.changed",
+            Self::ConversationChanged => "conversation.changed",
+            Self::RunRemoved => "run.removed",
+        }
+    }
+}
+
 /// One frame of `GET /api/v2/events`.
 ///
 /// The first frame of every connection is a fresh snapshot, so a client that
-/// reconnects never has to reconcile against state it missed.
+/// reconnects never has to reconcile against state it missed. `data` is a bare
+/// [`Value`] because only the snapshot carries an [`Envelope`]: an invalidation
+/// names the run that moved and nothing else, so the client refetches rather
+/// than reconciling a second copy of the state model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventFrame {
     /// The server-issued cursor, monotonically increasing from zero within a
     /// connection; a client resumes with it as `Last-Event-ID`.
     pub id: u64,
-    /// The frame's payload, carrying the same envelope every read route serves.
-    pub data: Envelope<Value>,
+    /// Which kind of frame this is.
+    pub event: SseEvent,
+    /// The frame's payload.
+    pub data: Value,
+}
+
+/// The query of `GET /api/v2/runs`.
+///
+/// `docs/contract.md` names no query on this route. These three are the paging
+/// and filtering surface the copied frontend already reads, kept here so the
+/// server's answer is bounded whatever a caller asks for; see AGENTS.md for the
+/// amendment they are proposed under.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct RunsQuery {
+    /// Whether to list runs whose graph has completed. Off by default: the list
+    /// is a supervision surface, and finished work is not what needs attention.
+    #[serde(default)]
+    pub include_settled: bool,
+    /// How many rows to serve.
+    #[serde(default)]
+    pub limit: PageLimit,
+    /// The `next_cursor` of the previous page; the list resumes after it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<RunId>,
+}
+
+impl RunsQuery {
+    /// The page size this query actually gets: never zero, never unbounded.
+    #[must_use]
+    pub fn page(&self) -> usize {
+        self.limit.get()
+    }
+}
+
+/// A run-list page size: never zero, never more than [`RUNS_PAGE_LIMIT`].
+///
+/// A bare `usize` would let a query carry a page size the server never serves,
+/// leaving whoever reads `limit` next as the only thing between a caller and an
+/// unbounded read. Constructed only by clamping, so the bound is the type's and
+/// an out-of-range `?limit=` is still answered with a page rather than refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "usize", into = "usize")]
+pub struct PageLimit(usize);
+
+impl PageLimit {
+    /// The page size a caller asking for `requested` rows actually gets.
+    #[must_use]
+    pub fn clamping(requested: usize) -> Self {
+        Self(requested.clamp(1, RUNS_PAGE_LIMIT))
+    }
+
+    /// How many rows this page serves.
+    #[must_use]
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl Default for PageLimit {
+    fn default() -> Self {
+        Self(RUNS_PAGE_LIMIT)
+    }
+}
+
+impl From<usize> for PageLimit {
+    fn from(requested: usize) -> Self {
+        Self::clamping(requested)
+    }
+}
+
+impl From<PageLimit> for usize {
+    fn from(limit: PageLimit) -> Self {
+        limit.0
+    }
+}
+
+/// The query of `GET /api/v2/events`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EventsQuery {
+    /// Watch one run rather than the whole root. Only a watched run's
+    /// transcripts are polled — each poll is a separate read, affordable for one
+    /// detail view and not for every run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    /// Continue the cursor sequence from a frame this process already issued.
+    ///
+    /// It only continues the numbering: the connection still opens with a fresh
+    /// snapshot, because no event history is retained to replay from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<u64>,
 }
 
 /// The query of `GET /api/v2/runs/{run}`.

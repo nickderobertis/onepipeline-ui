@@ -1,0 +1,29 @@
+{
+  "name": "dag-model",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/dag-model/src",
+  "tags": ["scope:shared", "type:model"],
+  "targets": {
+    "build": {
+      "command": "npx tsc -p packages/dag-model/tsconfig.json --emitDeclarationOnly",
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "command": "npx biome check packages/dag-model && npx eslint packages/dag-model"
+    },
+    "test": {
+      "command": "npx vitest run --root packages/dag-model",
+      "inputs": ["default", "servedGoldens"]
+    },
+    "typecheck": {
+      "command": "npx tsc -p packages/dag-model/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "npx biome check --write --linter-enabled=false packages/dag-model"
+    },
+    "format-check": {
+      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/dag-model"
+    }
+  }
+}

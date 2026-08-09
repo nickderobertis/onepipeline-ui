@@ -20,21 +20,60 @@ fn read(relative: &str) -> String {
 }
 
 /// The console command every distribution installs.
-const COMMAND: &str = "onepipeline-ui";
+const COMMAND: &str = "onepipeline-api";
 
 /// The distribution name the PyPI and npm wrappers publish under.
-const WRAPPER: &str = "onepipeline-ui-cli";
+const WRAPPER: &str = "onepipeline-api-cli";
+
+/// The crate name, on crates.io and in `cargo install`.
+const CRATE: &str = "onepipeline-ui";
+
+/// The npm distribution that carries the frontend rather than a binary.
+const FRONTEND: &str = "onepipeline-ui";
+
+/// The `name = "..."` a Cargo manifest sets inside `header`, e.g. `[[bin]]`.
+///
+/// Reading the section rather than the whole file is the point: the manifest
+/// declares two different names, and a substring search would let either one
+/// satisfy an assertion about the other.
+fn manifest_name(cargo: &str, header: &str) -> String {
+    let mut inside = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            inside = line == header;
+        } else if inside {
+            if let Some(value) = line.strip_prefix("name = ") {
+                return value.trim_matches('"').to_owned();
+            }
+        }
+    }
+    panic!("Cargo.toml declares no name under {header}");
+}
 
 #[test]
 fn the_crate_ships_the_binary_the_wrappers_wrap() {
     let cargo = read("Cargo.toml");
-    assert!(
-        cargo.contains(&format!("name = \"{COMMAND}\"")),
-        "the crate is not named {COMMAND}"
+    assert_eq!(
+        manifest_name(&cargo, "[package]"),
+        CRATE,
+        "the crate is not named {CRATE}, so `cargo install {CRATE}` installs nothing"
     );
-    assert!(
-        cargo.contains("[[bin]]"),
-        "the crate builds no binary for the wrappers to carry"
+    assert_eq!(
+        manifest_name(&cargo, "[[bin]]"),
+        COMMAND,
+        "the binary the wrappers carry is not the command they claim to install"
+    );
+}
+
+/// The command must not collide with the frontend package, which ships assets
+/// and no binary. Naming both `onepipeline-ui` is what this rename undid: an
+/// install of one would hand you the name the other's users type.
+#[test]
+fn the_command_does_not_collide_with_the_frontend_package() {
+    assert_ne!(
+        COMMAND, FRONTEND,
+        "the command shares a name with a package that installs no command"
     );
 }
 
@@ -58,29 +97,70 @@ fn the_wheel_wraps_the_binary_and_takes_its_version_from_cargo() {
 #[test]
 fn the_npm_launcher_wraps_the_binary_and_carries_no_version_of_its_own() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&read("npm/onepipeline-ui/package.json")).expect("parse manifest");
+        serde_json::from_str(&read("npm/onepipeline-api-cli/package.json"))
+            .expect("parse manifest");
     assert_eq!(manifest["name"], WRAPPER);
     assert_eq!(manifest["bin"][COMMAND], format!("bin/{COMMAND}.js"));
+    // `files` is what npm actually uploads: a shim the `bin` key points at but
+    // `files` omits publishes a package whose command cannot start.
+    assert_eq!(
+        manifest["files"],
+        serde_json::json!([format!("bin/{COMMAND}.js")])
+    );
     // The committed manifest carries a placeholder; scripts/npm-build.mjs stamps
     // the crate version in at publish time (proven by tests/e2e/packaging.rs).
     assert_eq!(manifest["version"], "0.0.0-managed");
 }
 
 #[test]
+fn the_frontend_package_carries_the_bundle_and_no_binary() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("npm/onepipeline-ui/package.json")).expect("parse manifest");
+    assert_eq!(manifest["name"], FRONTEND);
+    // Two deliverables, split by what they contain: this one is the built view,
+    // so a `bin` or a platform dependency here would make it a second wrapper.
+    assert!(
+        manifest.get("bin").is_none(),
+        "the frontend package declares a binary"
+    );
+    assert!(
+        manifest.get("optionalDependencies").is_none(),
+        "the frontend package pins per-platform binaries"
+    );
+    assert_eq!(manifest["files"], serde_json::json!(["dist"]));
+    // The same placeholder discipline as the launcher: release-plz is the one
+    // version driver, so a real number here would be a second source to drift.
+    assert_eq!(manifest["version"], "0.0.0-managed");
+}
+
+#[test]
+fn the_frontend_package_refuses_to_ship_without_a_built_bundle() {
+    let out = tempfile::tempdir().expect("temp dir");
+    let path = out.path().to_str().expect("utf-8 path");
+    // Pointed at a directory nothing has built into, `ui` must say so rather than
+    // publish a package whose `dist/` is empty.
+    let built = npm_build(&["ui", "--out", path, "--bundle", path]);
+    assert!(!built.status.success());
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(stderr.contains("no built frontend"), "{stderr}");
+    assert!(stderr.contains("ACTION:"), "{stderr}");
+}
+
+#[test]
 fn every_release_target_has_a_platform_package_on_both_sides() {
     let workflow = read(".github/workflows/release.yml");
     let build = read("scripts/npm-build.mjs");
-    let launcher = read("npm/onepipeline-ui/bin/onepipeline-ui.js");
-    let manifest = read("npm/onepipeline-ui/package.json");
+    let launcher = read(&format!("npm/{WRAPPER}/bin/{COMMAND}.js"));
+    let manifest = read("npm/onepipeline-api-cli/package.json");
     for (target, package) in [
-        ("x86_64-unknown-linux-gnu", "onepipeline-ui-cli-linux-x64"),
+        ("x86_64-unknown-linux-gnu", "onepipeline-api-cli-linux-x64"),
         (
             "aarch64-unknown-linux-gnu",
-            "onepipeline-ui-cli-linux-arm64",
+            "onepipeline-api-cli-linux-arm64",
         ),
-        ("x86_64-apple-darwin", "onepipeline-ui-cli-darwin-x64"),
-        ("aarch64-apple-darwin", "onepipeline-ui-cli-darwin-arm64"),
-        ("x86_64-pc-windows-msvc", "onepipeline-ui-cli-win32-x64"),
+        ("x86_64-apple-darwin", "onepipeline-api-cli-darwin-x64"),
+        ("aarch64-apple-darwin", "onepipeline-api-cli-darwin-arm64"),
+        ("x86_64-pc-windows-msvc", "onepipeline-api-cli-win32-x64"),
     ] {
         assert!(workflow.contains(target), "release.yml builds no {target}");
         assert!(build.contains(target), "npm-build.mjs maps no {target}");

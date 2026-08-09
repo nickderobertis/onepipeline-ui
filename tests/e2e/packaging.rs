@@ -45,7 +45,7 @@ fn host_package() -> String {
         "aarch64" => "arm64",
         other => other,
     };
-    format!("onepipeline-ui-cli-{platform}-{arch}")
+    format!("onepipeline-api-cli-{platform}-{arch}")
 }
 
 fn repo_root() -> PathBuf {
@@ -87,9 +87,9 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
     let staging = root.join("staging");
     let modules = root.join("node_modules");
     let launcher = npm_build(&["launcher", "--out", staging.to_str().expect("utf-8 path")]);
-    copy_tree(&launcher, &modules.join("onepipeline-ui-cli"));
+    copy_tree(&launcher, &modules.join("onepipeline-api-cli"));
     if with_platform {
-        let binary = assert_cmd::cargo::cargo_bin("onepipeline-ui");
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let platform = npm_build(&[
             "platform",
             "--target",
@@ -101,7 +101,7 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
         ]);
         copy_tree(&platform, &modules.join(host_package()));
     }
-    modules.join("onepipeline-ui-cli/bin/onepipeline-ui.js")
+    modules.join("onepipeline-api-cli/bin/onepipeline-api.js")
 }
 
 fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
@@ -130,20 +130,13 @@ fn the_launcher_runs_the_binary_its_platform_package_carries() {
 fn the_launcher_propagates_the_binarys_exit_code_and_stderr() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
-    let runs = tempfile::tempdir().expect("temp dir");
-    let output = run_launcher(
-        &entry,
-        &[
-            "serve",
-            "--runs-root",
-            runs.path().to_str().expect("utf-8 path"),
-        ],
-    );
+    let output = run_launcher(&entry, &["serve", "--runs-root", "/no/such/runs/root"]);
     // A caller scripting against the documented exit codes has to see the
-    // binary's, not the shim's.
-    assert_eq!(output.status.code(), Some(70));
+    // binary's `2`, not the shim's own `1` — which is what it exits when the
+    // resolution it exists to do fails.
+    assert_eq!(output.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("`serve` is not implemented"),
+        String::from_utf8_lossy(&output.stderr).contains("is not a readable directory"),
         "the shim swallowed the binary's diagnostics"
     );
 }
@@ -158,7 +151,7 @@ fn a_missing_platform_package_fails_with_the_other_install_paths() {
     assert!(stderr.contains(&host_package()), "{stderr}");
     assert!(stderr.contains("optional dependencies"), "{stderr}");
     assert!(
-        stderr.contains("pip install onepipeline-ui-cli"),
+        stderr.contains("pip install onepipeline-api-cli"),
         "{stderr}"
     );
     assert!(stderr.contains("cargo install onepipeline-ui"), "{stderr}");

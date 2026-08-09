@@ -1,0 +1,36 @@
+{
+  "name": "dag-ui",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/dag-ui/src",
+  "tags": ["scope:app", "type:web"],
+  "implicitDependencies": ["dag-layout", "dag-model", "telemetry-client"],
+  "targets": {
+    "serve": {
+      "command": "cd apps/dag-ui && npx vite --config vite.config.ts"
+    },
+    "build": {
+      "command": "cd apps/dag-ui && npx vite build --config vite.config.ts",
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "command": "npx biome check apps/dag-ui && npx eslint apps/dag-ui"
+    },
+    "test": {
+      "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts && npx playwright test --config playwright.config.ts && npx playwright test --config isolation.config.ts",
+      "inputs": ["default", "apiServerSurface"]
+    },
+    "typecheck": {
+      "command": "npx tsc -p apps/dag-ui/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "npx biome check --write --linter-enabled=false apps/dag-ui"
+    },
+    "format-check": {
+      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui"
+    },
+    "bootstrap": {
+      "command": "cd apps/dag-ui && npx playwright install chromium"
+    }
+  }
+}

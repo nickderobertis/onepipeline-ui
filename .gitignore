@@ -4,8 +4,18 @@
 # re-creates node_modules from the committed lockfile whenever it is missing.
 /node_modules
 /.nx
+# Per-workspace installs, Vite's dependency cache, and the browser tier's own
+# scratch. `npm ci` and the Playwright configs recreate every one of them.
+node_modules/
+.vite/
+.vite-temp/
+/apps/*/dist
+/apps/*/test-results
+/apps/*/playwright-report
+/apps/*/.screenshots
+/packages/*/dist
 # Assembled by scripts/npm-build.mjs and by maturin; the committed sources are
-# npm/onepipeline-ui/ and pyproject.toml.
+# npm/onepipeline-api-cli/ and pyproject.toml.
 /npm/dist
 /dist
 # Coverage instrumentation writes these wherever an instrumented binary happens

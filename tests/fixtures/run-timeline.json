@@ -2,11 +2,98 @@
   "api_version": 2,
   "telemetry_schema_version": 10,
   "observed_at": "2026-08-07T12:00:00Z",
-  "scope": "node",
-  "node": "contract-interface",
+  "timeline_schema_version": 2,
+  "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
-      "dispatch_id": "dispatch-7f3a91c0"
+      "id": "node.01.contract-interface",
+      "kind": "node",
+      "label": "contract-interface",
+      "started_at": "2026-08-07T12:00:02.000Z",
+      "ended_at": "2026-08-07T12:00:20.000Z",
+      "node_id": "contract-interface",
+      "round": 1,
+      "status": "done",
+      "events": [
+        {
+          "id": "e2",
+          "kind": "node-dispatched",
+          "at": "2026-08-07T12:00:02.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
+          "kind": "agent-turn",
+          "at": "2026-08-07T12:00:03.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "reference": {
+            "kind": "conversation",
+            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+          }
+        },
+        {
+          "id": "e4",
+          "kind": "node-settled",
+          "at": "2026-08-07T12:00:20.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "status": "done",
+          "reference": {
+            "kind": "gate_log",
+            "value": "artifact-5c8f0a1b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dispatch.01.3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+      "kind": "dispatch",
+      "label": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+      "started_at": "2026-08-07T12:00:02.000Z",
+      "ended_at": "2026-08-07T12:00:20.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "dispatch_id": "run-20260807-a1b2c3.01.contract-interface",
+      "transport_role": "agent",
+      "agent_role": "worker",
+      "status": "done",
+      "reference": {
+        "kind": "conversation",
+        "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+      },
+      "events": [
+        {
+          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
+          "kind": "agent-turn",
+          "at": "2026-08-07T12:00:03.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "reference": {
+            "kind": "conversation",
+            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+          }
+        }
+      ]
+    },
+    {
+      "id": "verification.01.contract-interface.artifact-5c8f0a1b",
+      "kind": "verification",
+      "label": "artifact-5c8f0a1b",
+      "started_at": "2026-08-07T12:00:03.000Z",
+      "ended_at": "2026-08-07T12:00:20.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "status": "ok",
+      "detail": {
+        "ok": true,
+        "output_tail": "",
+        "artifact_id": "artifact-5c8f0a1b"
+      },
+      "events": []
     }
   ]
 }

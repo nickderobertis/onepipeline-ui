@@ -59,7 +59,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint test doc
+check: fmt-check lint typecheck build test doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -69,6 +69,16 @@ check: fmt-check lint test doc
 check-affected:
     @bash scripts/nx-affected.sh -t check
     @echo "check-affected: ok"
+
+# What the macOS and Windows legs run. They are here for what the platform can
+# change — formatting, lints and the suite against a real binary — and not for
+# what it cannot: coverage is instrumented on Linux alone (see `test-quick`),
+# and the frontend's typecheck, build and docs are the same artifact on every
+# OS. Naming that subset once is what keeps CI from re-listing tiers inline and
+# drifting away from this file.
+# The gate's platform-sensitive tiers, without the Linux-only coverage floor.
+check-cross: fmt-check lint test-quick
+    @echo "check-cross: ok"
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
@@ -100,6 +110,18 @@ format:
 # Lint every project with its own linter; any warning is an error.
 lint:
     @bash scripts/nx.sh run-many -t lint
+
+# The Rust crate's compiler type-checks inside `lint`, so only the TypeScript
+# projects carry this target.
+# Type-check every project that has a type checker.
+typecheck:
+    @bash scripts/nx.sh run-many -t typecheck
+
+# The crate's own build is covered by `lint` and `test`, so this is the frontend
+# bundle and the packages' declarations.
+# Build every project that produces a distributable artifact.
+build:
+    @bash scripts/nx.sh run-many -t build
 
 # Every project's test suite; the crate's enforces its coverage floor.
 test:
@@ -147,6 +169,13 @@ test-e2e:
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.
 run *ARGS:
     cargo run --locked --quiet -- {{ARGS}}
+
+# The operator iterates on this UI visually and cannot otherwise see it while a
+# change is being made; the script's own header explains the per-invocation
+# gallery. Not in `check`: it asserts nothing and writes images.
+# Photograph the DAG Observatory at every viewport into a fresh gallery.
+dag-ui-screens *ARGS:
+    @bash scripts/dag-ui-screens.sh {{ARGS}}
 
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.
@@ -198,5 +227,4 @@ lint-llm-validate *args:
 # The blocking `llmlint` PR check; `just gate` runs it before you push.
 # llmlint scoped to the files this branch changed since it forked from main.
 lint-llm-diff base="origin/main" *args:
-    @command -v llmlint >/dev/null 2>&1 || { echo "llmlint not installed — run 'just setup-llmlint'"; exit 1; }
-    llmlint --diff --diff-base "{{base}}" {{args}}
+    @./scripts/lint-llm-diff.sh "{{base}}" {{args}}
