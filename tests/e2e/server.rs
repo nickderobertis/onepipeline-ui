@@ -669,6 +669,9 @@ fn a_directory_that_records_no_launch_is_not_a_run() {
     assert_eq!(ids, vec![fixture_run::RUN_ID]);
 }
 
+/// Unix only: `Serving::stop` needs a stop a parent can *ask* for, and Windows
+/// has none — see `tests/support/serving.rs`'s `ask_to_stop`.
+#[cfg(unix)]
 #[test]
 fn a_server_asked_to_stop_finishes_cleanly() {
     let serving = two_runs();

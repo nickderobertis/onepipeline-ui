@@ -77,7 +77,9 @@ impl Serving {
     /// Ask the server to stop the way a supervisor does, and return its status.
     ///
     /// This is the journey for the clean-shutdown path: a signalled server
-    /// finishes and exits `0` rather than being killed.
+    /// finishes and exits `0` rather than being killed. Unix only — see
+    /// [`ask_to_stop`] for what a parent can and cannot say on Windows.
+    #[cfg(unix)]
     pub fn stop(mut self) -> std::process::ExitStatus {
         ask_to_stop(&mut self.child);
         let status = self.child.wait().expect("the server exits");
@@ -87,6 +89,13 @@ impl Serving {
 }
 
 /// Send the platform's "please stop" to a child.
+///
+/// On Unix that is `SIGTERM`, which the server handles and answers by finishing
+/// what it was doing. Windows offers a parent no equivalent: `kill` there is
+/// `TerminateProcess`, which ends the process unconditionally and reports a
+/// status the server never chose. That is why the clean-shutdown journey is
+/// asserted on Unix alone — a Windows assertion would be about the harness's
+/// own termination, not the server's shutdown.
 fn ask_to_stop(child: &mut Child) {
     #[cfg(unix)]
     {

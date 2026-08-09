@@ -122,13 +122,26 @@ if ! curl -fsS --max-time 10 "http://$address/healthz" | grep -q '"ok"'; then
 fi
 
 # Being asked to stop is the normal end of a read surface, and it exits 0.
+#
+# Windows is left out of the assertion, not out of the stop: `kill` under MSYS
+# is `TerminateProcess`, which ends the server unconditionally and reports a
+# status the server never chose, so an exit code there would be the shell's and
+# not the artifact's. Every other leg above — the version, `--help`, the
+# documented `2`, and serving `/healthz` — runs on every platform.
 kill "$serve_pid" 2>/dev/null
 stopped=0
 wait "$serve_pid" || stopped=$?
 serve_pid=""
-if [ "$stopped" -ne 0 ]; then
-  fail "'serve' exited $stopped when asked to stop, not 0" \
-    "compare against src/server.rs's graceful shutdown at this tag"
-fi
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    echo "$label: stopped (this platform cannot ask, so the exit status is not asserted)"
+    ;;
+  *)
+    if [ "$stopped" -ne 0 ]; then
+      fail "'serve' exited $stopped when asked to stop, not 0" \
+        "compare against src/server.rs's graceful shutdown at this tag"
+    fi
+    ;;
+esac
 
 echo "$label: smoke test passed"
