@@ -14,13 +14,18 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use onepipeline_ui::api::ReadApi;
-use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_NOT_IMPLEMENTED};
+use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
-    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame, Health,
-    HealthStatus, NodeId, RunId, RunQuery, TimelineQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
+    EventsQuery, Health, HealthStatus, NodeId, RunId, RunQuery, RunsQuery, SseEvent, TimelineQuery,
+    API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
+use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
 use serde_json::Value;
+
+#[path = "support/fixture_run.rs"]
+mod fixture_run;
 
 /// The fixture file each route's response body is pinned in.
 const ROUTE_FIXTURES: [(&str, &str); 7] = [
@@ -41,6 +46,14 @@ fn read_fixture(name: &str) -> String {
     let path = fixture_dir().join(name);
     fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
 }
+
+/// The env var that rewrites the goldens from what the server actually served.
+const UPDATE: &str = "UPDATE_CONTRACT_FIXTURES";
+
+/// `observed_at` is the instant of the read, so it is the one field a golden
+/// cannot pin. It is replaced by the instant the fixture claims, which keeps the
+/// rest of the document — the whole payload — compared byte for byte.
+const OBSERVED_AT: &str = "2026-08-07T12:00:00Z";
 
 fn contract_text() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/contract.md");
@@ -98,6 +111,122 @@ fn every_route_has_a_fixture() {
     }
 }
 
+/// Serve every route against a real recorded run and hold the result to the
+/// checked-in goldens.
+///
+/// The fixtures are not hand-written claims about the payloads: they are what
+/// this server made of the run directory in `tests/support/fixture_run.rs`,
+/// which is a directory the onepipeline SDK itself writes. A payload change is
+/// therefore a golden change in the same commit, and re-running with
+/// `UPDATE_CONTRACT_FIXTURES=1` is how that change is made deliberately.
+#[test]
+fn every_route_serves_the_payload_its_golden_pins() {
+    let root = tempfile::tempdir().expect("temp dir");
+    fixture_run::write(root.path(), fixture_run::RUN_ID);
+    fixture_run::write(root.path(), fixture_run::OTHER_RUN_ID);
+    let runs_root: onepipeline_ui::cli::RunsRoot = root
+        .path()
+        .to_str()
+        .expect("utf-8 path")
+        .parse()
+        .expect("a readable runs root");
+    let store = RunStore::new(&runs_root);
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+
+    let served: [(&str, Value); 6] = [
+        (
+            "runs.json",
+            enveloped(store.runs(&RunsQuery {
+                include_settled: true,
+                ..RunsQuery::default()
+            })),
+        ),
+        (
+            "run.json",
+            enveloped(store.run(
+                &run,
+                &RunQuery {
+                    include_conversations: true,
+                },
+            )),
+        ),
+        (
+            "run-timeline.json",
+            enveloped(store.timeline(
+                &run,
+                &TimelineQuery::Node {
+                    node: NodeId::try_from(fixture_run::NODE_ID).expect("valid"),
+                },
+            )),
+        ),
+        (
+            "run-conversation.json",
+            enveloped(store.conversation(
+                &run,
+                &ConversationId::try_from(fixture_run::CONVERSATION_ID).expect("valid"),
+            )),
+        ),
+        (
+            "run-artifact.json",
+            enveloped(store.artifact(
+                &run,
+                &ArtifactId::try_from(fixture_run::ARTIFACT_ID).expect("valid"),
+            )),
+        ),
+        (
+            "events.json",
+            serde_json::to_value(
+                store
+                    .events(&EventsQuery::default())
+                    .expect("the stream opens")
+                    .next()
+                    .expect("a fresh snapshot opens every connection"),
+            )
+            .expect("serialize the frame"),
+        ),
+    ];
+
+    for (name, document) in served {
+        let rendered = canonical(&normalized(document));
+        if std::env::var_os(UPDATE).is_some() {
+            fs::write(fixture_dir().join(name), &rendered).expect("rewrite the golden");
+            continue;
+        }
+        assert_eq!(
+            rendered,
+            read_fixture(name),
+            "tests/fixtures/{name} is not what the server serves — \
+             re-run with {UPDATE}=1 to accept the change deliberately"
+        );
+    }
+}
+
+/// The envelope a route served, as JSON, or the failure that stops the golden
+/// being written at all.
+fn enveloped(served: Result<Envelope<Value>, ApiError>) -> Value {
+    serde_json::to_value(served.expect("the fixture run serves every route")).expect("serialize")
+}
+
+/// The same document with the read's own instant replaced, wherever it appears.
+fn normalized(document: Value) -> Value {
+    match document {
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, value)| {
+                    if key == "observed_at" {
+                        (key, Value::String(OBSERVED_AT.to_owned()))
+                    } else {
+                        (key, normalized(value))
+                    }
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(normalized).collect()),
+        other => other,
+    }
+}
+
 #[test]
 fn the_health_body_round_trips() {
     let raw = read_fixture("healthz.json");
@@ -141,12 +270,12 @@ fn the_event_frame_round_trips_and_opens_with_a_snapshot() {
         frame.id, 0,
         "a connection's first frame is its fresh snapshot"
     );
-    assert_eq!(
-        frame.data.telemetry_schema_version,
-        TELEMETRY_SCHEMA_VERSION
-    );
+    assert_eq!(frame.event, SseEvent::Snapshot);
+    let snapshot: Envelope<Value> =
+        serde_json::from_value(frame.data.clone()).expect("the snapshot is enveloped");
+    assert_eq!(snapshot.telemetry_schema_version, TELEMETRY_SCHEMA_VERSION);
     assert!(
-        frame.data.payload.get("runs").is_some(),
+        snapshot.payload.get("runs").is_some(),
         "the snapshot carries the state a fresh connection needs"
     );
     assert_eq!(canonical(&frame), raw);
@@ -162,9 +291,12 @@ fn the_run_list_carries_session_attribution() {
     assert!(!runs.is_empty());
     for run in runs {
         RunId::try_from(run["run_id"].as_str().expect("run_id is a string")).expect("valid run id");
+        let launch = run
+            .get("launch")
+            .expect("every run carries its session attribution");
         assert!(
-            run.get("session").is_some(),
-            "every run carries its session attribution"
+            launch["launch_id"].is_string() && launch["launcher"].is_string(),
+            "the attribution names the launch and its launcher"
         );
     }
 }
@@ -176,7 +308,10 @@ fn schema_ten_carries_a_dispatch_id() {
     let spans = envelope.payload["spans"]
         .as_array()
         .expect("spans is an array");
-    let dispatch = spans[0]["dispatch_id"]
+    let dispatch = spans
+        .iter()
+        .find(|span| span["kind"] == "dispatch")
+        .expect("a node timeline carries the dispatch that did its work")["dispatch_id"]
         .as_str()
         .expect("dispatch_id is a string");
     assert_eq!(
@@ -200,7 +335,12 @@ fn the_error_envelope_round_trips_and_matches_the_error_it_renders() {
 fn every_error_maps_to_its_code_and_status() {
     let reason = "why".to_owned();
     let id = "why-1";
-    let cases: [(ApiError, &str, u16); 10] = [
+    let cases: [(ApiError, &str, u16); 11] = [
+        (
+            ApiError::InvalidRequest(reason.clone()),
+            "invalid_request",
+            422,
+        ),
         (
             ApiError::InvalidRunId(reason.clone()),
             "invalid_run_id",
@@ -256,6 +396,14 @@ fn every_error_maps_to_its_code_and_status() {
         assert_eq!(rendered.error.message, error.to_string());
         assert!(rendered.error.message.contains("why"));
     }
+    // The one failure that names nothing back: a path this server has no route
+    // for, which still answers in the same envelope as every other.
+    assert_eq!(ApiError::NoSuchRoute.code(), "no_such_route");
+    assert_eq!(ApiError::NoSuchRoute.status(), 404);
+    assert_eq!(
+        ApiError::NoSuchRoute.envelope().error.message,
+        "no such route"
+    );
 }
 
 #[test]
@@ -404,9 +552,10 @@ fn assert_config_names_the_same_root(root: &Path) {
         serde_json::from_str(&format!(r#"{{"runs_root":{encoded}}}"#)).expect("parse config");
     assert_eq!(args.runs_root.as_path(), root);
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
+    assert_eq!(args.poll_interval_ms, onepipeline_ui::cli::DEFAULT_POLL_MS);
     assert_eq!(
         serde_json::to_string(&args).expect("serialize"),
-        format!(r#"{{"runs_root":{encoded},"bind":"127.0.0.1:8765"}}"#)
+        format!(r#"{{"runs_root":{encoded},"bind":"127.0.0.1:8765","poll_interval_ms":500}}"#)
     );
 }
 
@@ -421,9 +570,9 @@ fn a_config_file_cannot_name_a_runs_root_the_cli_would_reject() {
 }
 
 #[test]
-fn the_not_implemented_status_is_distinct_from_success_and_usage() {
-    assert_ne!(EXIT_NOT_IMPLEMENTED, 0);
-    assert_ne!(EXIT_NOT_IMPLEMENTED, 2);
+fn the_software_failure_status_is_distinct_from_success_and_usage() {
+    assert_ne!(EXIT_SOFTWARE, 0);
+    assert_ne!(EXIT_SOFTWARE, 2);
 }
 
 /// The trait is what the axum server and the SDK-backed store are written
@@ -440,7 +589,7 @@ impl ReadApi for Unimplemented {
         }
     }
 
-    fn runs(&self) -> Result<Envelope<Value>, ApiError> {
+    fn runs(&self, _query: &RunsQuery) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::Read("not implemented".to_owned()))
     }
 
@@ -464,7 +613,7 @@ impl ReadApi for Unimplemented {
         Err(ApiError::ArtifactNotFound(artifact.clone()))
     }
 
-    fn events(&self) -> Result<Self::Events, ApiError> {
+    fn events(&self, _query: &EventsQuery) -> Result<Self::Events, ApiError> {
         Ok(Vec::new().into_iter())
     }
 }
@@ -474,7 +623,10 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
     let api = Unimplemented;
     let run = RunId::try_from("run-1").expect("valid");
     assert_eq!(api.health().status, HealthStatus::Ok);
-    assert_eq!(api.runs().expect_err("stub").status(), 500);
+    assert_eq!(
+        api.runs(&RunsQuery::default()).expect_err("stub").status(),
+        500
+    );
     assert_eq!(
         api.run(
             &run,
@@ -504,5 +656,8 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
             .code(),
         "artifact_not_found"
     );
-    assert_eq!(api.events().expect("stub").count(), 0);
+    assert_eq!(
+        api.events(&EventsQuery::default()).expect("stub").count(),
+        0
+    );
 }

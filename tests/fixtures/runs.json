@@ -5,11 +5,93 @@
   "runs": [
     {
       "run_id": "run-20260807-a1b2c3",
-      "session": "claude-code:3f9a1c2e"
+      "state": "settled",
+      "phase": "reviewing-results",
+      "last_event": "round-finished",
+      "last_progress_at": 1786104031,
+      "timing_quality": "complete",
+      "linkage_quality": "labelled",
+      "timing": {
+        "agent_seconds": 27,
+        "judge_seconds": 0,
+        "llmlint_seconds": 0,
+        "gate_seconds": 0,
+        "publication_wait_seconds": 0,
+        "lock_wait_seconds": 0,
+        "setup_seconds": 0,
+        "scheduling_seconds": 4,
+        "wall_seconds": 31,
+        "agent_model_ms": 27000,
+        "judge_model_ms": 0,
+        "llmlint_model_ms": 0,
+        "tool_ms": 0,
+        "idle_orchestration_ms": 0,
+        "unattributed_ms": 0,
+        "wall_ms": 31000,
+        "fractions": {
+          "agent_model": 0.8709677419354839,
+          "judge_model": 0.0,
+          "llmlint_model": 0.0,
+          "tool": 0.0,
+          "idle_orchestration": 0.0,
+          "lock_wait": 0.0,
+          "setup": 0.0,
+          "scheduling": 0.12903225806451613
+        }
+      },
+      "node_counts": {
+        "done": 2
+      },
+      "launch": {
+        "launch_id": "run-20260807-a1b2c3",
+        "launcher": "claude-code",
+        "session_key": "f4a5b11c4e92"
+      }
     },
     {
       "run_id": "run-20260807-d4e5f6",
-      "session": null
+      "state": "settled",
+      "phase": "reviewing-results",
+      "last_event": "round-finished",
+      "last_progress_at": 1786104031,
+      "timing_quality": "complete",
+      "linkage_quality": "labelled",
+      "timing": {
+        "agent_seconds": 27,
+        "judge_seconds": 0,
+        "llmlint_seconds": 0,
+        "gate_seconds": 0,
+        "publication_wait_seconds": 0,
+        "lock_wait_seconds": 0,
+        "setup_seconds": 0,
+        "scheduling_seconds": 4,
+        "wall_seconds": 31,
+        "agent_model_ms": 27000,
+        "judge_model_ms": 0,
+        "llmlint_model_ms": 0,
+        "tool_ms": 0,
+        "idle_orchestration_ms": 0,
+        "unattributed_ms": 0,
+        "wall_ms": 31000,
+        "fractions": {
+          "agent_model": 0.8709677419354839,
+          "judge_model": 0.0,
+          "llmlint_model": 0.0,
+          "tool": 0.0,
+          "idle_orchestration": 0.0,
+          "lock_wait": 0.0,
+          "setup": 0.0,
+          "scheduling": 0.12903225806451613
+        }
+      },
+      "node_counts": {
+        "done": 2
+      },
+      "launch": {
+        "launch_id": "run-20260807-d4e5f6",
+        "launcher": "claude-code",
+        "session_key": "f4a5b11c4e92"
+      }
     }
   ]
 }

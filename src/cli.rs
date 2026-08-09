@@ -13,12 +13,14 @@ use std::str::FromStr;
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-/// Exit status when a parsed command has no implementation yet.
+/// Exit status when a command parsed but this process could not carry it out.
 ///
-/// `sysexits.h`'s `EX_SOFTWARE`. The command surface is real and its arguments
-/// are validated; what is missing is behind it, which is an internal-software
-/// condition rather than a usage error (clap's `2`).
-pub const EXIT_NOT_IMPLEMENTED: u8 = 70;
+/// `sysexits.h`'s `EX_SOFTWARE`. It is the third of the three statuses AGENTS.md
+/// fixes, and it is deliberately distinct from clap's `2`: the arguments were
+/// usable and something behind them — a runtime this host would not give the
+/// process — is what stopped it, so a caller scripting against these can tell
+/// "you asked wrongly" from "this host could not do it".
+pub const EXIT_SOFTWARE: u8 = 70;
 
 /// Serve and inspect the onepipeline read API.
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
@@ -60,6 +62,23 @@ pub struct ServeArgs {
     #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:8765")]
     #[serde(default = "default_bind")]
     pub bind: SocketAddr,
+
+    /// How often the event stream re-reads the runs root, in milliseconds.
+    ///
+    /// The lever between how quickly a live change reaches a browser and how
+    /// much of this host's disk the stream costs to hold open. A watched run's
+    /// transcripts are re-read a tenth as often, because that read walks every
+    /// relayed envelope of the run.
+    #[arg(long, value_name = "MS", default_value_t = DEFAULT_POLL_MS)]
+    #[serde(default = "default_poll_ms")]
+    pub poll_interval_ms: u64,
+}
+
+/// How often the event stream re-reads the runs root when nothing says otherwise.
+pub const DEFAULT_POLL_MS: u64 = 500;
+
+fn default_poll_ms() -> u64 {
+    DEFAULT_POLL_MS
 }
 
 fn default_bind() -> SocketAddr {

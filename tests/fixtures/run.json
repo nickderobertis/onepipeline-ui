@@ -4,7 +4,258 @@
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
-    "session": "claude-code:3f9a1c2e"
+    "state": "settled",
+    "phase": "reviewing-results",
+    "last_event": "round-finished",
+    "last_progress_at": 1786104031,
+    "timing": {
+      "agent_seconds": 27,
+      "judge_seconds": 0,
+      "llmlint_seconds": 0,
+      "gate_seconds": 0,
+      "publication_wait_seconds": 0,
+      "lock_wait_seconds": 0,
+      "setup_seconds": 0,
+      "scheduling_seconds": 4,
+      "wall_seconds": 31,
+      "agent_model_ms": 27000,
+      "judge_model_ms": 0,
+      "llmlint_model_ms": 0,
+      "tool_ms": 0,
+      "idle_orchestration_ms": 0,
+      "unattributed_ms": 0,
+      "wall_ms": 31000,
+      "fractions": {
+        "agent_model": 0.8709677419354839,
+        "judge_model": 0.0,
+        "llmlint_model": 0.0,
+        "tool": 0.0,
+        "idle_orchestration": 0.0,
+        "lock_wait": 0.0,
+        "setup": 0.0,
+        "scheduling": 0.12903225806451613
+      }
+    },
+    "nodes": [
+      {
+        "node": "contract-interface",
+        "status": "done",
+        "outcome": "shipped",
+        "branch": "feature/contract-interface",
+        "sessions": [
+          {
+            "session_id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+            "role": "agent",
+            "agent_role": "worker",
+            "started_at": "2026-08-07T12:00:03.000Z"
+          }
+        ],
+        "turns": 0,
+        "lint": 0,
+        "timing_quality": "complete",
+        "linkage_quality": "labelled",
+        "timing_presence": {
+          "agent_model_ms": true,
+          "judge_model_ms": false,
+          "llmlint_model_ms": false,
+          "tool_ms": false
+        }
+      },
+      {
+        "node": "review",
+        "status": "done",
+        "outcome": "approved",
+        "sessions": [],
+        "turns": 0,
+        "lint": 0,
+        "timing_quality": "complete",
+        "linkage_quality": "labelled",
+        "timing_presence": {
+          "agent_model_ms": true,
+          "judge_model_ms": false,
+          "llmlint_model_ms": false,
+          "tool_ms": false
+        }
+      }
+    ],
+    "usage": {
+      "agent": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null
+      },
+      "judge": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null
+      },
+      "llmlint": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null
+      },
+      "total": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null
+      }
+    },
+    "timing_quality": "complete",
+    "linkage_quality": "labelled",
+    "timing_presence": {
+      "agent_model_ms": true,
+      "judge_model_ms": false,
+      "llmlint_model_ms": false,
+      "tool_ms": false
+    },
+    "sources": [
+      "events.jsonl",
+      "launch.json"
+    ],
+    "node_work_ms": {
+      "agent_model_ms": 27000,
+      "judge_model_ms": 0,
+      "llmlint_model_ms": 0,
+      "tool_ms": 0,
+      "wall_ms": 31000
+    },
+    "turns": 0,
+    "lint": 0
   },
-  "conversations": []
+  "rounds": [
+    {
+      "run_id": "run-20260807-a1b2c3",
+      "round": 1,
+      "plan": {
+        "tasks": [
+          {
+            "id": "contract-interface",
+            "kind": "agent",
+            "persona": "worker",
+            "task": "## What\nLand the wire contract.",
+            "done_when": "the routes serve"
+          },
+          {
+            "id": "review",
+            "kind": "agent",
+            "persona": "judge",
+            "task": "## What\nReview it.",
+            "deps": [
+              "contract-interface"
+            ]
+          }
+        ],
+        "schema_version": 1,
+        "concurrency": 4,
+        "name": "contract",
+        "goal": {
+          "id": "5b4501007f42",
+          "text": "serve the read contract"
+        }
+      },
+      "node_states": {
+        "contract-interface": "done",
+        "review": "done"
+      },
+      "node_status": {
+        "contract-interface": "done",
+        "review": "done"
+      },
+      "node_gated_by": {},
+      "node_results": {
+        "contract-interface": {
+          "kind": "agent",
+          "status": "done",
+          "outcome": "shipped",
+          "branch": "feature/contract-interface",
+          "pr": "https://example.invalid/changes/1",
+          "completed": true
+        },
+        "review": {
+          "kind": "agent",
+          "status": "done",
+          "outcome": "approved",
+          "completed": true
+        }
+      },
+      "attestations": [],
+      "result": {
+        "ok": true,
+        "state": "complete",
+        "round": 1,
+        "started_order": [
+          "contract-interface",
+          "review"
+        ]
+      },
+      "last_seq": 7
+    }
+  ],
+  "conversations": [
+    {
+      "conversation": {
+        "canContinue": false,
+        "harnesses": [
+          "oneagentgraph"
+        ],
+        "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+        "name": "contract-interface",
+        "project": "run-20260807-a1b2c3",
+        "startedAt": "2026-08-07T12:00:03.000Z",
+        "state": "agent-turn",
+        "turns": [
+          {
+            "assistant": "landed the route table",
+            "failureKind": null,
+            "harness": "oneagentgraph",
+            "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
+            "model": "a-model",
+            "reasoning": null,
+            "status": "agent-turn",
+            "timestamp": "2026-08-07T12:00:03.000Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {},
+            "user": "worker"
+          }
+        ]
+      },
+      "attribution": {
+        "runId": "run-20260807-a1b2c3",
+        "round": 1,
+        "nodeId": "contract-interface",
+        "launchId": "run-20260807-a1b2c3",
+        "launcher": "claude-code",
+        "transportRole": "agent",
+        "agentRole": "worker",
+        "persona": "worker",
+        "finishedAt": "2026-08-07T12:00:03.000Z"
+      }
+    }
+  ],
+  "node_details": {
+    "contract-interface": {
+      "verification": {
+        "records": []
+      },
+      "publication": {
+        "branch": "feature/contract-interface",
+        "merged": false,
+        "pr_url": "https://example.invalid/changes/1"
+      }
+    }
+  },
+  "launch": {
+    "launch_id": "run-20260807-a1b2c3",
+    "launcher": "claude-code",
+    "session_key": "f4a5b11c4e92"
+  }
 }

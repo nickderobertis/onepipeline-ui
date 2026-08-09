@@ -7,10 +7,10 @@
 # purpose: the install is what races a registry (scripts/retry-install.sh
 # retries that), and a wrong version or a broken binary must fail now.
 #
-# What it asserts is the artifact's whole user-visible contract today: the
-# version it reports, that `--help` renders, and that `serve` refuses with the
-# documented exit code rather than starting something. When the read API lands,
-# its journey lands here too.
+# What it asserts is the artifact's whole user-visible contract: the version it
+# reports, that `--help` renders, that a bad `--runs-root` is the documented
+# usage error rather than a crash, and that `serve` really serves — bound on a
+# port the kernel chose, answering `/healthz`, and stopping cleanly when asked.
 #
 # Usage:
 #   smoke-published.sh --expect-version X.Y.Z [--label TEXT] [--command NAME]
@@ -66,14 +66,54 @@ fi
 "$command_name" --help >/dev/null || fail "'--help' failed" \
   "the installed binary is broken; check the build job for this platform"
 
-# `serve` is landed interface-only and must refuse with the documented status.
-# Anything else — a zero exit, or a usage error — means the artifact does not
-# behave the way its own docs say.
+# A runs root this host cannot read is a usage error, exit 2 — the documented
+# status, and distinct from the crash a broken binary would give.
 code=0
-"$command_name" serve --runs-root . >/dev/null 2>&1 || code=$?
-if [ "$code" -ne 70 ]; then
-  fail "'serve' exited $code, not the documented 70" \
-    "compare against docs/contract.md and src/main.rs at this tag"
+"$command_name" serve --runs-root /no/such/runs/root >/dev/null 2>&1 || code=$?
+if [ "$code" -ne 2 ]; then
+  fail "'serve' with an unreadable runs root exited $code, not the documented 2" \
+    "compare against AGENTS.md's exit-code invariant and src/main.rs at this tag"
+fi
+
+# Then the thing the artifact is for. `--bind 127.0.0.1:0` takes whatever port is
+# free, and the server names it on its first line of output — so this asks for no
+# port of its own and cannot collide with anything else on the runner.
+serve_root="$(mktemp -d)"
+serve_log="$(mktemp)"
+cleanup() {
+  [ -n "${serve_pid:-}" ] && kill "$serve_pid" 2>/dev/null
+  rm -rf "$serve_root" "$serve_log"
+}
+trap cleanup EXIT
+
+"$command_name" serve --runs-root "$serve_root" --bind 127.0.0.1:0 >"$serve_log" 2>&1 &
+serve_pid=$!
+
+address=""
+for _ in $(seq 1 100); do
+  address="$(tr -d '\r' <"$serve_log" | sed -n 's|.*on http://||p' | head -n 1)"
+  [ -n "$address" ] && break
+  kill -0 "$serve_pid" 2>/dev/null || break
+  sleep 0.1
+done
+if [ -z "$address" ]; then
+  fail "'serve' never named the address it took" \
+    "the server printed: $(tr '\n' ' ' <"$serve_log")"
+fi
+
+if ! curl -fsS --max-time 10 "http://$address/healthz" | grep -q '"ok"'; then
+  fail "'serve' did not answer /healthz on $address" \
+    "the server printed: $(tr '\n' ' ' <"$serve_log")"
+fi
+
+# Being asked to stop is the normal end of a read surface, and it exits 0.
+kill "$serve_pid" 2>/dev/null
+stopped=0
+wait "$serve_pid" || stopped=$?
+serve_pid=""
+if [ "$stopped" -ne 0 ]; then
+  fail "'serve' exited $stopped when asked to stop, not 0" \
+    "compare against src/server.rs's graceful shutdown at this tag"
 fi
 
 echo "$label: smoke test passed"

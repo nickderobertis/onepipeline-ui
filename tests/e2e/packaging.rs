@@ -130,20 +130,13 @@ fn the_launcher_runs_the_binary_its_platform_package_carries() {
 fn the_launcher_propagates_the_binarys_exit_code_and_stderr() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
-    let runs = tempfile::tempdir().expect("temp dir");
-    let output = run_launcher(
-        &entry,
-        &[
-            "serve",
-            "--runs-root",
-            runs.path().to_str().expect("utf-8 path"),
-        ],
-    );
+    let output = run_launcher(&entry, &["serve", "--runs-root", "/no/such/runs/root"]);
     // A caller scripting against the documented exit codes has to see the
-    // binary's, not the shim's.
-    assert_eq!(output.status.code(), Some(70));
+    // binary's `2`, not the shim's own `1` — which is what it exits when the
+    // resolution it exists to do fails.
+    assert_eq!(output.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("`serve` is not implemented"),
+        String::from_utf8_lossy(&output.stderr).contains("is not a readable directory"),
         "the shim swallowed the binary's diagnostics"
     );
 }

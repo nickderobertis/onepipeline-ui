@@ -58,7 +58,8 @@ fn the_wheel_wraps_the_binary_and_takes_its_version_from_cargo() {
 #[test]
 fn the_npm_launcher_wraps_the_binary_and_carries_no_version_of_its_own() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&read("npm/onepipeline-api-cli/package.json")).expect("parse manifest");
+        serde_json::from_str(&read("npm/onepipeline-api-cli/package.json"))
+            .expect("parse manifest");
     assert_eq!(manifest["name"], WRAPPER);
     assert_eq!(manifest["bin"][COMMAND], format!("bin/{COMMAND}.js"));
     // The committed manifest carries a placeholder; scripts/npm-build.mjs stamps

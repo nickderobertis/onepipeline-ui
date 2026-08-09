@@ -1,17 +1,12 @@
-//! The binary's own journeys.
+//! The binary's own argument journeys.
 //!
-//! Every command this crate exposes parses today and refuses today: the read API
-//! is landed interface-only (see `docs/contract.md`). These journeys are what
-//! keep "refuses" honest — a `serve` that started something, or one that failed
-//! with a bare usage error instead of saying why, would fail here.
+//! What `serve` *serves* is `server.rs`; this is everything a user meets before
+//! a port is taken — the version, the help, and every argument the process
+//! refuses rather than starting on. The exit codes here are the contract
+//! AGENTS.md fixes, spelled out as the numbers a shell sees.
 
 use assert_cmd::Command;
 use predicates::str::contains;
-
-/// The exit status a parsed-but-unimplemented command leaves. Mirrors
-/// `onepipeline_ui::cli::EXIT_NOT_IMPLEMENTED`, spelled out here so the journey
-/// asserts the number a user's shell sees rather than the constant's own value.
-const NOT_IMPLEMENTED: i32 = 70;
 
 /// Clap's usage-error status.
 const USAGE: i32 = 2;
@@ -48,20 +43,22 @@ fn serve_help_documents_its_arguments() {
         .success()
         .stdout(contains("--runs-root"))
         .stdout(contains("--bind"))
+        .stdout(contains("--poll-interval-ms"))
         .stdout(contains("127.0.0.1:8765"));
 }
 
 #[test]
-fn serve_refuses_loudly_and_starts_nothing() {
+fn a_bind_something_else_is_holding_is_a_usage_error_that_names_it() {
+    let held = std::net::TcpListener::bind("127.0.0.1:0").expect("hold a port");
+    let address = held.local_addr().expect("the held address");
     let runs = tempfile::tempdir().expect("temp dir");
     cli()
         .args(["serve", "--runs-root"])
         .arg(runs.path())
+        .args(["--bind", &address.to_string()])
         .assert()
-        .code(NOT_IMPLEMENTED)
-        .stdout(predicates::str::is_empty())
-        .stderr(contains("`serve` is not implemented"))
-        .stderr(contains("contract interface only"))
+        .code(USAGE)
+        .stderr(contains(format!("cannot bind {address}")))
         .stderr(contains("ACTION:"));
 }
 
