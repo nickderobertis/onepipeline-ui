@@ -101,13 +101,15 @@ format:
 lint:
     @bash scripts/nx.sh run-many -t lint
 
-# Type-check every project that has a type checker. The Rust crate's compiler
-# does this inside `lint`, so only the TypeScript projects carry this target.
+# The Rust crate's compiler type-checks inside `lint`, so only the TypeScript
+# projects carry this target.
+# Type-check every project that has a type checker.
 typecheck:
     @bash scripts/nx.sh run-many -t typecheck
 
-# Build every project that produces an artifact — the frontend bundle and the
-# packages' declarations. The crate's own build is covered by `lint` and `test`.
+# The crate's own build is covered by `lint` and `test`, so this is the frontend
+# bundle and the packages' declarations.
+# Build every project that produces a distributable artifact.
 build:
     @bash scripts/nx.sh run-many -t build
 
