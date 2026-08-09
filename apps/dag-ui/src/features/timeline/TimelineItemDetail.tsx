@@ -504,7 +504,7 @@ function Reference({
 /**
  * What the served timeline says the session behind this row has recorded.
  *
- * `orchestrator/timeline.py` folds one dispatch span per conversation carrying that
+ * The server folds one dispatch span per relayed session, carrying that
  * transcript's state, its end, and one event per recorded turn — so this string moves
  * exactly when the transcript does. It is what decides whether an open transcript is
  * re-read at all: a session that has stopped recording keeps one value forever, and no
@@ -575,8 +575,7 @@ type Attribution = DagConversation["attribution"];
  *
  * The word is not chosen here: `dispatchRoleLabel` derives it from the lane the role
  * is plotted in, so an opened conversation cannot head itself with one word while the
- * segment that opened it carries another. The vocabulary is reconciled against
- * `orchestrator/labels.py` by `scripts/check-dag-state-contract.py`, and it is keyed
+ * segment that opened it carries another. It is keyed
  * on the contract's closed `agentRole` enum, so a role added there fails to compile
  * until it has been given a lane rather than rendering as its raw identifier.
  */

@@ -233,6 +233,40 @@ describe("one node's slice of the run timeline", () => {
     expect(projected.items.some(({ id }) => id === "event-9")).toBe(false);
   });
 
+  test("plots work the record never closed to the end of what the node recorded", () => {
+    // A dispatch the run has not settled is served open-ended. Plotted at its own
+    // start it would be an instant — the one thing on the node that is still
+    // happening, drawn as the one thing a reader cannot point at.
+    const open = parseRunTimeline(runTimeline(LIVE_RUN));
+    const inFlight = open.spans.find(
+      (span) => span.id === "dispatch-worker-session",
+    );
+    if (inFlight === undefined) throw new Error("fixture lost the dispatch");
+    const projected = nodeTimelineV2(
+      {
+        ...open,
+        spans: open.spans.map((span) =>
+          span.id === inFlight.id ? { ...span, ended_at: null } : span,
+        ),
+      },
+      "dashboard",
+    );
+    const worker = projected.items.find(({ id }) => id === inFlight.id);
+    const recorded = Math.max(
+      ...projected.items.map((item) => item.end ?? item.start),
+      ...projected.markers.map((marker) => marker.at),
+    );
+    expect(worker?.end).toBe(recorded);
+    expect(worker?.duration).toBe(recorded - (worker?.start ?? 0));
+    // And a span the record *did* close keeps the interval it recorded.
+    const judge = projected.items.find(({ laneId }) => laneId === "judge");
+    expect(judge?.end).toBe(
+      Date.parse(
+        open.spans.find((span) => span.id === judge?.id)?.ended_at ?? "",
+      ),
+    );
+  });
+
   test("keeps one deterministic hit target for coincident compact items", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
     const worker = projected.items.find(({ laneId }) => laneId === "worker");

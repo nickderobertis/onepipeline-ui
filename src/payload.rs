@@ -1303,9 +1303,10 @@ pub enum Scope<'a> {
 /// The whole of `GET /api/v2/runs/{run}/timeline`'s payload.
 #[must_use]
 pub fn timeline(view: &RunView, scope: &Scope<'_>) -> Value {
+    let turns = turn_ids(view);
     let spans = match scope {
-        Scope::Run => run_spans(view),
-        Scope::Node(node) => node_spans(view, node.as_str()),
+        Scope::Run => run_spans(view, &turns),
+        Scope::Node(node) => node_spans(view, node.as_str(), &turns),
     };
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
@@ -1314,10 +1315,55 @@ pub fn timeline(view: &RunView, scope: &Scope<'_>) -> Value {
     })
 }
 
+/// The transcript turn one relayed envelope became.
+struct Turn {
+    session: String,
+    id: String,
+}
+
+/// The turn each envelope of the run became, indexed by its place in the merged
+/// store, and `None` for anything that is not a relayed turn.
+///
+/// [`conversations`] numbers a session's turns by their order *within that
+/// session*, so a timeline event naming one has to carry the same id: that
+/// pairing is the whole of how a client opens a plotted moment and finds the turn
+/// behind it. Computed once per timeline rather than per event, because the
+/// number is a position in the run and not a property of the envelope.
+fn turn_ids(view: &RunView) -> Vec<Option<Turn>> {
+    let mut counted: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut ids: Vec<Option<Turn>> = Vec::with_capacity(view.events.len());
+    for event in &view.events {
+        let named = (event.source == Source::Agentgraph)
+            .then(|| {
+                event
+                    .labels
+                    .extra
+                    .get("session")
+                    .and_then(Value::as_str)
+                    .filter(|session| ConversationId::try_from(*session).is_ok())
+            })
+            .flatten();
+        ids.push(named.map(|session| {
+            let index = counted.entry(session).or_insert(0);
+            let turn = Turn {
+                session: session.to_owned(),
+                id: format!("{session}.{index}"),
+            };
+            *index += 1;
+            turn
+        }));
+    }
+    ids
+}
+
 /// One journal envelope as a timeline event.
-fn timeline_event(index: usize, event: &Envelope) -> Value {
+fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
+    let turn = turns.get(index).and_then(Option::as_ref);
     let mut item = Map::new();
-    item.insert("id".into(), json!(format!("e{index}")));
+    item.insert(
+        "id".into(),
+        json!(turn.map_or_else(|| format!("e{index}"), |turn| turn.id.clone())),
+    );
     item.insert("kind".into(), json!(event.kind.0));
     item.insert("at".into(), json!(event.ts));
     if let Some(node) = &event.labels.node {
@@ -1332,10 +1378,15 @@ fn timeline_event(index: usize, event: &Envelope) -> Value {
     if let Some(status) = event.payload.get("status").and_then(Value::as_str) {
         item.insert("status".into(), json!(status));
     }
-    // Where the event's own heavy content lives, never inlined: the change it
-    // published, or the first evidence it stored. A reader opens the record and
-    // the client fetches that one thing.
-    if let Some(url) = event.payload.get("url").and_then(Value::as_str) {
+    // Where the event's own heavy content lives, never inlined: the transcript it
+    // is a turn of, the change it published, or the first evidence it stored. A
+    // reader opens the record and the client fetches that one thing.
+    if let Some(turn) = turn {
+        item.insert(
+            "reference".into(),
+            json!({ "kind": "conversation", "value": turn.session }),
+        );
+    } else if let Some(url) = event.payload.get("url").and_then(Value::as_str) {
         item.insert("reference".into(), json!({ "kind": "pr", "value": url }));
     } else if let Some(artifact) = event.artifacts.first() {
         item.insert(
@@ -1347,7 +1398,7 @@ fn timeline_event(index: usize, event: &Envelope) -> Value {
 }
 
 /// The rounds of the run, each with the nodes it carried beneath it.
-fn run_spans(view: &RunView) -> Vec<Value> {
+fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     for number in 1..=view.state.round.max(1) {
         let events: Vec<(usize, &Envelope)> = view
@@ -1385,7 +1436,7 @@ fn run_spans(view: &RunView) -> Vec<Value> {
                 .filter(|(_, event)| {
                     event.labels.node.is_none() && event.source != Source::Agentgraph
                 })
-                .map(|(index, event)| timeline_event(*index, event))
+                .map(|(index, event)| timeline_event(*index, event, turns))
                 .collect::<Vec<_>>(),
         }));
         // The sessions the round relayed at no node: the run's own driving
@@ -1432,7 +1483,7 @@ fn run_spans(view: &RunView) -> Vec<Value> {
                 "events".into(),
                 json!(relayed
                     .iter()
-                    .map(|(index, event)| timeline_event(*index, event))
+                    .map(|(index, event)| timeline_event(*index, event, turns))
                     .collect::<Vec<_>>()),
             );
             spans.push(Value::Object(span));
@@ -1448,14 +1499,20 @@ fn run_spans(view: &RunView) -> Vec<Value> {
             if !seen.insert(node) {
                 continue;
             }
-            spans.push(node_span(view, number, node, Some(&round_id)));
+            spans.push(node_span(view, number, node, Some(&round_id), turns));
         }
     }
     spans
 }
 
 /// One node's span within a round.
-fn node_span(view: &RunView, round: u64, node: &str, parent: Option<&str>) -> Value {
+fn node_span(
+    view: &RunView,
+    round: u64,
+    node: &str,
+    parent: Option<&str>,
+    turns: &[Option<Turn>],
+) -> Value {
     let events: Vec<(usize, &Envelope)> = view
         .events
         .iter()
@@ -1495,7 +1552,7 @@ fn node_span(view: &RunView, round: u64, node: &str, parent: Option<&str>) -> Va
         "events".into(),
         json!(events
             .iter()
-            .map(|(index, event)| timeline_event(*index, event))
+            .map(|(index, event)| timeline_event(*index, event, turns))
             .collect::<Vec<_>>()),
     );
     Value::Object(span)
@@ -1595,7 +1652,7 @@ fn publication_span(
 }
 
 /// One node's own work: the node span, then a dispatch span per attempt.
-fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
+fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     for number in 1..=view.state.round.max(1) {
         let events: Vec<(usize, &Envelope)> = view
@@ -1610,7 +1667,7 @@ fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
             continue;
         }
         let node_id = format!("node.{number:02}.{node}");
-        spans.push(node_span(view, number, node, None));
+        spans.push(node_span(view, number, node, None, turns));
         let settled = events.iter().find(|(_, event)| {
             event.source == Source::Pipeline
                 && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
@@ -1676,10 +1733,14 @@ fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
             continue;
         };
         let key = dispatch_key(&view.paths.run, number, node);
+        // A dispatch the node has not settled is running, which is a state the
+        // run is asserting rather than one this crate is guessing: the node was
+        // dispatched and nothing has closed it. Leaving it absent would leave a
+        // reader with "unknown" for the one case they can see is in flight.
         let status = settled
             .and_then(|(_, event)| event.payload.get("status"))
             .and_then(Value::as_str)
-            .map(status_word);
+            .map_or("running", status_word);
 
         // One span per session the dispatch ran under, all carrying the same
         // `dispatch_id`: that key is what groups them back into the one dispatch
@@ -1704,15 +1765,13 @@ fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
                 "label".into(),
                 json!(named.clone().unwrap_or_else(|| session.to_owned())),
             );
-            span.insert(
-                "started_at".into(),
-                json!(relayed.first().map_or(&start.ts, |(_, event)| &event.ts)),
-            );
-            // The settlement, which is where the dispatch a session was relayed
-            // under ends. The session's own last envelope is the last thing it
-            // said, not the end of it: a session says nothing while it works,
-            // and closing the span there would draw every dispatch as the
-            // instant of its final message.
+            // The dispatch, and the settlement that closed it. A session's own
+            // first and last envelopes are the first and last things it *said*,
+            // not its ends: a session says nothing while it works, so bracketing
+            // it by its own messages would draw a dispatch that ran for minutes
+            // as the instant between two of them — and would put the node's own
+            // dispatch record outside the window drawn for it.
+            span.insert("started_at".into(), json!(start.ts));
             span.insert(
                 "ended_at".into(),
                 settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
@@ -1729,9 +1788,7 @@ fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
             if let Some(role) = agent_role(persona) {
                 span.insert("agent_role".into(), json!(role));
             }
-            if let Some(status) = status {
-                span.insert("status".into(), json!(status));
-            }
+            span.insert("status".into(), json!(status));
             if named.is_none() {
                 span.insert(
                     "reference".into(),
@@ -1742,7 +1799,7 @@ fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
                 "events".into(),
                 json!(relayed
                     .iter()
-                    .map(|(index, event)| timeline_event(*index, event))
+                    .map(|(index, event)| timeline_event(*index, event, turns))
                     .collect::<Vec<_>>()),
             );
             spans.push(Value::Object(span));

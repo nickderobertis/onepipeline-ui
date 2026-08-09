@@ -23,11 +23,15 @@
           "round": 1
         },
         {
-          "id": "e3",
+          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
           "kind": "agent-turn",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
-          "round": 1
+          "round": 1,
+          "reference": {
+            "kind": "conversation",
+            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+          }
         },
         {
           "id": "e4",
@@ -47,7 +51,7 @@
       "id": "dispatch.01.3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
       "kind": "dispatch",
       "label": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
-      "started_at": "2026-08-07T12:00:03.000Z",
+      "started_at": "2026-08-07T12:00:02.000Z",
       "ended_at": "2026-08-07T12:00:20.000Z",
       "parent_id": "node.01.contract-interface",
       "node_id": "contract-interface",
@@ -62,11 +66,15 @@
       },
       "events": [
         {
-          "id": "e3",
+          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
           "kind": "agent-turn",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
-          "round": 1
+          "round": 1,
+          "reference": {
+            "kind": "conversation",
+            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+          }
         }
       ]
     },

@@ -403,7 +403,7 @@ function stamp(seconds: number): string {
 }
 
 /**
- * The served timeline of a run, shaped exactly as `orchestrator/timeline.py` folds
+ * The served timeline of a run, shaped exactly as `src/payload.rs::timeline` folds
  * one: a round span holding node spans, each holding the dispatches, verification,
  * publication and rollups recorded inside it, with references instead of bodies.
  */
@@ -428,7 +428,7 @@ export const WORKER_SESSION = "worker-session";
  *
  * A dispatched session is written a turn at a time, so this and `workerTurnsTimeline`
  * are one fixture in two payloads: the timeline gains a `conversation-turn` event as
- * the transcript gains the turn itself, exactly as `orchestrator/timeline.py` folds
+ * the transcript gains the turn itself, exactly as `src/payload.rs::timeline` folds
  * them. A test that grew one without the other would be describing a server that
  * cannot exist.
  */
@@ -813,8 +813,8 @@ function runLevelDispatch(
  * This is what the graph-level reading of a run is served, and it is deliberately not
  * the node payload with pieces removed — a summary carries a count and the time its
  * category *cost*, the roles that identify it, and no events, references or bodies.
- * `orchestrator.timeline._run_scope` owns the rule; `tests/e2e/test_server_e2e.py`
- * holds it to the shape written out here.
+ * `src/payload.rs::run_spans` owns the rule; `tests/e2e/server.rs` holds it to the
+ * shape written out here.
  */
 export function runScopeTimeline(runId: string = LIVE_RUN) {
   const served = runTimeline(runId);

@@ -359,7 +359,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   });
   await worker.hover();
   await expect(page.getByRole("tooltip")).toContainText("Duration:");
-  await expect(page.getByRole("tooltip")).toContainText("Status: completed");
+  await expect(page.getByRole("tooltip")).toContainText("Status: running");
   await expect(timeline(page).getByRole("button")).not.toHaveCount(0);
   // And it says which session it was, served on the row rather than read out of a
   // transcript: every dispatch on this node read "dispatch" and nothing else, so
@@ -771,55 +771,52 @@ test("states when a verification artifact is unavailable", async ({ page }) => {
   await expect(itemDetail(page)).toContainText("No readable log was recorded.");
 });
 
+/**
+ * What the API can say about a node's publication, node by node.
+ *
+ * onepipeline records the branch a node opened, the outcome it reached, and the
+ * change url it published — and nothing about a merge commit or a browsable branch
+ * page, which is why those two halves of the upstream matrix are gone rather than
+ * asserted against invented links. See AGENTS.md's list of what no journal records.
+ */
 for (const scenario of [
   {
     name: "local direct merge",
     node: "local-direct",
-    expected: [`https://github.com/example/repo/commit/${"a".repeat(40)}`],
-    absent: [
-      fixture().foundation_pr,
-      "https://github.com/example/repo/tree/feature/local",
-    ],
+    change: undefined,
   },
   {
-    name: "remote PR unmerged",
+    name: "remote change request left open",
     node: "remote-open",
-    expected: [
-      "https://github.com/example/repo/pull/13",
-      "https://github.com/example/repo/tree/feature/remote-open",
-    ],
-    absent: [`https://github.com/example/repo/commit/${"b".repeat(40)}`],
+    change: "https://example.invalid/changes/13",
   },
   {
-    name: "remote PR merged",
-    node: "remote-merged",
-    expected: [
-      "https://github.com/example/repo/pull/14",
-      `https://github.com/example/repo/commit/${"c".repeat(40)}`,
-    ],
-    absent: ["https://github.com/example/repo/tree/feature/remote-merged"],
+    name: "remote change request merged",
+    node: "foundation",
+    change: undefined,
   },
 ] satisfies readonly {
   name: string;
   node: string;
-  expected: readonly string[];
-  absent: readonly string[];
+  change: string | undefined;
 }[]) {
   test(`renders the ${scenario.name} publication from the API`, async ({
     page,
   }) => {
     await openObservatory(page, `/?run=${runs().live}&node=${scenario.node}`);
-    await timeline(page)
-      .getByRole("button", { name: /example\/repo/ })
-      .click();
-    for (const href of scenario.expected) {
-      await expect(itemDetail(page).locator(`a[href="${href}"]`)).toBeVisible();
+    await page.getByRole("tab", { name: "PR" }).click();
+    const facts = page.locator(".facts");
+    const change = scenario.change ?? fixture().foundation_pr;
+    if (scenario.change === undefined && scenario.node === "local-direct") {
+      // Merged straight from a local workflow: no change was ever opened, and the
+      // panel says so rather than linking a page that does not exist.
+      await expect(facts).toContainText("Not recorded");
+      await expect(facts.getByRole("link")).toHaveCount(0);
+      return;
     }
-    for (const href of scenario.absent) {
-      await expect(itemDetail(page).locator(`a[href="${href}"]`)).toHaveCount(
-        0,
-      );
-    }
+    await expect(
+      facts.getByRole("link", { name: "Pull request" }),
+    ).toHaveAttribute("href", change);
   });
 }
 
@@ -972,10 +969,10 @@ test("navigates historical DAGs grouped by their launching session", async ({
   // Every row states the run's own state and whether it is still moving, so the list
   // is readable without opening a run.
   const liveRow = page.getByRole("button", { name: RegExp(runs().live) });
-  await expect(liveRow).toContainText("running");
+  await expect(liveRow).toContainText("active");
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
-  ).toContainText("complete");
+  ).toContainText("settled");
 
   // The live marker is a bare dot, so it carries a name of its own and repeats it on
   // hover rather than leaving colour to say the only thing that distinguishes it.
@@ -1072,7 +1069,7 @@ test("restores a bookmarked view and refreshes through the read API", async ({
   await openObservatory(page, `/?run=${runs().live}&view=overall`);
   const metric = (label: string) =>
     page.locator(".metric").filter({ hasText: label });
-  await expect(metric("Status")).toContainText("running");
+  await expect(metric("Status")).toContainText("active");
   await expect(metric("Nodes")).toContainText(/[1-9]\d*/);
   // A duration in the units it is read in, never the raw second count the contract
   // serves: `58000.0s` is arithmetic homework, `16h 6m 40s` is an answer.
@@ -1939,8 +1936,9 @@ test("tells each outcome apart by the palette's semantic tones", async ({
     await page.keyboard.press("Escape");
   }
 
-  // The run list is the other surface that states an outcome, and `complete` is a
-  // state the package's own badge does not know at all.
+  // The run list is the other surface that states an outcome, and `settled` — the
+  // word this executor's own CLI prints — is a state the package's badge does not
+  // know at all.
   const runBadge = (runId: string): Locator =>
     page
       .getByRole("button", { name: RegExp(runId) })
@@ -1954,9 +1952,9 @@ test("tells each outcome apart by the palette's semantic tones", async ({
     await tokenColor(page, "--info"),
   );
   // A run's state is an open string in the read contract, and the sibling run's
-  // executor stopped without recording a result — a real state with no outcome in it.
-  // The list has to say the word and stop there rather than colour it in.
-  await expect(runBadge(runs().sibling)).toHaveText("stopped");
+  // driver is gone without a result having been recorded — a real state with no
+  // outcome in it. The list says the word and stops there rather than colouring it.
+  await expect(runBadge(runs().sibling)).toHaveText("driver-dead");
   await expect(runBadge(runs().sibling)).toHaveCSS("color", neutral);
 
   // And the canvas says the same things on its own surfaces, out of the same tokens

@@ -63,8 +63,18 @@ const NODE_TONE: Readonly<Record<DagNodeState, string | undefined>> = {
   waiting: undefined,
 };
 
-/** Run- and node-level `blocked` differ, but both use the same held-state tone. */
+/**
+ * Run- and node-level `blocked` differ, but both use the same held-state tone.
+ *
+ * A run's state is an open string in the read contract and each executor has its
+ * own words — `onepipeline` prints `ACTIVE` and `SETTLED` from its own CLI, and a
+ * server that says `running` and `complete` is equally conforming. Each pair reads
+ * as one tone. A word no table holds — `driver-dead`, `undriven` — is shown untoned
+ * rather than relabelled: it is a real state with no outcome in it.
+ */
 const TONE: Readonly<Record<string, string | undefined>> = {
   ...NODE_TONE,
   complete: NODE_TONE.done,
+  settled: NODE_TONE.done,
+  active: NODE_TONE.running,
 };

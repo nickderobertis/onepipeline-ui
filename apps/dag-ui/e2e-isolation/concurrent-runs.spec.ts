@@ -37,7 +37,7 @@ interface TierRun {
 function runTier(...extra: string[]): Promise<TierRun> {
   return new Promise((resolve) => {
     execFile(
-      "bunx",
+      "npx",
       [
         "playwright",
         "test",

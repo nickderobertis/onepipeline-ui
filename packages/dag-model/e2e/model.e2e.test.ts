@@ -96,9 +96,9 @@ test("the checked-in v2 run-detail contract parses and v1 is rejected", async ()
 });
 
 test("the checked-in v2 run-timeline contract parses, and v1's meaning is refused", async () => {
-  // The same bytes `tests/test_timeline.py` compares the Python projection to, parsed
-  // here with the schema a browser parses with — so neither side can move the payload
-  // without the other failing on it.
+  // The client half of the contract, parsed with the schema a browser parses with:
+  // a conforming server may serve exactly this, whatever this repository's own
+  // server happens to record.
   const golden = await corpus("run-timeline-v2.json");
   const parsed = parseRunTimeline(golden);
   expect(parsed.timeline_schema_version).toBe(2);
@@ -134,8 +134,8 @@ test("the checked-in v2 run-timeline contract parses, and v1's meaning is refuse
 });
 
 test("the goal id the read boundary derives is what makes a legacy run parse", async () => {
-  // Python derives this fixture's `plan.goal.id`; the run behind it recorded text
-  // alone. Without that id the contract rejects the whole detail.
+  // A conforming server derives this fixture's `plan.goal.id`; the run behind it
+  // recorded text alone. Without that id the contract rejects the whole detail.
   const golden = await corpus("run-detail-v2.json");
   expect(parseRunDetail(golden).rounds[0]?.plan.goal).toEqual({
     id: "Ship-the-gated-release",
@@ -156,7 +156,7 @@ test("the goal id the read boundary derives is what makes a legacy run parse", a
   expect(() => parseRunDetail(legacy)).toThrow();
 });
 
-/** The legacy plan shapes Python serves verbatim, read from the same committed corpus. */
+/** The legacy plan shapes a server serves verbatim, from the same committed corpus. */
 // Tuple literals keep each fixture name visible to test.each instead of widening to string[].
 const LEGACY_RUNS = ["legacy-resume-object", "legacy-steps-node"] as const;
 
@@ -180,9 +180,9 @@ async function legacyRound(run: string) {
 test.each(LEGACY_RUNS)(
   "the %s corpus fixture parses as the contract's own plan shape",
   async (run) => {
-    // The browser side of `tests/e2e/test_server_e2e.py`'s corpus check, over the same
-    // committed bytes: Python proved the read API serves these plans unchanged, so a
-    // schema that rejects them here is a run the operator cannot open.
+    // The browser side of `tests/contract.rs`'s golden check, over the same
+    // committed bytes: a read API serves these plans unchanged, so a schema that
+    // rejects them here is a run the operator cannot open.
     const golden = await corpus("run-detail-v2.json");
     const parsed = parseRunDetail({
       ...golden,
@@ -367,7 +367,7 @@ function completeDetail(conversations: unknown[]) {
 
 test("a package consumer accepts a complete run detail", () => {
   // The read API serves one flat list of transcripts, each carrying its own node
-  // locator, exactly as `docs/dag-ui/design.md` fixes `RunDetail.conversations`.
+  // locator, exactly as `docs/contract.md` fixes `RunDetail.conversations`.
   const parsed = parseRunDetail(completeDetail([TRANSCRIPT]));
   expect(parsed.run.run_id).toBe("run-1");
   expect(parsed.conversations[0]?.attribution.nodeId).toBe("build");

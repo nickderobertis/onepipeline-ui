@@ -411,6 +411,10 @@ test("ends the reading when the pointer leaves the document", async ({
   // `pointerleave` is the only thing that hears it, and without it the reading stays
   // painted over an app the pointer is no longer in.
   await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
+  // Opened, because this reads two lanes against each other: on the one collapsed
+  // line the branch a node published lies under the session that opened it, which
+  // is what collapsing the plot is for.
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   const segment = timeline(page).getByRole("button", {
     name: new RegExp(fixture().artifacts.gate),
   });
@@ -643,24 +647,24 @@ test("gives a lone recorded term the whole fact row", async ({ page }) => {
   expect(term?.width ?? 0).toBeGreaterThanOrEqual((list?.width ?? 0) - 3);
 });
 
-test("opens a turn's tool call at the phone", async ({ page }) => {
-  // The tool row is itself the disclosure, so a row pushed off the edge of a panel
-  // that clips sideways is a call nobody can open.
+test("keeps an opened turn readable at the phone", async ({ page }) => {
+  // A turn card is the widest thing the detail panel holds, so a card pushed off the
+  // edge of a panel that clips sideways is a turn nobody can read. (Upstream this
+  // read a turn's tool disclosure; a onepipeline journal records that a session
+  // reported, never what it said, so the card itself is the widest thing served.)
   await open(page, PHONE, `/?run=${runs().live}&node=dashboard`);
   await transcript(page)
     .getByRole("button", { name: /^Open Judge/ })
     .click();
   const detail = itemDetail(page);
-  await expect(
-    detail.getByRole("article", { name: /^Turn / }).first(),
-  ).toBeVisible();
-
-  const disclosure = detail
-    .getByRole("button", { name: "command_execution tool details" })
-    .first();
-  await expect(disclosure).toBeInViewport({ ratio: 1 });
-  await disclosure.click();
-  await expect(detail.getByText("just gate").first()).toBeVisible();
+  const turn = detail.getByRole("article", { name: /^Turn / }).first();
+  await expect(turn).toBeVisible();
+  await expect(turn).toBeInViewport({ ratio: 1 });
+  const panel = await detail.boundingBox();
+  const card = await turn.boundingBox();
+  expect((card?.x ?? 0) + (card?.width ?? 0)).toBeLessThanOrEqual(
+    (panel?.x ?? 0) + (panel?.width ?? 0) + 1,
+  );
   await expectThePageItselfDoesNotScroll(page);
 });
 

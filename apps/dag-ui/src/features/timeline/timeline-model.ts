@@ -108,7 +108,7 @@ export const NODE_LANES: readonly TimelineLane[] = Object.entries(
  * work rather than being work.
  *
  * Keyed by the contract's own closed span vocabulary, so a kind added to
- * `orchestrator/timeline.py` fails to compile here until it has been given a lane
+ * `timelineSpanKindSchema` fails to compile here until it has been given a lane
  * rather than silently landing in whichever one a string comparison reached first.
  */
 const LANE_BY_SPAN_KIND: Readonly<Record<TimelineSpanKind, LaneId | null>> = {
@@ -340,7 +340,21 @@ export function nodeTimelineV2(
         ]
       : [],
   );
-  return { items, markers, lanes: NODE_LANES, rows };
+  // Work the record never closed runs to the end of what this node has recorded —
+  // the same rule the graph timeline draws by, applied to the plot a reader opens
+  // the node in. Left at its start it would be a point, and an in-flight dispatch
+  // is not an instant: it is work still going on, and drawing it as a moment puts
+  // the one thing happening now out of the reader's reach.
+  const recorded = Math.max(
+    ...items.map((item) => item.end ?? item.start),
+    ...markers.map((marker) => marker.at),
+  );
+  const plotted = items.map((item) =>
+    item.end === null
+      ? { ...item, end: recorded, duration: recorded - item.start }
+      : item,
+  );
+  return { items: plotted, markers, lanes: NODE_LANES, rows };
 }
 
 function flattenRows(

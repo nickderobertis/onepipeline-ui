@@ -34,7 +34,7 @@ export const BUSY_RUN = "dag-ui-busy";
 /** How many of those sessions the busy node recorded. */
 export const BUSY_SESSIONS = 200;
 /** One of them ran long enough that its own turns are paged too. */
-export const BUSY_LONG_SESSION = "0c9a1e77-1111-4222-8333-000000000007";
+export const BUSY_LONG_SESSION = "engineer-sweep-7";
 /** How many turns that one recorded. */
 export const BUSY_LONG_TURNS = 30;
 /** More than one API page of cheap records, so paging is the real cursor boundary. */
@@ -307,18 +307,7 @@ function writeLiveRun(root) {
     "orchestrator",
     "Coordinating the execution frontier",
   );
-  // A second session the round recorded at no node: the run level is not one
-  // conversation, so the plot has to tell two of them apart there too.
-  journal.advance(1);
-  turn(
-    journal,
-    undefined,
-    ROUND_CHECK_IN_SESSION,
-    "check-in",
-    "Round 1 progress reported",
-  );
-
-  journal.advance(3).emit("pipeline", "node-dispatched", {
+  journal.advance(4).emit("pipeline", "node-dispatched", {
     ...round,
     node: "foundation",
     persona: "worker",
@@ -465,6 +454,17 @@ function writeLiveRun(root) {
     node: "obsolete",
     persona: "worker",
   });
+  // A second session the round recorded at no node, late in it: the run level is
+  // not one conversation, so the plot has to tell two of them apart there — and
+  // two open sessions that began together are one segment nobody can point at.
+  journal.advance(1);
+  turn(
+    journal,
+    undefined,
+    ROUND_CHECK_IN_SESSION,
+    "check-in",
+    "Round 1 progress reported",
+  );
   journal.advance(1).emit(
     "pipeline",
     "node-settled",
@@ -830,8 +830,8 @@ function writeBusyRun(root) {
   });
   for (let index = 0; index < BUSY_SESSIONS; index += 1) {
     // Session ids are the conversation identifiers the read API validates, so they
-    // are minted in that shape rather than as arbitrary names.
-    const session = `0c9a1e77-1111-4222-8333-${String(index).padStart(12, "0")}`;
+    // are minted as bare path segments rather than as anything a route would refuse.
+    const session = `engineer-sweep-${index}`;
     const turns = session === BUSY_LONG_SESSION ? BUSY_LONG_TURNS : 1;
     for (let step = 0; step < turns; step += 1) {
       journal
@@ -840,7 +840,7 @@ function writeBusyRun(root) {
           "agentgraph",
           "agent-turn",
           { ...round, node: "sweep", persona: "worker", session },
-          { message: `Swept batch ${index}`, model: "a-model" },
+          { message: `Swept batch ${index} (${step})`, model: "a-model" },
         );
     }
   }

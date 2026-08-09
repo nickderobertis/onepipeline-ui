@@ -1,9 +1,10 @@
 import { z } from "zod";
 
-// llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] docs/dag-ui/design.md is the
-// authoritative API contract and explicitly assigns these exported schemas to this package; the
-// Python read server emits the same contract from TypedDicts that cannot consume Zod directly;
-// scripts/check-dag-state-contract.py therefore reconciles their fields and closed vocabularies.
+// llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] docs/contract.md is the
+// authoritative API contract and assigns these exported schemas to this package; the Rust read
+// server projects the same contract from the onepipeline SDK's own records and cannot consume Zod;
+// model.e2e.test.ts therefore parses this repository's own served goldens — the bytes
+// tests/contract.rs pins — through these very parsers, which is the drift gate between them.
 // llmlint: ignore-file[changed_behavior_has_e2e] model.e2e.test.ts exercises every top-level API
 // parser plus populated telemetry, projection, provenance, timeline, and conversation attribution
 // through the package export. Nested Zod records compose those same tested boundaries; exhaustively
@@ -149,9 +150,9 @@ const arbitraryRecord = z.record(z.string(), z.unknown());
 /**
  * How a recorded outcome failed, classified once on the server.
  *
- * `orchestrator/telemetry.py`'s `FailureClass` owns this vocabulary and
- * `scripts/check-dag-state-contract.py` reconciles the three copies of it. It is
- * `class`, not `kind`, because that is the key the Python `Failure.record()` writes.
+ * `src/payload.rs`'s `failure_class` derives this vocabulary from the outcome
+ * word a run recorded, and `tests/contract.rs` reconciles it against the served
+ * goldens. It is `class`, not `kind`, because that is the key the wire carries.
  */
 export const failureClassSchema = z.enum([
   "agent",
@@ -166,18 +167,18 @@ export const failureClassSchema = z.enum([
 /**
  * Which side of onejudge's two-party conversation the provider refused.
  *
- * `orchestrator/provider_failure.py`'s `ConversationSide` owns this vocabulary and
- * `scripts/check-dag-state-contract.py` reconciles the three copies of it. A
- * planner reading "quota" needs it first: the two sides prefer different
- * identities, so a fix aimed at the wrong one changes nothing.
+ * A conforming server owns this vocabulary; nothing a onepipeline journal records
+ * fills it yet, so this repository's server never serves one. A planner reading
+ * "quota" needs it first: the two sides prefer different identities, so a fix aimed
+ * at the wrong one changes nothing.
  */
 export const conversationSideSchema = z.enum(["agent", "judge", "llmlint"]);
 
 /**
  * Why the provider refused, closed so a client can switch on it exhaustively.
  *
- * `orchestrator/provider_failure.py`'s `ProviderFailureCause` owns this vocabulary and
- * `scripts/check-dag-state-contract.py` reconciles the three copies of it.
+ * A conforming server owns this vocabulary; this repository's own has no record to
+ * derive it from and serves none.
  * `quota_at_launch` fell through to the next identity in the chain;
  * `quota_mid_conversation` could not, because the conversation was already bound
  * to the identity that refused it.
@@ -193,8 +194,7 @@ export const providerFailureCauseSchema = z.enum([
 /**
  * A provider refusal, as served on a failure record.
  *
- * `orchestrator/provider_failure.py`'s `ProviderFailure` owns this shape and
- * `scripts/check-dag-state-contract.py` reconciles all three copies of it. Every
+ * A conforming server owns this shape. Every
  * field is optional: only a failure that reached a provider carries any of them,
  * and the evidence a harness gives varies.
  */
@@ -337,10 +337,9 @@ const planStepSchema = openObject({
 /**
  * Where a preserved workstream is picked back up, as the plan records it for the
  * round that continues it. Never a boolean: the field this schema types has always
- * carried `orchestrator.lifecycle.Resume`'s own metadata, and typing it `boolean`
- * is what made every replanned run fail whole-detail validation in the browser.
- * `scripts/check-dag-state-contract.py` reconciles it with
- * `orchestrator.lifecycle.RESUME_FIELDS` and `docs/dag-ui/design.md`.
+ * carried the executor's own resume metadata, and typing it `boolean` is what made
+ * every replanned run fail whole-detail validation in the browser. The committed
+ * `e2e/corpus/legacy-runs` plans are the record of what has actually been written.
  *
  * Only the four fields that locate the work are required. A journal written before
  * a later field existed omits it — `completed_steps` and `pr` are both absent from
@@ -360,9 +359,8 @@ export const planTaskResumeSchema = openObject({
 });
 /**
  * One anchor a stacked plan node bases on. A *mapping*, never a bare branch name:
- * `orchestrator.lifecycle.STACK_BASE_FIELDS` is its one source and refuses anything
- * else, so a stacked run would have failed whole-detail validation the same way a
- * replanned one did.
+ * that is what an executor has always recorded, so typing it as a bare name would
+ * have failed whole-detail validation the same way a replanned run did.
  */
 export const stackBaseSchema = openObject({
   branch: z.string().min(1),
@@ -491,9 +489,9 @@ export const nodeStateSchema = z.enum([
   "cancelled",
 ]);
 /**
- * The one authoritative per-node status, owned by `orchestrator.projection.NodeStatus`
- * and reconciled with it, `@onepipeline-ui/dag-layout`, and `docs/dag-ui/design.md`
- * by `scripts/check-dag-state-contract.py`.
+ * The one authoritative per-node status. `src/payload.rs`'s `NODE_STATUSES` maps
+ * whatever a run recorded onto exactly this set, and `@onepipeline-ui/dag-layout`
+ * renders exactly this set; `model.e2e.test.ts` holds the two in agreement.
  *
  * `nodeStateSchema` above is the strict journal fold and is a subset of this: it can
  * only speak for nodes the journal recorded something about, so `pending`, `blocked`
@@ -642,8 +640,8 @@ export const nodeConversationsSchema = openObject({
 /**
  * `RunDetail.conversations`, accepting both recorded shapes and yielding one.
  *
- * `docs/dag-ui/design.md` fixes the served shape as a flat `DagConversation[]`, and
- * that is what `orchestrator/read_model.py` returns — each transcript carries its own
+ * `docs/contract.md` fixes the served shape as a flat `DagConversation[]`, and
+ * that is what `src/payload.rs::conversations` returns — each transcript carries its own
  * `attribution.nodeId`, so a consumer that wants them per node groups by it. Payloads
  * that group transcripts under `nodeConversationsSchema` entries stay valid and are
  * flattened into the same list, so a producer or recorded fixture written against
