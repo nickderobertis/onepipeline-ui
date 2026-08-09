@@ -28,9 +28,9 @@ import {
 import { useEffect, useMemo } from "react";
 import { DagGraph } from "../features/graph/DagGraph";
 import { RunNavigation } from "../features/navigation/RunNavigation";
-import { OverallView } from "../features/overall/OverallView";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
+import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
 import { groupRuns, nodeViews } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";

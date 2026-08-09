@@ -25,9 +25,9 @@ import {
   type GraphRow,
   type GraphSegment,
   graphTimeline,
-} from "../timeline/graph-timeline";
-import { TimelineItemDetail } from "../timeline/TimelineItemDetail";
-import { spanAsRow } from "../timeline/timeline-model";
+} from "./graph-timeline";
+import { TimelineItemDetail } from "./TimelineItemDetail";
+import { spanAsRow } from "./timeline-model";
 
 /**
  * The run as a whole, read as one clock rather than as a list of its parts.

@@ -25,6 +25,16 @@ That is why several components hold their own effects and subscriptions beside
 render rather than behind hooks: rewriting them would be rewriting the spec, and
 each such site carries a suppression saying so.
 
+## Both readings of the clock are one feature
+
+`OverallView` and `NodeTimelineView` live together in `src/features/timeline/`
+because they are the run-level and node-level ends of a single reading: they
+share its model (`timeline-model`, `graph-timeline`) and the detail panel each
+row opens into (`TimelineItemDetail`), and the overall view is one click from
+the node view by design. Split apart, one of them has to reach into the other's
+internals, which is the coupling the feature boundary exists to prevent. A
+module both features need and neither owns belongs in `src/lib/` instead.
+
 ## What the backend cannot answer
 
 The client's model has fields no onepipeline journal records, so parts of this
