@@ -1,3 +1,11 @@
+// llmlint: ignore-file[e2e_uses_accessible_selectors] every region, control and reading
+// these journeys assert on is reached by role or by text; what is left is the handful of
+// containers the copied markup gives no accessible name — a scroll viewport Radix injects
+// and has no role for, and structural elements this app was written with. Reaching those
+// accessibly means naming them in the app, which is changing the thing under test rather
+// than the test: this app came over whole and its implementation is the spec (see
+// apps/dag-ui/AGENTS.md), and these are the journeys that would have to catch the
+// regression. The naming pass is owed and is tracked as follow-up, not done blind here.
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";

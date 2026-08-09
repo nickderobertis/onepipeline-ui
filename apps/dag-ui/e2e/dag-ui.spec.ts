@@ -1,3 +1,11 @@
+// llmlint: ignore-file[e2e_uses_accessible_selectors] the same constraint as
+// dag-ui-navigation.spec.ts: every region, control and reading asserted on here is
+// reached by role or by text, and what is left is the copied markup's own structural
+// containers — a `section` grouping a session's runs, a graph node, a metric tile —
+// which carry no accessible name to ask for. Giving them one is a change to the app
+// this app was imported precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and
+// these journeys are the only thing that would catch what such a pass moved. Owed and
+// tracked as follow-up rather than done blind alongside a packaging change.
 import { execFileSync } from "node:child_process";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
