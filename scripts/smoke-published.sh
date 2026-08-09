@@ -132,9 +132,10 @@ kill "$serve_pid" 2>/dev/null
 stopped=0
 wait "$serve_pid" || stopped=$?
 serve_pid=""
+stop_note=""
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
-    echo "$label: stopped (this platform cannot ask, so the exit status is not asserted)"
+    stop_note=" (stopped, but this platform cannot ask, so its status is not asserted)"
     ;;
   *)
     if [ "$stopped" -ne 0 ]; then
@@ -144,4 +145,6 @@ case "$(uname -s)" in
     ;;
 esac
 
-echo "$label: smoke test passed"
+# Success is this one line on every platform; what the stop leg could assert is
+# said inside it rather than on a line of its own.
+echo "$label: smoke test passed$stop_note"
