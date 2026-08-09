@@ -70,6 +70,16 @@ check-affected:
     @bash scripts/nx-affected.sh -t check
     @echo "check-affected: ok"
 
+# What the macOS and Windows legs run. They are here for what the platform can
+# change — formatting, lints and the suite against a real binary — and not for
+# what it cannot: coverage is instrumented on Linux alone (see `test-quick`),
+# and the frontend's typecheck, build and docs are the same artifact on every
+# OS. Naming that subset once is what keeps CI from re-listing tiers inline and
+# drifting away from this file.
+# The gate's platform-sensitive tiers, without the Linux-only coverage floor.
+check-cross: fmt-check lint test-quick
+    @echo "check-cross: ok"
+
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
 # on its own; this is where the non-deterministic tier joins it.
