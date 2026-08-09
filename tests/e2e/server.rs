@@ -130,6 +130,54 @@ fn a_cursor_naming_a_run_that_has_gone_serves_the_list_from_its_start() {
 }
 
 #[test]
+fn a_run_with_no_journal_is_served_from_the_result_its_round_recorded() {
+    // Nothing to fold, so the round's own result is the only account there is. It
+    // must reach the list, the graph and the node telemetry as one derivation:
+    // a row and the graph it opens describing different graphs is the
+    // disagreement an operator actually saw.
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_only(root, fixture_run::RECORDED_ONLY_RUN_ID);
+    });
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let counts = &listed["runs"][0]["node_counts"];
+    // Counted in the run's own words: a client renders a closed vocabulary, but a
+    // count that silently renamed what the run wrote would hide it entirely.
+    assert_eq!(counts["improvised"], json!(1), "{counts}");
+    assert_eq!(counts["failed"], json!(1), "{counts}");
+
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RECORDED_ONLY_RUN_ID),
+    )
+    .json();
+    let round = &detail["rounds"][0];
+    // The word outside the vocabulary is served as `unknown` rather than passed
+    // through — a client switches on this exhaustively and refuses the whole run
+    // over a member it does not have — and never as a neighbouring meaning.
+    assert_eq!(round["node_status"][fixture_run::NODE_ID], json!("unknown"));
+    assert_eq!(
+        round["node_status"][fixture_run::REVIEW_NODE_ID],
+        json!("failed")
+    );
+
+    let nodes = detail["run"]["nodes"].as_array().expect("nodes");
+    let review = nodes
+        .iter()
+        .find(|node| node["node"] == json!(fixture_run::REVIEW_NODE_ID))
+        .expect("the failed node's telemetry");
+    // How it failed, from the only classification a onepipeline journal carries:
+    // the outcome word the run itself recorded.
+    assert_eq!(review["failure"]["class"], json!("gate"));
+    let converted = nodes
+        .iter()
+        .find(|node| node["node"] == json!(fixture_run::NODE_ID))
+        .expect("the other node's telemetry");
+    assert_eq!(converted["status"], json!("unknown"));
+    // A status that is not a lost outcome is not a failure, whatever it says.
+    assert!(converted.get("failure").is_none(), "{converted}");
+}
+
+#[test]
 fn the_run_list_hides_settled_runs_unless_asked_for_them() {
     let serving = two_runs();
     let body = http::get(serving.address, "/api/v2/runs").json();

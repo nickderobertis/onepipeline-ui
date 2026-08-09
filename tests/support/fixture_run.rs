@@ -527,3 +527,64 @@ fn pretty(value: &Value) -> String {
         serde_json::to_string_pretty(value).expect("serialize")
     )
 }
+
+/// The run id of the recorded-only fixture below.
+pub const RECORDED_ONLY_RUN_ID: &str = "run-20260807-9f8e7d";
+
+/// A run whose round recorded a result and whose journal never existed.
+///
+/// This is what a run predating the journal looks like on an operator's machine,
+/// permanently: there is nothing to fold, so the round's own result is the only
+/// account of it — and that result holds words no journal settlement can carry,
+/// including a status outside the vocabulary a client switches on and a failure
+/// with an outcome but no prose.
+pub fn write_recorded_only(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4245,
+            "host": "a-recording-host",
+            "started_at": START,
+            "round_budget": 14_400,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 1,
+        "name": "recorded",
+        "concurrency": 1,
+        "tasks": [
+            { "id": NODE_ID, "persona": "worker", "task": "## What\nConvert it." },
+            { "id": REVIEW_NODE_ID, "persona": "judge", "task": "## What\nCheck it." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
+    fs::write(
+        dir.join("round-01/result.json"),
+        pretty(&json!({
+            "run_id": run,
+            "round": 1,
+            "state": "failed",
+            "ok": false,
+            "nodes": [
+                // A word the served vocabulary does not hold.
+                { "id": NODE_ID, "status": "improvised" },
+                // A failure whose only recorded explanation is its outcome word.
+                { "id": REVIEW_NODE_ID, "status": "failed", "outcome": "gate-failed" },
+            ],
+        })),
+    )
+    .expect("the round's result");
+    fs::write(dir.join("events.jsonl"), "").expect("the empty journal");
+    dir
+}
