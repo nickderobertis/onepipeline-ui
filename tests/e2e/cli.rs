@@ -12,7 +12,7 @@ use predicates::str::contains;
 const USAGE: i32 = 2;
 
 fn cli() -> Command {
-    Command::cargo_bin("onepipeline-ui").expect("the binary is built")
+    Command::cargo_bin("onepipeline-api").expect("the binary is built")
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn version_reports_the_crate_version() {
         .assert()
         .success()
         .stdout(contains(env!("CARGO_PKG_VERSION")))
-        .stdout(contains("onepipeline-ui"));
+        .stdout(contains("onepipeline-api"));
 }
 
 #[test]

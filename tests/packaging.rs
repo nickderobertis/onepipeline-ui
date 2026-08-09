@@ -20,24 +20,60 @@ fn read(relative: &str) -> String {
 }
 
 /// The console command every distribution installs.
-const COMMAND: &str = "onepipeline-ui";
+const COMMAND: &str = "onepipeline-api";
 
 /// The distribution name the PyPI and npm wrappers publish under.
 const WRAPPER: &str = "onepipeline-api-cli";
 
+/// The crate name, on crates.io and in `cargo install`.
+const CRATE: &str = "onepipeline-ui";
+
 /// The npm distribution that carries the frontend rather than a binary.
 const FRONTEND: &str = "onepipeline-ui";
+
+/// The `name = "..."` a Cargo manifest sets inside `header`, e.g. `[[bin]]`.
+///
+/// Reading the section rather than the whole file is the point: the manifest
+/// declares two different names, and a substring search would let either one
+/// satisfy an assertion about the other.
+fn manifest_name(cargo: &str, header: &str) -> String {
+    let mut inside = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            inside = line == header;
+        } else if inside {
+            if let Some(value) = line.strip_prefix("name = ") {
+                return value.trim_matches('"').to_owned();
+            }
+        }
+    }
+    panic!("Cargo.toml declares no name under {header}");
+}
 
 #[test]
 fn the_crate_ships_the_binary_the_wrappers_wrap() {
     let cargo = read("Cargo.toml");
-    assert!(
-        cargo.contains(&format!("name = \"{COMMAND}\"")),
-        "the crate is not named {COMMAND}"
+    assert_eq!(
+        manifest_name(&cargo, "[package]"),
+        CRATE,
+        "the crate is not named {CRATE}, so `cargo install {CRATE}` installs nothing"
     );
-    assert!(
-        cargo.contains("[[bin]]"),
-        "the crate builds no binary for the wrappers to carry"
+    assert_eq!(
+        manifest_name(&cargo, "[[bin]]"),
+        COMMAND,
+        "the binary the wrappers carry is not the command they claim to install"
+    );
+}
+
+/// The command must not collide with the frontend package, which ships assets
+/// and no binary. Naming both `onepipeline-ui` is what this rename undid: an
+/// install of one would hand you the name the other's users type.
+#[test]
+fn the_command_does_not_collide_with_the_frontend_package() {
+    assert_ne!(
+        COMMAND, FRONTEND,
+        "the command shares a name with a package that installs no command"
     );
 }
 
@@ -65,6 +101,12 @@ fn the_npm_launcher_wraps_the_binary_and_carries_no_version_of_its_own() {
             .expect("parse manifest");
     assert_eq!(manifest["name"], WRAPPER);
     assert_eq!(manifest["bin"][COMMAND], format!("bin/{COMMAND}.js"));
+    // `files` is what npm actually uploads: a shim the `bin` key points at but
+    // `files` omits publishes a package whose command cannot start.
+    assert_eq!(
+        manifest["files"],
+        serde_json::json!([format!("bin/{COMMAND}.js")])
+    );
     // The committed manifest carries a placeholder; scripts/npm-build.mjs stamps
     // the crate version in at publish time (proven by tests/e2e/packaging.rs).
     assert_eq!(manifest["version"], "0.0.0-managed");
@@ -108,7 +150,7 @@ fn the_frontend_package_refuses_to_ship_without_a_built_bundle() {
 fn every_release_target_has_a_platform_package_on_both_sides() {
     let workflow = read(".github/workflows/release.yml");
     let build = read("scripts/npm-build.mjs");
-    let launcher = read("npm/onepipeline-api-cli/bin/onepipeline-ui.js");
+    let launcher = read(&format!("npm/{WRAPPER}/bin/{COMMAND}.js"));
     let manifest = read("npm/onepipeline-api-cli/package.json");
     for (target, package) in [
         ("x86_64-unknown-linux-gnu", "onepipeline-api-cli-linux-x64"),

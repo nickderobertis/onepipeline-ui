@@ -1,4 +1,4 @@
-//! The `onepipeline-ui` binary.
+//! The `onepipeline-api` binary.
 //!
 //! Exit codes are a contract: `0` on success (`--help`, `--version`, a server
 //! that was stopped), `2` on a usage error (clap, or a bind this process cannot
@@ -27,7 +27,7 @@ fn serve(args: &onepipeline_ui::cli::ServeArgs) -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => {
             eprintln!(
-                "onepipeline-ui: cannot start an async runtime: {err}\n\
+                "onepipeline-api: cannot start an async runtime: {err}\n\
                  ACTION: this host could not create the threads the server needs; \
                  check its thread and file-descriptor limits."
             );
@@ -39,7 +39,7 @@ fn serve(args: &onepipeline_ui::cli::ServeArgs) -> ExitCode {
         Ok(listener) => listener,
         Err(message) => {
             eprintln!(
-                "onepipeline-ui: {message}\n\
+                "onepipeline-api: {message}\n\
                  ACTION: choose a free address with --bind HOST:PORT, or stop \
                  whatever is holding this one."
             );
@@ -56,15 +56,15 @@ fn serve(args: &onepipeline_ui::cli::ServeArgs) -> ExitCode {
     // was handed rather than the zero it asked for.
     match listener.local_addr() {
         Ok(address) => println!(
-            "onepipeline-ui: serving {} on http://{address}",
+            "onepipeline-api: serving {} on http://{address}",
             args.runs_root.as_path().display()
         ),
-        Err(err) => eprintln!("onepipeline-ui: bound, but cannot name the address: {err}"),
+        Err(err) => eprintln!("onepipeline-api: bound, but cannot name the address: {err}"),
     }
     match runtime.block_on(server::serve(store, listener, stop)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("onepipeline-ui: {message}\nACTION: check the server log above.");
+            eprintln!("onepipeline-api: {message}\nACTION: check the server log above.");
             ExitCode::from(EXIT_SOFTWARE)
         }
     }

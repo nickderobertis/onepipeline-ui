@@ -3,7 +3,7 @@
  * Serve this repository's own read API over a recorded run fixture, or change what an
  * already-running one is serving.
  *
- * The browser journeys drive the shipped UI against the actual `onepipeline-ui serve`
+ * The browser journeys drive the shipped UI against the actual `onepipeline-api serve`
  * process, so the app's fetch and SSE paths, the telemetry client, and the read model
  * are all exercised for real. What this fabricates is only what a browser test cannot
  * afford to earn: the recorded run directory an orchestration would have written,
@@ -59,7 +59,7 @@ function serverBinary() {
       "run 'cargo build --locked' in the repository root and fix what it reports",
     );
   }
-  return join(REPO_ROOT, "target", "debug", "onepipeline-ui");
+  return join(REPO_ROOT, "target", "debug", "onepipeline-api");
 }
 
 /**

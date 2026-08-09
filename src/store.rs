@@ -60,7 +60,7 @@ impl RunStore {
     /// The same store, re-reading the runs root every `poll`.
     ///
     /// A shorter poll is what makes a live change reach a browser sooner, at the
-    /// cost of the disk the open stream keeps busy; `onepipeline-ui serve
+    /// cost of the disk the open stream keeps busy; `onepipeline-api serve
     /// --poll-interval-ms` is where an operator sets it.
     #[must_use]
     pub fn new_polling_every(root: &RunsRoot, poll: Duration) -> Self {

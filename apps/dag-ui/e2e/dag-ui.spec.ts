@@ -9,7 +9,7 @@ import { fixture, runs } from "./fixture-facts";
 import { PHONE } from "./viewports";
 
 /**
- * The DAG Observatory driven end to end against a real `onepipeline-ui serve`
+ * The DAG Observatory driven end to end against a real `onepipeline-api serve`
  * serving a real recorded run directory (see `e2e/fixtures/serve-fixture.mjs`, started
  * by `playwright.config.ts`). Nothing between the browser and the read model is
  * doubled: the app's own telemetry client makes the HTTP and SSE requests, and the

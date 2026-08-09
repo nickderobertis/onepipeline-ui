@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Launcher for the `onepipeline-ui` command installed from the
+// Launcher for the `onepipeline-api` command installed from the
 // `onepipeline-api-cli` npm package.
 //
 // Like the PyPI wheels (maturin `bindings = "bin"`, see pyproject.toml), the npm
@@ -36,7 +36,7 @@ const OTHER_INSTALLS =
   "'cargo install onepipeline-ui --locked'.";
 
 function fail(message) {
-  process.stderr.write(`onepipeline-ui: ${message}\n`);
+  process.stderr.write(`onepipeline-api: ${message}\n`);
   process.exit(1);
 }
 
@@ -58,7 +58,7 @@ function binaryPath() {
   // llmlint: ignore-end[changed_behavior_has_e2e]
 
   const binName =
-    process.platform === "win32" ? "onepipeline-ui.exe" : "onepipeline-ui";
+    process.platform === "win32" ? "onepipeline-api.exe" : "onepipeline-api";
   try {
     // Resolve the platform package's manifest, then locate the binary beside it.
     // Resolving package.json (rather than the binary file directly) is portable
@@ -82,7 +82,7 @@ const result = spawnSync(binaryPath(), process.argv.slice(2), {
 });
 
 if (result.error) {
-  fail(`failed to launch the onepipeline-ui binary: ${result.error.message}`);
+  fail(`failed to launch the onepipeline-api binary: ${result.error.message}`);
 }
 
 // Re-raise a terminating signal so callers observe the true cause; otherwise

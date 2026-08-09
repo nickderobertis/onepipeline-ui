@@ -157,7 +157,7 @@ jobs:
           RUSTFLAGS: "-D warnings"
         uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: onepipeline-ui
+          bin: onepipeline-api
           target: ${{ matrix.target }}
           # The asset-naming contract. `verify-assets` below downloads under
           # exactly this template, so a change to one that is not made in the
@@ -218,7 +218,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET: ${{ matrix.target }}
         run: |
-          archive="onepipeline-ui-${GITHUB_REF_NAME}-${TARGET}.tar.gz"
+          archive="onepipeline-api-${GITHUB_REF_NAME}-${TARGET}.tar.gz"
           bash scripts/retry-install.sh \
             --label "GitHub Release $archive" \
             --action "check the release's assets — upload may have attached no archive or no .sha256 for this target" \
@@ -235,8 +235,8 @@ jobs:
           cd ..
           bash scripts/smoke-published.sh \
             --expect-version "${GITHUB_REF_NAME#v}" \
-            --command "$PWD/dl/onepipeline-ui" \
-            --label "GitHub Release onepipeline-ui $GITHUB_REF_NAME on $RUNNER_OS/$RUNNER_ARCH"
+            --command "$PWD/dl/onepipeline-api" \
+            --label "GitHub Release onepipeline-api $GITHUB_REF_NAME on $RUNNER_OS/$RUNNER_ARCH"
 
   # crates.io publishing: runs whenever CARGO_REGISTRY_TOKEN is set. Gated on the
   # same `test` job as the binary upload, but NOT on `upload` — a flaky
@@ -465,7 +465,7 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          bin="target/$TARGET/release/onepipeline-ui"
+          bin="target/$TARGET/release/onepipeline-api"
           [ -f "$bin" ] || bin="${bin}.exe"
           pkgdir="$(node scripts/npm-build.mjs platform --target "$TARGET" --binary "$bin" --out npm/dist)"
           mkdir -p npm-artifacts

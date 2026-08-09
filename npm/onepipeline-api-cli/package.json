@@ -12,10 +12,10 @@
   "license": "MIT",
   "author": "Nick DeRobertis",
   "bin": {
-    "onepipeline-ui": "bin/onepipeline-ui.js"
+    "onepipeline-api": "bin/onepipeline-api.js"
   },
   "files": [
-    "bin/onepipeline-ui.js"
+    "bin/onepipeline-api.js"
   ],
   "engines": {
     "node": ">=18"

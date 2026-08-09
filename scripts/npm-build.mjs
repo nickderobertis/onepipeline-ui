@@ -2,12 +2,12 @@
 // Build the npm packages this repository publishes. There are two deliverables,
 // split by what they contain.
 //
-// The first distributes the prebuilt onepipeline-ui binary — the direct analogue of
+// The first distributes the prebuilt onepipeline-api binary — the direct analogue of
 // the maturin PyPI wheels (see pyproject.toml). Its layout mirrors esbuild/@biomejs
 // and every other "carry the native binary" npm tool:
 //
 //   onepipeline-api-cli                launcher package (npm/onepipeline-api-cli, committed)
-//     bin/onepipeline-ui.js            resolves + execs the platform binary
+//     bin/onepipeline-api.js            resolves + execs the platform binary
 //     optionalDependencies:            one per Rust target in release.yml's matrix
 //       onepipeline-api-cli-linux-x64
 //       onepipeline-api-cli-linux-arm64
@@ -57,7 +57,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Rust target triple -> npm platform package facts. Keys must match the release
 // matrix in .github/workflows/release.yml; the (platform, arch) pair must match
-// the PACKAGES map in npm/onepipeline-api-cli/bin/onepipeline-ui.js and the
+// the PACKAGES map in npm/onepipeline-api-cli/bin/onepipeline-api.js and the
 // optionalDependencies in npm/onepipeline-api-cli/package.json.
 const TARGETS = {
   "x86_64-unknown-linux-gnu": { platform: "linux", arch: "x64", exe: false },
@@ -167,7 +167,7 @@ function buildPlatform(args) {
   const target =
     args.target || die("platform: --target <triple> is required", `pass --target with one of: ${Object.keys(TARGETS).join(", ")}`);
   const binary =
-    args.binary || die("platform: --binary <path> is required", "pass --binary the path to the built onepipeline-ui for that target");
+    args.binary || die("platform: --binary <path> is required", "pass --binary the path to the built onepipeline-api for that target");
   const facts =
     TARGETS[target] || die(`platform: unknown target ${target}`, `pass one of: ${Object.keys(TARGETS).join(", ")}`);
   const version = resolveVersion(args);
@@ -176,10 +176,10 @@ function buildPlatform(args) {
   const pkgName = `onepipeline-api-cli-${facts.platform}-${facts.arch}`;
   const pkgDir = join(outRoot, pkgName);
   const binDir = join(pkgDir, "bin");
-  const binName = facts.exe ? "onepipeline-ui.exe" : "onepipeline-ui";
+  const binName = facts.exe ? "onepipeline-api.exe" : "onepipeline-api";
 
   // Resolve the source binary with a `.exe` fallback: a bash caller may pass the
-  // extensionless path (Git Bash's `test -x` matches onepipeline-ui.exe
+  // extensionless path (Git Bash's `test -x` matches onepipeline-api.exe
   // transparently, but Node's copyFileSync needs the real name).
   let srcBin = resolve(binary);
   if (!existsSync(srcBin) && existsSync(`${srcBin}.exe`)) srcBin = `${srcBin}.exe`;
@@ -204,7 +204,7 @@ function buildPlatform(args) {
   writeJson(join(pkgDir, "package.json"), {
     name: pkgName,
     version,
-    description: `Prebuilt onepipeline-ui binary for ${facts.platform} ${facts.arch}.`,
+    description: `Prebuilt onepipeline-api binary for ${facts.platform} ${facts.arch}.`,
     homepage: REPOSITORY,
     license: "MIT",
     author: "Nick DeRobertis",
@@ -219,7 +219,7 @@ function buildPlatform(args) {
   attempt(`cannot write the ${pkgName} README`, "check that --out is writable", () =>
     writeFileSync(
       join(pkgDir, "README.md"),
-    `# ${pkgName}\n\nPrebuilt \`onepipeline-ui\` binary for ${facts.platform} ${facts.arch}.\n` +
+    `# ${pkgName}\n\nPrebuilt \`onepipeline-api\` binary for ${facts.platform} ${facts.arch}.\n` +
       "This is a platform-specific dependency of " +
         "[`onepipeline-api-cli`](https://www.npmjs.com/package/onepipeline-api-cli); install " +
         "that instead.\n"

@@ -25,14 +25,14 @@ pub const EXIT_SOFTWARE: u8 = 70;
 
 /// Serve and inspect the onepipeline read API.
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
-#[command(name = "onepipeline-ui", version, about, long_about = None)]
+#[command(name = "onepipeline-api", version, about, long_about = None)]
 pub struct Cli {
     /// What to do.
     #[command(subcommand)]
     pub command: Command,
 }
 
-/// The subcommands `onepipeline-ui` accepts.
+/// The subcommands `onepipeline-api` accepts.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
     /// Serve the read API described in docs/contract.md.
@@ -49,7 +49,7 @@ impl Command {
     }
 }
 
-/// Where `onepipeline-ui serve` reads runs from and what it binds.
+/// Where `onepipeline-api serve` reads runs from and what it binds.
 #[derive(Debug, Clone, PartialEq, Eq, Args, Serialize, Deserialize)]
 pub struct ServeArgs {
     /// Directory holding the recorded runs to serve.

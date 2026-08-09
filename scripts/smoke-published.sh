@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-test an `onepipeline-ui` that is already on PATH.
+# Smoke-test an `onepipeline-api` that is already on PATH.
 #
 # Every post-publish verify leg — the GitHub Release, the PyPI wheel, the npm
 # package — installs its own way and then hands what it installed to this one
@@ -18,7 +18,7 @@ set -euo pipefail
 
 expect_version=""
 label=""
-command_name="onepipeline-ui"
+command_name="onepipeline-api"
 
 usage="run 'smoke-published.sh --expect-version X.Y.Z [--label TEXT] [--command NAME]'"
 

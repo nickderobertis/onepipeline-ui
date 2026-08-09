@@ -89,7 +89,7 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
     let launcher = npm_build(&["launcher", "--out", staging.to_str().expect("utf-8 path")]);
     copy_tree(&launcher, &modules.join("onepipeline-api-cli"));
     if with_platform {
-        let binary = assert_cmd::cargo::cargo_bin("onepipeline-ui");
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let platform = npm_build(&[
             "platform",
             "--target",
@@ -101,7 +101,7 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
         ]);
         copy_tree(&platform, &modules.join(host_package()));
     }
-    modules.join("onepipeline-api-cli/bin/onepipeline-ui.js")
+    modules.join("onepipeline-api-cli/bin/onepipeline-api.js")
 }
 
 fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {

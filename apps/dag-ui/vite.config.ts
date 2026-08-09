@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 
 /**
  * The read API this dev server proxies. It defaults to the loopback address and
- * port `onepipeline-ui serve` binds, and the browser e2e overrides it to point at
+ * port `onepipeline-api serve` binds, and the browser e2e overrides it to point at
  * the throwaway fixture server it starts instead of the operator's own runs.
  */
 const apiTarget = process.env.DAG_UI_API_URL ?? "http://127.0.0.1:8787";

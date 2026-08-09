@@ -503,14 +503,14 @@ fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
 fn the_serve_surface_parses_and_defaults_to_loopback() {
     let runs = tempfile::tempdir().expect("temp dir");
     let root = runs.path().to_str().expect("utf-8 path");
-    let cli = Cli::try_parse_from(["onepipeline-ui", "serve", "--runs-root", root]).expect("parse");
+    let cli = Cli::try_parse_from(["onepipeline-api", "serve", "--runs-root", root]).expect("parse");
     let Command::Serve(args) = &cli.command;
     assert_eq!(args.runs_root.as_path(), runs.path());
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(cli.command.name(), "serve");
 
     let bound = Cli::try_parse_from([
-        "onepipeline-ui",
+        "onepipeline-api",
         "serve",
         "--runs-root",
         root,

@@ -1,4 +1,4 @@
-//! A real `onepipeline-ui serve` process, on a real port.
+//! A real `onepipeline-api serve` process, on a real port.
 //!
 //! The journeys that use it drive the compiled binary the way an operator does —
 //! spawn it, read the address it says it took, and make requests over a socket.
@@ -38,7 +38,7 @@ impl Serving {
 
     /// Start a server over a runs root the caller already built.
     pub fn start_in(runs: TempDir) -> Self {
-        let binary = assert_cmd::cargo::cargo_bin("onepipeline-ui");
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let mut child = Command::new(binary)
             .arg("serve")
             .arg("--runs-root")

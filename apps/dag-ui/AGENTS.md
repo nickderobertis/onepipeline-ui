@@ -9,7 +9,7 @@ There is no line-coverage floor here. `test` runs vitest and *both* Playwright
 configs — `playwright.config.ts` for the journeys and `isolation.config.ts` for
 what one run of that tier owes another — and a change to what a reader sees is
 not done until one of them drives it, in a browser, against a real
-`onepipeline-ui serve` over a recorded run directory. Nothing between the browser
+`onepipeline-api serve` over a recorded run directory. Nothing between the browser
 and the read model is doubled.
 
 `just dag-ui-screens` photographs every surface at every viewport in the matrix.

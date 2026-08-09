@@ -29,8 +29,12 @@ include = [
   "/docs/contract.md",
 ]
 
+# The command an operator types. Deliberately not the crate name: the crate and
+# the npm package of built frontend assets are both `onepipeline-ui`, and only
+# one of them can own a command called that. This binary serves the read API, so
+# it is `onepipeline-api` — `tests/packaging.rs` holds every distribution to it.
 [[bin]]
-name = "onepipeline-ui"
+name = "onepipeline-api"
 path = "src/main.rs"
 
 [lib]

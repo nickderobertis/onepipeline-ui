@@ -67,7 +67,7 @@ just nx run dag-ui:serve
 ```
 
 Open `http://127.0.0.1:4173`. Vite proxies `/api` and `/healthz` to
-`http://127.0.0.1:8787` — the loopback address and port `onepipeline-ui serve`
+`http://127.0.0.1:8787` — the loopback address and port `onepipeline-api serve`
 binds by default. Set `DAG_UI_API_URL` to proxy somewhere else. In a production
 deployment, serve the built files from `apps/dag-ui/dist` on the same origin as
 the API, or route those paths to it.
@@ -385,7 +385,7 @@ just dag-ui-screens
 `just check` runs both tiers of the app's suite. Testing Library exercises the
 views through the real telemetry client with only the browser's `fetch` and
 `EventSource` replaced. Playwright then drives the built user journeys in a real
-browser against a real `onepipeline-ui serve` process:
+browser against a real `onepipeline-api serve` process:
 `apps/dag-ui/e2e/fixtures/runs.mjs` writes a throwaway run directory in the SDK's
 own on-disk shape — a launch record, a plan, a per-round plan and result, and the
 merged event store — `serve-fixture.mjs` serves it through the compiled binary,
