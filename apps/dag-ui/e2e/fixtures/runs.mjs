@@ -312,7 +312,13 @@ function writeLiveRun(root) {
     persona: "worker",
   });
   journal.advance(2);
-  turn(journal, "foundation", FOUNDATION_SESSION, "worker", "Landed the route table");
+  turn(
+    journal,
+    "foundation",
+    FOUNDATION_SESSION,
+    "worker",
+    "Landed the route table",
+  );
   journal.advance(20).emit(
     "pipeline",
     "node-settled",
@@ -356,13 +362,15 @@ function writeLiveRun(root) {
     node: "missing-artifact",
     persona: "worker",
   });
-  journal.advance(3).emit(
-    "pipeline",
-    "node-settled",
-    { ...round, node: "missing-artifact" },
-    { status: "failed", detail: "the verification log was removed" },
-    [{ id: MISSING_ARTIFACT, kind: "log", bytes: 24 }],
-  );
+  journal
+    .advance(3)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...round, node: "missing-artifact" },
+      { status: "failed", detail: "the verification log was removed" },
+      [{ id: MISSING_ARTIFACT, kind: "log", bytes: 24 }],
+    );
 
   // The node every transcript journey opens: still running, with one session per
   // attributed role, and a step of its own that finished.
@@ -406,12 +414,14 @@ function writeLiveRun(root) {
   );
   // Waiting on a person: real recorded time, which the node timeline draws as its
   // own span rather than as silence.
-  journal.advance(1).emit(
-    "pipeline",
-    "node-settled",
-    { ...round, node: "approval" },
-    { status: "waiting" },
-  );
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...round, node: "approval" },
+      { status: "waiting" },
+    );
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...round,
     node: "obsolete",
@@ -455,13 +465,7 @@ function writeHistoryRun(root) {
   writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
-    launch(
-      HISTORY_RUN,
-      "claude-code",
-      CLAUDE_SESSION,
-      stamp(HISTORIC),
-      4243,
-    ),
+    launch(HISTORY_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4243),
   );
   writeJson(join(dir, "round-01", "result.json"), {
     run_id: HISTORY_RUN,
@@ -486,12 +490,14 @@ function writeHistoryRun(root) {
     { ...round, node: "archive", persona: "worker", session: JUDGE_SESSION },
     { message: "Archived the release", model: "a-model" },
   );
-  journal.advance(4).emit(
-    "pipeline",
-    "node-settled",
-    { ...round, node: "archive" },
-    { status: "done", outcome: "merged" },
-  );
+  journal
+    .advance(4)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...round, node: "archive" },
+      { status: "done", outcome: "merged" },
+    );
   journal.advance(1).emit("pipeline", "round-finished", round, {
     state: "complete",
     ok: true,
@@ -577,7 +583,11 @@ function writeOutcomesRun(root) {
       },
     ],
   });
-  const journal = new Journal(dir, `a-recording-host-${OUTCOMES_RUN}`, HISTORIC);
+  const journal = new Journal(
+    dir,
+    `a-recording-host-${OUTCOMES_RUN}`,
+    HISTORIC,
+  );
   const round = { run_id: OUTCOMES_RUN, round: 1 };
   journal.emit("pipeline", "run-started", { run_id: OUTCOMES_RUN }, { plan });
   journal.advance(1).emit("pipeline", "round-started", round, { plan });
@@ -586,12 +596,14 @@ function writeOutcomesRun(root) {
     node: "migrate",
     persona: "worker",
   });
-  journal.advance(2).emit(
-    "pipeline",
-    "node-settled",
-    { ...round, node: "migrate" },
-    { status: "failed" },
-  );
+  journal
+    .advance(2)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...round, node: "migrate" },
+      { status: "failed" },
+    );
   journal.advance(1).emit("pipeline", "round-finished", round, {
     state: "failed",
     ok: false,
@@ -707,7 +719,12 @@ function writeUnattributedRun(root) {
     HISTORIC,
   );
   const round = { run_id: UNATTRIBUTED_RUN, round: 1 };
-  journal.emit("pipeline", "run-started", { run_id: UNATTRIBUTED_RUN }, { plan });
+  journal.emit(
+    "pipeline",
+    "run-started",
+    { run_id: UNATTRIBUTED_RUN },
+    { plan },
+  );
   journal.advance(1).emit("pipeline", "round-started", round, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...round,
@@ -779,12 +796,14 @@ function writeBusyRun(root) {
     const session = `0c9a1e77-1111-4222-8333-${String(index).padStart(12, "0")}`;
     const turns = session === BUSY_LONG_SESSION ? BUSY_LONG_TURNS : 1;
     for (let step = 0; step < turns; step += 1) {
-      journal.advance(1).emit(
-        "agentgraph",
-        "agent-turn",
-        { ...round, node: "sweep", persona: "worker", session },
-        { message: `Swept batch ${index}`, model: "a-model" },
-      );
+      journal
+        .advance(1)
+        .emit(
+          "agentgraph",
+          "agent-turn",
+          { ...round, node: "sweep", persona: "worker", session },
+          { message: `Swept batch ${index}`, model: "a-model" },
+        );
     }
   }
   journal.write();
@@ -854,7 +873,9 @@ export function growTranscript(root, turns) {
   const recorded = readFileSync(join(dir, "events.jsonl"), "utf8")
     .split("\n")
     .filter(Boolean)
-    .filter((line) => JSON.parse(line).labels?.session === WORKER_SESSION).length;
+    .filter(
+      (line) => JSON.parse(line).labels?.session === WORKER_SESSION,
+    ).length;
   for (let index = recorded; index < turns; index += 1) {
     appendEvent(
       dir,

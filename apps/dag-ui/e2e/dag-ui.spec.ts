@@ -141,7 +141,12 @@ async function tokenColor(page: Page, token: string): Promise<string> {
 function changeServedRuns(args: string[]): void {
   execFileSync(
     process.execPath,
-    ["e2e/fixtures/serve-fixture.mjs", "--workspace", FIXTURE_WORKSPACE, ...args],
+    [
+      "e2e/fixtures/serve-fixture.mjs",
+      "--workspace",
+      FIXTURE_WORKSPACE,
+      ...args,
+    ],
     { stdio: "inherit" },
   );
 }

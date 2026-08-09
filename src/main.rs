@@ -49,6 +49,10 @@ fn serve(args: &onepipeline_ui::cli::ServeArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Installed before the address is announced: a supervisor that connects on
+    // that line and immediately says stop must be answered by the handler, not
+    // by the default disposition that kills the process.
+    let stop = runtime.block_on(async { server::StopSignal::install() });
     // Printed *after* the bind and before the accept loop, and naming the
     // address the kernel actually gave: a supervisor that waits for this line
     // can connect on the next one, and `--bind 127.0.0.1:0` reports the port it
@@ -60,7 +64,7 @@ fn serve(args: &onepipeline_ui::cli::ServeArgs) -> ExitCode {
         ),
         Err(err) => eprintln!("onepipeline-ui: bound, but cannot name the address: {err}"),
     }
-    match runtime.block_on(server::serve(store, listener)) {
+    match runtime.block_on(server::serve(store, listener, stop)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("onepipeline-ui: {message}\nACTION: check the server log above.");

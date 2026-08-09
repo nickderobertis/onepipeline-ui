@@ -95,11 +95,11 @@ pub async fn bind(address: SocketAddr) -> Result<TcpListener, String> {
 /// # Errors
 ///
 /// Returns why the accept loop ended when it ended for any other reason.
-pub async fn serve(store: RunStore, listener: TcpListener) -> Result<(), String> {
+pub async fn serve(store: RunStore, listener: TcpListener, stop: StopSignal) -> Result<(), String> {
     let stopping = Arc::new(AtomicBool::new(false));
     let router = router_stopping_on(store, Arc::clone(&stopping));
     let shutdown = async move {
-        asked_to_stop().await;
+        stop.asked().await;
         stopping.store(true, Ordering::Relaxed);
     };
     axum::serve(listener, router)
@@ -108,30 +108,74 @@ pub async fn serve(store: RunStore, listener: TcpListener) -> Result<(), String>
         .map_err(|err| format!("the server stopped: {err}"))
 }
 
-/// Resolves the first time this process is asked to stop.
-async fn asked_to_stop() {
-    let interrupted = async {
-        let _ = tokio::signal::ctrl_c().await;
-    };
+/// The handlers this process stops on, installed the moment this is built.
+///
+/// Built *before* the server announces its address, and deliberately not inside
+/// the shutdown future: a signal handler is installed when the stream is
+/// created, so registering it at first poll leaves a window in which a
+/// supervisor that connected on the announced address and immediately said stop
+/// is answered by the default disposition — which kills the process rather than
+/// letting it finish, and in a coverage build throws away what the run measured.
+///
+/// A supervisor sends `SIGTERM`; a terminal sends `SIGINT`. Both mean the same
+/// thing here, and a server that honoured only one of them would be killed by
+/// whichever it ignored. A host that will give the process neither leaves this
+/// empty, and the server stays startable rather than refusing to run.
+#[derive(Debug)]
+pub struct StopSignal {
     #[cfg(unix)]
-    let terminated = async {
-        // A supervisor sends `SIGTERM`; a terminal sends `SIGINT`. Both mean the
-        // same thing here, and a server that honoured only one of them would be
-        // killed by whichever it ignored.
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut term) => {
-                term.recv().await;
+    signals: Vec<tokio::signal::unix::Signal>,
+}
+
+impl StopSignal {
+    /// Install them. Call from inside the runtime the server will run on.
+    #[must_use]
+    pub fn install() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            Self {
+                signals: [SignalKind::terminate(), SignalKind::interrupt()]
+                    .into_iter()
+                    .filter_map(|kind| signal(kind).ok())
+                    .collect(),
             }
-            // This host will not give the process a signal handler. Ctrl-C still
-            // works, so the server stays stoppable rather than refusing to start.
-            Err(_) => std::future::pending().await,
         }
-    };
-    #[cfg(not(unix))]
-    let terminated = std::future::pending::<()>();
-    tokio::select! {
-        () = interrupted => {}
-        () = terminated => {}
+        #[cfg(not(unix))]
+        {
+            Self {}
+        }
+    }
+
+    /// Resolves the first time this process is asked to stop.
+    async fn asked(self) {
+        #[cfg(unix)]
+        {
+            let mut waits: Vec<_> = self.signals.into_iter().collect();
+            if waits.is_empty() {
+                std::future::pending::<()>().await;
+                return;
+            }
+            let mut pending: futures_core::future::BoxFuture<'_, ()> =
+                Box::pin(std::future::pending());
+            for signal in &mut waits {
+                let next: futures_core::future::BoxFuture<'_, ()> = Box::pin(async {
+                    signal.recv().await;
+                });
+                let previous = pending;
+                pending = Box::pin(async move {
+                    tokio::select! {
+                        () = previous => {}
+                        () = next => {}
+                    }
+                });
+            }
+            pending.await;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
     }
 }
 

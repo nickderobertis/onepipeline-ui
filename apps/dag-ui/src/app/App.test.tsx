@@ -889,8 +889,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(
       paths().filter(
         (value: string) =>
-          isTimeline(new URL(value)) &&
-          new URL(value).searchParams.has("node_id"),
+          isTimeline(new URL(value)) && new URL(value).searchParams.has("node"),
       ),
     ).toHaveLength(0);
     await userEvent.click(screen.getByRole("tab", { name: "Graph" }));
@@ -901,7 +900,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         paths().some(
           (value: string) =>
             isTimeline(new URL(value)) &&
-            new URL(value).searchParams.get("node_id") === "dashboard",
+            new URL(value).searchParams.get("node") === "dashboard",
         ),
       ).toBe(true),
     );

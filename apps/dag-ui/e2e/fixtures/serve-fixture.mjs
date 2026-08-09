@@ -34,7 +34,10 @@ import {
   settleDashboard,
 } from "./runs.mjs";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const REPO_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../..",
+);
 
 /** Published beside the runs root so a spec names what this wrote, not a copy of it. */
 export const FIXTURE_FACTS_NAME = "fixture-facts.json";
@@ -168,15 +171,22 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 const port = Number(args.port ?? 8765);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  die(`'${args.port}' is not a port`, "pass --port a number between 1 and 65535");
+  die(
+    `'${args.port}' is not a port`,
+    "pass --port a number between 1 and 65535",
+  );
 }
 
 if (args.stall) {
-  const refuse = args["refuse-port"] === undefined ? undefined : Number(args["refuse-port"]);
+  const refuse =
+    args["refuse-port"] === undefined ? undefined : Number(args["refuse-port"]);
   await stall(port, refuse);
 } else {
   if (args.workspace === undefined) {
-    die("--workspace is required", "pass --workspace the fixture directory to use");
+    die(
+      "--workspace is required",
+      "pass --workspace the fixture directory to use",
+    );
   }
   const runsRoot = join(args.workspace, "runs");
   if (args["settle-dashboard"]) {

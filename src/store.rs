@@ -4,7 +4,7 @@
 //! run's launch record, its merged event store, and the fold of that store. This
 //! module adds the run-list paging, the not-found decisions, and the polling
 //! loop behind the event stream; the payloads themselves are
-//! [`payload`](crate::payload)'s projection of what the SDK read.
+//! [`crate::payload`]'s projection of what the SDK read.
 //!
 //! Nothing here writes. Reading takes no lock the engine's single writer needs,
 //! which is what lets the server run beside a live round.
