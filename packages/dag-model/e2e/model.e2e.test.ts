@@ -692,7 +692,20 @@ test("this repository's own served goldens parse through the public parsers", as
   // Schema 10 including `dispatch_id`: the node-scoped timeline names the dispatch
   // that did the work, which is what lets a client join a span to its transcript.
   const timeline = parseRunTimeline(await served("run-timeline.json"));
-  expect(timeline.spans.map((span) => span.kind)).toEqual(["node", "dispatch"]);
+  expect(timeline.spans.map((span) => span.kind)).toEqual([
+    "node",
+    "dispatch",
+    "verification",
+  ]);
   const dispatches = timeline.spans.filter((span) => span.kind === "dispatch");
   expect(dispatches.every((span) => span.dispatch_id !== undefined)).toBe(true);
+  // The evidence that node kept, served as the record a client renders: the same
+  // artifact id the detail's own verification record names.
+  const verification = timeline.spans.find(
+    (span) => span.kind === "verification",
+  );
+  expect(verification?.detail?.artifact_id).toBe(
+    detail.node_details[verification?.node_id ?? ""]?.verification.records[0]
+      ?.artifact_id,
+  );
 });

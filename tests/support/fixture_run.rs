@@ -368,7 +368,7 @@ fn live_journal(run: &str, second: &Value) -> String {
                 "kind": kind,
                 "labels": labels,
                 "payload": payload,
-                "artifacts": if kind == "node-settled" {
+                "artifacts": if kind == "node-settled" && labels["node"] == json!(SHIP_NODE_ID) {
                     json!([{ "id": "artifact-long-log", "kind": "report", "bytes": 70_005 }])
                 } else {
                     json!([])
@@ -450,6 +450,33 @@ fn live_journal(run: &str, second: &Value) -> String {
             "session": LIVE_CONVERSATION_ID,
         }),
         json!({ "message": "opened the change request" }),
+    );
+    // The branch `onevcs` opened for this node and the change it published from
+    // it, relayed into the merged store under that library's own vocabulary.
+    // Two recorded ends, which is the only publication interval a journal holds.
+    emit(
+        "2026-08-07T12:00:29.000Z",
+        "vcs",
+        "session-opened",
+        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({
+            "token": "a-vcs-session-token",
+            "branch": "feature/ship",
+            "base": "main",
+            "worktree": "/a/recorded/worktree",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:38.000Z",
+        "vcs",
+        "published",
+        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({
+            "branch": "feature/ship",
+            "url": "https://example.invalid/changes/2",
+            "id": "2",
+            "outcome": "published",
+        }),
     );
     emit(
         "2026-08-07T12:00:40.000Z",

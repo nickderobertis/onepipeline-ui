@@ -35,15 +35,19 @@
           "at": "2026-08-07T12:00:20.000Z",
           "node_id": "contract-interface",
           "round": 1,
-          "status": "done"
+          "status": "done",
+          "reference": {
+            "kind": "gate_log",
+            "value": "artifact-5c8f0a1b"
+          }
         }
       ]
     },
     {
-      "id": "dispatch.01.contract-interface",
+      "id": "dispatch.01.3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
       "kind": "dispatch",
-      "label": "contract-interface dispatch",
-      "started_at": "2026-08-07T12:00:02.000Z",
+      "label": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+      "started_at": "2026-08-07T12:00:03.000Z",
       "ended_at": "2026-08-07T12:00:20.000Z",
       "parent_id": "node.01.contract-interface",
       "node_id": "contract-interface",
@@ -52,6 +56,10 @@
       "transport_role": "agent",
       "agent_role": "worker",
       "status": "done",
+      "reference": {
+        "kind": "conversation",
+        "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+      },
       "events": [
         {
           "id": "e3",
@@ -61,6 +69,23 @@
           "round": 1
         }
       ]
+    },
+    {
+      "id": "verification.01.contract-interface.artifact-5c8f0a1b",
+      "kind": "verification",
+      "label": "artifact-5c8f0a1b",
+      "started_at": "2026-08-07T12:00:03.000Z",
+      "ended_at": "2026-08-07T12:00:20.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "status": "ok",
+      "detail": {
+        "ok": true,
+        "output_tail": "",
+        "artifact_id": "artifact-5c8f0a1b"
+      },
+      "events": []
     }
   ]
 }

@@ -244,7 +244,13 @@
   "node_details": {
     "contract-interface": {
       "verification": {
-        "records": []
+        "records": [
+          {
+            "ok": true,
+            "output_tail": "",
+            "artifact_id": "artifact-5c8f0a1b"
+          }
+        ]
       },
       "publication": {
         "branch": "feature/contract-interface",

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { runs } from "./fixture-facts";
+import { fixture, runs } from "./fixture-facts";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -156,7 +156,7 @@ const SURFACES: readonly Surface[] = [
       await page.goto(`/?run=${runs().live}&node=foundation`);
       await page
         .getByRole("region", { name: "Node timeline" })
-        .getByRole("button", { name: /branch push/ })
+        .getByRole("button", { name: new RegExp(fixture().artifacts.gate) })
         .click();
       await expect(
         page.getByRole("region", { name: "Timeline item detail" }),

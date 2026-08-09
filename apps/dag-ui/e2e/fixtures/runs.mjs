@@ -48,13 +48,15 @@ const CODEX_SESSION = "codex-top-session";
 const CLAUDE_SESSION = "claude-code-top-session";
 
 /** The agent-graph sessions the live run's dashboard node dispatched. */
-export const WORKER_SESSION = "9e4b7d21-6a05-4c38-91df-2b6c4e0a7f18";
+export const WORKER_SESSION = "engineer-dashboard";
 /** The session the run's first node's dispatch ran under. */
 export const FOUNDATION_SESSION = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
-export const JUDGE_SESSION = "8a1d3c07-4b2f-4e55-91aa-6d3e2f0b7c14";
+export const JUDGE_SESSION = "you-are-a-strict-careful-evaluator";
 export const CHECK_IN_SESSION = "5d2e4f18-9c3a-4b66-82bb-7e4f3a1c8d25";
 /** The run's own driving session, recorded at no node. */
 export const ORCHESTRATOR_SESSION = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
+/** The round's own check-in, recorded beside it at no node either. */
+export const ROUND_CHECK_IN_SESSION = "9f2a6b31-7c48-4d09-a5ee-3b1d8e6f4a52";
 
 /** The verification log one node left behind, and one that was swept. */
 export const GATE_ARTIFACT = "artifact-foundation-gate";
@@ -305,13 +307,38 @@ function writeLiveRun(root) {
     "orchestrator",
     "Coordinating the execution frontier",
   );
+  // A second session the round recorded at no node: the run level is not one
+  // conversation, so the plot has to tell two of them apart there too.
+  journal.advance(1);
+  turn(
+    journal,
+    undefined,
+    ROUND_CHECK_IN_SESSION,
+    "check-in",
+    "Round 1 progress reported",
+  );
 
-  journal.advance(4).emit("pipeline", "node-dispatched", {
+  journal.advance(3).emit("pipeline", "node-dispatched", {
     ...round,
     node: "foundation",
     persona: "worker",
   });
-  journal.advance(2);
+  // The branch this node worked on, opened and published by `onevcs` and relayed
+  // into the merged store under that library's own vocabulary. The two events are
+  // the only recorded ends of a publication, so they are what the server draws it
+  // between.
+  journal.advance(1).emit(
+    "vcs",
+    "session-opened",
+    { ...round, node: "foundation" },
+    {
+      token: "a-vcs-session-token",
+      branch: "feature/foundation",
+      base: "main",
+      worktree: "/a/recorded/worktree",
+    },
+  );
+  journal.advance(1);
   turn(
     journal,
     "foundation",
@@ -319,7 +346,18 @@ function writeLiveRun(root) {
     "worker",
     "Landed the route table",
   );
-  journal.advance(20).emit(
+  journal.advance(6).emit(
+    "vcs",
+    "published",
+    { ...round, node: "foundation" },
+    {
+      branch: "feature/foundation",
+      url: FOUNDATION_PR,
+      id: "12",
+      outcome: "merged",
+    },
+  );
+  journal.advance(14).emit(
     "pipeline",
     "node-settled",
     { ...round, node: "foundation" },
@@ -368,7 +406,7 @@ function writeLiveRun(root) {
       "pipeline",
       "node-settled",
       { ...round, node: "missing-artifact" },
-      { status: "failed", detail: "the verification log was removed" },
+      { status: "failed", detail: "log was removed before it could be read" },
       [{ id: MISSING_ARTIFACT, kind: "log", bytes: 24 }],
     );
 
@@ -844,6 +882,7 @@ export function facts() {
       foundation: FOUNDATION_SESSION,
       judge: JUDGE_SESSION,
       check_in: CHECK_IN_SESSION,
+      round_check_in: ROUND_CHECK_IN_SESSION,
       orchestrator: ORCHESTRATOR_SESSION,
     },
     artifacts: { gate: GATE_ARTIFACT, missing: MISSING_ARTIFACT },

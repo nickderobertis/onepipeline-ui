@@ -13,7 +13,8 @@
       "command": "npx biome check packages/dag-model && npx eslint packages/dag-model"
     },
     "test": {
-      "command": "npx vitest run --root packages/dag-model"
+      "command": "npx vitest run --root packages/dag-model",
+      "inputs": ["default", "servedGoldens"]
     },
     "typecheck": {
       "command": "npx tsc -p packages/dag-model/tsconfig.json --noEmit"

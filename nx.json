@@ -19,7 +19,8 @@
       "{workspaceRoot}/src/**/*.rs",
       "{workspaceRoot}/Cargo.toml",
       "{workspaceRoot}/Cargo.lock"
-    ]
+    ],
+    "servedGoldens": ["{workspaceRoot}/tests/fixtures/*.json"]
   },
   "targetDefaults": {
     "bootstrap": { "cache": false },

@@ -842,6 +842,99 @@ fn a_wait_on_a_person_is_drawn_as_its_own_open_span() {
 }
 
 #[test]
+fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
+    let serving = live_run();
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let records = detail["node_details"][fixture_run::SHIP_NODE_ID]["verification"]["records"]
+        .as_array()
+        .expect("the node's verification records")
+        .clone();
+    assert_eq!(records.len(), 1, "the node stored one artifact");
+    assert_eq!(records[0]["artifact_id"], json!("artifact-long-log"));
+    assert_eq!(records[0]["ok"], json!(true));
+    assert_eq!(
+        records[0]["output_tail"],
+        json!("the change request is open"),
+        "the prose belongs to the event that stored the evidence"
+    );
+
+    // And the same evidence is an interval on the node's own timeline, so a
+    // reader can open it and pull the log it names.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::SHIP_NODE_ID
+        ),
+    )
+    .json();
+    let spans = timeline["spans"].as_array().expect("spans");
+    let verification = spans
+        .iter()
+        .find(|span| span["kind"] == "verification")
+        .expect("the evidence the node stored");
+    assert_eq!(verification["label"], json!("artifact-long-log"));
+    assert_eq!(verification["status"], json!("ok"));
+    assert_eq!(
+        verification["detail"]["artifact_id"],
+        json!("artifact-long-log")
+    );
+    assert_eq!(
+        verification["started_at"],
+        json!("2026-08-07T12:00:38.000Z"),
+        "bracketed by the record before it, not by the whole dispatch"
+    );
+    assert_eq!(verification["ended_at"], json!("2026-08-07T12:00:40.000Z"));
+    assert_eq!(
+        verification["parent_id"],
+        json!(format!("node.02.{}", fixture_run::SHIP_NODE_ID))
+    );
+
+    // The publication is the interval between the two ends `onevcs` recorded.
+    let publication = spans
+        .iter()
+        .find(|span| span["kind"] == "publication")
+        .expect("the branch the node published");
+    assert_eq!(publication["label"], json!("feature/ship"));
+    assert_eq!(publication["started_at"], json!("2026-08-07T12:00:29.000Z"));
+    assert_eq!(publication["ended_at"], json!("2026-08-07T12:00:38.000Z"));
+    assert_eq!(publication["status"], json!("published"));
+    assert_eq!(
+        publication["reference"],
+        json!({ "kind": "pr", "value": "https://example.invalid/changes/2" })
+    );
+}
+
+#[test]
+fn a_node_that_stored_nothing_serves_no_verification_and_no_publication() {
+    let serving = live_run();
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::SIGNOFF_NODE_ID
+        ),
+    )
+    .json();
+    let kinds: Vec<&str> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter_map(|span| span["kind"].as_str())
+        .collect();
+    assert!(
+        !kinds.contains(&"verification") && !kinds.contains(&"publication"),
+        "a node whose round recorded neither is served neither, not an empty one: {kinds:?}"
+    );
+}
+
+#[test]
 fn the_run_timeline_covers_every_round_the_run_has_had() {
     let serving = live_run();
     let body = http::get(

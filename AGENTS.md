@@ -51,6 +51,29 @@ anything new here is a proposal to make upstream first.
   newest first, because a client opens the first row and an operator came to look
   at the run that moved last. `onepipeline runs` orders by run id, so the two
   listings disagree about what leads.
+- **A verification record from stored evidence.** onepipeline's event vocabulary
+  names no verification, so `payload::evidence` reads one out of what a node
+  *kept*: each `ArtifactRef` on one of its events, with the verdict and bounded
+  prose of the event that stored it. The interval it is drawn over is the two
+  neighbouring records that bracket it — the tightest one the journal holds.
+
+### What the wire asks for and no onepipeline journal records
+
+Not derivations but gaps: a client's model has fields this API cannot fill from
+any run, and the copied browser journeys were trimmed to stop asserting them.
+Each needs a producing library to record it before anything here can serve it.
+
+- **Observed checks on a publication** (`node_details[…].verification.checks`,
+  `pre_push_hook`, `required_checks`). `onevcs` relays a branch and a change url
+  and nothing about what ran against them.
+- **A merge commit and its url, and a branch url.** The publish event carries the
+  change's own url only.
+- **Turn bodies and tool calls.** The journal records that a session reported,
+  not what it said, so every served turn carries no tools and no reasoning.
+- **A lint transport.** `transportRoleSchema` has an `llmlint` member; a
+  onepipeline journal has three producers and none of them is one, so the client's
+  lint lane is always empty.
+- **Lock waits.** Nothing counts contention, so no `rollup` span is ever served.
 
 ## Two standing goals on every task
 

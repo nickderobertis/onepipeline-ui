@@ -21,6 +21,18 @@ const fixtureSchema = z.object({
     busy: z.string().min(1),
   }),
   foundation_pr: z.string().min(1),
+  sessions: z.object({
+    worker: z.string().min(1),
+    foundation: z.string().min(1),
+    judge: z.string().min(1),
+    check_in: z.string().min(1),
+    round_check_in: z.string().min(1),
+    orchestrator: z.string().min(1),
+  }),
+  artifacts: z.object({
+    gate: z.string().min(1),
+    missing: z.string().min(1),
+  }),
 });
 
 export type FixtureFacts = z.infer<typeof fixtureSchema>;

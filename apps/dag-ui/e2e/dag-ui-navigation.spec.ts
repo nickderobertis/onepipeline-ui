@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { runs } from "./fixture-facts";
+import { fixture, runs } from "./fixture-facts";
 import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -189,7 +189,7 @@ test("keeps a node the run reported a problem on readable", async ({
 
   // What it records is reachable, which is the whole point of the region being there.
   await timeline(page)
-    .getByRole("button", { name: /missing verification log/ })
+    .getByRole("button", { name: new RegExp(fixture().artifacts.missing) })
     .click();
   await expect(itemDetail(page)).toContainText("Verification record");
 });
@@ -208,7 +208,9 @@ test("walks graph to node to timeline item and back, restoring each selection", 
   await expect(itemDetail(page)).toContainText(
     "Implementing the dashboard now",
   );
-  await expect(page).toHaveURL(/event=dispatch-worker-session/);
+  await expect(page).toHaveURL(
+    new RegExp(`event=dispatch.01.${fixture().sessions.worker}`),
+  );
 
   // Back once leaves the item and keeps the node: the reader stepped out of one
   // moment of this node's execution, not out of the node. The panel that carried it
@@ -249,7 +251,7 @@ test("restores a deep-linked moment at a narrow viewport", async ({ page }) => {
   await open(
     page,
     PHONE,
-    `/?run=${runs().live}&node=dashboard&event=dispatch-worker-session`,
+    `/?run=${runs().live}&node=dashboard&event=dispatch.01.${fixture().sessions.worker}`,
   );
   await expect(
     page.getByRole("region", { name: "Timeline for dashboard" }),
@@ -325,7 +327,7 @@ test("keeps a long recorded label inside the node transcript at the phone", asyn
   const region = transcript(page);
   await expect(region.getByRole("article").first()).toBeVisible();
   await expect(
-    region.getByRole("article", { name: /branch push/ }),
+    region.getByRole("article", { name: new RegExp(fixture().artifacts.gate) }),
   ).toBeVisible();
   const bounds = await region.boundingBox();
   const items = region.getByRole("article");
@@ -358,7 +360,9 @@ test("keeps a long recorded label inside the node transcript at the phone", asyn
 for (const size of VIEWPORTS) {
   test(`reads a hovered segment whole at ${size.name}`, async ({ page }) => {
     await open(page, size, `/?run=${runs().live}&node=foundation`);
-    const segment = timeline(page).getByRole("button", { name: /branch push/ });
+    const segment = timeline(page).getByRole("button", {
+      name: new RegExp(fixture().artifacts.gate),
+    });
     await segment.hover();
 
     const reading = page.getByTestId("timeline-popover");
@@ -407,7 +411,9 @@ test("ends the reading when the pointer leaves the document", async ({
   // `pointerleave` is the only thing that hears it, and without it the reading stays
   // painted over an app the pointer is no longer in.
   await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
-  const segment = timeline(page).getByRole("button", { name: /branch push/ });
+  const segment = timeline(page).getByRole("button", {
+    name: new RegExp(fixture().artifacts.gate),
+  });
   await segment.hover();
   const reading = page.getByTestId("timeline-popover");
   await expect(reading).toContainText("Lane: verification");
@@ -492,7 +498,9 @@ test("reads a segment the keyboard reached", async ({ page }) => {
   // proves both halves at once: that a plot's segments are on the tab path in the
   // first place, and that arriving at one by keyboard states what it is.
   await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
-  const segment = timeline(page).getByRole("button", { name: /branch push/ });
+  const segment = timeline(page).getByRole("button", {
+    name: new RegExp(fixture().artifacts.gate),
+  });
   await tabTo(page, segment);
 
   const reading = page.getByTestId("timeline-popover");
@@ -623,7 +631,7 @@ test("gives a lone recorded term the whole fact row", async ({ page }) => {
   // cell is a filled panel with nothing written on it rather than blank space.
   await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
   await timeline(page)
-    .getByRole("button", { name: /branch push/ })
+    .getByRole("button", { name: new RegExp(fixture().artifacts.gate) })
     .click();
   await expect(itemDetail(page)).toContainText("Verification record");
   const facts = itemDetail(page).locator(".facts");

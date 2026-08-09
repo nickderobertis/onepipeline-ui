@@ -8,6 +8,7 @@ import {
   OFFLINE_UI_URL,
   STALLED_UI_URL,
 } from "../playwright.config";
+import { fixture, runs } from "./fixture-facts";
 import { PHONE } from "./viewports";
 
 /**
@@ -20,35 +21,6 @@ import { PHONE } from "./viewports";
  * pagination recovery journey takes the browser offline; its online retry still
  * reaches this real server and renders its next recorded page.
  */
-
-/**
- * What the fixture wrote — its runs, and the change request one of them published —
- * read from the file it publishes beside them. `e2e/fixtures/runs.mjs` is their one
- * source; naming them again here would be a second one that drifts the moment the
- * fixture changes.
- */
-const fixtureSchema = z.object({
-  runs: z.object({
-    live: z.string().min(1),
-    history: z.string().min(1),
-    outcomes: z.string().min(1),
-    legacy: z.string().min(1),
-    sibling: z.string().min(1),
-    unattributed: z.string().min(1),
-    eventless: z.string().min(1),
-    busy: z.string().min(1),
-  }),
-  foundation_pr: z.string().min(1),
-});
-let cachedFixture: z.infer<typeof fixtureSchema> | undefined;
-const fixture = (): z.infer<typeof fixtureSchema> =>
-  (cachedFixture ??= fixtureSchema.parse(
-    JSON.parse(
-      readFileSync(join(FIXTURE_WORKSPACE, "fixture-facts.json"), "utf8"),
-    ),
-  ));
-/** Every run the fixture wrote, and nothing else: journeys iterate this. */
-const runs = (): z.infer<typeof fixtureSchema>["runs"] => fixture().runs;
 
 /**
  * Open the app and wait for it to have mounted; each journey then asserts its own state.
@@ -402,25 +374,14 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
     timeline(page).getByRole("button", { name: /^Judge/ }),
   ).toBeVisible();
   await expect(
-    timeline(page).getByRole("button", { name: /^Lint/ }),
-  ).toBeVisible();
-  await expect(
     timeline(page).getByRole("button", { name: /^Check-in/ }),
   ).toBeVisible();
-  await expect(
-    timeline(page).getByRole("button", { name: /^PR author/ }),
-  ).toBeVisible();
-  // The waits a node spent on a lock are plotted at the length they actually took —
-  // ten seconds of a four-minute node — and neither stretched across the window the
-  // journal happened to write them in nor collapsed to the instant that window is.
-  const lockWait = timeline(page).getByRole("button", { name: /^Lock waits/ });
-  await expect(lockWait).toHaveAttribute("data-timeline-shape", "span");
-  const lockWidth = (await lockWait.boundingBox())?.width ?? 0;
   const plot = timeline(page).getByLabel(/Timeline plot/);
-  const plotWidth = (await plot.boundingBox())?.width ?? 1;
-  expect(lockWidth / plotWidth).toBeLessThan(0.1);
-  expect(lockWidth / plotWidth).toBeGreaterThan(0.02);
   // The categories the reader was promised, and no served identifier among them.
+  // The whole vocabulary is offered whatever this run recorded: a lane a onepipeline
+  // journal has no producer for — lint, which is a transport of its own, and the lock
+  // waits nothing in it counts — is a lane an operator still has to be able to read
+  // as absent rather than as missing.
   await expect(page.getByRole("list", { name: "Timeline legend" })).toHaveText(
     [
       "Worker",
@@ -470,35 +431,18 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   await worker.click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("event"))
-    .toBe("dispatch-worker-session");
+    .toBe(`dispatch.01.${fixture().sessions.worker}`);
   await expect(itemDetail(page)).toContainText(
     "Implementing the dashboard now",
   );
   // The dispatch it belongs to and the role it played in it, on the transcript's
   // own header rather than left to be inferred from the session name.
-  await expect(itemDetail(page)).toContainText(
-    "Dispatch 1 · Worker · engineer",
-  );
+  await expect(itemDetail(page)).toContainText("Dispatch 1 · Worker · worker");
   await expect(
     itemDetail(page)
       .getByRole("article", { name: /^Turn / })
       .first(),
   ).toBeVisible();
-  // One disclosure per recorded turn: this worker ran three.
-  await expect(
-    itemDetail(page).getByRole("button", {
-      name: "command_execution tool details",
-    }),
-  ).toHaveCount(3);
-  await itemDetail(page)
-    .getByRole("button", { name: "command_execution tool details" })
-    .first()
-    .click();
-  const toolOutput = itemDetail(page)
-    .getByLabel("command_execution tool output")
-    .first();
-  await expect(toolOutput).toContainText('"exit_code": 0');
-  await expect(toolOutput.locator(".hljs-number")).toHaveText("0");
   // The detail region is where the reading happens, so it holds the majority of
   // the width rather than a fixed narrow column.
   const detailWidth = (await itemDetail(page).boundingBox())?.width ?? 0;
@@ -524,7 +468,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
     .getByRole("button", { name: "Expand timeline" })
     .click();
   await conversationTimeline
-    .getByRole("button", { name: /claude-code turn/ })
+    .getByRole("button", { name: /oneagentgraph turn/ })
     .last()
     .click();
   await expect.poll(readingTop).toBeGreaterThan(0);
@@ -536,7 +480,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
 
   // A span contains its events, and opening it discloses them: one turn here.
   const turn = timeline(page).getByRole("button", {
-    name: /conversation-turn/,
+    name: /agent-turn/,
   });
   await expect(turn.first()).toBeVisible();
   await turn.first().click();
@@ -560,12 +504,12 @@ test("restores a bookmarked moment inside a session from the address alone", asy
     .getByRole("button", { name: /engineer-dashboard/ })
     .click();
   const turn = timeline(page)
-    .getByRole("button", { name: /conversation-turn/ })
+    .getByRole("button", { name: /agent-turn/ })
     .first();
   await turn.click();
   const bookmarked = new URL(page.url());
   expect(bookmarked.searchParams.get("event")).not.toBe(
-    "dispatch-worker-session",
+    `dispatch.01.${fixture().sessions.worker}`,
   );
 
   // Loading the graph in between is what makes the next load cold: nothing the
@@ -578,7 +522,7 @@ test("restores a bookmarked moment inside a session from the address alone", asy
   // node's journal icons, and its item is the focused one in the transcript.
   await expect(
     timeline(page).locator('[data-selected="true"]'),
-  ).toHaveAccessibleName(/conversation-turn, marker/);
+  ).toHaveAccessibleName(/agent-turn, marker/);
   await expect(
     page
       .getByRole("region", { name: "Node transcript" })
@@ -613,28 +557,23 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
 
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   const judge = timeline(page).getByRole("button", { name: /^Judge/ });
-  const lint = timeline(page).getByRole("button", { name: /^Lint/ });
   await expect(judge).toHaveAttribute("data-timeline-shape", "span");
-  await expect(lint).toHaveAttribute("data-timeline-shape", "span");
   // Read as a share of the plot, not as pixels: a supervising session projected
   // against a window nothing else occupied still clears the minimum bar width the
-  // design system paints, which is exactly the sliver this has to rule out. Each of
-  // these ran half a minute of a four-minute node.
+  // design system paints, which is exactly the sliver this has to rule out.
   const plotWidth = (
     await timeline(page)
       .getByLabel(/Timeline plot/)
       .boundingBox()
   )?.width;
   if (plotWidth === undefined) throw new Error("timeline plot has no bounds");
-  for (const supervising of [judge, lint]) {
-    expect((await supervising.boundingBox())?.width ?? 0).toBeGreaterThan(
-      plotWidth * 0.05,
-    );
-  }
+  expect((await judge.boundingBox())?.width ?? 0).toBeGreaterThan(
+    plotWidth * 0.05,
+  );
   await judge.click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("event"))
-    .toBe("dispatch-judge-session");
+    .toBe(`dispatch.01.${fixture().sessions.judge}`);
 
   const judgeItem = transcript
     .getByRole("article")
@@ -694,9 +633,6 @@ test("scrolls the transcript to the journal record a marker names", async ({
     dispatch.getByRole("article", { name: /^Worker \(engineer-dashboard\)/ }),
   ).toBeVisible();
   await expect(
-    dispatch.getByRole("article", { name: /^Lint \(llmlint-dashboard\)/ }),
-  ).toBeVisible();
-  await expect(
     dispatch.getByRole("article", { name: /^Judge \(/ }),
   ).toBeVisible();
   // A separately dispatched role is its own group rather than a member of the first.
@@ -751,10 +687,12 @@ test("shows a verification and a publication as the records they are", async ({
   // The verification carries this push's own verdict and bounded output, then loads
   // the preserved log through its opaque artifact id without exposing a host path.
   await timeline(page)
-    .getByRole("button", { name: /branch push/ })
+    .getByRole("button", { name: new RegExp(fixture().artifacts.gate) })
     .click();
   await expect(
-    timeline(page).getByRole("button", { name: /branch push/ }),
+    timeline(page).getByRole("button", {
+      name: new RegExp(fixture().artifacts.gate),
+    }),
   ).toHaveAttribute("data-timeline-shape", "span");
   await expect(itemDetail(page)).toContainText("Verification record");
   await expect(itemDetail(page)).toContainText("pre-push verification passed");
@@ -772,36 +710,40 @@ test("shows a verification and a publication as the records they are", async ({
   );
   await page.getByRole("button", { name: "Close detail" }).click();
 
-  // The publication carries the PR and the checks that were observed on it.
+  // The publication carries the change it published and says, rather than implies,
+  // that nothing observed a check on it: onepipeline records the branch a node
+  // opened and what became of it, and no check evidence at all. Read from the
+  // opened plot, where each category has a row of its own — collapsed, the branch
+  // this node worked on lies under the session that opened it, which is what the
+  // one line is for.
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   await timeline(page)
-    .getByRole("button", { name: /local\/example/ })
+    .getByRole("button", { name: /^Publication/ })
     .click();
   await expect(
     itemDetail(page).getByRole("link", {
-      name: /github\.com\/example\/repo\/pull\/12/,
+      name: new RegExp(fixture().foundation_pr),
     }),
   ).toBeVisible();
   await expect(itemDetail(page)).toContainText("Observed checks");
-  await expect(itemDetail(page)).toContainText("unit");
-  await expect(
-    itemDetail(page).getByRole("link", { name: "SUCCESS" }),
-  ).toHaveAttribute("href", "https://github.com/example/repo/actions/runs/12");
-  await expect(
-    itemDetail(page).getByRole("link", { name: /Merged commit/ }),
-  ).toHaveAttribute(
-    "href",
-    `https://github.com/example/repo/commit/${"4".repeat(40)}`,
+  await expect(itemDetail(page)).toContainText(
+    "No checks were observed on this node.",
   );
   await page.getByRole("button", { name: "Close detail" }).click();
 
-  // Its own recorded events sit inside it, in the order they happened.
-  const checks = page
-    .getByRole("article")
-    .filter({ hasText: /pr-checks-observed/ })
-    .getByRole("button");
-  await checks.click();
-  await expect(itemDetail(page)).toContainText("Observed checks");
-  await expect(itemDetail(page)).toContainText("passing");
+  // The publish `onevcs` relayed sits inside the node's own record and opens as the
+  // publication it reported, not as an untyped line of journal.
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "published" })
+    .getByRole("button")
+    .click();
+  await expect(itemDetail(page)).toContainText("Publication");
+  await expect(
+    itemDetail(page).getByRole("link", {
+      name: new RegExp(fixture().foundation_pr),
+    }),
+  ).toBeVisible();
 });
 
 test("states when a verification artifact is unavailable", async ({ page }) => {
@@ -818,7 +760,7 @@ test("states when a verification artifact is unavailable", async ({ page }) => {
       response.url().includes("/artifacts/") && response.status() === 404,
   );
   const failedVerification = timeline(page).getByRole("button", {
-    name: /missing verification log/,
+    name: new RegExp(fixture().artifacts.missing),
   });
   await failedVerification.hover();
   await expect(page.getByRole("tooltip")).toContainText(
@@ -1489,19 +1431,15 @@ test("reads the whole run as one clock, node by node, from one line", async ({
   await expect(dashboard.getByTestId("timeline-lane")).toHaveCount(1);
 
   // Opened again: that node's own category lanes, the same vocabulary its node view
-  // draws — Lint included, which shares the worker's semantic role and is told from
-  // it only by the transport the served summary carries.
+  // draws, one row per role the run recorded a session under.
   await dashboard.getByRole("button", { name: "Expand timeline" }).click();
-  await expect(
-    dashboard
-      .getByTestId("timeline-lane")
-      .and(page.locator('[data-lane-id="lint"]')),
-  ).toHaveCount(1);
-  await expect(
-    dashboard
-      .getByTestId("timeline-lane")
-      .and(page.locator('[data-lane-id="worker"]')),
-  ).toHaveCount(1);
+  for (const lane of ["worker", "judge", "check-in"]) {
+    await expect(
+      dashboard
+        .getByTestId("timeline-lane")
+        .and(page.locator(`[data-lane-id="${lane}"]`)),
+    ).toHaveCount(1);
+  }
   // And the other rows are untouched: opening one node is not opening the graph.
   await expect(
     graphRow(page, "publish").getByTestId("timeline-lane"),

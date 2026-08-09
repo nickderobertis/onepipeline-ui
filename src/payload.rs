@@ -1019,30 +1019,118 @@ pub fn run_detail(view: &RunView, include_conversations: bool) -> Value {
     Value::Object(payload)
 }
 
+/// One piece of evidence a node's work stored beside the stream.
+///
+/// onepipeline's own event vocabulary is closed and names no verification, so
+/// what a node verified is read from what it *kept*: an [`ArtifactRef`] on the
+/// event that reported the work. The reporting event supplies the verdict and
+/// the bounded prose; the artifact id is how a reader — or `onepipeline`'s own
+/// CLI — asks for the whole log.
+///
+/// `since` is the last thing the node recorded before it — the stretch of its
+/// own record the evidence closes. The run stamps evidence at one instant and
+/// never records when producing it began, and the two neighbouring events are
+/// the tightest bracket it does record; widening that to the whole dispatch
+/// would draw every node's evidence across the whole of its work.
+///
+/// This is one of the derivations AGENTS.md proposes moving into the SDK.
+///
+/// [`ArtifactRef`]: onepipeline::event::ArtifactRef
+struct Evidence<'a> {
+    artifact: &'a str,
+    since: &'a str,
+    at: &'a str,
+    ok: bool,
+    output_tail: String,
+}
+
+/// Every artifact one node's events stored in `round`, oldest first.
+fn evidence<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<Evidence<'a>> {
+    let mine: Vec<&Envelope> = view
+        .events
+        .iter()
+        .filter(|event| {
+            event.labels.round == Some(round) && event.labels.node.as_deref() == Some(node)
+        })
+        .collect();
+    mine.iter()
+        .enumerate()
+        .flat_map(|(position, event)| {
+            // The event before this one, or this one itself when it is the first
+            // thing the node recorded: a zero-length bracket is the honest answer
+            // for evidence that arrived with nothing before it.
+            let since = mine
+                .get(position.saturating_sub(1))
+                .map_or(event.ts.as_str(), |before| before.ts.as_str());
+            let prose = event
+                .payload
+                .get("detail")
+                .or_else(|| event.payload.get("error"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let ok = event
+                .payload
+                .get("status")
+                .and_then(Value::as_str)
+                .is_none_or(|status| status_word(status) == "done");
+            event.artifacts.iter().map(move |artifact| Evidence {
+                artifact: artifact.id.0.as_str(),
+                since,
+                at: event.ts.as_str(),
+                ok,
+                output_tail: prose.clone(),
+            })
+        })
+        .collect()
+}
+
 /// The publication and verification evidence each node left behind.
 fn node_details(view: &RunView) -> Value {
-    let mut details = Map::new();
-    for (node, branch) in &view.state.branches {
-        let mut publication = Map::new();
-        publication.insert("branch".into(), json!(branch));
-        publication.insert(
-            "merged".into(),
-            json!(view
-                .state
-                .outcomes
-                .get(node)
-                .is_some_and(|outcome| outcome == "merged")),
-        );
-        if let Some(url) = view.state.change_urls.get(node) {
-            publication.insert("pr_url".into(), json!(url));
+    let round = view.state.round.max(1);
+    let mut details: Map<String, Value> = Map::new();
+    let mut nodes: BTreeSet<&str> = view
+        .state
+        .branches
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    nodes.extend(
+        view.events
+            .iter()
+            .filter(|event| !event.artifacts.is_empty() && event.labels.round == Some(round))
+            .filter_map(|event| event.labels.node.as_deref()),
+    );
+    for node in nodes {
+        let records: Vec<Value> = evidence(view, round, node)
+            .into_iter()
+            .map(|record| {
+                json!({
+                    "ok": record.ok,
+                    "output_tail": record.output_tail,
+                    "artifact_id": record.artifact,
+                })
+            })
+            .collect();
+        let mut detail = Map::new();
+        detail.insert("verification".into(), json!({ "records": records }));
+        if let Some(branch) = view.state.branches.get(node) {
+            let mut publication = Map::new();
+            publication.insert("branch".into(), json!(branch));
+            publication.insert(
+                "merged".into(),
+                json!(view
+                    .state
+                    .outcomes
+                    .get(node)
+                    .is_some_and(|outcome| outcome == "merged")),
+            );
+            if let Some(url) = view.state.change_urls.get(node) {
+                publication.insert("pr_url".into(), json!(url));
+            }
+            detail.insert("publication".into(), Value::Object(publication));
         }
-        details.insert(
-            node.clone(),
-            json!({
-                "verification": { "records": [] },
-                "publication": Value::Object(publication),
-            }),
-        );
+        details.insert(node.to_owned(), Value::Object(detail));
     }
     Value::Object(details)
 }
@@ -1244,6 +1332,17 @@ fn timeline_event(index: usize, event: &Envelope) -> Value {
     if let Some(status) = event.payload.get("status").and_then(Value::as_str) {
         item.insert("status".into(), json!(status));
     }
+    // Where the event's own heavy content lives, never inlined: the change it
+    // published, or the first evidence it stored. A reader opens the record and
+    // the client fetches that one thing.
+    if let Some(url) = event.payload.get("url").and_then(Value::as_str) {
+        item.insert("reference".into(), json!({ "kind": "pr", "value": url }));
+    } else if let Some(artifact) = event.artifacts.first() {
+        item.insert(
+            "reference".into(),
+            json!({ "kind": reference_kind(&artifact.kind), "value": artifact.id.0 }),
+        );
+    }
     Value::Object(item)
 }
 
@@ -1278,12 +1377,67 @@ fn run_spans(view: &RunView) -> Vec<Value> {
             "ended_at": ended,
             "round": number,
             "phase": if closed { "reviewing-results" } else { "driving-round" },
+            // What the round itself recorded: the relayed turns belong to the
+            // sessions below, and carrying them here too would draw every one
+            // of them on the run's row twice.
             "events": events
                 .iter()
-                .filter(|(_, event)| event.labels.node.is_none())
+                .filter(|(_, event)| {
+                    event.labels.node.is_none() && event.source != Source::Agentgraph
+                })
                 .map(|(index, event)| timeline_event(*index, event))
                 .collect::<Vec<_>>(),
         }));
+        // The sessions the round relayed at no node: the run's own driving
+        // conversations, which belong to the run rather than to any of its work.
+        // Left open until the round closes, because a session that has stopped
+        // talking has not necessarily stopped.
+        let unattached: Vec<(usize, &Envelope)> = events
+            .iter()
+            .filter(|(_, event)| event.labels.node.is_none())
+            .copied()
+            .collect();
+        for (session, relayed) in relayed_sessions(&unattached) {
+            let mut span = Map::new();
+            span.insert("id".into(), json!(format!("run.{number:02}.{session}")));
+            span.insert("kind".into(), json!("dispatch"));
+            span.insert("label".into(), json!(session));
+            span.insert(
+                "started_at".into(),
+                json!(relayed.first().map(|(_, event)| &event.ts)),
+            );
+            span.insert(
+                "ended_at".into(),
+                if closed {
+                    json!(relayed.last().map(|(_, event)| &event.ts))
+                } else {
+                    Value::Null
+                },
+            );
+            span.insert("parent_id".into(), json!(round_id));
+            span.insert("round".into(), json!(number));
+            span.insert("transport_role".into(), json!(TRANSPORT_ROLE));
+            if let Some(role) = agent_role(
+                relayed
+                    .first()
+                    .and_then(|(_, event)| event.labels.persona.as_deref()),
+            ) {
+                span.insert("agent_role".into(), json!(role));
+            }
+            span.insert(
+                "reference".into(),
+                json!({ "kind": "conversation", "value": session }),
+            );
+            span.insert(
+                "events".into(),
+                json!(relayed
+                    .iter()
+                    .map(|(index, event)| timeline_event(*index, event))
+                    .collect::<Vec<_>>()),
+            );
+            spans.push(Value::Object(span));
+        }
+
         let mut nodes: Vec<&str> = events
             .iter()
             .filter_map(|(_, event)| event.labels.node.as_deref())
@@ -1347,6 +1501,99 @@ fn node_span(view: &RunView, round: u64, node: &str, parent: Option<&str>) -> Va
     Value::Object(span)
 }
 
+/// The agent-graph sessions a slice of a run's events relayed, each with its own
+/// envelopes, in the order the slice first mentioned them.
+///
+/// A session id that could not survive a round trip through a route is dropped
+/// rather than served: the client fetches a transcript by it, so an id it cannot
+/// ask for is an id this crate must not offer.
+fn relayed_sessions<'a>(
+    events: &[(usize, &'a Envelope)],
+) -> Vec<(&'a str, Vec<(usize, &'a Envelope)>)> {
+    let mut sessions: Vec<(&str, Vec<(usize, &Envelope)>)> = Vec::new();
+    for (index, event) in events {
+        if event.source != Source::Agentgraph {
+            continue;
+        }
+        let Some(session) = event
+            .labels
+            .extra
+            .get("session")
+            .and_then(Value::as_str)
+            .filter(|session| ConversationId::try_from(*session).is_ok())
+        else {
+            continue;
+        };
+        match sessions.iter_mut().find(|(name, _)| *name == session) {
+            Some((_, relayed)) => relayed.push((*index, event)),
+            None => sessions.push((session, vec![(*index, event)])),
+        }
+    }
+    sessions
+}
+
+/// The kinds `onevcs` relays when it opens a branch and when it publishes one.
+///
+/// Its vocabulary is the sibling's, not this crate's, so it is matched as the
+/// wire strings the sibling writes rather than folded into a closed enum here.
+const VCS_SESSION_OPENED: &str = "session-opened";
+const VCS_PUBLISHED: &str = "published";
+
+/// The branch a node opened and what became of it, when `onevcs` recorded both
+/// ends of it.
+///
+/// This is the one publication interval the journal actually holds: the session
+/// open and the publish are two separate relayed events, so the span between
+/// them is recorded rather than derived. A node whose round opened no session
+/// contributes none, and one that opened a session it never published is served
+/// open-ended, which is what an in-flight publication is.
+fn publication_span(
+    events: &[(usize, &Envelope)],
+    parent: &str,
+    node: &str,
+    round: u64,
+) -> Option<Value> {
+    let relayed = |kind: &str| {
+        events
+            .iter()
+            .find(|(_, event)| event.source == Source::Vcs && event.kind.0 == kind)
+            .map(|(_, event)| *event)
+    };
+    let opened = relayed(VCS_SESSION_OPENED)?;
+    let published = relayed(VCS_PUBLISHED);
+    let branch = opened
+        .payload
+        .get("branch")
+        .and_then(Value::as_str)
+        .unwrap_or(node);
+    let mut span = Map::new();
+    span.insert("id".into(), json!(format!("publication.{round:02}.{node}")));
+    span.insert("kind".into(), json!("publication"));
+    span.insert("label".into(), json!(branch));
+    span.insert("started_at".into(), json!(opened.ts));
+    span.insert(
+        "ended_at".into(),
+        published.map_or(Value::Null, |event| json!(event.ts)),
+    );
+    span.insert("parent_id".into(), json!(parent));
+    span.insert("node_id".into(), json!(node));
+    span.insert("round".into(), json!(round));
+    if let Some(outcome) = published
+        .and_then(|event| event.payload.get("outcome"))
+        .and_then(Value::as_str)
+    {
+        span.insert("status".into(), json!(outcome));
+    }
+    if let Some(url) = published
+        .and_then(|event| event.payload.get("url"))
+        .and_then(Value::as_str)
+    {
+        span.insert("reference".into(), json!({ "kind": "pr", "value": url }));
+    }
+    span.insert("events".into(), Value::Array(Vec::new()));
+    Some(Value::Object(span))
+}
+
 /// One node's own work: the node span, then a dispatch span per attempt.
 fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
@@ -1394,48 +1641,113 @@ fn node_spans(view: &RunView, node: &str) -> Vec<Value> {
             }));
         }
 
+        // The evidence the node kept and the branch it published: both sit inside
+        // the dispatch they were recorded during, so both are appended after it.
+        // The plot paints in the order it is given, and a segment underneath one
+        // that covers it is a segment no pointer can reach.
+        let mut inside: Vec<Value> = Vec::new();
+        for record in evidence(view, number, node) {
+            inside.push(json!({
+                "id": format!("verification.{number:02}.{node}.{}", record.artifact),
+                "kind": "verification",
+                "label": record.artifact,
+                "started_at": record.since,
+                "ended_at": record.at,
+                "parent_id": node_id,
+                "node_id": node,
+                "round": number,
+                "status": if record.ok { "ok" } else { "failed" },
+                "detail": {
+                    "ok": record.ok,
+                    "output_tail": record.output_tail,
+                    "artifact_id": record.artifact,
+                },
+                "events": Vec::<Value>::new(),
+            }));
+        }
+        inside.extend(publication_span(&events, &node_id, node, number));
+
         let dispatched = events.iter().find(|(_, event)| {
             event.source == Source::Pipeline
                 && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
         });
         let Some((_, start)) = dispatched else {
+            spans.append(&mut inside);
             continue;
         };
-        let mut span = Map::new();
-        span.insert("id".into(), json!(format!("dispatch.{number:02}.{node}")));
-        span.insert("kind".into(), json!("dispatch"));
-        span.insert("label".into(), json!(format!("{node} dispatch")));
-        span.insert("started_at".into(), json!(start.ts));
-        span.insert(
-            "ended_at".into(),
-            settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
-        );
-        span.insert("parent_id".into(), json!(node_id));
-        span.insert("node_id".into(), json!(node));
-        span.insert("round".into(), json!(number));
-        span.insert(
-            "dispatch_id".into(),
-            json!(dispatch_key(&view.paths.run, number, node)),
-        );
-        span.insert("transport_role".into(), json!(TRANSPORT_ROLE));
-        if let Some(role) = agent_role(start.labels.persona.as_deref()) {
-            span.insert("agent_role".into(), json!(role));
-        }
-        if let Some(status) = settled
+        let key = dispatch_key(&view.paths.run, number, node);
+        let status = settled
             .and_then(|(_, event)| event.payload.get("status"))
             .and_then(Value::as_str)
-        {
-            span.insert("status".into(), json!(status_word(status)));
+            .map(status_word);
+
+        // One span per session the dispatch ran under, all carrying the same
+        // `dispatch_id`: that key is what groups them back into the one dispatch
+        // they are, and a node that ran a worker, a judge and a check-in at once
+        // is three transcripts an operator has to be able to tell apart. A
+        // dispatch that relayed no session at all is still one span, because the
+        // node was dispatched and that is a fact of its own.
+        let mut sessions = relayed_sessions(&events);
+        if sessions.is_empty() {
+            sessions.push((node, Vec::new()));
         }
-        span.insert(
-            "events".into(),
-            json!(events
-                .iter()
-                .filter(|(_, event)| event.source == Source::Agentgraph)
-                .map(|(index, event)| timeline_event(*index, event))
-                .collect::<Vec<_>>()),
-        );
-        spans.push(Value::Object(span));
+
+        for (session, relayed) in sessions {
+            let named = relayed.is_empty().then(|| format!("{node} dispatch"));
+            let mut span = Map::new();
+            span.insert(
+                "id".into(),
+                json!(format!("dispatch.{number:02}.{session}")),
+            );
+            span.insert("kind".into(), json!("dispatch"));
+            span.insert(
+                "label".into(),
+                json!(named.clone().unwrap_or_else(|| session.to_owned())),
+            );
+            span.insert(
+                "started_at".into(),
+                json!(relayed.first().map_or(&start.ts, |(_, event)| &event.ts)),
+            );
+            // The settlement, which is where the dispatch a session was relayed
+            // under ends. The session's own last envelope is the last thing it
+            // said, not the end of it: a session says nothing while it works,
+            // and closing the span there would draw every dispatch as the
+            // instant of its final message.
+            span.insert(
+                "ended_at".into(),
+                settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
+            );
+            span.insert("parent_id".into(), json!(node_id));
+            span.insert("node_id".into(), json!(node));
+            span.insert("round".into(), json!(number));
+            span.insert("dispatch_id".into(), json!(key));
+            span.insert("transport_role".into(), json!(TRANSPORT_ROLE));
+            let persona = relayed
+                .first()
+                .and_then(|(_, event)| event.labels.persona.as_deref())
+                .or(start.labels.persona.as_deref());
+            if let Some(role) = agent_role(persona) {
+                span.insert("agent_role".into(), json!(role));
+            }
+            if let Some(status) = status {
+                span.insert("status".into(), json!(status));
+            }
+            if named.is_none() {
+                span.insert(
+                    "reference".into(),
+                    json!({ "kind": "conversation", "value": session }),
+                );
+            }
+            span.insert(
+                "events".into(),
+                json!(relayed
+                    .iter()
+                    .map(|(index, event)| timeline_event(*index, event))
+                    .collect::<Vec<_>>()),
+            );
+            spans.push(Value::Object(span));
+        }
+        spans.append(&mut inside);
     }
     spans
 }
