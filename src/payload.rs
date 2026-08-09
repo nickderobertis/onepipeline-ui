@@ -1500,6 +1500,21 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
                 continue;
             }
             spans.push(node_span(view, number, node, Some(&round_id), turns));
+            // What that node did, as categories rather than as records: the graph
+            // draws one lane per category and opens the node for the rest.
+            let node_id = format!("node.{number:02}.{node}");
+            let mine: Vec<(usize, &Envelope)> = events
+                .iter()
+                .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
+                .copied()
+                .collect();
+            let settled = mine.iter().find(|(_, event)| {
+                event.source == Source::Pipeline
+                    && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+            });
+            spans.extend(waiting_span(view, settled, &node_id, node, number));
+            spans.extend(role_rollups(&mine, &node_id, node, number));
+            spans.extend(kept_spans(view, &mine, &node_id, node, number));
         }
     }
     spans
@@ -1651,6 +1666,134 @@ fn publication_span(
     Some(Value::Object(span))
 }
 
+/// The wait on a person a node's settlement records, when it recorded one.
+///
+/// Real recorded time, drawn as its own span rather than as silence — including
+/// for a human action, which is never dispatched at all and would otherwise
+/// contribute no span but its own settlement.
+fn waiting_span(
+    view: &RunView,
+    settled: Option<&(usize, &Envelope)>,
+    parent: &str,
+    node: &str,
+    round: u64,
+) -> Option<Value> {
+    let (_, wait_start) = settled.filter(|(_, event)| {
+        event.payload.get("status").and_then(Value::as_str) == Some("waiting")
+    })?;
+    let attested = view.events.iter().find(|event| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::HumanAttested)
+            && event.labels.node.as_deref() == Some(node)
+    });
+    Some(json!({
+        "id": format!("human-wait.{round:02}.{node}"),
+        "kind": "human-wait",
+        "label": format!("{node} awaiting a person"),
+        "started_at": wait_start.ts,
+        "ended_at": attested.map_or(Value::Null, |event| json!(event.ts)),
+        "parent_id": parent,
+        "node_id": node,
+        "round": round,
+        "events": Vec::<Value>::new(),
+    }))
+}
+
+/// What a node kept: one span per artifact it stored, and the branch it published.
+fn kept_spans(
+    view: &RunView,
+    events: &[(usize, &Envelope)],
+    parent: &str,
+    node: &str,
+    round: u64,
+) -> Vec<Value> {
+    let mut kept: Vec<Value> = evidence(view, round, node)
+        .into_iter()
+        .map(|record| {
+            json!({
+                "id": format!("verification.{round:02}.{node}.{}", record.artifact),
+                "kind": "verification",
+                "label": record.artifact,
+                "started_at": record.since,
+                "ended_at": record.at,
+                "parent_id": parent,
+                "node_id": node,
+                "round": round,
+                "status": if record.ok { "ok" } else { "failed" },
+                "detail": {
+                    "ok": record.ok,
+                    "output_tail": record.output_tail,
+                    "artifact_id": record.artifact,
+                },
+                "events": Vec::<Value>::new(),
+            })
+        })
+        .collect();
+    kept.extend(publication_span(events, parent, node, round));
+    kept
+}
+
+/// One node's dispatched sessions, summarized one span per role.
+///
+/// The graph-level reading of a run is a reading rather than a download: a node
+/// that dispatched two hundred sessions is two hundred spans at node scope and
+/// one per category here, carrying the pair that names the category and the count
+/// it stands for. No events, no references, no bodies — a reader who wants those
+/// opens the node.
+fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: u64) -> Vec<Value> {
+    let dispatched = events.iter().find(|(_, event)| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
+    });
+    let Some((_, start)) = dispatched else {
+        return Vec::new();
+    };
+    let settled = events.iter().find(|(_, event)| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+    });
+    let mut counted: Vec<(&'static str, usize)> = Vec::new();
+    for (_, relayed) in relayed_sessions(events) {
+        let persona = relayed
+            .first()
+            .and_then(|(_, event)| event.labels.persona.as_deref())
+            .or(start.labels.persona.as_deref());
+        let Some(role) = agent_role(persona) else {
+            continue;
+        };
+        match counted.iter_mut().find(|(named, _)| *named == role) {
+            Some((_, count)) => *count += 1,
+            None => counted.push((role, 1)),
+        }
+    }
+    if counted.is_empty() {
+        // Dispatched and nothing relayed: still one category, because the node
+        // was dispatched and the row has to say so.
+        if let Some(role) = agent_role(start.labels.persona.as_deref()) {
+            counted.push((role, 1));
+        }
+    }
+    counted
+        .into_iter()
+        .map(|(role, count)| {
+            json!({
+                "id": format!("rollup.{round:02}.{node}.{role}"),
+                "kind": "rollup",
+                "label": "dispatch",
+                "started_at": start.ts,
+                "ended_at": settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
+                "parent_id": parent,
+                "node_id": node,
+                "round": round,
+                "count": count,
+                "agent_role": role,
+                "transport_role": TRANSPORT_ROLE,
+                "events": Vec::<Value>::new(),
+            })
+        })
+        .collect()
+}
+
 /// One node's own work: the node span, then a dispatch span per attempt.
 fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
@@ -1673,56 +1816,13 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
                 && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
         });
 
-        // A node that settled `waiting` is waiting on a person. The wait is real
-        // recorded time and is drawn as its own span rather than as silence —
-        // including for a human action, which is never dispatched at all and
-        // would otherwise contribute no span but its own settlement.
-        if let Some((_, wait_start)) = settled.filter(|(_, event)| {
-            event.payload.get("status").and_then(Value::as_str) == Some("waiting")
-        }) {
-            let attested = view.events.iter().find(|event| {
-                event.source == Source::Pipeline
-                    && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::HumanAttested)
-                    && event.labels.node.as_deref() == Some(node)
-            });
-            spans.push(json!({
-                "id": format!("human-wait.{number:02}.{node}"),
-                "kind": "human-wait",
-                "label": format!("{node} awaiting a person"),
-                "started_at": wait_start.ts,
-                "ended_at": attested.map_or(Value::Null, |event| json!(event.ts)),
-                "parent_id": node_id,
-                "node_id": node,
-                "round": number,
-                "events": Vec::<Value>::new(),
-            }));
-        }
+        spans.extend(waiting_span(view, settled, &node_id, node, number));
 
         // The evidence the node kept and the branch it published: both sit inside
         // the dispatch they were recorded during, so both are appended after it.
         // The plot paints in the order it is given, and a segment underneath one
         // that covers it is a segment no pointer can reach.
-        let mut inside: Vec<Value> = Vec::new();
-        for record in evidence(view, number, node) {
-            inside.push(json!({
-                "id": format!("verification.{number:02}.{node}.{}", record.artifact),
-                "kind": "verification",
-                "label": record.artifact,
-                "started_at": record.since,
-                "ended_at": record.at,
-                "parent_id": node_id,
-                "node_id": node,
-                "round": number,
-                "status": if record.ok { "ok" } else { "failed" },
-                "detail": {
-                    "ok": record.ok,
-                    "output_tail": record.output_tail,
-                    "artifact_id": record.artifact,
-                },
-                "events": Vec::<Value>::new(),
-            }));
-        }
-        inside.extend(publication_span(&events, &node_id, node, number));
+        let mut inside = kept_spans(view, &events, &node_id, node, number);
 
         let dispatched = events.iter().find(|(_, event)| {
             event.source == Source::Pipeline

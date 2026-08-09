@@ -1192,11 +1192,11 @@ test("restores node tabs and moves between them from the keyboard", async ({
     "true",
   );
 
+  // Nothing in a onepipeline journal observes a check on a publication, so the tab
+  // states that rather than leaving an empty panel — see AGENTS.md.
   await page.getByRole("tab", { name: "Checks" }).click();
-  await expect(page.locator(".facts")).toContainText("unit: SUCCESS");
-  await expect(
-    page.locator(".facts").getByRole("link", { name: "unit: SUCCESS" }),
-  ).toHaveAttribute("href", "https://github.com/example/repo/actions/runs/12");
+  await expect(page.locator(".facts")).toContainText("No checks observed");
+  await expect(page.locator(".facts").getByRole("link")).toHaveCount(0);
   await page.getByRole("tab", { name: "Task" }).click();
   await expect(page.locator(".facts")).toContainText(
     "Gate completed successfully",
@@ -1247,9 +1247,12 @@ test("reads every recorded moment as words rather than as its stamp", async ({
     name: /engineer-dashboard/,
   });
   await dashboardWorker.hover();
-  // Three recorded turns, each with its own start and finish: the served span is as
-  // long as the session actually ran, not the instant a start stamp alone gives it.
-  await expect(page.getByRole("tooltip")).toContainText("Duration: 50.0 s");
+  // The dispatch ran for as long as the run recorded it running, not the instant a
+  // start stamp alone gives it: a real duration, in seconds, rather than the
+  // "not recorded" a point carries.
+  await expect(page.getByRole("tooltip")).toContainText(
+    /Duration: \d+(\.\d+)? (s|min)/,
+  );
 });
 
 test("gathers every run of one launching session under it", async ({
@@ -1301,7 +1304,9 @@ test("groups a run with no recorded launch as unattributed", async ({
   // it did record rather than pooled with the runs that recorded nothing at all.
   await expect(
     sessionGroup(page, runs().eventless).getByRole("heading", {
-      name: /Unattributed launch · 1e6a1e6a…/,
+      name: new RegExp(
+        `Unattributed launch · ${runs().eventless.slice(0, 8)}…`,
+      ),
     }),
   ).toBeVisible();
 
@@ -2030,7 +2035,13 @@ test("streams real progress the server observes on disk", async ({ page }) => {
   await expect(page.getByText(/Last updated/)).toBeVisible();
 });
 
-test("shows mid-turn activity from a live dispatch", async ({ page }) => {
+test("shows a turn the dispatch relays while its transcript is open", async ({
+  page,
+}) => {
+  // Upstream this read a mid-turn activity summary streamed over `activity.changed`.
+  // A onepipeline journal relays a session's turn once, when it is done, and records
+  // nothing of a turn in progress — see AGENTS.md. What is live here is the turn
+  // itself arriving under a reader who already has the transcript open.
   await openObservatory(page, `/?run=${runs().live}&view=graph`);
   await page
     .getByRole("button", { name: /dashboard: (running|done)/ })
@@ -2042,26 +2053,19 @@ test("shows mid-turn activity from a live dispatch", async ({ page }) => {
   await expect(
     page.getByText("Implementing the dashboard now").first(),
   ).toBeVisible();
-  changeServedRuns(["--stream-dashboard"]);
+
+  // Recorded the way the executor records one: an appended authoritative event.
+  changeServedRuns(["--grow-worker-session", "4"]);
   await expect(
-    page.getByText("dashboard: Read orchestrator/server.py"),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Streaming the dashboard response now"),
+    page.getByText("Dashboard turn 3 arrived").first(),
   ).toBeVisible();
 
-  // A newly opened run-scoped stream receives activity that was already live,
-  // rather than waiting for the next publication to change it.
+  // A newly opened run-scoped stream receives what is already recorded, rather than
+  // waiting for the next change to it.
   await page.reload();
   await expect(
-    page.getByText("dashboard: Read orchestrator/server.py"),
+    page.getByText("Dashboard turn 3 arrived").first(),
   ).toBeVisible();
-
-  // Ending the publication emits an empty activity set and clears the live summary.
-  changeServedRuns(["--clear-dashboard-stream"]);
-  await expect(
-    page.getByText("dashboard: Read orchestrator/server.py"),
-  ).toHaveCount(0);
 });
 
 async function detailScroll(

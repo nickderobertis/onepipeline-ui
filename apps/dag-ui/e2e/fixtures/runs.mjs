@@ -283,8 +283,11 @@ function writeLiveRun(root) {
 
   // Stamped from the wall clock: the graph timeline plots the whole run on one
   // range, and a run pinned to a fixed calendar date stretches that range across the
-  // days between it and now, collapsing every node to a hairline at one edge.
-  const start = Date.now() - 8 * 60 * 1000;
+  // days between it and now, collapsing every node to a hairline at one edge. Close
+  // enough to now that the plotted range is mostly the run: it ends at the server's
+  // `observed_at`, so dead time before the read is dead width every segment in every
+  // row is squeezed into.
+  const start = Date.now() - 3 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(LIVE_RUN, "codex", CODEX_SESSION, stamp(start), 4242),
@@ -297,9 +300,10 @@ function writeLiveRun(root) {
   journal.emit("pipeline", "run-started", run, { plan });
   journal.advance(1).emit("pipeline", "round-started", round, { plan });
 
-  // The run's own driving session, opened before the first node was dispatched: it
-  // is what starts the run, so it is the launch the whole plot is measured from.
-  journal.advance(1);
+  // The run's own driving session, opened well after the round started and before
+  // the first node was dispatched: the stretch before it is silence the plot has to
+  // draw, and a hairline of it is a segment nobody can read or reach.
+  journal.advance(12);
   turn(
     journal,
     undefined,
@@ -407,10 +411,17 @@ function writeLiveRun(root) {
     persona: "worker",
   });
   journal.advance(5);
+  // Several turns each, because this is the node whose transcript the reading
+  // journeys scroll: a rail short enough to fit its own region has no reading
+  // position to move.
   for (const [session, persona, message] of [
     [WORKER_SESSION, "worker", "Implementing the dashboard now"],
     [JUDGE_SESSION, "judge", "The transcript is accessible"],
+    [WORKER_SESSION, "worker", "Wiring the run list to the read API"],
     [CHECK_IN_SESSION, "check-in", "Progress update sent"],
+    [WORKER_SESSION, "worker", "Rendering the node view"],
+    [JUDGE_SESSION, "judge", "The graph and the rail agree"],
+    [CHECK_IN_SESSION, "check-in", "Second progress update sent"],
   ]) {
     journal.emit(
       "agentgraph",
@@ -418,7 +429,7 @@ function writeLiveRun(root) {
       { ...round, node: "dashboard", persona, session },
       { message, model: "a-model" },
     );
-    journal.advance(25);
+    journal.advance(10);
   }
 
   journal.emit("pipeline", "node-dispatched", {
@@ -711,7 +722,14 @@ function writeSiblingRun(root) {
     join(dir, "launch.json"),
     launch(SIBLING_RUN, "codex", CODEX_SESSION, stamp(HISTORIC), 4246),
   );
-  const journal = new Journal(dir, `a-recording-host-${SIBLING_RUN}`, HISTORIC);
+  // Later than every other recorded run but the live one, so the three runs of one
+  // launching session are the three the list leads with — which is the order an
+  // operator reads it in, and what the grouping journey opens on.
+  const journal = new Journal(
+    dir,
+    `a-recording-host-${SIBLING_RUN}`,
+    HISTORIC + 10 * 60 * 1000,
+  );
   const round = { run_id: SIBLING_RUN, round: 1 };
   journal.emit("pipeline", "run-started", { run_id: SIBLING_RUN }, { plan });
   journal.advance(1).emit("pipeline", "round-started", round, { plan });
@@ -780,12 +798,18 @@ function writeUnattributedRun(root) {
  * the run list in one parse, so a run this shape either renders with the rest or
  * takes every one of them down with it.
  */
-function writeEventlessRun(root, runId = EVENTLESS_RUN) {
+function writeEventlessRun(root, runId = EVENTLESS_RUN, session = "") {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
+  // The paging runs are launched by the *other* session: the codex group is the one
+  // a journey counts, and forty-odd paging runs under it would make that count a
+  // page size. The named eventless run records a launch and no session at all —
+  // every run launched before the launcher was detected reads that way — so it is
+  // grouped by the launch it does know rather than pooled with the runs that
+  // recorded no launch.
   writeJson(
     join(dir, "launch.json"),
-    launch(runId, "codex", CODEX_SESSION, stamp(HISTORIC), 4248),
+    launch(runId, "claude-code", session, stamp(HISTORIC), 4248),
   );
   writeFileSync(join(dir, "events.jsonl"), "");
 }
@@ -852,7 +876,11 @@ export function buildRuns(root) {
   mkdirSync(root, { recursive: true });
   writeEventlessRun(root);
   for (let index = 0; index < PAGE_RUNS; index += 1) {
-    writeEventlessRun(root, `dag-ui-page-${String(index).padStart(2, "0")}`);
+    writeEventlessRun(
+      root,
+      `dag-ui-page-${String(index).padStart(2, "0")}`,
+      CLAUDE_SESSION,
+    );
   }
   writeBusyRun(root);
   writeUnattributedRun(root);

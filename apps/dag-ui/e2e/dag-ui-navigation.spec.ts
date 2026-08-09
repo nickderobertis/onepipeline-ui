@@ -502,6 +502,9 @@ test("reads a segment the keyboard reached", async ({ page }) => {
   // proves both halves at once: that a plot's segments are on the tab path in the
   // first place, and that arriving at one by keyboard states what it is.
   await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
+  // Opened, because this reads two of the node's categories against each other and
+  // the one collapsed line stacks them under the session that dominated it.
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   const segment = timeline(page).getByRole("button", {
     name: new RegExp(fixture().artifacts.gate),
   });

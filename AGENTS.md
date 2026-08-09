@@ -74,6 +74,9 @@ Each needs a producing library to record it before anything here can serve it.
   onepipeline journal has three producers and none of them is one, so the client's
   lint lane is always empty.
 - **Lock waits.** Nothing counts contention, so no `rollup` span is ever served.
+- **Mid-turn activity.** The client knows an `activity.changed` stream event and a
+  live-activity summary; a session's turn is relayed once, when it is done, so
+  there is nothing in flight to report and that event is never sent.
 
 ## Two standing goals on every task
 

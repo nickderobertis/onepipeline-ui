@@ -911,6 +911,64 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
 }
 
 #[test]
+fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    let spans = body["spans"].as_array().expect("spans").clone();
+    let rollups: Vec<&Value> = spans
+        .iter()
+        .filter(|span| {
+            span["kind"] == "rollup" && span["node_id"] == json!(fixture_run::SHIP_NODE_ID)
+        })
+        .collect();
+    assert_eq!(rollups.len(), 1, "one category, one summary: {rollups:?}");
+    assert_eq!(rollups[0]["agent_role"], json!("pr-author"));
+    assert_eq!(rollups[0]["transport_role"], json!("agent"));
+    assert_eq!(rollups[0]["count"], json!(1));
+    assert_eq!(
+        rollups[0]["events"],
+        json!([]),
+        "a summary carries no records: a reader who wants them opens the node"
+    );
+    assert_eq!(
+        rollups[0]["parent_id"],
+        json!(format!("node.02.{}", fixture_run::SHIP_NODE_ID))
+    );
+
+    // And the node's own scope still serves the sessions themselves, so the two
+    // readings agree about the category without the graph carrying every record.
+    let node = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::SHIP_NODE_ID
+        ),
+    )
+    .json();
+    let dispatches: Vec<&Value> = node["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == "dispatch")
+        .collect();
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0]["agent_role"], json!("pr-author"));
+    assert!(
+        !node["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .any(|span| span["kind"] == "rollup"),
+        "the node's own reading is the records, not a summary of them"
+    );
+}
+
+#[test]
 fn a_node_that_stored_nothing_serves_no_verification_and_no_publication() {
     let serving = live_run();
     let timeline = http::get(

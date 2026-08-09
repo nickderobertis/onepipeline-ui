@@ -744,11 +744,18 @@ function count(rows: readonly TimelineRow[]): number {
   );
 }
 
+/**
+ * Recorded order: by the instant, and by the order the server served them where
+ * two records share one.
+ *
+ * The sort is stable, so equal instants keep the order they arrived in — which is
+ * the order the run recorded them. Breaking that tie on the id instead sorted the
+ * sessions of one dispatch alphabetically by session name, so which of them read
+ * as the dispatch that opened the group depended on what its session happened to
+ * be called.
+ */
 function byStart(first: TimelineRow, next: TimelineRow): number {
-  return (
-    first.startedAt.localeCompare(next.startedAt) ||
-    first.id.localeCompare(next.id)
-  );
+  return first.startedAt.localeCompare(next.startedAt);
 }
 
 function elapsed(startedAt: string, endedAt: string | null): number | null {
