@@ -166,6 +166,39 @@ fn the_run_list_pages_by_opaque_cursor() {
 }
 
 #[test]
+fn a_settled_node_serves_the_words_its_settlement_recorded() {
+    // A card that says only "failed" tells a reader less than the run knows. The
+    // two recorded texts mean different things — the lifecycle's own prose, and
+    // what the dispatch reported — so both reach the wire, from a finished round's
+    // recorded result and from the live fold alike.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let rounds = body["rounds"].as_array().expect("rounds is an array");
+
+    let finished = &rounds[0]["node_results"][fixture_run::REVIEW_NODE_ID];
+    assert_eq!(
+        finished["detail"],
+        json!("the reviewer asked for a changelog entry")
+    );
+    assert_eq!(finished["error"], json!("review exited non-zero"));
+    assert_eq!(finished["exit_code"], json!(2));
+    assert_eq!(finished["ok"], json!(false));
+
+    // The live round's fold keeps a node's status and outcome but not the prose
+    // beside them, so the settlement envelope is where this comes from.
+    let live = &rounds[1]["node_results"][fixture_run::SHIP_NODE_ID];
+    assert_eq!(live["detail"], json!("the change request is open"));
+    // Nothing recorded is nothing served: an absent field is not a null one.
+    assert!(live.get("error").is_none(), "{live}");
+}
+
+#[test]
 fn a_run_detail_serves_its_rounds_plan_and_transcripts() {
     let serving = two_runs();
     let response = http::get(

@@ -150,7 +150,7 @@ describe("TelemetryClient fetch boundary", () => {
     // An in-flight node stays representable all the way to the consumer.
     expect(timeline.spans[0]?.ended_at).toBeNull();
     expect(requested[1]).toBe(
-      "http://127.0.0.1:8000/api/v2/runs/run-1/timeline?node_id=build",
+      "http://127.0.0.1:8000/api/v2/runs/run-1/timeline?scope=node&node=build",
     );
 
     // Omitting the option leaves the request exactly as it was before.

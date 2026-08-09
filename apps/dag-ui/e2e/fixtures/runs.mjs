@@ -174,6 +174,10 @@ const LIVE_TASKS = [
     branch: "feature/foundation",
     base_branch: "main",
     title: "Prepare shared contracts",
+    steps: [
+      { id: "build", persona: "worker", task: "## What\nBuild and verify." },
+      { id: "hand-over", kind: "human", task: "Hand the work over." },
+    ],
   },
   {
     id: "local-direct",
@@ -201,10 +205,6 @@ const LIVE_TASKS = [
     context: "the reviewer asked for a changelog entry",
     done_when: "Users can inspect transcripts",
     max_turns: 12,
-    steps: [
-      { id: "build", persona: "worker", task: "## What\nBuild and verify." },
-      { id: "hand-over", kind: "human", task: "Hand the work over." },
-    ],
   },
   {
     id: "publish",
@@ -395,7 +395,14 @@ function writeLiveRun(root) {
     "pipeline",
     "node-settled",
     { ...round, node: "publish" },
-    { status: "failed", outcome: "gate-failed", detail: "The deploy failed" },
+    {
+      status: "failed",
+      // No outcome word: the dispatch itself failed, which is the classification
+      // the server derives when a run names no category of its own.
+      detail: "Deploy failed",
+      error: "publication exited non-zero",
+      exit_code: 2,
+    },
   );
   // Waiting on a person: real recorded time, which the node timeline draws as its
   // own span rather than as silence.
@@ -414,7 +421,9 @@ function writeLiveRun(root) {
     "pipeline",
     "node-settled",
     { ...round, node: "obsolete" },
-    { status: "cancelled", detail: "Cancelled cooperatively" },
+    // The scheduler's own words, in `error` rather than in a lifecycle's `detail`:
+    // what the executor records when a live drop or retry cancels a node.
+    { status: "cancelled", error: "cancelled cooperatively" },
   );
   journal.write();
 
@@ -500,17 +509,34 @@ function writeHistoryRun(root) {
  */
 function writeOutcomesRun(root) {
   const dir = runDir(root, OUTCOMES_RUN);
-  const ids = ["migrate", "backfill", "verify", "rollback", "retry"];
+  // The order is the layout's: the fan below ranks children in plan order, and a
+  // journey clicks `backfill`, so it sits in the middle of the fan rather than at
+  // the top of the canvas under the view switcher.
+  const ids = [
+    "migrate",
+    "verify",
+    "rollback",
+    "backfill",
+    "stalled",
+    "retry",
+    "orphaned",
+  ];
   const plan = {
     schema_version: 1,
     goal: { text: "Migrate the store" },
     name: "migrate",
     concurrency: 3,
+    // A fan out of the first node rather than seven independent ones: the layout
+    // ranks by dependency, so a graph with no edges is one rank as wide as the
+    // canvas and every card in it lands under the view switcher. `orphaned` stays
+    // outside the fan — it is the node recorded blocked with nothing recorded
+    // about what blocks it, and a dependency would answer that for it.
     tasks: ids.map((id) => ({
       id,
       persona: "worker",
       task: `## What\n${id[0].toUpperCase()}${id.slice(1)} the store.`,
       done_when: "The store is migrated",
+      ...(id === "migrate" || id === "orphaned" ? {} : { deps: ["migrate"] }),
     })),
   };
   writeJson(join(dir, "plan.json"), plan);
@@ -526,10 +552,29 @@ function writeOutcomesRun(root) {
     ok: false,
     nodes: [
       { id: "migrate", status: "failed" },
-      { id: "backfill", status: "not-completed", detail: "step 'load' timed out" },
+      {
+        id: "backfill",
+        status: "not-completed",
+        detail: "step 'load' timed out",
+      },
+      // A status the served vocabulary does not hold, which must be reported as
+      // unknown rather than mapped onto a neighbouring meaning.
       { id: "verify", status: "improvised" },
       { id: "rollback", status: "failed", outcome: "gate-failed" },
-      { id: "retry", status: "failed", detail: "the gate rejected the push" },
+      // What the executor really records for a blocked node: the *human action*
+      // refs holding it, which are `node/step` locators rather than plan nodes.
+      { id: "stalled", status: "blocked", blocked_by: ["migrate/sign-off"] },
+      // And one recorded blocked with nothing recorded about what blocks it — a
+      // legacy result, or one whose gating dependency has since settled.
+      { id: "orphaned", status: "blocked" },
+      // A node whose two recorded texts are the same sentence: showing it twice
+      // under two headings reads as two findings rather than one.
+      {
+        id: "retry",
+        status: "failed",
+        detail: "gate rejected the push",
+        error: "gate rejected the push",
+      },
     ],
   });
   const journal = new Journal(dir, `a-recording-host-${OUTCOMES_RUN}`, HISTORIC);

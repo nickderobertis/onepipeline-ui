@@ -9,13 +9,17 @@
  * package's source tree, and Tailwind fails the build on them. The `@source` lines
  * below name the trees this app actually scans instead — Tailwind never scans
  * `node_modules` on its own, so the package's `dist` has to be named explicitly or
- * none of the utilities its components rely on are generated.
+ * none of the utilities its components rely on are generated. A build that misses
+ * it does not fail: it produces a stylesheet without the package's own layout
+ * utilities, and the app renders with collapsed regions. The path is the
+ * *workspace* install, which is where npm hoists a dependency every project here
+ * shares.
  *
  * The dark palette is selected by `class="dark"` on the document element in
  * `index.html`, which is the package's documented switch.
  */
 @import "@oneharness/ui/styles.css" source(none);
-@source "../node_modules/@oneharness/ui/dist";
+@source "../../../node_modules/@oneharness/ui/dist";
 @source "./";
 
 /*

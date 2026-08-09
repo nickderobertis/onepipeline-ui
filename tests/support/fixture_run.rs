@@ -286,7 +286,18 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
             "ok": false,
             "nodes": [
                 { "id": NODE_ID, "status": "done", "outcome": "shipped" },
-                { "id": REVIEW_NODE_ID, "status": "failed", "outcome": "rejected" },
+                {
+                    "id": REVIEW_NODE_ID,
+                    "status": "failed",
+                    "outcome": "rejected",
+                    // The two texts a failure records are written by different
+                    // parts of the executor and mean different things: the
+                    // lifecycle's own prose, and what the dispatch reported.
+                    "detail": "the reviewer asked for a changelog entry",
+                    "error": "review exited non-zero",
+                    "exit_code": 2,
+                    "ok": false,
+                },
             ],
         })),
     )
@@ -451,6 +462,7 @@ fn live_journal(run: &str, second: &Value) -> String {
             "branch": "feature/ship",
             "change_url": "https://example.invalid/changes/2",
             "completed_steps": ["build"],
+            "detail": "the change request is open",
         }),
     );
     // Waiting on a person: real recorded time, drawn as its own span rather

@@ -123,9 +123,14 @@ export class TelemetryClient {
   async getTimeline(runId: string, nodeId?: string): Promise<RunTimeline> {
     requireOpaqueId(runId, "run ID");
     const url = this.#url(API_V2_PATHS.timeline(runId));
-    if (nodeId === undefined)
+    // The scope is always stated, and a node scope always names its node: the two
+    // are one query the contract refuses to read half of.
+    if (nodeId === undefined) {
       url.searchParams.set(API_V2_QUERY.scope, API_V2_TIMELINE_SCOPES.run);
-    else url.searchParams.set(API_V2_QUERY.nodeId, nodeId);
+    } else {
+      url.searchParams.set(API_V2_QUERY.scope, API_V2_TIMELINE_SCOPES.node);
+      url.searchParams.set(API_V2_QUERY.node, nodeId);
+    }
     return this.#request(url, runTimelineSchema.parse);
   }
 

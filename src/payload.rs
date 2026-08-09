@@ -83,16 +83,40 @@ fn launcher_word(launcher: &str) -> &'static str {
     }
 }
 
-/// The status word a client renders, from the SDK's own.
+/// The per-node statuses the wire's vocabulary holds, and exactly those.
+///
+/// Closed because a client switches on it exhaustively: a word outside this set
+/// has no rendering, and one round's recorded result can hold any word at all.
+const NODE_STATUSES: [&str; 11] = [
+    "pending",
+    "running",
+    "waiting",
+    "blocked",
+    "skipped",
+    "done",
+    "not-completed",
+    "failed",
+    "parked",
+    "cancelled",
+    "unknown",
+];
+
+/// The status word a client renders, from whatever the run recorded.
 ///
 /// One translation: the SDK's `ready` — eligible now, nothing dispatched — has
 /// no member in the client's vocabulary, and `pending` is what that vocabulary
-/// calls a node that has not started. Everything else is served as written.
+/// calls a node that has not started. Anything else the vocabulary does not hold
+/// is `unknown`, rather than passed through for a client to fail on or mapped
+/// onto a neighbouring meaning it does not have. The word itself is not lost:
+/// `node_counts` reports what the run actually wrote.
 fn status_word(status: &str) -> &str {
     if status == "ready" {
-        "pending"
-    } else {
+        return "pending";
+    }
+    if NODE_STATUSES.contains(&status) {
         status
+    } else {
+        "unknown"
     }
 }
 
@@ -126,10 +150,9 @@ fn read_json(path: &Path) -> Option<Value> {
 /// One run, as `GET /api/v2/runs` lists it.
 #[must_use]
 pub fn run_summary(view: &RunView) -> Value {
-    let statuses = view.state.statuses();
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for status in statuses.values() {
-        *counts.entry(status_word(status.as_str())).or_insert(0) += 1;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for recorded in recorded_statuses(view).values() {
+        *counts.entry(recorded.status.clone()).or_insert(0) += 1;
     }
     let mut summary = Map::new();
     summary.insert("run_id".into(), json!(view.paths.run));
@@ -145,6 +168,67 @@ pub fn run_summary(view: &RunView) -> Value {
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
     Value::Object(summary)
+}
+
+/// Every node's status as the run itself last wrote it, in the run's own words.
+///
+/// The same derivation the round payload renders from, so a list row and the
+/// graph it opens cannot describe different graphs — the disagreement an
+/// operator would otherwise see between the two. An *open* round is the live
+/// fold; a closed one is its own recorded result, which is the only account of
+/// it that survives the next round starting, and which is all a run predating
+/// the journal ever had. The words are unmapped on purpose: a count reports what
+/// the run wrote, where a status a client switches on cannot.
+fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
+    let folded = || -> BTreeMap<String, Recorded> {
+        view.state
+            .statuses()
+            .into_iter()
+            .map(|(node, status)| {
+                let outcome = view.state.outcomes.get(&node).cloned();
+                (
+                    node,
+                    Recorded {
+                        status: status.as_str().to_owned(),
+                        outcome,
+                    },
+                )
+            })
+            .collect()
+    };
+    if view.state.round_open {
+        return folded();
+    }
+    // `max(1)` because a run predating the journal has no round-started event to
+    // fold at all: its round number is zero and its result is still on disk.
+    let recorded: BTreeMap<String, Recorded> =
+        read_json(&view.paths.round_result(view.state.round.max(1)))
+            .and_then(|result| result["nodes"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|node| {
+                Some((
+                    node["id"].as_str()?.to_owned(),
+                    Recorded {
+                        status: node["status"].as_str()?.to_owned(),
+                        outcome: node["outcome"].as_str().map(str::to_owned),
+                    },
+                ))
+            })
+            .collect();
+    if recorded.is_empty() {
+        folded()
+    } else {
+        recorded
+    }
+}
+
+/// What one node's last account of itself said: its status word, and the outcome
+/// word beside it when it recorded one.
+#[derive(Debug, Clone)]
+struct Recorded {
+    status: String,
+    outcome: Option<String>,
 }
 
 /// The run's own attribution to the session that launched it.
@@ -422,16 +506,53 @@ fn agent_role(persona: Option<&str>) -> Option<&'static str> {
     AGENT_ROLES.into_iter().find(|role| *role == persona)
 }
 
+/// The statuses that mean this node's own work ran, or was cut short, without
+/// finishing — the ones a reader is owed a reason for.
+fn is_lost(status: &str) -> bool {
+    matches!(status, "failed" | "not-completed" | "cancelled")
+}
+
+/// How a lost outcome failed, from the closed vocabulary a client switches on.
+///
+/// Derived from the outcome word the run recorded, because that is the only
+/// classification a onepipeline journal carries: the categories a run can name
+/// are what the wire's own `failureClassSchema` calls `gate`, `checks`,
+/// `publication` and `timeout`. Anything else that ran and stopped is the
+/// dispatch's own failure, and anything that never ran is `unknown` rather than
+/// a category this crate picked for it.
+///
+/// This is one of the computations AGENTS.md proposes moving into the SDK: the
+/// agent reading the CLI sees the outcome word and not the class.
+fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'static str> {
+    if !is_lost(status_word(&recorded.status)) {
+        return None;
+    }
+    Some(match recorded.outcome.as_deref() {
+        Some("gate-failed") => "gate",
+        Some("checks-failed") => "checks",
+        Some("publication-failed") => "publication",
+        Some("timed-out") => "timeout",
+        _ if view.state.dispatched_at.contains_key(node) => "agent",
+        _ => "unknown",
+    })
+}
+
 /// One node's telemetry row.
-fn node_telemetry(view: &RunView, node: &str, status: &str) -> Value {
+fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
     let mut row = Map::new();
     row.insert("node".into(), json!(node));
-    row.insert("status".into(), json!(status_word(status)));
-    if let Some(outcome) = view.state.outcomes.get(node) {
+    row.insert("status".into(), json!(status_word(&recorded.status)));
+    if let Some(outcome) = &recorded.outcome {
         row.insert("outcome".into(), json!(outcome));
     }
     if let Some(branch) = view.state.branches.get(node) {
         row.insert("branch".into(), json!(branch));
+    }
+    if let Some(class) = failure_class(view, node, recorded) {
+        // The classification alone: onepipeline records no classified *detail*, so
+        // serving one would be this crate writing the sentence. A client falls
+        // through to the prose the settlement itself recorded instead.
+        row.insert("failure".into(), json!({ "class": class }));
     }
     row.insert("sessions".into(), json!(sessions_of(view, node)));
     row.insert("turns".into(), json!(0));
@@ -444,10 +565,10 @@ fn node_telemetry(view: &RunView, node: &str, status: &str) -> Value {
 
 /// The run's own telemetry document, as `GET /api/v2/runs/{run}` serves it.
 fn run_telemetry(view: &RunView) -> Value {
-    let statuses = view.state.statuses();
+    let statuses = recorded_statuses(view);
     let nodes: Vec<Value> = statuses
         .iter()
-        .map(|(node, status)| node_telemetry(view, node, status.as_str()))
+        .map(|(node, recorded)| node_telemetry(view, node, recorded))
         .collect();
     let totals = buckets(view);
     let mut run = Map::new();
@@ -610,7 +731,11 @@ fn round(view: &RunView, number: u64) -> Option<Value> {
     let plan = round_plan(view, number)?;
     let task_ids: BTreeSet<&str> = plan.tasks.iter().map(|node| node.id.as_str()).collect();
     let result = read_json(&view.paths.round_result(number));
-    let current = number == view.state.round;
+    // Only an *open* round is described by the live fold. Once it closes, its own
+    // recorded result is the sole account of it that survives the next round
+    // starting — and it holds outcomes the fold never saw, because a status a
+    // round records at its end was never journalled as a settlement.
+    let current = number == view.state.round && view.state.round_open;
 
     // The current round's statuses are the live fold; a finished round's are
     // what its own result recorded, which is the only account of it that
@@ -711,6 +836,41 @@ fn plan_document(plan: &Plan) -> Value {
     Value::Object(document)
 }
 
+/// The fields of a recorded node result the wire carries, each as recorded.
+///
+/// Deliberately an allowlist rather than a passthrough: a round's result is a
+/// wider record than `graphResultItemSchema` describes, and serving a key the
+/// client has no meaning for would be this crate inventing contract.
+const RESULT_FIELDS: &[&str] = &[
+    "status",
+    "outcome",
+    "branch",
+    "blocked_by",
+    "unblocks",
+    "human_actions",
+    "detail",
+    "error",
+    "exit_code",
+    "ok",
+];
+
+/// The payload of the settlement the current round recorded for `node`.
+///
+/// The last one wins: a node that settled more than once in a round is a node
+/// that was retried, and the retry is what happened.
+fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
+    view.events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+                && event.labels.round == Some(view.state.round)
+                && event.labels.node.as_deref() == Some(node)
+        })
+        .map(|event| event.payload.clone())
+}
+
 /// One node's recorded result within a round, when the round recorded one.
 fn node_result(
     view: &RunView,
@@ -724,9 +884,9 @@ fn node_result(
         .and_then(|r| r["nodes"].as_array())
         .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))
     {
-        for field in ["status", "outcome", "branch", "blocked_by", "unblocks"] {
+        for field in RESULT_FIELDS {
             if let Some(value) = recorded.get(field) {
-                item.insert(field.to_owned(), value.clone());
+                item.insert((*field).to_owned(), value.clone());
             }
         }
         if let Some(url) = recorded.get("change_url").and_then(Value::as_str) {
@@ -744,6 +904,20 @@ fn node_result(
             "completed".into(),
             json!(status_word(status.as_str()) == "done"),
         );
+        // The words the settlement itself carried. The SDK's fold keeps a node's
+        // status, outcome and branch but not the prose beside them, and a node
+        // that stopped without them is a card that says only "failed" — which
+        // tells a reader less than the run already knows.
+        if let Some(settled) = settlement(view, &node.id) {
+            for field in RESULT_FIELDS {
+                if item.contains_key(*field) {
+                    continue;
+                }
+                if let Some(value) = settled.get(*field) {
+                    item.insert((*field).to_owned(), value.clone());
+                }
+            }
+        }
         if let Some(outcome) = view.state.outcomes.get(&node.id) {
             item.insert("outcome".into(), json!(outcome));
         }

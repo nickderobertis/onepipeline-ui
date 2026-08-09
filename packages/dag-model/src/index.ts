@@ -48,11 +48,17 @@ export const API_V2_QUERY = {
   after: "after",
   cursor: "cursor",
   limit: "limit",
-  nodeId: "node_id",
+  /**
+   * Which node a `scope=node` timeline is for. `docs/contract.md` names the pair —
+   * `?scope=node&node=ID` — and the server refuses a scope that names no node, so
+   * the two are always sent together.
+   */
+  node: "node",
   scope: "scope",
 } as const;
 export const API_V2_TIMELINE_SCOPES = {
   run: "run",
+  node: "node",
 } as const;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
