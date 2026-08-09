@@ -1,7 +1,7 @@
 # apps/dag-ui/AGENTS.md
 
-The DAG Observatory: the browser view of what the read API serves.
-[`docs/dag-ui.md`](../../docs/dag-ui.md) is the guide; this is the bar.
+The DAG Observatory: the browser view of what the read API serves. What follows
+is the bar it is held to, not a tour of it.
 
 ## The bar is journeys, not a number
 

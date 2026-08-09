@@ -162,6 +162,12 @@ jobs:
       # On a PR, the change is not on the remote yet, so `--path .` is the only
       # way to install *this* revision.
       - name: Install (this revision)
+        # Denied here for the same reason release.yml denies them on every build
+        # it does: this is a release-profile compile of the whole crate on three
+        # platforms, and the gate's own build is a debug one on Linux — so a
+        # warning that only appears this way has no other job to surface it.
+        env:
+          RUSTFLAGS: "-D warnings"
         run: cargo install --path . --locked
       - name: Smoke-test the installed binary
         run: |
