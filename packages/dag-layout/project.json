@@ -1,0 +1,28 @@
+{
+  "name": "dag-layout",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/dag-layout/src",
+  "tags": ["scope:shared", "type:layout"],
+  "targets": {
+    "build": {
+      "command": "npx tsc -p packages/dag-layout/tsconfig.json --emitDeclarationOnly",
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "command": "npx biome check packages/dag-layout && npx eslint packages/dag-layout"
+    },
+    "test": {
+      "command": "npx vitest run --root packages/dag-layout"
+    },
+    "typecheck": {
+      "command": "npx tsc -p packages/dag-layout/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "npx biome check --write --linter-enabled=false packages/dag-layout"
+    },
+    "format-check": {
+      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/dag-layout"
+    }
+  }
+}

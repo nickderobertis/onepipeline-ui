@@ -9,20 +9,30 @@
       "{workspaceRoot}/package-lock.json",
       "{workspaceRoot}/rust-toolchain.toml",
       "{workspaceRoot}/rustfmt.toml",
-      "{workspaceRoot}/clippy.toml"
+      "{workspaceRoot}/clippy.toml",
+      "{workspaceRoot}/biome.json",
+      "{workspaceRoot}/eslint.config.mjs",
+      "{workspaceRoot}/tsconfig.base.json"
     ],
-    "default": ["{projectRoot}/**/*", "sharedGlobals"]
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "apiServerSurface": [
+      "{workspaceRoot}/src/**/*.rs",
+      "{workspaceRoot}/Cargo.toml",
+      "{workspaceRoot}/Cargo.lock"
+    ]
   },
   "targetDefaults": {
     "bootstrap": { "cache": false },
     "format": { "cache": false },
     "format-check": { "cache": true, "inputs": ["default"] },
     "lint": { "cache": true, "inputs": ["default"] },
+    "typecheck": { "cache": true, "inputs": ["default"] },
+    "build": { "cache": true, "inputs": ["default"] },
     "test": { "cache": true, "inputs": ["default"] },
     "doc": { "cache": true, "inputs": ["default"] },
     "check": {
       "cache": false,
-      "dependsOn": ["format-check", "lint", "test", "doc"]
+      "dependsOn": ["format-check", "lint", "typecheck", "build", "test", "doc"]
     }
   }
 }

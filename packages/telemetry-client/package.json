@@ -1,0 +1,12 @@
+{
+  "name": "@onepipeline-ui/telemetry-client",
+  "version": "0.0.0-workspace",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@onepipeline-ui/dag-model": "*"
+  }
+}

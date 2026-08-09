@@ -1,0 +1,29 @@
+{
+  "name": "telemetry-client",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/telemetry-client/src",
+  "tags": ["scope:shared", "type:client"],
+  "implicitDependencies": ["dag-model"],
+  "targets": {
+    "build": {
+      "command": "npx tsc -p packages/telemetry-client/tsconfig.json --emitDeclarationOnly",
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "command": "npx biome check packages/telemetry-client && npx eslint packages/telemetry-client"
+    },
+    "test": {
+      "command": "npx vitest run --root packages/telemetry-client"
+    },
+    "typecheck": {
+      "command": "npx tsc -p packages/telemetry-client/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "npx biome check --write --linter-enabled=false packages/telemetry-client"
+    },
+    "format-check": {
+      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/telemetry-client"
+    }
+  }
+}

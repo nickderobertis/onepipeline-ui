@@ -1,0 +1,12 @@
+{
+  "name": "@onepipeline-ui/dag-layout",
+  "version": "0.0.0-workspace",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "1.1.5"
+  }
+}

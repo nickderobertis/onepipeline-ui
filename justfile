@@ -59,7 +59,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint test doc
+check: fmt-check lint typecheck build test doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -100,6 +100,16 @@ format:
 # Lint every project with its own linter; any warning is an error.
 lint:
     @bash scripts/nx.sh run-many -t lint
+
+# Type-check every project that has a type checker. The Rust crate's compiler
+# does this inside `lint`, so only the TypeScript projects carry this target.
+typecheck:
+    @bash scripts/nx.sh run-many -t typecheck
+
+# Build every project that produces an artifact — the frontend bundle and the
+# packages' declarations. The crate's own build is covered by `lint` and `test`.
+build:
+    @bash scripts/nx.sh run-many -t build
 
 # Every project's test suite; the crate's enforces its coverage floor.
 test:
@@ -147,6 +157,13 @@ test-e2e:
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.
 run *ARGS:
     cargo run --locked --quiet -- {{ARGS}}
+
+# The operator iterates on this UI visually and cannot otherwise see it while a
+# change is being made; the script's own header explains the per-invocation
+# gallery. Not in `check`: it asserts nothing and writes images.
+# Photograph the DAG Observatory at every viewport into a fresh gallery.
+dag-ui-screens *ARGS:
+    @bash scripts/dag-ui-screens.sh {{ARGS}}
 
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.

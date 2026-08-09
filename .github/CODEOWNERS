@@ -13,6 +13,13 @@
 /docs/contract.md        @nickderobertis
 /Cargo.toml              @nickderobertis
 
+# The frontend: the React app and the packages it reads the contract through.
+/apps/dag-ui/            @nickderobertis
+/packages/dag-model/     @nickderobertis
+/packages/dag-layout/    @nickderobertis
+/packages/telemetry-client/ @nickderobertis
+/docs/dag-ui.md          @nickderobertis
+
 # The distribution wrappers.
 /npm/onepipeline-api-cli/ @nickderobertis
 /pyproject.toml          @nickderobertis
