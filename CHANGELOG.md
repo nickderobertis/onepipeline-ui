@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.1.0...v0.2.0) - 2026-08-09
+
+### Added
+
+- [**breaking**] ship the DAG Observatory, and publish the read API as onepipeline-api-cli ([#2](https://github.com/nickderobertis/onepipeline-ui/pull/2))
+
 ## [0.1.0](https://github.com/nickderobertis/onepipeline-ui/releases/tag/v0.1.0) - 2026-08-08
 
 ### Added
