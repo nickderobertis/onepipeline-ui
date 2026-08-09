@@ -5,6 +5,7 @@
 //! a code that disagree. The codes are the ones the existing `/api/v2` clients
 //! already branch on; the copied frontend re-points without touching them.
 
+use axum::http::StatusCode;
 use thiserror::Error;
 
 use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, RunId};
@@ -78,21 +79,26 @@ impl ApiError {
     }
 
     /// The HTTP status this failure is served with.
+    ///
+    /// The status type rather than a number: every arm here is a status that
+    /// exists, and a route rebuilding one from an integer would have to decide
+    /// what to do when it did not — a branch nothing can reach and nothing can
+    /// test.
     #[must_use]
-    pub fn status(&self) -> u16 {
+    pub fn status(&self) -> StatusCode {
         match self {
             Self::InvalidRequest(_)
             | Self::InvalidRunId(_)
             | Self::InvalidNodeId(_)
             | Self::InvalidConversationId(_)
             | Self::InvalidArtifactId(_)
-            | Self::InvalidDispatchId(_) => 422,
+            | Self::InvalidDispatchId(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoSuchRoute
             | Self::RunNotFound(_)
             | Self::ConversationNotFound(_)
-            | Self::ArtifactNotFound(_) => 404,
-            Self::ProjectionFailed(_) => 409,
-            Self::Read(_) => 500,
+            | Self::ArtifactNotFound(_) => StatusCode::NOT_FOUND,
+            Self::ProjectionFailed(_) => StatusCode::CONFLICT,
+            Self::Read(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 

@@ -9,6 +9,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -69,9 +70,31 @@ pub struct ServeArgs {
     /// much of this host's disk the stream costs to hold open. A watched run's
     /// transcripts are re-read a tenth as often, because that read walks every
     /// relayed envelope of the run.
-    #[arg(long, value_name = "MS", default_value_t = DEFAULT_POLL_MS)]
+    /// Refused rather than clamped at zero: a poll of no milliseconds is a
+    /// request this host cannot honour, and a usage error is the contract for
+    /// one — silently correcting it would leave an operator believing the
+    /// number they typed is what the stream is doing.
+    #[arg(
+        long,
+        value_name = "MS",
+        default_value_t = DEFAULT_POLL_MS,
+        value_parser = clap::value_parser!(u64).range(1..),
+    )]
     #[serde(default = "default_poll_ms")]
     pub poll_interval_ms: u64,
+}
+
+impl ServeArgs {
+    /// How often the event stream re-reads the runs root, as a duration that is
+    /// never zero.
+    ///
+    /// The flag refuses zero outright, but this type is also the config schema,
+    /// and a config file is a second way in: the floor is stated here, once, so
+    /// neither boundary can hand the stream an interval it would spin on.
+    #[must_use]
+    pub fn poll_interval(&self) -> Duration {
+        Duration::from_millis(self.poll_interval_ms.max(1))
+    }
 }
 
 /// How often the event stream re-reads the runs root when nothing says otherwise.

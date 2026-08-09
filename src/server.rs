@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -185,8 +185,7 @@ type Store = State<Serving>;
 /// Render a failed read as the error contract, whatever produced it.
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status =
-            StatusCode::from_u16(self.status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status = self.status();
         (status, Json(self.envelope())).into_response()
     }
 }

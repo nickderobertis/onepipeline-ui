@@ -56,8 +56,15 @@ if ! command -v "$command_name" >/dev/null 2>&1; then
 fi
 
 # `--version` prints `<name> <version>`; take the last field so the assertion is
-# about the version and not about how clap spells the program name.
-reported="$("$command_name" --version | tr -d '\r' | awk 'NR==1 {print $NF}')"
+# about the version and not about how clap spells the program name. Captured
+# without `set -e` deciding what happens: `pipefail` would otherwise end the run
+# here on a binary that cannot even print its version, with the shell's own
+# silence in place of what went wrong and what to do about it.
+if ! version_output="$("$command_name" --version 2>&1)"; then
+  fail "'$command_name --version' failed: ${version_output}" \
+    "the installed binary does not run on this platform; check the build job for it"
+fi
+reported="$(printf '%s\n' "$version_output" | tr -d '\r' | awk 'NR==1 {print $NF}')"
 if [ "$reported" != "$expect_version" ]; then
   fail "installed $reported but the release is $expect_version" \
     "check that the publish job uploaded artifacts built from this tag"
