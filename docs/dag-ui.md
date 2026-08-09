@@ -62,12 +62,12 @@ Start the read-only telemetry API, then start Vite in a second shell:
 
 ```sh
 just bootstrap
-just telemetry-server   # reads ./runs; pass --runs-dir to point elsewhere
-just dag-ui
+just run serve --runs-root ./runs   # the read API; --bind moves it
+just nx run dag-ui:serve
 ```
 
 Open `http://127.0.0.1:4173`. Vite proxies `/api` and `/healthz` to
-`http://127.0.0.1:8787` — the loopback address and port `orchestrator/server.py`
+`http://127.0.0.1:8787` — the loopback address and port `onepipeline-ui serve`
 binds by default. Set `DAG_UI_API_URL` to proxy somewhere else. In a production
 deployment, serve the built files from `apps/dag-ui/dist` on the same origin as
 the API, or route those paths to it.
@@ -385,12 +385,12 @@ just dag-ui-screens
 `just check` runs both tiers of the app's suite. Testing Library exercises the
 views through the real telemetry client with only the browser's `fetch` and
 `EventSource` replaced. Playwright then drives the built user journeys in a real
-browser against a real `orchestrator/server.py` process:
-`apps/dag-ui/e2e/fixtures/serve_fixture.py` writes a throwaway run directory with
-the executor's own journal writers, serves it through the actual read API, and
-`playwright.config.ts` starts both that server and Vite. Only the paid harness'
-history store is recorded, through the same `tests/e2e/fake_oneharness.py`
-subprocess the Python e2e suite uses.
+browser against a real `onepipeline-ui serve` process:
+`apps/dag-ui/e2e/fixtures/runs.mjs` writes a throwaway run directory in the SDK's
+own on-disk shape — a launch record, a plan, a per-round plan and result, and the
+merged event store — `serve-fixture.mjs` serves it through the compiled binary,
+and `playwright.config.ts` starts both that server and Vite. Nothing between the
+browser and the read model is doubled.
 
 The gallery spec lives beside the journeys because it drives the same surfaces against
 the same stack, but it asserts nothing and writes images, so `playwright.config.ts`
@@ -408,7 +408,7 @@ overlapping runs collide by construction — a `--strictPort` Vite refusing a po
 other run holds, and a fixture server rebuilding the run directory the other run is
 asserting against. The one port that must *refuse* connections, so the
 unreachable-API journey has a real failure to observe, is held bound but unlistened
-by the stall server (`serve_fixture.py --refuse-port`): leaving it merely free would
+by the stall server (`serve-fixture.mjs --refuse-port`): leaving it merely free would
 let a concurrent run's own API server take it.
 
 That gallery is deliberately outside `just check`: its product is images a reviewer
