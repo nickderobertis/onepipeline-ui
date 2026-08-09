@@ -15,9 +15,11 @@ export interface DagNode {
 
 /**
  * Every node status the read API serves, and the only vocabulary a renderer switches
- * on. `@onepipeline-ui/dag-model`'s `nodeStatusSchema` owns it, and
- * `model.e2e.test.ts` fails when the two disagree, so a status added there reaches
- * every renderer rather than arriving as a layout error.
+ * on. `@onepipeline-ui/dag-model`'s `nodeStatusSchema` owns it; this restates it
+ * because a geometry package takes no dependency on the model. The two are held
+ * together by `apps/dag-ui/src/test/node-state-contract.test.ts`, in the one project
+ * that depends on both, so a status added there reaches every renderer rather than
+ * arriving as a missing style token on whichever node is in it.
  */
 export const DAG_NODE_STATES = [
   "pending",

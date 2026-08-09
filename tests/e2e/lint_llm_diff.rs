@@ -1,10 +1,14 @@
 //! The LLM-judge tier's journey: `scripts/lint-llm-diff.sh`, driven the way
-//! `just lint-llm-diff` drives it, over a real git repository with a real
-//! `llmlint` on PATH that records the calls it is asked to make.
+//! `just lint-llm-diff` drives it, over a real git repository.
 //!
-//! The judge is the one thing not run here — a model call is neither free nor
-//! deterministic — but everything this script decides is. Which files a shard
-//! judges, that the excludes it passes are exactly the rest of the change, that
+//! One thing is stood in for. `llmlint` on PATH is a recording stand-in rather than
+//! the real command, because the real one bills a model call per shard and answers
+//! differently each time — a journey that drove it could assert nothing about what
+//! this script did. What the script decides is entirely deterministic, and the
+//! stand-in is what makes it observable: it is the boundary the script talks across,
+//!
+//! Which files a shard judges, that the excludes it passes are exactly the rest of
+//! the change, that
 //! every changed file is judged exactly once, that no shard carries more diff
 //! than the character budget a harness caps, that a failing shard does not stop
 //! the ones after it, and which exit code the caller ends up with are all
