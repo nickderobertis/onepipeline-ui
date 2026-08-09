@@ -533,6 +533,19 @@ jobs:
           # the version-stamped manifest.
           launcher="$(node scripts/npm-build.mjs launcher --out npm/dist)"
           bash scripts/publish-npm.sh "$launcher"
+      # The other npm deliverable: the frontend itself, which carries no binary
+      # and so has no per-platform packages to publish first. It is built here
+      # rather than in the matrix above because one static bundle serves every
+      # platform — building it five times would publish whichever won.
+      - name: Build the frontend bundle
+        run: |
+          bash scripts/nx.sh run dag-ui:build
+      - name: Publish the frontend package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          ui="$(node scripts/npm-build.mjs ui --out npm/dist)"
+          bash scripts/publish-npm.sh "$ui"
 
   # Post-publish gate: prove the just-published version is npm-installable on
   # every OS a user installs it on, the same promise verify-pypi makes for the

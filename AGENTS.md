@@ -31,6 +31,27 @@ Two rules govern what may be written here:
   are `serde_json::Value` and this crate owns only the envelope: inventing record
   types here would put a second source of truth in the wrong repo.
 
+### Computations proposed for the SDK
+
+`src/payload.rs` and `src/store.rs` derive a handful of things the SDK does not
+compute yet. Each one is presentation-worthy, so each belongs *there* rather than
+here — until it lands, this list is the record of what an agent reading the CLI
+cannot currently see that a human in the UI can. Do not add to it silently:
+anything new here is a proposal to make upstream first.
+
+- **The eight-way timing breakdown.** The SDK attributes a run's wall clock four
+  ways behind its contract surface; the wire's breakdown is finer, and
+  `payload::buckets` recomputes the fold to map onto it.
+- **A dispatch id.** The journal stamps a dispatch with its run, round, and node
+  but mints no id for it; schema 10 serves one, so `payload::dispatch_key`
+  derives it from the three.
+- **An opaque session key.** The raw launching session id may be sensitive and is
+  never served, so runs are grouped by a digest of it.
+- **The run list's order.** `RunStore::run_list` orders by most recent progress,
+  newest first, because a client opens the first row and an operator came to look
+  at the run that moved last. `onepipeline runs` orders by run id, so the two
+  listings disagree about what leads.
+
 ## Two standing goals on every task
 
 The user drives product features and their request is the priority — but carry
@@ -96,7 +117,11 @@ fans one uniformly-named target across all of them.
 
 - The gate is strict: no warnings-only mode anywhere. A diagnostic is an error or
   a suppression with a written reason at the narrowest scope the tool allows.
-- **Coverage is enforced at 95% line coverage**; the gate fails below it.
+- **Coverage is enforced at 95% line coverage**; the gate fails below it. That
+  is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend's bar is
+  its journeys: `apps/dag-ui`'s `test` target runs vitest and *both* Playwright
+  configs, and a change to what a reader sees is not done until one of them
+  drives it.
 - **Tests are realistic, not mocked, and complete, not minimal.** Nothing under
   test is stubbed, and a change is not done until a real journey covers it —
   happy path and at least one failure a user can cause.

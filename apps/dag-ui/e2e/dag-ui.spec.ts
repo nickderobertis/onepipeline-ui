@@ -11,8 +11,8 @@ import {
 import { PHONE } from "./viewports";
 
 /**
- * The DAG Observatory driven end to end against a real `orchestrator/server.py`
- * serving a real recorded run directory (see `e2e/fixtures/serve_fixture.py`, started
+ * The DAG Observatory driven end to end against a real `onepipeline-ui serve`
+ * serving a real recorded run directory (see `e2e/fixtures/serve-fixture.mjs`, started
  * by `playwright.config.ts`). Nothing between the browser and the read model is
  * doubled: the app's own telemetry client makes the HTTP and SSE requests, and the
  * server projects them from journal files the executor's own writers produced. Live
@@ -22,10 +22,10 @@ import { PHONE } from "./viewports";
  */
 
 /**
- * What the fixture wrote — its runs, and the pull request one of them published —
- * read from the file it publishes beside them. The Python module that records them is
- * their one source; naming them again here would be a second one that drifts the
- * moment the fixture changes.
+ * What the fixture wrote — its runs, and the change request one of them published —
+ * read from the file it publishes beside them. `e2e/fixtures/runs.mjs` is their one
+ * source; naming them again here would be a second one that drifts the moment the
+ * fixture changes.
  */
 const fixtureSchema = z.object({
   runs: z.object({
@@ -140,15 +140,8 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  */
 function changeServedRuns(args: string[]): void {
   execFileSync(
-    "uv",
-    [
-      "run",
-      "python",
-      "e2e/fixtures/serve_fixture.py",
-      "--workspace",
-      FIXTURE_WORKSPACE,
-      ...args,
-    ],
+    process.execPath,
+    ["e2e/fixtures/serve-fixture.mjs", "--workspace", FIXTURE_WORKSPACE, ...args],
     { stdio: "inherit" },
   );
 }

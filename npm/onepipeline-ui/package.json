@@ -1,0 +1,21 @@
+{
+  "name": "onepipeline-ui",
+  "version": "0.0.0-managed",
+  "description": "The DAG Observatory: the browser view of onepipeline runs, built and ready to serve.",
+  "keywords": ["ui", "dashboard", "telemetry", "observability", "onepipeline"],
+  "homepage": "https://github.com/nickderobertis/onepipeline-ui",
+  "bugs": "https://github.com/nickderobertis/onepipeline-ui/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nickderobertis/onepipeline-ui.git"
+  },
+  "license": "MIT",
+  "author": "Nick DeRobertis",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./dist": "./dist",
+    "./package.json": "./package.json"
+  }
+}

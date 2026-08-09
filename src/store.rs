@@ -106,14 +106,34 @@ impl RunStore {
     }
 
     /// The run list as one page, with the cursor the next page resumes from.
+    ///
+    /// Ordered by most recent progress, newest first, because that is the order a
+    /// reader arrives in: a client takes the first row as the run to open, and the
+    /// run that moved last is the one an operator came to look at. The SDK orders
+    /// its own listing by run id instead, so this is one of the presentation-worthy
+    /// computations AGENTS.md proposes moving into it. Ties break on the id, so the
+    /// order is total and a page boundary lands in the same place on every read.
     fn run_list(&self, query: &RunsQuery) -> Value {
-        let mut rows: Vec<&RunView> = Vec::new();
         let views = self.views();
-        let after = query.cursor.as_ref().map(RunId::as_str);
-        for view in &views {
-            if after.is_some_and(|cursor| view.paths.run.as_str() <= cursor) {
-                continue;
-            }
+        let mut ordered: Vec<&RunView> = views.iter().collect();
+        ordered.sort_by(|left, right| {
+            right
+                .state
+                .last_write_at
+                .cmp(&left.state.last_write_at)
+                .then_with(|| left.paths.run.cmp(&right.paths.run))
+        });
+        // The cursor names the last row *served*, so resumption is positional in
+        // this order rather than a comparison on the id: an id comparison would
+        // skip or repeat rows the moment the order stopped being the id's.
+        let resume = query.cursor.as_ref().map_or(0, |cursor| {
+            ordered
+                .iter()
+                .position(|view| view.paths.run == cursor.as_str())
+                .map_or(0, |index| index + 1)
+        });
+        let mut rows: Vec<&RunView> = Vec::new();
+        for view in ordered.into_iter().skip(resume) {
             if !query.include_settled && Self::settled(view) {
                 continue;
             }

@@ -25,6 +25,9 @@ const COMMAND: &str = "onepipeline-ui";
 /// The distribution name the PyPI and npm wrappers publish under.
 const WRAPPER: &str = "onepipeline-api-cli";
 
+/// The npm distribution that carries the frontend rather than a binary.
+const FRONTEND: &str = "onepipeline-ui";
+
 #[test]
 fn the_crate_ships_the_binary_the_wrappers_wrap() {
     let cargo = read("Cargo.toml");
@@ -65,6 +68,40 @@ fn the_npm_launcher_wraps_the_binary_and_carries_no_version_of_its_own() {
     // The committed manifest carries a placeholder; scripts/npm-build.mjs stamps
     // the crate version in at publish time (proven by tests/e2e/packaging.rs).
     assert_eq!(manifest["version"], "0.0.0-managed");
+}
+
+#[test]
+fn the_frontend_package_carries_the_bundle_and_no_binary() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("npm/onepipeline-ui/package.json")).expect("parse manifest");
+    assert_eq!(manifest["name"], FRONTEND);
+    // Two deliverables, split by what they contain: this one is the built view,
+    // so a `bin` or a platform dependency here would make it a second wrapper.
+    assert!(
+        manifest.get("bin").is_none(),
+        "the frontend package declares a binary"
+    );
+    assert!(
+        manifest.get("optionalDependencies").is_none(),
+        "the frontend package pins per-platform binaries"
+    );
+    assert_eq!(manifest["files"], serde_json::json!(["dist"]));
+    // The same placeholder discipline as the launcher: release-plz is the one
+    // version driver, so a real number here would be a second source to drift.
+    assert_eq!(manifest["version"], "0.0.0-managed");
+}
+
+#[test]
+fn the_frontend_package_refuses_to_ship_without_a_built_bundle() {
+    let out = tempfile::tempdir().expect("temp dir");
+    let path = out.path().to_str().expect("utf-8 path");
+    // Pointed at a directory nothing has built into, `ui` must say so rather than
+    // publish a package whose `dist/` is empty.
+    let built = npm_build(&["ui", "--out", path, "--bundle", path]);
+    assert!(!built.status.success());
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(stderr.contains("no built frontend"), "{stderr}");
+    assert!(stderr.contains("ACTION:"), "{stderr}");
 }
 
 #[test]

@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-// Build the npm packages that distribute the prebuilt onepipeline-ui binary — the
-// direct analogue of the maturin PyPI wheels (see pyproject.toml). The layout
-// mirrors esbuild/@biomejs and every other "carry the native binary" npm tool:
+// Build the npm packages this repository publishes. There are two deliverables,
+// split by what they contain.
+//
+// The first distributes the prebuilt onepipeline-ui binary — the direct analogue of
+// the maturin PyPI wheels (see pyproject.toml). Its layout mirrors esbuild/@biomejs
+// and every other "carry the native binary" npm tool:
 //
 //   onepipeline-api-cli                launcher package (npm/onepipeline-api-cli, committed)
 //     bin/onepipeline-ui.js            resolves + execs the platform binary
@@ -19,6 +22,11 @@
 // `npm install -g onepipeline-api-cli` is a seconds-fast binary install — the same
 // promise the wheels make on PyPI.
 //
+// The second is `onepipeline-ui` itself: the built frontend, assembled by the `ui`
+// mode below from `apps/dag-ui/dist`. It carries no binary and no dependencies — a
+// Vite bundle inlines what it needs — so it is the committed manifest plus that
+// directory, and nothing else.
+//
 // The version is sourced from Cargo.toml (release-plz stays the single version
 // driver, exactly like the wheels' `dynamic = ["version"]`); pass --version to
 // override. Nothing here publishes — it only assembles package directories under
@@ -28,8 +36,9 @@
 //   node scripts/npm-build.mjs platform --target <triple> --binary <path> \
 //        [--version <v>] [--out <dir>]
 //   node scripts/npm-build.mjs launcher [--version <v>] [--out <dir>]
+//   node scripts/npm-build.mjs ui [--bundle <dir>] [--version <v>] [--out <dir>]
 //
-// Both modes print the created package directory on stdout.
+// Every mode prints the created package directory on stdout.
 
 import {
   chmodSync,
@@ -255,14 +264,62 @@ function buildLauncher(args) {
   process.stdout.write(`${dest}\n`);
 }
 
+// Assemble the frontend package: the committed manifest plus the bundle Vite built.
+// The bundle is an input rather than something built here — `just build` (Nx's
+// `dag-ui:build`) owns that step, and running it from inside a packaging script would
+// be a second place the frontend gets built.
+function buildUi(args) {
+  const version = resolveVersion(args);
+  const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
+  const src = join(REPO_ROOT, "npm", "onepipeline-ui");
+  // `--bundle` names the built view; it defaults to where Nx puts it. Explicit so
+  // a release can assemble from a downloaded artifact, and so the "nothing was
+  // built" refusal below can be exercised without emptying the checkout.
+  const bundle = resolve(args.bundle || join(REPO_ROOT, "apps", "dag-ui", "dist"));
+  const dest = join(outRoot, "onepipeline-ui");
+
+  if (!existsSync(join(bundle, "index.html"))) {
+    die(
+      `ui: no built frontend at ${bundle}`,
+      "build it first: just build (or `nx run dag-ui:build`)"
+    );
+  }
+
+  attempt(
+    `cannot assemble the frontend package under ${outRoot}`,
+    "restore npm/onepipeline-ui from git, and check that --out is writable",
+    () => {
+      rmSync(dest, { recursive: true, force: true });
+      mkdirSync(outRoot, { recursive: true });
+      cpSync(src, dest, { recursive: true });
+      cpSync(bundle, join(dest, "dist"), { recursive: true });
+    }
+  );
+
+  // The same placeholder discipline the launcher follows: the committed manifest
+  // carries no real number, so release-plz stays the single version driver.
+  const manifestPath = join(dest, "package.json");
+  const manifest = attempt(
+    "the committed frontend manifest is missing or is not JSON",
+    "restore npm/onepipeline-ui/package.json from git",
+    () => JSON.parse(readFileSync(manifestPath, "utf8"))
+  );
+  manifest.version = version;
+  writeJson(manifestPath, manifest);
+
+  process.stdout.write(`${dest}\n`);
+}
+
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "platform") {
   buildPlatform(parseArgs(rest, ["target", "binary", "version", "out"]));
 } else if (mode === "launcher") {
   buildLauncher(parseArgs(rest, ["version", "out"]));
+} else if (mode === "ui") {
+  buildUi(parseArgs(rest, ["version", "out", "bundle"]));
 } else {
   die(
     `unknown mode ${mode === undefined ? "(none given)" : mode}`,
-    "run `npm-build.mjs platform --target <triple> --binary <path> [--version <v>] [--out <dir>]` or `npm-build.mjs launcher [--version <v>] [--out <dir>]`"
+    "run `npm-build.mjs platform --target <triple> --binary <path> [--version <v>] [--out <dir>]`, `npm-build.mjs launcher [--version <v>] [--out <dir>]`, or `npm-build.mjs ui [--version <v>] [--out <dir>]`"
   );
 }

@@ -71,6 +71,65 @@ fn the_run_list_serves_every_recorded_run_with_its_session_attribution() {
 }
 
 #[test]
+fn the_run_list_leads_with_the_run_that_moved_most_recently() {
+    // A reader arrives on the first row, so the order is the answer to "what am I
+    // here to look at". The two fixture runs record the same instants, so the one
+    // that progressed *after* them is what has to lead — which the SDK's own
+    // id-ordered listing would bury alphabetically.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::append(&dir, "round-started", json!({}));
+    });
+    let body = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let ids: Vec<&str> = body["runs"]
+        .as_array()
+        .expect("runs is an array")
+        .iter()
+        .filter_map(|run| run["run_id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![fixture_run::RUN_ID, fixture_run::OTHER_RUN_ID],
+        "the run that progressed last is not the one a reader lands on"
+    );
+
+    // And the page boundary is positional in that order rather than a comparison
+    // on the id: the second page must be the row the first one did not serve,
+    // even though its id sorts *before* the cursor's.
+    let first = http::get(serving.address, "/api/v2/runs?include_settled=true&limit=1").json();
+    let cursor = first["next_cursor"].as_str().expect("a cursor");
+    assert_eq!(cursor, fixture_run::RUN_ID);
+    let second = http::get(
+        serving.address,
+        &format!("/api/v2/runs?include_settled=true&cursor={cursor}"),
+    )
+    .json();
+    assert_eq!(
+        second["runs"][0]["run_id"],
+        json!(fixture_run::OTHER_RUN_ID)
+    );
+}
+
+#[test]
+fn a_cursor_naming_a_run_that_has_gone_serves_the_list_from_its_start() {
+    // A run can be swept between two pages, and a client holding that cursor must
+    // still be able to read: serving nothing would strand it on a page it can
+    // never turn, so the list restarts rather than ending.
+    let serving = two_runs();
+    let body = http::get(
+        serving.address,
+        "/api/v2/runs?include_settled=true&cursor=run-20260807-999999",
+    )
+    .json();
+    assert_eq!(
+        body["runs"].as_array().map(Vec::len),
+        Some(2),
+        "a stale cursor stranded the client instead of restarting the list"
+    );
+}
+
+#[test]
 fn the_run_list_hides_settled_runs_unless_asked_for_them() {
     let serving = two_runs();
     let body = http::get(serving.address, "/api/v2/runs").json();

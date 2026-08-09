@@ -6,7 +6,7 @@ import { FIXTURE_WORKSPACE } from "../playwright.config";
 /**
  * What the fixture wrote, read from the file it publishes beside its runs.
  *
- * `e2e/fixtures/serve_fixture.py` is the one source of these ids; naming them again
+ * `e2e/fixtures/runs.mjs` is the one source of these ids; naming them again
  * in a spec would be a second one that drifts the moment the fixture changes.
  */
 const fixtureSchema = z.object({

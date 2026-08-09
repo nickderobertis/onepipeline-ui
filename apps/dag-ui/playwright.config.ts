@@ -34,8 +34,8 @@ const sessionSchema = z.object({
 type Session = z.infer<typeof sessionSchema>;
 
 /**
- * The Python program that asks the kernel which ports are free; running it is what
- * produces the six numbers.
+ * The program that asks the kernel which ports are free; running it is what produces
+ * the six numbers.
  *
  * It binds all six at once so they come back distinct, then releases them together —
  * nothing here reserves anything, because a port has to be free for a server to take
@@ -44,15 +44,22 @@ type Session = z.infer<typeof sessionSchema>;
  * `--strictPort` Vite or the stall server refusing to start, never a run quietly
  * attached to another run's server. Choosing by arithmetic from a base would not even
  * give that: only the kernel knows what is free.
+ *
+ * It runs in a child process because the answer has to be produced synchronously,
+ * before this module finishes evaluating, and binding a socket in Node is not.
  */
 const FREE_PORTS_SCRIPT = `
-import json, socket
-held = [socket.socket() for _ in range(6)]
-for sock in held:
-    sock.bind(("127.0.0.1", 0))
-print(json.dumps([sock.getsockname()[1] for sock in held]))
-for sock in held:
-    sock.close()
+const { createServer } = require("node:net");
+const held = Array.from({ length: 6 }, () => createServer());
+let bound = 0;
+for (const server of held) {
+  server.listen(0, "127.0.0.1", () => {
+    bound += 1;
+    if (bound < held.length) return;
+    console.log(JSON.stringify(held.map((s) => s.address().port)));
+    for (const open of held) open.close();
+  });
+}
 `;
 
 function chooseSession(): Session {
@@ -60,7 +67,7 @@ function chooseSession(): Session {
     .tuple([port, port, port, port, port, port])
     .parse(
       JSON.parse(
-        execFileSync("python3", ["-c", FREE_PORTS_SCRIPT], {
+        execFileSync(process.execPath, ["-e", FREE_PORTS_SCRIPT], {
           encoding: "utf8",
         }),
       ),
@@ -120,7 +127,7 @@ export default defineConfig({
   globalTeardown: "./e2e/global-teardown.ts",
   /**
    * Budgeted for this host rather than inherited. Every wait here crosses the browser,
-   * the dev server, uvicorn and a disk read, and this host runs live agent dispatches
+   * the dev server, the axum server and a disk read, and this host runs live agent dispatches
    * beside its own tests, which roughly doubles a journey. Playwright's 5 s / 30 s
    * defaults assume a dedicated runner; the sibling configs driving the same servers
    * already budget for that (`isolation.config.ts`, `screenshots.config.ts`).
@@ -137,34 +144,34 @@ export default defineConfig({
   use: { baseURL: `http://127.0.0.1:${session.ui}` },
   webServer: [
     {
-      command: `uv run python e2e/fixtures/serve_fixture.py --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
+      command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
       url: `http://127.0.0.1:${session.api}/healthz`,
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: `bunx vite --config vite.config.ts --port ${session.ui} --strictPort`,
+      command: `npx vite --config vite.config.ts --port ${session.ui} --strictPort`,
       url: `http://127.0.0.1:${session.ui}`,
       env: { DAG_UI_API_URL: `http://127.0.0.1:${session.api}` },
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: `uv run python e2e/fixtures/serve_fixture.py --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
+      command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
       // Readiness is the accepted connection: this listener answers nothing, by design.
       port: session.stalledApi,
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: `bunx vite --config vite.config.ts --port ${session.stalledUi} --strictPort`,
+      command: `npx vite --config vite.config.ts --port ${session.stalledUi} --strictPort`,
       url: STALLED_UI_URL,
       env: { DAG_UI_API_URL: `http://127.0.0.1:${session.stalledApi}` },
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: `bunx vite --config vite.config.ts --port ${session.offlineUi} --strictPort`,
+      command: `npx vite --config vite.config.ts --port ${session.offlineUi} --strictPort`,
       url: OFFLINE_UI_URL,
       env: { DAG_UI_API_URL: `http://127.0.0.1:${session.offlineApi}` },
       reuseExistingServer: false,
