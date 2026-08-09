@@ -6,9 +6,12 @@
 //! a real port over a directory the onepipeline SDK itself writes and reads the
 //! bytes it serves; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
-//! platform package through node's own resolution.
+//! platform package through node's own resolution; `lint_llm_diff` runs the
+//! gate's own llmlint recipe over a real git repository, against a real
+//! `llmlint` on PATH.
 
 mod cli;
+mod lint_llm_diff;
 mod packaging;
 mod server;
 
