@@ -304,7 +304,7 @@ gallery captures at every entry, and `e2e/dag-ui-navigation.spec.ts` drives the 
 whose outcome depends on width at the widest and narrowest of them.
 
 Each entry's name is what a captured file and a journey title are called, so the table
-below reads in the same words the gallery does. `scripts/check-dag-state-contract.py`
+below reads in the same words the gallery does. `src/test/dag-ui-doc.test.ts`
 reconciles it with that declaration, so a width can neither reach the gallery without
 reaching this table nor be promised here without being photographed.
 
@@ -318,7 +318,7 @@ reaching this table nor be promised here without being photographed.
 
 The **surfaces** are declared once too, as `SURFACES` in `e2e/gallery.screens.spec.ts`,
 and each one names the PNG it writes at every viewport — so the table below is also how
-to find a capture in the gallery directory. `scripts/check-dag-state-contract.py`
+to find a capture in the gallery directory. `src/test/dag-ui-doc.test.ts`
 reconciles it with that declaration for the same reason it reconciles the matrix: a
 surface can neither be photographed without being listed here nor promised here without
 being photographed.

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
-import { graphNodes, metrics } from "./observatory-locators";
+import { graphNodes, metrics, timelineLane } from "./observatory-locators";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -79,9 +79,9 @@ const SURFACES: readonly Surface[] = [
         name: "dashboard timeline",
       });
       await dashboard.getByRole("button", { name: "Expand timeline" }).click();
-      await expect(
-        dashboard.getByTestId("timeline-lane").first(),
-      ).toBeVisible();
+      // An opened row names each of its lanes for a reader who cannot see the plot,
+      // and that name is what says the lanes have arrived.
+      await expect(timelineLane(dashboard, "Worker")).toBeAttached();
     },
   },
   {

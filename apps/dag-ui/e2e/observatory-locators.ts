@@ -46,3 +46,17 @@ export const metric = (page: Page, label: string): Locator =>
 /** Every metric tile of the overall view, in the order they are laid out. */
 export const metrics = (page: Page): Locator =>
   page.getByRole("region", { name: "Run metrics" }).getByRole("group");
+
+/**
+ * One named lane of an opened timeline row.
+ *
+ * A closed row is a single unnamed strip; opening it draws one lane per category and
+ * names each for a reader who cannot see the plot, which makes the name the signal
+ * that the lanes have arrived. Asked for inside the plot rather than anywhere in the
+ * row, because the legend beside it lists the same categories whether the row is open
+ * or shut — and that legend is what a journey waiting on "Worker" would settle for.
+ */
+export const timelineLane = (row: Locator, label: string): Locator =>
+  row
+    .getByLabel("Timeline plot. Scroll to zoom or drag to select a range.")
+    .getByText(label, { exact: true });
