@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Launcher for the `onepipeline-ui` command installed from the
-// `onepipeline-ui-cli` npm package.
+// `onepipeline-api-cli` npm package.
 //
 // Like the PyPI wheels (maturin `bindings = "bin"`, see pyproject.toml), the npm
 // distribution carries the *prebuilt* Rust binary — no Rust toolchain, no
 // compile, no download at install time. The platform-specific binary ships
-// inside a per-platform package (`onepipeline-ui-cli-<platform>-<arch>`)
+// inside a per-platform package (`onepipeline-api-cli-<platform>-<arch>`)
 // declared in this package's `optionalDependencies`; npm installs only the one
 // whose `os`/`cpu` match the host, and this shim resolves it and execs it with
 // the caller's argv.
@@ -22,17 +22,17 @@ const { spawnSync } = require("node:child_process");
 // The keys mirror the Rust target matrix in .github/workflows/release.yml and
 // the optionalDependencies in package.json; keep the three in lockstep.
 const PACKAGES = {
-  "linux-x64": "onepipeline-ui-cli-linux-x64",
-  "linux-arm64": "onepipeline-ui-cli-linux-arm64",
-  "darwin-x64": "onepipeline-ui-cli-darwin-x64",
-  "darwin-arm64": "onepipeline-ui-cli-darwin-arm64",
-  "win32-x64": "onepipeline-ui-cli-win32-x64",
+  "linux-x64": "onepipeline-api-cli-linux-x64",
+  "linux-arm64": "onepipeline-api-cli-linux-arm64",
+  "darwin-x64": "onepipeline-api-cli-darwin-x64",
+  "darwin-arm64": "onepipeline-api-cli-darwin-arm64",
+  "win32-x64": "onepipeline-api-cli-win32-x64",
 };
 
 // Every failure here is a failed install, so say what to do about it rather than
 // only what went wrong.
 const OTHER_INSTALLS =
-  "Install another way instead: 'pip install onepipeline-ui-cli', or " +
+  "Install another way instead: 'pip install onepipeline-api-cli', or " +
   "'cargo install onepipeline-ui --locked'.";
 
 function fail(message) {

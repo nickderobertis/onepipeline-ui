@@ -40,9 +40,9 @@ the UI sees; this crate owns the envelope, not the records.
 Three surfaces, all carrying the same prebuilt binary:
 
 ```bash
-cargo install onepipeline-ui --locked   # from crates.io
-pip install onepipeline-ui-cli          # prebuilt wheel, no Rust toolchain
-npm install -g onepipeline-ui-cli       # prebuilt binary, no Rust toolchain
+cargo install onepipeline-ui --locked  # from crates.io
+pip install onepipeline-api-cli        # prebuilt wheel, no Rust toolchain
+npm install -g onepipeline-api-cli     # prebuilt binary, no Rust toolchain
 ```
 
 Prebuilt archives and their `.sha256` checksums are also attached to every

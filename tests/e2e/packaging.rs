@@ -45,7 +45,7 @@ fn host_package() -> String {
         "aarch64" => "arm64",
         other => other,
     };
-    format!("onepipeline-ui-cli-{platform}-{arch}")
+    format!("onepipeline-api-cli-{platform}-{arch}")
 }
 
 fn repo_root() -> PathBuf {
@@ -87,7 +87,7 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
     let staging = root.join("staging");
     let modules = root.join("node_modules");
     let launcher = npm_build(&["launcher", "--out", staging.to_str().expect("utf-8 path")]);
-    copy_tree(&launcher, &modules.join("onepipeline-ui-cli"));
+    copy_tree(&launcher, &modules.join("onepipeline-api-cli"));
     if with_platform {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-ui");
         let platform = npm_build(&[
@@ -101,7 +101,7 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
         ]);
         copy_tree(&platform, &modules.join(host_package()));
     }
-    modules.join("onepipeline-ui-cli/bin/onepipeline-ui.js")
+    modules.join("onepipeline-api-cli/bin/onepipeline-ui.js")
 }
 
 fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
@@ -158,7 +158,7 @@ fn a_missing_platform_package_fails_with_the_other_install_paths() {
     assert!(stderr.contains(&host_package()), "{stderr}");
     assert!(stderr.contains("optional dependencies"), "{stderr}");
     assert!(
-        stderr.contains("pip install onepipeline-ui-cli"),
+        stderr.contains("pip install onepipeline-api-cli"),
         "{stderr}"
     );
     assert!(stderr.contains("cargo install onepipeline-ui"), "{stderr}");

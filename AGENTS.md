@@ -9,9 +9,15 @@ and the `justfile`; this file holds the judgment.
 ## What this repo is
 
 The read API and browser view for onepipeline runs: a Rust (axum) server wrapping
-the onepipeline SDK, and the frontend that reads it. One crate
-(`onepipeline-ui`, library + CLI) ships on crates.io and, as thin
-prebuilt-binary wrappers, on PyPI and npm as `onepipeline-ui-cli`.
+the onepipeline SDK, and the frontend that reads it.
+
+Two things ship, split by what they contain. The crate `onepipeline-ui`
+(library + CLI) goes to crates.io and, as thin prebuilt-binary wrappers, to PyPI
+and npm as **`onepipeline-api-cli`** — that is the read-API server. The React
+app goes to npm alone as **`onepipeline-ui`**, which carries the built frontend
+rather than a binary. The crate keeps its `onepipeline-ui` name and its
+`onepipeline-ui` console command for the artifact already published under them;
+the split lives in the distribution names.
 
 Two rules govern what may be written here:
 

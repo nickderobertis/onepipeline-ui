@@ -3,20 +3,20 @@
 // direct analogue of the maturin PyPI wheels (see pyproject.toml). The layout
 // mirrors esbuild/@biomejs and every other "carry the native binary" npm tool:
 //
-//   onepipeline-ui-cli                 launcher package (npm/onepipeline-ui, committed)
+//   onepipeline-api-cli                launcher package (npm/onepipeline-api-cli, committed)
 //     bin/onepipeline-ui.js            resolves + execs the platform binary
-//     optionalDependencies:        one per Rust target in release.yml's matrix
-//       onepipeline-ui-cli-linux-x64
-//       onepipeline-ui-cli-linux-arm64
-//       onepipeline-ui-cli-darwin-x64
-//       onepipeline-ui-cli-darwin-arm64
-//       onepipeline-ui-cli-win32-x64   each carries the matching prebuilt binary
+//     optionalDependencies:            one per Rust target in release.yml's matrix
+//       onepipeline-api-cli-linux-x64
+//       onepipeline-api-cli-linux-arm64
+//       onepipeline-api-cli-darwin-x64
+//       onepipeline-api-cli-darwin-arm64
+//       onepipeline-api-cli-win32-x64  each carries the matching prebuilt binary
 //
 // The platform packages are UNSCOPED on purpose: a `@scope/` name needs an npm
 // organization, which a publish token cannot create.
 //
 // npm installs only the optional dependency whose `os`/`cpu` match the host, so
-// `npm install -g onepipeline-ui-cli` is a seconds-fast binary install — the same
+// `npm install -g onepipeline-api-cli` is a seconds-fast binary install — the same
 // promise the wheels make on PyPI.
 //
 // The version is sourced from Cargo.toml (release-plz stays the single version
@@ -48,8 +48,8 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Rust target triple -> npm platform package facts. Keys must match the release
 // matrix in .github/workflows/release.yml; the (platform, arch) pair must match
-// the PACKAGES map in npm/onepipeline-ui/bin/onepipeline-ui.js and the
-// optionalDependencies in npm/onepipeline-ui/package.json.
+// the PACKAGES map in npm/onepipeline-api-cli/bin/onepipeline-ui.js and the
+// optionalDependencies in npm/onepipeline-api-cli/package.json.
 const TARGETS = {
   "x86_64-unknown-linux-gnu": { platform: "linux", arch: "x64", exe: false },
   "aarch64-unknown-linux-gnu": { platform: "linux", arch: "arm64", exe: false },
@@ -164,7 +164,7 @@ function buildPlatform(args) {
   const version = resolveVersion(args);
   const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
 
-  const pkgName = `onepipeline-ui-cli-${facts.platform}-${facts.arch}`;
+  const pkgName = `onepipeline-api-cli-${facts.platform}-${facts.arch}`;
   const pkgDir = join(outRoot, pkgName);
   const binDir = join(pkgDir, "bin");
   const binName = facts.exe ? "onepipeline-ui.exe" : "onepipeline-ui";
@@ -212,7 +212,7 @@ function buildPlatform(args) {
       join(pkgDir, "README.md"),
     `# ${pkgName}\n\nPrebuilt \`onepipeline-ui\` binary for ${facts.platform} ${facts.arch}.\n` +
       "This is a platform-specific dependency of " +
-        "[`onepipeline-ui-cli`](https://www.npmjs.com/package/onepipeline-ui-cli); install " +
+        "[`onepipeline-api-cli`](https://www.npmjs.com/package/onepipeline-api-cli); install " +
         "that instead.\n"
     )
   );
@@ -223,12 +223,12 @@ function buildPlatform(args) {
 function buildLauncher(args) {
   const version = resolveVersion(args);
   const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
-  const src = join(REPO_ROOT, "npm", "onepipeline-ui");
-  const dest = join(outRoot, "onepipeline-ui-cli");
+  const src = join(REPO_ROOT, "npm", "onepipeline-api-cli");
+  const dest = join(outRoot, "onepipeline-api-cli");
 
   attempt(
     `cannot copy the committed launcher from ${src}`,
-    "restore npm/onepipeline-ui from git, and check that --out is writable",
+    "restore npm/onepipeline-api-cli from git, and check that --out is writable",
     () => {
       rmSync(dest, { recursive: true, force: true });
       mkdirSync(outRoot, { recursive: true });
@@ -243,7 +243,7 @@ function buildLauncher(args) {
   const manifestPath = join(dest, "package.json");
   const manifest = attempt(
     "the committed launcher manifest is missing or is not JSON",
-    "restore npm/onepipeline-ui/package.json from git",
+    "restore npm/onepipeline-api-cli/package.json from git",
     () => JSON.parse(readFileSync(manifestPath, "utf8"))
   );
   manifest.version = version;

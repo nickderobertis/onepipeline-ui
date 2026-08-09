@@ -23,7 +23,7 @@ fn read(relative: &str) -> String {
 const COMMAND: &str = "onepipeline-ui";
 
 /// The distribution name the PyPI and npm wrappers publish under.
-const WRAPPER: &str = "onepipeline-ui-cli";
+const WRAPPER: &str = "onepipeline-api-cli";
 
 #[test]
 fn the_crate_ships_the_binary_the_wrappers_wrap() {
@@ -58,7 +58,7 @@ fn the_wheel_wraps_the_binary_and_takes_its_version_from_cargo() {
 #[test]
 fn the_npm_launcher_wraps_the_binary_and_carries_no_version_of_its_own() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&read("npm/onepipeline-ui/package.json")).expect("parse manifest");
+        serde_json::from_str(&read("npm/onepipeline-api-cli/package.json")).expect("parse manifest");
     assert_eq!(manifest["name"], WRAPPER);
     assert_eq!(manifest["bin"][COMMAND], format!("bin/{COMMAND}.js"));
     // The committed manifest carries a placeholder; scripts/npm-build.mjs stamps
@@ -70,17 +70,17 @@ fn the_npm_launcher_wraps_the_binary_and_carries_no_version_of_its_own() {
 fn every_release_target_has_a_platform_package_on_both_sides() {
     let workflow = read(".github/workflows/release.yml");
     let build = read("scripts/npm-build.mjs");
-    let launcher = read("npm/onepipeline-ui/bin/onepipeline-ui.js");
-    let manifest = read("npm/onepipeline-ui/package.json");
+    let launcher = read("npm/onepipeline-api-cli/bin/onepipeline-ui.js");
+    let manifest = read("npm/onepipeline-api-cli/package.json");
     for (target, package) in [
-        ("x86_64-unknown-linux-gnu", "onepipeline-ui-cli-linux-x64"),
+        ("x86_64-unknown-linux-gnu", "onepipeline-api-cli-linux-x64"),
         (
             "aarch64-unknown-linux-gnu",
-            "onepipeline-ui-cli-linux-arm64",
+            "onepipeline-api-cli-linux-arm64",
         ),
-        ("x86_64-apple-darwin", "onepipeline-ui-cli-darwin-x64"),
-        ("aarch64-apple-darwin", "onepipeline-ui-cli-darwin-arm64"),
-        ("x86_64-pc-windows-msvc", "onepipeline-ui-cli-win32-x64"),
+        ("x86_64-apple-darwin", "onepipeline-api-cli-darwin-x64"),
+        ("aarch64-apple-darwin", "onepipeline-api-cli-darwin-arm64"),
+        ("x86_64-pc-windows-msvc", "onepipeline-api-cli-win32-x64"),
     ] {
         assert!(workflow.contains(target), "release.yml builds no {target}");
         assert!(build.contains(target), "npm-build.mjs maps no {target}");

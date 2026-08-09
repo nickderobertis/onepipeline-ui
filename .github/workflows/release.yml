@@ -26,13 +26,13 @@ name: Release
 #                     maturin (the ruff/uv pattern). Runs unconditionally, so a
 #                     packaging break reddens the release even while publishing
 #                     is switched off.
-#   * publish-pypi  — upload those wheels to onepipeline-ui-cli with the
+#   * publish-pypi  — upload those wheels to onepipeline-api-cli with the
 #                     PYPI_TOKEN secret, gated on the PYPI_PUBLISH repo variable.
 #   * verify-pypi   — on Linux, both macOS architectures, and Windows,
 #                     pip-install the exact version just published and run
 #                     scripts/smoke-published.sh over it.
 #   * build-npm     — wrap the same prebuilt binary in per-platform npm packages
-#                     (onepipeline-ui-cli-<platform>-<arch>) via
+#                     (onepipeline-api-cli-<platform>-<arch>) via
 #                     scripts/npm-build.mjs. Unconditional, same rationale.
 #   * publish-npm   — publish the platform packages, then the launcher that
 #                     depends on them, with the NPM_TOKEN secret, gated on the
@@ -271,7 +271,7 @@ jobs:
           cargo publish --locked
 
   # PyPI wheels: maturin's `bin` bindings wrap the prebuilt binary in
-  # per-platform wheels (the ruff/uv pattern), so `pip install onepipeline-ui-cli`
+  # per-platform wheels (the ruff/uv pattern), so `pip install onepipeline-api-cli`
   # is a seconds-fast binary install anywhere PyPI is reachable — the quickest
   # path on a CI image with no Rust toolchain. maturin-action compiles inside
   # manylinux containers on Linux for broad glibc compatibility, which is why
@@ -408,18 +408,18 @@ jobs:
         run: |
           ver="${GITHUB_REF_NAME#v}"
           bash scripts/retry-install.sh \
-            --label "PyPI onepipeline-ui-cli $ver on $RUNNER_OS/$RUNNER_ARCH" \
-            --action "check https://pypi.org/project/onepipeline-ui-cli/ — publish-pypi may have uploaded no wheel for this platform" \
-            -- pip install --no-cache-dir "onepipeline-ui-cli==${ver}"
+            --label "PyPI onepipeline-api-cli $ver on $RUNNER_OS/$RUNNER_ARCH" \
+            --action "check https://pypi.org/project/onepipeline-api-cli/ — publish-pypi may have uploaded no wheel for this platform" \
+            -- pip install --no-cache-dir "onepipeline-api-cli==${ver}"
       - name: Smoke-test what PyPI served
         run: |
           ver="${GITHUB_REF_NAME#v}"
           bash scripts/smoke-published.sh \
             --expect-version "$ver" \
-            --label "PyPI onepipeline-ui-cli $ver on $RUNNER_OS/$RUNNER_ARCH"
+            --label "PyPI onepipeline-api-cli $ver on $RUNNER_OS/$RUNNER_ARCH"
 
   # npm packages: scripts/npm-build.mjs wraps the prebuilt binary in a
-  # per-platform package (onepipeline-ui-cli-<platform>-<arch>), the direct
+  # per-platform package (onepipeline-api-cli-<platform>-<arch>), the direct
   # analogue of the maturin wheels, on the same native-runner matrix as `upload`,
   # then `npm pack`s each to a tarball artifact. Unconditioned for the same
   # reason the wheels are.
@@ -478,7 +478,7 @@ jobs:
   # npm publishing activates when the NPM_PUBLISH repository variable is 'true'.
   # `registry-url` makes setup-node write an .npmrc that authenticates with
   # NODE_AUTH_TOKEN, so `npm publish` is token-authenticated (an npm automation
-  # token with publish rights to onepipeline-ui-cli and its platform packages).
+  # token with publish rights to onepipeline-api-cli and its platform packages).
   #
   # No `--provenance`: that needs an OIDC-backed attestation whose first
   # successful run cannot be rehearsed anywhere but a real publish, and a
@@ -576,12 +576,12 @@ jobs:
         run: |
           ver="${GITHUB_REF_NAME#v}"
           bash scripts/retry-install.sh \
-            --label "npm onepipeline-ui-cli $ver on $RUNNER_OS/$RUNNER_ARCH" \
-            --action "check https://www.npmjs.com/package/onepipeline-ui-cli — the platform package for this runner may not have published" \
-            -- npm install -g --prefer-online "onepipeline-ui-cli@${ver}"
+            --label "npm onepipeline-api-cli $ver on $RUNNER_OS/$RUNNER_ARCH" \
+            --action "check https://www.npmjs.com/package/onepipeline-api-cli — the platform package for this runner may not have published" \
+            -- npm install -g --prefer-online "onepipeline-api-cli@${ver}"
       - name: Smoke-test what npm served
         run: |
           ver="${GITHUB_REF_NAME#v}"
           bash scripts/smoke-published.sh \
             --expect-version "$ver" \
-            --label "npm onepipeline-ui-cli $ver on $RUNNER_OS/$RUNNER_ARCH"
+            --label "npm onepipeline-api-cli $ver on $RUNNER_OS/$RUNNER_ARCH"

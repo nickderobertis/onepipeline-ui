@@ -1,5 +1,5 @@
 {
-  "name": "onepipeline-ui-cli",
+  "name": "onepipeline-api-cli",
   "version": "0.0.0-managed",
   "description": "Read API and browser view for onepipeline runs.",
   "keywords": ["cli", "api", "telemetry", "observability", "onepipeline"],
@@ -21,10 +21,10 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "onepipeline-ui-cli-linux-x64": "0.0.0-managed",
-    "onepipeline-ui-cli-linux-arm64": "0.0.0-managed",
-    "onepipeline-ui-cli-darwin-x64": "0.0.0-managed",
-    "onepipeline-ui-cli-darwin-arm64": "0.0.0-managed",
-    "onepipeline-ui-cli-win32-x64": "0.0.0-managed"
+    "onepipeline-api-cli-linux-x64": "0.0.0-managed",
+    "onepipeline-api-cli-linux-arm64": "0.0.0-managed",
+    "onepipeline-api-cli-darwin-x64": "0.0.0-managed",
+    "onepipeline-api-cli-darwin-arm64": "0.0.0-managed",
+    "onepipeline-api-cli-win32-x64": "0.0.0-managed"
   }
 }

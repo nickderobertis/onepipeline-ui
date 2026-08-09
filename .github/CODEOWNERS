@@ -14,7 +14,7 @@
 /Cargo.toml              @nickderobertis
 
 # The distribution wrappers.
-/npm/onepipeline-ui/     @nickderobertis
+/npm/onepipeline-api-cli/ @nickderobertis
 /pyproject.toml          @nickderobertis
 
 # The orchestration and release surfaces, where a mistake is repo-wide.

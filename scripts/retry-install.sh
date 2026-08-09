@@ -6,7 +6,7 @@
 # after the upload, but `pip install` resolves through the *simple index* behind
 # a CDN, which converges later and per edge; npm's packument has the same shape.
 # Releases v0.1.4, v0.1.5 and v0.1.6 each went red in a post-publish verify leg
-# with "No matching distribution found for onepipeline-ui-cli==0.1.6 (from versions:
+# with "No matching distribution found for onepipeline-api-cli==0.1.6 (from versions:
 # … 0.1.5)" — after a wait step polling the JSON API had already printed the
 # version as available. Every publish had succeeded; the one install attempt
 # raced the index the JSON API says nothing about.
