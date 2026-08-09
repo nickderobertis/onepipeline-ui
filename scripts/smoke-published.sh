@@ -44,9 +44,15 @@ done
 [ -n "$expect_version" ] || fail_usage "--expect-version is required"
 [ -n "$label" ] || label="$command_name $expect_version"
 
+# A third argument is the server's own output, printed as its own plain line: it
+# is evidence for the ACTION rather than the ACTION itself, and a `::error::`
+# annotation is a workflow command, which arbitrary server output could close.
 fail() {
   echo "::error::$label: $1" >&2
   echo "ACTION: $2" >&2
+  if [ "$#" -ge 3 ]; then
+    echo "The server printed: $3" >&2
+  fi
   exit 1
 }
 
@@ -105,12 +111,14 @@ for _ in $(seq 1 100); do
 done
 if [ -z "$address" ]; then
   fail "'serve' never named the address it took" \
-    "the server printed: $(tr '\n' ' ' <"$serve_log")"
+    "if the line below names an address in another form, reconcile src/server.rs's startup line with this script's parser; if it names a bind failure, this host denied loopback; if it is empty, check the build job for this platform" \
+    "$(tr '\n' ' ' <"$serve_log")"
 fi
 
 if ! curl -fsS --max-time 10 "http://$address/healthz" | grep -q '"ok"'; then
   fail "'serve' did not answer /healthz on $address" \
-    "the server printed: $(tr '\n' ' ' <"$serve_log")"
+    "compare the line below against the /healthz route in src/server.rs at this tag, and check that nothing on this host intercepts loopback" \
+    "$(tr '\n' ' ' <"$serve_log")"
 fi
 
 # Being asked to stop is the normal end of a read surface, and it exits 0.
