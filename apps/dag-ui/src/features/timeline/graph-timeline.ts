@@ -4,8 +4,8 @@ import type {
   TimelineMarker,
 } from "@oneharness/ui";
 import type { RunTimeline, TimelineSpan } from "@onepipeline-ui/dag-model";
+import type { NodeView } from "../../lib/run-model";
 import { formatDuration } from "../../lib/time";
-import type { NodeView } from "../runs/run-model";
 import {
   compactTimelineItems,
   compactTimelineMarkers,

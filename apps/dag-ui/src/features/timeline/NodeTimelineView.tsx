@@ -29,15 +29,19 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  isUnhealthy,
+  type NodeView,
+  recordedReason,
+} from "../../lib/run-model";
+import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
-import { isUnhealthy, type NodeView, recordedReason } from "../runs/run-model";
-import { StateBadge } from "../runs/StateBadge";
 import {
   isNodeTab,
   NODE_TAB_LABELS,
   type NodeTab,
-} from "../runs/useUrlSelection";
+} from "../../lib/useUrlSelection";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
   compactTimelineItems,

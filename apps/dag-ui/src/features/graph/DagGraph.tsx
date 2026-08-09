@@ -8,7 +8,7 @@
 import { layoutDag } from "@onepipeline-ui/dag-layout";
 import { Background, Controls, type Edge, ReactFlow } from "@xyflow/react";
 import { useMemo } from "react";
-import { isUnhealthy, type NodeView, nodeReason } from "../runs/run-model";
+import { isUnhealthy, type NodeView, nodeReason } from "../../lib/run-model";
 import { type DagFlowNode, DagNodeCard } from "./DagNodeCard";
 import { DagRoutedEdge } from "./DagRoutedEdge";
 

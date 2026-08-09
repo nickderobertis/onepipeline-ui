@@ -1,6 +1,6 @@
 import { parseRunDetail, parseRunList } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
-import { HISTORY_RUN, LIVE_RUN, runDetail, runList } from "../../test/fixtures";
+import { HISTORY_RUN, LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
   groupRuns,
   isUnhealthy,

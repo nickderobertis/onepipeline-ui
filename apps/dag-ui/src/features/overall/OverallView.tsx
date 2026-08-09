@@ -19,8 +19,8 @@ import type { RunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { NodeView } from "../../lib/run-model";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
-import type { NodeView } from "../runs/run-model";
 import {
   type GraphRow,
   type GraphSegment,

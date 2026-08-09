@@ -1,5 +1,6 @@
 import { parseRunDetail, parseRunTimeline } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
+import { nodeViews } from "../../lib/run-model";
 // The stylesheet as text, through the bundler that ships it — so the gate below reads
 // the same file the application is built from rather than a path guessed from a cwd.
 import stylesheet from "../../styles.css?raw";
@@ -9,7 +10,6 @@ import {
   runDetail,
   runScopeTimeline,
 } from "../../test/fixtures";
-import { nodeViews } from "../runs/run-model";
 import {
   graphTimeline,
   IDLE_ID_PREFIX,

@@ -29,9 +29,9 @@ import type {
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { NodeView } from "../../lib/run-model";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
-import type { NodeView } from "../runs/run-model";
 import {
   dispatchRoleLabel,
   LLMLINT_TRANSPORT,

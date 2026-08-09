@@ -13,8 +13,8 @@ import {
   TooltipTrigger,
 } from "@oneharness/ui";
 import { Activity, Bot, ChevronRight, History } from "lucide-react";
-import { nodeCountSummary, type RunGroup } from "../runs/run-model";
-import { StateBadge } from "../runs/StateBadge";
+import { nodeCountSummary, type RunGroup } from "../../lib/run-model";
+import { StateBadge } from "../../lib/StateBadge";
 
 export function RunNavigation({
   groups,
