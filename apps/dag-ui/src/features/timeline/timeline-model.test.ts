@@ -291,6 +291,33 @@ describe("one node's slice of the run timeline", () => {
     ]);
   });
 
+  test("drops a category a window end covers rather than painting it underneath", () => {
+    const projected = nodeTimelineV2(timeline, "dashboard");
+    const worker = projected.items.find(({ laneId }) => laneId === "worker");
+    const judge = projected.items.find(({ laneId }) => laneId === "judge");
+    if (worker === undefined || judge === undefined)
+      throw new Error("fixture lost the dashboard's dispatches");
+    // The shape a node that dispatched a worker and the judge over it serves: both
+    // run the whole of it, so the worker is both ends of the window and the judge
+    // is inside it at every pixel. Kept, the judge would be painted over the whole
+    // worker — a segment nothing can point at, and the one the reader came for.
+    const served = [
+      { ...worker, start: 0, end: 60_000 },
+      { ...judge, start: 0, end: 60_000 },
+    ];
+    expect(compactTimelineItems(served).map(({ id }) => id)).toEqual([
+      worker.id,
+    ]);
+    // And the dominant one still wins when it is the later arrival, without taking
+    // the window's end with it.
+    expect(
+      compactTimelineItems([
+        { ...judge, start: 0, end: 60_000 },
+        { ...worker, start: 0, end: 60_000 },
+      ]).map(({ id }) => id),
+    ).toEqual([judge.id, worker.id]);
+  });
+
   test("spans the same window compact as expanded", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
     const worker = projected.items.find(({ laneId }) => laneId === "worker");

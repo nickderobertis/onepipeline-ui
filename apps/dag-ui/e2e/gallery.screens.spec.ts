@@ -154,8 +154,9 @@ const SURFACES: readonly Surface[] = [
     title: "Node view with a verification open over the reading",
     open: async (page) => {
       await page.goto(`/?run=${runs().live}&node=foundation`);
-      await page
-        .getByRole("region", { name: "Node timeline" })
+      const plot = page.getByRole("region", { name: "Node timeline" });
+      await plot.getByRole("button", { name: "Expand timeline" }).click();
+      await plot
         .getByRole("button", { name: new RegExp(fixture().artifacts.gate) })
         .click();
       await expect(

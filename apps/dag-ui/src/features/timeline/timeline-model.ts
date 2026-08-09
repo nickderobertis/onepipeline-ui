@@ -249,18 +249,33 @@ export function compactTimelineItems<Payload>(
     });
     // An item that meets one of the two boundaries neither replaces it nor is
     // dropped by it: both are kept, because losing either end moves the axis and
-    // losing the other would silently hide work that really did happen there.
-    if (
-      collision === undefined ||
-      boundaries.has(item.id) ||
-      boundaries.has(collision.id)
-    ) {
+    // losing the other would silently hide work that really did happen there —
+    // a shorter one inside a window end is drawn over it and stays reachable.
+    // One that runs the *same* length as it is not: it would be painted over
+    // every pixel of a segment nothing else can reach, so the moment goes to
+    // whichever category dominates it and the rest are read in the lanes.
+    if (collision === undefined || boundaries.has(item.id)) {
       result.push(item);
     } else if (compactPriority(item) < compactPriority(collision)) {
-      result[result.indexOf(collision)] = item;
+      if (boundaries.has(collision.id)) result.push(item);
+      else result[result.indexOf(collision)] = item;
+    } else if (!coincident(item, collision, pointCluster)) {
+      result.push(item);
     }
   }
   return result;
+}
+
+/** Whether two plotted items occupy the same pixels, to within one visual moment. */
+function coincident(
+  item: TimelineItem<unknown>,
+  other: TimelineItem<unknown>,
+  cluster: number,
+): boolean {
+  return (
+    Math.abs(item.start - other.start) <= cluster &&
+    Math.abs((item.end ?? item.start) - (other.end ?? other.start)) <= cluster
+  );
 }
 
 function compactPriority(item: TimelineItem<unknown>): number {

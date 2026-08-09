@@ -188,6 +188,7 @@ test("keeps a node the run reported a problem on readable", async ({
   await expectThePageItselfDoesNotScroll(page);
 
   // What it records is reachable, which is the whole point of the region being there.
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   await timeline(page)
     .getByRole("button", { name: new RegExp(fixture().artifacts.missing) })
     .click();
@@ -637,6 +638,7 @@ test("gives a lone recorded term the whole fact row", async ({ page }) => {
   // The list shows its own border colour through the gaps between cells, so an empty
   // cell is a filled panel with nothing written on it rather than blank space.
   await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   await timeline(page)
     .getByRole("button", { name: new RegExp(fixture().artifacts.gate) })
     .click();

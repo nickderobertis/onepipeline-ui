@@ -591,7 +591,9 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
     itemDetail(page).locator(".conversation-timeline-sticky"),
   ).toHaveCSS("position", "sticky");
   await expect(
-    itemDetail(page).getByRole("article", { name: /^Turn / }),
+    itemDetail(page)
+      .getByRole("article", { name: /^Turn / })
+      .first(),
   ).toContainText("Judge");
   await page.keyboard.press("Escape");
   await expect(page.getByLabel("Item detail panel")).toHaveCount(0);
@@ -752,6 +754,9 @@ test("states when a verification artifact is unavailable", async ({ page }) => {
     page.locator(".facts").filter({ hasText: "Verification coverage" }),
   ).toContainText("Hook: not recorded");
   await page.getByRole("tab", { name: "Timeline" }).click();
+  // Opened: the one collapsed line says which activity dominated the node, and what
+  // this node kept is read in the lane the categories live in.
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   const rejected = page.waitForResponse(
     (response) =>
       response.url().includes("/artifacts/") && response.status() === 404,
