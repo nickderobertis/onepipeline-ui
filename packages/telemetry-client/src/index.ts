@@ -68,8 +68,11 @@ export interface TelemetryClientOptions {
   readonly eventSource?: EventSourceFactory;
 }
 
-// Owned by orchestrator.server.RUNS_PAGE_LIMIT and held in sync by the DAG contract
-// check. Sending it explicitly keeps continuation pages the same size.
+// Owned by `RUNS_PAGE_LIMIT` in the crate's src/contract.rs; sending it explicitly
+// keeps continuation pages the same size as the first. TypeScript cannot read a Rust
+// constant, so this line is a copy, and the copy is gated: `tests/contract.rs`'s
+// `the_browser_clients_copy_of_the_page_bound_matches_this_one` reads this file and
+// fails when the two numbers disagree, whichever side moved.
 const RUNS_PAGE_LIMIT = 50;
 
 export class TelemetryClient {

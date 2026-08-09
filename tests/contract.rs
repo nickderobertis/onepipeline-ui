@@ -604,6 +604,31 @@ fn a_run_list_query_cannot_carry_a_page_size_outside_the_bound() {
     assert_eq!(encoded["limit"], serde_json::json!(RUNS_PAGE_LIMIT));
 }
 
+/// The browser client sends the page bound explicitly so its continuation pages
+/// stay the size the first one was, which means it carries its own copy of
+/// [`RUNS_PAGE_LIMIT`] across the language boundary. That copy is not derived
+/// from this one — TypeScript cannot read a Rust constant — so this is the gate
+/// that keeps the two from drifting: raise the bound here and the client's copy
+/// fails this test until it follows.
+#[test]
+fn the_browser_clients_copy_of_the_page_bound_matches_this_one() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/telemetry-client/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the client that carries the copy has moved, so this gate no longer \
+             guards anything",
+            path.display()
+        )
+    });
+    let declaration = format!("const RUNS_PAGE_LIMIT = {RUNS_PAGE_LIMIT};");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's page bound has drifted from this \
+         crate's RUNS_PAGE_LIMIT = {RUNS_PAGE_LIMIT}",
+        path.display()
+    );
+}
+
 #[test]
 fn the_software_failure_status_is_distinct_from_success_and_usage() {
     assert_ne!(EXIT_SOFTWARE, 0);
