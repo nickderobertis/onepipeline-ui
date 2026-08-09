@@ -1502,6 +1502,14 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
             );
             span.insert("parent_id".into(), json!(round_id));
             span.insert("round".into(), json!(number));
+            // Running for as long as the round it is driving is: nothing closes a
+            // run-level session of its own, so the round's own end is the only
+            // thing that can speak for it, and "unknown" would be this crate
+            // declining to say what the round already said.
+            span.insert(
+                "status".into(),
+                json!(if closed { "done" } else { "running" }),
+            );
             span.insert("transport_role".into(), json!(TRANSPORT_ROLE));
             if let Some(role) = agent_role(
                 relayed

@@ -38,6 +38,8 @@ pub const SIGNOFF_NODE_ID: &str = "signoff";
 pub const ANNOUNCE_NODE_ID: &str = "announce";
 /// The agent-graph session the live run's dispatch ran under.
 pub const LIVE_CONVERSATION_ID: &str = "8a1d3c07-4b2f-4e55-91aa-6d3e2f0b7c14";
+/// The live run's own driving session, recorded at no node.
+pub const DRIVING_CONVERSATION_ID: &str = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
 
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
@@ -393,6 +395,20 @@ fn live_journal(run: &str, second: &Value) -> String {
         json!({ "run_id": run, "round": 1 }),
         json!({}),
     );
+    // The run's own driving session, recorded at no node: what starts the run
+    // rather than any of the work in it.
+    emit(
+        "2026-08-07T12:00:05.000Z",
+        "agentgraph",
+        "agent-turn",
+        json!({
+            "run_id": run,
+            "round": 1,
+            "persona": "orchestrator",
+            "session": DRIVING_CONVERSATION_ID,
+        }),
+        json!({ "message": "driving the first round", "model": "a-model" }),
+    );
     emit(
         "2026-08-07T12:00:09.000Z",
         "pipeline",
@@ -429,6 +445,18 @@ fn live_journal(run: &str, second: &Value) -> String {
         "round-started",
         json!({ "run_id": run, "round": 2 }),
         json!({ "plan": second }),
+    );
+    emit(
+        "2026-08-07T12:00:26.500Z",
+        "agentgraph",
+        "agent-turn",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "persona": "orchestrator",
+            "session": DRIVING_CONVERSATION_ID,
+        }),
+        json!({ "message": "driving the second round", "model": "a-model" }),
     );
     emit(
         "2026-08-07T12:00:27.000Z",

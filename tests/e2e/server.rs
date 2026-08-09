@@ -1073,6 +1073,21 @@ fn the_run_timeline_covers_every_round_the_run_has_had() {
         "the round being driven has not ended"
     );
     assert_eq!(rounds[1]["phase"], json!("driving-round"));
+
+    // The run's own driving session, recorded at no node: it is running for as
+    // long as the round it is driving is, rather than a state nothing named.
+    let driving: Vec<&Value> = body["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == "dispatch" && span["node_id"].is_null())
+        .collect();
+    assert!(!driving.is_empty(), "no run-level session was served");
+    assert_eq!(driving[0]["status"], json!("done"));
+    assert_eq!(
+        driving.last().expect("the open round's session")["status"],
+        json!("running")
+    );
 }
 
 #[test]
