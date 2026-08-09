@@ -932,6 +932,11 @@ test("zooms and reframes the graph through its canvas controls", async ({
   // These graphs are a handful of nodes that fit the canvas, so there is no minimap
   // over them: the zoom controls are the whole of the canvas chrome.
   await expect(page.locator(".react-flow__minimap")).toHaveCount(0);
+  // The framing to compare against is the one the canvas settles on, not the
+  // identity it mounts with: reading it before the graph has been fitted compares
+  // "fit view" against a transform the reader never saw.
+  await expect(page.locator(".dag-node").first()).toBeVisible();
+  await expect.poll(transform).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
   const framed = await transform();
   await page.getByRole("button", { name: "zoom in" }).click();
   await expect.poll(transform).not.toBe(framed);
