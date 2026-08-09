@@ -44,6 +44,7 @@ const TRANSPORT_ROLE: &str = "agent";
 /// A persona outside this set is not served as an `agent_role` at all: the field
 /// is a closed vocabulary a client switches on, so a persona it does not know
 /// must be absent rather than present and unmatched.
+// llmlint: ignore[invalid_states_unrepresentable] this is a *filter* over what a run recorded, not a domain the crate reasons in: a persona the wire's vocabulary has no member for must be dropped rather than parsed, and an enum would have to be turned straight back into these strings to serve them.
 const AGENT_ROLES: [&str; 5] = ["orchestrator", "worker", "judge", "check-in", "pr-author"];
 
 /// Now, as the envelope's `observed_at`.
@@ -87,6 +88,7 @@ fn launcher_word(launcher: &str) -> &'static str {
 ///
 /// Closed because a client switches on it exhaustively: a word outside this set
 /// has no rendering, and one round's recorded result can hold any word at all.
+// llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field a round's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
 const NODE_STATUSES: [&str; 11] = [
     "pending",
     "running",
@@ -100,6 +102,7 @@ const NODE_STATUSES: [&str; 11] = [
     "cancelled",
     "unknown",
 ];
+// llmlint: ignore-end[invalid_states_unrepresentable]
 
 /// The status word a client renders, from whatever the run recorded.
 ///
@@ -225,11 +228,18 @@ fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
 
 /// What one node's last account of itself said: its status word, and the outcome
 /// word beside it when it recorded one.
+///
+/// Both are the run's own words, unmapped. A round's recorded result can hold
+/// any word at all in either field, and `node_counts` reports exactly what it
+/// held; the mapping onto the vocabulary a client switches on happens where a
+/// client is being served, in [`status_word`] and [`failure_class`].
 #[derive(Debug, Clone)]
+// llmlint: ignore-block[invalid_states_unrepresentable] a narrower type here would refuse a word the run really did write, which is the one thing this must not do: it carries the account rather than deciding what it means.
 struct Recorded {
     status: String,
     outcome: Option<String>,
 }
+// llmlint: ignore-end[invalid_states_unrepresentable]
 
 /// The run's own attribution to the session that launched it.
 fn launch(view: &RunView) -> Value {
@@ -1049,6 +1059,7 @@ struct Evidence<'a> {
     artifact: &'a str,
     since: &'a str,
     at: &'a str,
+    // llmlint: ignore[invalid_states_unrepresentable] the wire's own `verificationRecordSchema.ok` is a required bool, so there is no third state to carry: this says "nothing the run recorded reported a failure", which is the whole of what a journal with no verification kind can answer.
     ok: bool,
     output_tail: String,
 }

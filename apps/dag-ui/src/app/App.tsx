@@ -1,3 +1,10 @@
+// llmlint: ignore-file[stateful_logic_extracted_to_hooks] this app was copied whole from
+// the repository it was written in, and its implementation is the spec — see
+// apps/dag-ui/AGENTS.md. Its effects and subscriptions sit beside render because that is
+// where they were written; lifting them into hooks would be rewriting behaviour this
+// repository imported precisely so as not to reimplement it, with nothing but the copied
+// journeys to catch what moved. The two hooks it does have — useConversation and
+// useStickyBottom — are the ones that were extracted upstream.
 import {
   Alert,
   AlertDescription,
