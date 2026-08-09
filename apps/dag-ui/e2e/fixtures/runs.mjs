@@ -798,18 +798,23 @@ function writeUnattributedRun(root) {
  * the run list in one parse, so a run this shape either renders with the rest or
  * takes every one of them down with it.
  */
-function writeEventlessRun(root, runId = EVENTLESS_RUN, session = "") {
+function writeEventlessRun(
+  root,
+  runId = EVENTLESS_RUN,
+  launcher = "a-plain-shell",
+  session = "",
+) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
   // The paging runs are launched by the *other* session: the codex group is the one
   // a journey counts, and forty-odd paging runs under it would make that count a
-  // page size. The named eventless run records a launch and no session at all —
-  // every run launched before the launcher was detected reads that way — so it is
-  // grouped by the launch it does know rather than pooled with the runs that
-  // recorded no launch.
+  // page size. The named eventless run records a launch whose launcher is outside
+  // the closed vocabulary a client switches on and no session at all — every run
+  // launched before the launcher was detected reads that way — so it is grouped by
+  // the launch it does know rather than pooled with the runs that recorded none.
   writeJson(
     join(dir, "launch.json"),
-    launch(runId, "claude-code", session, stamp(HISTORIC), 4248),
+    launch(runId, launcher, session, stamp(HISTORIC), 4248),
   );
   writeFileSync(join(dir, "events.jsonl"), "");
 }
@@ -879,6 +884,7 @@ export function buildRuns(root) {
     writeEventlessRun(
       root,
       `dag-ui-page-${String(index).padStart(2, "0")}`,
+      "claude-code",
       CLAUDE_SESSION,
     );
   }

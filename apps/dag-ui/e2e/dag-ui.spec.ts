@@ -1364,6 +1364,10 @@ test("opens a run-level session other than the one shown on arrival", async ({
   const runLevel = page.getByRole("region", { name: "Run-level timeline" });
   await expect(runLevel).toBeVisible();
   await expect.poll(() => transcripts.size).toBe(0);
+  // Opened into its own lanes: two sessions the round never closed both run to the
+  // moment this payload was read, so on the one collapsed line the later one lies
+  // inside the earlier and only one of them can own a moment.
+  await runLevel.getByRole("button", { name: "Expand timeline" }).click();
 
   // Each opens in the two-thirds panel beside the plot, with the turns labelled by
   // the role the segment that opened them was named with.

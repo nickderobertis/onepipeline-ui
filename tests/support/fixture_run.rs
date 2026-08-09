@@ -555,6 +555,76 @@ fn pretty(value: &Value) -> String {
     )
 }
 
+/// The run id of the stopped-mid-round fixture below.
+pub const STOPPED_RUN_ID: &str = "run-20260807-5c4b3a";
+
+/// A run whose driver stopped part way through a round it never wrote a result for.
+///
+/// The one shape where the round's own account and the run's fold could disagree:
+/// the round is not open, so a reader that only ever consults a result finds
+/// nothing, while the fold still knows exactly what the run got to.
+pub fn write_stopped_mid_round(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "codex",
+            "session": SESSION,
+            "pid": 4250,
+            "host": "a-recording-host",
+            "started_at": START,
+            "round_budget": 14_400,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 1,
+        "name": "stopped",
+        "concurrency": 1,
+        "tasks": [
+            { "id": NODE_ID, "persona": "worker", "task": "## What\nStart it." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
+    let lines = [
+        json!({
+            "v": 1, "ts": START, "stream": "a-recording-host-4250", "seq": 0,
+            "source": "pipeline", "kind": "run-started",
+            "labels": { "run_id": run }, "payload": { "plan": plan }, "artifacts": [],
+        }),
+        json!({
+            "v": 1, "ts": "2026-08-07T12:00:01.000Z", "stream": "a-recording-host-4250",
+            "seq": 1, "source": "pipeline", "kind": "round-started",
+            "labels": { "run_id": run, "round": 1 }, "payload": {}, "artifacts": [],
+        }),
+        json!({
+            "v": 1, "ts": "2026-08-07T12:00:02.000Z", "stream": "a-recording-host-4250",
+            "seq": 2, "source": "pipeline", "kind": "node-dispatched",
+            "labels": { "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" },
+            "payload": {}, "artifacts": [],
+        }),
+        json!({
+            "v": 1, "ts": "2026-08-07T12:00:03.000Z", "stream": "a-recording-host-4250",
+            "seq": 3, "source": "pipeline", "kind": "run-stopped",
+            "labels": { "run_id": run }, "payload": {}, "artifacts": [],
+        }),
+    ];
+    let journal: Vec<String> = lines.iter().map(ToString::to_string).collect();
+    fs::write(
+        dir.join("events.jsonl"),
+        format!("{}\n", journal.join("\n")),
+    )
+    .expect("the journal");
+    dir
+}
+
 /// The run id of the recorded-only fixture below.
 pub const RECORDED_ONLY_RUN_ID: &str = "run-20260807-9f8e7d";
 

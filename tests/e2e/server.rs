@@ -969,6 +969,37 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
 }
 
 #[test]
+fn a_round_that_wrote_no_result_is_described_by_the_fold_behind_it() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_stopped_mid_round(root, fixture_run::STOPPED_RUN_ID);
+    });
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::STOPPED_RUN_ID),
+    )
+    .json();
+    // The row a reader opens the graph from, and the graph they open: one
+    // derivation, so the two cannot describe different runs.
+    let telemetry: Vec<(&str, &str)> = body["run"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .map(|node| {
+            (
+                node["node"].as_str().expect("a node id"),
+                node["status"].as_str().expect("a status"),
+            )
+        })
+        .collect();
+    assert_eq!(telemetry, vec![(fixture_run::NODE_ID, "running")]);
+    assert_eq!(
+        body["rounds"][0]["node_status"][fixture_run::NODE_ID],
+        json!("running"),
+        "the round it stopped in has no result of its own, and the fold does"
+    );
+}
+
+#[test]
 fn a_node_that_stored_nothing_serves_no_verification_and_no_publication() {
     let serving = live_run();
     let timeline = http::get(

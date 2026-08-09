@@ -752,6 +752,15 @@ fn round(view: &RunView, number: u64) -> Option<Value> {
             }
         }
     }
+    // A round that closed without writing a result — a driver that died mid-round,
+    // a stop — still has the fold behind it, and that is what the run's own
+    // telemetry reports. Falling through to it is what keeps the graph a reader
+    // opens from describing a different run than the row they opened it from.
+    if statuses.is_empty() {
+        for (node, status) in view.state.statuses() {
+            statuses.insert(node, status_word(status.as_str()).to_owned());
+        }
+    }
     // Exactly one entry per plan task, so a client never invents a status for a
     // node or renders one for a node the round did not carry.
     let node_status: Map<String, Value> = plan
