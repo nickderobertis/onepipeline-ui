@@ -14,6 +14,7 @@
 /Cargo.toml              @nickderobertis
 
 # The frontend: the React app and the packages it reads the contract through.
+# Each of them carries its own AGENTS.md; the root holds only what is repo-wide.
 /apps/dag-ui/            @nickderobertis
 /packages/dag-model/     @nickderobertis
 /packages/dag-layout/    @nickderobertis

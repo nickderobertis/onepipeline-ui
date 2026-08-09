@@ -380,6 +380,29 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(dispatch["agent_role"], json!("worker"));
     assert_eq!(dispatch["status"], json!("done"));
     assert_eq!(dispatch["parent_id"], json!("node.01.contract-interface"));
+
+    // The count beside the node is the transcript a reader opens from it: one
+    // relayed envelope, one turn, and the run's own total over every node.
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let node = detail["run"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|row| row["node"] == json!(fixture_run::NODE_ID))
+        .expect("the dispatched node");
+    assert_eq!(node["turns"], json!(1));
+    assert_eq!(
+        node["turns"],
+        json!(detail["conversations"][0]["conversation"]["turns"]
+            .as_array()
+            .map(Vec::len)
+            .expect("the transcript's turns"))
+    );
+    assert_eq!(detail["run"]["turns"], json!(1));
 }
 
 #[test]
@@ -992,6 +1015,11 @@ fn a_round_that_wrote_no_result_is_described_by_the_fold_behind_it() {
         })
         .collect();
     assert_eq!(telemetry, vec![(fixture_run::NODE_ID, "running")]);
+    assert_eq!(
+        body["run"]["nodes"][0]["turns"],
+        json!(0),
+        "nothing was relayed before the driver went, so nothing is counted"
+    );
     assert_eq!(
         body["rounds"][0]["node_status"][fixture_run::NODE_ID],
         json!("running"),

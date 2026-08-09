@@ -50,7 +50,7 @@
             "started_at": "2026-08-07T12:00:03.000Z"
           }
         ],
-        "turns": 0,
+        "turns": 1,
         "lint": 0,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
@@ -127,7 +127,7 @@
       "tool_ms": 0,
       "wall_ms": 31000
     },
-    "turns": 0,
+    "turns": 1,
     "lint": 0
   },
   "rounds": [

@@ -29,6 +29,7 @@ each such site carries a suppression saying so.
 
 The client's model has fields no onepipeline journal records, so parts of this
 vocabulary are permanently empty here: observed checks, merge commits, turn
-bodies and tool calls, the lint transport, lock waits, mid-turn activity.
-[`src/AGENTS.md`](../../src/AGENTS.md) is the list. A journey that would assert
-one of them was trimmed rather than fed an invented record.
+bodies and tool calls, the lint transport, lock waits, mid-turn activity. A
+journey that would assert one of them was trimmed rather than fed an invented
+record, and the reason for each is recorded beside the crate that would have to
+serve it.

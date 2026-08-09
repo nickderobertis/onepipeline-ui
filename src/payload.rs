@@ -547,6 +547,19 @@ fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'st
     })
 }
 
+/// How many turns a node — or the whole run — has had relayed to it.
+///
+/// One relayed envelope from the agent graph is one turn: that is what
+/// [`conversations`] serves as a transcript turn, so the count beside a node and
+/// the transcript a reader opens from it cannot disagree.
+fn turns_of(view: &RunView, node: Option<&str>) -> usize {
+    view.events
+        .iter()
+        .filter(|event| event.source == Source::Agentgraph)
+        .filter(|event| node.is_none_or(|node| event.labels.node.as_deref() == Some(node)))
+        .count()
+}
+
 /// One node's telemetry row.
 fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
     let mut row = Map::new();
@@ -565,7 +578,9 @@ fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
         row.insert("failure".into(), json!({ "class": class }));
     }
     row.insert("sessions".into(), json!(sessions_of(view, node)));
-    row.insert("turns".into(), json!(0));
+    row.insert("turns".into(), json!(turns_of(view, Some(node))));
+    // Nothing in a onepipeline journal is a lint run: its three producers are the
+    // pipeline, the agent graph and `onevcs`, and none of them is that transport.
     row.insert("lint".into(), json!(0));
     row.insert("timing_quality".into(), json!(timing_quality(view)));
     row.insert("linkage_quality".into(), json!("labelled"));
@@ -606,7 +621,7 @@ fn run_telemetry(view: &RunView) -> Value {
             "wall_ms": totals.wall_ms,
         }),
     );
-    run.insert("turns".into(), json!(0));
+    run.insert("turns".into(), json!(turns_of(view, None)));
     run.insert("lint".into(), json!(0));
     Value::Object(run)
 }

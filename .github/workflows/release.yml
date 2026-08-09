@@ -542,9 +542,9 @@ jobs:
       # and so has no per-platform packages to publish first. It is built here
       # rather than in the matrix above because one static bundle serves every
       # platform — building it five times would publish whichever won.
-      - name: Build the frontend bundle
+      - name: Build the distributable bundles
         run: |
-          just nx run dag-ui:build
+          just build
       - name: Publish the frontend package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

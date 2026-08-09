@@ -13,6 +13,11 @@
 #
 # Nx orchestrates targets; it is never a runtime dependency of the scripts it
 # runs.
+# llmlint: ignore-file[tool_output_is_signal] this is the wrapper, not a step: every
+# target it fans out shells to cargo, clippy, rustdoc, biome, tsc, vitest or
+# playwright, and their diagnostics are the whole reason a reader ran it. Quieting
+# the successful ones would also quiet which project a failing one was, because Nx
+# is what names the project.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
