@@ -54,7 +54,9 @@ Each needs a producing library to record it before anything here can serve it.
 - **A lint transport.** `transportRoleSchema` has an `llmlint` member; a
   onepipeline journal has three producers and none of them is one, so the client's
   lint lane is always empty.
-- **Lock waits.** Nothing counts contention, so no `rollup` span is ever served.
+- **Lock waits.** Nothing counts contention. A `rollup` *is* served — one per
+  category a node dispatched under, at `scope=run` — but never one standing for
+  waits, so the client's lock-waits lane is always empty.
 - **Mid-turn activity.** The client knows an `activity.changed` stream event and a
   live-activity summary; a session's turn is relayed once, when it is done, so
   there is nothing in flight to report and that event is never sent.
