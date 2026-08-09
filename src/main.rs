@@ -34,7 +34,7 @@ fn serve(args: &onepipeline_ui::cli::ServeArgs) -> ExitCode {
             return ExitCode::from(EXIT_SOFTWARE);
         }
     };
-    let store = RunStore::new_polling_every(&args.runs_root, args.poll_interval());
+    let store = RunStore::new_polling_every(&args.runs_root, args.poll_interval_ms);
     let listener = match runtime.block_on(server::bind(args.bind)) {
         Ok(listener) => listener,
         Err(message) => {

@@ -9,6 +9,7 @@
 //! Nothing here writes. Reading takes no lock the engine's single writer needs,
 //! which is what lets the server run beside a live round.
 
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,8 +26,8 @@ use crate::contract::{
 use crate::error::ApiError;
 use crate::payload::{self, Scope};
 
-/// How often the event stream re-reads the runs root.
-pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// How often the event stream re-reads the runs root, in milliseconds.
+pub const POLL_INTERVAL_MS: NonZeroU64 = NonZeroU64::new(500).expect("500 is not zero");
 
 /// How many run-root polls pass between two transcript polls.
 ///
@@ -54,16 +55,22 @@ impl RunStore {
     /// Read the runs recorded under `root`.
     #[must_use]
     pub fn new(root: &RunsRoot) -> Self {
-        Self::new_polling_every(root, POLL_INTERVAL)
+        Self::new_polling_every(root, POLL_INTERVAL_MS)
     }
 
-    /// The same store, re-reading the runs root every `poll`.
+    /// The same store, re-reading the runs root every `poll_ms` milliseconds.
     ///
     /// A shorter poll is what makes a live change reach a browser sooner, at the
     /// cost of the disk the open stream keeps busy; `onepipeline-api serve
     /// --poll-interval-ms` is where an operator sets it.
+    ///
+    /// Milliseconds that cannot be zero rather than a bare `Duration`: a store
+    /// polling every no-time spins its reader on the disk, and the flag and the
+    /// config file already refuse that number. The floor belongs in the type
+    /// all three go through rather than in each of them separately.
     #[must_use]
-    pub fn new_polling_every(root: &RunsRoot, poll: Duration) -> Self {
+    pub fn new_polling_every(root: &RunsRoot, poll_ms: NonZeroU64) -> Self {
+        let poll = Duration::from_millis(poll_ms.get());
         Self {
             root: root.as_path().to_path_buf(),
             poll,

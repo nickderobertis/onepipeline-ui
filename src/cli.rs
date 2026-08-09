@@ -10,7 +10,6 @@ use std::net::SocketAddr;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -82,16 +81,12 @@ pub struct ServeArgs {
     pub poll_interval_ms: NonZeroU64,
 }
 
-impl ServeArgs {
-    /// How often the event stream re-reads the runs root.
-    #[must_use]
-    pub fn poll_interval(&self) -> Duration {
-        Duration::from_millis(self.poll_interval_ms.get())
-    }
-}
-
 /// How often the event stream re-reads the runs root when nothing says otherwise.
-pub const DEFAULT_POLL_MS: NonZeroU64 = NonZeroU64::new(500).expect("500 is not zero");
+///
+/// The store's own default, not a second copy of the number: the flag exists to
+/// override what a store built without one already polls at, so the two saying
+/// different things would be a default nobody chose.
+pub const DEFAULT_POLL_MS: NonZeroU64 = crate::store::POLL_INTERVAL_MS;
 
 fn default_poll_ms() -> NonZeroU64 {
     DEFAULT_POLL_MS
