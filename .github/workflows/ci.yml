@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: extractions/setup-just@v3
       - name: Which projects the diff reaches
         id: affected
@@ -59,7 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -94,7 +94,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest
@@ -198,7 +198,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       # oneharness.toml's primary harness. Without a harness binary on PATH,
       # llmlint has nothing to drive and the job would fail with no findings —
       # which reads like a clean run. Pinned rather than floating: an upstream
