@@ -120,8 +120,13 @@ if [ -z "$address" ]; then
     "$(tr '\n' ' ' <"$serve_log")"
 fi
 
-if ! curl -fsS --max-time 10 "http://$address/healthz" | grep -q '"ok"'; then
-  fail "'serve' did not answer /healthz on $address" \
+# The body is held rather than piped straight into `grep`: a route that answers
+# 200 with something else is the interesting failure, and piping would report
+# only that the match failed while throwing away the thing that did not match.
+health=""
+if ! health="$(curl -fsS --max-time 10 "http://$address/healthz" 2>&1)" ||
+  ! printf '%s' "$health" | grep -q '"ok"'; then
+  fail "'serve' did not answer /healthz on $address with an ok status, but with: ${health}" \
     "compare the line below against the /healthz route in src/server.rs at this tag, and check that nothing on this host intercepts loopback" \
     "$(tr '\n' ' ' <"$serve_log")"
 fi
@@ -133,7 +138,14 @@ fi
 # status the server never chose, so an exit code there would be the shell's and
 # not the artifact's. Every other leg above — the version, `--help`, the
 # documented `2`, and serving `/healthz` — runs on every platform.
-kill "$serve_pid" 2>/dev/null
+# A kill that fails means the server is already gone, which under `set -e` would
+# end the run here with the shell's silence in place of the reason: the process
+# this leg exists to stop died on its own, and the log is what says why.
+if ! kill_error="$(kill "$serve_pid" 2>&1)"; then
+  fail "'serve' could not be asked to stop: ${kill_error}" \
+    "the server exited before this leg asked it to; read the line below for what ended it" \
+    "$(tr '\n' ' ' <"$serve_log")"
+fi
 stopped=0
 wait "$serve_pid" || stopped=$?
 serve_pid=""

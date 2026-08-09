@@ -33,13 +33,6 @@ Two rules govern what may be written here:
   are `serde_json::Value` and this crate owns only the envelope: inventing record
   types here would put a second source of truth in the wrong repo.
 
-### Where the projection rules live
-
-`src/payload.rs` and `src/store.rs` derive a few presentation-worthy things the
-SDK does not, and the wire asks for a few a onepipeline journal records nowhere.
-Both lists are kept beside the code that owes them — do not add to either
-silently.
-
 ## Two standing goals on every task
 
 The user drives product features and their request is the priority — but carry
