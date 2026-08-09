@@ -30,8 +30,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::ReadApi;
 use crate::contract::{
-    routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, RunId, RunQuery, RunsQuery,
-    TimelineQuery,
+    routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, PageLimit, RunId, RunQuery,
+    RunsQuery, TimelineQuery,
 };
 use crate::error::ApiError;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
@@ -336,10 +336,10 @@ fn flag(raw: &HashMap<String, String>, name: &str, default: bool) -> Result<bool
 
 fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
     let limit = match raw.get("limit") {
-        None => crate::contract::RUNS_PAGE_LIMIT,
-        Some(value) => value.parse::<usize>().map_err(|_| {
+        None => PageLimit::default(),
+        Some(value) => PageLimit::clamping(value.parse::<usize>().map_err(|_| {
             ApiError::InvalidRequest(format!("limit must be a whole number, got {value:?}"))
-        })?,
+        })?),
     };
     let cursor = match raw.get("cursor") {
         None => None,

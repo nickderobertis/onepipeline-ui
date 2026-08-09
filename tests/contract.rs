@@ -17,8 +17,8 @@ use onepipeline_ui::api::ReadApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
-    EventsQuery, Health, HealthStatus, NodeId, RunId, RunQuery, RunsQuery, SseEvent, TimelineQuery,
-    API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
+    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -568,6 +568,40 @@ fn a_config_file_cannot_name_a_runs_root_the_cli_would_reject() {
         err.to_string().contains("is not a readable directory"),
         "{err}"
     );
+}
+
+/// The flag refuses a poll of no milliseconds; a config file is the other way
+/// into the same field, and it has to refuse the same number. Clamping it here
+/// would leave the two boundaries disagreeing about what `0` means.
+#[test]
+fn a_config_file_cannot_name_a_poll_interval_the_cli_would_reject() {
+    let runs = tempfile::tempdir().expect("temp dir");
+    let encoded = serde_json::to_string(runs.path()).expect("encode the root as JSON");
+    let err = serde_json::from_str::<ServeArgs>(&format!(
+        r#"{{"runs_root":{encoded},"poll_interval_ms":0}}"#
+    ))
+    .expect_err("rejected");
+    assert!(err.to_string().contains("nonzero"), "{err}");
+}
+
+/// The page bound is the type's, so it holds on every way into the query rather
+/// than only on the one the route happens to parse a field at a time. A
+/// `RunsQuery` read whole from JSON must not be a way past it.
+#[test]
+fn a_run_list_query_cannot_carry_a_page_size_outside_the_bound() {
+    for (asked, served) in [("0", 1), ("100000", RUNS_PAGE_LIMIT), ("10", 10)] {
+        let query: RunsQuery =
+            serde_json::from_str(&format!(r#"{{"limit":{asked}}}"#)).expect("parse the query");
+        assert_eq!(query.page(), served, "limit={asked}");
+    }
+    // And it goes back out as the number it actually serves, not the one asked
+    // for: a client reading its own query back has to see the page it will get.
+    let query = RunsQuery {
+        limit: PageLimit::clamping(100_000),
+        ..RunsQuery::default()
+    };
+    let encoded: Value = serde_json::to_value(&query).expect("serialize the query");
+    assert_eq!(encoded["limit"], serde_json::json!(RUNS_PAGE_LIMIT));
 }
 
 #[test]

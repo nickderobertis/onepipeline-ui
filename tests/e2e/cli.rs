@@ -72,6 +72,20 @@ fn serve_needs_a_runs_root() {
         .stderr(contains("Usage"));
 }
 
+/// A poll of no milliseconds is refused rather than corrected: the operator has
+/// to learn that the number they typed is not what the stream would do.
+#[test]
+fn a_poll_of_no_milliseconds_is_a_usage_error() {
+    let runs = tempfile::tempdir().expect("temp dir");
+    cli()
+        .args(["serve", "--runs-root"])
+        .arg(runs.path())
+        .args(["--poll-interval-ms", "0"])
+        .assert()
+        .code(USAGE)
+        .stderr(contains("--poll-interval-ms"));
+}
+
 #[test]
 fn a_runs_root_that_does_not_exist_is_rejected_before_anything_starts() {
     cli()

@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::contract::{ArtifactId, ConversationId, NodeId, TIMELINE_SCHEMA_VERSION};
+use crate::contract::{ArtifactId, ConversationId, DispatchId, NodeId, TIMELINE_SCHEMA_VERSION};
 
 /// The bound on an artifact body served in one response.
 ///
@@ -138,8 +138,13 @@ fn is_recorded_state(status: &str) -> bool {
 /// run, round, and node but mints no id for it, and schema 10 serves one. The
 /// three together identify the dispatch exactly, so the derived key is stable
 /// across reads and across processes.
-fn dispatch_key(run: &str, round: u64, node: &str) -> String {
-    format!("{run}.{round:02}.{node}")
+///
+/// A [`DispatchId`] rather than a bare `String`, and `None` when the run and
+/// node on disk cannot form one: a client reads `dispatch_id` to ask about the
+/// dispatch, so minting one the contract's own boundary would reject is the
+/// drift the newtype exists to prevent.
+fn dispatch_key(run: &str, round: u64, node: &str) -> Option<DispatchId> {
+    DispatchId::try_from(format!("{run}.{round:02}.{node}")).ok()
 }
 
 /// Read one JSON document, or `None` if it is missing or unreadable.
@@ -1352,7 +1357,7 @@ pub fn timeline(view: &RunView, scope: &Scope<'_>) -> Value {
 
 /// The transcript turn one relayed envelope became.
 struct Turn {
-    session: String,
+    session: ConversationId,
     id: String,
 }
 
@@ -1375,13 +1380,17 @@ fn turn_ids(view: &RunView) -> Vec<Option<Turn>> {
                     .extra
                     .get("session")
                     .and_then(Value::as_str)
-                    .filter(|session| ConversationId::try_from(*session).is_ok())
+                    .and_then(|session| {
+                        ConversationId::try_from(session)
+                            .ok()
+                            .map(|id| (session, id))
+                    })
             })
             .flatten();
-        ids.push(named.map(|session| {
+        ids.push(named.map(|(session, id)| {
             let index = counted.entry(session).or_insert(0);
             let turn = Turn {
-                session: session.to_owned(),
+                session: id,
                 id: format!("{session}.{index}"),
             };
             *index += 1;
@@ -1922,7 +1931,9 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
             span.insert("parent_id".into(), json!(node_id));
             span.insert("node_id".into(), json!(node));
             span.insert("round".into(), json!(number));
-            span.insert("dispatch_id".into(), json!(key));
+            if let Some(key) = &key {
+                span.insert("dispatch_id".into(), json!(key));
+            }
             span.insert("transport_role".into(), json!(TRANSPORT_ROLE));
             let persona = relayed
                 .first()

@@ -182,40 +182,68 @@ pub struct EventFrame {
 /// and filtering surface the copied frontend already reads, kept here so the
 /// server's answer is bounded whatever a caller asks for; see AGENTS.md for the
 /// amendment they are proposed under.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RunsQuery {
     /// Whether to list runs whose graph has completed. Off by default: the list
     /// is a supervision surface, and finished work is not what needs attention.
     #[serde(default)]
     pub include_settled: bool,
-    /// How many rows to serve, capped at [`RUNS_PAGE_LIMIT`].
-    #[serde(default = "page_limit")]
-    pub limit: usize,
+    /// How many rows to serve.
+    #[serde(default)]
+    pub limit: PageLimit,
     /// The `next_cursor` of the previous page; the list resumes after it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<RunId>,
-}
-
-impl Default for RunsQuery {
-    fn default() -> Self {
-        Self {
-            include_settled: false,
-            limit: RUNS_PAGE_LIMIT,
-            cursor: None,
-        }
-    }
 }
 
 impl RunsQuery {
     /// The page size this query actually gets: never zero, never unbounded.
     #[must_use]
     pub fn page(&self) -> usize {
-        self.limit.clamp(1, RUNS_PAGE_LIMIT)
+        self.limit.get()
     }
 }
 
-fn page_limit() -> usize {
-    RUNS_PAGE_LIMIT
+/// A run-list page size: never zero, never more than [`RUNS_PAGE_LIMIT`].
+///
+/// A bare `usize` would let a query carry a page size the server never serves,
+/// leaving whoever reads `limit` next as the only thing between a caller and an
+/// unbounded read. Constructed only by clamping, so the bound is the type's and
+/// an out-of-range `?limit=` is still answered with a page rather than refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "usize", into = "usize")]
+pub struct PageLimit(usize);
+
+impl PageLimit {
+    /// The page size a caller asking for `requested` rows actually gets.
+    #[must_use]
+    pub fn clamping(requested: usize) -> Self {
+        Self(requested.clamp(1, RUNS_PAGE_LIMIT))
+    }
+
+    /// How many rows this page serves.
+    #[must_use]
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl Default for PageLimit {
+    fn default() -> Self {
+        Self(RUNS_PAGE_LIMIT)
+    }
+}
+
+impl From<usize> for PageLimit {
+    fn from(requested: usize) -> Self {
+        Self::clamping(requested)
+    }
+}
+
+impl From<PageLimit> for usize {
+    fn from(limit: PageLimit) -> Self {
+        limit.0
+    }
 }
 
 /// The query of `GET /api/v2/events`.

@@ -347,6 +347,59 @@ fn a_run_id_that_could_traverse_the_root_never_reaches_storage() {
     );
 }
 
+/// `dispatch_id` is the key a client sends back to ask about the dispatch, so
+/// it is a validated identifier or it is absent. The key is derived by joining
+/// the run, the round and the node, and each is short enough on its own while
+/// the three together overrun what an identifier may be — the run is still
+/// served, and the span still groups its sessions, but it carries no id the
+/// contract's own boundary would refuse.
+#[test]
+fn a_dispatch_whose_derived_key_is_too_long_to_name_is_served_without_one() {
+    // Valid on its own: a run id may be 128 characters, and this is 120 of them.
+    let long_run: String = format!("run-{}", "a".repeat(116));
+    assert_eq!(long_run.len(), 120);
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, &long_run);
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let dispatch = |run: &str| -> Value {
+        let body = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{run}/timeline?scope=node&node={}",
+                fixture_run::NODE_ID
+            ),
+        )
+        .json();
+        body["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .find(|span| span["kind"] == "dispatch")
+            .cloned()
+            .expect("the node's dispatch")
+    };
+
+    let overrun = dispatch(&long_run);
+    assert_eq!(overrun["node_id"], json!(fixture_run::NODE_ID));
+    assert!(
+        overrun.get("dispatch_id").is_none(),
+        "served an id the route would refuse: {overrun}"
+    );
+
+    // The short run beside it is untouched: this omits the id it cannot form, it
+    // does not stop the timeline naming the dispatches it can.
+    let named = dispatch(fixture_run::RUN_ID);
+    assert_eq!(
+        named["dispatch_id"],
+        json!(format!(
+            "{}.01.{}",
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID
+        ))
+    );
+}
+
 #[test]
 fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     let serving = two_runs();
