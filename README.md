@@ -49,11 +49,19 @@ pip install onepipeline-api-cli        # prebuilt wheel, no Rust toolchain
 npm install -g onepipeline-api-cli     # prebuilt binary, no Rust toolchain
 ```
 
+All three install one command, `onepipeline-api`:
+
+```bash
+onepipeline-api serve --runs-root ./runs
+```
+
 The view, as a static bundle on npm alone:
 
 ```bash
 npm install onepipeline-ui             # the built frontend under dist/
 ```
+
+That package installs no command — it is `dist/`, to be served statically.
 
 Prebuilt archives and their `.sha256` checksums are also attached to every
 [GitHub Release](https://github.com/nickderobertis/onepipeline-ui/releases).

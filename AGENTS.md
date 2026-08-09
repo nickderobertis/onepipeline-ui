@@ -15,9 +15,11 @@ Two things ship, split by what they contain. The crate `onepipeline-ui`
 (library + CLI) goes to crates.io and, as thin prebuilt-binary wrappers, to PyPI
 and npm as **`onepipeline-api-cli`** — that is the read-API server. The React
 app goes to npm alone as **`onepipeline-ui`**, which carries the built frontend
-rather than a binary. The crate keeps its `onepipeline-ui` name and its
-`onepipeline-ui` console command for the artifact already published under them;
-the split lives in the distribution names.
+rather than a binary. The crate keeps its `onepipeline-ui` name, matching the
+repository; the command it installs is **`onepipeline-api`**, because a command
+called `onepipeline-ui` would be handed out by the wrapper while the package
+actually named `onepipeline-ui` installs no command at all. `tests/packaging.rs`
+holds every distribution to that split.
 
 Two rules govern what may be written here:
 

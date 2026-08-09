@@ -5,7 +5,7 @@
 # binary install — the quickest trustworthy path on a CI image with no Rust
 # toolchain, or in a restricted-egress network where github.com is blocked but
 # PyPI is reachable. The distribution is `onepipeline-api-cli`; the console
-# command it installs is `onepipeline-ui`, from the `[[bin]]` in Cargo.toml.
+# command it installs is `onepipeline-api`, from the `[[bin]]` in Cargo.toml.
 #
 # The version is deliberately NOT set here (`dynamic = ["version"]`): maturin
 # sources it from Cargo.toml, so release-plz stays the single version driver —
@@ -41,7 +41,7 @@ Homepage = "https://github.com/nickderobertis/onepipeline-ui"
 Repository = "https://github.com/nickderobertis/onepipeline-ui"
 
 [tool.maturin]
-# Package the compiled `onepipeline-ui` binary as a wheel entry point, not a
+# Package the compiled `onepipeline-api` binary as a wheel entry point, not a
 # Python extension module. manifest-path names the binary crate explicitly so
 # maturin never has to guess which manifest at the root it should build.
 bindings = "bin"
