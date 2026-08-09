@@ -281,7 +281,7 @@ function buildUi(args) {
   if (!existsSync(join(bundle, "index.html"))) {
     die(
       `ui: no built frontend at ${bundle}`,
-      "build it first: just build (or `nx run dag-ui:build`)"
+      "build it first: just build"
     );
   }
 

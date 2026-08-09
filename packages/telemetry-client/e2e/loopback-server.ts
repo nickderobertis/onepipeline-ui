@@ -44,6 +44,10 @@ export function serveLoopback(
   return new Promise<LoopbackServer>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
+      // `address()` is typed for every server: a string for a unix socket, and
+      // null before `listen` resolves. This one is inside that callback, and
+      // listening on a TCP host and port, so node has already made it an
+      // `AddressInfo`.
       const address = server.address() as AddressInfo;
       resolve({
         port: address.port,

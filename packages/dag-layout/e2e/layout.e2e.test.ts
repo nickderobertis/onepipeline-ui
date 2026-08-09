@@ -4,6 +4,9 @@ import { layoutDag } from "@onepipeline-ui/dag-layout";
 import { expect, test } from "vitest";
 
 test("equivalent reordered inputs produce the checked-in serialized golden", async () => {
+  // The fixture is checked in beside this test rather than fetched, and
+  // `layoutDag` validates every node and edge it is handed — an input that
+  // drifted from the type would fail the call, which is the assertion below.
   const fixture = JSON.parse(
     await readFile(
       new URL("./fixtures/layout-input.json", import.meta.url),

@@ -127,9 +127,9 @@ shard_ends+=("${#files[@]}")
 shard_count="${#shard_ends[@]}"
 
 # One call is the run this script replaces: llmlint's own file selection, no
-# excludes, the caller's arguments forwarded untouched.
+# excludes, the caller's arguments forwarded untouched — and, since it adds
+# nothing to what llmlint reports, nothing said about it either.
 if [ "$shard_count" -eq 1 ]; then
-  echo "lint-llm-diff: ${#files[@]} changed file(s), $total diff chars, one judge run" >&2
   exec llmlint --diff --diff-base "$base" ${@+"$@"}
 fi
 
@@ -145,7 +145,9 @@ for file in "${files[@]}"; do
   esac
 done
 
-echo "lint-llm-diff: ${#files[@]} changed file(s), $total diff chars, $shard_count shard(s) of <= $budget" >&2
+# The one thing said on the way to a clean run, because llmlint is about to
+# print one report per shard and nothing in them says why there are several.
+echo "lint-llm-diff: ${#files[@]} changed file(s), $total diff chars, $shard_count shards of <= $budget" >&2
 
 status=0
 start=0
@@ -159,21 +161,19 @@ for ((i = 0; i < shard_count; i++)); do
       excludes+=(--exclude "${files[$f]}")
     fi
   done
-  echo "lint-llm-diff: shard $((i + 1))/$shard_count — $((end - start)) file(s) judged, ${#excludes[@]} argument(s) excluding the rest" >&2
   rc=0
   llmlint --diff --diff-base "$base" "${excludes[@]}" ${@+"$@"} || rc=$?
   # llmlint exits 1 for violations and 2 for a judge that never reached a
   # verdict. Every shard runs regardless: stopping at the first would report one
-  # shard's findings as the whole change's.
+  # shard's findings as the whole change's. A shard that reported something says
+  # so — which shard it was is the part its own report cannot tell you.
+  if [ "$rc" -ne 0 ]; then
+    echo "lint-llm-diff: shard $((i + 1))/$shard_count — $((end - start)) file(s) judged, exit $rc" >&2
+  fi
   if [ "$rc" -gt "$status" ]; then
     status="$rc"
   fi
   start="$end"
 done
 
-if [ "$status" -eq 0 ]; then
-  echo "lint-llm-diff: $shard_count shard(s) judged, none reported a violation" >&2
-else
-  echo "lint-llm-diff: $shard_count shard(s) judged, worst exit $status — see the reports above" >&2
-fi
 exit "$status"

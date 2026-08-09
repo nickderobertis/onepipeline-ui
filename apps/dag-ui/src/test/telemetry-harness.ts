@@ -134,10 +134,16 @@ export function telemetryHarness(
     responder(new URL(String(input), window.location.origin)),
   );
   const client = new TelemetryClient(window.location.origin, {
+    // `typeof fetch` carries overloads and a `preconnect` property that no
+    // double can implement and the client never reaches for; the harness only
+    // has to answer the one call signature above.
     fetch: fetchDouble as unknown as typeof fetch,
     eventSource: (url) => {
       const source = new FakeEventSource(url);
       sources.push(source);
+      // `EventSource` is a DOM class jsdom does not implement. What the client
+      // uses of it is the listener/close surface `FakeEventSource` provides,
+      // and the test drives that surface directly to deliver events.
       return source as unknown as EventSource;
     },
   });

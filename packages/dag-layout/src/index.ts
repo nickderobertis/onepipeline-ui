@@ -129,6 +129,9 @@ export function layoutDag(input: DagLayoutInput): DagLayout {
   }
 
   const incoming = new Map(nodes.map((node) => [node.id, 0]));
+  // `[]` alone would widen the map's value type to `never[]`, which the pushes
+  // below could not add an id to; the annotation names the type the map holds
+  // rather than overriding a type the checker inferred.
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
   const edgeIds = new Set<string>();
   for (const edge of edges) {

@@ -41,8 +41,8 @@ anything new here is a proposal to make upstream first.
 ## What the wire asks for and no onepipeline journal records
 
 Not derivations but gaps: a client's model has fields this API cannot fill from
-any run, and the copied browser journeys were trimmed to stop asserting them.
-Each needs a producing library to record it before anything here can serve it.
+any run, so no browser journey asserts them. Each needs a producing library to
+record it before anything here can serve it.
 
 - **Observed checks on a publication** (`node_details[…].verification.checks`,
   `pre_push_hook`, `required_checks`). `onevcs` relays a branch and a change url
