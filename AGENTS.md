@@ -56,6 +56,11 @@ anything new here is a proposal to make upstream first.
   *kept*: each `ArtifactRef` on one of its events, with the verdict and bounded
   prose of the event that stored it. The interval it is drawn over is the two
   neighbouring records that bracket it — the tightest one the journal holds.
+- **The graph-level summary of a node's sessions.** `payload::role_rollups`
+  counts a node's dispatched sessions per role so the graph reading is a reading
+  rather than a download: a node that dispatched two hundred of them is two
+  hundred spans at `scope=node` and one per category at `scope=run`. The SDK
+  counts neither.
 
 ### What the wire asks for and no onepipeline journal records
 
