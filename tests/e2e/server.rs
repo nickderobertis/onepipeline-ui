@@ -613,6 +613,37 @@ fn the_stream_opens_with_a_fresh_snapshot_and_invalidates_on_a_live_append() {
     assert_eq!(changed.id, "1", "cursors are monotonic within a connection");
 }
 
+/// A `run_id` on the stream is the id a client turns straight back into
+/// `GET /api/v2/runs/{run}`. A directory whose name the contract's own boundary
+/// would refuse is one the stream must not point a client at, so it is passed
+/// over rather than announced as a run to go and read.
+#[test]
+fn a_run_directory_the_contract_cannot_name_is_never_announced_on_the_stream() {
+    let unnameable = "a run with spaces";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, unnameable);
+    });
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
+
+    // Both move: only the one a client could refetch is reported.
+    fixture_run::append(&serving.run_dir(unnameable), "round-started", json!({}));
+    fixture_run::append(
+        &serving.run_dir(fixture_run::RUN_ID),
+        "round-started",
+        json!({}),
+    );
+
+    let changed = stream.next_frame().expect("the append is noticed");
+    assert_eq!(changed.event, "run.changed");
+    assert_eq!(
+        changed.json()["run_id"],
+        json!(fixture_run::RUN_ID),
+        "the stream named a run the route would refuse"
+    );
+}
+
 #[test]
 fn a_run_that_leaves_the_root_is_reported_removed() {
     let serving = two_runs();

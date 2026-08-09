@@ -228,7 +228,7 @@ pub struct Frames {
     watched: Option<RunId>,
     cursor: u64,
     opened: bool,
-    baseline: Vec<(String, (u64, usize, u64))>,
+    baseline: Vec<(RunId, (u64, usize, u64))>,
     transcripts: Option<String>,
     pending: std::collections::VecDeque<(SseEvent, Value)>,
     since_conversation_poll: Duration,
@@ -265,7 +265,12 @@ impl Frames {
     }
 
     /// The runs this connection watches, and their change tokens.
-    fn signatures(&self) -> Vec<(String, (u64, usize, u64))> {
+    ///
+    /// Keyed by [`RunId`] rather than by the directory name: every frame below
+    /// hands this back as the `run_id` a client refetches the run with, so a
+    /// directory the contract's own boundary would refuse is one this stream
+    /// must not announce as a run to go and read.
+    fn signatures(&self) -> Vec<(RunId, (u64, usize, u64))> {
         self.store
             .views()
             .iter()
@@ -274,7 +279,11 @@ impl Frames {
                     .as_ref()
                     .is_none_or(|run| view.paths.run == run.as_str())
             })
-            .map(|view| (view.paths.run.clone(), payload::signature(view)))
+            .filter_map(|view| {
+                RunId::try_from(view.paths.run.as_str())
+                    .ok()
+                    .map(|run| (run, payload::signature(view)))
+            })
             .collect()
     }
 

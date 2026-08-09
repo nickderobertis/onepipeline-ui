@@ -76,15 +76,20 @@ if [ "$reported" != "$expect_version" ]; then
     "check that the publish job uploaded artifacts built from this tag"
 fi
 
-"$command_name" --help >/dev/null || fail "'--help' failed" \
-  "the installed binary is broken; check the build job for this platform"
+# Captured rather than discarded, here and below: on a runner this script is the
+# only witness, and "'--help' failed" without the binary's own words leaves
+# whoever reads the log to reproduce the platform before they can start.
+if ! help_output="$("$command_name" --help 2>&1)"; then
+  fail "'--help' failed: ${help_output}" \
+    "the installed binary is broken; check the build job for this platform"
+fi
 
 # A runs root this host cannot read is a usage error, exit 2 — the documented
 # status, and distinct from the crash a broken binary would give.
 code=0
-"$command_name" serve --runs-root /no/such/runs/root >/dev/null 2>&1 || code=$?
+serve_output="$("$command_name" serve --runs-root /no/such/runs/root 2>&1)" || code=$?
 if [ "$code" -ne 2 ]; then
-  fail "'serve' with an unreadable runs root exited $code, not the documented 2" \
+  fail "'serve' with an unreadable runs root exited $code, not the documented 2: ${serve_output}" \
     "compare against AGENTS.md's exit-code invariant and src/main.rs at this tag"
 fi
 
