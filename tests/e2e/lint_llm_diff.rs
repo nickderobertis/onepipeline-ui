@@ -3,12 +3,14 @@
 //! `llmlint` on PATH that records the calls it is asked to make.
 //!
 //! The judge is the one thing not run here — a model call is neither free nor
-//! deterministic — but everything this script decides is. What a shard carries,
-//! that every changed file is carried exactly once, that no shard exceeds the
-//! character budget a harness caps, that a failing shard does not stop the ones
-//! after it, and which exit code the caller ends up with are all asserted
-//! against the same script CI runs.
+//! deterministic — but everything this script decides is. Which files a shard
+//! judges, that the excludes it passes are exactly the rest of the change, that
+//! every changed file is judged exactly once, that no shard carries more diff
+//! than the character budget a harness caps, that a failing shard does not stop
+//! the ones after it, and which exit code the caller ends up with are all
+//! asserted against the same script CI runs.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -66,6 +68,14 @@ fn make_executable(_path: &Path) {
     // so there is no mode bit here to set.
 }
 
+/// One judge run the script asked for: which changed files it left in view, and
+/// which it excluded.
+struct Call {
+    judged: Vec<String>,
+    excluded: BTreeSet<String>,
+    argv: String,
+}
+
 /// A repository whose branch commit changed `files`, with an `llmlint` on PATH
 /// that appends each call's arguments to a log and exits with the next code it
 /// was handed.
@@ -80,6 +90,15 @@ impl Fixture {
     /// shard's measured diff is a property of the fixture rather than of
     /// whatever the file happened to contain.
     fn new(sizes: &[usize]) -> Self {
+        let named: Vec<(String, usize)> = sizes
+            .iter()
+            .enumerate()
+            .map(|(index, size)| (format!("feature{index:02}/changed{index:02}.txt"), *size))
+            .collect();
+        Self::with_paths(&named)
+    }
+
+    fn with_paths(named: &[(String, usize)]) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let root = dir.path();
         git(root, &["init", "--quiet"]);
@@ -92,16 +111,16 @@ impl Fixture {
         let base = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
 
         let mut files = Vec::new();
-        for (index, size) in sizes.iter().enumerate() {
-            let path = format!("feature{index:02}/changed{index:02}.txt");
-            write(root, &path, &format!("{}\n", "x".repeat(*size)));
-            files.push(path);
+        for (path, size) in named {
+            write(root, path, &format!("{}\n", "x".repeat(*size)));
+            files.push(path.clone());
         }
         git(root, &["add", "-A"]);
         git(
             root,
             &["commit", "--quiet", "-m", "the change under judgement"],
         );
+        files.sort();
 
         let stub_dir = root.join("stub-bin");
         fs::create_dir_all(&stub_dir).expect("create the stub directory");
@@ -156,17 +175,32 @@ impl Fixture {
         command.output().expect("bash is on PATH")
     }
 
-    /// The changed files named in each recorded call, in call order.
-    fn shards(&self) -> Vec<Vec<String>> {
+    /// Each recorded call, split into the changed files it judged and the ones
+    /// it excluded. A rule's own `files:` glob outranks a positional path, so
+    /// what a call judges is the change minus what it excluded — the same thing
+    /// llmlint resolves.
+    fn calls(&self) -> Vec<Call> {
         let Ok(log) = fs::read_to_string(self.calls_log()) else {
             return Vec::new();
         };
         log.lines()
-            .map(|call| {
-                call.split_whitespace()
-                    .filter(|argument| self.files.iter().any(|file| file == argument))
-                    .map(str::to_owned)
-                    .collect()
+            .map(|argv| {
+                let tokens: Vec<&str> = argv.split_whitespace().collect();
+                let excluded: BTreeSet<String> = tokens
+                    .windows(2)
+                    .filter(|pair| pair[0] == "--exclude")
+                    .map(|pair| pair[1].to_owned())
+                    .collect();
+                Call {
+                    judged: self
+                        .files
+                        .iter()
+                        .filter(|file| !excluded.contains(*file))
+                        .cloned()
+                        .collect(),
+                    excluded,
+                    argv: argv.to_owned(),
+                }
             })
             .collect()
     }
@@ -192,17 +226,54 @@ fn every_changed_file_is_judged_in_exactly_one_shard() {
     let output = fixture.run(Some(TEST_BUDGET), "", &[]);
 
     assert!(output.status.success(), "{}", stderr(&output));
-    let shards = fixture.shards();
+    let calls = fixture.calls();
     assert!(
-        shards.len() > 1,
-        "the budget should have forced a split: {shards:?}"
+        calls.len() > 1,
+        "the budget should have forced a split: {} call(s)",
+        calls.len()
     );
-    let judged: Vec<&String> = shards.iter().flatten().collect();
+    let judged: Vec<&String> = calls.iter().flat_map(|call| &call.judged).collect();
     assert_eq!(
         judged,
         fixture.files.iter().collect::<Vec<_>>(),
         "the shards must carry every changed file exactly once, in path order"
     );
+}
+
+/// The excludes are what make a shard a shard, so they are asserted as passed
+/// rather than as interpreted: a changed file is held back from every shard but
+/// the one that judges it, and nothing else is ever denied — a broader pattern
+/// would silence files no shard makes up for.
+#[test]
+fn every_changed_file_is_held_back_from_every_shard_but_its_own() {
+    let fixture = Fixture::new(&[900; 6]);
+
+    let output = fixture.run(Some(TEST_BUDGET), "", &[]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let calls = fixture.calls();
+    assert!(calls.len() > 1, "the budget should have forced a split");
+    let changed: BTreeSet<&String> = fixture.files.iter().collect();
+    for call in &calls {
+        let denied: BTreeSet<&String> = call.excluded.iter().collect();
+        assert!(
+            denied.is_subset(&changed),
+            "a shard denied something outside the change: {}",
+            call.argv
+        );
+    }
+    for file in &fixture.files {
+        let held_back = calls
+            .iter()
+            .filter(|call| call.excluded.contains(file))
+            .count();
+        assert_eq!(
+            held_back,
+            calls.len() - 1,
+            "{file} should be held back from every shard but one of {}",
+            calls.len()
+        );
+    }
 }
 
 #[test]
@@ -212,8 +283,8 @@ fn no_shard_carries_more_diff_than_the_budget_allows() {
     let output = fixture.run(Some(TEST_BUDGET), "", &[]);
 
     assert!(output.status.success(), "{}", stderr(&output));
-    for shard in fixture.shards() {
-        let chars = fixture.diff_chars(&shard);
+    for call in fixture.calls() {
+        let chars = fixture.diff_chars(&call.judged);
         assert!(
             chars <= TEST_BUDGET,
             "a shard of {chars} chars exceeds the {TEST_BUDGET} budget"
@@ -231,17 +302,19 @@ fn a_file_larger_than_the_budget_is_judged_alone_rather_than_dropped() {
     let output = fixture.run(Some(TEST_BUDGET), "", &[]);
 
     assert!(output.status.success(), "{}", stderr(&output));
-    let shards = fixture.shards();
+    let calls = fixture.calls();
     assert!(
-        shards
+        calls
             .iter()
-            .any(|shard| shard.len() == 1 && shard[0] == fixture.files[1]),
-        "the oversized file should occupy a shard of its own: {shards:?}"
+            .any(|call| call.judged == [fixture.files[1].clone()]),
+        "the oversized file should occupy a shard of its own: {:?}",
+        calls.iter().map(|call| &call.judged).collect::<Vec<_>>()
     );
 }
 
 /// A change small enough for one call is the run this script replaced: a single
-/// invocation, with the caller's own arguments forwarded untouched.
+/// invocation with no excludes at all, and the caller's own arguments forwarded
+/// untouched.
 #[test]
 fn a_small_change_runs_as_a_single_unmodified_call() {
     let fixture = Fixture::new(&[200, 200]);
@@ -253,9 +326,47 @@ fn a_small_change_runs_as_a_single_unmodified_call() {
     assert_eq!(
         calls.trim_end(),
         format!(
-            "--diff --diff-base {} --rule no_hardcoded_secrets {} {}",
-            fixture.base, fixture.files[0], fixture.files[1]
+            "--diff --diff-base {} --rule no_hardcoded_secrets",
+            fixture.base
         ),
+    );
+}
+
+/// A path a glob cannot name exactly would exclude more than its own file, and
+/// the difference would go unjudged while the run still reported success. The
+/// script refuses instead — and only when it is about to shard, because the
+/// single-call path passes no excludes.
+#[test]
+fn a_path_a_glob_cannot_name_exactly_is_refused_rather_than_over_excluded() {
+    let named = vec![
+        ("feature00/changed.txt".to_owned(), 900),
+        ("feature01/chan[ge]d.txt".to_owned(), 900),
+        ("feature02/changed.txt".to_owned(), 900),
+    ];
+    let fixture = Fixture::with_paths(&named);
+
+    let sharded = fixture.run(Some(TEST_BUDGET), "", &[]);
+
+    assert_eq!(sharded.status.code(), Some(2), "{}", stderr(&sharded));
+    assert!(
+        stderr(&sharded).contains("chan[ge]d.txt"),
+        "the message should name the path it cannot exclude: {}",
+        stderr(&sharded)
+    );
+    assert!(
+        !fixture.calls_log().exists(),
+        "nothing should be judged when the shards could not be honoured"
+    );
+
+    // The same change under a budget that needs no shard is judged as one call,
+    // so the refusal is scoped to the excludes rather than to the path.
+    let whole = fixture.run(None, "", &[]);
+
+    assert!(whole.status.success(), "{}", stderr(&whole));
+    let calls = fs::read_to_string(fixture.calls_log()).expect("the stub was called");
+    assert_eq!(
+        calls.trim_end(),
+        format!("--diff --diff-base {}", fixture.base)
     );
 }
 
@@ -268,12 +379,13 @@ fn a_failing_shard_does_not_stop_the_shards_after_it() {
 
     let output = fixture.run(Some(TEST_BUDGET), "1 0 2", &[]);
 
-    let shards = fixture.shards();
+    let calls = fixture.calls();
     assert!(
-        shards.len() >= 3,
-        "expected at least three shards, got {shards:?}"
+        calls.len() >= 3,
+        "expected at least three shards, got {}",
+        calls.len()
     );
-    let judged: Vec<&String> = shards.iter().flatten().collect();
+    let judged: Vec<&String> = calls.iter().flat_map(|call| &call.judged).collect();
     assert_eq!(judged, fixture.files.iter().collect::<Vec<_>>());
     assert_eq!(
         output.status.code(),
