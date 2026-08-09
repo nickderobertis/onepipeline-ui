@@ -32,7 +32,13 @@ export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
           ? CircleDashed
           : Clock3;
   return (
-    <div
+    // One card is a kind, a name, a state word and sometimes a reason, laid out with
+    // nothing saying they are one node's line. An `article` with that line as its name
+    // is what makes the card askable as "dashboard: running" — the same line the
+    // accessible node list in DagGraph reads out, so both renderings name a node
+    // identically.
+    <article
+      aria-label={`${data.label}: ${data.state}`}
       className={cn("dag-node", `state-${data.state}`, `token-${data.style}`)}
       data-selected={data.selected}
     >
@@ -57,6 +63,6 @@ export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
         </span>
       )}
       <Handle type="source" position={Position.Right} />
-    </div>
+    </article>
   );
 }

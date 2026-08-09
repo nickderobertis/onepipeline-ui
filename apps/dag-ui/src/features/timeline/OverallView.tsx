@@ -99,7 +99,7 @@ export function OverallView({
                 : "no events recorded yet"}
             </p>
           </section>
-          <div className="metric-grid">
+          <section aria-label="Run metrics" className="metric-grid">
             <Metric
               icon={<Activity />}
               label="Status"
@@ -120,7 +120,7 @@ export function OverallView({
               label="Turns"
               value={String(detail.run.turns)}
             />
-          </div>
+          </section>
           <Card className="gap-0 py-[15px]">
             <CardContent className="px-[15px]">
               <div className="section-heading">
@@ -338,7 +338,14 @@ function Metric({
   readonly value: string;
 }) {
   return (
-    <Card className="metric flex-row items-center gap-3 p-4">
+    // The label and the value are two lines with nothing tying them together, so the
+    // tile is grouped and named by its label: "Wall time" reaches this one rather
+    // than whichever card happens to be fourth.
+    <Card
+      aria-label={label}
+      className="metric flex-row items-center gap-3 p-4"
+      role="group"
+    >
       {icon}
       <div>
         <p>{label}</p>

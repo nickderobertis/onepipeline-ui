@@ -1,11 +1,12 @@
 // llmlint: ignore-file[e2e_uses_accessible_selectors] the same constraint as
 // dag-ui-navigation.spec.ts: every region, control and reading asserted on here is
-// reached by role or by text, and what is left is the copied markup's own structural
-// containers — a `section` grouping a session's runs, a graph node, a metric tile —
-// which carry no accessible name to ask for. Giving them one is a change to the app
-// this app was imported precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and
-// these journeys are the only thing that would catch what such a pass moved. Owed and
-// tracked as follow-up rather than done blind alongside a packaging change.
+// reached by role or by text — graph cards and metric tiles through
+// `observatory-locators.ts`, which asks for them by the accessible names the app now
+// gives them. What is left is the copied markup's own structural containers, a
+// `section` grouping a session's runs among them, which carry no accessible name and
+// no role to ask for. Naming those is a change to the app this app was imported
+// precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
+// only thing that would catch what such a pass moved.
 import { execFileSync } from "node:child_process";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
@@ -14,6 +15,12 @@ import {
   STALLED_UI_URL,
 } from "../playwright.config";
 import { fixture, runs } from "./fixture-facts";
+import {
+  graphNodeList,
+  graphNodes,
+  metric as metricTile,
+  metrics as metricTiles,
+} from "./observatory-locators";
 import { PHONE } from "./viewports";
 
 /**
@@ -167,54 +174,44 @@ test("tracks every node state and kind of a live run", async ({ page }) => {
   await openObservatory(page);
 
   await expect(
-    page.locator(".dag-node.state-done").filter({ hasText: "foundation" }),
+    graphNodes(page, "done").filter({ hasText: "foundation" }),
   ).toContainText("foundation");
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
   await expect(
-    page.locator(".dag-node.state-failed").filter({ hasText: "publish" }),
+    graphNodes(page, "failed").filter({ hasText: "publish" }),
   ).toContainText("publish");
-  await expect(page.locator(".dag-node.state-waiting")).toContainText(
-    "approval",
-  );
-  await expect(page.locator(".dag-node.state-pending")).toContainText(
-    "followup",
-  );
-  await expect(page.locator(".dag-node.state-cancelled")).toContainText(
-    "obsolete",
-  );
+  await expect(graphNodes(page, "waiting")).toContainText("approval");
+  await expect(graphNodes(page, "pending")).toContainText("followup");
+  await expect(graphNodes(page, "cancelled")).toContainText("obsolete");
   // The two statuses the scheduler derives and journals nothing about. The served
   // graph re-derives them, so they reach the canvas as themselves rather than as the
   // "pending" a client used to invent for every node the journal never mentioned.
-  await expect(page.locator(".dag-node.state-blocked")).toContainText("queued");
-  await expect(page.locator(".dag-node.state-skipped")).toContainText(
-    "abandoned",
-  );
+  await expect(graphNodes(page, "blocked")).toContainText("queued");
+  await expect(graphNodes(page, "skipped")).toContainText("abandoned");
 
   // Each card names the kind of work it stands for, so an operator can tell the two
   // apart without opening either: agent work runs itself, a human action does not.
-  await expect(page.locator(".dag-node.state-running")).toContainText("agent");
-  await expect(page.locator(".dag-node.state-waiting")).toContainText("human");
+  await expect(graphNodes(page, "running")).toContainText("agent");
+  await expect(graphNodes(page, "waiting")).toContainText("human");
 
   // And a card that is not moving says why in one line, so a graph of red and amber
   // is a diagnosis rather than an invitation to open every node in it.
-  await expect(page.locator(".dag-node.state-blocked")).toContainText(
+  await expect(graphNodes(page, "blocked")).toContainText(
     "blocked by approval",
   );
-  await expect(page.locator(".dag-node.state-skipped")).toContainText(
-    "blocked by publish",
-  );
+  await expect(graphNodes(page, "skipped")).toContainText("blocked by publish");
   await expect(
-    page.locator(".dag-node.state-failed").filter({ hasText: "publish" }),
+    graphNodes(page, "failed").filter({ hasText: "publish" }),
   ).toContainText("Deploy failed");
-  await expect(page.locator(".dag-node.state-cancelled")).toContainText(
+  await expect(graphNodes(page, "cancelled")).toContainText(
     "cancelled cooperatively",
   );
-  // Work that is fine gets no such line at all.
-  await expect(page.locator(".dag-node.state-done .node-reason")).toHaveCount(
-    0,
-  );
+  // Work that is fine gets no such line at all. Asked of the accessible node list,
+  // which reads out the same reason the card truncates and appends it after an em
+  // dash — so "no `done` node has one" is one count rather than a rule per node.
+  await expect(
+    graphNodeList(page).getByRole("button", { name: /: done — / }),
+  ).toHaveCount(0);
 });
 
 test("leads a node that is not moving with the reason it is not", async ({
@@ -256,23 +253,21 @@ test("renders the outcomes only a settled round records", async ({ page }) => {
   // A finished round records statuses a live one cannot journal. Each has to reach
   // the canvas as itself and read as the kind of outcome it is.
   await openObservatory(page, `/?run=${runs().outcomes}&view=graph`);
-  await expect(page.locator(".dag-node.state-not-completed")).toContainText(
-    "backfill",
-  );
-  await expect(page.locator(".dag-node.state-unknown")).toContainText("verify");
+  await expect(graphNodes(page, "not-completed")).toContainText("backfill");
+  await expect(graphNodes(page, "unknown")).toContainText("verify");
 
   // Unfinished work is lost work, not held work; a status the vocabulary does not
   // hold has no outcome to claim and must not borrow one.
-  await expect(page.locator(".dag-node.state-not-completed")).toHaveCSS(
+  await expect(graphNodes(page, "not-completed")).toHaveCSS(
     "background-color",
     await tokenColor(page, "--destructive-surface"),
   );
-  await expect(page.locator(".dag-node.state-unknown")).toHaveCSS(
+  await expect(graphNodes(page, "unknown")).toHaveCSS(
     "background-color",
     await tokenColor(page, "--card"),
   );
 
-  await page.locator(".dag-node.state-not-completed").click();
+  await graphNodes(page, "not-completed").click();
   await expect(page.getByRole("alert")).toContainText("did not complete");
   await expect(page.getByRole("alert")).toContainText("step 'load' timed out");
 
@@ -287,7 +282,7 @@ test("renders the outcomes only a settled round records", async ({ page }) => {
   // that word on the card, rather than saying nothing the run did not already know.
   await openObservatory(page, `/?run=${runs().outcomes}&view=graph`);
   await expect(
-    page.locator(".dag-node.state-failed").filter({ hasText: "rollback" }),
+    graphNodes(page, "failed").filter({ hasText: "rollback" }),
   ).toContainText("gate-failed");
   // The banner reads the same chain, so the card and the view it opens cannot
   // explain one failure two ways.
@@ -340,14 +335,14 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   page,
 }) => {
   await openObservatory(page);
-  await page.locator(".dag-node.state-running").click();
+  await graphNodes(page, "running").click();
 
   // The node takes the working area: the graph is gone, and a breadcrumb stands
   // where it was.
   await expect(
     page.getByRole("region", { name: "Timeline for dashboard" }),
   ).toBeVisible();
-  await expect(page.locator(".dag-node")).toHaveCount(0);
+  await expect(graphNodes(page)).toHaveCount(0);
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" }),
   ).toContainText("dashboard");
@@ -496,9 +491,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   // Escape closes detail first, then returns to the graph.
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
 });
 
 test("restores a bookmarked moment inside a session from the address alone", async ({
@@ -681,9 +674,7 @@ test("opens a node from the keyboard-accessible node list and walks back", async
     .getByRole("button", { name: /Graph/ });
   expect(await tabTo(page, back)).toBe(true);
   await page.keyboard.press("Enter");
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
 });
 
 test("shows a verification and a publication as the records they are", async ({
@@ -943,7 +934,7 @@ test("zooms and reframes the graph through its canvas controls", async ({
   // The framing to compare against is the one the canvas settles on, not the
   // identity it mounts with: reading it before the graph has been fitted compares
   // "fit view" against a transform the reader never saw.
-  await expect(page.locator(".dag-node").first()).toBeVisible();
+  await expect(graphNodes(page).first()).toBeVisible();
   await expect.poll(transform).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
   const framed = await transform();
   await page.getByRole("button", { name: "zoom in" }).click();
@@ -959,15 +950,13 @@ test("renders a graph whose node depends on another run", async ({ page }) => {
   // The served plan gives `dashboard` a `run:<run_id>#<node_id>` prerequisite. It
   // names a node this graph does not hold, so it cannot be an edge — and it must not
   // take the whole view down with it either.
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
   await expect(
     page.getByText("The DAG view could not be displayed."),
   ).toHaveCount(0);
 
   // The prerequisite itself stays visible where the node's dependencies are listed.
-  await page.locator(".dag-node.state-running").click();
+  await graphNodes(page, "running").click();
   await page.getByRole("tab", { name: "Dependencies" }).click();
   await expect(page.locator(".facts")).toContainText(
     `run:${runs().history}#archive`,
@@ -997,18 +986,16 @@ test("navigates historical DAGs grouped by their launching session", async ({
   await expect(page.getByRole("tooltip")).toContainText("Live");
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
-  await expect(page.locator(".dag-node.state-done")).toContainText("archive");
+  await expect(graphNodes(page, "done")).toContainText("archive");
   // The graph is what this reader is in, so the address keeps saying so as they move
   // between runs — the same way it keeps saying `overall` for a reader in that.
   await expect
     .poll(() => new URL(page.url()).searchParams.get("view"))
     .toBe("graph");
   await page.getByRole("button", { name: RegExp(runs().live) }).click();
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
   await page.goBack();
-  await expect(page.locator(".dag-node.state-done")).toContainText("archive");
+  await expect(graphNodes(page, "done")).toContainText("archive");
 });
 
 test("loads another run-list page when navigation reaches the end", async ({
@@ -1082,8 +1069,7 @@ test("restores a bookmarked view and refreshes through the read API", async ({
   page,
 }) => {
   await openObservatory(page, `/?run=${runs().live}&view=overall`);
-  const metric = (label: string) =>
-    page.locator(".metric").filter({ hasText: label });
+  const metric = (label: string) => metricTile(page, label);
   await expect(metric("Status")).toContainText("active");
   await expect(metric("Nodes")).toContainText(/[1-9]\d*/);
   // A duration in the units it is read in, never the raw second count the contract
@@ -1100,9 +1086,7 @@ test("restores a bookmarked view and refreshes through the read API", async ({
   await expect(graphLine(page)).toBeVisible();
 
   await page.getByRole("tab", { name: "Graph" }).click();
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
   await expect(graphLine(page)).toHaveCount(0);
 
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
@@ -1123,7 +1107,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
     "true",
   );
   await expect(graphLine(page)).toBeVisible();
-  await expect(page.locator(".dag-node")).toHaveCount(0);
+  await expect(graphNodes(page)).toHaveCount(0);
 
   // Picking a second run is an operator comparing the two, so the reading they are
   // comparing them in survives the move — only the run under it changes.
@@ -1136,7 +1120,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
     "true",
   );
   await expect(graphLine(page)).toBeVisible();
-  await expect(page.locator(".dag-node")).toHaveCount(0);
+  await expect(graphNodes(page)).toHaveCount(0);
 
   // Every address that does name where it is going still opens there.
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
@@ -1157,9 +1141,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   ).toHaveCount(0);
 
   await openObservatory(page);
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
 
   // An address naming a view this app does not have is an address naming none: a
   // stale bookmark lands where a bare one does rather than on an empty pane.
@@ -1169,7 +1151,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
     "true",
   );
   await expect(graphLine(page)).toBeVisible();
-  await expect(page.locator(".dag-node")).toHaveCount(0);
+  await expect(graphNodes(page)).toHaveCount(0);
 });
 
 test("restores node tabs and moves between them from the keyboard", async ({
@@ -1289,9 +1271,7 @@ test("gathers every run of one launching session under it", async ({
 
   // Both are reachable from that one group.
   await codex.getByRole("button", { name: RegExp(runs().sibling) }).click();
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "sibling",
-  );
+  await expect(graphNodes(page, "running")).toContainText("sibling");
 });
 
 test("groups a run with no recorded launch as unattributed", async ({
@@ -1326,7 +1306,7 @@ test("groups a run with no recorded launch as unattributed", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: RegExp(runs().unattributed) }).click();
-  await expect(page.locator(".dag-node.state-running")).toContainText("orphan");
+  await expect(graphNodes(page, "running")).toContainText("orphan");
   await expect(page.getByText("Continue unattributed work")).toHaveCount(0);
 });
 
@@ -1633,9 +1613,7 @@ test("recovers the selection when a bookmarked run is not being served", async (
   await openObservatory(page, "/?run=absent-run&node=dashboard");
   // The server serves no such run, so the view falls back to a real one and
   // rewrites the address rather than stranding the operator on an empty graph.
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
   await expect
     .poll(() => new URL(page.url()).search)
     .toContain(`run=${runs().live}`);
@@ -1659,7 +1637,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
   const width = async (locator: Locator): Promise<number | undefined> =>
     (await locator.boundingBox())?.width;
   const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  const metrics = page.locator(".metric");
+  const metrics = metricTiles(page);
   /**
    * Which way, if either, the whole reading spills out of the viewport it was given.
    *
@@ -1934,7 +1912,7 @@ test("tells each outcome apart by the palette's semantic tones", async ({
     { state: "failed", token: "--destructive" },
     { state: "running", token: "--info" },
   ]) {
-    await openNode(page.locator(`.dag-node.state-${state}`).first(), state);
+    await openNode(graphNodes(page, state).first(), state);
     await expect(stateBadge).toHaveCSS("color", await tokenColor(page, token));
     await page.keyboard.press("Escape");
   }
@@ -1945,7 +1923,7 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   // action is the graph's own normal shape, and the card is where that is said.
   const held = await tokenColor(page, "--warning");
   for (const state of ["blocked", "skipped"]) {
-    await openNode(page.locator(`.dag-node.state-${state}`), state);
+    await openNode(graphNodes(page, state), state);
     await expect(stateBadge).toHaveCSS("color", held);
     await page.keyboard.press("Escape");
   }
@@ -1955,7 +1933,7 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   // mapping that simply paints everything.
   const neutral = await tokenColor(page, "--foreground");
   for (const state of ["waiting", "pending"]) {
-    await openNode(page.locator(`.dag-node.state-${state}`), state);
+    await openNode(graphNodes(page, state), state);
     await expect(stateBadge).toHaveCSS("color", neutral);
     await page.keyboard.press("Escape");
   }
@@ -1992,7 +1970,7 @@ test("tells each outcome apart by the palette's semantic tones", async ({
     { state: "blocked", token: "--warning-surface" },
     { state: "skipped", token: "--warning-surface" },
   ]) {
-    await expect(page.locator(`.dag-node.state-${state}`).first()).toHaveCSS(
+    await expect(graphNodes(page, state).first()).toHaveCSS(
       "background-color",
       await tokenColor(page, token),
     );
@@ -2039,18 +2017,16 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
 
 test("streams real progress the server observes on disk", async ({ page }) => {
   await openObservatory(page);
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
 
   // Record progress the way the executor does: one appended authoritative event.
   // The server's own poll notices it and invalidates the run over SSE.
   changeServedRuns(["--settle-dashboard"]);
 
   await expect(
-    page.locator(".dag-node.state-done", { hasText: "dashboard" }),
+    graphNodes(page, "done").filter({ hasText: "dashboard" }),
   ).toBeVisible();
-  await expect(page.locator(".dag-node.state-running")).toHaveCount(0);
+  await expect(graphNodes(page, "running")).toHaveCount(0);
   await expect(page.getByText(/Last updated/)).toBeVisible();
 });
 

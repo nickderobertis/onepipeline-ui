@@ -1,13 +1,15 @@
 // llmlint: ignore-file[e2e_uses_accessible_selectors] every region, control and reading
-// these journeys assert on is reached by role or by text; what is left is the handful of
-// containers the copied markup gives no accessible name — a scroll viewport Radix injects
-// and has no role for, and structural elements this app was written with. Reaching those
-// accessibly means naming them in the app, which is changing the thing under test rather
-// than the test: this app came over whole and its implementation is the spec (see
-// apps/dag-ui/AGENTS.md), and these are the journeys that would have to catch the
-// regression. The naming pass is owed and is tracked as follow-up, not done blind here.
+// these journeys assert on is reached by role or by text — graph cards through
+// `observatory-locators.ts`, which asks for them by the accessible names the app now
+// gives them. What is left is the handful of containers the copied markup gives no
+// accessible name: a scroll viewport Radix injects and has no role for, and structural
+// elements this app was written with. Reaching those accessibly means naming them in
+// the app, which is changing the thing under test rather than the test: this app came
+// over whole and its implementation is the spec (see apps/dag-ui/AGENTS.md), and these
+// are the journeys that would have to catch the regression.
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
+import { graphNodes } from "./observatory-locators";
 import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -207,7 +209,7 @@ test("walks graph to node to timeline item and back, restoring each selection", 
   page,
 }) => {
   await open(page, DESKTOP, `/?run=${runs().live}&view=graph`);
-  await page.locator(".dag-node.state-running").click();
+  await graphNodes(page, "running").click();
   await expect(
     page.getByRole("region", { name: "Timeline for dashboard" }),
   ).toBeVisible();
@@ -234,9 +236,7 @@ test("walks graph to node to timeline item and back, restoring each selection", 
 
   // Back again leaves the node for the graph it was opened from.
   await page.goBack();
-  await expect(page.locator(".dag-node.state-running")).toContainText(
-    "dashboard",
-  );
+  await expect(graphNodes(page, "running")).toContainText("dashboard");
   await expect(page).toHaveURL(/view=graph/);
   await expect(page).not.toHaveURL(/node=/);
 
@@ -292,9 +292,9 @@ for (const size of [DESKTOP, PHONE]) {
     // must not change what the wide one draws.
     await open(page, size, `/?run=${runs().live}&view=graph`);
     const canvas = page.getByLabel("DAG execution graph");
-    await expect(page.locator(".dag-node").first()).toBeVisible();
+    await expect(graphNodes(page).first()).toBeVisible();
     const pane = await canvas.boundingBox();
-    const cards = page.locator(".dag-node");
+    const cards = graphNodes(page);
     const count = await cards.count();
     expect(count).toBeGreaterThan(1);
     for (let index = 0; index < count; index += 1) {
@@ -404,7 +404,7 @@ for (const size of VIEWPORTS) {
     await segment.hover();
     await expect(reading).toBeInViewport({ ratio: 1 });
     await page.keyboard.press("Escape");
-    await expect(page.locator(".dag-node").first()).toBeVisible();
+    await expect(graphNodes(page).first()).toBeVisible();
     await expect(reading).toHaveCount(0);
     await expectThePageItselfDoesNotScroll(page);
   });
@@ -699,9 +699,7 @@ for (const size of [DESKTOP, PHONE]) {
     await page.keyboard.press("Escape");
     await expect(itemDetail(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(page.locator(".dag-node.state-running")).toContainText(
-      "dashboard",
-    );
+    await expect(graphNodes(page, "running")).toContainText("dashboard");
     await expect(
       page.getByRole("region", { name: "Timeline for dashboard" }),
     ).toHaveCount(0);

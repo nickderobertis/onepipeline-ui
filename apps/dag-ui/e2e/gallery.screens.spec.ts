@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
+import { graphNodes, metrics } from "./observatory-locators";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -57,7 +58,7 @@ const SURFACES: readonly Surface[] = [
     open: async (page) => {
       await page.goto(`/?run=${runs().live}&view=overall`);
       await expect(page.getByText("DAG Observatory")).toBeVisible();
-      await expect(page.locator(".metric")).toHaveCount(4);
+      await expect(metrics(page)).toHaveCount(4);
       await expect(
         page.getByRole("region", { name: "Graph timeline" }),
       ).toBeVisible();
@@ -109,12 +110,10 @@ const SURFACES: readonly Surface[] = [
     title: "Graph view",
     open: async (page) => {
       await page.goto(`/?run=${runs().live}&view=graph`);
-      await expect(page.locator(".dag-node.state-running")).toContainText(
-        "dashboard",
+      await expect(graphNodes(page, "running")).toHaveAccessibleName(
+        "dashboard: running",
       );
-      await expect(
-        page.locator(".dag-node.state-failed").first(),
-      ).toBeVisible();
+      await expect(graphNodes(page, "failed").first()).toBeVisible();
     },
   },
   {
