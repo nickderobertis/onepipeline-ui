@@ -37,8 +37,8 @@ Two rules govern what may be written here:
 
 `src/payload.rs` and `src/store.rs` derive a few presentation-worthy things the
 SDK does not, and the wire asks for a few a onepipeline journal records nowhere.
-Both lists live beside the code that owes them, in
-[`src/AGENTS.md`](src/AGENTS.md) — do not add to either silently.
+Both lists are kept beside the code that owes them — do not add to either
+silently.
 
 ## Two standing goals on every task
 
@@ -106,9 +106,8 @@ fans one uniformly-named target across all of them.
 - The gate is strict: no warnings-only mode anywhere. A diagnostic is an error or
   a suppression with a written reason at the narrowest scope the tool allows.
 - **Coverage is enforced at 95% line coverage**; the gate fails below it. That
-  is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend's bar is
-  its journeys rather than a number — [`apps/dag-ui/AGENTS.md`](apps/dag-ui/AGENTS.md)
-  states it.
+  is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend is held
+  to its journeys rather than to a number.
 - **Tests are realistic, not mocked, and complete, not minimal.** Nothing under
   test is stubbed, and a change is not done until a real journey covers it —
   happy path and at least one failure a user can cause.
