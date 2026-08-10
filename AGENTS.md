@@ -101,6 +101,19 @@ fans one uniformly-named target across all of them.
   published artifact carries has to be added there, and `tests/packaging.rs`
   fails if it is not. v0.2.0 and v0.3.0 are what the narrower set cost: their
   fixes lived under `apps/dag-ui/`, so no release was ever cut for them.
+- **A release that did not publish must not look like one.** `release.yml`'s
+  last job runs `scripts/release-status.sh` over every other job's result: if a
+  job the operator's switches say had to succeed did not, the GitHub Release is
+  demoted to a prerelease with a banner naming the jobs, and the job fails. The
+  tag is never touched — tags here are immutable — so the recovery is always the
+  next patch version. Before this, a red `test` job *skipped* the ten publish
+  jobs and left the tag, the Release and its assets indistinguishable from a
+  version that shipped; v0.2.0 and v0.3.0 both went out that way, and only a
+  registry query showed it.
+- **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
+  `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
+  workflow, so `release.yml` would never run and the release would ship nothing.
+  `gh-secrets.json` names every secret the workflows read.
 
 ## Invariants (non-negotiable)
 

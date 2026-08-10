@@ -21,6 +21,8 @@ use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
+use crate::stub_bin;
+
 /// The budget the sharding journeys run under. Small enough that a handful of
 /// fixture files must span several shards, so the split is exercised rather
 /// than assumed.
@@ -58,18 +60,6 @@ fn write(dir: &Path, path: &str, contents: &str) {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-#[cfg(unix)]
-fn make_executable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("chmod the stub");
-}
-
-#[cfg(not(unix))]
-fn make_executable(_path: &Path) {
-    // The shell reads the `#!` line to decide a file is a program it can run,
-    // so there is no mode bit here to set.
 }
 
 /// One judge run the script asked for: which changed files it left in view, and
@@ -126,19 +116,15 @@ impl Fixture {
         );
         files.sort();
 
-        let stub_dir = root.join("stub-bin");
-        fs::create_dir_all(&stub_dir).expect("create the stub directory");
-        let stub = stub_dir.join("llmlint");
-        fs::write(
-            &stub,
+        stub_bin::install(
+            &root.join("stub-bin"),
+            "llmlint",
             "#!/usr/bin/env bash\n\
              printf '%s\\n' \"$*\" >> \"$LLMLINT_CALLS\"\n\
              called=$(wc -l < \"$LLMLINT_CALLS\")\n\
              codes=($LLMLINT_EXITS)\n\
              exit \"${codes[$((called - 1))]:-0}\"\n",
-        )
-        .expect("write the stub");
-        make_executable(&stub);
+        );
 
         Self { dir, base, files }
     }
@@ -159,17 +145,13 @@ impl Fixture {
     }
 
     fn run_against(&self, base: &str, budget: Option<usize>, exits: &str, args: &[&str]) -> Output {
-        let mut path = vec![self.root().join("stub-bin")];
-        path.extend(std::env::split_paths(
-            &std::env::var_os("PATH").expect("PATH is set"),
-        ));
         let mut command = Command::new("bash");
         command
             .arg(repo_root().join("scripts/lint-llm-diff.sh"))
             .arg(base)
             .args(args)
             .current_dir(self.root())
-            .env("PATH", std::env::join_paths(path).expect("join PATH"))
+            .env("PATH", stub_bin::path_with(&self.root().join("stub-bin")))
             .env("LLMLINT_CALLS", self.calls_log())
             .env("LLMLINT_EXITS", exits);
         match budget {

@@ -38,6 +38,10 @@ name: Release
 #                     depends on them, with the NPM_TOKEN secret, gated on the
 #                     NPM_PUBLISH repo variable.
 #   * verify-npm    — the same, on the same matrix, for `npm install -g`.
+#   * release-status — runs whatever the jobs above did, and holds the GitHub
+#                     Release to it: a release whose publishing did not complete
+#                     is demoted to a prerelease with a banner naming the jobs,
+#                     so a stranded tag can never read as a shipped version.
 #
 # Every verify job runs the version at publish time only. `published-smoke.yml`
 # runs the identical script against whatever the registries and the Release serve
@@ -603,3 +607,59 @@ jobs:
           bash scripts/smoke-published.sh \
             --expect-version "$ver" \
             --label "npm onepipeline-api-cli $ver on $RUNNER_OS/$RUNNER_ARCH"
+
+  # The last word on whether this tag means anything. Every job above it can go
+  # red without the Release changing at all — a failed `test` *skips* the ten
+  # publish and verify jobs rather than failing them — which is how v0.2.0 and
+  # v0.3.0 came to have a tag, a Release and attached assets while npm and PyPI
+  # still served 0.1.0. This runs whatever happened and makes the Release say it:
+  # a release that did not publish becomes a prerelease with a banner naming the
+  # jobs, so `releases/latest` and the Latest badge stop pointing at it, and the
+  # job fails. `scripts/release-status.sh` holds the logic — it is driven for
+  # real, against a recording `gh`, by tests/e2e/release_status.rs.
+  #
+  # `if: always()` because the whole point is the paths where something did not
+  # run. The switches are passed in rather than assumed: a publish job the
+  # operator has turned off is not a job this release was waiting for.
+  release-status:
+    needs:
+      - guard
+      - test
+      - upload
+      - verify-assets
+      - publish-crate
+      - build-wheels
+      - publish-pypi
+      - verify-pypi
+      - build-npm
+      - publish-npm
+      - verify-npm
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      # Demoting the Release and rewriting its notes is a write to the release.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      # Every value below arrives as an environment variable rather than inside
+      # the `run:` string: a job result or a repository variable interpolated
+      # into a shell command is a command the workflow did not write.
+      - name: Hold the Release to what actually published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          JOB_RESULTS: >-
+            test=${{ needs.test.result }}
+            upload=${{ needs.upload.result }}
+            verify-assets=${{ needs.verify-assets.result }}
+            publish-crate=${{ needs.publish-crate.result }}
+            build-wheels=${{ needs.build-wheels.result }}
+            publish-pypi=${{ needs.publish-pypi.result }}
+            verify-pypi=${{ needs.verify-pypi.result }}
+            build-npm=${{ needs.build-npm.result }}
+            publish-npm=${{ needs.publish-npm.result }}
+            verify-npm=${{ needs.verify-npm.result }}
+          EXPECT_CRATE: ${{ needs.guard.outputs.publish }}
+          EXPECT_PYPI: ${{ vars.PYPI_PUBLISH }}
+          EXPECT_NPM: ${{ vars.NPM_PUBLISH }}
+        run: bash scripts/release-status.sh
