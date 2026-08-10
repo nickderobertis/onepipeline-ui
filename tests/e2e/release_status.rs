@@ -126,6 +126,12 @@ impl Fixture {
         Self::new(NOTES, false)
     }
 
+    /// Make `gh` answer the prerelease query with `raw` in place of a boolean —
+    /// the shape a version that no longer serves the field would produce.
+    fn gh_answers_the_flag_with(&self, raw: &str) {
+        fs::write(self.path("is-prerelease"), raw).expect("write the prerelease flag");
+    }
+
     fn path(&self, name: &str) -> PathBuf {
         self.dir.path().join(name)
     }
@@ -493,6 +499,25 @@ fn a_release_it_cannot_demote_names_the_grant_it_is_missing() {
         fixture.edited_body().is_none(),
         "the refused edit was recorded as made"
     );
+}
+
+/// The prerelease flag is the one fact demoting a Release destroys, so an answer
+/// this cannot read must not become a `false`: that `false` is what a later
+/// recovery would use to promote a deliberate `-rc` to Latest.
+#[test]
+fn a_prerelease_flag_it_cannot_read_is_not_read_as_false() {
+    let fixture = Fixture::fresh();
+    fixture.gh_answers_the_flag_with("null");
+    let output = fixture.run(&[("test", "failure")], &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("no isPrerelease flag"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
 }
 
 /// A switch the operator misspelled must not read as "off". `PYPI_PUBLISH` is a

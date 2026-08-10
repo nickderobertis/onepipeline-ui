@@ -144,9 +144,17 @@ if ! body="$(gh release view "$RELEASE_TAG" --json body --jq .body)"; then
     "check that GH_TOKEN can read this repository's releases"
 fi
 
-case "$flags" in
+# A shape this does not recognise is rejected rather than read as `false`: this
+# flag is the one thing a demotion destroys, so a `false` invented here would
+# promote a deliberate `-rc` to Latest the next time the release recovers.
+# Whitespace is dropped first, so a pretty-printed answer is still an answer.
+case "${flags// /}" in
   *'"isPrerelease":true'*) was_prerelease=true ;;
-  *) was_prerelease=false ;;
+  *'"isPrerelease":false'*) was_prerelease=false ;;
+  *)
+    fail "the GitHub Release for $RELEASE_TAG answered with no isPrerelease flag: $flags" \
+      "check that gh is authenticated and current enough to serve 'release view --json isPrerelease'"
+    ;;
 esac
 case "$body" in
   *"$BANNER_OPEN"*) demoted=true ;;
