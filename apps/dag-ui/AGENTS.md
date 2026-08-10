@@ -18,22 +18,20 @@ nobody opens by hand.
 
 ## Reading a browser tier that would not start
 
-`Timed out waiting 120000ms from config.webServer` is the whole of what
-Playwright says when one of the five servers `playwright.config.ts` starts never
-becomes ready — it names neither the server nor the reason, and it starts them
-one at a time. Two pull requests were spent attributing that sentence to the
-wrong server. So the log is the evidence, and keeping it readable is part of the
-tier: every entry carries a `name`, every entry keeps its `stdout`, and every
-server states the address it took — the read API through its own `serving …`
-line, Vite through its ready line, the stall server through one line per port.
+`Timed out waiting 120000ms from config.webServer` names neither the server nor
+the reason, and Playwright starts the five in order, so the log is the only
+evidence. Keeping it readable is part of the tier: every entry carries a `name`,
+every entry keeps its `stdout`, and every server states the address it took —
+the read API through its own `serving …` line, Vite through its ready line, the
+stall server through one line per port.
 
 **Read them in order, and read the address, not the word "ready".** The server
-being waited for is the last one that printed, not the first one that did not —
-the ones after it were never started. And "ready" is a server's opinion of
-itself: what decides the wait is whether the address it *bound* is the address
-`playwright.config.ts` *waits on*. Vite announced `ready in 253 ms` on four
-GitHub runs while listening somewhere Playwright was not looking, which is the
-whole of that bug and the reason `LOOPBACK` is one constant in that file.
+being waited for is the *last* one that printed; the ones after it were never
+started. And "ready" is a server's opinion of itself — what decides the wait is
+whether the address it *bound* is the address `playwright.config.ts` *waits on*.
+That is why the address is one exported `LOOPBACK`, why every server is told it
+rather than left to a default, and why `serve-fixture.mjs` requires `--host`
+instead of choosing one.
 
 A server that *exits* is reported differently — `Process from config.webServer
 was not able to start. Exit code: N` — so a bare timeout means the process is

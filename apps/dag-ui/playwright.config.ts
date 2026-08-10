@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { defineConfig } from "@playwright/test";
 import { z } from "zod";
 
@@ -20,7 +20,7 @@ import { z } from "zod";
  * says a server started and Playwright says one never did. That is a CI failure
  * this tier cannot see from a host where the same name resolves to `127.0.0.1`.
  */
-const LOOPBACK = "127.0.0.1";
+export const LOOPBACK = "127.0.0.1";
 
 /**
  * Everything one run of this tier must not share with another: its ports and the
@@ -39,6 +39,31 @@ const LOOPBACK = "127.0.0.1";
  * reads that back instead of choosing again.
  */
 const port = z.number().int().min(1).max(65535);
+/**
+ * The fixture directory, held to being one this run could have made.
+ *
+ * `DAG_UI_E2E_SESSION` is read back from the environment by every process this
+ * tier forks, and this value is interpolated into a `webServer` command that
+ * Playwright runs through a shell — so it is a trust boundary, and a string is
+ * not enough at one. It has to be an absolute path under the OS temp directory
+ * carrying the prefix `chooseSession` makes it with, and nothing that a shell
+ * would read as anything but a path. `serve-fixture.mjs` refuses a workspace
+ * outside the temp root too, because it removes the directory before rebuilding
+ * it; this is the same fact checked on the near side of the shell.
+ */
+const WORKSPACE_PREFIX = "dag-ui-e2e-fixture-";
+const fixtureWorkspace = z
+  .string()
+  .refine((value) => value === join(tmpdir(), basename(value)), {
+    message: `must be a path directly under ${tmpdir()}`,
+  })
+  .refine((value) => basename(value).startsWith(WORKSPACE_PREFIX), {
+    message: `must be named ${WORKSPACE_PREFIX}…`,
+  })
+  .refine((value) => /^[\w./-]+$/.test(value), {
+    message:
+      "must not carry characters a shell would read as anything but a path",
+  });
 const sessionSchema = z.object({
   api: port,
   ui: port,
@@ -46,7 +71,7 @@ const sessionSchema = z.object({
   offlineUi: port,
   stalledApi: port,
   stalledUi: port,
-  workspace: z.string().min(1),
+  workspace: fixtureWorkspace,
 });
 type Session = z.infer<typeof sessionSchema>;
 
@@ -96,7 +121,7 @@ function chooseSession(): Session {
     offlineUi,
     stalledApi,
     stalledUi,
-    workspace: mkdtempSync(join(tmpdir(), "dag-ui-e2e-fixture-")),
+    workspace: mkdtempSync(join(tmpdir(), WORKSPACE_PREFIX)),
   };
 }
 
@@ -181,7 +206,7 @@ export default defineConfig({
   webServer: [
     {
       name: "fixture-api",
-      command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
+      command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --host ${LOOPBACK} --port ${session.api}`,
       url: `http://${LOOPBACK}:${session.api}/healthz`,
       reuseExistingServer: false,
       stdout: "pipe",
@@ -198,7 +223,7 @@ export default defineConfig({
     },
     {
       name: "stalled-api",
-      command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
+      command: `node e2e/fixtures/serve-fixture.mjs --stall --host ${LOOPBACK} --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
       /**
        * Readiness is what this server says, because it is the one server here that
        * answers nothing when it is working — an accepted connection is all a
@@ -212,7 +237,7 @@ export default defineConfig({
       port: session.stalledApi,
       wait: {
         stdout: new RegExp(
-          `serve-fixture: stalling on 127\\.0\\.0\\.1:${session.stalledApi}\\b`,
+          `serve-fixture: stalling on ${LOOPBACK.replaceAll(".", "\\.")}:${session.stalledApi}\\b`,
         ),
       },
       reuseExistingServer: false,

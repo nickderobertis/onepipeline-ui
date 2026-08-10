@@ -13,11 +13,18 @@
  * removes, so a browser run never reads or writes the operator's own runs.
  *
  * Usage:
- *   serve-fixture.mjs --workspace DIR --port N     build the fixture and serve it
+ *   serve-fixture.mjs --workspace DIR --host ADDR --port N
+ *                                                  build the fixture and serve it
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
- *   serve-fixture.mjs --stall --port N [--refuse-port N]
+ *   serve-fixture.mjs --stall --host ADDR --port N [--refuse-port N]
+ *
+ * `--host` is required wherever this binds, and has no default: the address a
+ * server takes is the address its caller waits on, so the caller names it. A
+ * default here would be a second source for the one fact both sides must agree
+ * on, which is exactly the disagreement that makes a server unreachable while it
+ * reports itself ready.
  */
 
 import { spawn } from "node:child_process";
@@ -130,15 +137,15 @@ function serverBinary() {
  * kernel refuses every connection to it — which merely leaving a port free cannot
  * promise, because a concurrent run's API server could take it.
  */
-async function stall(port, refusePort) {
+async function stall(host, port, refusePort) {
   // Said before anything is taken, because a line that only appears on success
   // cannot tell a run that took neither port from one that never ran at all —
   // and those are the two shapes behind a `webServer` that Playwright can only
   // report as `Timed out waiting 120000ms`. This one says the process reached
   // its own first statement; the two below say each port became its own.
   process.stdout.write(
-    `serve-fixture: taking 127.0.0.1:${port} to stall${
-      refusePort === undefined ? "" : `, 127.0.0.1:${refusePort} to refuse`
+    `serve-fixture: taking ${host}:${port} to stall${
+      refusePort === undefined ? "" : `, ${host}:${refusePort} to refuse`
     }\n`,
   );
   const held = [];
@@ -149,7 +156,7 @@ async function stall(port, refusePort) {
     // listens and immediately destroys anything that arrives — a connection refused
     // as far as the browser's first read is concerned.
     reservation.on("connection", (socket) => socket.destroy());
-    await bound(reservation, refusePort, "refusing");
+    await bound(reservation, host, refusePort, "refusing");
     held.push(reservation);
   }
   const listener = createServer((socket) => {
@@ -157,7 +164,7 @@ async function stall(port, refusePort) {
     // fast, which is the opposite of what this proves.
     held.push(socket);
   });
-  await bound(listener, port, "stalling on");
+  await bound(listener, host, port, "stalling on");
   held.push(listener);
   // Nothing resolves this: the process lives until Playwright stops it.
   return new Promise(() => {});
@@ -186,23 +193,23 @@ async function stall(port, refusePort) {
  * address and the host will not give it, which is a usage error rather than this
  * side failing at something it could have done.
  */
-function bound(server, port, purpose) {
+function bound(server, host, port, purpose) {
   return new Promise((listening) => {
     server.once("error", (refused) => {
       die(
-        `cannot start ${purpose} 127.0.0.1:${port}: ${refused.message}`,
+        `cannot start ${purpose} ${host}:${port}: ${refused.message}`,
         "give this run a free port — playwright.config.ts asks the kernel for one per run, so a port taken between that answer and this bind is what this reports",
       );
     });
-    server.listen(port, "127.0.0.1", () => {
-      process.stdout.write(`serve-fixture: ${purpose} 127.0.0.1:${port}\n`);
+    server.listen(port, host, () => {
+      process.stdout.write(`serve-fixture: ${purpose} ${host}:${port}\n`);
       listening();
     });
   });
 }
 
 /** Build the fixture in `workspace` and serve it on a loopback port. */
-async function serve(workspace, port) {
+async function serve(workspace, host, port) {
   rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
@@ -220,7 +227,7 @@ async function serve(workspace, port) {
       "--runs-root",
       runsRoot,
       "--bind",
-      `127.0.0.1:${port}`,
+      `${host}:${port}`,
       // A quarter of the default: the live-update journeys wait for the stream to
       // notice a change on disk, and that wait is the slowest part of each of them.
       "--poll-interval-ms",
@@ -244,6 +251,7 @@ function parseArgs(argv) {
   ]);
   const valued = new Set([
     "--workspace",
+    "--host",
     "--port",
     "--remove-run",
     "--grow-worker-session",
@@ -297,6 +305,34 @@ if (asked.length > 1) {
     "run this once per change, so each one is the change the caller asked for",
   );
 }
+/**
+ * The loopback address this invocation was told to bind, checked before anything
+ * binds to it.
+ *
+ * Validated rather than trusted, like every other input here: it reaches a
+ * `listen` and the read API's `--bind`, and an address this host will not give is
+ * a caller error worth naming rather than a server that quietly never answers.
+ * Loopback only, because everything this script serves is a throwaway fixture of
+ * somebody's runs and none of it is authenticated — the same reason the crate
+ * binds loopback unless an operator says otherwise.
+ */
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1"]);
+function hostOf(value) {
+  if (value === undefined) {
+    die(
+      "--host is required",
+      "pass --host the loopback address the caller waits on; this script has no default because that would be a second source for it",
+    );
+  }
+  if (!LOOPBACK_ADDRESSES.has(value)) {
+    die(
+      `'${value}' is not a loopback address`,
+      `pass --host one of ${[...LOOPBACK_ADDRESSES].join(" or ")} — this fixture serves an unauthenticated throwaway run store and must not leave the host`,
+    );
+  }
+  return value;
+}
+
 /** One port option, checked before anything binds or connects to it. */
 function portOf(value, name) {
   const port = Number(value);
@@ -316,7 +352,7 @@ if (args.stall) {
     args["refuse-port"] === undefined
       ? undefined
       : portOf(args["refuse-port"], "--refuse-port");
-  await stall(port, refuse);
+  await stall(hostOf(args.host), port, refuse);
 } else {
   if (args.workspace === undefined) {
     die(
@@ -391,7 +427,7 @@ if (args.stall) {
         "pass --record-activity the name of the tool the summary came from",
       );
     } else {
-      process.exit(await serve(workspace, port));
+      process.exit(await serve(workspace, hostOf(args.host), port));
     }
   } catch (refused) {
     die(

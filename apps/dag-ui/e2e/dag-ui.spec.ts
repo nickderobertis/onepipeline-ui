@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   FIXTURE_WORKSPACE,
+  LOOPBACK,
   OFFLINE_UI_URL,
   STALLED_UI_URL,
 } from "../playwright.config";
@@ -127,16 +128,25 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  *
  * Every invocation this file makes goes through here — the ones that change what
  * the server is serving, and the ones that ask it to serve and are refused before
- * it can. `env` is empty unless a case is about what the command reads from it.
+ * it can. `env` is empty unless a case is about what the command reads from it,
+ * and `addressing` names this run's own address unless a case is about that
+ * option: `false` omits it, a string sends that one instead.
  */
 function invokeFixture(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
   env: NodeJS.ProcessEnv = {},
+  addressing: { host: string | false } = { host: LOOPBACK },
 ): void {
   execFileSync(
     process.execPath,
-    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
+    [
+      "e2e/fixtures/serve-fixture.mjs",
+      "--workspace",
+      workspace,
+      ...(addressing.host === false ? [] : ["--host", addressing.host]),
+      ...args,
+    ],
     { stdio: ["ignore", "inherit", "pipe"], env: { ...process.env, ...env } },
   );
 }
@@ -158,9 +168,10 @@ function refusedInvocation(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
   env: NodeJS.ProcessEnv = {},
+  addressing: { host: string | false } = { host: LOOPBACK },
 ): { status: number; stderr: string } {
   try {
-    invokeFixture(args, workspace, env);
+    invokeFixture(args, workspace, env, addressing);
   } catch (refused) {
     // Node decorates the error `execFileSync` throws with the child's own exit
     // status and captured stderr, and types neither: a caught value is `unknown`
@@ -2322,7 +2333,7 @@ function holdPort(port: number): Promise<() => void> {
   return new Promise((held, failed) => {
     const squatter = createServer();
     squatter.on("error", failed);
-    squatter.listen(port, "127.0.0.1", () =>
+    squatter.listen(port, LOOPBACK, () =>
       held(() => {
         squatter.close();
       }),
@@ -2350,6 +2361,8 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     [
       "e2e/fixtures/serve-fixture.mjs",
       "--stall",
+      "--host",
+      LOOPBACK,
       "--port",
       String(port),
       "--refuse-port",
@@ -2369,14 +2382,14 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     await expect
       .poll(() => announced, { timeout: 15_000 })
       .toBe(
-        `serve-fixture: taking 127.0.0.1:${port} to stall, 127.0.0.1:${refusePort} to refuse\n` +
-          `serve-fixture: refusing 127.0.0.1:${refusePort}\n` +
-          `serve-fixture: stalling on 127.0.0.1:${port}\n`,
+        `serve-fixture: taking ${LOOPBACK}:${port} to stall, ${LOOPBACK}:${refusePort} to refuse\n` +
+          `serve-fixture: refusing ${LOOPBACK}:${refusePort}\n` +
+          `serve-fixture: stalling on ${LOOPBACK}:${port}\n`,
       );
     // And that readiness is the truth: the connection is accepted, and then never
     // answered.
     const accepted = await new Promise<boolean>((connected) => {
-      const socket = createConnection(port, "127.0.0.1");
+      const socket = createConnection(port, LOOPBACK);
       socket.on("connect", () => {
         socket.destroy();
         connected(true);
@@ -2401,7 +2414,7 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     ]);
     expect(taken.status, taken.stderr).toBe(2);
     expect(taken.stderr).toContain(
-      `cannot start stalling on 127.0.0.1:${stalledTaken}`,
+      `cannot start stalling on ${LOOPBACK}:${stalledTaken}`,
     );
     expect(taken.stderr).toContain("EADDRINUSE");
   } finally {
@@ -2420,11 +2433,35 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     ]);
     expect(takenRefusal.status, takenRefusal.stderr).toBe(2);
     expect(takenRefusal.stderr).toContain(
-      `cannot start refusing 127.0.0.1:${refusalTaken}`,
+      `cannot start refusing ${LOOPBACK}:${refusalTaken}`,
     );
   } finally {
     releaseRefused();
   }
+
+  // The address is the caller's to name and this script has no default, because a
+  // default is a second source for the one fact a server and the thing waiting on
+  // it must agree about.
+  const unaddressed = refusedInvocation(
+    ["--stall", "--port", String(await freePort())],
+    FIXTURE_WORKSPACE,
+    {},
+    { host: false },
+  );
+  expect(unaddressed.status, unaddressed.stderr).toBe(2);
+  expect(unaddressed.stderr).toContain("--host is required");
+
+  // And it may only be loopback: this serves an unauthenticated throwaway copy of
+  // somebody's runs, so an address that leaves the host is refused before it binds
+  // rather than after somebody reaches it.
+  const routable = refusedInvocation(
+    ["--stall", "--port", String(await freePort())],
+    FIXTURE_WORKSPACE,
+    {},
+    { host: "0.0.0.0" },
+  );
+  expect(routable.status, routable.stderr).toBe(2);
+  expect(routable.stderr).toContain("'0.0.0.0' is not a loopback address");
 });
 
 /** A port the kernel says is free, asked for the way `playwright.config.ts` asks. */
@@ -2432,7 +2469,7 @@ function freePort(): Promise<number> {
   return new Promise((chosen, failed) => {
     const probe = createServer();
     probe.on("error", failed);
-    probe.listen(0, "127.0.0.1", () => {
+    probe.listen(0, LOOPBACK, () => {
       const bound = probe.address();
       if (typeof bound !== "object" || bound === null) {
         failed(new Error("the probe socket reported no port"));
@@ -2466,6 +2503,8 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
         "e2e/fixtures/serve-fixture.mjs",
         "--workspace",
         workspace,
+        "--host",
+        LOOPBACK,
         "--port",
         String(port),
       ],
@@ -2481,7 +2520,7 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
         .poll(
           async () => {
             try {
-              return (await fetch(`http://127.0.0.1:${port}/healthz`)).status;
+              return (await fetch(`http://${LOOPBACK}:${port}/healthz`)).status;
             } catch {
               return 0;
             }
@@ -2492,7 +2531,7 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
       // Serving, not merely listening: the runs this workspace was built with are
       // what came back.
       const listed = await (
-        await fetch(`http://127.0.0.1:${port}/api/v2/runs?limit=50`)
+        await fetch(`http://${LOOPBACK}:${port}/api/v2/runs?limit=50`)
       ).json();
       expect(Array.isArray(listed.runs) && listed.runs.length).toBeGreaterThan(
         0,
