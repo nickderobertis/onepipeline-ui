@@ -7,8 +7,11 @@
 // no role to ask for. Naming those is a change to the app this app was imported
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   FIXTURE_WORKSPACE,
@@ -120,15 +123,30 @@ async function tokenColor(page: Page, token: string): Promise<string> {
 }
 
 /**
+ * Run the fixture command over a workspace and wait for it to finish.
+ *
+ * Every invocation this file makes goes through here — the ones that change what
+ * the server is serving, and the ones that ask it to serve and are refused before
+ * it can. `env` is empty unless a case is about what the command reads from it.
+ */
+function invokeFixture(
+  args: string[],
+  workspace = FIXTURE_WORKSPACE,
+  env: NodeJS.ProcessEnv = {},
+): void {
+  execFileSync(
+    process.execPath,
+    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
+    { stdio: ["ignore", "inherit", "pipe"], env: { ...process.env, ...env } },
+  );
+}
+
+/**
  * Change what the server is serving — record progress, or take a run away — through
  * the fixture module that wrote the run directory in the first place.
  */
 function changeServedRuns(args: string[], workspace = FIXTURE_WORKSPACE): void {
-  execFileSync(
-    process.execPath,
-    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
-    { stdio: ["ignore", "inherit", "pipe"] },
-  );
+  invokeFixture(args, workspace);
 }
 
 /**
@@ -136,12 +154,13 @@ function changeServedRuns(args: string[], workspace = FIXTURE_WORKSPACE): void {
  *
  * `workspace` is this run's own unless a case is about that option itself.
  */
-function refusedChange(
+function refusedInvocation(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
+  env: NodeJS.ProcessEnv = {},
 ): { status: number; stderr: string } {
   try {
-    changeServedRuns(args, workspace);
+    invokeFixture(args, workspace, env);
   } catch (refused) {
     // Node decorates the error `execFileSync` throws with the child's own exit
     // status and captured stderr, and types neither: a caught value is `unknown`
@@ -2225,7 +2244,7 @@ test("refuses a change no recorded run could have held", () => {
     // read a run that recorded only half of what they asked for.
     [["--settle-dashboard", "--remove-page-runs"], "are more than one change"],
   ] satisfies readonly [string[], string][]) {
-    const refused = refusedChange(args);
+    const refused = refusedInvocation(args);
     expect(refused.status, args.join(" ")).toBe(2);
     expect(refused.stderr, args.join(" ")).toContain(said);
     expect(refused.stderr, args.join(" ")).toContain("ACTION:");
@@ -2233,18 +2252,258 @@ test("refuses a change no recorded run could have held", () => {
 
   // The workspace is the one option this script *deletes* through, so it is
   // refused rather than resolved against whatever directory the caller was in.
-  const relative = refusedChange(["--settle-dashboard"], "runs");
+  const relative = refusedInvocation(["--settle-dashboard"], "runs");
   expect(relative.status).toBe(2);
   expect(relative.stderr).toContain("is not an absolute path");
 
   // Absolute is not enough in front of that delete: a workspace outside the temp
   // root Playwright makes them in is somebody else's directory, and this refuses
   // it before it reads or removes anything under it — `/etc` is still here.
-  const elsewhere = refusedChange(["--settle-dashboard"], "/etc");
+  const elsewhere = refusedInvocation(["--settle-dashboard"], "/etc");
   expect(elsewhere.status).toBe(2);
   expect(elsewhere.stderr).toContain("is not a directory under");
   expect(existsSync("/etc/hosts")).toBe(true);
 });
+
+/**
+ * What the fixture server does when the read API it serves through was never built.
+ *
+ * It finds that binary rather than building it, because building it here would put a
+ * cargo compile inside the readiness window Playwright gives a `webServer` — a window
+ * budgeted for a process binding a port, which a cold `target/` on a CI runner blows
+ * through while Playwright reports the one thing that was not wrong. The build is
+ * `dag-ui:build-api-server`, a step of its own; the absence is this, immediately.
+ *
+ * Driven by pointing the child's `CARGO_TARGET_DIR` at an empty directory, which is
+ * exactly what an unbuilt tree looks like to it — and leaves the binary this run is
+ * being served through where it is.
+ */
+test("refuses to serve when the read API has not been built", () => {
+  const unbuilt = mkdtempSync(join(tmpdir(), "dag-ui-e2e-unbuilt-"));
+  const workspace = mkdtempSync(
+    join(tmpdir(), "dag-ui-e2e-unbuilt-workspace-"),
+  );
+  try {
+    const refused = refusedInvocation([], workspace, {
+      CARGO_TARGET_DIR: unbuilt,
+    });
+    // 70, not 2: the invocation was answerable, the tree was not ready for it.
+    expect(refused.status, refused.stderr).toBe(70);
+    expect(refused.stderr).toContain(
+      `no read API binary in ${join(unbuilt, "debug")}`,
+    );
+    // The action names the step that builds it, so a reader of a failed run does
+    // not have to know that the tier stopped building it on their behalf.
+    expect(refused.stderr).toContain(
+      "ACTION: run 'npx nx run dag-ui:build-api-server'",
+    );
+
+    // The same variable set to nothing is a mistyped export, not a directory, and
+    // it is refused as the usage error it is: resolved, it would name the
+    // repository root and report a tree that was never built.
+    const blank = refusedInvocation([], workspace, { CARGO_TARGET_DIR: "" });
+    expect(blank.status, blank.stderr).toBe(2);
+    expect(blank.stderr).toContain("CARGO_TARGET_DIR is set to an empty path");
+  } finally {
+    rmSync(unbuilt, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The binary `dag-ui:build-api-server` built, which this run is already being served
+ * through. Resolved against the working directory the tier runs from, as the fixture
+ * path in `invokeFixture` is.
+ */
+const API_BINARY = resolve("../../target/debug/onepipeline-api");
+
+/** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
+function holdPort(port: number): Promise<() => void> {
+  return new Promise((held, failed) => {
+    const squatter = createServer();
+    squatter.on("error", failed);
+    squatter.listen(port, "127.0.0.1", () =>
+      held(() => {
+        squatter.close();
+      }),
+    );
+  });
+}
+
+/**
+ * What the stall server says — the one server this tier starts that answers nothing.
+ *
+ * It is started as a `webServer` whose readiness is the accepted connection, and
+ * Playwright reports a `webServer` that never became ready as a bare `Timed out
+ * waiting 120000ms from config.webServer` naming neither the server nor the reason.
+ * That left this the only one of the five whose failure could not be told from its
+ * success, because saying nothing is what it does when it works. So it says which
+ * ports it took, and refuses — under the same exit-code contract the crate serves,
+ * `2` for an address this host will not give — rather than dying on an unhandled
+ * `error` with a stack and a status outside that contract.
+ */
+test("says which ports the stall server took, and refuses one it cannot", async () => {
+  const port = await freePort();
+  const refusePort = await freePort();
+  const stalling = spawn(
+    process.execPath,
+    [
+      "e2e/fixtures/serve-fixture.mjs",
+      "--stall",
+      "--port",
+      String(port),
+      "--refuse-port",
+      String(refusePort),
+    ],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  let announced = "";
+  stalling.stdout.on("data", (chunk: Buffer) => {
+    announced += chunk.toString();
+  });
+  try {
+    // What it is about to take, then one line per port as each becomes its own, so
+    // a run that stops partway says how far it got — and one that never started
+    // says that too, by saying nothing. The last is the readiness its `webServer`
+    // entry waits for, and it comes last because by then both ports are its own.
+    await expect
+      .poll(() => announced, { timeout: 15_000 })
+      .toBe(
+        `serve-fixture: taking 127.0.0.1:${port} to stall, 127.0.0.1:${refusePort} to refuse\n` +
+          `serve-fixture: refusing 127.0.0.1:${refusePort}\n` +
+          `serve-fixture: stalling on 127.0.0.1:${port}\n`,
+      );
+    // And that readiness is the truth: the connection is accepted, and then never
+    // answered.
+    const accepted = await new Promise<boolean>((connected) => {
+      const socket = createConnection(port, "127.0.0.1");
+      socket.on("connect", () => {
+        socket.destroy();
+        connected(true);
+      });
+      socket.on("error", () => connected(false));
+    });
+    expect(accepted).toBe(true);
+  } finally {
+    stalling.kill("SIGTERM");
+  }
+
+  // And the failure this could only report as a timeout before: a port taken between
+  // the kernel answering `playwright.config.ts` and this bind. Both of them, because
+  // the refused port is taken by a second server whose `error` was unhandled too.
+  const stalledTaken = await freePort();
+  const releaseStalled = await holdPort(stalledTaken);
+  try {
+    const taken = refusedInvocation([
+      "--stall",
+      "--port",
+      String(stalledTaken),
+    ]);
+    expect(taken.status, taken.stderr).toBe(2);
+    expect(taken.stderr).toContain(
+      `cannot start stalling on 127.0.0.1:${stalledTaken}`,
+    );
+    expect(taken.stderr).toContain("EADDRINUSE");
+  } finally {
+    releaseStalled();
+  }
+
+  const refusalTaken = await freePort();
+  const releaseRefused = await holdPort(refusalTaken);
+  try {
+    const takenRefusal = refusedInvocation([
+      "--stall",
+      "--port",
+      String(await freePort()),
+      "--refuse-port",
+      String(refusalTaken),
+    ]);
+    expect(takenRefusal.status, takenRefusal.stderr).toBe(2);
+    expect(takenRefusal.stderr).toContain(
+      `cannot start refusing 127.0.0.1:${refusalTaken}`,
+    );
+  } finally {
+    releaseRefused();
+  }
+});
+
+/** A port the kernel says is free, asked for the way `playwright.config.ts` asks. */
+function freePort(): Promise<number> {
+  return new Promise((chosen, failed) => {
+    const probe = createServer();
+    probe.on("error", failed);
+    probe.listen(0, "127.0.0.1", () => {
+      const bound = probe.address();
+      if (typeof bound !== "object" || bound === null) {
+        failed(new Error("the probe socket reported no port"));
+        return;
+      }
+      probe.close(() => chosen(bound.port));
+    });
+  });
+}
+
+/**
+ * And what it does when the binary is where `CARGO_TARGET_DIR` says: it serves
+ * through that one, under either name cargo writes.
+ *
+ * Both names are driven here rather than only this platform's, because the browser
+ * tier runs on Linux and a name chosen from `process.platform` would leave the other
+ * one proven nowhere. A link rather than a copy: it is the same 160 MB binary this
+ * run is already being served through, named the way the other platform's cargo
+ * would have named it.
+ */
+for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
+  test(`serves through the ${name} a custom CARGO_TARGET_DIR names`, async () => {
+    const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));
+    const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-space-"));
+    mkdirSync(join(target, "debug"), { recursive: true });
+    linkSync(API_BINARY, join(target, "debug", name));
+    const port = await freePort();
+    const served = spawn(
+      process.execPath,
+      [
+        "e2e/fixtures/serve-fixture.mjs",
+        "--workspace",
+        workspace,
+        "--port",
+        String(port),
+      ],
+      {
+        stdio: ["ignore", "inherit", "inherit"],
+        env: { ...process.env, CARGO_TARGET_DIR: target },
+      },
+    );
+    try {
+      // The read the fixture server's own `webServer` entry waits on, made here
+      // against a server started from the directory this case named.
+      await expect
+        .poll(
+          async () => {
+            try {
+              return (await fetch(`http://127.0.0.1:${port}/healthz`)).status;
+            } catch {
+              return 0;
+            }
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(200);
+      // Serving, not merely listening: the runs this workspace was built with are
+      // what came back.
+      const listed = await (
+        await fetch(`http://127.0.0.1:${port}/api/v2/runs?limit=50`)
+      ).json();
+      expect(Array.isArray(listed.runs) && listed.runs.length).toBeGreaterThan(
+        0,
+      );
+    } finally {
+      served.kill("SIGTERM");
+      rmSync(target, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+}
 
 async function detailScroll(
   page: Page,

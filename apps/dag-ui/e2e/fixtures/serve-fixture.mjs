@@ -20,8 +20,8 @@
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
-import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -48,9 +48,9 @@ export const FIXTURE_FACTS_NAME = "fixture-facts.json";
 /**
  * Report a failure and stop, under the same exit-code contract the crate serves:
  * `2` is a usage error — the caller asked for something this cannot mean — and
- * `70` is this side failing at something it was asked to do correctly. A build
- * that did not build is the second, and telling a Playwright run which of the two
- * it hit is the difference between fixing the invocation and fixing the tree.
+ * `70` is this side failing at something it was asked to do correctly. A server
+ * binary that was never built is the second, and telling a Playwright run which of
+ * the two it hit is the difference between fixing the invocation and fixing the tree.
  */
 function stop(code, message, action) {
   process.stderr.write(`serve-fixture: ${message}\nACTION: ${action}\n`);
@@ -62,25 +62,60 @@ function die(message, action) {
   stop(2, message, action);
 }
 
-/** The compiled server this fixture serves through, built if it is not there yet. */
-function serverBinary() {
-  const built = spawnSync("cargo", ["build", "--locked", "--quiet"], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (built.status !== 0) {
-    // llmlint: ignore[changed_behavior_has_e2e] driving this means making the
-    // repository not build, which is the one thing a journey of the suite that
-    // build produces must never do. Every other exit this script can take is
-    // driven in `dag-ui.spec.ts`; a Playwright run that reached here would have
-    // no server to test against, and says so on stderr with the action to take.
-    stop(
-      70,
-      "the read API binary did not build",
-      "run 'cargo build --locked' in the repository root and fix what it reports",
+/**
+ * The directory `dag-ui:build-api-server` built into: `CARGO_TARGET_DIR` when
+ * cargo was told one, and the default `target/` otherwise.
+ *
+ * Honoured because that build step is a cargo invocation from the repository
+ * root, so a relative one resolves the way cargo itself resolves it. Validated
+ * rather than trusted, like every other input here: this value chooses the path
+ * this script spawns, and one that is set but empty is a mistyped export rather
+ * than a directory — resolved, it would name the repository root and be reported
+ * as a tree that was never built, sending a reader to fix the wrong thing.
+ */
+function targetRoot() {
+  const configured = process.env.CARGO_TARGET_DIR;
+  if (configured === undefined) {
+    return join(REPO_ROOT, "target");
+  }
+  if (configured.trim() === "") {
+    die(
+      "CARGO_TARGET_DIR is set to an empty path",
+      "unset CARGO_TARGET_DIR, or set it to the directory cargo was told to build into",
     );
   }
-  return join(REPO_ROOT, "target", "debug", "onepipeline-api");
+  return resolve(REPO_ROOT, configured);
+}
+
+/**
+ * The compiled server this fixture serves through — located, never built.
+ *
+ * Compiling here would put a debug build inside the readiness window Playwright
+ * gives a `webServer`, and that window is budgeted for a process binding a port.
+ * A warm `target/` hides it; a cold one on a CI runner, sharing the cargo lock
+ * with the sibling task compiling the crate's own tests, spends minutes there and
+ * Playwright reports the one thing that was not wrong — a server that would not
+ * start. So the build is a step of its own, `dag-ui:build-api-server`, which
+ * `dag-ui:test` and `dag-ui:bootstrap` depend on, and its absence is answered
+ * here in milliseconds rather than waited out.
+ */
+function serverBinary() {
+  const directory = join(targetRoot(), "debug");
+  // Both names cargo gives that binary, looked for rather than chosen from the
+  // platform: what is on disk is what this has to spawn, and asking the disk is
+  // one path a run on any OS takes — where branching on `process.platform` would
+  // leave the branch the browser tier does not run on unproven.
+  const binary = ["onepipeline-api", "onepipeline-api.exe"]
+    .map((name) => join(directory, name))
+    .find(existsSync);
+  if (binary === undefined) {
+    stop(
+      70,
+      `no read API binary in ${directory}`,
+      "run 'npx nx run dag-ui:build-api-server' from the repository root — the browser tier builds it in a step of its own, before any server starts",
+    );
+  }
+  return binary;
 }
 
 /**
@@ -95,7 +130,17 @@ function serverBinary() {
  * kernel refuses every connection to it — which merely leaving a port free cannot
  * promise, because a concurrent run's API server could take it.
  */
-function stall(port, refusePort) {
+async function stall(port, refusePort) {
+  // Said before anything is taken, because a line that only appears on success
+  // cannot tell a run that took neither port from one that never ran at all —
+  // and those are the two shapes behind a `webServer` that Playwright can only
+  // report as `Timed out waiting 120000ms`. This one says the process reached
+  // its own first statement; the two below say each port became its own.
+  process.stdout.write(
+    `serve-fixture: taking 127.0.0.1:${port} to stall${
+      refusePort === undefined ? "" : `, 127.0.0.1:${refusePort} to refuse`
+    }\n`,
+  );
   const held = [];
   if (refusePort !== undefined) {
     const reservation = createServer();
@@ -104,7 +149,7 @@ function stall(port, refusePort) {
     // listens and immediately destroys anything that arrives — a connection refused
     // as far as the browser's first read is concerned.
     reservation.on("connection", (socket) => socket.destroy());
-    reservation.listen(refusePort, "127.0.0.1");
+    await bound(reservation, refusePort, "refusing");
     held.push(reservation);
   }
   const listener = createServer((socket) => {
@@ -112,10 +157,48 @@ function stall(port, refusePort) {
     // fast, which is the opposite of what this proves.
     held.push(socket);
   });
-  listener.listen(port, "127.0.0.1");
+  await bound(listener, port, "stalling on");
   held.push(listener);
   // Nothing resolves this: the process lives until Playwright stops it.
   return new Promise(() => {});
+}
+
+/**
+ * Take `port` on loopback for `purpose`, say so, or stop saying which port and why.
+ *
+ * Said out loud, one line per port, for the same reason the read API says which
+ * address it bound: this is the only server the browser tier starts that answers
+ * nothing when it is working, so a run that waited for it and gave up could not
+ * tell a port it never took from one it took and held — Playwright reports a
+ * `webServer` that did not become ready as a bare timeout naming neither the
+ * server nor the reason. Two ports, two lines, in the order they are taken, so
+ * the log says how far this got and not merely that it did not finish.
+ *
+ * The `stalling on` line is also this server's *readiness*, which
+ * `playwright.config.ts` waits for: a port answering a connection says only that
+ * something on this host is listening there, where the line says that this
+ * process is, and that both of its ports are its own.
+ *
+ * A `net.Server` reports a port it could not take by emitting `error`, and an
+ * `error` nothing is listening for is an uncaught exception — a stack trace and
+ * an exit code outside this script's contract, for the one failure a reader can
+ * act on. `2`, as the read API answers the same failure: the caller named an
+ * address and the host will not give it, which is a usage error rather than this
+ * side failing at something it could have done.
+ */
+function bound(server, port, purpose) {
+  return new Promise((listening) => {
+    server.once("error", (refused) => {
+      die(
+        `cannot start ${purpose} 127.0.0.1:${port}: ${refused.message}`,
+        "give this run a free port — playwright.config.ts asks the kernel for one per run, so a port taken between that answer and this bind is what this reports",
+      );
+    });
+    server.listen(port, "127.0.0.1", () => {
+      process.stdout.write(`serve-fixture: ${purpose} 127.0.0.1:${port}\n`);
+      listening();
+    });
+  });
 }
 
 /** Build the fixture in `workspace` and serve it on a loopback port. */

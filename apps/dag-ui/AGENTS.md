@@ -16,6 +16,32 @@ and the read model is doubled.
 It asserts nothing; it is how the operator sees a polish problem at a width
 nobody opens by hand.
 
+## Reading a browser tier that would not start
+
+`Timed out waiting 120000ms from config.webServer` is the whole of what
+Playwright says when one of the five servers `playwright.config.ts` starts never
+becomes ready — it names neither the server nor the reason, and it starts them
+one at a time. Two pull requests were spent attributing that sentence to the
+wrong server. So the log is the evidence, and keeping it readable is part of the
+tier: every entry carries a `name`, every entry keeps its `stdout`, and every
+server states the address it took — the read API through its own `serving …`
+line, Vite through its ready line, the stall server through one line per port.
+**Read them in order: the first server that printed nothing is the one being
+waited for.**
+
+A server that *exits* is reported differently — `Process from config.webServer
+was not able to start. Exit code: N` — so a bare timeout means the process is
+alive and has not bound. That distinction only survives if nothing here dies on
+an unhandled `error`, which is why both of `serve-fixture.mjs`'s refusals are
+exits under the crate's own contract: `2` for an address this host will not
+give, `70` for a read API that was never built.
+
+Whatever a server has to do before it binds, it does inside that window, so
+nothing may build there. The read API is built by `dag-ui:build-api-server`,
+which `test` and `bootstrap` depend on; the fixture run directory is written
+here, and it costs ~70 ms for its 750 files, which is the budget it has to stay
+inside.
+
 ## This app was copied, and its implementation is the spec
 
 It came over from the repository it was written in, whole. Preserve the invested

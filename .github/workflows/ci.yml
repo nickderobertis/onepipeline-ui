@@ -65,6 +65,13 @@ jobs:
           tool: just,nextest,cargo-llvm-cov
       - name: Bootstrap
         run: just bootstrap
+      # The browser tier is in this sweep, and has to be: it is the only proof the
+      # served UI works, and it gates every publish job in `release.yml`, so a
+      # pull request it skips can only redden main after the merge.
+      # `apps/dag-ui/project.json` is what puts it here — it declares `check`, and
+      # names the crate a dependency because `dag-ui:test` serves the UI through
+      # the compiled read API, so a change under `src/` selects that tier just as
+      # one under `apps/dag-ui` does.
       - name: Quality gate (affected projects)
         if: github.event_name == 'pull_request'
         run: just check-affected
