@@ -21,12 +21,22 @@
 //! states about what it writes. Nothing under a failed check is served, because
 //! a timing read out of a document that does not add up is a claim with nothing
 //! behind it, and this server's whole answer for an unknown clock is to say so.
+//!
+//! What arrives and what leaves are deliberately different shapes. A decode
+//! target has to be able to hold whatever the bytes say — a version this build
+//! does not read, a bucket set that is not the eight, a cost that is not an
+//! amount of money — so the wire types below hold all of it and are private.
+//! [`RunTelemetry`] is what survived, and it cannot represent any of those: the
+//! version is gone, because after the check there is only one; the buckets are
+//! the eight slots rather than a list; and a cost is a [`Cost`]. So a reader
+//! downstream is never the last thing between the producer's bytes and a
+//! payload.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::contract::RunId;
 
@@ -62,35 +72,128 @@ fn binary() -> String {
         .unwrap_or_else(|| DEFAULT_BINARY.to_owned())
 }
 
-/// One run's telemetry, as `onepipeline` aggregates it.
+/// One run's telemetry document, exactly as it arrives.
+///
+/// Private, and the only thing `serde` builds: every field here is as wide as
+/// the bytes are, so that what the producer's contract rules out is ruled out
+/// once — in [`validated`] — rather than left for each reader to remember.
 ///
 /// Only what the wire carries is read back. Extra fields are the producer's own
 /// and are ignored rather than refused: a newer build of the same document
-/// version may report more about a run than this server serves.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RunTelemetry {
-    /// The version of the document, read before anything under it and refused
-    /// unless it is [`DOCUMENT_VERSION`].
-    pub schema_version: u32,
+/// version may report more about a run than this server serves. The version
+/// itself is not among them: it is read and checked before this shape is
+/// decoded at all, so nothing under it is decoded out of a document that turned
+/// out to be another one.
+#[derive(Debug, Deserialize)]
+struct Document {
     /// The whole elapsed time, in milliseconds.
-    pub wall_ms: u64,
-    /// The eight buckets, each measured or absent.
-    pub buckets: Vec<Bucket>,
-    /// What each party spent. A party nothing reported for is absent from the
-    /// map rather than present and zero.
+    wall_ms: u64,
+    /// What the producer wrote as its bucket set, before it is held to being
+    /// the eight.
+    buckets: Vec<WireBucket>,
+    /// What the producer wrote for each party.
     #[serde(default)]
-    pub usage: BTreeMap<Party, Usage>,
+    usage: BTreeMap<Party, WireUsage>,
 }
 
-/// One span of the run's wall clock, named by what the run was doing.
+/// One span of the run's wall clock, as the document names it.
 #[derive(Debug, Clone, Copy, Deserialize)]
-pub struct Bucket {
+struct WireBucket {
     /// What the run was doing.
-    pub name: BucketName,
+    name: BucketName,
     /// For how long, in milliseconds — absent when nothing in the stack
     /// measures this bucket, which is not the same fact as a measured zero.
     #[serde(default)]
-    pub ms: Option<u64>,
+    ms: Option<u64>,
+}
+
+/// What one party consumed, as the document writes it.
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct WireUsage {
+    #[serde(default)]
+    input: Option<u64>,
+    #[serde(default)]
+    output: Option<u64>,
+    #[serde(default)]
+    cache_read: Option<u64>,
+    #[serde(default)]
+    cache_write: Option<u64>,
+    /// A bare number here, because a document may carry one that is not a cost;
+    /// it becomes a [`Cost`] or the document is refused.
+    #[serde(default)]
+    cost_usd: Option<f64>,
+}
+
+/// One run's telemetry, as `onepipeline` aggregates it and after its own
+/// contract has been held to.
+///
+/// Constructed only by [`read_document`]. There is no version on it because a
+/// value of this type is already a [`DOCUMENT_VERSION`] document, and no list of
+/// buckets because it is already exactly the eight.
+#[derive(Debug, Clone)]
+pub struct RunTelemetry {
+    /// The whole elapsed time, in milliseconds.
+    pub wall_ms: u64,
+    /// The eight buckets, one slot each in the order of [`BucketName::ALL`],
+    /// measured or absent. Slots rather than a list: "exactly one of each of the
+    /// eight" is the invariant every reading rests on, and as a `Vec` it would
+    /// be a rule to re-check instead of a shape.
+    buckets: [Option<u64>; BucketName::COUNT],
+    /// What each party spent. A party nothing reported for is absent from the
+    /// map rather than present and zero.
+    usage: BTreeMap<Party, Usage>,
+}
+
+/// An amount of money, in US dollars: finite, and not a debt.
+///
+/// A bare `f64` also holds NaN, an infinity and a negative, none of which a run
+/// can cost — and as a field it leaves whoever reads it next as the last thing
+/// between the producer's bytes and a served payload. Constructed only through
+/// [`TryFrom<f64>`], so a document carrying one of those is refused at the
+/// boundary. Serialized as the number it is, which is what the wire carries.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
+#[serde(into = "f64")]
+pub struct Cost(f64);
+
+/// A number that is not an amount of money.
+///
+/// It names the number, because the refusal a reader sees has to say which one
+/// the document carried; the caller adds only whose cost it was.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NotAnAmount(f64);
+
+impl std::fmt::Display for NotAnAmount {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "{:?}, which is not an amount of money", self.0)
+    }
+}
+
+impl std::error::Error for NotAnAmount {}
+
+impl Cost {
+    /// The amount, in US dollars.
+    #[must_use]
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for Cost {
+    type Error = NotAnAmount;
+
+    fn try_from(amount: f64) -> Result<Self, Self::Error> {
+        if amount.is_finite() && amount >= 0.0 {
+            Ok(Self(amount))
+        } else {
+            Err(NotAnAmount(amount))
+        }
+    }
+}
+
+impl From<Cost> for f64 {
+    fn from(cost: Cost) -> Self {
+        cost.0
+    }
 }
 
 /// What a run's wall clock is spent on, in the producer's own vocabulary.
@@ -139,28 +242,27 @@ pub enum Party {
 /// What one party consumed. Every field is independently absent until something
 /// reported a number for it: a run whose cost nothing answered must not read as
 /// a run that was free.
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Usage {
     /// Input tokens billed.
-    #[serde(default)]
     pub input: Option<u64>,
     /// Output tokens billed.
-    #[serde(default)]
     pub output: Option<u64>,
     /// Prompt tokens served from the provider's cache.
-    #[serde(default)]
     pub cache_read: Option<u64>,
     /// Prompt tokens written to it.
-    #[serde(default)]
     pub cache_write: Option<u64>,
     /// What it cost, in US dollars.
-    #[serde(default)]
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Cost>,
 }
 
 impl BucketName {
-    /// Every bucket, in the order the producer writes them.
-    pub const ALL: [Self; 8] = [
+    /// How many buckets a document carries — the eight, once each.
+    pub const COUNT: usize = 8;
+
+    /// Every bucket, in the order the producer writes them. Also the order of
+    /// the slots a [`RunTelemetry`] holds them in.
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Agent,
         Self::Judge,
         Self::Llmlint,
@@ -214,12 +316,15 @@ impl Usage {
 
 impl RunTelemetry {
     /// One bucket's measured span, or `None` when nothing measured it.
+    ///
+    /// The slot a bucket occupies is its place in [`BucketName::ALL`], looked up
+    /// there rather than written out a second time to drift from it.
     #[must_use]
     pub fn bucket(&self, name: BucketName) -> Option<u64> {
-        self.buckets
+        BucketName::ALL
             .iter()
-            .find(|bucket| bucket.name == name)
-            .and_then(|bucket| bucket.ms)
+            .position(|candidate| *candidate == name)
+            .and_then(|slot| self.buckets[slot])
     }
 
     /// What the measured buckets account for, which is what the residue is the
@@ -228,7 +333,7 @@ impl RunTelemetry {
     pub fn measured_ms(&self) -> u64 {
         self.buckets
             .iter()
-            .filter_map(|bucket| bucket.ms)
+            .filter_map(|ms| *ms)
             .fold(0, u64::saturating_add)
     }
 
@@ -246,18 +351,17 @@ impl RunTelemetry {
 /// a document failing one is not a document with a surprising number in it — it
 /// is a producer this reader cannot honestly project, and every timing served
 /// from it would be a claim nothing supports.
-fn validated(document: RunTelemetry) -> Result<RunTelemetry, Unavailable> {
+fn validated(document: Document) -> Result<RunTelemetry, Unavailable> {
     // Exactly the eight, once each. The invariant under everything else is that
     // every millisecond of the clock has one of a known set of homes, which says
     // nothing at all over a set missing one, carrying one twice, or naming one
     // this build cannot add up. Order is the producer's own and is not required
-    // here: what a reader indexes by is the name.
-    for name in BucketName::ALL {
-        let found = document
-            .buckets
-            .iter()
-            .filter(|bucket| bucket.name == name)
-            .count();
+    // here: the slot a span lands in is its bucket's place in `ALL`.
+    let mut buckets = [None; BucketName::COUNT];
+    for (slot, name) in BucketName::ALL.into_iter().enumerate() {
+        let mut named = document.buckets.iter().filter(|bucket| bucket.name == name);
+        let one = named.next();
+        let found = usize::from(one.is_some()) + named.count();
         if found != 1 {
             return Err(Unavailable::Unreadable(format!(
                 "the `{}` bucket appears {found} times, and a telemetry document carries \
@@ -265,6 +369,7 @@ fn validated(document: RunTelemetry) -> Result<RunTelemetry, Unavailable> {
                 name.as_str()
             )));
         }
+        buckets[slot] = one.and_then(|bucket| bucket.ms);
     }
     // No length check beside it: a name outside the eight is refused while the
     // document is still being decoded, so eight names each appearing once is
@@ -276,7 +381,10 @@ fn validated(document: RunTelemetry) -> Result<RunTelemetry, Unavailable> {
     // impossible, and a sum *below* the wall clock is honest: it is time nothing
     // claimed, which is what `unattributed_ms` is for. A sum above it is the one
     // that cannot be true of any clock.
-    let measured = document.measured_ms();
+    let measured = buckets
+        .iter()
+        .filter_map(|ms| *ms)
+        .fold(0, u64::saturating_add);
     if measured > document.wall_ms {
         return Err(Unavailable::Unreadable(format!(
             "the buckets measure {measured}ms of a {}ms wall clock",
@@ -284,29 +392,40 @@ fn validated(document: RunTelemetry) -> Result<RunTelemetry, Unavailable> {
         )));
     }
 
-    for (party, usage) in &document.usage {
+    let mut usage = BTreeMap::new();
+    for (party, spent) in document.usage {
+        let cost = spent
+            .cost_usd
+            .map(Cost::try_from)
+            .transpose()
+            .map_err(|rejected| {
+                Unavailable::Unreadable(format!("the `{}` party cost {rejected}", party.as_str()))
+            })?;
+        let spent = Usage {
+            input: spent.input,
+            output: spent.output,
+            cache_read: spent.cache_read,
+            cache_write: spent.cache_write,
+            cost_usd: cost,
+        };
         // A party nothing reported for is absent from the map rather than
         // present and empty — the producer says so, and a reader that accepted
         // an empty one would serve "spent nothing" for a party nobody measured.
-        if usage.is_empty() {
+        if spent.is_empty() {
             return Err(Unavailable::Unreadable(format!(
                 "the `{}` party is present and reports nothing, where a party nothing was \
                  reported for is absent",
                 party.as_str()
             )));
         }
-        if usage
-            .cost_usd
-            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
-        {
-            return Err(Unavailable::Unreadable(format!(
-                "the `{}` party cost {:?}, which is not an amount of money",
-                party.as_str(),
-                usage.cost_usd.unwrap_or_default()
-            )));
-        }
+        usage.insert(party, spent);
     }
-    Ok(document)
+
+    Ok(RunTelemetry {
+        wall_ms: document.wall_ms,
+        buckets,
+        usage,
+    })
 }
 
 /// Read one telemetry document, or say why it is not one.
@@ -335,7 +454,7 @@ pub fn read_document(answer: &[u8]) -> Result<RunTelemetry, Unavailable> {
             version.map_or_else(|| "absent".to_owned(), |found| found.to_string())
         )));
     }
-    let document: RunTelemetry =
+    let document: Document =
         serde_json::from_value(answered).map_err(|err| Unavailable::Unreadable(err.to_string()))?;
     validated(document)
 }

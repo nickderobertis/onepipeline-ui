@@ -934,7 +934,8 @@ fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
     assert_eq!(
         document
             .usage_of(onepipeline_ui::telemetry::Party::Total)
-            .cost_usd,
+            .cost_usd
+            .map(onepipeline_ui::telemetry::Cost::get),
         Some(0.53)
     );
     // A party nothing reported for reads as unknown, from its absence.
@@ -1047,6 +1048,7 @@ fn a_cost_no_number_can_hold_never_reaches_a_payload() {
         document
             .usage_of(onepipeline_ui::telemetry::Party::Total)
             .cost_usd
+            .map(onepipeline_ui::telemetry::Cost::get)
     });
     match refused {
         Ok(cost) => assert!(
@@ -1063,6 +1065,30 @@ fn a_cost_no_number_can_hold_never_reaches_a_payload() {
         onepipeline_ui::telemetry::read_document(overflowed).is_err(),
         "a cost past every number is not a cost"
     );
+}
+
+/// The one way a cost is made, held to what a cost can be.
+///
+/// The document boundary refuses a negative through this very type, but JSON has
+/// no NaN and no infinity to write one of, so those are only reachable where the
+/// type is — from a reader that computed a number and called it money. `Cost` is
+/// what stands between any of them and a payload, so it is driven where it
+/// stands rather than only through the one caller that exists today.
+#[test]
+fn a_cost_is_an_amount_of_money_or_it_is_never_made() {
+    use onepipeline_ui::telemetry::Cost;
+
+    assert_eq!(Cost::try_from(0.53).map(Cost::get), Ok(0.53));
+    // Free is an amount of money; a debt, a NaN and an infinity are not.
+    assert_eq!(Cost::try_from(0.0).map(Cost::get), Ok(0.0));
+    for refused in [-0.01_f64, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let rejected =
+            Cost::try_from(refused).expect_err(&format!("{refused:?} is not an amount of money"));
+        assert!(
+            rejected.to_string().contains("not an amount of money"),
+            "{refused:?}: the refusal does not say so — {rejected}"
+        );
+    }
 }
 
 /// The words this crate names a bucket and a party by, against the words the
