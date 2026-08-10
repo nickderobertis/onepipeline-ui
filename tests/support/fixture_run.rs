@@ -1120,3 +1120,118 @@ pub fn write_recorded_only(root: &Path, run: &str) -> PathBuf {
     fs::write(dir.join("events.jsonl"), "").expect("the empty journal");
     dir
 }
+
+/// The run id of the preserved-work fixture below.
+pub const PRESERVED_RUN_ID: &str = "run-20260807-7e6d5c";
+/// The commit that run's work was preserved on, rather than published as.
+pub const PRESERVED_SHA: &str = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
+
+/// A run whose publication never landed: the base moved under it, the bounded
+/// resolve did not converge, and the work was preserved on its branch instead.
+///
+/// The other half of what `onevcs` records about a publication — everything the
+/// merged fixture above cannot show, because that one went through.
+pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4251,
+            "host": "a-recording-host",
+            "started_at": START,
+            "round_budget": 14_400,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 1,
+        "name": "preserved",
+        "concurrency": 1,
+        "tasks": [
+            { "id": NODE_ID, "persona": "worker", "task": "## What\nLand it." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
+    let at_node = json!({ "run_id": run, "round": 1, "node": NODE_ID });
+    let mut journal = Journal::new("a-recording-host-4251");
+    journal
+        .emit(
+            START,
+            "pipeline",
+            "run-started",
+            json!({ "run_id": run }),
+            json!({ "plan": plan }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "round-started",
+            json!({ "run_id": run, "round": 1 }),
+            json!({}),
+        )
+        .emit(
+            "2026-08-07T12:00:02.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" }),
+            json!({ "persona": "worker" }),
+        )
+        .emit(
+            "2026-08-07T12:00:03.000Z",
+            "vcs",
+            "session-opened",
+            at_node.clone(),
+            json!({
+                "token": "a-third-vcs-session-token",
+                "identity": "github.com/nickderobertis/onepipeline-ui",
+                "branch": "feature/preserved",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        )
+        // Work committed onto the branch that is being kept, with the provenance
+        // word that library writes beside it.
+        .emit(
+            "2026-08-07T12:00:06.000Z",
+            "vcs",
+            "commit-preserved",
+            at_node.clone(),
+            json!({
+                "branch": "feature/preserved",
+                "sha": PRESERVED_SHA,
+                "provenance": "agent",
+            }),
+        )
+        // The base moved and the bounded resolve-and-requeue gave up, which is
+        // how a publication ends without one.
+        .emit(
+            "2026-08-07T12:00:09.000Z",
+            "vcs",
+            "sync-conflict",
+            at_node.clone(),
+            json!({ "branch": "feature/preserved", "base": "main", "attempts": 3 }),
+        )
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            at_node,
+            json!({
+                "status": "failed",
+                "outcome": "publication-failed",
+                "branch": "feature/preserved",
+                "detail": "the base moved under the publication",
+            }),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    dir
+}

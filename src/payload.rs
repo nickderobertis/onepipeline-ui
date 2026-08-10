@@ -2763,8 +2763,10 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
 /// recorded, oldest first: a reader takes the last of them as what the run is
 /// doing now.
 ///
-/// A summary stamped at no node is not served: the client's own record requires
-/// the node, and a run-level tool call has no row to land on.
+/// A summary stamped at no node is not served, and neither is one whose node is
+/// a name a route would refuse: the client's own record requires the node, and it
+/// reads the node's timeline by it — so a node it cannot ask for is a node this
+/// crate must not offer.
 #[must_use]
 pub fn live_activity(view: &RunView) -> Vec<Value> {
     let mut order: Vec<(String, u64)> = Vec::new();
@@ -2774,12 +2776,17 @@ pub fn live_activity(view: &RunView) -> Vec<Value> {
             continue;
         }
         let (Some(node), Some(round), Some(at)) = (
-            event.labels.node.clone(),
+            event
+                .labels
+                .node
+                .as_deref()
+                .and_then(|node| NodeId::try_from(node).ok()),
             event.labels.round,
             millis_of(&event.ts),
         ) else {
             continue;
         };
+        let node = node.as_str().to_owned();
         let key = (node.clone(), round);
         let counted = latest
             .get(&key)

@@ -1656,3 +1656,45 @@ fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
     assert_eq!(lint["attribution"]["transportRole"], json!("llmlint"));
     assert_eq!(lint["attribution"]["agentRole"], json!("pr-author"));
 }
+
+#[test]
+fn a_publication_that_never_landed_is_served_as_what_it_kept() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_preserved(root, fixture_run::PRESERVED_RUN_ID);
+    });
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::PRESERVED_RUN_ID),
+    )
+    .json();
+    // Nothing merged, so the commit served is the one the work was *preserved*
+    // on: the branch is still there, and that sha is where to find it.
+    let publication = &body["node_details"][fixture_run::NODE_ID]["publication"];
+    assert_eq!(publication["merged"], json!(false));
+    assert_eq!(publication["commit"], json!(fixture_run::PRESERVED_SHA));
+    assert_eq!(publication["branch"], json!("feature/preserved"));
+
+    // And the span ends where the conflict ended it, with the word that says the
+    // publication stopped rather than that it is still in flight.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::PRESERVED_RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json();
+    let span = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["kind"] == "publication")
+        .expect("the branch the node opened");
+    assert_eq!(span["status"], json!("conflict"));
+    assert_eq!(span["ended_at"], json!("2026-08-07T12:00:09.000Z"));
+    assert!(
+        span.get("reference").is_none(),
+        "no change was ever opened: {span}"
+    );
+}

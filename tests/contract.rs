@@ -798,3 +798,31 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         "the usage sits where this crate looks for it"
     );
 }
+
+/// The browser fixture writes tool summaries a real member could have written,
+/// which means it carries a copy of the bound `oneagentgraph` bounds one to.
+///
+/// TypeScript cannot read a Rust constant and neither can a `.mjs` fixture, so
+/// this is the gate that keeps the copy from drifting: raise the bound there and
+/// the fixture's copy fails here until it follows.
+#[test]
+fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui/e2e/fixtures/runs.mjs");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the fixture that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let declaration = format!(
+        "const ACTIVITY_DETAIL_CHARS = {};",
+        oneagentgraph::event::MAX_ACTIVITY_DETAIL_CHARS
+    );
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the fixture's bound has drifted from \
+         oneagentgraph's own MAX_ACTIVITY_DETAIL_CHARS",
+        path.display()
+    );
+}
