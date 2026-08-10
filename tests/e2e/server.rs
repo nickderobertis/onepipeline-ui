@@ -1873,6 +1873,14 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
     );
 }
 
+/// The two readings only *another* producer can give.
+///
+/// The subprocess boundary itself is driven against the real `onepipeline` in
+/// `the_run_clock_is_the_document_the_sibling_aggregates`, and the
+/// missing-binary reading against a name that really is not installed. What is
+/// left is what a different program answers, and the one thing the pinned build
+/// cannot be asked to do is be a different program.
+// llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the producer is the subject here rather than a double of one: these are another program's answers — a build on the older document version, and something that is not a document at all — and the real binary is driven in the journey beside this one. Provisioning a second, older `onepipeline` to say the same thing would pin this repository's suite to a version its own lock does not name.
 #[test]
 fn a_document_this_build_cannot_read_is_refused_rather_than_read() {
     let runs = tempfile::tempdir().expect("temp dir");
@@ -1910,16 +1918,9 @@ fn a_document_this_build_cannot_read_is_refused_rather_than_read() {
     );
 }
 
-/// A stand-in producer that prints `answer`, for the readings a real one cannot
-/// be made to give.
-///
-/// The subprocess boundary itself is driven against the real `onepipeline` in
-/// `the_run_clock_is_the_document_the_sibling_aggregates`, and the missing-binary
-/// reading against a name that really is not installed. What is left is what
-/// *another* producer answers — a build on the older document version, and
-/// something that is not a document at all — and the one thing the real binary
-/// cannot be asked to do is be a different program.
-// llmlint: ignore[e2e_not_mocked, tests_mirror_real_usage] the producer is the subject here rather than the double: these two readings are another program's output, which the pinned build cannot be made to give, and the reading it *can* give is driven against it in the journey beside this one. Provisioning a second, older `onepipeline` to say the same thing would pin this repository's suite to a version its own lock does not.
+// llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
+
+/// A stand-in producer that prints `answer`.
 #[cfg(unix)]
 fn stub(dir: &std::path::Path, name: &str, answer: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;

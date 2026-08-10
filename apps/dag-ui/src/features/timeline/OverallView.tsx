@@ -113,9 +113,16 @@ export function OverallView({
             <Metric
               icon={<Clock3 />}
               label="Wall time"
-              // Schema 11 serves an unmeasured timing as null, and a run whose
-              // clock nothing could aggregate is one of them: it reads as
-              // unknown rather than as a run that took no time at all.
+              /* Schema 11 serves an unmeasured timing as null, and a run whose
+                 clock nothing could aggregate is one of them: it reads as
+                 unknown rather than as a run that took no time at all.
+                 llmlint: ignore[changed_behavior_has_e2e] a browser reaches this
+                 only against a server whose sibling telemetry producer is
+                 missing, and the tier runs one server for every journey — the
+                 same reason the timeline-unavailable branches below carry this.
+                 App.test.tsx drives it through the real telemetry client, and
+                 `a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all`
+                 drives the server that produces the null. */
               value={
                 detail.run.timing.wall_seconds === null
                   ? "not measured"

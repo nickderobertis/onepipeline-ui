@@ -1202,6 +1202,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
   /** The same detail, with the clock nothing could measure served as absent. */
   async function unmeasuredClock(answered: Response): Promise<Response> {
+    // A parsed body is `any` until something says what it is, and the one thing
+    // this needs to know is where the timing sits. Narrowed to that and nothing
+    // else, so a change to the rest of the detail does not have to be restated
+    // here — the contract's own parser is what holds the whole shape.
     const detail = (await answered.json()) as {
       run: { timing: Record<string, unknown> };
     };
