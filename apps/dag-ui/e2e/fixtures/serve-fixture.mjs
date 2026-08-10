@@ -68,6 +68,11 @@ function serverBinary() {
     stdio: ["ignore", "inherit", "inherit"],
   });
   if (built.status !== 0) {
+    // llmlint: ignore[changed_behavior_has_e2e] driving this means making the
+    // repository not build, which is the one thing a journey of the suite that
+    // build produces must never do. Every other exit this script can take is
+    // driven in `dag-ui.spec.ts`; a Playwright run that reached here would have
+    // no server to test against, and says so on stderr with the action to take.
     stop(
       70,
       "the read API binary did not build",

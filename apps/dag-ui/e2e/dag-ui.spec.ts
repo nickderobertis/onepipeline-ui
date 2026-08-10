@@ -135,11 +135,37 @@ function changeServedRuns(args: string[]): void {
   );
 }
 
+/** The same, for an invocation that names its own workspace rather than this run's. */
+function refusedWorkspace(
+  args: string[],
+  workspace: string,
+): { status: number; stderr: string } {
+  try {
+    execFileSync(
+      process.execPath,
+      ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
+      { stdio: ["ignore", "inherit", "pipe"] },
+    );
+  } catch (refused) {
+    const failure = refused as { status?: number; stderr?: Buffer };
+    return {
+      status: failure.status ?? 0,
+      stderr: failure.stderr?.toString() ?? "",
+    };
+  }
+  throw new Error(`serve-fixture accepted a workspace of '${workspace}'`);
+}
+
 /** What the fixture command said and how it ended, for an invocation it refuses. */
 function refusedChange(args: string[]): { status: number; stderr: string } {
   try {
     changeServedRuns(args);
   } catch (refused) {
+    // Node decorates the error `execFileSync` throws with the child's own exit
+    // status and captured stderr, and types neither: a caught value is `unknown`
+    // and `ExecFileSyncException` is not what a failed spawn is typed as here.
+    // Reading them off the shape is the only way to assert the exit contract,
+    // and both are read defensively so a differently-shaped throw still reports.
     const failure = refused as { status?: number; stderr?: Buffer };
     return {
       status: failure.status ?? 0,
@@ -2208,12 +2234,19 @@ test("refuses a change no recorded run could have held", () => {
     ],
     [["--grow-worker-session", "many"], "is not a turn count"],
     [["--remove-run", "../etc"], "is not a usable run id"],
+    [["--stall", "--refuse-port", "no"], "is not a port"],
   ] satisfies readonly [string[], string][]) {
     const refused = refusedChange(args);
     expect(refused.status, args.join(" ")).toBe(2);
     expect(refused.stderr, args.join(" ")).toContain(said);
     expect(refused.stderr, args.join(" ")).toContain("ACTION:");
   }
+
+  // The workspace is the one option this script *deletes* through, so it is
+  // refused rather than resolved against whatever directory the caller was in.
+  const relative = refusedWorkspace(["--settle-dashboard"], "runs");
+  expect(relative.status).toBe(2);
+  expect(relative.stderr).toContain("is not an absolute path");
 });
 
 async function detailScroll(
