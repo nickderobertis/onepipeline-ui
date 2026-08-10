@@ -12,4 +12,4 @@ GET /api/v2/runs/{run}/artifacts/{id}
 GET /api/v2/events                    # SSE; fresh snapshot per connection
 ```
 
-Payloads keep the telemetry schema-version discipline and serve schema 10 including `dispatch_id`. Anything the API computes that is presentation-worthy lands in the onepipeline SDK/CLI first: the agent reading the CLI must have the same or better visibility than the human in the UI.
+Payloads keep the telemetry schema-version discipline and serve schema 11 including `dispatch_id` — schema 10 was where `dispatch_id` landed, and 11 is that discipline exercised: an unmeasured timing is served `null` rather than `0`, so a lane nothing measured can no longer read as a measured zero. Anything the API computes that is presentation-worthy lands in the onepipeline SDK/CLI first: the agent reading the CLI must have the same or better visibility than the human in the UI.

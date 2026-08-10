@@ -8,6 +8,7 @@
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   FIXTURE_WORKSPACE,
@@ -122,17 +123,38 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  * Change what the server is serving — record progress, or take a run away — through
  * the fixture module that wrote the run directory in the first place.
  */
-function changeServedRuns(args: string[]): void {
+function changeServedRuns(args: string[], workspace = FIXTURE_WORKSPACE): void {
   execFileSync(
     process.execPath,
-    [
-      "e2e/fixtures/serve-fixture.mjs",
-      "--workspace",
-      FIXTURE_WORKSPACE,
-      ...args,
-    ],
-    { stdio: "inherit" },
+    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
+    { stdio: ["ignore", "inherit", "pipe"] },
   );
+}
+
+/**
+ * What the fixture command said and how it ended, for an invocation it refuses.
+ *
+ * `workspace` is this run's own unless a case is about that option itself.
+ */
+function refusedChange(
+  args: string[],
+  workspace = FIXTURE_WORKSPACE,
+): { status: number; stderr: string } {
+  try {
+    changeServedRuns(args, workspace);
+  } catch (refused) {
+    // Node decorates the error `execFileSync` throws with the child's own exit
+    // status and captured stderr, and types neither: a caught value is `unknown`
+    // and `ExecFileSyncException` is not what a failed spawn is typed as here.
+    // Reading them off the shape is the only way to assert the exit contract,
+    // and both are read defensively so a differently-shaped throw still reports.
+    const failure = refused as { status?: number; stderr?: Buffer };
+    return {
+      status: failure.status ?? 0,
+      stderr: failure.stderr?.toString() ?? "",
+    };
+  }
+  throw new Error(`serve-fixture accepted ${args.join(" ")}`);
 }
 
 /** The node view's pinned plot, once a node has been opened. */
@@ -378,10 +400,9 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   ).toBeVisible();
   const plot = timeline(page).getByLabel(/Timeline plot/);
   // The categories the reader was promised, and no served identifier among them.
-  // The whole vocabulary is offered whatever this run recorded: a lane a onepipeline
-  // journal has no producer for — lint, which is a transport of its own, and the lock
-  // waits nothing in it counts — is a lane an operator still has to be able to read
-  // as absent rather than as missing.
+  // The whole vocabulary is offered whatever this run recorded: a lane this node
+  // has nothing in — the lock waits, which its publication never met — is a lane an
+  // operator still has to be able to read as absent rather than as missing.
   await expect(page.getByRole("list", { name: "Timeline legend" })).toHaveText(
     [
       "Worker",
@@ -709,11 +730,11 @@ test("shows a verification and a publication as the records they are", async ({
   await page.getByRole("button", { name: "Close detail" }).click();
 
   // The publication carries the change it published and says, rather than implies,
-  // that nothing observed a check on it: onepipeline records the branch a node
-  // opened and what became of it, and no check evidence at all. Read from the
-  // opened plot, where each category has a row of its own — collapsed, the branch
-  // this node worked on lies under the session that opened it, which is what the
-  // one line is for.
+  // that nothing observed a check on it: this node was merged with no host check
+  // reported against it, and the panel states that rather than leaving a blank.
+  // Read from the opened plot, where each category has a row of its own —
+  // collapsed, the branch this node worked on lies under the session that opened
+  // it, which is what the one line is for.
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   await timeline(page)
     .getByRole("button", { name: /^Publication/ })
@@ -729,11 +750,11 @@ test("shows a verification and a publication as the records they are", async ({
   );
   await page.getByRole("button", { name: "Close detail" }).click();
 
-  // The publish `onevcs` relayed sits inside the node's own record and opens as the
+  // The merge `onevcs` relayed sits inside the node's own record and opens as the
   // publication it reported, not as an untyped line of journal.
   await page
     .getByRole("region", { name: "Node transcript" })
-    .getByRole("article", { name: "published" })
+    .getByRole("article", { name: "change-merged" })
     .getByRole("button")
     .click();
   await expect(itemDetail(page)).toContainText("Publication");
@@ -775,10 +796,12 @@ test("states when a verification artifact is unavailable", async ({ page }) => {
 /**
  * What the API can say about a node's publication, node by node.
  *
- * onepipeline records the branch a node opened, the outcome it reached, and the
- * change url it published — and nothing about a merge commit or a browsable branch
- * page, which is why those two halves of the upstream matrix are gone rather than
- * asserted against invented links. See AGENTS.md's list of what no journal records.
+ * `onevcs` records the branch a node opened, the outcome it reached, the change url
+ * it published and the commit a merge landed as — but no url for that commit and
+ * none for the branch, because those are the host's own and it writes neither. So
+ * the two halves of the upstream matrix that were links are gone rather than
+ * asserted against invented ones; the commit itself is held by the read API's own
+ * journeys. See AGENTS.md's list of what no record fills.
  */
 for (const scenario of [
   {
@@ -820,6 +843,104 @@ for (const scenario of [
     ).toHaveAttribute("href", change);
   });
 }
+
+/**
+ * The checks a host ran on a publication, which is the evidence the planner's own
+ * bar is read against: reviewing gate evidence rather than a verdict alone means
+ * seeing which checks ran, which are required, and that none of them skipped.
+ *
+ * `onevcs` reports every transition of every check it waits on, and the server
+ * serves the last account of each — so this reads the words that library wrote.
+ */
+test("reads the checks a host observed on a publication", async ({ page }) => {
+  await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
+  await page.getByRole("tab", { name: "Checks" }).click();
+  const facts = page.locator(".facts");
+  // The repository's own pre-push hook left a verdict, which is the only record
+  // that it ran at all.
+  await expect(facts).toContainText("Hook: present");
+  await expect(facts).toContainText("Required checks: gate, e2e");
+  // Each check's own state: the conclusion once it reached one, and the host's
+  // status while it has not — so a required check still running cannot read as
+  // one that passed, and one that never ran cannot hide.
+  await expect(facts).toContainText("gate: success");
+  await expect(facts).toContainText("published-smoke: failure");
+  await expect(facts).toContainText("e2e: in_progress");
+
+  // And the same checks are read beside the change they ran on, from the
+  // publication the plot draws.
+  await page.getByRole("tab", { name: "PR" }).click();
+  await expect(
+    page.locator(".facts").getByRole("link", { name: "Pull request" }),
+  ).toHaveAttribute("href", fixture().remote_open_pr);
+  await page.getByRole("tab", { name: "Timeline" }).click();
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
+  await timeline(page)
+    .getByRole("button", { name: /^Publication/ })
+    .click();
+  await expect(itemDetail(page)).toContainText("Observed checks");
+  await expect(itemDetail(page)).not.toContainText(
+    "No checks were observed on this node.",
+  );
+  await expect(itemDetail(page)).toContainText("published-smoke");
+});
+
+test("opens the log the failing check stored", async ({ page }) => {
+  await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
+  const log = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/artifacts/${fixture().artifacts.check}`) &&
+      response.status() === 200,
+  );
+  await timeline(page)
+    .getByRole("button", { name: new RegExp(fixture().artifacts.check) })
+    .click();
+  await log;
+  await expect(itemDetail(page)).toContainText(
+    "published-smoke could not reach the published wheel",
+  );
+  await expect(itemDetail(page)).toContainText("Verification failed.");
+});
+
+/**
+ * The contention a publication met, which is how an operator tells a slow run
+ * from a queued one.
+ *
+ * `onevcs` times every wait on an identity's lock and relays it; a real
+ * publication takes thousands of them, so the reading is the count and the total
+ * rather than one segment each.
+ */
+test("reads the contention a publication met as one summary", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
+  const waits = timeline(page).getByRole("button", { name: /^Lock waits/ });
+  await expect(waits).toBeVisible();
+  await expect(waits).toHaveAccessibleName(/3 recorded/);
+  // Plotted at the total it carries rather than across the window the waits fell
+  // in, which is what the aggregate lane is for.
+  await waits.click();
+  await expect(itemDetail(page)).toContainText("12s");
+});
+
+/**
+ * The lint transport, which is the reason a session is served under a *pair* of
+ * roles: this member has the same semantic role as the work it is reading, and
+ * only the transport half tells the two apart.
+ */
+test("tells the lint member apart from the work it is reading", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
+  const lint = timeline(page).getByRole("button", { name: /^Lint/ });
+  await expect(lint).toBeVisible();
+  await expect(lint).toHaveAccessibleName(new RegExp(fixture().sessions.lint));
+  await lint.click();
+  await expect(itemDetail(page)).toContainText("The diff reads as written");
+});
 
 test("keeps a node's task, criteria, dependencies and verification reachable", async ({
   page,
@@ -1073,7 +1194,9 @@ test("restores a bookmarked view and refreshes through the read API", async ({
   await expect(metric("Status")).toContainText("active");
   await expect(metric("Nodes")).toContainText(/[1-9]\d*/);
   // A duration in the units it is read in, never the raw second count the contract
-  // serves: `58000.0s` is arithmetic homework, `16h 6m 40s` is an answer.
+  // serves: `58000.0s` is arithmetic homework, `16h 6m 40s` is an answer. And a
+  // duration at all rather than "not measured", which is what this reads when the
+  // sibling that aggregates a run's clock could not be asked.
   await expect(metric("Wall time").locator("strong")).toHaveText(
     /^(\d{1,3}ms|[1-5]?\ds|\d+m [1-5]?\ds|\d+h [1-5]?\dm [1-5]?\ds)$/,
   );
@@ -1189,8 +1312,9 @@ test("restores node tabs and moves between them from the keyboard", async ({
     "true",
   );
 
-  // Nothing in a onepipeline journal observes a check on a publication, so the tab
-  // states that rather than leaving an empty panel — see AGENTS.md.
+  // Nothing observed a check on *this* node's publication, so the tab states that
+  // rather than leaving an empty panel; the node that did observe some is read in
+  // its own journey above.
   await page.getByRole("tab", { name: "Checks" }).click();
   await expect(page.locator(".facts")).toContainText("No checks observed");
   await expect(page.locator(".facts").getByRole("link")).toHaveCount(0);
@@ -2033,10 +2157,9 @@ test("streams real progress the server observes on disk", async ({ page }) => {
 test("shows a turn the dispatch relays while its transcript is open", async ({
   page,
 }) => {
-  // Upstream this read a mid-turn activity summary streamed over `activity.changed`.
-  // A onepipeline journal relays a session's turn once, when it is done, and records
-  // nothing of a turn in progress — see AGENTS.md. What is live here is the turn
-  // itself arriving under a reader who already has the transcript open.
+  // Two live readings of one open transcript: what the member is doing *inside* the
+  // turn it is taking, which `oneagentgraph` publishes as it works and the server
+  // relays over `activity.changed`, and the turn itself arriving after it.
   await openObservatory(page, `/?run=${runs().live}&view=graph`);
   await page
     .getByRole("button", { name: /dashboard: (running|done)/ })
@@ -2048,6 +2171,17 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
   await expect(
     page.getByText("Implementing the dashboard now").first(),
   ).toBeVisible();
+
+  // Recorded the way the member records one: a bounded tool summary, published
+  // from inside a turn that has not finished. The reader is told what it is doing
+  // rather than waiting for the turn to end to find out.
+  changeServedRuns([
+    "--record-activity",
+    "Bash",
+    "--activity-detail",
+    "just gate",
+  ]);
+  await expect(page.getByText("dashboard: Bash just gate")).toBeVisible();
 
   // Recorded the way the executor records one: an appended authoritative event.
   changeServedRuns(["--grow-worker-session", "4"]);
@@ -2061,6 +2195,55 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
   await expect(
     page.getByText("Dashboard turn 3 arrived").first(),
   ).toBeVisible();
+});
+
+/**
+ * The fixture command's own contract, which is the one thing standing between a
+ * mistyped journey and a served run that records something no library could have
+ * written.
+ *
+ * Driven the way a journey drives it — the real script, over the real workspace —
+ * because a guard nobody has watched refuse is a guard nobody knows is there.
+ */
+test("refuses a change no recorded run could have held", () => {
+  for (const [args, said] of [
+    [["--record-activity", "Bash"], "needs --activity-detail"],
+    [["--activity-detail", "just gate"], "needs --record-activity"],
+    [
+      ["--record-activity", "Bash", "--activity-detail", ""],
+      "a tool summary is 1 to 160 characters",
+    ],
+    [
+      ["--record-activity", "not a tool", "--activity-detail", "just gate"],
+      "is not a tool name",
+    ],
+    [["--grow-worker-session", "many"], "is not a turn count"],
+    [["--remove-run", "../etc"], "is not a usable run id"],
+    [["--stall", "--refuse-port", "no"], "is not a port"],
+    // Two changes in one invocation: the dispatch is a chain, so the second
+    // would be dropped by whichever branch matched first and the caller would
+    // read a run that recorded only half of what they asked for.
+    [["--settle-dashboard", "--remove-page-runs"], "are more than one change"],
+  ] satisfies readonly [string[], string][]) {
+    const refused = refusedChange(args);
+    expect(refused.status, args.join(" ")).toBe(2);
+    expect(refused.stderr, args.join(" ")).toContain(said);
+    expect(refused.stderr, args.join(" ")).toContain("ACTION:");
+  }
+
+  // The workspace is the one option this script *deletes* through, so it is
+  // refused rather than resolved against whatever directory the caller was in.
+  const relative = refusedChange(["--settle-dashboard"], "runs");
+  expect(relative.status).toBe(2);
+  expect(relative.stderr).toContain("is not an absolute path");
+
+  // Absolute is not enough in front of that delete: a workspace outside the temp
+  // root Playwright makes them in is somebody else's directory, and this refuses
+  // it before it reads or removes anything under it — `/etc` is still here.
+  const elsewhere = refusedChange(["--settle-dashboard"], "/etc");
+  expect(elsewhere.status).toBe(2);
+  expect(elsewhere.stderr).toContain("is not a directory under");
+  expect(existsSync("/etc/hosts")).toBe(true);
 });
 
 async function detailScroll(

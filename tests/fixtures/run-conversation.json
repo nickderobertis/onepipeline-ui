@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 10,
+  "telemetry_schema_version": 11,
   "observed_at": "2026-08-07T12:00:00Z",
   "conversation": {
     "canContinue": false,
@@ -11,10 +11,11 @@
     "name": "contract-interface",
     "project": "run-20260807-a1b2c3",
     "startedAt": "2026-08-07T12:00:03.000Z",
-    "state": "agent-turn",
+    "state": "turn-completed",
     "turns": [
       {
         "assistant": "landed the route table",
+        "durationMs": null,
         "failureKind": null,
         "harness": "oneagentgraph",
         "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
@@ -25,6 +26,27 @@
         "tools": [],
         "unknown": {},
         "usage": {},
+        "user": "worker"
+      },
+      {
+        "assistant": null,
+        "durationMs": 2500,
+        "failureKind": null,
+        "harness": "oneagentgraph",
+        "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+        "model": null,
+        "reasoning": null,
+        "status": "turn-completed",
+        "timestamp": "2026-08-07T12:00:05.000Z",
+        "tools": [],
+        "unknown": {},
+        "usage": {
+          "inputTokens": 1200,
+          "outputTokens": 340,
+          "cacheReadTokens": 800,
+          "cacheWriteTokens": 120,
+          "costUsd": 0.42
+        },
         "user": "worker"
       }
     ]
@@ -38,6 +60,6 @@
     "transportRole": "agent",
     "agentRole": "worker",
     "persona": "worker",
-    "finishedAt": "2026-08-07T12:00:03.000Z"
+    "finishedAt": "2026-08-07T12:00:05.000Z"
   }
 }

@@ -16,19 +16,22 @@
  *   serve-fixture.mjs --workspace DIR --port N     build the fixture and serve it
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
+ *                     | --record-activity NAME --activity-detail TEXT
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   buildRuns,
   facts,
   growTranscript,
+  recordActivity,
   removePageRuns,
   removeRun,
   settleDashboard,
@@ -42,9 +45,21 @@ const REPO_ROOT = resolve(
 /** Published beside the runs root so a spec names what this wrote, not a copy of it. */
 export const FIXTURE_FACTS_NAME = "fixture-facts.json";
 
-function die(message, action) {
+/**
+ * Report a failure and stop, under the same exit-code contract the crate serves:
+ * `2` is a usage error — the caller asked for something this cannot mean — and
+ * `70` is this side failing at something it was asked to do correctly. A build
+ * that did not build is the second, and telling a Playwright run which of the two
+ * it hit is the difference between fixing the invocation and fixing the tree.
+ */
+function stop(code, message, action) {
   process.stderr.write(`serve-fixture: ${message}\nACTION: ${action}\n`);
-  process.exit(2);
+  process.exit(code);
+}
+
+/** A usage error: the invocation cannot mean anything this script can do. */
+function die(message, action) {
+  stop(2, message, action);
 }
 
 /** The compiled server this fixture serves through, built if it is not there yet. */
@@ -54,7 +69,13 @@ function serverBinary() {
     stdio: ["ignore", "inherit", "inherit"],
   });
   if (built.status !== 0) {
-    die(
+    // llmlint: ignore[changed_behavior_has_e2e] driving this means making the
+    // repository not build, which is the one thing a journey of the suite that
+    // build produces must never do. Every other exit this script can take is
+    // driven in `dag-ui.spec.ts`; a Playwright run that reached here would have
+    // no server to test against, and says so on stderr with the action to take.
+    stop(
+      70,
       "the read API binary did not build",
       "run 'cargo build --locked' in the repository root and fix what it reports",
     );
@@ -143,6 +164,8 @@ function parseArgs(argv) {
     "--port",
     "--remove-run",
     "--grow-worker-session",
+    "--record-activity",
+    "--activity-detail",
     "--refuse-port",
   ]);
   const out = {};
@@ -169,17 +192,47 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const port = Number(args.port ?? 8765);
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
+
+// One change per invocation. The dispatch below is a chain, so a second action
+// would be silently dropped by the first branch that matched — and a caller who
+// asked for two changes and got one is reading a run that recorded something
+// they never asked for, which is the whole failure this script's guards exist to
+// prevent. `--activity-detail` is not counted: it is the other half of
+// `--record-activity`, and arriving alone is already its own refusal.
+const ACTIONS = [
+  "stall",
+  "settle-dashboard",
+  "remove-page-runs",
+  "remove-run",
+  "grow-worker-session",
+  "record-activity",
+];
+const asked = ACTIONS.filter((action) => args[action] !== undefined);
+if (asked.length > 1) {
   die(
-    `'${args.port}' is not a port`,
-    "pass --port a number between 1 and 65535",
+    `${asked.map((action) => `--${action}`).join(" and ")} are more than one change`,
+    "run this once per change, so each one is the change the caller asked for",
   );
 }
+/** One port option, checked before anything binds or connects to it. */
+function portOf(value, name) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    die(
+      `'${value}' is not a port`,
+      `pass ${name} a number between 1 and 65535`,
+    );
+  }
+  return port;
+}
+
+const port = portOf(args.port ?? 8765, "--port");
 
 if (args.stall) {
   const refuse =
-    args["refuse-port"] === undefined ? undefined : Number(args["refuse-port"]);
+    args["refuse-port"] === undefined
+      ? undefined
+      : portOf(args["refuse-port"], "--refuse-port");
   await stall(port, refuse);
 } else {
   if (args.workspace === undefined) {
@@ -188,16 +241,79 @@ if (args.stall) {
       "pass --workspace the fixture directory to use",
     );
   }
-  const runsRoot = join(args.workspace, "runs");
-  if (args["settle-dashboard"]) {
-    settleDashboard(runsRoot);
-  } else if (args["remove-page-runs"]) {
-    removePageRuns(runsRoot);
-  } else if (args["remove-run"] !== undefined) {
-    removeRun(runsRoot, args["remove-run"]);
-  } else if (args["grow-worker-session"] !== undefined) {
-    growTranscript(runsRoot, Number(args["grow-worker-session"]));
-  } else {
-    process.exit(await serve(args.workspace, port));
+  // An absolute path, because this one is removed and rebuilt: a relative
+  // workspace resolves against whatever directory the caller happened to be in,
+  // and the directory this deletes must be the one Playwright chose.
+  if (!isAbsolute(args.workspace)) {
+    die(
+      `'${args.workspace}' is not an absolute path`,
+      "pass --workspace the absolute fixture directory Playwright recorded",
+    );
+  }
+  // And one this script is allowed to own. Absolute is not enough in front of a
+  // recursive delete: `serve` removes the whole directory before rebuilding it,
+  // so an absolute path that is somebody else's — a home directory, a source
+  // tree, `/` — is exactly the argument that must not be honoured. The temp root
+  // is the bound because `playwright.config.ts` makes every workspace with
+  // `mkdtempSync(join(tmpdir(), …))`, so nothing this may delete is ever outside
+  // it, and the temp root itself is not a workspace either.
+  const workspace = resolve(args.workspace);
+  const temporary = resolve(tmpdir());
+  if (workspace === temporary || !workspace.startsWith(`${temporary}${sep}`)) {
+    die(
+      `'${args.workspace}' is not a directory under ${temporary}`,
+      "pass --workspace a fixture directory inside the temp root, as playwright.config.ts creates it",
+    );
+  }
+  const runsRoot = join(workspace, "runs");
+  // The writers guard their own inputs — a run id that reaches a recursive
+  // delete, a tool summary that reaches a journal a server is reading — and they
+  // do it by throwing. Every one of those is the caller having asked for
+  // something this cannot mean, so it is reported as the usage error it is
+  // rather than as a stack trace and an undocumented exit code.
+  try {
+    if (args["settle-dashboard"]) {
+      settleDashboard(runsRoot);
+    } else if (args["remove-page-runs"]) {
+      removePageRuns(runsRoot);
+    } else if (args["remove-run"] !== undefined) {
+      removeRun(runsRoot, args["remove-run"]);
+    } else if (args["grow-worker-session"] !== undefined) {
+      const turns = Number(args["grow-worker-session"]);
+      if (!Number.isInteger(turns) || turns < 1) {
+        die(
+          `'${args["grow-worker-session"]}' is not a turn count`,
+          "pass --grow-worker-session the whole number of turns to record up to",
+        );
+      }
+      growTranscript(runsRoot, turns);
+    } else if (args["record-activity"] !== undefined) {
+      // Both halves or neither, checked in both directions: a tool summary is
+      // the tool's name *and* what it was given, and the half of it that arrived
+      // alone is a mistyped command rather than a request to serve.
+      if (args["activity-detail"] === undefined) {
+        die(
+          "--record-activity needs --activity-detail",
+          "pass --activity-detail the summary the tool call carried",
+        );
+      }
+      recordActivity(
+        runsRoot,
+        args["record-activity"],
+        args["activity-detail"],
+      );
+    } else if (args["activity-detail"] !== undefined) {
+      die(
+        "--activity-detail needs --record-activity",
+        "pass --record-activity the name of the tool the summary came from",
+      );
+    } else {
+      process.exit(await serve(workspace, port));
+    }
+  } catch (refused) {
+    die(
+      refused instanceof Error ? refused.message : String(refused),
+      "give the command a value the recorded run could really have held",
+    );
   }
 }

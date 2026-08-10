@@ -15,9 +15,11 @@ here — until it lands, this list is the record of what an agent reading the CL
 cannot currently see that a human in the UI can. Do not add to it silently:
 anything new here is a proposal to make upstream first.
 
-- **The eight-way timing breakdown.** The SDK attributes a run's wall clock four
-  ways behind its contract surface; the wire's breakdown is finer, and
-  `payload::buckets` recomputes the fold to map onto it.
+- **The eight-way timing breakdown, and the per-party usage.** Both are the
+  SDK's own fold and neither is recomputed here — but its `telemetry` module is
+  private, so the document is read through `onepipeline telemetry <run>` rather
+  than imported. `src/telemetry.rs` owns that seam; making the fold importable is
+  the proposal, and a server would then read it without starting a process.
 - **A dispatch id.** The journal stamps a dispatch with its run, round, and node
   but mints no id for it; schema 10 serves one, so `payload::dispatch_key`
   derives it from the three.
@@ -33,30 +35,77 @@ anything new here is a proposal to make upstream first.
   prose of the event that stored it. The interval it is drawn over is the two
   neighbouring records that bracket it — the tightest one the journal holds.
 - **The graph-level summary of a node's sessions.** `payload::role_rollups`
-  counts a node's dispatched sessions per role so the graph reading is a reading
-  rather than a download: a node that dispatched two hundred of them is two
-  hundred spans at `scope=node` and one per category at `scope=run`. The SDK
+  counts a node's dispatched sessions per *pair* of roles so the graph reading is
+  a reading rather than a download: a node that dispatched two hundred of them is
+  two hundred spans at `scope=node` and one per category at `scope=run`. The SDK
   counts neither.
+- **The party a record's session ran under.** `transportRoleSchema` is a pair
+  with `agentRoleSchema`, and nothing stamps the transport half as such;
+  `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
+  writes where it writes one, else the graph `member`, else the persona — and
+  falls back to the agent side, which is the one side every dispatch has.
+- **Time inside a model.** The SDK's buckets are wall clock — where the *run's*
+  time went — and the wire also carries how long each party spent in a model,
+  which no fold of a clock can answer. `payload::measured` reads it off each
+  `turn-completed`'s own `usage.duration`, and it is absent for a party that
+  reported no turn rather than zero.
+- **The last account of each observed check.** `onevcs` reports every transition
+  of every check it waits on, and `payload::observed_checks` keeps the last of
+  each with the state it moved from. The transitions themselves are still served,
+  as the node's own records.
 
-## What the wire asks for and no onepipeline journal records
+## What the siblings record and this crate reads
+
+`onevcs` and `oneagentgraph` are independent tools with general integration hooks
+only — neither knows this stack exists — so what they record is read as the wire
+strings they write, quoted in `payload::vcs` and `payload::graph` beside the
+payload each one carries. Read today: `session-opened`, `lock-wait`,
+`gate-started`, `gate-verdict`, `push`, `change-opened`, `change-check`,
+`change-merged`, `merge-completed`, `commit-preserved` and `sync-conflict` from
+`onevcs`; `turn-activity` and `turn-completed` from `oneagentgraph`.
+
+`oneagentgraph` declares its own vocabulary in a public module, so
+`tests/contract.rs` holds this crate's copy of it to that library's types.
+`onevcs` declares its in a private one, so the wire is the only declaration a
+consumer can reach and the fixture — written in the records that library emits —
+is the whole of the gate there.
+
+Deliberately not read: `fetch`, `lock-acquired`, `merge-queued`,
+`session-closed`, `recovery-attested`. Each is a real record and none of them
+answers a field the wire asks for; they still reach a reader, as the node's own
+timeline events.
+
+Two readings of a record are the producer's and not this crate's. A verdict is
+read in the words the library that wrote it uses — `onevcs` rules a gate `pass`,
+says whether a push was `accepted`, and treats three check conclusions as not
+blocking a merge — because reading a check's `completed` as a pipeline status is
+what would make every passing check look like a failure. And a tool summary is
+carried on the turn it was published from, never as a turn of its own:
+`turn-activity` is streamed *during* a turn, so counting one as a turn would
+report a turn that had not happened.
+
+## What the wire asks for and no record fills
 
 Not derivations but gaps: a client's model has fields this API cannot fill from
 any run, so no browser journey asserts them. Each needs a producing library to
 record it before anything here can serve it.
 
-- **Observed checks on a publication** (`node_details[…].verification.checks`,
-  `pre_push_hook`, `required_checks`). `onevcs` relays a branch and a change url
-  and nothing about what ran against them.
-- **A merge commit and its url, and a branch url.** The publish event carries the
-  change's own url only.
-- **Turn bodies and tool calls.** The journal records that a session reported,
-  not what it said, so every served turn carries no tools and no reasoning.
-- **A lint transport.** `transportRoleSchema` has an `llmlint` member; a
-  onepipeline journal has three producers and none of them is one, so the client's
-  lint lane is always empty.
-- **Lock waits.** Nothing counts contention. A `rollup` *is* served — one per
-  category a node dispatched under, at `scope=run` — but never one standing for
-  waits, so the client's lock-waits lane is always empty.
-- **Mid-turn activity.** The client knows an `activity.changed` stream event and a
-  live-activity summary; a session's turn is relayed once, when it is done, so
-  there is nothing in flight to report and that event is never sent.
+- **A merge commit's url, and a branch url.** The commit itself *is* recorded —
+  `merge-completed` and `change-merged` both carry the sha, and it is served as
+  `publication.commit` — but the urls that would open either are the host's own
+  and `onevcs` writes neither.
+- **A check's url.** `change-check` carries the check's name, whether it is
+  required, its transition and its conclusion, and its log as an artifact. No
+  link to the host's own page for it, so `checks[].url` is absent and a reader
+  opens the stored log instead.
+- **Turn bodies and reasoning.** The journal records that a session reported and
+  what tools it called, not the prose it wrote, so a served turn carries the tool
+  calls `turn-activity` published and no assistant text of its own.
+- **Time inside a tool call** (`timing.tool_ms`). `turn-activity` reports *what* a
+  turn did and carries no interval, so the presence flag beside that zero says it
+  was never measured — which is the wire's own way of telling an unmeasured zero
+  from a measured one, and is why nothing here is hardcoded to it.
+- **A provider refusal's own evidence** (`providerFailureSchema`). A member that
+  died records a classified cause, but the identity, the chain and the reset time
+  a planner would act on are `oneagentgraph`'s to relay and are not on the
+  envelope this crate reads.

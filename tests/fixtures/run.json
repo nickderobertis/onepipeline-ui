@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 10,
+  "telemetry_schema_version": 11,
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
@@ -9,30 +9,30 @@
     "last_event": "round-finished",
     "last_progress_at": 1786104031,
     "timing": {
-      "agent_seconds": 27,
-      "judge_seconds": 0,
-      "llmlint_seconds": 0,
-      "gate_seconds": 0,
-      "publication_wait_seconds": 0,
-      "lock_wait_seconds": 0,
-      "setup_seconds": 0,
+      "agent_seconds": 13,
+      "judge_seconds": null,
+      "llmlint_seconds": null,
+      "gate_seconds": 2,
+      "publication_wait_seconds": 9,
+      "lock_wait_seconds": 1,
+      "setup_seconds": 1,
       "scheduling_seconds": 4,
       "wall_seconds": 31,
-      "agent_model_ms": 27000,
-      "judge_model_ms": 0,
-      "llmlint_model_ms": 0,
-      "tool_ms": 0,
-      "idle_orchestration_ms": 0,
+      "agent_model_ms": 2500,
+      "judge_model_ms": 3000,
+      "llmlint_model_ms": null,
+      "tool_ms": null,
+      "idle_orchestration_ms": null,
       "unattributed_ms": 0,
       "wall_ms": 31000,
       "fractions": {
-        "agent_model": 0.8709677419354839,
-        "judge_model": 0.0,
-        "llmlint_model": 0.0,
-        "tool": 0.0,
-        "idle_orchestration": 0.0,
-        "lock_wait": 0.0,
-        "setup": 0.0,
+        "agent_model": 0.08064516129032258,
+        "judge_model": 0.0967741935483871,
+        "llmlint_model": null,
+        "tool": null,
+        "idle_orchestration": null,
+        "lock_wait": 0.035483870967741936,
+        "setup": 0.06129032258064516,
         "scheduling": 0.12903225806451613
       }
     },
@@ -50,7 +50,7 @@
             "started_at": "2026-08-07T12:00:03.000Z"
           }
         ],
-        "turns": 1,
+        "turns": 2,
         "lint": 0,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
@@ -65,14 +65,21 @@
         "node": "review",
         "status": "done",
         "outcome": "approved",
-        "sessions": [],
-        "turns": 0,
+        "sessions": [
+          {
+            "session_id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16",
+            "role": "judge",
+            "agent_role": "judge",
+            "started_at": "2026-08-07T12:00:22.000Z"
+          }
+        ],
+        "turns": 2,
         "lint": 0,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
         "timing_presence": {
-          "agent_model_ms": true,
-          "judge_model_ms": false,
+          "agent_model_ms": false,
+          "judge_model_ms": true,
           "llmlint_model_ms": false,
           "tool_ms": false
         }
@@ -101,18 +108,18 @@
         "cost_usd": null
       },
       "total": {
-        "input_tokens": null,
-        "output_tokens": null,
-        "cache_read_tokens": null,
-        "cache_write_tokens": null,
-        "cost_usd": null
+        "input_tokens": 1600,
+        "output_tokens": 430,
+        "cache_read_tokens": 800,
+        "cache_write_tokens": 120,
+        "cost_usd": 0.53
       }
     },
     "timing_quality": "complete",
     "linkage_quality": "labelled",
     "timing_presence": {
       "agent_model_ms": true,
-      "judge_model_ms": false,
+      "judge_model_ms": true,
       "llmlint_model_ms": false,
       "tool_ms": false
     },
@@ -121,13 +128,13 @@
       "launch.json"
     ],
     "node_work_ms": {
-      "agent_model_ms": 27000,
-      "judge_model_ms": 0,
-      "llmlint_model_ms": 0,
-      "tool_ms": 0,
+      "agent_model_ms": 2500,
+      "judge_model_ms": 3000,
+      "llmlint_model_ms": null,
+      "tool_ms": null,
       "wall_ms": 31000
     },
-    "turns": 1,
+    "turns": 4,
     "lint": 0
   },
   "rounds": [
@@ -196,7 +203,7 @@
           "review"
         ]
       },
-      "last_seq": 7
+      "last_seq": 24
     }
   ],
   "conversations": [
@@ -210,10 +217,11 @@
         "name": "contract-interface",
         "project": "run-20260807-a1b2c3",
         "startedAt": "2026-08-07T12:00:03.000Z",
-        "state": "agent-turn",
+        "state": "turn-completed",
         "turns": [
           {
             "assistant": "landed the route table",
+            "durationMs": null,
             "failureKind": null,
             "harness": "oneagentgraph",
             "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
@@ -224,6 +232,27 @@
             "tools": [],
             "unknown": {},
             "usage": {},
+            "user": "worker"
+          },
+          {
+            "assistant": null,
+            "durationMs": 2500,
+            "failureKind": null,
+            "harness": "oneagentgraph",
+            "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+            "model": null,
+            "reasoning": null,
+            "status": "turn-completed",
+            "timestamp": "2026-08-07T12:00:05.000Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 1200,
+              "outputTokens": 340,
+              "cacheReadTokens": 800,
+              "cacheWriteTokens": 120,
+              "costUsd": 0.42
+            },
             "user": "worker"
           }
         ]
@@ -237,25 +266,120 @@
         "transportRole": "agent",
         "agentRole": "worker",
         "persona": "worker",
-        "finishedAt": "2026-08-07T12:00:03.000Z"
+        "finishedAt": "2026-08-07T12:00:05.000Z"
+      }
+    },
+    {
+      "conversation": {
+        "canContinue": false,
+        "harnesses": [
+          "oneagentgraph"
+        ],
+        "id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16",
+        "name": "review",
+        "project": "run-20260807-a1b2c3",
+        "startedAt": "2026-08-07T12:00:22.000Z",
+        "state": "turn-completed",
+        "turns": [
+          {
+            "assistant": "the contract reads",
+            "durationMs": null,
+            "failureKind": null,
+            "harness": "oneagentgraph",
+            "id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16.0",
+            "model": "a-model",
+            "reasoning": null,
+            "status": "agent-turn",
+            "timestamp": "2026-08-07T12:00:22.000Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {},
+            "user": "judge"
+          },
+          {
+            "assistant": null,
+            "durationMs": 3000,
+            "failureKind": null,
+            "harness": "oneagentgraph",
+            "id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16.1",
+            "model": null,
+            "reasoning": null,
+            "status": "turn-completed",
+            "timestamp": "2026-08-07T12:00:25.000Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 400,
+              "outputTokens": 90,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": 0.11
+            },
+            "user": "judge"
+          }
+        ]
+      },
+      "attribution": {
+        "runId": "run-20260807-a1b2c3",
+        "round": 1,
+        "nodeId": "review",
+        "launchId": "run-20260807-a1b2c3",
+        "launcher": "claude-code",
+        "transportRole": "judge",
+        "agentRole": "judge",
+        "persona": "judge",
+        "finishedAt": "2026-08-07T12:00:25.000Z"
       }
     }
   ],
   "node_details": {
     "contract-interface": {
       "verification": {
+        "required_checks": [
+          "gate"
+        ],
+        "checks": [
+          {
+            "name": "gate",
+            "state": "success",
+            "required": true,
+            "from_state": "queued",
+            "status": "completed",
+            "artifact_id": "artifact-gate-check"
+          },
+          {
+            "name": "published-smoke",
+            "state": "failure",
+            "required": false,
+            "from_state": "in_progress",
+            "status": "completed",
+            "artifact_id": "artifact-published-smoke"
+          }
+        ],
         "records": [
           {
             "ok": true,
-            "output_tail": "",
+            "output_tail": "the gate ran and passed",
             "artifact_id": "artifact-5c8f0a1b"
+          },
+          {
+            "ok": false,
+            "output_tail": "",
+            "artifact_id": "artifact-published-smoke"
+          },
+          {
+            "ok": true,
+            "output_tail": "",
+            "artifact_id": "artifact-gate-check"
           }
         ]
       },
       "publication": {
         "branch": "feature/contract-interface",
-        "merged": false,
-        "pr_url": "https://example.invalid/changes/1"
+        "merged": true,
+        "pr_url": "https://example.invalid/changes/1",
+        "commit": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908",
+        "base_branch": "main"
       }
     }
   },

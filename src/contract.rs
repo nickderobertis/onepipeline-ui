@@ -17,18 +17,33 @@ pub const API_VERSION: u32 = 2;
 ///
 /// Schema-version discipline: a payload shape change bumps this, and the
 /// envelope carries it on every response so a client can refuse a version it
-/// does not understand rather than mis-read it. Schema 10 is the version that
-/// carries `dispatch_id` (see [`DispatchId`]).
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 10;
+/// does not understand rather than mis-read it. Schema 10 was the version that
+/// began carrying `dispatch_id` (see [`DispatchId`]).
+///
+/// **Schema 11 made every unmeasured timing absent.** Under 10 each of the eight
+/// `*_seconds`, the four `*_model_ms`, `idle_orchestration_ms`,
+/// `unattributed_ms`, `wall_ms` and every fraction was a required number, so a
+/// lane nothing measured was served `0` and read as a measurement — a run whose
+/// judge chain never reported looked like one whose judge cost nothing. Under 11
+/// each of them is `null` when no record measured it, which is a breaking change
+/// in the only direction that matters: a client that read a number now finds a
+/// null, and one that reads 11 knows the difference between free and unknown.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 11;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
 /// It moves independently of [`TELEMETRY_SCHEMA_VERSION`] because it says which
 /// *meaning* of the span list this is: version 1 served the role pair only on a
 /// `dispatch` span, so a client could read "carries roles" as "is a dispatch".
-/// Version 2 serves it on a `scope=run` rollup too, naming the category the
-/// rollup summarizes, and that inference no longer holds.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 2;
+/// Version 2 served it on a `scope=run` rollup too, naming the category the
+/// rollup summarizes, and that inference no longer held.
+///
+/// **Version 3 serves a rollup that is not a dispatch at all.** A `rollup` span
+/// may now carry no roles and stand for the waits a node's publication spent
+/// blocked on a lock, named by the kind it summarizes — so under 2 a client
+/// could read every rollup as a category of dispatches, and under 3 it must read
+/// the label.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 3;
 
 /// The largest run-list page any request can ask for.
 ///
@@ -140,6 +155,11 @@ pub enum SseEvent {
     /// One watched run's transcripts moved.
     #[serde(rename = "conversation.changed")]
     ConversationChanged,
+    /// A watched run reported from *inside* a turn: `oneagentgraph` publishes a
+    /// bounded tool summary as the turn runs rather than when it is done, so
+    /// there is something in flight to say.
+    #[serde(rename = "activity.changed")]
+    ActivityChanged,
     /// A run left the runs root; the client stops polling it.
     #[serde(rename = "run.removed")]
     RunRemoved,
@@ -153,6 +173,7 @@ impl SseEvent {
             Self::Snapshot => "snapshot",
             Self::RunChanged => "run.changed",
             Self::ConversationChanged => "conversation.changed",
+            Self::ActivityChanged => "activity.changed",
             Self::RunRemoved => "run.removed",
         }
     }

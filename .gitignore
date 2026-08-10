@@ -1,4 +1,6 @@
 /target
+# The sibling CLI `just _ensure-sibling` provisions, pinned by the lock.
+/.tools
 /.dev
 # The Nx orchestrator's own install and computation cache. `scripts/nx.sh`
 # re-creates node_modules from the committed lockfile whenever it is missing.

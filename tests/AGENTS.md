@@ -16,6 +16,14 @@ writes — a launch record, a merged `events.jsonl`, `round-NN/plan.json`,
 `round-NN/result.json`. They are deliberately not a stub of the SDK: an SDK build
 that changed those files fails here rather than in production.
 
+One thing those journeys need that the tree does not carry: the `onepipeline`
+build whose telemetry document this server serves. `just bootstrap` provisions
+the version the lock pins into `.tools/`, and every tier is pointed at it by
+`ONEPIPELINE_UI_ONEPIPELINE_BIN` rather than at whatever is on PATH — a stray
+build speaks a different document version and is refused, which would leave every
+run served with no clock at all. `every_route_serves_the_payload_its_golden_pins`
+fails with that instruction rather than quietly pinning goldens full of nulls.
+
 `tests/support/http.rs` is hand-rolled for the same reason. A client library
 would decide what a non-2xx means and how much of a stream to buffer, and both
 are what the journeys assert.

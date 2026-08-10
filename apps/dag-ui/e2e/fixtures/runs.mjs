@@ -42,6 +42,14 @@ export const PAGE_RUNS = 44;
 
 /** The change request the live run's first node published. */
 export const FOUNDATION_PR = "https://example.invalid/changes/12";
+/** The commit it merged as. No url beside it: the host owns that and records none. */
+export const FOUNDATION_COMMIT = "5f3c8a1204e7b96d3fa8c05e17d2b649a08c7e31";
+/** The change request the node behind the host's checks left open. */
+export const REMOTE_OPEN_PR = "https://example.invalid/changes/13";
+/** The identity every publication of this fixture queues on. */
+const IDENTITY = "github.com/example/repo";
+/** The command `onevcs` records for the gate that is git's own hook. */
+const PRE_PUSH_COMMAND = "the repository's pre-push hook";
 
 /** The launching sessions behind the runs, never served raw. */
 const CODEX_SESSION = "codex-top-session";
@@ -52,6 +60,8 @@ export const WORKER_SESSION = "engineer-dashboard";
 /** The session the run's first node's dispatch ran under. */
 export const FOUNDATION_SESSION = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
 export const JUDGE_SESSION = "you-are-a-strict-careful-evaluator";
+/** The lint member's session: the worker's own role under another transport. */
+export const LINT_SESSION = "llmlint-dashboard";
 export const CHECK_IN_SESSION = "5d2e4f18-9c3a-4b66-82bb-7e4f3a1c8d25";
 /** The run's own driving session, recorded at no node. */
 export const ORCHESTRATOR_SESSION = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
@@ -61,6 +71,9 @@ export const ROUND_CHECK_IN_SESSION = "9f2a6b31-7c48-4d09-a5ee-3b1d8e6f4a52";
 /** The verification log one node left behind, and one that was swept. */
 export const GATE_ARTIFACT = "artifact-foundation-gate";
 export const MISSING_ARTIFACT = "artifact-swept-gate";
+/** The pre-push hook's own log, and the log the host's failing check stored. */
+export const HOOK_ARTIFACT = "artifact-remote-open-hook";
+export const CHECK_ARTIFACT = "artifact-published-smoke";
 
 /** The clock every recorded run but the live one is stamped from. */
 const HISTORIC = Date.parse("2026-07-26T09:00:00.000Z");
@@ -316,16 +329,16 @@ function writeLiveRun(root) {
     node: "foundation",
     persona: "worker",
   });
-  // The branch this node worked on, opened and published by `onevcs` and relayed
-  // into the merged store under that library's own vocabulary. The two events are
-  // the only recorded ends of a publication, so they are what the server draws it
-  // between.
+  // The branch this node worked on, opened and landed by `onevcs` and relayed into
+  // the merged store under that library's own vocabulary — the kinds it really
+  // emits, which are the recorded ends the server draws the publication between.
   journal.advance(1).emit(
     "vcs",
     "session-opened",
     { ...round, node: "foundation" },
     {
       token: "a-vcs-session-token",
+      identity: IDENTITY,
       branch: "feature/foundation",
       base: "main",
       worktree: "/a/recorded/worktree",
@@ -339,16 +352,39 @@ function writeLiveRun(root) {
     "worker",
     "Landed the route table",
   );
-  journal.advance(6).emit(
+  journal
+    .advance(4)
+    .emit(
+      "vcs",
+      "push",
+      { ...round, node: "foundation" },
+      { branch: "feature/foundation", remote: "origin", accepted: true },
+    );
+  journal.advance(1).emit(
     "vcs",
-    "published",
+    "change-opened",
     { ...round, node: "foundation" },
     {
-      branch: "feature/foundation",
       url: FOUNDATION_PR,
+      host: "github",
       id: "12",
-      outcome: "merged",
+      base: "main",
+      author: "a-recording-host",
     },
+  );
+  journal
+    .advance(1)
+    .emit(
+      "vcs",
+      "change-merged",
+      { ...round, node: "foundation" },
+      { url: FOUNDATION_PR, sha: FOUNDATION_COMMIT },
+    );
+  journal.emit(
+    "vcs",
+    "merge-completed",
+    { ...round, node: "foundation" },
+    { identity: IDENTITY, sha: FOUNDATION_COMMIT, base: "main" },
   );
   journal.advance(14).emit(
     "pipeline",
@@ -364,27 +400,137 @@ function writeLiveRun(root) {
     [{ id: GATE_ARTIFACT, kind: "log", bytes: 4096 }],
   );
 
-  for (const [node, outcome, url] of [
-    ["local-direct", "merged", undefined],
-    ["remote-open", "published", "https://example.invalid/changes/13"],
-  ]) {
-    journal.advance(1).emit("pipeline", "node-dispatched", {
-      ...round,
-      node,
-      persona: "worker",
-    });
-    journal.advance(3).emit(
+  // Merged straight from a local workflow: no change was ever opened, so nothing
+  // observed a check on it and the panel has to say so.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...round,
+    node: "local-direct",
+    persona: "worker",
+  });
+  journal
+    .advance(3)
+    .emit(
       "pipeline",
       "node-settled",
-      { ...round, node },
-      {
-        status: "done",
-        outcome,
-        branch: `feature/${node}`,
-        ...(url === undefined ? {} : { change_url: url }),
-      },
+      { ...round, node: "local-direct" },
+      { status: "done", outcome: "merged", branch: "feature/local-direct" },
     );
+
+  // The publication the operator's own bar is read from: the repository's pre-push
+  // hook ran, the host is running the checks branch protection requires, and the
+  // change is still open behind them. Every record here is one `onevcs` emits.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...round,
+    node: "remote-open",
+    persona: "worker",
+  });
+  journal.advance(1).emit(
+    "vcs",
+    "session-opened",
+    { ...round, node: "remote-open" },
+    {
+      token: "a-second-vcs-session-token",
+      identity: IDENTITY,
+      branch: "feature/remote-open",
+      base: "main",
+      worktree: "/a/recorded/worktree",
+    },
+  );
+  journal.advance(1).emit(
+    "vcs",
+    "gate-started",
+    { ...round, node: "remote-open" },
+    {
+      command: PRE_PUSH_COMMAND,
+      comparison_remote: "origin",
+      comparison_base: "main",
+    },
+  );
+  journal.advance(2).emit(
+    "vcs",
+    "gate-verdict",
+    { ...round, node: "remote-open" },
+    {
+      verdict: "pass",
+      command: PRE_PUSH_COMMAND,
+      output: "the pre-push hook accepted the branch",
+      preserved_log: "/a/recorded/clone/pre-push.log",
+    },
+    [{ id: HOOK_ARTIFACT, kind: "log", bytes: 41 }],
+  );
+  journal
+    .advance(1)
+    .emit(
+      "vcs",
+      "push",
+      { ...round, node: "remote-open" },
+      { branch: "feature/remote-open", remote: "origin", accepted: true },
+    );
+  journal.advance(1).emit(
+    "vcs",
+    "change-opened",
+    { ...round, node: "remote-open" },
+    {
+      url: REMOTE_OPEN_PR,
+      host: "github",
+      id: "13",
+      base: "main",
+      author: "a-recording-host",
+    },
+  );
+  // Every transition of every check, which is what waiting on a host looks like:
+  // one required check green, one still running, and an advisory one red with the
+  // log that says why.
+  for (const [name, required, from, status, conclusion, log] of [
+    ["gate", true, null, "queued", null, undefined],
+    ["gate", true, "queued", "completed", "success", undefined],
+    [
+      "published-smoke",
+      false,
+      "in_progress",
+      "completed",
+      "failure",
+      CHECK_ARTIFACT,
+    ],
+    ["e2e", true, "queued", "in_progress", null, undefined],
+  ]) {
+    journal
+      .advance(1)
+      .emit(
+        "vcs",
+        "change-check",
+        { ...round, node: "remote-open" },
+        { name, required, status, from_status: from, conclusion },
+        log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
+      );
   }
+  // The contention the merge queue met, timed by `onevcs` itself: thousands of
+  // these is the normal shape, which is why the reading is a summary.
+  for (const [waited, position] of [
+    [1.5, 1],
+    [3.25, 2],
+    [7.5, 3],
+  ]) {
+    journal
+      .advance(2)
+      .emit(
+        "vcs",
+        "lock-wait",
+        { ...round, node: "remote-open" },
+        { identity: IDENTITY, elapsed: waited, queue_position: position },
+      );
+  }
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...round, node: "remote-open" },
+    {
+      status: "done",
+      outcome: "published",
+      branch: "feature/remote-open",
+      change_url: REMOTE_OPEN_PR,
+    },
+  );
 
   // A verification whose log the run recorded and something later swept: the id is
   // in the journal, and reading it finds nothing.
@@ -414,22 +560,43 @@ function writeLiveRun(root) {
   // Several turns each, because this is the node whose transcript the reading
   // journeys scroll: a rail short enough to fit its own region has no reading
   // position to move.
-  for (const [session, persona, message] of [
-    [WORKER_SESSION, "worker", "Implementing the dashboard now"],
-    [JUDGE_SESSION, "judge", "The transcript is accessible"],
-    [WORKER_SESSION, "worker", "Wiring the run list to the read API"],
-    [CHECK_IN_SESSION, "check-in", "Progress update sent"],
-    [WORKER_SESSION, "worker", "Rendering the node view"],
-    [JUDGE_SESSION, "judge", "The graph and the rail agree"],
-    [CHECK_IN_SESSION, "check-in", "Second progress update sent"],
+  // One session per party the dispatch ran under. The lint member is the case the
+  // pair exists for: the same semantic role as the work it is reading, told apart
+  // from it only by the transport `oneagentgraph` ran it as.
+  for (const [session, member, persona, message] of [
+    [WORKER_SESSION, "worker", "worker", "Implementing the dashboard now"],
+    [JUDGE_SESSION, "judge", "judge", "The transcript is accessible"],
+    [WORKER_SESSION, "worker", "worker", "Wiring the run list to the read API"],
+    [CHECK_IN_SESSION, "check-in", "check-in", "Progress update sent"],
+    [LINT_SESSION, "llmlint", "worker", "The diff reads as written"],
+    [WORKER_SESSION, "worker", "worker", "Rendering the node view"],
+    [JUDGE_SESSION, "judge", "judge", "The graph and the rail agree"],
+    [CHECK_IN_SESSION, "check-in", "check-in", "Second progress update sent"],
   ]) {
     journal.emit(
       "agentgraph",
       "agent-turn",
-      { ...round, node: "dashboard", persona, session },
+      { ...round, node: "dashboard", member, persona, session },
       { message, model: "a-model" },
     );
-    journal.advance(10);
+    // What the turn consumed, which is the only measurement of model time and
+    // cost anything in the stack records.
+    journal.advance(2).emit(
+      "agentgraph",
+      "turn-completed",
+      { ...round, node: "dashboard", member, persona, session },
+      {
+        usage: {
+          tokens_in: 1200,
+          tokens_out: 340,
+          cache_read: 800,
+          cache_write: 120,
+          cost: 0.42,
+          duration: 1.5,
+        },
+      },
+    );
+    journal.advance(8);
   }
 
   journal.emit("pipeline", "node-dispatched", {
@@ -489,6 +656,14 @@ function writeLiveRun(root) {
   writeFileSync(
     join(dir, "artifacts", GATE_ARTIFACT),
     `oldest verification output\n${"full verification output\n".repeat(220)}pre-push verification passed\n`,
+  );
+  writeFileSync(
+    join(dir, "artifacts", HOOK_ARTIFACT),
+    "the pre-push hook accepted the branch\n",
+  );
+  writeFileSync(
+    join(dir, "artifacts", CHECK_ARTIFACT),
+    "published-smoke could not reach the published wheel\n",
   );
   return dir;
 }
@@ -913,13 +1088,21 @@ export function facts() {
     foundation_pr: FOUNDATION_PR,
     sessions: {
       worker: WORKER_SESSION,
+      lint: LINT_SESSION,
       foundation: FOUNDATION_SESSION,
       judge: JUDGE_SESSION,
       check_in: CHECK_IN_SESSION,
       round_check_in: ROUND_CHECK_IN_SESSION,
       orchestrator: ORCHESTRATOR_SESSION,
     },
-    artifacts: { gate: GATE_ARTIFACT, missing: MISSING_ARTIFACT },
+    remote_open_pr: REMOTE_OPEN_PR,
+    foundation_commit: FOUNDATION_COMMIT,
+    artifacts: {
+      gate: GATE_ARTIFACT,
+      missing: MISSING_ARTIFACT,
+      hook: HOOK_ARTIFACT,
+      check: CHECK_ARTIFACT,
+    },
   };
 }
 
@@ -940,14 +1123,59 @@ export function settleDashboard(root) {
   );
 }
 
+/**
+ * The bound `oneagentgraph` writes a tool summary under, in characters.
+ *
+ * A fixture that wrote a longer one would be recording something that library
+ * cannot produce, which is the one thing these runs must never do.
+ */
+const ACTIVITY_DETAIL_CHARS = 160;
+
+/**
+ * Record one tool summary from inside the turn the dashboard is taking.
+ *
+ * `oneagentgraph` publishes these while the member works rather than when it is
+ * done, which is what makes a watcher's live-activity reading possible at all.
+ *
+ * Both halves reach a journal a server is reading, so both are checked against
+ * what that library would have written: a tool has a name, a summary has text,
+ * and the text is within the bound the producer bounds it to.
+ */
+export function recordActivity(root, name, detail) {
+  if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(name)) {
+    throw new Error(`'${name}' is not a tool name`);
+  }
+  if (detail.length === 0 || detail.length > ACTIVITY_DETAIL_CHARS) {
+    throw new Error(
+      `a tool summary is 1 to ${ACTIVITY_DETAIL_CHARS} characters, not ${detail.length}`,
+    );
+  }
+  appendEvent(
+    join(root, LIVE_RUN),
+    "agentgraph",
+    "turn-activity",
+    {
+      run_id: LIVE_RUN,
+      round: 1,
+      node: "dashboard",
+      member: "worker",
+      persona: "worker",
+      session: WORKER_SESSION,
+    },
+    { kind: "tool_use", name, detail, truncated: false },
+  );
+}
+
 /** Record turns onto the live dashboard's worker session until it has `turns`. */
 export function growTranscript(root, turns) {
   const dir = join(root, LIVE_RUN);
   const recorded = readFileSync(join(dir, "events.jsonl"), "utf8")
     .split("\n")
     .filter(Boolean)
+    .map((line) => JSON.parse(line))
     .filter(
-      (line) => JSON.parse(line).labels?.session === WORKER_SESSION,
+      (event) =>
+        event.labels?.session === WORKER_SESSION && event.kind === "agent-turn",
     ).length;
   for (let index = recorded; index < turns; index += 1) {
     appendEvent(
@@ -975,7 +1203,7 @@ export function growTranscript(root, turns) {
  */
 export function removeRun(root, runId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) {
-    throw new Error(`serve-fixture: '${runId}' is not a usable run id`);
+    throw new Error(`'${runId}' is not a usable run id`);
   }
   rmSync(join(root, runId), { recursive: true, force: true });
 }

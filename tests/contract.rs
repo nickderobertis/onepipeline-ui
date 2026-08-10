@@ -1,6 +1,11 @@
 //! The contract tests: `docs/contract.md` is the source of truth, and these
 //! hold the crate's types to it.
 //!
+//! Beside them are the contracts this crate keeps with the libraries it reads:
+//! the vocabulary `oneagentgraph` declares, and the telemetry document
+//! `onepipeline` writes — held here as a parser boundary, which is answerable
+//! without starting the process that produced the bytes.
+//!
 //! Each fixture under `tests/fixtures/` is one endpoint's response body. What
 //! they pin is the **envelope** — the schema-version preamble and its
 //! byte-for-byte serialization. Their payload bodies carry only the payload
@@ -18,7 +23,7 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
     EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
-    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -132,6 +137,25 @@ fn every_route_serves_the_payload_its_golden_pins() {
         .expect("a readable runs root");
     let store = RunStore::new(&runs_root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+
+    // The timings in these goldens are `onepipeline`'s own document, read through
+    // its CLI, and every one of them is `null` when that CLI cannot be asked. So
+    // the sibling being missing would quietly rewrite the goldens to say the run
+    // had no clock — checked here rather than discovered in a diff.
+    let served = store
+        .run(
+            &run,
+            &RunQuery {
+                include_conversations: false,
+            },
+        )
+        .expect("the fixture run serves");
+    assert!(
+        !served.payload["run"]["timing"]["wall_ms"].is_null(),
+        "the sibling that aggregates a run's telemetry did not answer, so every timing here \
+         would be pinned absent — run `just bootstrap` to provision the `onepipeline` build \
+         the lock pins, or name one with ONEPIPELINE_UI_ONEPIPELINE_BIN"
+    );
 
     let served: [(&str, Value); 6] = [
         (
@@ -254,12 +278,41 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 }
 
 #[test]
-fn the_schema_version_the_envelope_carries_is_ten() {
+fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 10);
-    assert!(contract_text().contains("schema 10"));
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 11);
+    assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
+}
+
+/// The two versions move independently, and the browser client carries a copy of
+/// each across the language boundary.
+///
+/// TypeScript cannot read a Rust constant, so this is the gate between them:
+/// bump either here and the client's copy fails until it follows — which is what
+/// stops a server serving one meaning while the client renders another.
+#[test]
+fn the_browser_clients_copy_of_each_schema_version_matches_this_one() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copies has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    for declaration in [
+        format!("export const TELEMETRY_SCHEMA_VERSION = {TELEMETRY_SCHEMA_VERSION};"),
+        format!("export const TIMELINE_SCHEMA_VERSION = {TIMELINE_SCHEMA_VERSION};"),
+    ] {
+        assert!(
+            source.contains(&declaration),
+            "{} does not declare `{declaration}`; the client's schema versions have drifted \
+             from this crate's",
+            path.display()
+        );
+    }
 }
 
 #[test]
@@ -302,7 +355,7 @@ fn the_run_list_carries_session_attribution() {
 }
 
 #[test]
-fn schema_ten_carries_a_dispatch_id() {
+fn a_dispatch_span_carries_a_dispatch_id_this_crate_can_name() {
     let raw = read_fixture("run-timeline.json");
     let envelope: Envelope<Value> = serde_json::from_str(&raw).expect("parse run-timeline.json");
     let spans = envelope.payload["spans"]
@@ -720,4 +773,376 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
         api.events(&EventsQuery::default()).expect("stub").count(),
         0
     );
+}
+
+/// The `oneagentgraph` vocabulary this crate reads, against that library's own
+/// declaration of it.
+///
+/// The names in `payload::graph` are a copy — the stack has no shared crate, and
+/// each producer owns its own envelope types — so this is the gate that keeps the
+/// copy honest: a kind or a usage field renamed there fails here rather than in
+/// a payload that silently stops carrying what a turn consumed.
+///
+/// `onevcs` has no equivalent gate to offer. Its event module is private in every
+/// published version, so the only declaration of its vocabulary a consumer can
+/// reach is the wire itself; `tests/support/fixture_run.rs` writes those records
+/// as that library emits them, and the goldens are what pins the reading.
+#[test]
+fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
+    use onepipeline_ui::payload::graph;
+
+    let wire = |kind: oneagentgraph::event::EventKind| {
+        serde_json::to_value(kind)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .expect("a kind serializes as its wire string")
+    };
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnActivity),
+        graph::TURN_ACTIVITY
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnCompleted),
+        graph::TURN_COMPLETED
+    );
+
+    // The payload a `turn-completed` carries, as that library writes it: every
+    // key this crate reads is one of its fields, and none of its fields is one
+    // this crate has no reading for.
+    let usage = serde_json::to_value(oneagentgraph::event::Usage {
+        tokens_in: 1,
+        tokens_out: 2,
+        cache_read: 3,
+        cache_write: 4,
+        cost: 0.5,
+        duration: 1.5,
+    })
+    .expect("the usage record serializes");
+    let read = [
+        graph::TOKENS_IN,
+        graph::TOKENS_OUT,
+        graph::CACHE_READ,
+        graph::CACHE_WRITE,
+        graph::COST,
+        graph::DURATION,
+    ];
+    let declared: Vec<&str> = usage
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(declared, read.to_vec());
+    assert_eq!(
+        serde_json::to_value(oneagentgraph::event::TurnCompleted {
+            usage: oneagentgraph::event::Usage {
+                tokens_in: 1,
+                tokens_out: 2,
+                cache_read: 3,
+                cache_write: 4,
+                cost: 0.5,
+                duration: 1.5,
+            },
+        })
+        .expect("the payload serializes")
+        .as_object()
+        .and_then(|payload| payload.keys().next().cloned()),
+        Some(graph::USAGE.to_owned()),
+        "the usage sits where this crate looks for it"
+    );
+}
+
+/// The browser fixture writes tool summaries a real member could have written,
+/// which means it carries a copy of the bound `oneagentgraph` bounds one to.
+///
+/// TypeScript cannot read a Rust constant and neither can a `.mjs` fixture, so
+/// this is the gate that keeps the copy from drifting: raise the bound there and
+/// the fixture's copy fails here until it follows.
+#[test]
+fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui/e2e/fixtures/runs.mjs");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the fixture that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let declaration = format!(
+        "const ACTIVITY_DETAIL_CHARS = {};",
+        oneagentgraph::event::MAX_ACTIVITY_DETAIL_CHARS
+    );
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the fixture's bound has drifted from \
+         oneagentgraph's own MAX_ACTIVITY_DETAIL_CHARS",
+        path.display()
+    );
+}
+
+/// A telemetry document as `onepipeline` writes one, for the tests below to
+/// break one property of at a time.
+fn telemetry_document() -> Value {
+    serde_json::json!({
+        "schema_version": 2,
+        "run_id": fixture_run::RUN_ID,
+        "wall_ms": 31_000,
+        "buckets": [
+            { "name": "agent", "ms": 13_000 },
+            { "name": "judge" },
+            { "name": "llmlint" },
+            { "name": "gate", "ms": 2_000 },
+            { "name": "publication_wait", "ms": 9_000 },
+            { "name": "lock_wait", "ms": 1_100 },
+            { "name": "setup", "ms": 1_900 },
+            { "name": "scheduling", "ms": 4_000 }
+        ],
+        "usage": {
+            "total": { "input": 1_600, "output": 430, "cost_usd": 0.53 }
+        },
+        "dispatches": 2,
+        "settled_done": 2,
+        "no_diff": 0,
+        "surfaces_queued": 0,
+        "surfaces_read": 0
+    })
+}
+
+/// The document above, with one thing about it changed.
+fn document_with(change: impl FnOnce(&mut Value)) -> Vec<u8> {
+    let mut document = telemetry_document();
+    change(&mut document);
+    document.to_string().into_bytes()
+}
+
+/// The run the document above is about, which is the run these tests ask about.
+fn telemetry_run() -> RunId {
+    RunId::try_from(fixture_run::RUN_ID).expect("valid")
+}
+
+#[test]
+fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
+    let document =
+        onepipeline_ui::telemetry::read_document(&telemetry_run(), &document_with(|_| {}))
+            .expect("the document a run really produces");
+    assert_eq!(document.wall_ms, 31_000);
+    assert_eq!(
+        document.bucket(onepipeline_ui::telemetry::BucketName::Agent),
+        Some(13_000)
+    );
+    // An unmeasured bucket is present and absent at once: named, so the set is
+    // whole, and carrying no span, so nothing reads it as a measured zero.
+    assert_eq!(
+        document.bucket(onepipeline_ui::telemetry::BucketName::Judge),
+        None
+    );
+    assert_eq!(document.measured_ms(), 31_000);
+    assert_eq!(
+        document
+            .usage_of(onepipeline_ui::telemetry::Party::Total)
+            .cost_usd
+            .map(onepipeline_ui::telemetry::Cost::get),
+        Some(0.53)
+    );
+    // A party nothing reported for reads as unknown, from its absence.
+    assert!(document
+        .usage_of(onepipeline_ui::telemetry::Party::Llmlint)
+        .is_empty());
+}
+
+/// Everything a document can be that this build must not project.
+///
+/// The producer states each of these about what it writes, and every one of them
+/// is a thing a reader would otherwise serve as fact: a bucket set that does not
+/// add up, time that was never on the clock, a party reported as having spent
+/// nothing when nobody measured it, a whole other run's clock. A malformed
+/// document has to become an absence of timing with a reason, never a payload.
+#[test]
+fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
+    let refusals: [(&str, Vec<u8>, &str); 11] = [
+        (
+            "not a document at all",
+            b"onepipeline: something went wrong".to_vec(),
+            "expected value",
+        ),
+        (
+            "a document about another run",
+            document_with(|document| {
+                document["run_id"] = serde_json::json!(fixture_run::OTHER_RUN_ID);
+            }),
+            "the document is run `run-20260807-d4e5f6`'s",
+        ),
+        (
+            "a document about no run at all",
+            document_with(|document| {
+                document
+                    .as_object_mut()
+                    .expect("a mapping")
+                    .remove("run_id");
+            }),
+            "missing field `run_id`",
+        ),
+        (
+            "a version this build does not read",
+            document_with(|document| document["schema_version"] = serde_json::json!(1)),
+            "schema_version 1, and this build reads 2",
+        ),
+        (
+            "no version at all",
+            document_with(|document| {
+                document
+                    .as_object_mut()
+                    .expect("a mapping")
+                    .remove("schema_version");
+            }),
+            "schema_version absent",
+        ),
+        (
+            "a bucket named twice",
+            document_with(|document| {
+                document["buckets"][1] = serde_json::json!({ "name": "agent", "ms": 0 });
+            }),
+            "the `agent` bucket appears 2 times",
+        ),
+        (
+            "a bucket left out",
+            document_with(|document| {
+                document["buckets"]
+                    .as_array_mut()
+                    .expect("the buckets")
+                    .retain(|bucket| bucket["name"] != serde_json::json!("setup"));
+            }),
+            "the `setup` bucket appears 0 times",
+        ),
+        (
+            "a bucket this build cannot add up",
+            document_with(|document| {
+                document["buckets"][2] = serde_json::json!({ "name": "dispatching", "ms": 1 });
+            }),
+            "unknown variant `dispatching`",
+        ),
+        (
+            "more time measured than the clock ran",
+            document_with(|document| document["wall_ms"] = serde_json::json!(1_000)),
+            "the buckets measure 31000ms of a 1000ms wall clock",
+        ),
+        (
+            "a party present and reporting nothing",
+            document_with(|document| document["usage"]["judge"] = serde_json::json!({})),
+            "the `judge` party is present and reports nothing",
+        ),
+        (
+            "a cost that is not an amount of money",
+            document_with(|document| {
+                document["usage"]["total"]["cost_usd"] = serde_json::json!(-1.0);
+            }),
+            "the `total` party cost -1.0",
+        ),
+    ];
+    for (what, answered, said) in refusals {
+        let refused = onepipeline_ui::telemetry::read_document(&telemetry_run(), &answered)
+            .expect_err(&format!("{what} is not a telemetry document"));
+        assert!(
+            matches!(
+                refused,
+                onepipeline_ui::telemetry::Unavailable::Unreadable(_)
+            ),
+            "{what}: {refused:?}"
+        );
+        assert!(
+            refused.to_string().contains(said),
+            "{what}: the refusal does not name it — {refused}"
+        );
+    }
+}
+
+/// A number no clock could hold is refused whichever layer notices it.
+///
+/// `1e999` is valid JSON and not a `f64`, so the reader may refuse it while
+/// decoding rather than while checking; both are refusals, and the one thing
+/// that must not happen is a cost of infinity reaching a payload.
+#[test]
+fn a_cost_no_number_can_hold_never_reaches_a_payload() {
+    let refused = onepipeline_ui::telemetry::read_document(
+        &telemetry_run(),
+        &document_with(|document| {
+            document["usage"]["total"]["cost_usd"] = serde_json::json!(1e308);
+            document["usage"]["total"]["input"] = serde_json::json!(1);
+        }),
+    )
+    .map(|document| {
+        document
+            .usage_of(onepipeline_ui::telemetry::Party::Total)
+            .cost_usd
+            .map(onepipeline_ui::telemetry::Cost::get)
+    });
+    match refused {
+        Ok(cost) => assert!(
+            cost.is_some_and(f64::is_finite),
+            "a cost that reached a payload is a number: {cost:?}"
+        ),
+        Err(unavailable) => assert!(matches!(
+            unavailable,
+            onepipeline_ui::telemetry::Unavailable::Unreadable(_)
+        )),
+    }
+    // Written as text rather than through `serde_json::json!`, because `1e999` is
+    // not a number any `Value` holds either — and the rest of the document is the
+    // good one, so the cost is the only thing there is to refuse it for.
+    let overflowed = String::from_utf8(document_with(|_| {}))
+        .expect("utf-8")
+        .replace("0.53", "1e999")
+        .into_bytes();
+    assert!(
+        onepipeline_ui::telemetry::read_document(&telemetry_run(), &overflowed).is_err(),
+        "a cost past every number is not a cost"
+    );
+}
+
+/// The one way a cost is made, held to what a cost can be.
+///
+/// The document boundary refuses a negative through this very type, but JSON has
+/// no NaN and no infinity to write one of, so those are only reachable where the
+/// type is — from a reader that computed a number and called it money. `Cost` is
+/// what stands between any of them and a payload, so it is driven where it
+/// stands rather than only through the one caller that exists today.
+#[test]
+fn a_cost_is_an_amount_of_money_or_it_is_never_made() {
+    use onepipeline_ui::telemetry::Cost;
+
+    assert_eq!(Cost::try_from(0.53).map(Cost::get), Ok(0.53));
+    // Free is an amount of money; a debt, a NaN and an infinity are not.
+    assert_eq!(Cost::try_from(0.0).map(Cost::get), Ok(0.0));
+    for refused in [-0.01_f64, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let rejected =
+            Cost::try_from(refused).expect_err(&format!("{refused:?} is not an amount of money"));
+        assert!(
+            rejected.to_string().contains("not an amount of money"),
+            "{refused:?}: the refusal does not say so — {rejected}"
+        );
+    }
+}
+
+/// The words this crate names a bucket and a party by, against the words the
+/// document spells them with.
+///
+/// They are two spellings of one vocabulary — one for a refusal to read, one on
+/// the wire — and a refusal that names a bucket the document does not have is a
+/// reader sending an operator to look for the wrong thing. Read back rather than
+/// written out, because reading is the only direction this crate has: the
+/// document is the producer's to write.
+#[test]
+fn every_bucket_and_party_is_named_as_the_document_spells_it() {
+    use onepipeline_ui::telemetry::{BucketName, Party};
+
+    for name in BucketName::ALL {
+        let read: BucketName = serde_json::from_value(serde_json::json!(name.as_str()))
+            .unwrap_or_else(|err| panic!("`{}` is not a bucket name: {err}", name.as_str()));
+        assert_eq!(read, name);
+    }
+    for party in [Party::Agent, Party::Judge, Party::Llmlint, Party::Total] {
+        let read: Party = serde_json::from_value(serde_json::json!(party.as_str()))
+            .unwrap_or_else(|err| panic!("`{}` is not a party: {err}", party.as_str()));
+        assert_eq!(read, party);
+    }
 }

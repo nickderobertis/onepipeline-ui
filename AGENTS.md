@@ -65,7 +65,10 @@ and because nothing else recovers *why* the tooling is what it is.
 ## Command surface
 
 `just --list` is the index; do not hand-roll equivalents. **`just gate` is the
-pre-push bar.** `just deps-check` is deliberately outside it: it needs a network
+pre-push bar.** `just bootstrap` also provisions the `onepipeline` CLI at the
+version the lock pins its library to, into `.tools/`: the read API asks it for
+each run's telemetry document, the two speak a versioned document, and a
+mismatched pair serves every run with no clock at all. `just deps-check` is deliberately outside it: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx

@@ -2,6 +2,7 @@ import {
   type NodeDetail,
   parseRunDetail,
   parseRunTimeline,
+  TELEMETRY_SCHEMA_VERSION,
 } from "@onepipeline-ui/dag-model";
 import {
   act,
@@ -1199,6 +1200,42 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(await screen.findByText("dashboard")).toBeInTheDocument();
   });
 
+  /** The same detail, with the clock nothing could measure served as absent. */
+  async function unmeasuredClock(answered: Response): Promise<Response> {
+    // A parsed body is `any` until something says what it is, and the one thing
+    // this needs to know is where the timing sits. Narrowed to that and nothing
+    // else, so a change to the rest of the detail does not have to be restated
+    // here — the contract's own parser is what holds the whole shape.
+    const detail = (await answered.json()) as {
+      run: { timing: Record<string, unknown> };
+    };
+    return Response.json({
+      ...detail,
+      run: {
+        ...detail.run,
+        timing: { ...detail.run.timing, wall_seconds: null, wall_ms: null },
+      },
+    });
+  }
+
+  test("says a run's clock is unmeasured rather than reporting no time at all", async () => {
+    window.history.replaceState(null, "", "/");
+    // Schema 11 serves a timing nothing measured as null, and a server that could
+    // not read the document that aggregates a run's clock serves every one of
+    // them that way. `0s` would be the one reading that is a lie.
+    const { client } = telemetryHarness((url) => {
+      const answered = defaultResponder(url);
+      if (!url.pathname.endsWith(`/runs/${runList.runs[0]?.run_id}`))
+        return answered;
+      return unmeasuredClock(answered);
+    });
+    render(<App client={client} />);
+    expect(await screen.findByText("Graph timeline")).toBeInTheDocument();
+    const wall = screen.getByText("Wall time").closest(".metric");
+    expect(wall).toHaveTextContent("not measured");
+    expect(wall).not.toHaveTextContent("0s");
+  });
+
   test("opens the graph line into one row per node beside the run's own", async () => {
     const { client } = telemetryHarness();
     render(<App client={client} />);
@@ -1455,11 +1492,12 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     await screen.findByText("dashboard");
 
     // A peer that ships a schema the app does not accept must be reported, not
-    // silently rendered from whatever survived. Kept one ahead of the accepted
-    // version, so this stays a rejection every time that version is bumped.
+    // silently rendered from whatever survived. Derived from the accepted
+    // version rather than written out, so this stays a rejection when that
+    // version is bumped instead of quietly becoming the accepted one.
     sources[0]?.emit(
       "snapshot",
-      { ...runList, telemetry_schema_version: 11 },
+      { ...runList, telemetry_schema_version: TELEMETRY_SCHEMA_VERSION + 1 },
       "5",
     );
     expect(await screen.findByRole("alert")).toBeInTheDocument();

@@ -33,11 +33,23 @@ impl Serving {
     pub fn start(build: impl FnOnce(&Path)) -> Self {
         let runs = tempfile::tempdir().expect("temp dir");
         build(runs.path());
-        Self::start_in(runs)
+        Self::start_in(runs, &[])
+    }
+
+    /// The same, with the server's environment changed.
+    ///
+    /// The one thing a journey needs to say about that environment is which
+    /// `onepipeline` the server asks for a run's telemetry — including that it
+    /// cannot have one, which is a state an operator really meets and a payload
+    /// with no clock in it is the answer to.
+    pub fn start_with_env(build: impl FnOnce(&Path), environment: &[(&str, &str)]) -> Self {
+        let runs = tempfile::tempdir().expect("temp dir");
+        build(runs.path());
+        Self::start_in(runs, environment)
     }
 
     /// Start a server over a runs root the caller already built.
-    pub fn start_in(runs: TempDir) -> Self {
+    pub fn start_in(runs: TempDir, environment: &[(&str, &str)]) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let mut child = Command::new(binary)
             .arg("serve")
@@ -47,6 +59,7 @@ impl Serving {
             // Fast enough that a journey asserting on a live append finishes in
             // about a second, and still a real poll of the real runs root.
             .args(["--poll-interval-ms", "50"])
+            .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
@@ -72,6 +85,12 @@ impl Serving {
     /// The run directory of `run` under this server's root.
     pub fn run_dir(&self, run: &str) -> std::path::PathBuf {
         self.runs.path().join(run)
+    }
+
+    /// The root it is serving, for a journey that asks the sibling about the same
+    /// runs this server is reading.
+    pub fn runs_root(&self) -> &Path {
+        self.runs.path()
     }
 
     /// Ask the server to stop the way a supervisor does, and return its status.

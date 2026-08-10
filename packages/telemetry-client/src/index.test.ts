@@ -1,10 +1,14 @@
+import {
+  TELEMETRY_SCHEMA_VERSION,
+  TIMELINE_SCHEMA_VERSION,
+} from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 
 import { TelemetryClient, TelemetryClientError } from "./index.js";
 
 const emptyList = {
   api_version: 2,
-  telemetry_schema_version: 10,
+  telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [],
 } as const;
@@ -113,7 +117,7 @@ describe("TelemetryClient fetch boundary", () => {
         if (url.includes("/timeline?")) {
           return Response.json({
             api_version: 2,
-            timeline_schema_version: 2,
+            timeline_schema_version: TIMELINE_SCHEMA_VERSION,
             observed_at: "2026-07-26T12:00:00Z",
             run_id: "run-1",
             spans: [
@@ -130,7 +134,7 @@ describe("TelemetryClient fetch boundary", () => {
         }
         return Response.json({
           api_version: 2,
-          telemetry_schema_version: 10,
+          telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
           observed_at: "2026-07-26T12:00:00Z",
           run: runTelemetry,
           rounds: [],
@@ -163,7 +167,7 @@ describe("TelemetryClient fetch boundary", () => {
       fetch: async () =>
         Response.json({
           api_version: 2,
-          timeline_schema_version: 2,
+          timeline_schema_version: TIMELINE_SCHEMA_VERSION,
           observed_at: "2026-07-26T12:00:00Z",
           run_id: "run-1",
           spans: [{ id: "x", kind: "guess", label: "x", events: [] }],
@@ -234,7 +238,10 @@ test("validates SSE snapshots before notifying subscribers", () => {
   );
   listeners.get("snapshot")?.(
     new MessageEvent("snapshot", {
-      data: JSON.stringify({ ...emptyList, telemetry_schema_version: 11 }),
+      data: JSON.stringify({
+        ...emptyList,
+        telemetry_schema_version: TELEMETRY_SCHEMA_VERSION + 1,
+      }),
     }),
   );
   expect(events).toHaveLength(1);

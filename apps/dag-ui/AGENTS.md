@@ -37,9 +37,8 @@ module both features need and neither owns belongs in `src/lib/` instead.
 
 ## What the backend cannot answer
 
-The client's model has fields no onepipeline journal records, so parts of this
-vocabulary are permanently empty here: observed checks, merge commits, turn
-bodies and tool calls, the lint transport, lock waits, mid-turn activity. A
-journey that would assert one of them was trimmed rather than fed an invented
-record, and the reason for each is recorded beside the crate that would have to
-serve it.
+Some of the client's model has no record behind it. A surface needing one of
+those fields is fed nothing rather than an invented record: it states the
+absence, and the journey asserts that statement. Trim a journey only against what
+the producing library actually emits, never against a belief about what it does
+not.

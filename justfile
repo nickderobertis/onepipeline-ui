@@ -26,6 +26,15 @@ msrv-version := `sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml`
 # Keep the gate's own output to signal: successes are silent, failures are not.
 export CARGO_TERM_QUIET := "true"
 
+# The `onepipeline` build the read API asks for a run's telemetry, pinned to the
+# version the lock resolves its library to. The two speak a versioned document
+# and the producer refuses a mismatched one, so a stray build on PATH would serve
+# every run with no clock at all. Provisioned into the tree rather than taken
+# from PATH for exactly that reason, and exported so every tier — the crate's own
+# suite and the browser tier's server alike — asks the same one.
+onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^version = /{gsub(/[",]/, "", $3); print $3; exit}' Cargo.lock`
+export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onepipeline"
+
 # List available recipes.
 default:
     @just --list
@@ -44,7 +53,16 @@ _crate-bootstrap:
       || { echo "cannot add toolchain components — install rustup (https://rustup.rs/) and re-run" >&2; exit 1; }
     @just _ensure-tool cargo-nextest
     @just _ensure-tool cargo-llvm-cov
+    @just _ensure-sibling
     @cargo fetch --locked --quiet
+
+# The sibling CLI, at the exact version the lock pins its library to. Unlike the
+# test runners above this *is* a rule: it produces the telemetry document this
+# server serves, and a different version of it is a different document.
+_ensure-sibling:
+    @[ "$({{ONEPIPELINE_UI_ONEPIPELINE_BIN}} --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
+      || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
+      || { echo "cannot provision onepipeline {{onepipeline-version}} — the read API serves no timing without it" >&2; exit 1; }
 
 # These are test runners, not rules: their version cannot change the gate's
 # verdict, so both here and CI take the latest rather than keeping two pins that

@@ -14,7 +14,9 @@
 //! so the typed records arrive from there rather than being invented here; what
 //! this crate owns, and what the fixtures pin, is the envelope. [`payload`] is
 //! the projection from the SDK's records onto the wire, and AGENTS.md lists
-//! every derivation in it that is proposed for the SDK.
+//! every derivation in it that is proposed for the SDK. [`telemetry`] is the
+//! seam onto the SDK's own telemetry document, which it aggregates and this
+//! crate reads rather than folding a run's clock a second time.
 
 #![deny(missing_docs)]
 
@@ -25,5 +27,6 @@ pub mod error;
 pub mod payload;
 pub mod server;
 pub mod store;
+pub mod telemetry;
 
 pub use error::ApiError;

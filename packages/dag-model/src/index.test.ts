@@ -12,8 +12,11 @@ import {
   runSummarySchema,
   runTelemetrySchema,
   sessionLinkSchema,
+  TELEMETRY_SCHEMA_VERSION,
+  TIMELINE_SCHEMA_VERSION,
   timelineReferenceSchema,
   timelineSpanSchema,
+  timingSchema,
 } from "./index.js";
 
 const timing = {
@@ -92,7 +95,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 10,
+    telemetry_schema_version: 11,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -126,7 +129,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 10,
+    telemetry_schema_version: 11,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -158,7 +161,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 10,
+    telemetry_schema_version: 11,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -204,12 +207,96 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   expect(telemetryResult.success).toBe(true);
 });
 
+describe("schema compatibility", () => {
+  /**
+   * The version is the whole compatibility statement, so the parsers refuse the
+   * one either side of the one they read rather than taking what arrives.
+   */
+  test("refuses a payload from a server on another telemetry schema", () => {
+    const list = {
+      api_version: 2,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
+      observed_at: "2026-07-26T12:00:00Z",
+      runs: [],
+    };
+    expect(parseRunList(list).telemetry_schema_version).toBe(
+      TELEMETRY_SCHEMA_VERSION,
+    );
+    for (const other of [
+      TELEMETRY_SCHEMA_VERSION - 1,
+      TELEMETRY_SCHEMA_VERSION + 1,
+    ]) {
+      expect(() =>
+        parseRunList({ ...list, telemetry_schema_version: other }),
+      ).toThrow();
+    }
+  });
+
+  test("refuses a timeline from a server on another timeline schema", () => {
+    const timeline = {
+      api_version: 2,
+      timeline_schema_version: TIMELINE_SCHEMA_VERSION,
+      observed_at: "2026-07-26T12:00:00Z",
+      run_id: "run-1",
+      spans: [],
+    };
+    expect(parseRunTimeline(timeline).timeline_schema_version).toBe(
+      TIMELINE_SCHEMA_VERSION,
+    );
+    for (const other of [
+      TIMELINE_SCHEMA_VERSION - 1,
+      TIMELINE_SCHEMA_VERSION + 1,
+    ]) {
+      expect(() =>
+        parseRunTimeline({ ...timeline, timeline_schema_version: other }),
+      ).toThrow();
+    }
+  });
+
+  /**
+   * What schema 11 is *for*: a lane nothing measured arrives null, and a client
+   * that reads it can tell that from a lane measured at zero. Both are accepted,
+   * and they are different values — which is exactly what schema 10 could not
+   * say.
+   */
+  test("reads an unmeasured timing apart from one measured at zero", () => {
+    const unmeasured = timingSchema.parse({
+      ...timing,
+      judge_seconds: null,
+      judge_model_ms: null,
+      fractions: { ...timing.fractions, judge_model: null },
+    });
+    expect(unmeasured.judge_seconds).toBeNull();
+    expect(unmeasured.judge_model_ms).toBeNull();
+    expect(unmeasured.fractions.judge_model).toBeNull();
+
+    const measured = timingSchema.parse({
+      ...timing,
+      judge_seconds: 0,
+      judge_model_ms: 0,
+      fractions: { ...timing.fractions, judge_model: 0 },
+    });
+    expect(measured.judge_seconds).toBe(0);
+    expect(measured.judge_model_ms).toBe(0);
+    expect(unmeasured.judge_seconds).not.toBe(measured.judge_seconds);
+
+    // Still a number where a number is served, and still refused where the value
+    // could not be either.
+    expect(() =>
+      timingSchema.parse({ ...timing, judge_seconds: -1 }),
+    ).toThrow();
+    expect(() =>
+      timingSchema.parse({ ...timing, judge_seconds: "unknown" }),
+    ).toThrow();
+  });
+});
+
 describe("boundary failures", () => {
   test("rejects incompatible API versions and negative counters", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 10,
+        telemetry_schema_version: 11,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -226,7 +313,7 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 10,
+      telemetry_schema_version: 11,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       rounds: [{ node_states: { build: "paused" } }],
@@ -381,7 +468,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 2,
+      timeline_schema_version: 3,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -437,7 +524,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 2,
+        timeline_schema_version: 3,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

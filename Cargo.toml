@@ -45,7 +45,7 @@ path = "src/lib.rs"
 axum = "0.8"
 clap = { version = "4.6", features = ["derive"] }
 futures-core = "0.3"
-onepipeline = "0.1.1"
+onepipeline = "0.1.4"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -60,6 +60,13 @@ tokio-stream = "0.1"
 [dev-dependencies]
 assert_cmd = "2"
 libc = "0.2"
+# The drift gate on the sibling vocabulary `src/payload.rs` reads: that library
+# declares its event kinds and its usage record in a public module, so the suite
+# holds this crate's copy of those names to the sibling's own type rather than to
+# a second reading of the wire. Held at the major `onepipeline` itself resolves,
+# so the gate reads the same declaration the records reaching this crate were
+# written by, and the tree carries one version of it rather than two.
+oneagentgraph = "0.2"
 predicates = "3"
 tempfile = "3"
 
