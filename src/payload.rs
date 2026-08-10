@@ -565,7 +565,8 @@ struct Measured {
     lint_records: u64,
 }
 
-/// Add a measured span to a slot that has never been measured before.
+/// Add one measured span to a slot, which is what turns it from unmeasured into
+/// a measurement of zero or more.
 fn measure(slot: &mut Option<u64>, ms: u64) {
     *slot = Some(slot.unwrap_or(0) + ms);
 }
