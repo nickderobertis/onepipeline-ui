@@ -695,8 +695,21 @@ test("this repository's own served goldens parse through the public parsers", as
   expect(timeline.spans.map((span) => span.kind)).toEqual([
     "node",
     "dispatch",
+    // One per log the node's own records kept — its gate's, and each settled
+    // check's — then the change it published and the contention that publication
+    // met, summarized rather than listed.
     "verification",
+    "verification",
+    "verification",
+    "publication",
+    "rollup",
   ]);
+  // The aggregate lane carries what it stands for rather than the window the
+  // waits fell in, which is what a client plots it at.
+  const waits = timeline.spans.find((span) => span.kind === "rollup");
+  expect(waits?.label).toBe("lock-wait");
+  expect(waits?.count).toBe(2);
+  expect(waits?.total_duration_ms).toBeGreaterThan(0);
   const dispatches = timeline.spans.filter((span) => span.kind === "dispatch");
   expect(dispatches.every((span) => span.dispatch_id !== undefined)).toBe(true);
   // The evidence that node kept, served as the record a client renders: the same

@@ -16,6 +16,7 @@
  *   serve-fixture.mjs --workspace DIR --port N     build the fixture and serve it
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
+ *                     | --record-activity NAME --activity-detail TEXT
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
@@ -29,6 +30,7 @@ import {
   buildRuns,
   facts,
   growTranscript,
+  recordActivity,
   removePageRuns,
   removeRun,
   settleDashboard,
@@ -143,6 +145,8 @@ function parseArgs(argv) {
     "--port",
     "--remove-run",
     "--grow-worker-session",
+    "--record-activity",
+    "--activity-detail",
     "--refuse-port",
   ]);
   const out = {};
@@ -197,6 +201,12 @@ if (args.stall) {
     removeRun(runsRoot, args["remove-run"]);
   } else if (args["grow-worker-session"] !== undefined) {
     growTranscript(runsRoot, Number(args["grow-worker-session"]));
+  } else if (args["record-activity"] !== undefined) {
+    recordActivity(
+      runsRoot,
+      args["record-activity"],
+      args["activity-detail"] ?? "",
+    );
   } else {
     process.exit(await serve(args.workspace, port));
   }

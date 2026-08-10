@@ -21,8 +21,11 @@ const fixtureSchema = z.object({
     busy: z.string().min(1),
   }),
   foundation_pr: z.string().min(1),
+  remote_open_pr: z.string().min(1),
+  foundation_commit: z.string().min(1),
   sessions: z.object({
     worker: z.string().min(1),
+    lint: z.string().min(1),
     foundation: z.string().min(1),
     judge: z.string().min(1),
     check_in: z.string().min(1),
@@ -32,6 +35,8 @@ const fixtureSchema = z.object({
   artifacts: z.object({
     gate: z.string().min(1),
     missing: z.string().min(1),
+    hook: z.string().min(1),
+    check: z.string().min(1),
   }),
 });
 
