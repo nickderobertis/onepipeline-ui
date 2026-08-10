@@ -122,44 +122,25 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  * Change what the server is serving — record progress, or take a run away — through
  * the fixture module that wrote the run directory in the first place.
  */
-function changeServedRuns(args: string[]): void {
+function changeServedRuns(args: string[], workspace = FIXTURE_WORKSPACE): void {
   execFileSync(
     process.execPath,
-    [
-      "e2e/fixtures/serve-fixture.mjs",
-      "--workspace",
-      FIXTURE_WORKSPACE,
-      ...args,
-    ],
+    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
     { stdio: ["ignore", "inherit", "pipe"] },
   );
 }
 
-/** The same, for an invocation that names its own workspace rather than this run's. */
-function refusedWorkspace(
+/**
+ * What the fixture command said and how it ended, for an invocation it refuses.
+ *
+ * `workspace` is this run's own unless a case is about that option itself.
+ */
+function refusedChange(
   args: string[],
-  workspace: string,
+  workspace = FIXTURE_WORKSPACE,
 ): { status: number; stderr: string } {
   try {
-    execFileSync(
-      process.execPath,
-      ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
-      { stdio: ["ignore", "inherit", "pipe"] },
-    );
-  } catch (refused) {
-    const failure = refused as { status?: number; stderr?: Buffer };
-    return {
-      status: failure.status ?? 0,
-      stderr: failure.stderr?.toString() ?? "",
-    };
-  }
-  throw new Error(`serve-fixture accepted a workspace of '${workspace}'`);
-}
-
-/** What the fixture command said and how it ended, for an invocation it refuses. */
-function refusedChange(args: string[]): { status: number; stderr: string } {
-  try {
-    changeServedRuns(args);
+    changeServedRuns(args, workspace);
   } catch (refused) {
     // Node decorates the error `execFileSync` throws with the child's own exit
     // status and captured stderr, and types neither: a caught value is `unknown`
@@ -2244,7 +2225,7 @@ test("refuses a change no recorded run could have held", () => {
 
   // The workspace is the one option this script *deletes* through, so it is
   // refused rather than resolved against whatever directory the caller was in.
-  const relative = refusedWorkspace(["--settle-dashboard"], "runs");
+  const relative = refusedChange(["--settle-dashboard"], "runs");
   expect(relative.status).toBe(2);
   expect(relative.stderr).toContain("is not an absolute path");
 });
