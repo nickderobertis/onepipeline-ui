@@ -1124,12 +1124,32 @@ export function settleDashboard(root) {
 }
 
 /**
+ * The bound `oneagentgraph` writes a tool summary under, in characters.
+ *
+ * A fixture that wrote a longer one would be recording something that library
+ * cannot produce, which is the one thing these runs must never do.
+ */
+const ACTIVITY_DETAIL_CHARS = 160;
+
+/**
  * Record one tool summary from inside the turn the dashboard is taking.
  *
  * `oneagentgraph` publishes these while the member works rather than when it is
  * done, which is what makes a watcher's live-activity reading possible at all.
+ *
+ * Both halves reach a journal a server is reading, so both are checked against
+ * what that library would have written: a tool has a name, a summary has text,
+ * and the text is within the bound the producer bounds it to.
  */
 export function recordActivity(root, name, detail) {
+  if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(name)) {
+    throw new Error(`serve-fixture: '${name}' is not a tool name`);
+  }
+  if (detail.length === 0 || detail.length > ACTIVITY_DETAIL_CHARS) {
+    throw new Error(
+      `serve-fixture: a tool summary is 1 to ${ACTIVITY_DETAIL_CHARS} characters, not ${detail.length}`,
+    );
+  }
   appendEvent(
     join(root, LIVE_RUN),
     "agentgraph",
