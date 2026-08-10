@@ -13,6 +13,14 @@
 //! holds them together: `tests/e2e/server.rs` runs the real binary over a real
 //! recorded run and reads what it prints through these very types, beside the
 //! payload this server made of the same document.
+//!
+//! Two boundaries, kept apart because they fail differently and are answerable
+//! separately. [`of_run`] is the *process*: a build that will not start, or one
+//! that ran and refused. [`read_document`] is the *document*: whether what came
+//! back is one at all — the version, and then every property `onepipeline`
+//! states about what it writes. Nothing under a failed check is served, because
+//! a timing read out of a document that does not add up is a claim with nothing
+//! behind it, and this server's whole answer for an unknown clock is to say so.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -150,6 +158,60 @@ pub struct Usage {
     pub cost_usd: Option<f64>,
 }
 
+impl BucketName {
+    /// Every bucket, in the order the producer writes them.
+    pub const ALL: [Self; 8] = [
+        Self::Agent,
+        Self::Judge,
+        Self::Llmlint,
+        Self::Gate,
+        Self::PublicationWait,
+        Self::LockWait,
+        Self::Setup,
+        Self::Scheduling,
+    ];
+
+    /// The word this bucket is written as, for naming it in a refusal.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Judge => "judge",
+            Self::Llmlint => "llmlint",
+            Self::Gate => "gate",
+            Self::PublicationWait => "publication_wait",
+            Self::LockWait => "lock_wait",
+            Self::Setup => "setup",
+            Self::Scheduling => "scheduling",
+        }
+    }
+}
+
+impl Party {
+    /// The word this party is written as, for naming it in a refusal.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Judge => "judge",
+            Self::Llmlint => "llmlint",
+            Self::Total => "total",
+        }
+    }
+}
+
+impl Usage {
+    /// Whether nothing at all was reported for this party.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.input.is_none()
+            && self.output.is_none()
+            && self.cache_read.is_none()
+            && self.cache_write.is_none()
+            && self.cost_usd.is_none()
+    }
+}
+
 impl RunTelemetry {
     /// One bucket's measured span, or `None` when nothing measured it.
     #[must_use]
@@ -175,6 +237,107 @@ impl RunTelemetry {
     pub fn usage_of(&self, party: Party) -> Usage {
         self.usage.get(&party).copied().unwrap_or_default()
     }
+}
+
+/// Hold a document to the producer's own contract, before any of it is served.
+///
+/// The version says which document this is; these say whether it is one at all.
+/// Each is a property `onepipeline` states and enforces about what it writes, so
+/// a document failing one is not a document with a surprising number in it — it
+/// is a producer this reader cannot honestly project, and every timing served
+/// from it would be a claim nothing supports.
+fn validated(document: RunTelemetry) -> Result<RunTelemetry, Unavailable> {
+    // Exactly the eight, once each. The invariant under everything else is that
+    // every millisecond of the clock has one of a known set of homes, which says
+    // nothing at all over a set missing one, carrying one twice, or naming one
+    // this build cannot add up. Order is the producer's own and is not required
+    // here: what a reader indexes by is the name.
+    for name in BucketName::ALL {
+        let found = document
+            .buckets
+            .iter()
+            .filter(|bucket| bucket.name == name)
+            .count();
+        if found != 1 {
+            return Err(Unavailable::Unreadable(format!(
+                "the `{}` bucket appears {found} times, and a telemetry document carries \
+                 exactly one of each of the eight",
+                name.as_str()
+            )));
+        }
+    }
+    // No length check beside it: a name outside the eight is refused while the
+    // document is still being decoded, so eight names each appearing once is
+    // eight buckets and nothing else.
+
+    // Measured time that was never on the clock. The producer's aim is that its
+    // measured buckets sum *exactly* to the whole, and it sweeps any residue into
+    // `scheduling` to keep that true — but a reader must refuse only what is
+    // impossible, and a sum *below* the wall clock is honest: it is time nothing
+    // claimed, which is what `unattributed_ms` is for. A sum above it is the one
+    // that cannot be true of any clock.
+    let measured = document.measured_ms();
+    if measured > document.wall_ms {
+        return Err(Unavailable::Unreadable(format!(
+            "the buckets measure {measured}ms of a {}ms wall clock",
+            document.wall_ms
+        )));
+    }
+
+    for (party, usage) in &document.usage {
+        // A party nothing reported for is absent from the map rather than
+        // present and empty — the producer says so, and a reader that accepted
+        // an empty one would serve "spent nothing" for a party nobody measured.
+        if usage.is_empty() {
+            return Err(Unavailable::Unreadable(format!(
+                "the `{}` party is present and reports nothing, where a party nothing was \
+                 reported for is absent",
+                party.as_str()
+            )));
+        }
+        if usage
+            .cost_usd
+            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+        {
+            return Err(Unavailable::Unreadable(format!(
+                "the `{}` party cost {:?}, which is not an amount of money",
+                party.as_str(),
+                usage.cost_usd.unwrap_or_default()
+            )));
+        }
+    }
+    Ok(document)
+}
+
+/// Read one telemetry document, or say why it is not one.
+///
+/// The parser boundary, separate from the process that produced the bytes: what
+/// a document has to be is the same question whichever build wrote it, and it is
+/// answerable — and tested — without starting anything.
+///
+/// # Errors
+///
+/// [`Unavailable::Unreadable`] for anything that is not a document of
+/// [`DOCUMENT_VERSION`] holding to the producer's own contract.
+pub fn read_document(answer: &[u8]) -> Result<RunTelemetry, Unavailable> {
+    // The version before anything under it. A document of another version is not
+    // a document with a bad field in it: schema 1 named four spans this build has
+    // no names for, and reporting that as an unknown bucket would send a reader
+    // looking for a typo instead of at the version they are running.
+    let answered: serde_json::Value =
+        serde_json::from_slice(answer).map_err(|err| Unavailable::Unreadable(err.to_string()))?;
+    let version = answered
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64);
+    if version != Some(u64::from(DOCUMENT_VERSION)) {
+        return Err(Unavailable::Unreadable(format!(
+            "telemetry schema_version {}, and this build reads {DOCUMENT_VERSION}",
+            version.map_or_else(|| "absent".to_owned(), |found| found.to_string())
+        )));
+    }
+    let document: RunTelemetry =
+        serde_json::from_value(answered).map_err(|err| Unavailable::Unreadable(err.to_string()))?;
+    validated(document)
 }
 
 /// Why a run's telemetry could not be read.
@@ -249,22 +412,7 @@ pub fn of_run_from(binary: &str, root: &Path, run: &RunId) -> Result<RunTelemetr
     if !output.status.success() {
         return Err(Unavailable::Refused(tail(&output.stderr)));
     }
-    // The version before anything under it. A document of another version is not
-    // a document with a bad field in it: schema 1 named four spans this build has
-    // no names for, and reporting that as an unknown bucket would send a reader
-    // looking for a typo instead of at the version they are running.
-    let answered: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|err| Unavailable::Unreadable(err.to_string()))?;
-    let version = answered
-        .get("schema_version")
-        .and_then(serde_json::Value::as_u64);
-    if version != Some(u64::from(DOCUMENT_VERSION)) {
-        return Err(Unavailable::Unreadable(format!(
-            "telemetry schema_version {}, and this build reads {DOCUMENT_VERSION}",
-            version.map_or_else(|| "absent".to_owned(), |found| found.to_string())
-        )));
-    }
-    serde_json::from_value(answered).map_err(|err| Unavailable::Unreadable(err.to_string()))
+    read_document(&output.stdout)
 }
 
 /// The last line of what a refused command said, bounded: the sibling names the

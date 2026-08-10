@@ -1,6 +1,11 @@
 //! The contract tests: `docs/contract.md` is the source of truth, and these
 //! hold the crate's types to it.
 //!
+//! Beside them are the contracts this crate keeps with the libraries it reads:
+//! the vocabulary `oneagentgraph` declares, and the telemetry document
+//! `onepipeline` writes — held here as a parser boundary, which is answerable
+//! without starting the process that produced the bytes.
+//!
 //! Each fixture under `tests/fixtures/` is one endpoint's response body. What
 //! they pin is the **envelope** — the schema-version preamble and its
 //! byte-for-byte serialization. Their payload bodies carry only the payload
@@ -873,4 +878,213 @@ fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
          oneagentgraph's own MAX_ACTIVITY_DETAIL_CHARS",
         path.display()
     );
+}
+
+/// A telemetry document as `onepipeline` writes one, for the tests below to
+/// break one property of at a time.
+fn telemetry_document() -> Value {
+    serde_json::json!({
+        "schema_version": 2,
+        "run_id": fixture_run::RUN_ID,
+        "wall_ms": 31_000,
+        "buckets": [
+            { "name": "agent", "ms": 13_000 },
+            { "name": "judge" },
+            { "name": "llmlint" },
+            { "name": "gate", "ms": 2_000 },
+            { "name": "publication_wait", "ms": 9_000 },
+            { "name": "lock_wait", "ms": 1_100 },
+            { "name": "setup", "ms": 1_900 },
+            { "name": "scheduling", "ms": 4_000 }
+        ],
+        "usage": {
+            "total": { "input": 1_600, "output": 430, "cost_usd": 0.53 }
+        },
+        "dispatches": 2,
+        "settled_done": 2,
+        "no_diff": 0,
+        "surfaces_queued": 0,
+        "surfaces_read": 0
+    })
+}
+
+/// The document above, with one thing about it changed.
+fn document_with(change: impl FnOnce(&mut Value)) -> Vec<u8> {
+    let mut document = telemetry_document();
+    change(&mut document);
+    document.to_string().into_bytes()
+}
+
+#[test]
+fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
+    let document = onepipeline_ui::telemetry::read_document(&document_with(|_| {}))
+        .expect("the document a run really produces");
+    assert_eq!(document.wall_ms, 31_000);
+    assert_eq!(
+        document.bucket(onepipeline_ui::telemetry::BucketName::Agent),
+        Some(13_000)
+    );
+    // An unmeasured bucket is present and absent at once: named, so the set is
+    // whole, and carrying no span, so nothing reads it as a measured zero.
+    assert_eq!(
+        document.bucket(onepipeline_ui::telemetry::BucketName::Judge),
+        None
+    );
+    assert_eq!(document.measured_ms(), 31_000);
+    assert_eq!(
+        document
+            .usage_of(onepipeline_ui::telemetry::Party::Total)
+            .cost_usd,
+        Some(0.53)
+    );
+    // A party nothing reported for reads as unknown, from its absence.
+    assert!(document
+        .usage_of(onepipeline_ui::telemetry::Party::Llmlint)
+        .is_empty());
+}
+
+/// Everything a document can be that this build must not project.
+///
+/// The producer states each of these about what it writes, and every one of them
+/// is a thing a reader would otherwise serve as fact: a bucket set that does not
+/// add up, time that was never on the clock, a party reported as having spent
+/// nothing when nobody measured it. A malformed document has to become an
+/// absence of timing with a reason, never a payload.
+#[test]
+fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
+    let refusals: [(&str, Vec<u8>, &str); 9] = [
+        (
+            "not a document at all",
+            b"onepipeline: something went wrong".to_vec(),
+            "expected value",
+        ),
+        (
+            "a version this build does not read",
+            document_with(|document| document["schema_version"] = serde_json::json!(1)),
+            "schema_version 1, and this build reads 2",
+        ),
+        (
+            "no version at all",
+            document_with(|document| {
+                document
+                    .as_object_mut()
+                    .expect("a mapping")
+                    .remove("schema_version");
+            }),
+            "schema_version absent",
+        ),
+        (
+            "a bucket named twice",
+            document_with(|document| {
+                document["buckets"][1] = serde_json::json!({ "name": "agent", "ms": 0 });
+            }),
+            "the `agent` bucket appears 2 times",
+        ),
+        (
+            "a bucket left out",
+            document_with(|document| {
+                document["buckets"]
+                    .as_array_mut()
+                    .expect("the buckets")
+                    .retain(|bucket| bucket["name"] != serde_json::json!("setup"));
+            }),
+            "the `setup` bucket appears 0 times",
+        ),
+        (
+            "a bucket this build cannot add up",
+            document_with(|document| {
+                document["buckets"][2] = serde_json::json!({ "name": "dispatching", "ms": 1 });
+            }),
+            "unknown variant `dispatching`",
+        ),
+        (
+            "more time measured than the clock ran",
+            document_with(|document| document["wall_ms"] = serde_json::json!(1_000)),
+            "the buckets measure 31000ms of a 1000ms wall clock",
+        ),
+        (
+            "a party present and reporting nothing",
+            document_with(|document| document["usage"]["judge"] = serde_json::json!({})),
+            "the `judge` party is present and reports nothing",
+        ),
+        (
+            "a cost that is not an amount of money",
+            document_with(|document| {
+                document["usage"]["total"]["cost_usd"] = serde_json::json!(-1.0);
+            }),
+            "the `total` party cost -1.0",
+        ),
+    ];
+    for (what, answered, said) in refusals {
+        let refused = onepipeline_ui::telemetry::read_document(&answered)
+            .expect_err(&format!("{what} is not a telemetry document"));
+        assert!(
+            matches!(
+                refused,
+                onepipeline_ui::telemetry::Unavailable::Unreadable(_)
+            ),
+            "{what}: {refused:?}"
+        );
+        assert!(
+            refused.to_string().contains(said),
+            "{what}: the refusal does not name it — {refused}"
+        );
+    }
+}
+
+/// A number no clock could hold is refused whichever layer notices it.
+///
+/// `1e999` is valid JSON and not a `f64`, so the reader may refuse it while
+/// decoding rather than while checking; both are refusals, and the one thing
+/// that must not happen is a cost of infinity reaching a payload.
+#[test]
+fn a_cost_no_number_can_hold_never_reaches_a_payload() {
+    let refused = onepipeline_ui::telemetry::read_document(&document_with(|document| {
+        document["usage"]["total"]["cost_usd"] = serde_json::json!(1e308);
+        document["usage"]["total"]["input"] = serde_json::json!(1);
+    }))
+    .map(|document| {
+        document
+            .usage_of(onepipeline_ui::telemetry::Party::Total)
+            .cost_usd
+    });
+    match refused {
+        Ok(cost) => assert!(
+            cost.is_some_and(f64::is_finite),
+            "a cost that reached a payload is a number: {cost:?}"
+        ),
+        Err(unavailable) => assert!(matches!(
+            unavailable,
+            onepipeline_ui::telemetry::Unavailable::Unreadable(_)
+        )),
+    }
+    let overflowed = b"{\"schema_version\":2,\"wall_ms\":0,\"buckets\":[],\"usage\":{\"total\":{\"cost_usd\":1e999}}}";
+    assert!(
+        onepipeline_ui::telemetry::read_document(overflowed).is_err(),
+        "a cost past every number is not a cost"
+    );
+}
+
+/// The words this crate names a bucket and a party by, against the words the
+/// document spells them with.
+///
+/// They are two spellings of one vocabulary — one for a refusal to read, one on
+/// the wire — and a refusal that names a bucket the document does not have is a
+/// reader sending an operator to look for the wrong thing. Read back rather than
+/// written out, because reading is the only direction this crate has: the
+/// document is the producer's to write.
+#[test]
+fn every_bucket_and_party_is_named_as_the_document_spells_it() {
+    use onepipeline_ui::telemetry::{BucketName, Party};
+
+    for name in BucketName::ALL {
+        let read: BucketName = serde_json::from_value(serde_json::json!(name.as_str()))
+            .unwrap_or_else(|err| panic!("`{}` is not a bucket name: {err}", name.as_str()));
+        assert_eq!(read, name);
+    }
+    for party in [Party::Agent, Party::Judge, Party::Llmlint, Party::Total] {
+        let read: Party = serde_json::from_value(serde_json::json!(party.as_str()))
+            .unwrap_or_else(|err| panic!("`{}` is not a party: {err}", party.as_str()));
+        assert_eq!(read, party);
+    }
 }
