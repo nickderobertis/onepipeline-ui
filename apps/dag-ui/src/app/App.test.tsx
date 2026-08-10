@@ -1200,6 +1200,38 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(await screen.findByText("dashboard")).toBeInTheDocument();
   });
 
+  /** The same detail, with the clock nothing could measure served as absent. */
+  async function unmeasuredClock(answered: Response): Promise<Response> {
+    const detail = (await answered.json()) as {
+      run: { timing: Record<string, unknown> };
+    };
+    return Response.json({
+      ...detail,
+      run: {
+        ...detail.run,
+        timing: { ...detail.run.timing, wall_seconds: null, wall_ms: null },
+      },
+    });
+  }
+
+  test("says a run's clock is unmeasured rather than reporting no time at all", async () => {
+    window.history.replaceState(null, "", "/");
+    // Schema 11 serves a timing nothing measured as null, and a server that could
+    // not read the document that aggregates a run's clock serves every one of
+    // them that way. `0s` would be the one reading that is a lie.
+    const { client } = telemetryHarness((url) => {
+      const answered = defaultResponder(url);
+      if (!url.pathname.endsWith(`/runs/${runList.runs[0]?.run_id}`))
+        return answered;
+      return unmeasuredClock(answered);
+    });
+    render(<App client={client} />);
+    expect(await screen.findByText("Graph timeline")).toBeInTheDocument();
+    const wall = screen.getByText("Wall time").closest(".metric");
+    expect(wall).toHaveTextContent("not measured");
+    expect(wall).not.toHaveTextContent("0s");
+  });
+
   test("opens the graph line into one row per node beside the run's own", async () => {
     const { client } = telemetryHarness();
     render(<App client={client} />);

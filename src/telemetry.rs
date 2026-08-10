@@ -20,6 +20,8 @@ use std::process::Command;
 
 use serde::Deserialize;
 
+use crate::contract::RunId;
+
 /// The environment variable naming the `onepipeline` executable.
 ///
 /// Resolved rather than hardcoded, for the same reason the SDK resolves its own
@@ -212,16 +214,17 @@ impl std::fmt::Display for Unavailable {
 
 /// The telemetry `onepipeline` aggregates for one run under `root`.
 ///
-/// The run id has already crossed this server's own trust boundary as a
-/// [`RunId`](crate::contract::RunId) — a bare path segment — and it is handed to
-/// the sibling as one argument rather than interpolated into anything.
+/// A [`RunId`] rather than a name: this reaches another process's argument list,
+/// and the sibling refuses a run id that navigates for exactly the reason this
+/// crate does. Taking the validated type means there is no path into the seam
+/// that has not already crossed that boundary.
 ///
 /// # Errors
 ///
 /// When the sibling cannot be started, refuses the run, or answers a document of
 /// another version. Every one of those leaves the run's timing unknown, which is
 /// served as absent rather than as zero.
-pub fn of_run(root: &Path, run: &str) -> Result<RunTelemetry, Unavailable> {
+pub fn of_run(root: &Path, run: &RunId) -> Result<RunTelemetry, Unavailable> {
     of_run_from(&binary(), root, run)
 }
 
@@ -236,10 +239,10 @@ pub fn of_run(root: &Path, run: &str) -> Result<RunTelemetry, Unavailable> {
 /// # Errors
 ///
 /// As [`of_run`].
-pub fn of_run_from(binary: &str, root: &Path, run: &str) -> Result<RunTelemetry, Unavailable> {
+pub fn of_run_from(binary: &str, root: &Path, run: &RunId) -> Result<RunTelemetry, Unavailable> {
     let output = Command::new(binary)
         .arg("telemetry")
-        .arg(run)
+        .arg(run.as_str())
         .env(RUNS_DIR_ENV, root)
         .output()
         .map_err(|err| Unavailable::NoBinary(err.to_string()))?;

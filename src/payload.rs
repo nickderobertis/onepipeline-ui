@@ -1,15 +1,16 @@
 //! Projecting the onepipeline SDK's run records onto the wire shapes.
 //!
 //! The SDK owns the records — the launch record, the merged event store, the
-//! folded run state, the per-round plan and result. This module owns only the
-//! projection onto what `docs/contract.md` serves: it renames nothing the SDK
-//! already names and computes nothing the SDK already computes, and every place
-//! it does derive something (the timing buckets, a dispatch key, a session key)
+//! folded run state, the per-round plan and result, and the telemetry document
+//! [`crate::telemetry`] reads. This module owns only the projection onto what
+//! `docs/contract.md` serves: it renames nothing the SDK already names and
+//! computes nothing the SDK already computes, and every place it does derive
+//! something (a dispatch key, a session key, the time a turn spent in a model)
 //! is listed in AGENTS.md as a computation proposed for the SDK, where the agent
 //! reading the CLI would see it too.
 //!
-//! Everything here is a pure function of a [`RunView`] plus the run directory,
-//! so a payload can be built and asserted without a server.
+//! Everything here is a pure function of a [`RunView`], the run directory, and
+//! that document, so a payload can be built and asserted without a server.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

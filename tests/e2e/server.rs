@@ -8,6 +8,7 @@
 
 use serde_json::{json, Value};
 
+use onepipeline_ui::contract::RunId;
 use onepipeline_ui::telemetry;
 
 use crate::fixture_run;
@@ -1525,7 +1526,7 @@ fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
     }
 
     // The same distinction on the clock: the two parties that reported a turn
-    // are present, and the one that did not is flagged absent beside its zero.
+    // carry a number, and the one that did not carries no number at all.
     let presence = &body["run"]["timing_presence"];
     assert_eq!(presence["agent_model_ms"], json!(true));
     assert_eq!(presence["judge_model_ms"], json!(true));
@@ -1733,7 +1734,8 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     // its own CLI rather than folded here a second time. Asserted against what
     // that binary says right now, so a build whose attribution moves fails here
     // instead of leaving two readings of one run's clock disagreeing.
-    let document = onepipeline_ui::telemetry::of_run(serving.runs_root(), fixture_run::RUN_ID)
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
+    let document = onepipeline_ui::telemetry::of_run(serving.runs_root(), &run)
         .expect("the sibling aggregates the fixture run");
     assert_eq!(timing["wall_ms"], json!(document.wall_ms));
     for (lane, name) in [
@@ -1822,6 +1824,15 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
     assert_eq!(timing["agent_model_ms"], json!(2_500));
     assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
 
+    // The row the operator arrives on says the same thing as the detail they open
+    // from it: one reading of the run, whether or not its clock could be read.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = &listed["runs"][0];
+    assert_eq!(row["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(row["timing"]["wall_seconds"], json!(null), "{row}");
+    assert_eq!(row["timing"]["agent_seconds"], json!(null), "{row}");
+    assert_eq!(row["node_counts"]["done"], json!(2), "a run all the same");
+
     // The rest of the payload is untouched: a run with no clock is still a run.
     assert_eq!(body["run"]["run_id"], json!(fixture_run::RUN_ID));
     assert_eq!(
@@ -1838,8 +1849,9 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
     // Asked about a run it does not have: it ran, and refused. The reason names
     // the command, because the alternative is a server serving no clock and no
     // account of why.
-    let refused = telemetry::of_run(runs.path(), "run-that-was-never-recorded")
-        .expect_err("the sibling has no such run");
+    let never_recorded = RunId::try_from("run-that-was-never-recorded").expect("a valid id");
+    let refused =
+        telemetry::of_run(runs.path(), &never_recorded).expect_err("the sibling has no such run");
     assert!(
         matches!(refused, telemetry::Unavailable::Refused(_)),
         "{refused:?}"
@@ -1848,12 +1860,9 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
 
     // Not startable at all, which is what a missing install looks like: the
     // message says how to fix it rather than only that it broke.
-    let missing = telemetry::of_run_from(
-        "a-onepipeline-that-is-not-installed",
-        runs.path(),
-        fixture_run::RUN_ID,
-    )
-    .expect_err("nothing to start");
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
+    let missing = telemetry::of_run_from("a-onepipeline-that-is-not-installed", runs.path(), &run)
+        .expect_err("nothing to start");
     assert!(
         matches!(missing, telemetry::Unavailable::NoBinary(_)),
         "{missing:?}"
@@ -1871,12 +1880,9 @@ fn a_document_this_build_cannot_read_is_refused_rather_than_read() {
 
     // A producer answering something else entirely.
     let babbling = stub(runs.path(), "not-a-document", "hello");
-    let unreadable = telemetry::of_run_from(
-        &babbling.display().to_string(),
-        runs.path(),
-        fixture_run::RUN_ID,
-    )
-    .expect_err("not a document");
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
+    let unreadable = telemetry::of_run_from(&babbling.display().to_string(), runs.path(), &run)
+        .expect_err("not a document");
     assert!(
         matches!(unreadable, telemetry::Unavailable::Unreadable(_)),
         "{unreadable:?}"
@@ -1896,12 +1902,8 @@ fn a_document_this_build_cannot_read_is_refused_rather_than_read() {
         })
         .to_string(),
     );
-    let wrong_version = telemetry::of_run_from(
-        &older.display().to_string(),
-        runs.path(),
-        fixture_run::RUN_ID,
-    )
-    .expect_err("another version");
+    let wrong_version = telemetry::of_run_from(&older.display().to_string(), runs.path(), &run)
+        .expect_err("another version");
     assert!(
         wrong_version.to_string().contains("schema_version 1"),
         "the refusal names both versions: {wrong_version}"
@@ -1910,6 +1912,14 @@ fn a_document_this_build_cannot_read_is_refused_rather_than_read() {
 
 /// A stand-in producer that prints `answer`, for the readings a real one cannot
 /// be made to give.
+///
+/// The subprocess boundary itself is driven against the real `onepipeline` in
+/// `the_run_clock_is_the_document_the_sibling_aggregates`, and the missing-binary
+/// reading against a name that really is not installed. What is left is what
+/// *another* producer answers — a build on the older document version, and
+/// something that is not a document at all — and the one thing the real binary
+/// cannot be asked to do is be a different program.
+// llmlint: ignore[e2e_not_mocked, tests_mirror_real_usage] the producer is the subject here rather than the double: these two readings are another program's output, which the pinned build cannot be made to give, and the reading it *can* give is driven against it in the journey beside this one. Provisioning a second, older `onepipeline` to say the same thing would pin this repository's suite to a version its own lock does not.
 #[cfg(unix)]
 fn stub(dir: &std::path::Path, name: &str, answer: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;

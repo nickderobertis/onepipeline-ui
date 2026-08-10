@@ -690,8 +690,8 @@ test("this repository's own served goldens parse through the public parsers", as
   expect(detail.run.run_id).toBe(detail.rounds[0]?.run_id);
   expect(Object.keys(detail.rounds[0]?.node_status ?? {})).not.toHaveLength(0);
 
-  // Schema 10 including `dispatch_id`: the node-scoped timeline names the dispatch
-  // that did the work, which is what lets a client join a span to its transcript.
+  // The node-scoped timeline names the dispatch that did the work, which is what
+  // lets a client join a span to its transcript.
   const timeline = parseRunTimeline(await served("run-timeline.json"));
   expect(timeline.spans.map((span) => span.kind)).toEqual([
     "node",

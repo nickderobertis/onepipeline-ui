@@ -2207,6 +2207,7 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
 test("refuses a change no recorded run could have held", () => {
   for (const [args, said] of [
     [["--record-activity", "Bash"], "needs --activity-detail"],
+    [["--activity-detail", "just gate"], "needs --record-activity"],
     [
       ["--record-activity", "Bash", "--activity-detail", ""],
       "a tool summary is 1 to 160 characters",

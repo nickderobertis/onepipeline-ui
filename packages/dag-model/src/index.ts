@@ -99,35 +99,35 @@ export const timingPresenceSchema = openObject({
  * run whose cost cannot be answered must not read as a run that was free, so the
  * absence is on the wire rather than inferred from a sidecar.
  */
-const measuredSeconds = nonnegative.nullable();
-const measuredMs = counter.nullable();
+const measured = nonnegative.nullable();
+const measuredCount = counter.nullable();
 
 export const timingSchema = openObject({
-  agent_seconds: measuredSeconds,
-  judge_seconds: measuredSeconds,
-  llmlint_seconds: measuredSeconds,
-  gate_seconds: measuredSeconds,
-  publication_wait_seconds: measuredSeconds,
-  lock_wait_seconds: measuredSeconds,
-  setup_seconds: measuredSeconds,
-  scheduling_seconds: measuredSeconds,
-  wall_seconds: measuredSeconds,
-  agent_model_ms: measuredMs,
-  judge_model_ms: measuredMs,
-  llmlint_model_ms: measuredMs,
-  tool_ms: measuredMs,
-  idle_orchestration_ms: measuredMs,
-  unattributed_ms: measuredMs,
-  wall_ms: measuredMs,
+  agent_seconds: measured,
+  judge_seconds: measured,
+  llmlint_seconds: measured,
+  gate_seconds: measured,
+  publication_wait_seconds: measured,
+  lock_wait_seconds: measured,
+  setup_seconds: measured,
+  scheduling_seconds: measured,
+  wall_seconds: measured,
+  agent_model_ms: measuredCount,
+  judge_model_ms: measuredCount,
+  llmlint_model_ms: measuredCount,
+  tool_ms: measuredCount,
+  idle_orchestration_ms: measuredCount,
+  unattributed_ms: measuredCount,
+  wall_ms: measuredCount,
   fractions: openObject({
-    agent_model: measuredSeconds,
-    judge_model: measuredSeconds,
-    llmlint_model: measuredSeconds,
-    tool: measuredSeconds,
-    idle_orchestration: measuredSeconds,
-    lock_wait: measuredSeconds,
-    setup: measuredSeconds,
-    scheduling: measuredSeconds,
+    agent_model: measured,
+    judge_model: measured,
+    llmlint_model: measured,
+    tool: measured,
+    idle_orchestration: measured,
+    lock_wait: measured,
+    setup: measured,
+    scheduling: measured,
   }),
 });
 
@@ -291,11 +291,11 @@ export const runTelemetrySchema = openObject({
   timing_presence: timingPresenceSchema,
   sources: z.array(z.string()),
   node_work_ms: openObject({
-    agent_model_ms: measuredMs,
-    judge_model_ms: measuredMs,
-    llmlint_model_ms: measuredMs,
-    tool_ms: measuredMs,
-    wall_ms: measuredMs,
+    agent_model_ms: measuredCount,
+    judge_model_ms: measuredCount,
+    llmlint_model_ms: measuredCount,
+    tool_ms: measuredCount,
+    wall_ms: measuredCount,
   }),
   turns: counter,
   lint: counter,

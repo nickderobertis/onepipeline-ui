@@ -109,27 +109,28 @@ impl RunStore {
     /// the cache is an optimisation, and the worst a recovered one costs is a
     /// re-read.
     fn telemetry(&self, view: &RunView) -> Option<Arc<RunTelemetry>> {
+        // Keyed and asked for by the validated id, so a directory this contract
+        // could not name is one no argument list is built from either — the same
+        // filter the stream applies before announcing a run.
+        let run = RunId::try_from(view.paths.run.as_str()).ok()?;
         let token = payload::signature(view);
         let mut cache = self
             .aggregated
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((cached, document)) = cache.get(&view.paths.run) {
+        if let Some((cached, document)) = cache.get(run.as_str()) {
             if *cached == token {
                 return document.clone();
             }
         }
-        let document = match telemetry::of_run(&self.root, &view.paths.run) {
+        let document = match telemetry::of_run(&self.root, &run) {
             Ok(document) => Some(Arc::new(document)),
             Err(unavailable) => {
-                eprintln!(
-                    "onepipeline-api: no telemetry for {}: {unavailable}",
-                    view.paths.run
-                );
+                eprintln!("onepipeline-api: no telemetry for {run}: {unavailable}");
                 None
             }
         };
-        cache.insert(view.paths.run.clone(), (token, document.clone()));
+        cache.insert(run.as_str().to_owned(), (token, document.clone()));
         document
     }
 

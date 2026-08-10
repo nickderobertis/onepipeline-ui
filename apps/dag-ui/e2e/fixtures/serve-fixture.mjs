@@ -250,9 +250,9 @@ if (args.stall) {
       }
       growTranscript(runsRoot, turns);
     } else if (args["record-activity"] !== undefined) {
-      // Both halves or neither: a tool summary is the tool's name *and* what it
-      // was given, and one recorded with an empty detail is a record no member
-      // would have written.
+      // Both halves or neither, checked in both directions: a tool summary is
+      // the tool's name *and* what it was given, and the half of it that arrived
+      // alone is a mistyped command rather than a request to serve.
       if (args["activity-detail"] === undefined) {
         die(
           "--record-activity needs --activity-detail",
@@ -263,6 +263,11 @@ if (args.stall) {
         runsRoot,
         args["record-activity"],
         args["activity-detail"],
+      );
+    } else if (args["activity-detail"] !== undefined) {
+      die(
+        "--activity-detail needs --record-activity",
+        "pass --record-activity the name of the tool the summary came from",
       );
     } else {
       process.exit(await serve(args.workspace, port));
