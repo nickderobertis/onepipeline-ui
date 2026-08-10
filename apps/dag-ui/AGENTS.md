@@ -26,15 +26,21 @@ wrong server. So the log is the evidence, and keeping it readable is part of the
 tier: every entry carries a `name`, every entry keeps its `stdout`, and every
 server states the address it took — the read API through its own `serving …`
 line, Vite through its ready line, the stall server through one line per port.
-**Read them in order: the first server that printed nothing is the one being
-waited for.**
+
+**Read them in order, and read the address, not the word "ready".** The server
+being waited for is the last one that printed, not the first one that did not —
+the ones after it were never started. And "ready" is a server's opinion of
+itself: what decides the wait is whether the address it *bound* is the address
+`playwright.config.ts` *waits on*. Vite announced `ready in 253 ms` on four
+GitHub runs while listening somewhere Playwright was not looking, which is the
+whole of that bug and the reason `LOOPBACK` is one constant in that file.
 
 A server that *exits* is reported differently — `Process from config.webServer
 was not able to start. Exit code: N` — so a bare timeout means the process is
-alive and has not bound. That distinction only survives if nothing here dies on
-an unhandled `error`, which is why both of `serve-fixture.mjs`'s refusals are
-exits under the crate's own contract: `2` for an address this host will not
-give, `70` for a read API that was never built.
+alive and has not bound where it was asked to. That distinction only survives if
+nothing here dies on an unhandled `error`, which is why both of
+`serve-fixture.mjs`'s refusals are exits under the crate's own contract: `2` for
+an address this host will not give, `70` for a read API that was never built.
 
 Whatever a server has to do before it binds, it does inside that window, so
 nothing may build there. The read API is built by `dag-ui:build-api-server`,
