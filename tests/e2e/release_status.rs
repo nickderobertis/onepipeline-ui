@@ -29,7 +29,7 @@ const TAG: &str = "v0.3.1";
 
 /// Every job the workflow reports, in the order it reports them. A test names
 /// only the ones it is bending, so a new job here does not rewrite every case.
-const ALL_JOBS: &[&str] = &[
+const REPORTED_JOBS: &[&str] = &[
     "test",
     "upload",
     "verify-assets",
@@ -202,10 +202,10 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// `JOB_RESULTS` as the workflow writes it: every job in `ALL_JOBS`, succeeding
+/// `JOB_RESULTS` as the workflow writes it: every job in `REPORTED_JOBS`, succeeding
 /// unless `bent` overrides it.
 fn reported(bent: &[(&str, &str)]) -> String {
-    ALL_JOBS
+    REPORTED_JOBS
         .iter()
         .map(|job| {
             let result = bent
@@ -246,7 +246,7 @@ fn a_release_whose_every_required_job_succeeded_is_left_alone() {
 #[test]
 fn a_gate_failure_that_skips_every_publish_demotes_the_release() {
     let fixture = Fixture::fresh();
-    let skipped: Vec<(&str, &str)> = ALL_JOBS
+    let skipped: Vec<(&str, &str)> = REPORTED_JOBS
         .iter()
         .map(|job| (*job, if *job == "test" { "failure" } else { "skipped" }))
         .collect();
@@ -403,7 +403,7 @@ fn demoting_an_already_demoted_release_writes_nothing_further() {
 #[test]
 fn a_job_the_workflow_never_reported_strands_the_release() {
     let fixture = Fixture::fresh();
-    let reported: Vec<String> = ALL_JOBS
+    let reported: Vec<String> = REPORTED_JOBS
         .iter()
         .filter(|job| **job != "verify-assets")
         .map(|job| format!("{job}=success"))
@@ -434,6 +434,59 @@ fn no_release_to_hold_is_a_usage_error() {
 
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+}
+
+/// No job results at all is the same usage error, and emphatically not "nothing
+/// failed": a gate handed nothing to judge must say so rather than pass.
+#[test]
+fn no_job_results_to_judge_is_a_usage_error() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run_with("", &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("JOB_RESULTS is required"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
+}
+
+/// A job result GitHub never gives is neither a success nor a failure to blame a
+/// job for, so it stops the run instead of being read as either.
+#[test]
+fn a_job_result_that_is_not_one_github_gives_is_a_usage_error() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run_with("test=green upload=success", &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("not 'test=green'"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
+}
+
+/// A Release cut by hand under some other tag is not one this pipeline built, and
+/// every other job in the release slices a version out of that tag.
+#[test]
+fn a_tag_that_is_not_a_version_is_a_usage_error() {
+    let fixture = Fixture::fresh();
+    let output = fixture
+        .command(&reported(&[]), &ALL_ON)
+        .env("RELEASE_TAG", "nightly")
+        .output()
+        .expect("bash is on PATH");
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("must be a vX.Y.Z version tag, not 'nightly'"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
 }
 
 /// A Release this cannot read is the failure mode that would make the gate
@@ -578,7 +631,7 @@ fn the_workflow_reports_every_job_it_runs_to_this_gate() {
             continue;
         }
         assert!(
-            ALL_JOBS.contains(&job.as_str()),
+            REPORTED_JOBS.contains(&job.as_str()),
             "release.yml runs a job called {job} that release-status.sh is never told about"
         );
         assert!(

@@ -67,6 +67,24 @@ EXPECT_NPM="${EXPECT_NPM:-}"
 [ -n "$RELEASE_TAG" ] || fail_usage "RELEASE_TAG is required"
 [ -n "$JOB_RESULTS" ] || fail_usage "JOB_RESULTS is required"
 
+# The tag names the Release this rewrites, so it is held to the same shape
+# release.yml's verify jobs hold it to: a Release cut by hand under some other
+# tag is not one this pipeline built, and saying so beats gh's 404.
+if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+  fail_usage "RELEASE_TAG must be a vX.Y.Z version tag, not '$RELEASE_TAG'"
+fi
+
+# Each pair is a job id and one of the four results GitHub gives a job. A token
+# of any other shape is a usage error rather than a verdict: read as a job that
+# failed it would blame a job that does not exist, and read as one that succeeded
+# it would be the silence this whole script exists to end.
+for pair in $JOB_RESULTS; do
+  case "$pair" in
+    ?*=success | ?*=failure | ?*=cancelled | ?*=skipped) ;;
+    *) fail_usage "JOB_RESULTS takes 'job=<success|failure|cancelled|skipped>' pairs, not '$pair'" ;;
+  esac
+done
+
 # Whether a switch is on. Anything that is neither `true`, `false` nor unset is a
 # usage error rather than a `false`: these decide which publish jobs a release was
 # waiting for, so a misspelled repository variable read as "off" would quietly
