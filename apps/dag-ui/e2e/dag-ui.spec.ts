@@ -2362,14 +2362,17 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     announced += chunk.toString();
   });
   try {
+    // One line per port, in the order they are taken, so a run that stops partway
+    // says how far it got. The second is the readiness its `webServer` entry waits
+    // for, and it comes last because by then both ports are this process's own.
     await expect
       .poll(() => announced, { timeout: 15_000 })
-      .toContain(
-        `serve-fixture: stalling on 127.0.0.1:${port}, refusing 127.0.0.1:${refusePort}`,
+      .toBe(
+        `serve-fixture: refusing 127.0.0.1:${refusePort}\n` +
+          `serve-fixture: stalling on 127.0.0.1:${port}\n`,
       );
-    // Announced only once both ports are its own, so the line is a fact about the
-    // host rather than an intention: this connection is the readiness its `webServer`
-    // entry waits on, and it is accepted and then never answered.
+    // And that readiness is the truth: the connection is accepted, and then never
+    // answered.
     const accepted = await new Promise<boolean>((connected) => {
       const socket = createConnection(port, "127.0.0.1");
       socket.on("connect", () => {
@@ -2389,9 +2392,15 @@ test("says which ports the stall server took, and refuses one it cannot", async 
   const stalledTaken = await freePort();
   const releaseStalled = await holdPort(stalledTaken);
   try {
-    const taken = refusedInvocation(["--stall", "--port", String(stalledTaken)]);
+    const taken = refusedInvocation([
+      "--stall",
+      "--port",
+      String(stalledTaken),
+    ]);
     expect(taken.status, taken.stderr).toBe(2);
-    expect(taken.stderr).toContain(`cannot stall on 127.0.0.1:${stalledTaken}`);
+    expect(taken.stderr).toContain(
+      `cannot start stalling on 127.0.0.1:${stalledTaken}`,
+    );
     expect(taken.stderr).toContain("EADDRINUSE");
   } finally {
     releaseStalled();
@@ -2409,7 +2418,7 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     ]);
     expect(takenRefusal.status, takenRefusal.stderr).toBe(2);
     expect(takenRefusal.stderr).toContain(
-      `cannot hold refused on 127.0.0.1:${refusalTaken}`,
+      `cannot start refusing 127.0.0.1:${refusalTaken}`,
     );
   } finally {
     releaseRefused();

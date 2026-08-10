@@ -182,8 +182,22 @@ export default defineConfig({
     {
       name: "stalled-api",
       command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
-      // Readiness is the accepted connection: this listener answers nothing, by design.
+      /**
+       * Readiness is what this server says, because it is the one server here that
+       * answers nothing when it is working — an accepted connection is all a
+       * reader could ask it for, and Playwright's `port` check asks the host that
+       * question rather than this process: it says *something* is listening on that
+       * number, which is also true of anything else that took it. The line says
+       * this process took both of its ports. `port` stays alongside it for the
+       * check Playwright makes before starting anything, which is what refuses a
+       * port another run is already holding.
+       */
       port: session.stalledApi,
+      wait: {
+        stdout: new RegExp(
+          `serve-fixture: stalling on 127\\.0\\.0\\.1:${session.stalledApi}\\b`,
+        ),
+      },
       reuseExistingServer: false,
       stdout: "pipe",
       timeout: 120_000,
