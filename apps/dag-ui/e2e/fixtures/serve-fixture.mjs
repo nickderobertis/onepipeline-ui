@@ -131,6 +131,16 @@ function serverBinary() {
  * promise, because a concurrent run's API server could take it.
  */
 async function stall(port, refusePort) {
+  // Said before anything is taken, because a line that only appears on success
+  // cannot tell a run that took neither port from one that never ran at all —
+  // and those are the two shapes behind a `webServer` that Playwright can only
+  // report as `Timed out waiting 120000ms`. This one says the process reached
+  // its own first statement; the two below say each port became its own.
+  process.stdout.write(
+    `serve-fixture: taking 127.0.0.1:${port} to stall${
+      refusePort === undefined ? "" : `, 127.0.0.1:${refusePort} to refuse`
+    }\n`,
+  );
   const held = [];
   if (refusePort !== undefined) {
     const reservation = createServer();

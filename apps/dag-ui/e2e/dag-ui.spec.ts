@@ -2362,13 +2362,15 @@ test("says which ports the stall server took, and refuses one it cannot", async 
     announced += chunk.toString();
   });
   try {
-    // One line per port, in the order they are taken, so a run that stops partway
-    // says how far it got. The second is the readiness its `webServer` entry waits
-    // for, and it comes last because by then both ports are this process's own.
+    // What it is about to take, then one line per port as each becomes its own, so
+    // a run that stops partway says how far it got — and one that never started
+    // says that too, by saying nothing. The last is the readiness its `webServer`
+    // entry waits for, and it comes last because by then both ports are its own.
     await expect
       .poll(() => announced, { timeout: 15_000 })
       .toBe(
-        `serve-fixture: refusing 127.0.0.1:${refusePort}\n` +
+        `serve-fixture: taking 127.0.0.1:${port} to stall, 127.0.0.1:${refusePort} to refuse\n` +
+          `serve-fixture: refusing 127.0.0.1:${refusePort}\n` +
           `serve-fixture: stalling on 127.0.0.1:${port}\n`,
       );
     // And that readiness is the truth: the connection is accepted, and then never
