@@ -38,6 +38,9 @@
 #   EXPECT_PYPI   'true' when publish-pypi and verify-pypi had to run
 #   EXPECT_NPM    'true' when publish-npm and verify-npm had to run
 #
+# The three switches take 'true', 'false' or nothing; anything else is a usage
+# error rather than an "off".
+#
 # `gh` must be on PATH and authenticated for the repository (GH_TOKEN).
 set -euo pipefail
 
@@ -64,6 +67,19 @@ EXPECT_NPM="${EXPECT_NPM:-}"
 [ -n "$RELEASE_TAG" ] || fail_usage "RELEASE_TAG is required"
 [ -n "$JOB_RESULTS" ] || fail_usage "JOB_RESULTS is required"
 
+# Whether a switch is on. Anything that is neither `true`, `false` nor unset is a
+# usage error rather than a `false`: these decide which publish jobs a release was
+# waiting for, so a misspelled repository variable read as "off" would quietly
+# leave this gate asking nothing of the registry the operator meant to publish to
+# — the exact silence the whole script exists to end.
+switched_on() {
+  case "$2" in
+    true) return 0 ;;
+    false | "") return 1 ;;
+    *) fail_usage "$1 must be 'true', 'false' or unset, not '$2'" ;;
+  esac
+}
+
 # The banner's own delimiters. The opening one is what makes this idempotent
 # across re-runs, and it carries the one fact demoting destroys: whether the
 # Release was already a prerelease. Restoring an `-rc` tag to Latest would be
@@ -77,13 +93,13 @@ BANNER_CLOSE="<!-- release-status: end -->"
 # unconditionally by design, so a packaging break reddens a release even where
 # publishing is switched off.
 required="test upload verify-assets build-wheels build-npm"
-if [ "$EXPECT_CRATE" = "true" ]; then
+if switched_on EXPECT_CRATE "$EXPECT_CRATE"; then
   required="$required publish-crate"
 fi
-if [ "$EXPECT_PYPI" = "true" ]; then
+if switched_on EXPECT_PYPI "$EXPECT_PYPI"; then
   required="$required publish-pypi verify-pypi"
 fi
-if [ "$EXPECT_NPM" = "true" ]; then
+if switched_on EXPECT_NPM "$EXPECT_NPM"; then
   required="$required publish-npm verify-npm"
 fi
 
@@ -157,6 +173,26 @@ edit_release() {
   fi
 }
 
+# The scratch file the notes below are assembled in, removed however this exits —
+# including the `fail` paths, which is why a trap rather than an `rm` after each
+# use.
+notes=""
+trap '[ -z "$notes" ] || rm -f "$notes"' EXIT
+
+# Assigns rather than prints: a `fail` inside a command substitution would exit
+# only the subshell it ran in.
+open_notes() {
+  if ! notes="$(mktemp)"; then
+    fail "cannot create a temporary file to assemble $RELEASE_TAG's notes in" \
+      "check that the runner's TMPDIR exists and is writable"
+  fi
+}
+
+wrote_notes_or_fail() {
+  fail "cannot write $RELEASE_TAG's notes to $notes" \
+    "check that the runner's TMPDIR has space and is writable"
+}
+
 if [ -z "$stranded" ]; then
   if [ "$demoted" = false ]; then
     echo "release-status: $RELEASE_TAG published — every required job succeeded."
@@ -164,19 +200,18 @@ if [ -z "$stranded" ]; then
   fi
   # A re-run finished what an earlier attempt left stranded, so the Release stops
   # saying it did not. It goes back to what it was before that demotion.
-  notes="$(mktemp)"
-  strip_banner >"$notes"
+  open_notes
+  strip_banner >"$notes" || wrote_notes_or_fail
   case "$body" in
     *"was-prerelease=true"*) edit_release --prerelease --notes-file "$notes" ;;
     *) edit_release --prerelease=false --latest --notes-file "$notes" ;;
   esac
-  rm -f "$notes"
   echo "release-status: $RELEASE_TAG published on a later attempt — the Release is a release again."
   exit 0
 fi
 
 if [ "$demoted" = false ]; then
-  notes="$(mktemp)"
+  open_notes
   {
     echo "$BANNER_OPEN was-prerelease=$was_prerelease -->"
     echo "> [!CAUTION]"
@@ -190,9 +225,8 @@ if [ "$demoted" = false ]; then
     echo "$BANNER_CLOSE"
     echo ""
     printf '%s\n' "$body"
-  } >"$notes"
+  } >"$notes" || wrote_notes_or_fail
   edit_release --prerelease --notes-file "$notes"
-  rm -f "$notes"
 fi
 
 fail "$RELEASE_TAG did not publish — $stranded" \

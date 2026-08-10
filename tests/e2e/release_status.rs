@@ -78,11 +78,11 @@ impl Fixture {
         // Release — and refuses whatever `GH_REFUSE` names, the way the real one
         // refuses a token that cannot read or write the Release.
         //
-        // llmlint: ignore[e2e_not_mocked] the real `gh` rewrites a public GitHub
-        // Release, so it is the one thing a journey cannot drive. Standing in for
-        // the program on PATH is the narrowest cut available: the script under
-        // test is the real script, run with the workflow's own environment, and
-        // the stand-in is only what makes the edits it asked for readable.
+        // llmlint: ignore-block[e2e_not_mocked] the real `gh` rewrites a public
+        // GitHub Release, so it is the one thing a journey cannot drive. Standing
+        // in for the program on PATH is the narrowest cut available: the script
+        // under test is the real script, run with the workflow's own environment,
+        // and the stand-in is only what makes the edits it asked for readable.
         stub_bin::install(
             &fixture.path("stub-bin"),
             "gh",
@@ -117,6 +117,7 @@ impl Fixture {
                  ;;\n\
              esac\n",
         );
+        // llmlint: ignore-end[e2e_not_mocked]
         fixture
     }
 
@@ -146,6 +147,15 @@ impl Fixture {
 
     fn run_with(&self, job_results: &str, switches: &Switches) -> Output {
         self.command(job_results, switches)
+            .output()
+            .expect("bash is on PATH")
+    }
+
+    /// The same run on a runner whose `TMPDIR` does not exist, which is the one
+    /// way the notes this rewrites a Release with cannot be assembled.
+    fn run_without_a_tmpdir(&self, bent: &[(&str, &str)], switches: &Switches) -> Output {
+        self.command(&reported(bent), switches)
+            .env("TMPDIR", self.path("no-such-directory"))
             .output()
             .expect("bash is on PATH")
     }
@@ -482,6 +492,51 @@ fn a_release_it_cannot_demote_names_the_grant_it_is_missing() {
     assert!(
         fixture.edited_body().is_none(),
         "the refused edit was recorded as made"
+    );
+}
+
+/// A switch the operator misspelled must not read as "off". `PYPI_PUBLISH` is a
+/// repository variable typed by hand, and a `yes` silently treated as `false`
+/// would leave this gate asking nothing at all of the registry it was set for.
+#[test]
+fn a_switch_that_is_not_a_boolean_is_a_usage_error() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run(
+        &[],
+        &Switches {
+            krate: "true",
+            pypi: "yes",
+            npm: "true",
+        },
+    );
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("EXPECT_PYPI must be 'true', 'false' or unset, not 'yes'"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
+}
+
+/// The banner is assembled in a temporary file, so a runner with no usable
+/// `TMPDIR` is the last way this job could go quiet about a stranded release.
+#[test]
+fn notes_it_cannot_assemble_fail_rather_than_leaving_the_release_alone() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run_without_a_tmpdir(&[("test", "failure")], &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("cannot create a temporary file"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert!(
+        fixture.edited_body().is_none(),
+        "a Release was rewritten with notes that were never assembled"
     );
 }
 
