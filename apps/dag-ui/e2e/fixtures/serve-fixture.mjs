@@ -44,9 +44,21 @@ const REPO_ROOT = resolve(
 /** Published beside the runs root so a spec names what this wrote, not a copy of it. */
 export const FIXTURE_FACTS_NAME = "fixture-facts.json";
 
-function die(message, action) {
+/**
+ * Report a failure and stop, under the same exit-code contract the crate serves:
+ * `2` is a usage error — the caller asked for something this cannot mean — and
+ * `70` is this side failing at something it was asked to do correctly. A build
+ * that did not build is the second, and telling a Playwright run which of the two
+ * it hit is the difference between fixing the invocation and fixing the tree.
+ */
+function stop(code, message, action) {
   process.stderr.write(`serve-fixture: ${message}\nACTION: ${action}\n`);
-  process.exit(2);
+  process.exit(code);
+}
+
+/** A usage error: the invocation cannot mean anything this script can do. */
+function die(message, action) {
+  stop(2, message, action);
 }
 
 /** The compiled server this fixture serves through, built if it is not there yet. */
@@ -56,7 +68,8 @@ function serverBinary() {
     stdio: ["ignore", "inherit", "inherit"],
   });
   if (built.status !== 0) {
-    die(
+    stop(
+      70,
       "the read API binary did not build",
       "run 'cargo build --locked' in the repository root and fix what it reports",
     );
