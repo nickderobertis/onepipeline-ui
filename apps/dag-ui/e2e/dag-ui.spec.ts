@@ -131,8 +131,22 @@ function changeServedRuns(args: string[]): void {
       FIXTURE_WORKSPACE,
       ...args,
     ],
-    { stdio: "inherit" },
+    { stdio: ["ignore", "inherit", "pipe"] },
   );
+}
+
+/** What the fixture command said and how it ended, for an invocation it refuses. */
+function refusedChange(args: string[]): { status: number; stderr: string } {
+  try {
+    changeServedRuns(args);
+  } catch (refused) {
+    const failure = refused as { status?: number; stderr?: Buffer };
+    return {
+      status: failure.status ?? 0,
+      stderr: failure.stderr?.toString() ?? "",
+    };
+  }
+  throw new Error(`serve-fixture accepted ${args.join(" ")}`);
 }
 
 /** The node view's pinned plot, once a node has been opened. */
@@ -2171,6 +2185,35 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
   await expect(
     page.getByText("Dashboard turn 3 arrived").first(),
   ).toBeVisible();
+});
+
+/**
+ * The fixture command's own contract, which is the one thing standing between a
+ * mistyped journey and a served run that records something no library could have
+ * written.
+ *
+ * Driven the way a journey drives it — the real script, over the real workspace —
+ * because a guard nobody has watched refuse is a guard nobody knows is there.
+ */
+test("refuses a change no recorded run could have held", () => {
+  for (const [args, said] of [
+    [["--record-activity", "Bash"], "needs --activity-detail"],
+    [
+      ["--record-activity", "Bash", "--activity-detail", ""],
+      "a tool summary is 1 to 160 characters",
+    ],
+    [
+      ["--record-activity", "not a tool", "--activity-detail", "just gate"],
+      "is not a tool name",
+    ],
+    [["--grow-worker-session", "many"], "is not a turn count"],
+    [["--remove-run", "../etc"], "is not a usable run id"],
+  ] satisfies readonly [string[], string][]) {
+    const refused = refusedChange(args);
+    expect(refused.status, args.join(" ")).toBe(2);
+    expect(refused.stderr, args.join(" ")).toContain(said);
+    expect(refused.stderr, args.join(" ")).toContain("ACTION:");
+  }
 });
 
 async function detailScroll(

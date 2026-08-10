@@ -1143,11 +1143,11 @@ const ACTIVITY_DETAIL_CHARS = 160;
  */
 export function recordActivity(root, name, detail) {
   if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(name)) {
-    throw new Error(`serve-fixture: '${name}' is not a tool name`);
+    throw new Error(`'${name}' is not a tool name`);
   }
   if (detail.length === 0 || detail.length > ACTIVITY_DETAIL_CHARS) {
     throw new Error(
-      `serve-fixture: a tool summary is 1 to ${ACTIVITY_DETAIL_CHARS} characters, not ${detail.length}`,
+      `a tool summary is 1 to ${ACTIVITY_DETAIL_CHARS} characters, not ${detail.length}`,
     );
   }
   appendEvent(
@@ -1203,7 +1203,7 @@ export function growTranscript(root, turns) {
  */
 export function removeRun(root, runId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) {
-    throw new Error(`serve-fixture: '${runId}' is not a usable run id`);
+    throw new Error(`'${runId}' is not a usable run id`);
   }
   rmSync(join(root, runId), { recursive: true, force: true });
 }

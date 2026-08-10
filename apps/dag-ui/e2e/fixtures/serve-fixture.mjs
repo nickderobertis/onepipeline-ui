@@ -223,33 +223,49 @@ if (args.stall) {
     );
   }
   const runsRoot = join(args.workspace, "runs");
-  if (args["settle-dashboard"]) {
-    settleDashboard(runsRoot);
-  } else if (args["remove-page-runs"]) {
-    removePageRuns(runsRoot);
-  } else if (args["remove-run"] !== undefined) {
-    removeRun(runsRoot, args["remove-run"]);
-  } else if (args["grow-worker-session"] !== undefined) {
-    const turns = Number(args["grow-worker-session"]);
-    if (!Number.isInteger(turns) || turns < 1) {
-      die(
-        `'${args["grow-worker-session"]}' is not a turn count`,
-        "pass --grow-worker-session the whole number of turns to record up to",
+  // The writers guard their own inputs — a run id that reaches a recursive
+  // delete, a tool summary that reaches a journal a server is reading — and they
+  // do it by throwing. Every one of those is the caller having asked for
+  // something this cannot mean, so it is reported as the usage error it is
+  // rather than as a stack trace and an undocumented exit code.
+  try {
+    if (args["settle-dashboard"]) {
+      settleDashboard(runsRoot);
+    } else if (args["remove-page-runs"]) {
+      removePageRuns(runsRoot);
+    } else if (args["remove-run"] !== undefined) {
+      removeRun(runsRoot, args["remove-run"]);
+    } else if (args["grow-worker-session"] !== undefined) {
+      const turns = Number(args["grow-worker-session"]);
+      if (!Number.isInteger(turns) || turns < 1) {
+        die(
+          `'${args["grow-worker-session"]}' is not a turn count`,
+          "pass --grow-worker-session the whole number of turns to record up to",
+        );
+      }
+      growTranscript(runsRoot, turns);
+    } else if (args["record-activity"] !== undefined) {
+      // Both halves or neither: a tool summary is the tool's name *and* what it
+      // was given, and one recorded with an empty detail is a record no member
+      // would have written.
+      if (args["activity-detail"] === undefined) {
+        die(
+          "--record-activity needs --activity-detail",
+          "pass --activity-detail the summary the tool call carried",
+        );
+      }
+      recordActivity(
+        runsRoot,
+        args["record-activity"],
+        args["activity-detail"],
       );
+    } else {
+      process.exit(await serve(args.workspace, port));
     }
-    growTranscript(runsRoot, turns);
-  } else if (args["record-activity"] !== undefined) {
-    // Both halves or neither: a summary the producing library bounds to 160
-    // characters is a tool's name *and* what it was given, and one recorded with
-    // an empty detail is a record no member would have written.
-    if (args["activity-detail"] === undefined) {
-      die(
-        "--record-activity needs --activity-detail",
-        "pass --activity-detail the summary the tool call carried",
-      );
-    }
-    recordActivity(runsRoot, args["record-activity"], args["activity-detail"]);
-  } else {
-    process.exit(await serve(args.workspace, port));
+  } catch (refused) {
+    die(
+      refused instanceof Error ? refused.message : String(refused),
+      "give the command a value the recorded run could really have held",
+    );
   }
 }
