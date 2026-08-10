@@ -151,40 +151,59 @@ export default defineConfig({
    * absent. A compile here is a wait whose length is the runner's and whatever else
    * holds the cargo lock, and Playwright can only report it as a server that would
    * not start — which is the one thing that was not wrong.
+   *
+   * Every entry is named and keeps its stdout, because the whole of what Playwright
+   * reports when one of them does not become ready is `Timed out waiting 120000ms
+   * from config.webServer` — which names neither the server nor the reason. It
+   * starts them one at a time, so on a host where that happens the run ends with no
+   * record of which of the five it was waiting for, and none of what the four that
+   * did start had said. `name` puts that on every line; `stdout: "pipe"` keeps the
+   * line each server prints when it binds, which is the one that answers whether it
+   * ever did. Playwright discards stdout by default, and here it is the evidence.
    */
   webServer: [
     {
+      name: "fixture-api",
       command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
       url: `http://127.0.0.1:${session.api}/healthz`,
       reuseExistingServer: false,
+      stdout: "pipe",
       timeout: 120_000,
     },
     {
+      name: "ui",
       command: `npx vite --config vite.config.ts --port ${session.ui} --strictPort`,
       url: `http://127.0.0.1:${session.ui}`,
       env: { DAG_UI_API_URL: `http://127.0.0.1:${session.api}` },
       reuseExistingServer: false,
+      stdout: "pipe",
       timeout: 120_000,
     },
     {
+      name: "stalled-api",
       command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
       // Readiness is the accepted connection: this listener answers nothing, by design.
       port: session.stalledApi,
       reuseExistingServer: false,
+      stdout: "pipe",
       timeout: 120_000,
     },
     {
+      name: "stalled-ui",
       command: `npx vite --config vite.config.ts --port ${session.stalledUi} --strictPort`,
       url: STALLED_UI_URL,
       env: { DAG_UI_API_URL: `http://127.0.0.1:${session.stalledApi}` },
       reuseExistingServer: false,
+      stdout: "pipe",
       timeout: 120_000,
     },
     {
+      name: "offline-ui",
       command: `npx vite --config vite.config.ts --port ${session.offlineUi} --strictPort`,
       url: OFFLINE_UI_URL,
       env: { DAG_UI_API_URL: `http://127.0.0.1:${session.offlineApi}` },
       reuseExistingServer: false,
+      stdout: "pipe",
       timeout: 120_000,
     },
   ],
