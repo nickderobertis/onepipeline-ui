@@ -37,8 +37,8 @@ module both features need and neither owns belongs in `src/lib/` instead.
 
 ## What the backend cannot answer
 
-A field no record fills is fed nothing, never an invented record: the surface
-states the absence and the journey asserts that statement. `src/AGENTS.md` is the
-list, and it is short — check what a producer actually emits before trimming a
-journey, because most of this vocabulary is answered and the last list of gaps
-was wrong about four of them.
+Some of the client's model has no record behind it. A surface needing one of
+those fields is fed nothing rather than an invented record: it states the
+absence, and the journey asserts that statement. Trim a journey only against what
+the producing library actually emits, never against a belief about what it does
+not.

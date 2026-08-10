@@ -23,7 +23,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -173,23 +173,40 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const port = Number(args.port ?? 8765);
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  die(
-    `'${args.port}' is not a port`,
-    "pass --port a number between 1 and 65535",
-  );
+/** One port option, checked before anything binds or connects to it. */
+function portOf(value, name) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    die(
+      `'${value}' is not a port`,
+      `pass ${name} a number between 1 and 65535`,
+    );
+  }
+  return port;
 }
+
+const port = portOf(args.port ?? 8765, "--port");
 
 if (args.stall) {
   const refuse =
-    args["refuse-port"] === undefined ? undefined : Number(args["refuse-port"]);
+    args["refuse-port"] === undefined
+      ? undefined
+      : portOf(args["refuse-port"], "--refuse-port");
   await stall(port, refuse);
 } else {
   if (args.workspace === undefined) {
     die(
       "--workspace is required",
       "pass --workspace the fixture directory to use",
+    );
+  }
+  // An absolute path, because this one is removed and rebuilt: a relative
+  // workspace resolves against whatever directory the caller happened to be in,
+  // and the directory this deletes must be the one Playwright chose.
+  if (!isAbsolute(args.workspace)) {
+    die(
+      `'${args.workspace}' is not an absolute path`,
+      "pass --workspace the absolute fixture directory Playwright recorded",
     );
   }
   const runsRoot = join(args.workspace, "runs");
@@ -200,7 +217,14 @@ if (args.stall) {
   } else if (args["remove-run"] !== undefined) {
     removeRun(runsRoot, args["remove-run"]);
   } else if (args["grow-worker-session"] !== undefined) {
-    growTranscript(runsRoot, Number(args["grow-worker-session"]));
+    const turns = Number(args["grow-worker-session"]);
+    if (!Number.isInteger(turns) || turns < 1) {
+      die(
+        `'${args["grow-worker-session"]}' is not a turn count`,
+        "pass --grow-worker-session the whole number of turns to record up to",
+      );
+    }
+    growTranscript(runsRoot, turns);
   } else if (args["record-activity"] !== undefined) {
     // Both halves or neither: a summary the producing library bounds to 160
     // characters is a tool's name *and* what it was given, and one recorded with
