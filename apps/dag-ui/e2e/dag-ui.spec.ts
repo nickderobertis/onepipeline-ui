@@ -7,10 +7,11 @@
 // no role to ask for. Naming those is a change to the app this app was imported
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   FIXTURE_WORKSPACE,
@@ -122,10 +123,13 @@ async function tokenColor(page: Page, token: string): Promise<string> {
 }
 
 /**
- * Change what the server is serving — record progress, or take a run away — through
- * the fixture module that wrote the run directory in the first place.
+ * Run the fixture command over a workspace and wait for it to finish.
+ *
+ * Every invocation this file makes goes through here — the ones that change what
+ * the server is serving, and the ones that ask it to serve and are refused before
+ * it can. `env` is empty unless a case is about what the command reads from it.
  */
-function changeServedRuns(
+function invokeFixture(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
   env: NodeJS.ProcessEnv = {},
@@ -138,18 +142,25 @@ function changeServedRuns(
 }
 
 /**
+ * Change what the server is serving — record progress, or take a run away — through
+ * the fixture module that wrote the run directory in the first place.
+ */
+function changeServedRuns(args: string[], workspace = FIXTURE_WORKSPACE): void {
+  invokeFixture(args, workspace);
+}
+
+/**
  * What the fixture command said and how it ended, for an invocation it refuses.
  *
- * `workspace` is this run's own unless a case is about that option itself, and
- * `env` is empty unless a case is about what the command reads from it.
+ * `workspace` is this run's own unless a case is about that option itself.
  */
-function refusedChange(
+function refusedInvocation(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
   env: NodeJS.ProcessEnv = {},
 ): { status: number; stderr: string } {
   try {
-    changeServedRuns(args, workspace, env);
+    invokeFixture(args, workspace, env);
   } catch (refused) {
     // Node decorates the error `execFileSync` throws with the child's own exit
     // status and captured stderr, and types neither: a caught value is `unknown`
@@ -2233,7 +2244,7 @@ test("refuses a change no recorded run could have held", () => {
     // read a run that recorded only half of what they asked for.
     [["--settle-dashboard", "--remove-page-runs"], "are more than one change"],
   ] satisfies readonly [string[], string][]) {
-    const refused = refusedChange(args);
+    const refused = refusedInvocation(args);
     expect(refused.status, args.join(" ")).toBe(2);
     expect(refused.stderr, args.join(" ")).toContain(said);
     expect(refused.stderr, args.join(" ")).toContain("ACTION:");
@@ -2241,14 +2252,14 @@ test("refuses a change no recorded run could have held", () => {
 
   // The workspace is the one option this script *deletes* through, so it is
   // refused rather than resolved against whatever directory the caller was in.
-  const relative = refusedChange(["--settle-dashboard"], "runs");
+  const relative = refusedInvocation(["--settle-dashboard"], "runs");
   expect(relative.status).toBe(2);
   expect(relative.stderr).toContain("is not an absolute path");
 
   // Absolute is not enough in front of that delete: a workspace outside the temp
   // root Playwright makes them in is somebody else's directory, and this refuses
   // it before it reads or removes anything under it — `/etc` is still here.
-  const elsewhere = refusedChange(["--settle-dashboard"], "/etc");
+  const elsewhere = refusedInvocation(["--settle-dashboard"], "/etc");
   expect(elsewhere.status).toBe(2);
   expect(elsewhere.stderr).toContain("is not a directory under");
   expect(existsSync("/etc/hosts")).toBe(true);
@@ -2273,13 +2284,13 @@ test("refuses to serve when the read API has not been built", () => {
     join(tmpdir(), "dag-ui-e2e-unbuilt-workspace-"),
   );
   try {
-    const refused = refusedChange([], workspace, {
+    const refused = refusedInvocation([], workspace, {
       CARGO_TARGET_DIR: unbuilt,
     });
     // 70, not 2: the invocation was answerable, the tree was not ready for it.
     expect(refused.status, refused.stderr).toBe(70);
     expect(refused.stderr).toContain(
-      `no read API binary at ${join(unbuilt, "debug", "onepipeline-api")}`,
+      `no read API binary in ${join(unbuilt, "debug")}`,
     );
     // The action names the step that builds it, so a reader of a failed run does
     // not have to know that the tier stopped building it on their behalf.
@@ -2290,7 +2301,7 @@ test("refuses to serve when the read API has not been built", () => {
     // The same variable set to nothing is a mistyped export, not a directory, and
     // it is refused as the usage error it is: resolved, it would name the
     // repository root and report a tree that was never built.
-    const blank = refusedChange([], workspace, { CARGO_TARGET_DIR: "" });
+    const blank = refusedInvocation([], workspace, { CARGO_TARGET_DIR: "" });
     expect(blank.status, blank.stderr).toBe(2);
     expect(blank.stderr).toContain("CARGO_TARGET_DIR is set to an empty path");
   } finally {
@@ -2298,6 +2309,91 @@ test("refuses to serve when the read API has not been built", () => {
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+/**
+ * The binary `dag-ui:build-api-server` built, which this run is already being served
+ * through. Resolved against the working directory the tier runs from, as the fixture
+ * path in `invokeFixture` is.
+ */
+const API_BINARY = resolve("../../target/debug/onepipeline-api");
+
+/** A port the kernel says is free, asked for the way `playwright.config.ts` asks. */
+function freePort(): Promise<number> {
+  return new Promise((chosen, failed) => {
+    const probe = createServer();
+    probe.on("error", failed);
+    probe.listen(0, "127.0.0.1", () => {
+      const bound = probe.address();
+      if (typeof bound !== "object" || bound === null) {
+        failed(new Error("the probe socket reported no port"));
+        return;
+      }
+      probe.close(() => chosen(bound.port));
+    });
+  });
+}
+
+/**
+ * And what it does when the binary is where `CARGO_TARGET_DIR` says: it serves
+ * through that one, under either name cargo writes.
+ *
+ * Both names are driven here rather than only this platform's, because the browser
+ * tier runs on Linux and a name chosen from `process.platform` would leave the other
+ * one proven nowhere. A link rather than a copy: it is the same 160 MB binary this
+ * run is already being served through, named the way the other platform's cargo
+ * would have named it.
+ */
+for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
+  test(`serves through the ${name} a custom CARGO_TARGET_DIR names`, async () => {
+    const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));
+    const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-space-"));
+    mkdirSync(join(target, "debug"), { recursive: true });
+    linkSync(API_BINARY, join(target, "debug", name));
+    const port = await freePort();
+    const served = spawn(
+      process.execPath,
+      [
+        "e2e/fixtures/serve-fixture.mjs",
+        "--workspace",
+        workspace,
+        "--port",
+        String(port),
+      ],
+      {
+        stdio: ["ignore", "inherit", "inherit"],
+        env: { ...process.env, CARGO_TARGET_DIR: target },
+      },
+    );
+    try {
+      // The read the fixture server's own `webServer` entry waits on, made here
+      // against a server started from the directory this case named.
+      await expect
+        .poll(
+          async () => {
+            try {
+              return (await fetch(`http://127.0.0.1:${port}/healthz`)).status;
+            } catch {
+              return 0;
+            }
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(200);
+      // Serving, not merely listening: the runs this workspace was built with are
+      // what came back.
+      const listed = await (
+        await fetch(`http://127.0.0.1:${port}/api/v2/runs?limit=50`)
+      ).json();
+      expect(Array.isArray(listed.runs) && listed.runs.length).toBeGreaterThan(
+        0,
+      );
+    } finally {
+      served.kill("SIGTERM");
+      rmSync(target, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+}
 
 async function detailScroll(
   page: Page,

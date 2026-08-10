@@ -184,14 +184,6 @@ test-quick:
 test-e2e:
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 
-# Deliberately outside affected selection, and the one target CI runs that way:
-# it is the only proof the served UI works, and a browser tier that runs only
-# where it cannot block a merge is worse than no tier (see .github/workflows/ci.yml).
-# Nx still replays it from cache when the affected sweep already ran it.
-# The browser tier alone (also run by `test`/`check`).
-test-browser:
-    @bash scripts/nx.sh run dag-ui:test
-
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.
 run *ARGS:
     cargo run --locked --quiet -- {{ARGS}}

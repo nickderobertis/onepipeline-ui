@@ -100,15 +100,18 @@ function targetRoot() {
  * here in milliseconds rather than waited out.
  */
 function serverBinary() {
-  const binary = join(
-    targetRoot(),
-    "debug",
-    process.platform === "win32" ? "onepipeline-api.exe" : "onepipeline-api",
-  );
-  if (!existsSync(binary)) {
+  const directory = join(targetRoot(), "debug");
+  // Both names cargo gives that binary, looked for rather than chosen from the
+  // platform: what is on disk is what this has to spawn, and asking the disk is
+  // one path a run on any OS takes — where branching on `process.platform` would
+  // leave the branch the browser tier does not run on unproven.
+  const binary = ["onepipeline-api", "onepipeline-api.exe"]
+    .map((name) => join(directory, name))
+    .find(existsSync);
+  if (binary === undefined) {
     stop(
       70,
-      `no read API binary at ${binary}`,
+      `no read API binary in ${directory}`,
       "run 'npx nx run dag-ui:build-api-server' from the repository root — the browser tier builds it in a step of its own, before any server starts",
     );
   }

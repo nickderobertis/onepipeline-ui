@@ -16,16 +16,6 @@ and the read model is doubled.
 It asserts nothing; it is how the operator sees a polish problem at a width
 nobody opens by hand.
 
-## The tier finds the read API; it never builds it
-
-The fixture server serves through the compiled `onepipeline-api`, and compiling
-it is `dag-ui:build-api-server` — a target of its own that `test` and `bootstrap`
-depend on. No Playwright `webServer` command may build anything: its timeout is
-a readiness budget for a process binding a port, and a compile spends that budget
-on something Playwright can only report as a server that would not start.
-`serve-fixture.mjs` locates the binary and, when it is absent, exits `70` naming
-the target that builds it.
-
 ## This app was copied, and its implementation is the spec
 
 It came over from the repository it was written in, whole. Preserve the invested

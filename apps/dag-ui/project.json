@@ -4,7 +4,12 @@
   "projectType": "application",
   "sourceRoot": "apps/dag-ui/src",
   "tags": ["scope:app", "type:web"],
-  "implicitDependencies": ["dag-layout", "dag-model", "telemetry-client"],
+  "implicitDependencies": [
+    "dag-layout",
+    "dag-model",
+    "telemetry-client",
+    "onepipeline-ui"
+  ],
   "targets": {
     "serve": {
       "command": "cd apps/dag-ui && npx vite --config vite.config.ts"
@@ -15,7 +20,6 @@
     },
     "build-api-server": {
       "command": "cargo build --locked --quiet --bin onepipeline-api",
-      "inputs": ["apiServerSurface"],
       "cache": false
     },
     "lint": {
@@ -38,6 +42,9 @@
     "bootstrap": {
       "command": "cd apps/dag-ui && npx playwright install chromium",
       "dependsOn": ["build-api-server"]
+    },
+    "check": {
+      "executor": "nx:noop"
     }
   }
 }
