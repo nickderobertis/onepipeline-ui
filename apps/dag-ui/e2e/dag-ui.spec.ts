@@ -9,7 +9,7 @@
 // only thing that would catch what such a pass moved.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -2316,6 +2316,105 @@ test("refuses to serve when the read API has not been built", () => {
  * path in `invokeFixture` is.
  */
 const API_BINARY = resolve("../../target/debug/onepipeline-api");
+
+/** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
+function holdPort(port: number): Promise<() => void> {
+  return new Promise((held, failed) => {
+    const squatter = createServer();
+    squatter.on("error", failed);
+    squatter.listen(port, "127.0.0.1", () =>
+      held(() => {
+        squatter.close();
+      }),
+    );
+  });
+}
+
+/**
+ * What the stall server says — the one server this tier starts that answers nothing.
+ *
+ * It is started as a `webServer` whose readiness is the accepted connection, and
+ * Playwright reports a `webServer` that never became ready as a bare `Timed out
+ * waiting 120000ms from config.webServer` naming neither the server nor the reason.
+ * That left this the only one of the five whose failure could not be told from its
+ * success, because saying nothing is what it does when it works. So it says which
+ * ports it took, and refuses — under the same exit-code contract the crate serves,
+ * `2` for an address this host will not give — rather than dying on an unhandled
+ * `error` with a stack and a status outside that contract.
+ */
+test("says which ports the stall server took, and refuses one it cannot", async () => {
+  const port = await freePort();
+  const refusePort = await freePort();
+  const stalling = spawn(
+    process.execPath,
+    [
+      "e2e/fixtures/serve-fixture.mjs",
+      "--stall",
+      "--port",
+      String(port),
+      "--refuse-port",
+      String(refusePort),
+    ],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  let announced = "";
+  stalling.stdout.on("data", (chunk: Buffer) => {
+    announced += chunk.toString();
+  });
+  try {
+    await expect
+      .poll(() => announced, { timeout: 15_000 })
+      .toContain(
+        `serve-fixture: stalling on 127.0.0.1:${port}, refusing 127.0.0.1:${refusePort}`,
+      );
+    // Announced only once both ports are its own, so the line is a fact about the
+    // host rather than an intention: this connection is the readiness its `webServer`
+    // entry waits on, and it is accepted and then never answered.
+    const accepted = await new Promise<boolean>((connected) => {
+      const socket = createConnection(port, "127.0.0.1");
+      socket.on("connect", () => {
+        socket.destroy();
+        connected(true);
+      });
+      socket.on("error", () => connected(false));
+    });
+    expect(accepted).toBe(true);
+  } finally {
+    stalling.kill("SIGTERM");
+  }
+
+  // And the failure this could only report as a timeout before: a port taken between
+  // the kernel answering `playwright.config.ts` and this bind. Both of them, because
+  // the refused port is taken by a second server whose `error` was unhandled too.
+  const stalledTaken = await freePort();
+  const releaseStalled = await holdPort(stalledTaken);
+  try {
+    const taken = refusedInvocation(["--stall", "--port", String(stalledTaken)]);
+    expect(taken.status, taken.stderr).toBe(2);
+    expect(taken.stderr).toContain(`cannot stall on 127.0.0.1:${stalledTaken}`);
+    expect(taken.stderr).toContain("EADDRINUSE");
+  } finally {
+    releaseStalled();
+  }
+
+  const refusalTaken = await freePort();
+  const releaseRefused = await holdPort(refusalTaken);
+  try {
+    const takenRefusal = refusedInvocation([
+      "--stall",
+      "--port",
+      String(await freePort()),
+      "--refuse-port",
+      String(refusalTaken),
+    ]);
+    expect(takenRefusal.status, takenRefusal.stderr).toBe(2);
+    expect(takenRefusal.stderr).toContain(
+      `cannot hold refused on 127.0.0.1:${refusalTaken}`,
+    );
+  } finally {
+    releaseRefused();
+  }
+});
 
 /** A port the kernel says is free, asked for the way `playwright.config.ts` asks. */
 function freePort(): Promise<number> {

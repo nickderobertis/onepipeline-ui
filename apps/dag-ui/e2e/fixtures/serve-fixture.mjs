@@ -130,7 +130,7 @@ function serverBinary() {
  * kernel refuses every connection to it — which merely leaving a port free cannot
  * promise, because a concurrent run's API server could take it.
  */
-function stall(port, refusePort) {
+async function stall(port, refusePort) {
   const held = [];
   if (refusePort !== undefined) {
     const reservation = createServer();
@@ -139,7 +139,7 @@ function stall(port, refusePort) {
     // listens and immediately destroys anything that arrives — a connection refused
     // as far as the browser's first read is concerned.
     reservation.on("connection", (socket) => socket.destroy());
-    reservation.listen(refusePort, "127.0.0.1");
+    await bound(reservation, refusePort, "hold refused");
     held.push(reservation);
   }
   const listener = createServer((socket) => {
@@ -147,10 +147,42 @@ function stall(port, refusePort) {
     // fast, which is the opposite of what this proves.
     held.push(socket);
   });
-  listener.listen(port, "127.0.0.1");
+  await bound(listener, port, "stall");
   held.push(listener);
+  // Said out loud for the same reason the read API says it: this is the only server
+  // the browser tier starts that answers nothing by design, so a run that waits for
+  // it and gives up has, without this line, no way to tell a port it never took from
+  // one it took and held. Playwright reports a `webServer` that did not become ready
+  // as a bare timeout naming neither the server nor the reason.
+  process.stdout.write(
+    `serve-fixture: stalling on 127.0.0.1:${port}${
+      refusePort === undefined ? "" : `, refusing 127.0.0.1:${refusePort}`
+    }\n`,
+  );
   // Nothing resolves this: the process lives until Playwright stops it.
   return new Promise(() => {});
+}
+
+/**
+ * Take `port` on loopback for `purpose`, or stop saying which port and why.
+ *
+ * A `net.Server` reports a port it could not take by emitting `error`, and an
+ * `error` nothing is listening for is an uncaught exception — a stack trace and
+ * an exit code outside this script's contract, for the one failure a reader can
+ * act on. `2`, as the read API answers the same failure: the caller named an
+ * address and the host will not give it, which is a usage error rather than this
+ * side failing at something it could have done.
+ */
+function bound(server, port, purpose) {
+  return new Promise((listening) => {
+    server.once("error", (refused) => {
+      die(
+        `cannot ${purpose} on 127.0.0.1:${port}: ${refused.message}`,
+        "give this run a free port — playwright.config.ts asks the kernel for one per run, so a port taken between that answer and this bind is what this reports",
+      );
+    });
+    server.listen(port, "127.0.0.1", listening);
+  });
 }
 
 /** Build the fixture in `workspace` and serve it on a loopback port. */
