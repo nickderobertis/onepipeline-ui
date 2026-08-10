@@ -8,6 +8,7 @@
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   FIXTURE_WORKSPACE,
@@ -2219,6 +2220,10 @@ test("refuses a change no recorded run could have held", () => {
     [["--grow-worker-session", "many"], "is not a turn count"],
     [["--remove-run", "../etc"], "is not a usable run id"],
     [["--stall", "--refuse-port", "no"], "is not a port"],
+    // Two changes in one invocation: the dispatch is a chain, so the second
+    // would be dropped by whichever branch matched first and the caller would
+    // read a run that recorded only half of what they asked for.
+    [["--settle-dashboard", "--remove-page-runs"], "are more than one change"],
   ] satisfies readonly [string[], string][]) {
     const refused = refusedChange(args);
     expect(refused.status, args.join(" ")).toBe(2);
@@ -2231,6 +2236,14 @@ test("refuses a change no recorded run could have held", () => {
   const relative = refusedChange(["--settle-dashboard"], "runs");
   expect(relative.status).toBe(2);
   expect(relative.stderr).toContain("is not an absolute path");
+
+  // Absolute is not enough in front of that delete: a workspace outside the temp
+  // root Playwright makes them in is somebody else's directory, and this refuses
+  // it before it reads or removes anything under it — `/etc` is still here.
+  const elsewhere = refusedChange(["--settle-dashboard"], "/etc");
+  expect(elsewhere.status).toBe(2);
+  expect(elsewhere.stderr).toContain("is not a directory under");
+  expect(existsSync("/etc/hosts")).toBe(true);
 });
 
 async function detailScroll(

@@ -1048,23 +1048,6 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f469d71c5091d647ef0102421326ec5f4206f54d95c4368c1d236456fce83113"
-dependencies = [
- "clap",
- "libc",
- "serde",
- "serde_json",
- "serde_norway",
- "sha2",
- "thiserror",
- "toml_edit",
- "ureq",
-]
-
-[[package]]
-name = "oneagentgraph"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df15c323024ecb823db40b6124176952c24aa6589fb9c58c7f28314d35e82b1f"
@@ -1127,7 +1110,7 @@ checksum = "b56e59596e50d2b032013422fecea36e8f554aa3ba959564c9cb2b5ba0c7abf3"
 dependencies = [
  "clap",
  "libc",
- "oneagentgraph 0.2.2",
+ "oneagentgraph",
  "onevcs",
  "serde",
  "serde_json",
@@ -1145,7 +1128,7 @@ dependencies = [
  "clap",
  "futures-core",
  "libc",
- "oneagentgraph 0.1.1",
+ "oneagentgraph",
  "onepipeline",
  "predicates",
  "serde",

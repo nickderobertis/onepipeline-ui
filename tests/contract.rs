@@ -355,7 +355,7 @@ fn the_run_list_carries_session_attribution() {
 }
 
 #[test]
-fn schema_ten_carries_a_dispatch_id() {
+fn a_dispatch_span_carries_a_dispatch_id_this_crate_can_name() {
     let raw = read_fixture("run-timeline.json");
     let envelope: Envelope<Value> = serde_json::from_str(&raw).expect("parse run-timeline.json");
     let spans = envelope.payload["spans"]

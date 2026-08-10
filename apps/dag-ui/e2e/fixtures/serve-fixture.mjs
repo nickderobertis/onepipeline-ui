@@ -23,7 +23,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -191,6 +192,28 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+
+// One change per invocation. The dispatch below is a chain, so a second action
+// would be silently dropped by the first branch that matched — and a caller who
+// asked for two changes and got one is reading a run that recorded something
+// they never asked for, which is the whole failure this script's guards exist to
+// prevent. `--activity-detail` is not counted: it is the other half of
+// `--record-activity`, and arriving alone is already its own refusal.
+const ACTIONS = [
+  "stall",
+  "settle-dashboard",
+  "remove-page-runs",
+  "remove-run",
+  "grow-worker-session",
+  "record-activity",
+];
+const asked = ACTIONS.filter((action) => args[action] !== undefined);
+if (asked.length > 1) {
+  die(
+    `${asked.map((action) => `--${action}`).join(" and ")} are more than one change`,
+    "run this once per change, so each one is the change the caller asked for",
+  );
+}
 /** One port option, checked before anything binds or connects to it. */
 function portOf(value, name) {
   const port = Number(value);
@@ -227,7 +250,22 @@ if (args.stall) {
       "pass --workspace the absolute fixture directory Playwright recorded",
     );
   }
-  const runsRoot = join(args.workspace, "runs");
+  // And one this script is allowed to own. Absolute is not enough in front of a
+  // recursive delete: `serve` removes the whole directory before rebuilding it,
+  // so an absolute path that is somebody else's — a home directory, a source
+  // tree, `/` — is exactly the argument that must not be honoured. The temp root
+  // is the bound because `playwright.config.ts` makes every workspace with
+  // `mkdtempSync(join(tmpdir(), …))`, so nothing this may delete is ever outside
+  // it, and the temp root itself is not a workspace either.
+  const workspace = resolve(args.workspace);
+  const temporary = resolve(tmpdir());
+  if (workspace === temporary || !workspace.startsWith(`${temporary}${sep}`)) {
+    die(
+      `'${args.workspace}' is not a directory under ${temporary}`,
+      "pass --workspace a fixture directory inside the temp root, as playwright.config.ts creates it",
+    );
+  }
+  const runsRoot = join(workspace, "runs");
   // The writers guard their own inputs — a run id that reaches a recursive
   // delete, a tool summary that reaches a journal a server is reading — and they
   // do it by throwing. Every one of those is the caller having asked for
@@ -270,7 +308,7 @@ if (args.stall) {
         "pass --record-activity the name of the tool the summary came from",
       );
     } else {
-      process.exit(await serve(args.workspace, port));
+      process.exit(await serve(workspace, port));
     }
   } catch (refused) {
     die(

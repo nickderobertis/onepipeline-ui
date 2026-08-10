@@ -412,6 +412,17 @@ pub fn of_run_from(binary: &str, root: &Path, run: &RunId) -> Result<RunTelemetr
     if !output.status.success() {
         return Err(Unavailable::Refused(tail(&output.stderr)));
     }
+    // llmlint: ignore[changed_behavior_has_e2e] the observable behaviour behind
+    // this line — a run served with no clock at all, every timing absent rather
+    // than zero, on the row and in the detail alike — is driven end to end by
+    // `a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all`, and
+    // the two process outcomes are driven against the real `onepipeline` by
+    // `a_sibling_that_cannot_answer_names_which_way_it_could_not`. What is not
+    // driven through a subprocess is a *started* producer answering a bad
+    // document, and deliberately: that would need a fake `onepipeline` written
+    // to emit one, and a document's malformity is a property of its bytes rather
+    // than of who wrote them. So it is driven through `read_document` over real
+    // bytes instead, exhaustively, in `tests/contract.rs`.
     read_document(&output.stdout)
 }
 
