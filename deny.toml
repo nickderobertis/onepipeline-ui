@@ -38,6 +38,12 @@ allow = [
     # 2.0 places no condition at all on what a recipient does with it, and none
     # on this binary. Reviewed when `onepipeline` was first depended on.
     "CDLA-Permissive-2.0",
+    # MIT with the attribution clause struck out, on `borrow-or-share`. It comes
+    # in under the onepipeline SDK's schema validation (onepipeline ->
+    # oneharness-core -> jsonschema -> referencing -> fluent-uri). OSI-approved
+    # and FSF-free, and strictly weaker than the MIT this binary ships under:
+    # having dropped the notice requirement it imposes no condition to carry.
+    "MIT-0",
 ]
 confidence-threshold = 0.9
 exceptions = []
