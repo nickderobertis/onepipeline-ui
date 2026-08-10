@@ -6,6 +6,23 @@ import { defineConfig } from "@playwright/test";
 import { z } from "zod";
 
 /**
+ * The loopback address every server here binds, every URL here names, and every
+ * readiness check here connects to — one literal, because the whole failure it
+ * exists to prevent is two of them disagreeing.
+ *
+ * An address rather than `localhost`, and named rather than defaulted, because
+ * `localhost` is a name a host resolves and this is a number a socket binds. Vite's
+ * dev server binds whatever `--host` resolves to and defaults to `localhost`, so on
+ * a host whose `/etc/hosts` gives `::1` first — as Ubuntu images with
+ * `::1 localhost` do, and Node resolves verbatim since 17 — it listens on `[::1]`
+ * alone while Playwright waits on `http://127.0.0.1:<port>`, which is refused for
+ * the whole readiness budget. It prints `ready in 253 ms` either way, so the log
+ * says a server started and Playwright says one never did. That is a CI failure
+ * this tier cannot see from a host where the same name resolves to `127.0.0.1`.
+ */
+const LOOPBACK = "127.0.0.1";
+
+/**
  * Everything one run of this tier must not share with another: its ports and the
  * fixture directory its servers build.
  *
@@ -53,7 +70,7 @@ const { createServer } = require("node:net");
 const held = Array.from({ length: 6 }, () => createServer());
 let bound = 0;
 for (const server of held) {
-  server.listen(0, "127.0.0.1", () => {
+  server.listen(0, "${LOOPBACK}", () => {
     bound += 1;
     if (bound < held.length) return;
     console.log(JSON.stringify(held.map((s) => s.address().port)));
@@ -103,13 +120,13 @@ const session = currentSession();
  * free would let a concurrent run's API server take it, and this journey would quietly
  * be driving a reachable API.
  */
-export const OFFLINE_UI_URL = `http://127.0.0.1:${session.offlineUi}`;
+export const OFFLINE_UI_URL = `http://${LOOPBACK}:${session.offlineUi}`;
 /**
  * A third UI origin whose proxy points at a listener that accepts and never answers,
  * so the app's first read stays in flight and its loading view stays on screen long
  * enough for a real browser to observe it.
  */
-export const STALLED_UI_URL = `http://127.0.0.1:${session.stalledUi}`;
+export const STALLED_UI_URL = `http://${LOOPBACK}:${session.stalledUi}`;
 /**
  * Where the fixture server writes the run directory it serves, rebuilt on every start.
  * A journey needs to name it to change what the server is serving; it is this run's
@@ -141,7 +158,7 @@ export default defineConfig({
   // is serving, so the journeys share that state and must not run against each other.
   workers: 1,
   fullyParallel: false,
-  use: { baseURL: `http://127.0.0.1:${session.ui}` },
+  use: { baseURL: `http://${LOOPBACK}:${session.ui}` },
   /**
    * Every timeout below is a *readiness* budget: how long a process may take to bind
    * its port, not how long it may take to exist. So no command here may build
@@ -165,16 +182,16 @@ export default defineConfig({
     {
       name: "fixture-api",
       command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
-      url: `http://127.0.0.1:${session.api}/healthz`,
+      url: `http://${LOOPBACK}:${session.api}/healthz`,
       reuseExistingServer: false,
       stdout: "pipe",
       timeout: 120_000,
     },
     {
       name: "ui",
-      command: `npx vite --config vite.config.ts --port ${session.ui} --strictPort`,
-      url: `http://127.0.0.1:${session.ui}`,
-      env: { DAG_UI_API_URL: `http://127.0.0.1:${session.api}` },
+      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.ui} --strictPort`,
+      url: `http://${LOOPBACK}:${session.ui}`,
+      env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.api}` },
       reuseExistingServer: false,
       stdout: "pipe",
       timeout: 120_000,
@@ -204,18 +221,18 @@ export default defineConfig({
     },
     {
       name: "stalled-ui",
-      command: `npx vite --config vite.config.ts --port ${session.stalledUi} --strictPort`,
+      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.stalledUi} --strictPort`,
       url: STALLED_UI_URL,
-      env: { DAG_UI_API_URL: `http://127.0.0.1:${session.stalledApi}` },
+      env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.stalledApi}` },
       reuseExistingServer: false,
       stdout: "pipe",
       timeout: 120_000,
     },
     {
       name: "offline-ui",
-      command: `npx vite --config vite.config.ts --port ${session.offlineUi} --strictPort`,
+      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.offlineUi} --strictPort`,
       url: OFFLINE_UI_URL,
-      env: { DAG_UI_API_URL: `http://127.0.0.1:${session.offlineApi}` },
+      env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.offlineApi}` },
       reuseExistingServer: false,
       stdout: "pipe",
       timeout: 120_000,
