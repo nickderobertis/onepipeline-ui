@@ -915,10 +915,16 @@ fn document_with(change: impl FnOnce(&mut Value)) -> Vec<u8> {
     document.to_string().into_bytes()
 }
 
+/// The run the document above is about, which is the run these tests ask about.
+fn telemetry_run() -> RunId {
+    RunId::try_from(fixture_run::RUN_ID).expect("valid")
+}
+
 #[test]
 fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
-    let document = onepipeline_ui::telemetry::read_document(&document_with(|_| {}))
-        .expect("the document a run really produces");
+    let document =
+        onepipeline_ui::telemetry::read_document(&telemetry_run(), &document_with(|_| {}))
+            .expect("the document a run really produces");
     assert_eq!(document.wall_ms, 31_000);
     assert_eq!(
         document.bucket(onepipeline_ui::telemetry::BucketName::Agent),
@@ -949,15 +955,32 @@ fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
 /// The producer states each of these about what it writes, and every one of them
 /// is a thing a reader would otherwise serve as fact: a bucket set that does not
 /// add up, time that was never on the clock, a party reported as having spent
-/// nothing when nobody measured it. A malformed document has to become an
-/// absence of timing with a reason, never a payload.
+/// nothing when nobody measured it, a whole other run's clock. A malformed
+/// document has to become an absence of timing with a reason, never a payload.
 #[test]
 fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
-    let refusals: [(&str, Vec<u8>, &str); 9] = [
+    let refusals: [(&str, Vec<u8>, &str); 11] = [
         (
             "not a document at all",
             b"onepipeline: something went wrong".to_vec(),
             "expected value",
+        ),
+        (
+            "a document about another run",
+            document_with(|document| {
+                document["run_id"] = serde_json::json!(fixture_run::OTHER_RUN_ID);
+            }),
+            "the document is run `run-20260807-d4e5f6`'s",
+        ),
+        (
+            "a document about no run at all",
+            document_with(|document| {
+                document
+                    .as_object_mut()
+                    .expect("a mapping")
+                    .remove("run_id");
+            }),
+            "missing field `run_id`",
         ),
         (
             "a version this build does not read",
@@ -1017,7 +1040,7 @@ fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
         ),
     ];
     for (what, answered, said) in refusals {
-        let refused = onepipeline_ui::telemetry::read_document(&answered)
+        let refused = onepipeline_ui::telemetry::read_document(&telemetry_run(), &answered)
             .expect_err(&format!("{what} is not a telemetry document"));
         assert!(
             matches!(
@@ -1040,10 +1063,13 @@ fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
 /// that must not happen is a cost of infinity reaching a payload.
 #[test]
 fn a_cost_no_number_can_hold_never_reaches_a_payload() {
-    let refused = onepipeline_ui::telemetry::read_document(&document_with(|document| {
-        document["usage"]["total"]["cost_usd"] = serde_json::json!(1e308);
-        document["usage"]["total"]["input"] = serde_json::json!(1);
-    }))
+    let refused = onepipeline_ui::telemetry::read_document(
+        &telemetry_run(),
+        &document_with(|document| {
+            document["usage"]["total"]["cost_usd"] = serde_json::json!(1e308);
+            document["usage"]["total"]["input"] = serde_json::json!(1);
+        }),
+    )
     .map(|document| {
         document
             .usage_of(onepipeline_ui::telemetry::Party::Total)
@@ -1060,9 +1086,15 @@ fn a_cost_no_number_can_hold_never_reaches_a_payload() {
             onepipeline_ui::telemetry::Unavailable::Unreadable(_)
         )),
     }
-    let overflowed = b"{\"schema_version\":2,\"wall_ms\":0,\"buckets\":[],\"usage\":{\"total\":{\"cost_usd\":1e999}}}";
+    // Written as text rather than through `serde_json::json!`, because `1e999` is
+    // not a number any `Value` holds either — and the rest of the document is the
+    // good one, so the cost is the only thing there is to refuse it for.
+    let overflowed = String::from_utf8(document_with(|_| {}))
+        .expect("utf-8")
+        .replace("0.53", "1e999")
+        .into_bytes();
     assert!(
-        onepipeline_ui::telemetry::read_document(overflowed).is_err(),
+        onepipeline_ui::telemetry::read_document(&telemetry_run(), &overflowed).is_err(),
         "a cost past every number is not a cost"
     );
 }

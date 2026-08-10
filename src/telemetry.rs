@@ -17,8 +17,9 @@
 //! Two boundaries, kept apart because they fail differently and are answerable
 //! separately. [`of_run`] is the *process*: a build that will not start, or one
 //! that ran and refused. [`read_document`] is the *document*: whether what came
-//! back is one at all — the version, and then every property `onepipeline`
-//! states about what it writes. Nothing under a failed check is served, because
+//! back is one at all — the version, the run it is about, and then every
+//! property `onepipeline` states about what it writes. Nothing under a failed
+//! check is served, because
 //! a timing read out of a document that does not add up is a claim with nothing
 //! behind it, and this server's whole answer for an unknown clock is to say so.
 //!
@@ -86,6 +87,10 @@ fn binary() -> String {
 /// out to be another one.
 #[derive(Debug, Deserialize)]
 struct Document {
+    /// Which run the producer aggregated. Required, because the producer writes
+    /// it on every document and it is the only thing in the answer that says
+    /// what the answer is about.
+    run_id: String,
     /// The whole elapsed time, in milliseconds.
     wall_ms: u64,
     /// What the producer wrote as its bucket set, before it is held to being
@@ -351,7 +356,19 @@ impl RunTelemetry {
 /// a document failing one is not a document with a surprising number in it — it
 /// is a producer this reader cannot honestly project, and every timing served
 /// from it would be a claim nothing supports.
-fn validated(document: Document) -> Result<RunTelemetry, Unavailable> {
+fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unavailable> {
+    // The run the answer is about, before anything measured in it. Nothing in a
+    // document says which run's clock it is except this, and a document about
+    // another run is not a surprising number — it is a whole other run's timing,
+    // which this server would serve under this run's name with nothing in the
+    // payload to tell them apart.
+    if document.run_id != run.as_str() {
+        return Err(Unavailable::Unreadable(format!(
+            "the document is run `{}`'s, and this asked about `{run}`",
+            document.run_id
+        )));
+    }
+
     // Exactly the eight, once each. The invariant under everything else is that
     // every millisecond of the clock has one of a known set of homes, which says
     // nothing at all over a set missing one, carrying one twice, or naming one
@@ -428,17 +445,21 @@ fn validated(document: Document) -> Result<RunTelemetry, Unavailable> {
     })
 }
 
-/// Read one telemetry document, or say why it is not one.
+/// Read one telemetry document about `run`, or say why it is not one.
 ///
 /// The parser boundary, separate from the process that produced the bytes: what
 /// a document has to be is the same question whichever build wrote it, and it is
 /// answerable — and tested — without starting anything.
 ///
+/// `run` is what was asked about, and a document is only an answer to that: the
+/// producer names the run it aggregated, so an answer naming another one is
+/// refused rather than served under the name the caller used.
+///
 /// # Errors
 ///
 /// [`Unavailable::Unreadable`] for anything that is not a document of
-/// [`DOCUMENT_VERSION`] holding to the producer's own contract.
-pub fn read_document(answer: &[u8]) -> Result<RunTelemetry, Unavailable> {
+/// [`DOCUMENT_VERSION`] about `run`, holding to the producer's own contract.
+pub fn read_document(run: &RunId, answer: &[u8]) -> Result<RunTelemetry, Unavailable> {
     // The version before anything under it. A document of another version is not
     // a document with a bad field in it: schema 1 named four spans this build has
     // no names for, and reporting that as an unknown bucket would send a reader
@@ -456,7 +477,7 @@ pub fn read_document(answer: &[u8]) -> Result<RunTelemetry, Unavailable> {
     }
     let document: Document =
         serde_json::from_value(answered).map_err(|err| Unavailable::Unreadable(err.to_string()))?;
-    validated(document)
+    validated(run, document)
 }
 
 /// Why a run's telemetry could not be read.
@@ -538,11 +559,13 @@ pub fn of_run_from(binary: &str, root: &Path, run: &RunId) -> Result<RunTelemetr
     // the two process outcomes are driven against the real `onepipeline` by
     // `a_sibling_that_cannot_answer_names_which_way_it_could_not`. What is not
     // driven through a subprocess is a *started* producer answering a bad
-    // document, and deliberately: that would need a fake `onepipeline` written
-    // to emit one, and a document's malformity is a property of its bytes rather
-    // than of who wrote them. So it is driven through `read_document` over real
-    // bytes instead, exhaustively, in `tests/contract.rs`.
-    read_document(&output.stdout)
+    // document — one that contradicts itself, or one about another run entirely —
+    // and deliberately: that would need a fake `onepipeline` written to emit one,
+    // since the real one echoes the id it was asked, and what makes a document
+    // wrong is a property of its bytes rather than of who wrote them. So it is
+    // driven through `read_document` over real bytes instead, exhaustively, in
+    // `tests/contract.rs`.
+    read_document(run, &output.stdout)
 }
 
 /// The last line of what a refused command said, bounded: the sibling names the
