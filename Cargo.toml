@@ -10,23 +10,72 @@ homepage = "https://github.com/nickderobertis/onepipeline-ui"
 readme = "README.md"
 keywords = ["cli", "api", "telemetry", "observability", "onepipeline"]
 categories = ["command-line-utilities", "development-tools", "web-programming"]
-# Package what a consumer receives: the sources, manifest, readme, license, and
-# the contract the crate's types are the Rust rendering of — `docs/contract.md`
-# is the source of truth `tests/contract.rs` reconciles the route table against,
-# so a consumer reading the crate can read the contract beside it.
+# The packaged set has two jobs, and the second is why it reaches outside the
+# crate. It is what a crates.io consumer receives — and it is the *only* signal
+# release-plz gives us that a release is due: release-plz diffs a package's
+# packaged files against the last release, and opens no release PR when none of
+# them changed.
 #
-# release-plz decides a package changed by diffing its **packaged files** against
-# the last release, so anything a consumer receives at the tag belongs here.
-# Excludes the CLAUDE.md/AGENTS.md symlink (registries reject symlinks), CI
-# config, the scripts, and the fixtures.
+# This repository publishes more than the crate. One version stamps the
+# `onepipeline-api-cli` wheels and npm packages (the compiled binary) *and* the
+# `onepipeline-ui` npm package (the built frontend bundle). A UI-only change
+# therefore changes a published artifact, and unless the files it touched are
+# listed here it silently never releases — which is exactly how v0.2.0 and
+# v0.3.0 stranded. So this lists every file whose **bytes reach a published
+# artifact**: the Rust sources, the committed manifests and launcher shim the
+# wrappers ship verbatim, the script that writes the generated manifests (the
+# platform packages have no committed manifest — it is their only source), and
+# the frontend's build inputs.
+#
+# The price is that the crate tarball carries the frontend sources, which
+# `cargo build` never reads. That is deliberate: a consumer downloading the crate
+# at a tag gets the whole of what that tag published, and a release that ships UI
+# changes stays releasable by UI changes. `tests/packaging.rs` holds the set to
+# that rule.
+#
+# What stays out: the CLAUDE.md/AGENTS.md symlink (registries reject symlinks),
+# the fixtures and suites, and the workflows. A workflow contributes no bytes to
+# an artifact — it selects targets, which the launcher's committed
+# `optionalDependencies` already record — so a CI change that alters nothing a
+# user installs must not cut a version.
 #
 # Anchored with a leading `/` where a bare name would also match a nested one.
 include = [
-  "src/**/*.rs",
-  "Cargo.toml",
-  "README.md",
-  "LICENSE",
+  # The read API itself: what crates.io serves, and what every prebuilt binary
+  # in the wheels and the npm platform packages is compiled from.
+  "/src/**/*.rs",
+  "/Cargo.toml",
+  "/README.md",
+  "/LICENSE",
+  # The contract the crate's types are the Rust rendering of — the source of
+  # truth `tests/contract.rs` reconciles the route table against, so a consumer
+  # reading the crate can read the contract beside it.
   "/docs/contract.md",
+
+  # The wrappers' own published bytes: the wheel's metadata, the committed npm
+  # manifests and the launcher shim they ship verbatim, and the script that
+  # assembles the generated per-platform manifests.
+  "/pyproject.toml",
+  "/npm/onepipeline-api-cli/package.json",
+  "/npm/onepipeline-api-cli/bin/**",
+  "/npm/onepipeline-ui/package.json",
+  "/npm/onepipeline-ui/README.md",
+  "/scripts/npm-build.mjs",
+
+  # The frontend bundle the `onepipeline-ui` npm package carries: its sources,
+  # the workspace libraries Vite inlines into it, the config that decides what is
+  # emitted, and the lockfile that pins what gets inlined.
+  "/apps/dag-ui/index.html",
+  "/apps/dag-ui/src/**",
+  "/apps/dag-ui/package.json",
+  "/apps/dag-ui/tsconfig.json",
+  "/apps/dag-ui/vite.config.ts",
+  "/packages/*/src/**",
+  "/packages/*/package.json",
+  "/packages/*/tsconfig.json",
+  "/tsconfig.base.json",
+  "/package.json",
+  "/package-lock.json",
 ]
 
 # The command an operator types. Deliberately not the crate name: the crate and

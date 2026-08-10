@@ -92,10 +92,15 @@ fans one uniformly-named target across all of them.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.
-- **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
-  `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
-  workflow, so `release.yml` would never run and the release would ship nothing.
-  `gh-secrets.json` names every secret the workflows read.
+- **`[package] include` in Cargo.toml is the release trigger, not just the crate
+  tarball.** release-plz opens a release PR only when one of the crate's
+  *packaged files* changed, and that is the only lever it offers. One version
+  stamps three deliverables here, so the set covers everything whose bytes reach
+  any of them — including the frontend the `onepipeline-ui` npm package ships,
+  whose sources ride along in the crate tarball as the price. Anything a
+  published artifact carries has to be added there, and `tests/packaging.rs`
+  fails if it is not. v0.2.0 and v0.3.0 are what the narrower set cost: their
+  fixes lived under `apps/dag-ui/`, so no release was ever cut for them.
 
 ## Invariants (non-negotiable)
 

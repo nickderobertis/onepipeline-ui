@@ -4,7 +4,9 @@
 #   1. Commits land on `main` (pre-1.0: feat -> minor, fix/perf/refactor/build ->
 #      patch, `!`/BREAKING -> minor; chore/docs/ci/test/style do not release).
 #      release-plz only *sees* a commit that touched the crate's packaged files,
-#      so what releases is governed by `[package] include` in Cargo.toml.
+#      so what releases is governed by `[package] include` in Cargo.toml — which
+#      is why that list reaches past the crate to the frontend and the wrappers,
+#      everything one version stamps. See the comment on it.
 #   2. The `release-pr` job opens/updates a PR that bumps the version in
 #      Cargo.toml + Cargo.lock and writes the CHANGELOG section.
 #   3. Merging that PR makes the `release` job tag `vX.Y.Z` and cut a GitHub

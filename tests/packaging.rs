@@ -204,6 +204,123 @@ fn every_secret_the_workflows_read_is_in_the_manifest() {
     );
 }
 
+/// Directories whose every file reaches a published artifact, so a file added to
+/// one has to be covered without anyone remembering this test exists.
+const ARTIFACT_TREES: &[&str] = &[
+    "src",
+    "apps/dag-ui/src",
+    "packages/dag-layout/src",
+    "packages/dag-model/src",
+    "packages/telemetry-client/src",
+    "npm/onepipeline-api-cli/bin",
+];
+
+/// Single files a published artifact ships, or is described by.
+const ARTIFACT_FILES: &[&str] = &[
+    "README.md",
+    "LICENSE",
+    "docs/contract.md",
+    "pyproject.toml",
+    "npm/onepipeline-api-cli/package.json",
+    "npm/onepipeline-ui/package.json",
+    "npm/onepipeline-ui/README.md",
+    // The per-platform packages have no committed manifest: this is the only
+    // source of the bytes theirs is written from.
+    "scripts/npm-build.mjs",
+    // What Vite emits into the frontend bundle is decided by these, and what it
+    // inlines is pinned by the lockfile.
+    "apps/dag-ui/index.html",
+    "apps/dag-ui/vite.config.ts",
+    "apps/dag-ui/tsconfig.json",
+    "apps/dag-ui/package.json",
+    "tsconfig.base.json",
+    "package.json",
+    "package-lock.json",
+];
+
+/// The files `cargo package` would upload, which is exactly the set release-plz
+/// diffs to decide a release is due.
+fn packaged_files() -> Vec<String> {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let listed = std::process::Command::new(cargo)
+        // `--offline` and `--locked` because the gate is offline and
+        // deterministic; `just bootstrap` has fetched everything this resolves.
+        // `--allow-dirty` because a working tree under review is usually dirty.
+        .args([
+            "package",
+            "--list",
+            "--offline",
+            "--locked",
+            "--allow-dirty",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("cargo is on PATH");
+    assert!(
+        listed.status.success(),
+        "cargo package --list failed:\n{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    String::from_utf8(listed.stdout)
+        .expect("utf-8 file list")
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every file under `directory`, relative to the repository root and spelled the
+/// way `cargo package --list` spells one.
+///
+/// `AGENTS.md` is the one thing skipped: those are instructions to whoever works
+/// on the tree next, they reach no artifact, and registries reject the
+/// `CLAUDE.md` symlink beside the root one anyway.
+fn files_under(directory: &str) -> Vec<String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(directory);
+    let mut found = Vec::new();
+    let mut pending = vec![root.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).unwrap_or_else(|err| panic!("read {dir:?}: {err}")) {
+            let path = entry.expect("read a directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name().is_some_and(|name| name != "AGENTS.md") {
+                let relative = path.strip_prefix(&root).expect("a path under the root");
+                let relative = relative.to_str().expect("utf-8 path").replace('\\', "/");
+                found.push(format!("{directory}/{relative}"));
+            }
+        }
+    }
+    assert!(!found.is_empty(), "{directory} holds no files");
+    found
+}
+
+/// The packaged set is release-plz's only signal that a release is due: it opens
+/// no release PR unless one of these files changed. This repository stamps one
+/// version onto three deliverables, so anything whose bytes reach any of them has
+/// to be in here — the alternative is what happened to v0.2.0 and v0.3.0, where
+/// the fixes lived under `apps/dag-ui/` and no release was ever cut for them.
+#[test]
+fn every_file_a_published_artifact_ships_is_a_packaged_file() {
+    let packaged = packaged_files();
+    let mut missing = Vec::new();
+    for path in ARTIFACT_TREES
+        .iter()
+        .flat_map(|tree| files_under(tree))
+        .chain(ARTIFACT_FILES.iter().map(|path| (*path).to_owned()))
+    {
+        if !packaged.contains(&path) {
+            missing.push(path);
+        }
+    }
+    missing.sort();
+    assert!(
+        missing.is_empty(),
+        "a change to these files would ship in a release but cannot cut one — \
+         add them to `include` in Cargo.toml:\n  {}",
+        missing.join("\n  ")
+    );
+}
+
 fn npm_build(args: &[&str]) -> std::process::Output {
     std::process::Command::new("node")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/npm-build.mjs"))
