@@ -73,15 +73,30 @@ impl Fixture {
             if is_prerelease { "true" } else { "false" },
         )
         .expect("write the prerelease flag");
-        // Records what it was asked, answers from the two files above, and keeps
-        // the notes of any edit — which is the whole of what this script does to
-        // a Release.
+        // Records what it was asked, answers from the two files above, keeps the
+        // notes of any edit — which is the whole of what this script does to a
+        // Release — and refuses whatever `GH_REFUSE` names, the way the real one
+        // refuses a token that cannot read or write the Release.
+        //
+        // llmlint: ignore[e2e_not_mocked] the real `gh` rewrites a public GitHub
+        // Release, so it is the one thing a journey cannot drive. Standing in for
+        // the program on PATH is the narrowest cut available: the script under
+        // test is the real script, run with the workflow's own environment, and
+        // the stand-in is only what makes the edits it asked for readable.
         stub_bin::install(
             &fixture.path("stub-bin"),
             "gh",
             "#!/usr/bin/env bash\n\
              set -eu\n\
              printf '%s\\n' \"$*\" >> \"$GH_CALLS\"\n\
+             if [ -n \"${GH_REFUSE:-}\" ]; then\n\
+               case \"$*\" in\n\
+                 *\"$GH_REFUSE\"*)\n\
+                   echo 'HTTP 403: Resource not accessible by integration' >&2\n\
+                   exit 1\n\
+                   ;;\n\
+               esac\n\
+             fi\n\
              case \"${2:-}\" in\n\
                view)\n\
                  case \"$*\" in\n\
@@ -117,21 +132,27 @@ impl Fixture {
     /// Run the script the way the `release-status` job does. `bent` overrides
     /// the result of the jobs it names; everything else succeeded.
     fn run(&self, bent: &[(&str, &str)], switches: &Switches) -> Output {
-        let results: Vec<String> = ALL_JOBS
-            .iter()
-            .map(|job| {
-                let result = bent
-                    .iter()
-                    .find(|(name, _)| name == job)
-                    .map_or("success", |(_, result)| result);
-                format!("{job}={result}")
-            })
-            .collect();
-        self.run_with(&results.join(" "), switches)
+        self.run_with(&reported(bent), switches)
+    }
+
+    /// The same run, with `gh` refusing every call whose argv contains `refuse` —
+    /// the shape a token without access to the Release produces.
+    fn run_refused(&self, refuse: &str, bent: &[(&str, &str)], switches: &Switches) -> Output {
+        self.command(&reported(bent), switches)
+            .env("GH_REFUSE", refuse)
+            .output()
+            .expect("bash is on PATH")
     }
 
     fn run_with(&self, job_results: &str, switches: &Switches) -> Output {
-        Command::new("bash")
+        self.command(job_results, switches)
+            .output()
+            .expect("bash is on PATH")
+    }
+
+    fn command(&self, job_results: &str, switches: &Switches) -> Command {
+        let mut command = Command::new("bash");
+        command
             .arg(repo_root().join("scripts/release-status.sh"))
             .current_dir(self.dir.path())
             .env("PATH", stub_bin::path_with(&self.path("stub-bin")))
@@ -141,9 +162,8 @@ impl Fixture {
             .env("JOB_RESULTS", job_results)
             .env("EXPECT_CRATE", switches.krate)
             .env("EXPECT_PYPI", switches.pypi)
-            .env("EXPECT_NPM", switches.npm)
-            .output()
-            .expect("bash is on PATH")
+            .env("EXPECT_NPM", switches.npm);
+        command
     }
 
     /// The `gh release edit` invocations the script made, argv per line.
@@ -164,6 +184,22 @@ impl Fixture {
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// `JOB_RESULTS` as the workflow writes it: every job in `ALL_JOBS`, succeeding
+/// unless `bent` overrides it.
+fn reported(bent: &[(&str, &str)]) -> String {
+    ALL_JOBS
+        .iter()
+        .map(|job| {
+            let result = bent
+                .iter()
+                .find(|(name, _)| name == job)
+                .map_or("success", |(_, result)| result);
+            format!("{job}={result}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn stderr(output: &Output) -> String {
@@ -382,6 +418,71 @@ fn no_release_to_hold_is_a_usage_error() {
 
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+}
+
+/// A Release this cannot read is the failure mode that would make the gate
+/// itself silent, so it is a loud failure rather than a pass — and nothing is
+/// written to a Release whose current state was never established.
+#[test]
+fn a_release_it_cannot_read_fails_rather_than_passing() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run_refused("--json isPrerelease", &[("test", "failure")], &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("cannot read the GitHub Release"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
+}
+
+/// The notes are read separately from the prerelease flag, and they are what a
+/// demotion rewrites: reading them has to fail loudly too, or the banner would
+/// be published over an empty changelog.
+#[test]
+fn notes_it_cannot_read_fail_rather_than_being_republished_empty() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run_refused("--json body", &[("test", "failure")], &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("cannot read the notes of the GitHub Release"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert!(
+        fixture.edited_body().is_none(),
+        "notes that were never read were written back: {:?}",
+        fixture.edited_body()
+    );
+}
+
+/// A token that can read but not write leaves the exact state this gate exists
+/// to prevent — a stranded release still marked Latest — so the job says which
+/// grant is missing instead of exiting on the demotion it did not make.
+#[test]
+fn a_release_it_cannot_demote_names_the_grant_it_is_missing() {
+    let fixture = Fixture::fresh();
+    let output = fixture.run_refused("release edit", &[("publish-npm", "failure")], &ALL_ON);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("cannot edit the GitHub Release"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("contents:write"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        fixture.edited_body().is_none(),
+        "the refused edit was recorded as made"
+    );
 }
 
 /// The gate is only as complete as the list of jobs the workflow hands it, so

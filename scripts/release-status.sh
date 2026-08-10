@@ -120,7 +120,13 @@ if ! flags="$(gh release view "$RELEASE_TAG" --json isPrerelease 2>&1)"; then
   fail "cannot read the GitHub Release for $RELEASE_TAG: $flags" \
     "check that the tag has a Release and that GH_TOKEN can read it"
 fi
-body="$(gh release view "$RELEASE_TAG" --json body --jq .body)"
+# Unlike the call above, this one's output becomes the notes the Release is
+# rewritten with, so gh's stderr is left on the job log rather than folded into
+# it — a warning captured here would be published as part of the changelog.
+if ! body="$(gh release view "$RELEASE_TAG" --json body --jq .body)"; then
+  fail "cannot read the notes of the GitHub Release for $RELEASE_TAG (gh's own error is above)" \
+    "check that GH_TOKEN can read this repository's releases"
+fi
 
 case "$flags" in
   *'"isPrerelease":true'*) was_prerelease=true ;;

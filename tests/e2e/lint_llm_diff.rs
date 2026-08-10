@@ -116,6 +116,12 @@ impl Fixture {
         );
         files.sort();
 
+        // llmlint: ignore[e2e_not_mocked] the real `llmlint` bills a model call
+        // per shard and answers differently each time, so a journey that drove it
+        // could assert nothing about what this script decided. The program on
+        // PATH is the narrowest cut available: the script under test is the real
+        // one, run the way the recipe runs it, and the stand-in is only what makes
+        // the shards it asked for readable.
         stub_bin::install(
             &root.join("stub-bin"),
             "llmlint",
