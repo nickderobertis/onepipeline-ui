@@ -283,8 +283,10 @@ fn a_run_detail_serves_its_rounds_plan_and_transcripts() {
         json!("https://example.invalid/changes/1")
     );
 
+    // One transcript per session the run relayed, and the pair each was run
+    // under: the worker's own side, and the judge member that reviewed it.
     let conversations = body["conversations"].as_array().expect("conversations");
-    assert_eq!(conversations.len(), 1);
+    assert_eq!(conversations.len(), 2);
     assert_eq!(
         conversations[0]["conversation"]["id"],
         json!(fixture_run::CONVERSATION_ID)
@@ -292,6 +294,18 @@ fn a_run_detail_serves_its_rounds_plan_and_transcripts() {
     assert_eq!(
         conversations[0]["attribution"]["nodeId"],
         json!(fixture_run::NODE_ID)
+    );
+    assert_eq!(
+        conversations[0]["attribution"]["transportRole"],
+        json!("agent")
+    );
+    assert_eq!(
+        conversations[1]["conversation"]["id"],
+        json!(fixture_run::REVIEW_CONVERSATION_ID)
+    );
+    assert_eq!(
+        conversations[1]["attribution"]["transportRole"],
+        json!("judge")
     );
 }
 
@@ -447,7 +461,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
         .iter()
         .find(|row| row["node"] == json!(fixture_run::NODE_ID))
         .expect("the dispatched node");
-    assert_eq!(node["turns"], json!(1));
+    assert_eq!(node["turns"], json!(2));
     assert_eq!(
         node["turns"],
         json!(detail["conversations"][0]["conversation"]["turns"]
@@ -455,7 +469,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
             .map(Vec::len)
             .expect("the transcript's turns"))
     );
-    assert_eq!(detail["run"]["turns"], json!(1));
+    assert_eq!(detail["run"]["turns"], json!(4));
 }
 
 #[test]
@@ -791,15 +805,43 @@ fn a_live_run_reports_the_round_it_is_driving_and_what_it_is_waiting_on() {
     assert_eq!(run["node_counts"]["blocked"], json!(1));
     assert_eq!(run["node_counts"]["done"], json!(1));
 
-    // Every millisecond of the run's clock has exactly one home.
+    // Every millisecond of the run's clock has exactly one home: the lanes the
+    // wire names a fraction for, and the residue nothing measured.
     let timing = &run["timing"];
     let wall = timing["wall_ms"].as_u64().expect("wall_ms");
-    let parts = timing["agent_model_ms"].as_u64().expect("agent")
-        + timing["idle_orchestration_ms"].as_u64().expect("idle")
-        + timing["scheduling_seconds"].as_u64().expect("scheduling") * 1_000;
-    assert_eq!(
-        parts, wall,
+    let ms = |key: &str| {
+        timing[key]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{key}: {timing}"))
+    };
+    // Read as the fractions rather than the seconds, because that is the one
+    // reading carried at the precision the parts were measured in: the eight
+    // `*_seconds` are whole seconds of a clock timed in milliseconds.
+    let shares: f64 = timing["fractions"]
+        .as_object()
+        .expect("fractions")
+        .values()
+        .map(|share| share.as_f64().expect("a share"))
+        .sum();
+    #[allow(clippy::cast_precision_loss)]
+    let residue = ms("unattributed_ms") as f64 / wall as f64;
+    assert!(
+        (shares + residue - 1.0).abs() < 1e-9,
         "the breakdown must add up to the whole: {timing}"
+    );
+    // Measured where a record measured it, and absent where none did — never a
+    // zero a reader could take for a measurement.
+    assert_eq!(
+        ms("lock_wait_seconds"),
+        4,
+        "`onevcs` timed the wait: {timing}"
+    );
+    assert!(ms("llmlint_model_ms") > 0, "the lint member ran: {timing}");
+    assert_eq!(ms("judge_model_ms"), 0, "no judge chain ran: {timing}");
+    assert_eq!(
+        run["timing_quality"],
+        json!("partial"),
+        "and the presence flags say which of those zeros were measured"
     );
     assert!(
         timing["idle_orchestration_ms"]
@@ -996,7 +1038,7 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
     );
     assert_eq!(
         verification["started_at"],
-        json!("2026-08-07T12:00:38.000Z"),
+        json!("2026-08-07T12:00:39.000Z"),
         "bracketed by the record before it, not by the whole dispatch"
     );
     assert_eq!(verification["ended_at"], json!("2026-08-07T12:00:40.000Z"));
@@ -1013,10 +1055,32 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
     assert_eq!(publication["label"], json!("feature/ship"));
     assert_eq!(publication["started_at"], json!("2026-08-07T12:00:29.000Z"));
     assert_eq!(publication["ended_at"], json!("2026-08-07T12:00:38.000Z"));
-    assert_eq!(publication["status"], json!("published"));
+    // A change the host has not landed: open, and still running as far as the
+    // run is concerned, which is what its own records say.
+    assert_eq!(publication["status"], json!("open"));
     assert_eq!(
         publication["reference"],
         json!({ "kind": "pr", "value": "https://example.invalid/changes/2" })
+    );
+
+    // The waits `onevcs` timed on the identity's lock, rolled up rather than
+    // listed: the count and the total, which is what the contention lane plots.
+    let waits = spans
+        .iter()
+        .find(|span| span["kind"] == "rollup" && span["label"] == json!("lock-wait"))
+        .expect("the contention the publication met");
+    assert_eq!(waits["count"], json!(1));
+    assert_eq!(waits["total_duration_ms"], json!(4_500));
+    assert_eq!(
+        waits["started_at"],
+        json!("2026-08-07T12:00:28.500Z"),
+        "the record is written when the turn came and says how long it waited"
+    );
+    assert_eq!(waits["ended_at"], json!("2026-08-07T12:00:33.000Z"));
+    assert_eq!(
+        waits["node_id"],
+        json!(fixture_run::SHIP_NODE_ID),
+        "contention is rolled up per node, not once for the run"
     );
 }
 
@@ -1032,13 +1096,20 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
     let rollups: Vec<&Value> = spans
         .iter()
         .filter(|span| {
-            span["kind"] == "rollup" && span["node_id"] == json!(fixture_run::SHIP_NODE_ID)
+            span["kind"] == "rollup"
+                && span["label"] == json!("dispatch")
+                && span["node_id"] == json!(fixture_run::SHIP_NODE_ID)
         })
         .collect();
-    assert_eq!(rollups.len(), 1, "one category, one summary: {rollups:?}");
+    // Two sessions under one semantic role, and the transport half is what tells
+    // them apart: the work, and the lint member that read it.
+    assert_eq!(rollups.len(), 2, "one category, one summary: {rollups:?}");
     assert_eq!(rollups[0]["agent_role"], json!("pr-author"));
     assert_eq!(rollups[0]["transport_role"], json!("agent"));
     assert_eq!(rollups[0]["count"], json!(1));
+    assert_eq!(rollups[1]["agent_role"], json!("pr-author"));
+    assert_eq!(rollups[1]["transport_role"], json!("llmlint"));
+    assert_eq!(rollups[1]["count"], json!(1));
     assert_eq!(
         rollups[0]["events"],
         json!([]),
@@ -1066,15 +1137,27 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
         .iter()
         .filter(|span| span["kind"] == "dispatch")
         .collect();
-    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches.len(), 2);
     assert_eq!(dispatches[0]["agent_role"], json!("pr-author"));
+    assert_eq!(dispatches[0]["transport_role"], json!("agent"));
+    assert_eq!(dispatches[1]["transport_role"], json!("llmlint"));
     assert!(
         !node["spans"]
             .as_array()
             .expect("spans")
             .iter()
-            .any(|span| span["kind"] == "rollup"),
+            .any(|span| span["kind"] == "rollup" && span["label"] == json!("dispatch")),
         "the node's own reading is the records, not a summary of them"
+    );
+    // Contention is the exception, and deliberately: a publication takes
+    // thousands of waits, so both readings summarize them.
+    assert!(
+        node["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .any(|span| span["label"] == json!("lock-wait")),
+        "the contention lane is served at the node's own scope too"
     );
 }
 
@@ -1323,4 +1406,253 @@ fn a_watched_stream_reports_only_that_run_and_notices_its_transcripts() {
         seen.contains(&"conversation.changed".to_owned()),
         "a watched run's transcripts are polled on their own interval: {seen:?}"
     );
+}
+
+#[test]
+fn the_checks_a_host_observed_on_a_publication_are_served_with_their_logs() {
+    let serving = two_runs();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let verification = &body["node_details"][fixture_run::NODE_ID]["verification"];
+    let checks = verification["checks"].as_array().expect("the checks");
+    // The last account of each check, not one row per transition: the required
+    // one queued and then passed, and both states were recorded.
+    assert_eq!(checks.len(), 2, "{verification}");
+    assert_eq!(checks[0]["name"], json!("gate"));
+    assert_eq!(checks[0]["required"], json!(true));
+    assert_eq!(checks[0]["from_state"], json!("queued"));
+    assert_eq!(checks[0]["state"], json!("success"));
+    assert_eq!(verification["required_checks"], json!(["gate"]));
+
+    // The advisory one failed, and the log it stored is named twice over: on the
+    // check, and as the verification record a reader opens the log from.
+    assert_eq!(checks[1]["name"], json!("published-smoke"));
+    assert_eq!(checks[1]["required"], json!(false));
+    assert_eq!(checks[1]["state"], json!("failure"));
+    let log = checks[1]["artifact_id"].as_str().expect("the check's log");
+    let failed = verification["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .find(|record| record["artifact_id"] == json!(log))
+        .expect("the failing check's own record");
+    assert_eq!(
+        failed["ok"],
+        json!(false),
+        "a host conclusion is read in the host's words, not as a pipeline status"
+    );
+
+    // And that log really is readable, by the id the check named.
+    let artifact = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/artifacts/{log}", fixture_run::RUN_ID),
+    );
+    assert_eq!(artifact.status, 200);
+    assert_eq!(
+        artifact.json()["content"],
+        json!("the published-smoke check failed\n")
+    );
+
+    // The merge the host completed, which is the commit the work landed as. No
+    // url beside it: the host owns that and `onevcs` records none.
+    let publication = &body["node_details"][fixture_run::NODE_ID]["publication"];
+    assert_eq!(publication["merged"], json!(true));
+    assert_eq!(publication["commit"], json!(fixture_run::MERGE_SHA));
+    assert_eq!(publication["base_branch"], json!("main"));
+    assert!(publication.get("commit_url").is_none(), "{publication}");
+}
+
+#[test]
+fn a_node_that_observed_no_check_says_so_rather_than_serving_an_empty_one() {
+    let serving = two_runs();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    // The review node published nothing and no host ran anything on it, so it
+    // has no detail at all rather than a detail claiming zero checks.
+    let details = body["node_details"].as_object().expect("the node details");
+    assert!(
+        !details.contains_key(fixture_run::REVIEW_NODE_ID),
+        "{details:?}"
+    );
+}
+
+#[test]
+fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
+    let serving = two_runs();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let usage = &body["run"]["usage"];
+    assert_eq!(usage["agent"]["input_tokens"], json!(1_200));
+    assert_eq!(usage["agent"]["cost_usd"], json!(0.42));
+    assert_eq!(usage["judge"]["input_tokens"], json!(400));
+    assert_eq!(usage["total"]["output_tokens"], json!(430));
+    // Nothing ran a lint chain here, and that is served as unknown rather than
+    // as a measured nothing: a null cost cannot be read as a free one.
+    assert_eq!(usage["llmlint"]["input_tokens"], json!(null));
+    assert_eq!(usage["llmlint"]["cost_usd"], json!(null));
+
+    // The same distinction on the clock: the two parties that reported a turn
+    // are present, and the one that did not is flagged absent beside its zero.
+    let presence = &body["run"]["timing_presence"];
+    assert_eq!(presence["agent_model_ms"], json!(true));
+    assert_eq!(presence["judge_model_ms"], json!(true));
+    assert_eq!(presence["llmlint_model_ms"], json!(false));
+    assert_eq!(presence["tool_ms"], json!(false));
+    let timing = &body["run"]["timing"];
+    assert_eq!(timing["judge_seconds"], json!(3));
+    assert_eq!(timing["gate_seconds"], json!(2));
+    assert_eq!(timing["lock_wait_seconds"], json!(3));
+    assert_eq!(timing["llmlint_model_ms"], json!(0));
+
+    // A node reports only what it measured; one that measured nothing says
+    // nothing at all.
+    let node = body["run"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|row| row["node"] == json!(fixture_run::REVIEW_NODE_ID))
+        .expect("the review node");
+    assert_eq!(node["usage"]["judge"]["cost_usd"], json!(0.11));
+    assert_eq!(node["usage"]["agent"]["cost_usd"], json!(null));
+}
+
+#[test]
+fn a_watched_stream_reports_what_a_turn_is_doing_before_it_is_done() {
+    let serving = live_run();
+    let mut stream = http::stream(
+        serving.address,
+        &format!("/api/v2/events?run_id={}", fixture_run::RUN_ID),
+        None,
+    );
+    assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
+
+    // One tool summary, published from inside a turn that has not finished:
+    // exactly what `oneagentgraph` streams while a member works.
+    let dir = serving.run_dir(fixture_run::RUN_ID);
+    let journal = dir.join("events.jsonl");
+    let existing = std::fs::read_to_string(&journal).expect("the journal");
+    std::fs::write(
+        &journal,
+        format!(
+            "{existing}{}\n",
+            json!({
+                "v": 1,
+                "ts": "2026-08-07T12:01:00.000Z",
+                "stream": "a-recording-host-4243",
+                "seq": 99,
+                "source": "agentgraph",
+                "kind": "turn-activity",
+                "labels": {
+                    "run_id": fixture_run::RUN_ID,
+                    "round": 2,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "persona": "pr-author",
+                    "session": fixture_run::LIVE_CONVERSATION_ID,
+                },
+                "payload": {
+                    "kind": "tool_use",
+                    "name": "Edit",
+                    "detail": "CHANGELOG.md",
+                    "truncated": false,
+                },
+                "artifacts": [],
+            })
+        ),
+    )
+    .expect("append a tool summary");
+
+    let mut activity = None;
+    for _ in 0..3 {
+        let frame = stream.next_frame().expect("the stream stayed open");
+        if frame.event == "activity.changed" {
+            activity = Some(frame.json());
+            break;
+        }
+    }
+    let activity = activity.expect("the watcher was told what the turn is doing");
+    assert_eq!(activity["run_id"], json!(fixture_run::RUN_ID));
+    let latest = activity["activity"]
+        .as_array()
+        .expect("the live activity")
+        .last()
+        .expect("the most recent summary")
+        .clone();
+    assert_eq!(latest["node"], json!(fixture_run::SHIP_NODE_ID));
+    assert_eq!(latest["round"], json!("2"));
+    assert_eq!(latest["name"], json!("Edit"));
+    assert_eq!(latest["detail"], json!("CHANGELOG.md"));
+    assert_eq!(latest["kind"], json!("tool_use"));
+    assert_eq!(latest["events"], json!(2), "counted, not just carried");
+}
+
+#[test]
+fn a_tool_summary_is_carried_on_its_turn_rather_than_served_as_one() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    )
+    .json();
+    let turns = body["conversation"]["turns"].as_array().expect("the turns");
+    // Two relayed turns, and the tool summary published between them is on the
+    // one it belongs to rather than a third turn nobody took.
+    assert_eq!(turns.len(), 2, "{turns:?}");
+    let tools = turns[1]["tools"].as_array().expect("the turn's tool calls");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"], json!("Bash"));
+    assert_eq!(tools[0]["kind"], json!("tool_use"));
+    assert_eq!(tools[0]["input"], json!("just gate"));
+    assert_eq!(turns[1]["usage"]["inputTokens"], json!(900));
+    assert_eq!(turns[1]["durationMs"], json!(1_500));
+}
+
+#[test]
+fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let node = body["run"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|row| row["node"] == json!(fixture_run::SHIP_NODE_ID))
+        .expect("the publishing node");
+    let parties: Vec<&str> = node["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .filter_map(|link| link["role"].as_str())
+        .collect();
+    // Two sessions of one dispatch, under one semantic role and two transports:
+    // a failure on either is a different failure, and the pair says which.
+    assert_eq!(parties, vec!["llmlint", "agent"], "{node}");
+    assert_eq!(node["lint"], json!(2), "what the lint transport recorded");
+
+    let lint = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::LINT_CONVERSATION_ID
+        ),
+    )
+    .json();
+    assert_eq!(lint["attribution"]["transportRole"], json!("llmlint"));
+    assert_eq!(lint["attribution"]["agentRole"], json!("pr-author"));
 }

@@ -140,6 +140,11 @@ pub enum SseEvent {
     /// One watched run's transcripts moved.
     #[serde(rename = "conversation.changed")]
     ConversationChanged,
+    /// A watched run reported from *inside* a turn: `oneagentgraph` publishes a
+    /// bounded tool summary as the turn runs rather than when it is done, so
+    /// there is something in flight to say.
+    #[serde(rename = "activity.changed")]
+    ActivityChanged,
     /// A run left the runs root; the client stops polling it.
     #[serde(rename = "run.removed")]
     RunRemoved,
@@ -153,6 +158,7 @@ impl SseEvent {
             Self::Snapshot => "snapshot",
             Self::RunChanged => "run.changed",
             Self::ConversationChanged => "conversation.changed",
+            Self::ActivityChanged => "activity.changed",
             Self::RunRemoved => "run.removed",
         }
     }

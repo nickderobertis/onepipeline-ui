@@ -24,8 +24,14 @@ pub const OTHER_RUN_ID: &str = "run-20260807-d4e5f6";
 pub const SESSION: &str = "claude-code-session-3f9a1c2e";
 /// The agent-graph session one node's dispatch ran under.
 pub const CONVERSATION_ID: &str = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
-/// The artifact one relayed envelope recorded.
+/// The session the review node's judge member ran under.
+pub const REVIEW_CONVERSATION_ID: &str = "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16";
+/// The artifact one relayed envelope recorded: the gate's own log.
 pub const ARTIFACT_ID: &str = "artifact-5c8f0a1b";
+/// The log the host's failing check stored, which is how a reader reads it.
+pub const CHECK_LOG_ARTIFACT: &str = "artifact-published-smoke";
+/// The commit the change merged as. No url: the host owns that and records none.
+pub const MERGE_SHA: &str = "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908";
 /// The node whose timeline the `scope=node` fixture is taken from.
 pub const NODE_ID: &str = "contract-interface";
 /// The node that depends on it.
@@ -40,6 +46,8 @@ pub const ANNOUNCE_NODE_ID: &str = "announce";
 pub const LIVE_CONVERSATION_ID: &str = "8a1d3c07-4b2f-4e55-91aa-6d3e2f0b7c14";
 /// The live run's own driving session, recorded at no node.
 pub const DRIVING_CONVERSATION_ID: &str = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
+/// The session the lint member of that dispatch ran under.
+pub const LINT_CONVERSATION_ID: &str = "2c9e4b71-6a83-4f20-97dd-1e6b4c2a8f37";
 
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
@@ -103,6 +111,16 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
         "the gate ran and passed\n",
     )
     .expect("the artifact body");
+    fs::write(
+        dir.join("artifacts").join(CHECK_LOG_ARTIFACT),
+        "the published-smoke check failed\n",
+    )
+    .expect("the failing check's log");
+    fs::write(
+        dir.join("artifacts").join("artifact-gate-check"),
+        "the gate check passed\n",
+    )
+    .expect("the passing check's log");
 
     fs::write(dir.join("events.jsonl"), journal(run)).expect("the journal");
     dir
@@ -132,99 +150,369 @@ fn plan() -> Value {
     })
 }
 
+/// A merged event store being written, one record at a time.
+///
+/// The sequence is per stream and the merge order is `(ts, stream, seq)`, which
+/// is what the SDK's own reader merges on — so a fixture writes its records in
+/// the order they happened and lets the numbering follow.
+struct Journal {
+    stream: String,
+    lines: Vec<String>,
+}
+
+impl Journal {
+    fn new(stream: &str) -> Self {
+        Self {
+            stream: stream.to_owned(),
+            lines: Vec::new(),
+        }
+    }
+
+    /// One record, with the evidence its producer stored beside the stream.
+    fn kept(
+        &mut self,
+        at: &str,
+        source: &str,
+        kind: &str,
+        labels: Value,
+        payload: Value,
+        artifacts: Value,
+    ) -> &mut Self {
+        self.lines.push(
+            json!({
+                "v": 1,
+                "ts": at,
+                "stream": self.stream,
+                "seq": self.lines.len(),
+                "source": source,
+                "kind": kind,
+                "labels": labels,
+                "payload": payload,
+                "artifacts": artifacts,
+            })
+            .to_string(),
+        );
+        self
+    }
+
+    /// One record that stored nothing.
+    fn emit(
+        &mut self,
+        at: &str,
+        source: &str,
+        kind: &str,
+        labels: Value,
+        payload: Value,
+    ) -> &mut Self {
+        self.kept(at, source, kind, labels, payload, json!([]))
+    }
+
+    fn text(&self) -> String {
+        format!("{}\n", self.lines.join("\n"))
+    }
+}
+
 /// The merged event store, in merge order.
+///
+/// The `vcs` and `agentgraph` records are the ones those two libraries really
+/// write: `onevcs` opens a session, runs the repository's gate, pushes, opens a
+/// change, reports every transition of every check the host runs on it, queues
+/// on the identity's lock, and merges — and `oneagentgraph` closes a turn with
+/// the usage that turn consumed. What this crate makes of them is the whole of
+/// what the goldens pin.
 fn journal(run: &str) -> String {
-    let mut lines: Vec<String> = Vec::new();
-    let mut seq = 0;
-    let mut emit = |at: &str, source: &str, kind: &str, labels: Value, payload: Value| {
-        let line = json!({
-            "v": 1,
-            "ts": at,
-            "stream": "a-recording-host-4242",
-            "seq": seq,
-            "source": source,
-            "kind": kind,
-            "labels": labels,
-            "payload": payload,
-            "artifacts": if kind == "node-settled" && labels["node"] == json!(NODE_ID) {
-                json!([{ "id": ARTIFACT_ID, "kind": "log", "bytes": 24 }])
-            } else {
-                json!([])
-            },
-        });
-        seq += 1;
-        lines.push(line.to_string());
-    };
-
-    emit(
-        START,
-        "pipeline",
-        "run-started",
-        json!({ "run_id": run }),
-        json!({ "plan": plan() }),
-    );
-    emit(
-        "2026-08-07T12:00:01.000Z",
-        "pipeline",
-        "round-started",
-        json!({ "run_id": run, "round": 1 }),
-        json!({}),
-    );
-    emit(
-        "2026-08-07T12:00:02.000Z",
-        "pipeline",
-        "node-dispatched",
-        json!({ "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" }),
-        json!({ "persona": "worker" }),
-    );
-    emit(
-        "2026-08-07T12:00:03.000Z",
-        "agentgraph",
-        "agent-turn",
-        json!({
-            "run_id": run,
-            "round": 1,
-            "node": NODE_ID,
-            "persona": "worker",
-            "session": CONVERSATION_ID,
-        }),
-        json!({ "message": "landed the route table", "model": "a-model" }),
-    );
-    emit(
-        "2026-08-07T12:00:20.000Z",
-        "pipeline",
-        "node-settled",
-        json!({ "run_id": run, "round": 1, "node": NODE_ID }),
-        json!({
-            "status": "done",
-            "outcome": "shipped",
-            "branch": "feature/contract-interface",
-            "change_url": "https://example.invalid/changes/1",
-        }),
-    );
-    emit(
-        "2026-08-07T12:00:21.000Z",
-        "pipeline",
-        "node-dispatched",
-        json!({ "run_id": run, "round": 1, "node": REVIEW_NODE_ID, "persona": "judge" }),
-        json!({ "persona": "judge" }),
-    );
-    emit(
-        "2026-08-07T12:00:30.000Z",
-        "pipeline",
-        "node-settled",
-        json!({ "run_id": run, "round": 1, "node": REVIEW_NODE_ID }),
-        json!({ "status": "done", "outcome": "approved" }),
-    );
-    emit(
-        "2026-08-07T12:00:31.000Z",
-        "pipeline",
-        "round-finished",
-        json!({ "run_id": run, "round": 1 }),
-        json!({ "state": "complete", "ok": true }),
-    );
-
-    format!("{}\n", lines.join("\n"))
+    let round = json!({ "run_id": run, "round": 1 });
+    let at_node = json!({ "run_id": run, "round": 1, "node": NODE_ID });
+    let identity = "github.com/nickderobertis/onepipeline-ui";
+    let mut journal = Journal::new("a-recording-host-4242");
+    journal
+        .emit(
+            START,
+            "pipeline",
+            "run-started",
+            json!({ "run_id": run }),
+            json!({ "plan": plan() }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "round-started",
+            round.clone(),
+            json!({}),
+        )
+        .emit(
+            "2026-08-07T12:00:02.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" }),
+            json!({ "persona": "worker" }),
+        )
+        .emit(
+            "2026-08-07T12:00:03.000Z",
+            "agentgraph",
+            "agent-turn",
+            json!({
+                "run_id": run,
+                "round": 1,
+                "node": NODE_ID,
+                "member": "worker",
+                "persona": "worker",
+                "session": CONVERSATION_ID,
+            }),
+            json!({ "message": "landed the route table", "model": "a-model" }),
+        )
+        // What the turn consumed, as `oneagentgraph` reports it when the turn is
+        // done: the only measurement of model time and cost anything in the
+        // stack records.
+        .emit(
+            "2026-08-07T12:00:05.000Z",
+            "agentgraph",
+            "turn-completed",
+            json!({
+                "run_id": run,
+                "round": 1,
+                "node": NODE_ID,
+                "member": "worker",
+                "persona": "worker",
+                "session": CONVERSATION_ID,
+            }),
+            json!({
+                "usage": {
+                    "tokens_in": 1_200,
+                    "tokens_out": 340,
+                    "cache_read": 800,
+                    "cache_write": 120,
+                    "cost": 0.42,
+                    "duration": 2.5,
+                },
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:06.000Z",
+            "vcs",
+            "session-opened",
+            at_node.clone(),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": identity,
+                "branch": "feature/contract-interface",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+                "clone": "/a/recorded/clone",
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:07.000Z",
+            "vcs",
+            "gate-started",
+            at_node.clone(),
+            json!({
+                "command": "just gate",
+                "comparison_remote": "origin",
+                "comparison_base": "main",
+            }),
+        )
+        // The gate's own log, which is the evidence a reader opens from the
+        // verification record this becomes.
+        .kept(
+            "2026-08-07T12:00:09.000Z",
+            "vcs",
+            "gate-verdict",
+            at_node.clone(),
+            json!({
+                "verdict": "pass",
+                "command": "just gate",
+                "output": "the gate ran and passed",
+                "preserved_log": "/a/recorded/clone/gate.log",
+            }),
+            json!([{ "id": ARTIFACT_ID, "kind": "log", "bytes": 24 }]),
+        )
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "vcs",
+            "push",
+            at_node.clone(),
+            json!({ "branch": "feature/contract-interface", "remote": "origin", "accepted": true }),
+        )
+        .emit(
+            "2026-08-07T12:00:11.000Z",
+            "vcs",
+            "change-opened",
+            at_node.clone(),
+            json!({
+                "url": "https://example.invalid/changes/1",
+                "host": "github",
+                "id": "1",
+                "base": "main",
+                "author": "a-recording-host",
+            }),
+        )
+        // Every transition of every check, which is what `onevcs` reports while
+        // it waits: the required one queues and then passes, and the advisory
+        // one fails without blocking the merge.
+        .emit(
+            "2026-08-07T12:00:12.000Z",
+            "vcs",
+            "change-check",
+            at_node.clone(),
+            json!({
+                "name": "gate",
+                "required": true,
+                "status": "queued",
+                "from_status": Value::Null,
+                "conclusion": Value::Null,
+            }),
+        )
+        .kept(
+            "2026-08-07T12:00:13.000Z",
+            "vcs",
+            "change-check",
+            at_node.clone(),
+            json!({
+                "name": "published-smoke",
+                "required": false,
+                "status": "completed",
+                "from_status": "in_progress",
+                "conclusion": "failure",
+            }),
+            json!([{ "id": CHECK_LOG_ARTIFACT, "kind": "log", "bytes": 39 }]),
+        )
+        .kept(
+            "2026-08-07T12:00:14.000Z",
+            "vcs",
+            "change-check",
+            at_node.clone(),
+            json!({
+                "name": "gate",
+                "required": true,
+                "status": "completed",
+                "from_status": "queued",
+                "conclusion": "success",
+            }),
+            json!([{ "id": "artifact-gate-check", "kind": "log", "bytes": 18 }]),
+        )
+        // The contention the merge met, timed by `onevcs` itself: the record is
+        // written when the turn came and says how long it had been waiting.
+        .emit(
+            "2026-08-07T12:00:15.000Z",
+            "vcs",
+            "lock-wait",
+            at_node.clone(),
+            json!({ "identity": identity, "elapsed": 0.75, "queue_position": 1 }),
+        )
+        .emit(
+            "2026-08-07T12:00:15.100Z",
+            "vcs",
+            "lock-acquired",
+            at_node.clone(),
+            json!({ "identity": identity }),
+        )
+        .emit(
+            "2026-08-07T12:00:16.000Z",
+            "vcs",
+            "merge-queued",
+            at_node.clone(),
+            json!({
+                "identity": identity,
+                "queue_position": 1,
+                "url": "https://example.invalid/changes/1",
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:17.000Z",
+            "vcs",
+            "lock-wait",
+            at_node.clone(),
+            json!({ "identity": identity, "elapsed": 2.25, "queue_position": 2 }),
+        )
+        .emit(
+            "2026-08-07T12:00:18.000Z",
+            "vcs",
+            "change-merged",
+            at_node.clone(),
+            json!({ "url": "https://example.invalid/changes/1", "sha": MERGE_SHA }),
+        )
+        .emit(
+            "2026-08-07T12:00:19.000Z",
+            "vcs",
+            "merge-completed",
+            at_node.clone(),
+            json!({ "identity": identity, "sha": MERGE_SHA, "base": "main" }),
+        )
+        .emit(
+            "2026-08-07T12:00:20.000Z",
+            "pipeline",
+            "node-settled",
+            at_node,
+            json!({
+                "status": "done",
+                "outcome": "shipped",
+                "branch": "feature/contract-interface",
+                "change_url": "https://example.invalid/changes/1",
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:21.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "round": 1, "node": REVIEW_NODE_ID, "persona": "judge" }),
+            json!({ "persona": "judge" }),
+        )
+        // The other side of the pair: a member the graph runs as the judge
+        // transport, which is what tells a judge chain's failure from an
+        // agent chain's.
+        .emit(
+            "2026-08-07T12:00:22.000Z",
+            "agentgraph",
+            "agent-turn",
+            json!({
+                "run_id": run,
+                "round": 1,
+                "node": REVIEW_NODE_ID,
+                "member": "judge",
+                "persona": "judge",
+                "session": REVIEW_CONVERSATION_ID,
+            }),
+            json!({ "message": "the contract reads", "model": "a-model" }),
+        )
+        .emit(
+            "2026-08-07T12:00:25.000Z",
+            "agentgraph",
+            "turn-completed",
+            json!({
+                "run_id": run,
+                "round": 1,
+                "node": REVIEW_NODE_ID,
+                "member": "judge",
+                "persona": "judge",
+                "session": REVIEW_CONVERSATION_ID,
+            }),
+            json!({
+                "usage": {
+                    "tokens_in": 400,
+                    "tokens_out": 90,
+                    "cache_read": 0,
+                    "cache_write": 0,
+                    "cost": 0.11,
+                    "duration": 3.0,
+                },
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:30.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "round": 1, "node": REVIEW_NODE_ID }),
+            json!({ "status": "done", "outcome": "approved" }),
+        )
+        .emit(
+            "2026-08-07T12:00:31.000Z",
+            "pipeline",
+            "round-finished",
+            round,
+            json!({ "state": "complete", "ok": true }),
+        );
+    journal.text()
 }
 
 /// Append one event to a run's journal, the way a live round does.
@@ -479,9 +767,95 @@ fn live_journal(run: &str, second: &Value) -> String {
         }),
         json!({ "message": "opened the change request" }),
     );
-    // The branch `onevcs` opened for this node and the change it published from
-    // it, relayed into the merged store under that library's own vocabulary.
-    // Two recorded ends, which is the only publication interval a journal holds.
+    // What the dispatch reported from *inside* that turn: `oneagentgraph`
+    // publishes a bounded tool summary as the turn runs rather than when it is
+    // done, which is what a watcher is told about over the stream.
+    emit(
+        "2026-08-07T12:00:28.500Z",
+        "agentgraph",
+        "turn-activity",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": SHIP_NODE_ID,
+            "step": "build",
+            "member": "worker",
+            "persona": "pr-author",
+            "session": LIVE_CONVERSATION_ID,
+        }),
+        json!({
+            "kind": "tool_use",
+            "name": "Bash",
+            "detail": "just gate",
+            "truncated": false,
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:28.800Z",
+        "agentgraph",
+        "turn-completed",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": SHIP_NODE_ID,
+            "step": "build",
+            "member": "worker",
+            "persona": "pr-author",
+            "session": LIVE_CONVERSATION_ID,
+        }),
+        json!({
+            "usage": {
+                "tokens_in": 900,
+                "tokens_out": 210,
+                "cache_read": 300,
+                "cache_write": 60,
+                "cost": 0.19,
+                "duration": 1.5,
+            },
+        }),
+    );
+    // The lint tier the graph runs as a member of its own: the same semantic
+    // role as the work it is checking, told apart from it by its transport.
+    emit(
+        "2026-08-07T12:00:28.900Z",
+        "agentgraph",
+        "agent-turn",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": SHIP_NODE_ID,
+            "member": "llmlint",
+            "persona": "pr-author",
+            "session": LINT_CONVERSATION_ID,
+        }),
+        json!({ "message": "the diff reads", "model": "a-model" }),
+    );
+    emit(
+        "2026-08-07T12:00:28.950Z",
+        "agentgraph",
+        "turn-completed",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": SHIP_NODE_ID,
+            "member": "llmlint",
+            "persona": "pr-author",
+            "session": LINT_CONVERSATION_ID,
+        }),
+        json!({
+            "usage": {
+                "tokens_in": 120,
+                "tokens_out": 40,
+                "cache_read": 0,
+                "cache_write": 0,
+                "cost": 0.03,
+                "duration": 0.5,
+            },
+        }),
+    );
+    // The branch `onevcs` opened for this node and what it did with it, relayed
+    // into the merged store under that library's own vocabulary: a change left
+    // open with a required check still running is a publication in flight.
     emit(
         "2026-08-07T12:00:29.000Z",
         "vcs",
@@ -489,21 +863,54 @@ fn live_journal(run: &str, second: &Value) -> String {
         json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
         json!({
             "token": "a-vcs-session-token",
+            "identity": "github.com/nickderobertis/onepipeline-ui",
             "branch": "feature/ship",
             "base": "main",
             "worktree": "/a/recorded/worktree",
         }),
     );
     emit(
-        "2026-08-07T12:00:38.000Z",
+        "2026-08-07T12:00:33.000Z",
         "vcs",
-        "published",
+        "lock-wait",
         json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
         json!({
-            "branch": "feature/ship",
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "elapsed": 4.5,
+            "queue_position": 3,
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:35.000Z",
+        "vcs",
+        "push",
+        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "branch": "feature/ship", "remote": "origin", "accepted": true }),
+    );
+    emit(
+        "2026-08-07T12:00:38.000Z",
+        "vcs",
+        "change-opened",
+        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({
             "url": "https://example.invalid/changes/2",
+            "host": "github",
             "id": "2",
-            "outcome": "published",
+            "base": "main",
+            "author": "a-recording-host",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:39.000Z",
+        "vcs",
+        "change-check",
+        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({
+            "name": "gate",
+            "required": true,
+            "status": "in_progress",
+            "from_status": "queued",
+            "conclusion": Value::Null,
         }),
     );
     emit(

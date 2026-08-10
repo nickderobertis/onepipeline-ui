@@ -34,16 +34,148 @@
           }
         },
         {
-          "id": "e4",
-          "kind": "node-settled",
-          "at": "2026-08-07T12:00:20.000Z",
+          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+          "kind": "turn-completed",
+          "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
           "round": 1,
-          "status": "done",
+          "reference": {
+            "kind": "conversation",
+            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+          }
+        },
+        {
+          "id": "e5",
+          "kind": "session-opened",
+          "at": "2026-08-07T12:00:06.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e6",
+          "kind": "gate-started",
+          "at": "2026-08-07T12:00:07.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e7",
+          "kind": "gate-verdict",
+          "at": "2026-08-07T12:00:09.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
           "reference": {
             "kind": "gate_log",
             "value": "artifact-5c8f0a1b"
           }
+        },
+        {
+          "id": "e8",
+          "kind": "push",
+          "at": "2026-08-07T12:00:10.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e9",
+          "kind": "change-opened",
+          "at": "2026-08-07T12:00:11.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "reference": {
+            "kind": "pr",
+            "value": "https://example.invalid/changes/1"
+          }
+        },
+        {
+          "id": "e10",
+          "kind": "change-check",
+          "at": "2026-08-07T12:00:12.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "status": "queued"
+        },
+        {
+          "id": "e11",
+          "kind": "change-check",
+          "at": "2026-08-07T12:00:13.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "status": "completed",
+          "reference": {
+            "kind": "gate_log",
+            "value": "artifact-published-smoke"
+          }
+        },
+        {
+          "id": "e12",
+          "kind": "change-check",
+          "at": "2026-08-07T12:00:14.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "status": "completed",
+          "reference": {
+            "kind": "gate_log",
+            "value": "artifact-gate-check"
+          }
+        },
+        {
+          "id": "e13",
+          "kind": "lock-wait",
+          "at": "2026-08-07T12:00:15.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e14",
+          "kind": "lock-acquired",
+          "at": "2026-08-07T12:00:15.100Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e15",
+          "kind": "merge-queued",
+          "at": "2026-08-07T12:00:16.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "reference": {
+            "kind": "pr",
+            "value": "https://example.invalid/changes/1"
+          }
+        },
+        {
+          "id": "e16",
+          "kind": "lock-wait",
+          "at": "2026-08-07T12:00:17.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e17",
+          "kind": "change-merged",
+          "at": "2026-08-07T12:00:18.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "reference": {
+            "kind": "pr",
+            "value": "https://example.invalid/changes/1"
+          }
+        },
+        {
+          "id": "e18",
+          "kind": "merge-completed",
+          "at": "2026-08-07T12:00:19.000Z",
+          "node_id": "contract-interface",
+          "round": 1
+        },
+        {
+          "id": "e19",
+          "kind": "node-settled",
+          "at": "2026-08-07T12:00:20.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "status": "done"
         }
       ]
     },
@@ -75,6 +207,17 @@
             "kind": "conversation",
             "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
           }
+        },
+        {
+          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+          "kind": "turn-completed",
+          "at": "2026-08-07T12:00:05.000Z",
+          "node_id": "contract-interface",
+          "round": 1,
+          "reference": {
+            "kind": "conversation",
+            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+          }
         }
       ]
     },
@@ -82,8 +225,42 @@
       "id": "verification.01.contract-interface.artifact-5c8f0a1b",
       "kind": "verification",
       "label": "artifact-5c8f0a1b",
-      "started_at": "2026-08-07T12:00:03.000Z",
-      "ended_at": "2026-08-07T12:00:20.000Z",
+      "started_at": "2026-08-07T12:00:07.000Z",
+      "ended_at": "2026-08-07T12:00:09.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "status": "ok",
+      "detail": {
+        "ok": true,
+        "output_tail": "the gate ran and passed",
+        "artifact_id": "artifact-5c8f0a1b"
+      },
+      "events": []
+    },
+    {
+      "id": "verification.01.contract-interface.artifact-published-smoke",
+      "kind": "verification",
+      "label": "artifact-published-smoke",
+      "started_at": "2026-08-07T12:00:12.000Z",
+      "ended_at": "2026-08-07T12:00:13.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "status": "failed",
+      "detail": {
+        "ok": false,
+        "output_tail": "",
+        "artifact_id": "artifact-published-smoke"
+      },
+      "events": []
+    },
+    {
+      "id": "verification.01.contract-interface.artifact-gate-check",
+      "kind": "verification",
+      "label": "artifact-gate-check",
+      "started_at": "2026-08-07T12:00:13.000Z",
+      "ended_at": "2026-08-07T12:00:14.000Z",
       "parent_id": "node.01.contract-interface",
       "node_id": "contract-interface",
       "round": 1,
@@ -91,8 +268,37 @@
       "detail": {
         "ok": true,
         "output_tail": "",
-        "artifact_id": "artifact-5c8f0a1b"
+        "artifact_id": "artifact-gate-check"
       },
+      "events": []
+    },
+    {
+      "id": "publication.01.contract-interface",
+      "kind": "publication",
+      "label": "feature/contract-interface",
+      "started_at": "2026-08-07T12:00:06.000Z",
+      "ended_at": "2026-08-07T12:00:19.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "status": "merged",
+      "reference": {
+        "kind": "pr",
+        "value": "https://example.invalid/changes/1"
+      },
+      "events": []
+    },
+    {
+      "id": "rollup.01.contract-interface.lock-wait",
+      "kind": "rollup",
+      "label": "lock-wait",
+      "started_at": "2026-08-07T12:00:14.250Z",
+      "ended_at": "2026-08-07T12:00:17.000Z",
+      "parent_id": "node.01.contract-interface",
+      "node_id": "contract-interface",
+      "round": 1,
+      "count": 2,
+      "total_duration_ms": 3000,
       "events": []
     }
   ]

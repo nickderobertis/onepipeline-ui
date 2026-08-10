@@ -237,6 +237,7 @@ pub struct Frames {
     opened: bool,
     baseline: Vec<(RunId, (u64, usize, u64))>,
     transcripts: Option<String>,
+    activity: Option<Vec<Value>>,
     pending: std::collections::VecDeque<(SseEvent, Value)>,
     since_conversation_poll: Duration,
 }
@@ -254,6 +255,7 @@ impl Frames {
             opened: false,
             baseline: Vec::new(),
             transcripts: None,
+            activity: None,
             pending: std::collections::VecDeque::new(),
             since_conversation_poll: Duration::ZERO,
         }
@@ -301,6 +303,18 @@ impl Frames {
         Some(payload::conversation_signature(&view))
     }
 
+    /// What the watched run's nodes were last reported doing from inside a turn.
+    ///
+    /// Read only when that run's own change token moved, because an activity
+    /// summary *is* a recorded event: nothing can arrive that the run-level poll
+    /// has not already noticed, so this costs a read of one run rather than a
+    /// second poll of the root.
+    fn activity(&self) -> Option<Vec<Value>> {
+        let watched = self.watched.as_ref()?;
+        let view = self.store.view(watched).ok()?;
+        Some(payload::live_activity(&view))
+    }
+
     fn frame(&mut self, event: SseEvent, data: Value) -> EventFrame {
         let frame = EventFrame {
             id: self.cursor,
@@ -320,6 +334,7 @@ impl Iterator for Frames {
             self.opened = true;
             self.baseline = self.signatures();
             self.transcripts = self.transcript_digest();
+            self.activity = self.activity();
             let snapshot = RunStore::envelope(self.store.run_list(&RunsQuery {
                 include_settled: true,
                 ..RunsQuery::default()
@@ -349,6 +364,20 @@ impl Iterator for Frames {
                         SseEvent::RunChanged,
                         json!({ "run_id": run, "round": token.0 }),
                     ));
+                    // The same movement, read for what it was: a run that moved
+                    // because a turn reported from inside itself has something in
+                    // flight to say, and a client watching it is told rather than
+                    // left to refetch a detail that does not carry it.
+                    if self.watched.as_ref() == Some(run) {
+                        let latest = self.activity();
+                        if latest.is_some() && latest != self.activity {
+                            self.activity.clone_from(&latest);
+                            self.pending.push_back((
+                                SseEvent::ActivityChanged,
+                                json!({ "run_id": run, "activity": latest }),
+                            ));
+                        }
+                    }
                 }
             }
             for (run, _) in &self.baseline {
