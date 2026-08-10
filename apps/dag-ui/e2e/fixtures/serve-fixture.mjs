@@ -20,8 +20,8 @@
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
-import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -48,9 +48,9 @@ export const FIXTURE_FACTS_NAME = "fixture-facts.json";
 /**
  * Report a failure and stop, under the same exit-code contract the crate serves:
  * `2` is a usage error — the caller asked for something this cannot mean — and
- * `70` is this side failing at something it was asked to do correctly. A build
- * that did not build is the second, and telling a Playwright run which of the two
- * it hit is the difference between fixing the invocation and fixing the tree.
+ * `70` is this side failing at something it was asked to do correctly. A server
+ * binary that was never built is the second, and telling a Playwright run which of
+ * the two it hit is the difference between fixing the invocation and fixing the tree.
  */
 function stop(code, message, action) {
   process.stderr.write(`serve-fixture: ${message}\nACTION: ${action}\n`);
@@ -62,25 +62,57 @@ function die(message, action) {
   stop(2, message, action);
 }
 
-/** The compiled server this fixture serves through, built if it is not there yet. */
-function serverBinary() {
-  const built = spawnSync("cargo", ["build", "--locked", "--quiet"], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (built.status !== 0) {
-    // llmlint: ignore[changed_behavior_has_e2e] driving this means making the
-    // repository not build, which is the one thing a journey of the suite that
-    // build produces must never do. Every other exit this script can take is
-    // driven in `dag-ui.spec.ts`; a Playwright run that reached here would have
-    // no server to test against, and says so on stderr with the action to take.
-    stop(
-      70,
-      "the read API binary did not build",
-      "run 'cargo build --locked' in the repository root and fix what it reports",
+/**
+ * The directory `dag-ui:build-api-server` built into: `CARGO_TARGET_DIR` when
+ * cargo was told one, and the default `target/` otherwise.
+ *
+ * Honoured because that build step is a cargo invocation from the repository
+ * root, so a relative one resolves the way cargo itself resolves it. Validated
+ * rather than trusted, like every other input here: this value chooses the path
+ * this script spawns, and one that is set but empty is a mistyped export rather
+ * than a directory — resolved, it would name the repository root and be reported
+ * as a tree that was never built, sending a reader to fix the wrong thing.
+ */
+function targetRoot() {
+  const configured = process.env.CARGO_TARGET_DIR;
+  if (configured === undefined) {
+    return join(REPO_ROOT, "target");
+  }
+  if (configured.trim() === "") {
+    die(
+      "CARGO_TARGET_DIR is set to an empty path",
+      "unset CARGO_TARGET_DIR, or set it to the directory cargo was told to build into",
     );
   }
-  return join(REPO_ROOT, "target", "debug", "onepipeline-api");
+  return resolve(REPO_ROOT, configured);
+}
+
+/**
+ * The compiled server this fixture serves through — located, never built.
+ *
+ * Compiling here would put a debug build inside the readiness window Playwright
+ * gives a `webServer`, and that window is budgeted for a process binding a port.
+ * A warm `target/` hides it; a cold one on a CI runner, sharing the cargo lock
+ * with the sibling task compiling the crate's own tests, spends minutes there and
+ * Playwright reports the one thing that was not wrong — a server that would not
+ * start. So the build is a step of its own, `dag-ui:build-api-server`, which
+ * `dag-ui:test` and `dag-ui:bootstrap` depend on, and its absence is answered
+ * here in milliseconds rather than waited out.
+ */
+function serverBinary() {
+  const binary = join(
+    targetRoot(),
+    "debug",
+    process.platform === "win32" ? "onepipeline-api.exe" : "onepipeline-api",
+  );
+  if (!existsSync(binary)) {
+    stop(
+      70,
+      `no read API binary at ${binary}`,
+      "run 'npx nx run dag-ui:build-api-server' from the repository root — the browser tier builds it in a step of its own, before any server starts",
+    );
+  }
+  return binary;
 }
 
 /**

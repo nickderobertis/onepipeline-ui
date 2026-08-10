@@ -8,7 +8,9 @@
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   FIXTURE_WORKSPACE,
@@ -123,25 +125,31 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  * Change what the server is serving — record progress, or take a run away — through
  * the fixture module that wrote the run directory in the first place.
  */
-function changeServedRuns(args: string[], workspace = FIXTURE_WORKSPACE): void {
+function changeServedRuns(
+  args: string[],
+  workspace = FIXTURE_WORKSPACE,
+  env: NodeJS.ProcessEnv = {},
+): void {
   execFileSync(
     process.execPath,
     ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
-    { stdio: ["ignore", "inherit", "pipe"] },
+    { stdio: ["ignore", "inherit", "pipe"], env: { ...process.env, ...env } },
   );
 }
 
 /**
  * What the fixture command said and how it ended, for an invocation it refuses.
  *
- * `workspace` is this run's own unless a case is about that option itself.
+ * `workspace` is this run's own unless a case is about that option itself, and
+ * `env` is empty unless a case is about what the command reads from it.
  */
 function refusedChange(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
+  env: NodeJS.ProcessEnv = {},
 ): { status: number; stderr: string } {
   try {
-    changeServedRuns(args, workspace);
+    changeServedRuns(args, workspace, env);
   } catch (refused) {
     // Node decorates the error `execFileSync` throws with the child's own exit
     // status and captured stderr, and types neither: a caught value is `unknown`
@@ -2244,6 +2252,51 @@ test("refuses a change no recorded run could have held", () => {
   expect(elsewhere.status).toBe(2);
   expect(elsewhere.stderr).toContain("is not a directory under");
   expect(existsSync("/etc/hosts")).toBe(true);
+});
+
+/**
+ * What the fixture server does when the read API it serves through was never built.
+ *
+ * It finds that binary rather than building it, because building it here would put a
+ * cargo compile inside the readiness window Playwright gives a `webServer` — a window
+ * budgeted for a process binding a port, which a cold `target/` on a CI runner blows
+ * through while Playwright reports the one thing that was not wrong. The build is
+ * `dag-ui:build-api-server`, a step of its own; the absence is this, immediately.
+ *
+ * Driven by pointing the child's `CARGO_TARGET_DIR` at an empty directory, which is
+ * exactly what an unbuilt tree looks like to it — and leaves the binary this run is
+ * being served through where it is.
+ */
+test("refuses to serve when the read API has not been built", () => {
+  const unbuilt = mkdtempSync(join(tmpdir(), "dag-ui-e2e-unbuilt-"));
+  const workspace = mkdtempSync(
+    join(tmpdir(), "dag-ui-e2e-unbuilt-workspace-"),
+  );
+  try {
+    const refused = refusedChange([], workspace, {
+      CARGO_TARGET_DIR: unbuilt,
+    });
+    // 70, not 2: the invocation was answerable, the tree was not ready for it.
+    expect(refused.status, refused.stderr).toBe(70);
+    expect(refused.stderr).toContain(
+      `no read API binary at ${join(unbuilt, "debug", "onepipeline-api")}`,
+    );
+    // The action names the step that builds it, so a reader of a failed run does
+    // not have to know that the tier stopped building it on their behalf.
+    expect(refused.stderr).toContain(
+      "ACTION: run 'npx nx run dag-ui:build-api-server'",
+    );
+
+    // The same variable set to nothing is a mistyped export, not a directory, and
+    // it is refused as the usage error it is: resolved, it would name the
+    // repository root and report a tree that was never built.
+    const blank = refusedChange([], workspace, { CARGO_TARGET_DIR: "" });
+    expect(blank.status, blank.stderr).toBe(2);
+    expect(blank.stderr).toContain("CARGO_TARGET_DIR is set to an empty path");
+  } finally {
+    rmSync(unbuilt, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 async function detailScroll(

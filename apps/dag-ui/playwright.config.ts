@@ -142,6 +142,16 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   use: { baseURL: `http://127.0.0.1:${session.ui}` },
+  /**
+   * Every timeout below is a *readiness* budget: how long a process may take to bind
+   * its port, not how long it may take to exist. So no command here may build
+   * anything. The read API the fixture server serves through is built by
+   * `dag-ui:build-api-server`, which `dag-ui:test` and `dag-ui:bootstrap` depend on;
+   * `serve-fixture.mjs` finds that binary and refuses in milliseconds when it is
+   * absent. A compile here is a wait whose length is the runner's and whatever else
+   * holds the cargo lock, and Playwright can only report it as a server that would
+   * not start — which is the one thing that was not wrong.
+   */
   webServer: [
     {
       command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,

@@ -13,12 +13,18 @@
       "command": "cd apps/dag-ui && npx vite build --config vite.config.ts",
       "outputs": ["{projectRoot}/dist"]
     },
+    "build-api-server": {
+      "command": "cargo build --locked --quiet --bin onepipeline-api",
+      "inputs": ["apiServerSurface"],
+      "cache": false
+    },
     "lint": {
       "command": "npx biome check apps/dag-ui && npx eslint apps/dag-ui"
     },
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts && npx playwright test --config playwright.config.ts && npx playwright test --config isolation.config.ts",
-      "inputs": ["default", "apiServerSurface"]
+      "inputs": ["default", "apiServerSurface"],
+      "dependsOn": ["build-api-server"]
     },
     "typecheck": {
       "command": "npx tsc -p apps/dag-ui/tsconfig.json --noEmit"
@@ -30,7 +36,8 @@
       "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui"
     },
     "bootstrap": {
-      "command": "cd apps/dag-ui && npx playwright install chromium"
+      "command": "cd apps/dag-ui && npx playwright install chromium",
+      "dependsOn": ["build-api-server"]
     }
   }
 }

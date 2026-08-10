@@ -68,6 +68,19 @@ jobs:
       - name: Quality gate (affected projects)
         if: github.event_name == 'pull_request'
         run: just check-affected
+      # The browser tier is exempt from that scoping, and it is the only tier that
+      # is. `affected` selected `dag-ui` for none of the diffs in #2, #4, #5 or #6,
+      # so each of them cleared a pull-request gate that never started the browser
+      # journeys and then reddened main — where the same tier gates every publish
+      # job in `release.yml`, which is how three releases shipped nothing to any
+      # registry. A tier that only ever runs where it cannot block a merge is worse
+      # than no tier, so a pull request is judged on it by the same selection a
+      # push is: unconditionally. Affected scoping stays for format, lint and
+      # typecheck, where a skipped run costs nobody a release. Seconds when
+      # `check-affected` already ran it — Nx replays it from that run's cache.
+      - name: Browser tier (never affected-scoped)
+        if: github.event_name == 'pull_request'
+        run: just test-browser
       - name: Quality gate (every project)
         if: github.event_name != 'pull_request'
         run: just check

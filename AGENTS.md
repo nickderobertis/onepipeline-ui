@@ -107,6 +107,11 @@ fans one uniformly-named target across all of them.
 - **Tests are realistic, not mocked, and complete, not minimal.** Nothing under
   test is stubbed, and a change is not done until a real journey covers it —
   happy path and at least one failure a user can cause.
+- **The browser tier is never affected-scoped.** `just check-affected` may skip
+  any other tier on a pull request; `dag-ui:test` runs on every one, as
+  `just test-browser`. It is the only proof the served UI works and it gates
+  every publish job in `release.yml`, so a tier scoped away from a pull request
+  is one that can only redden main and skip a release after the merge.
 - **Validate external input at its trust boundary.** Every `{...}` a route
   interpolates is a validated identifier newtype constructible only through
   `TryFrom`; a raw `String` must never reach storage, and a runs root is a
