@@ -202,11 +202,16 @@ if (args.stall) {
   } else if (args["grow-worker-session"] !== undefined) {
     growTranscript(runsRoot, Number(args["grow-worker-session"]));
   } else if (args["record-activity"] !== undefined) {
-    recordActivity(
-      runsRoot,
-      args["record-activity"],
-      args["activity-detail"] ?? "",
-    );
+    // Both halves or neither: a summary the producing library bounds to 160
+    // characters is a tool's name *and* what it was given, and one recorded with
+    // an empty detail is a record no member would have written.
+    if (args["activity-detail"] === undefined) {
+      die(
+        "--record-activity needs --activity-detail",
+        "pass --activity-detail the summary the tool call carried",
+      );
+    }
+    recordActivity(runsRoot, args["record-activity"], args["activity-detail"]);
   } else {
     process.exit(await serve(args.workspace, port));
   }

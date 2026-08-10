@@ -37,19 +37,8 @@ module both features need and neither owns belongs in `src/lib/` instead.
 
 ## What the backend cannot answer
 
-Most of this vocabulary the backend *does* answer, out of records `onevcs` and
-`oneagentgraph` write and the read API reads: the checks a host observed on a
-publication and the log a failing one stored, the contention a publication met on
-a lock, the merge commit, the tool calls a member published from inside a turn,
-and the lint transport — which is a party of the served role pair rather than a
-producer, and is what tells a lint session from the worker whose semantic role it
-borrows. Each has a journey here, driven against a fixture written in the records
-those libraries really emit.
-
-What is left is narrower, and it is the *only* thing a journey may not assert: a
-merge commit's url and a branch url, a check's own url, a turn's prose, and the
-time spent inside a tool call. Each is named in [`src/AGENTS.md`](../../src/AGENTS.md)
-beside the crate that would have to serve it, with the record that would have to
-carry it. A surface that would need one of them is fed nothing rather than an
-invented record — the panel states the absence, and the journey asserts that
-statement.
+A field no record fills is fed nothing, never an invented record: the surface
+states the absence and the journey asserts that statement. `src/AGENTS.md` is the
+list, and it is short — check what a producer actually emits before trimming a
+journey, because most of this vocabulary is answered and the last list of gaps
+was wrong about four of them.

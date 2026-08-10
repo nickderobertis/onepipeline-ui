@@ -39,14 +39,39 @@ pub const ARTIFACT_TAIL_BYTES: usize = 64 * 1024;
 /// dispatch was for. Without the first half an agent chain that lost its provider
 /// and a judge chain that lost its own read as the same sentence, which is the
 /// diagnosis a whole night was once lost to.
-const TRANSPORT_ROLES: [&str; 3] = ["agent", "judge", "llmlint"];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Party {
+    /// The side that does the work, and the one side every dispatch has.
+    Agent,
+    /// The side that supervises it.
+    Judge,
+    /// The lint tier, which reads the work under the semantic role of whoever
+    /// did it and is told apart from them by nothing else.
+    Llmlint,
+}
 
-/// The side of a conversation a dispatch runs on when no record names another.
-///
-/// A default, not a stamp: [`named_transport_role`] answers from the record
-/// wherever the record answers, and this is the party that is left when it does
-/// not — the agent side, which is the one side every dispatch has.
-const DISPATCHED_TRANSPORT_ROLE: &str = TRANSPORT_ROLES[0];
+impl Party {
+    /// The word the wire carries this party as.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Judge => "judge",
+            Self::Llmlint => "llmlint",
+        }
+    }
+
+    /// The party one recorded word names, or `None` when it names none this
+    /// crate can serve: the field is a closed vocabulary a client switches on,
+    /// so a member called anything else is not a party at all.
+    fn named(value: &str) -> Option<Self> {
+        match value {
+            "agent" => Some(Self::Agent),
+            "judge" => Some(Self::Judge),
+            "llmlint" => Some(Self::Llmlint),
+            _ => None,
+        }
+    }
+}
 
 /// The semantic roles a client may be given, from `agentRoleSchema`.
 ///
@@ -117,11 +142,8 @@ mod graph {
 /// declared a member for, and a persona names the side the member runs under. A
 /// word outside `transportRoleSchema` names no party at all, so it is dropped
 /// rather than served for a client to fail on.
-fn named_transport_role(event: &Envelope) -> Option<&'static str> {
-    let named = |value: Option<&str>| {
-        let value = value?;
-        TRANSPORT_ROLES.into_iter().find(|role| *role == value)
-    };
+fn named_transport_role(event: &Envelope) -> Option<Party> {
+    let named = |value: Option<&str>| Party::named(value?);
     named(event.payload.get("role").and_then(Value::as_str))
         .or_else(|| named(event.labels.extra.get("role").and_then(Value::as_str)))
         .or_else(|| named(event.labels.extra.get("member").and_then(Value::as_str)))
@@ -129,8 +151,12 @@ fn named_transport_role(event: &Envelope) -> Option<&'static str> {
 }
 
 /// The party that produced one record.
-fn transport_role(event: &Envelope) -> &'static str {
-    named_transport_role(event).unwrap_or(DISPATCHED_TRANSPORT_ROLE)
+///
+/// [`Party::Agent`] is the answer for a record that names none, and a default
+/// rather than a stamp: it is the party that is left when nothing else was
+/// named, and it is the one side every dispatch has.
+fn transport_role(event: &Envelope) -> Party {
+    named_transport_role(event).unwrap_or(Party::Agent)
 }
 
 /// The party a group of records belongs to: the first of them that names one.
@@ -139,11 +165,11 @@ fn transport_role(event: &Envelope) -> &'static str {
 /// say so — a tool summary carries no `role` where the settle that follows it
 /// does. Taking the first answer rather than each record's own keeps every span
 /// and every link of one session under the one party that ran it.
-fn relayed_transport_role<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> &'static str {
+fn relayed_transport_role<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Party {
     events
         .into_iter()
         .find_map(named_transport_role)
-        .unwrap_or(DISPATCHED_TRANSPORT_ROLE)
+        .unwrap_or(Party::Agent)
 }
 
 /// Now, as the envelope's `observed_at`.
@@ -586,7 +612,7 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
                     continue;
                 }
                 let party = transport_role(event);
-                if party == "llmlint" {
+                if party == Party::Llmlint {
                     totals.lint_records += 1;
                 }
                 // A dispatch has reported: whatever ran between it and the
@@ -604,9 +630,9 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
                     continue;
                 };
                 match party {
-                    "judge" => measure(&mut totals.judge_model_ms, ms),
-                    "llmlint" => measure(&mut totals.llmlint_model_ms, ms),
-                    _ => measure(&mut totals.agent_model_ms, ms),
+                    Party::Judge => measure(&mut totals.judge_model_ms, ms),
+                    Party::Llmlint => measure(&mut totals.llmlint_model_ms, ms),
+                    Party::Agent => measure(&mut totals.agent_model_ms, ms),
                 }
             }
             Source::Vcs => {
@@ -727,7 +753,7 @@ fn timing_document(totals: &Buckets, measured: &Measured) -> Value {
 /// leaves the cost unknown rather than free, and the wire's own `null` is what
 /// says so.
 #[derive(Debug, Default, Clone, Copy)]
-struct Party {
+struct Spend {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     cache_read_tokens: Option<u64>,
@@ -735,7 +761,7 @@ struct Party {
     cost_usd: Option<f64>,
 }
 
-impl Party {
+impl Spend {
     /// Whether any record filled any field of this party.
     fn recorded(self) -> bool {
         self.input_tokens.is_some()
@@ -808,7 +834,7 @@ impl Party {
 /// every field of a party nothing reported stays `null`.
 fn usage<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> (Value, bool) {
     let (mut agent, mut judge, mut llmlint) =
-        (Party::default(), Party::default(), Party::default());
+        (Spend::default(), Spend::default(), Spend::default());
     for event in events {
         if event.source != Source::Agentgraph || event.kind.0 != graph::TURN_COMPLETED {
             continue;
@@ -817,9 +843,9 @@ fn usage<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> (Value, bool) {
             continue;
         };
         match transport_role(event) {
-            "judge" => judge.record(recorded),
-            "llmlint" => llmlint.record(recorded),
-            _ => agent.record(recorded),
+            Party::Judge => judge.record(recorded),
+            Party::Llmlint => llmlint.record(recorded),
+            Party::Agent => agent.record(recorded),
         }
     }
     let total = agent.plus(judge).plus(llmlint);
@@ -879,7 +905,7 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
             // its own are the same failure until this says which one it was.
             link.insert(
                 "role".into(),
-                json!(relayed_transport_role(events.iter().copied())),
+                json!(relayed_transport_role(events.iter().copied()).as_str()),
             );
             if let Some(role) = agent_role(first.and_then(|event| event.labels.persona.as_deref()))
             {
@@ -1898,7 +1924,7 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
     );
     attribution.insert(
         "transportRole".into(),
-        json!(relayed_transport_role(events.iter().copied())),
+        json!(relayed_transport_role(events.iter().copied()).as_str()),
     );
     attribution.insert(
         "agentRole".into(),
@@ -2165,9 +2191,7 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
             );
             span.insert(
                 "transport_role".into(),
-                json!(relayed_transport_role(
-                    relayed.iter().map(|(_, event)| *event)
-                )),
+                json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
             );
             if let Some(role) = agent_role(
                 relayed
@@ -2521,7 +2545,7 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: 
         event.source == Source::Pipeline
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
-    let mut counted: Vec<((&'static str, &'static str), usize)> = Vec::new();
+    let mut counted: Vec<((Party, &'static str), usize)> = Vec::new();
     for (_, relayed) in relayed_sessions(events) {
         let persona = relayed
             .first()
@@ -2550,7 +2574,7 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: 
         .into_iter()
         .map(|((transport, role), count)| {
             json!({
-                "id": format!("rollup.{round:02}.{node}.{transport}.{role}"),
+                "id": format!("rollup.{round:02}.{node}.{}.{role}", transport.as_str()),
                 "kind": "rollup",
                 "label": "dispatch",
                 "started_at": start.ts,
@@ -2560,7 +2584,7 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: 
                 "round": round,
                 "count": count,
                 "agent_role": role,
-                "transport_role": transport,
+                "transport_role": transport.as_str(),
                 "events": Vec::<Value>::new(),
             })
         })
@@ -2662,9 +2686,9 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
             span.insert(
                 "transport_role".into(),
                 json!(if relayed.is_empty() {
-                    transport_role(start)
+                    transport_role(start).as_str()
                 } else {
-                    relayed_transport_role(relayed.iter().map(|(_, event)| *event))
+                    relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
                 }),
             );
             let persona = relayed
