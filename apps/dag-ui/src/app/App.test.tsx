@@ -2,6 +2,7 @@ import {
   type NodeDetail,
   parseRunDetail,
   parseRunTimeline,
+  TELEMETRY_SCHEMA_VERSION,
 } from "@onepipeline-ui/dag-model";
 import {
   act,
@@ -1455,11 +1456,12 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     await screen.findByText("dashboard");
 
     // A peer that ships a schema the app does not accept must be reported, not
-    // silently rendered from whatever survived. Kept one ahead of the accepted
-    // version, so this stays a rejection every time that version is bumped.
+    // silently rendered from whatever survived. Derived from the accepted
+    // version rather than written out, so this stays a rejection when that
+    // version is bumped instead of quietly becoming the accepted one.
     sources[0]?.emit(
       "snapshot",
-      { ...runList, telemetry_schema_version: 11 },
+      { ...runList, telemetry_schema_version: TELEMETRY_SCHEMA_VERSION + 1 },
       "5",
     );
     expect(await screen.findByRole("alert")).toBeInTheDocument();

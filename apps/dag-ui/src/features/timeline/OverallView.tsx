@@ -113,7 +113,14 @@ export function OverallView({
             <Metric
               icon={<Clock3 />}
               label="Wall time"
-              value={formatDurationSeconds(detail.run.timing.wall_seconds)}
+              // Schema 11 serves an unmeasured timing as null, and a run whose
+              // clock nothing could aggregate is one of them: it reads as
+              // unknown rather than as a run that took no time at all.
+              value={
+                detail.run.timing.wall_seconds === null
+                  ? "not measured"
+                  : formatDurationSeconds(detail.run.timing.wall_seconds)
+              }
             />
             <Metric
               icon={<Cpu />}

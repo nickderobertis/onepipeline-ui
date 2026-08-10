@@ -8,6 +8,8 @@
 
 use serde_json::{json, Value};
 
+use onepipeline_ui::telemetry;
+
 use crate::fixture_run;
 use crate::http;
 use crate::serving::Serving;
@@ -23,7 +25,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(10), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(11), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -428,7 +430,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(2));
+    assert_eq!(body["timeline_schema_version"], json!(3));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -808,46 +810,65 @@ fn a_live_run_reports_the_round_it_is_driving_and_what_it_is_waiting_on() {
     // Every millisecond of the run's clock has exactly one home: the lanes the
     // wire names a fraction for, and the residue nothing measured.
     let timing = &run["timing"];
-    let wall = timing["wall_ms"].as_u64().expect("wall_ms");
     let ms = |key: &str| {
         timing[key]
             .as_u64()
             .unwrap_or_else(|| panic!("{key}: {timing}"))
     };
-    // Read as the fractions rather than the seconds, because that is the one
-    // reading carried at the precision the parts were measured in: the eight
-    // `*_seconds` are whole seconds of a clock timed in milliseconds.
-    let shares: f64 = timing["fractions"]
-        .as_object()
-        .expect("fractions")
-        .values()
-        .map(|share| share.as_f64().expect("a share"))
-        .sum();
-    #[allow(clippy::cast_precision_loss)]
-    let residue = ms("unattributed_ms") as f64 / wall as f64;
+    // The sibling's own invariant, carried onto the wire: its measured buckets
+    // sum exactly to the whole, so the residue is what nothing measured.
+    let measured: u64 = [
+        "agent_seconds",
+        "judge_seconds",
+        "llmlint_seconds",
+        "gate_seconds",
+        "publication_wait_seconds",
+        "lock_wait_seconds",
+        "setup_seconds",
+        "scheduling_seconds",
+    ]
+    .iter()
+    .filter_map(|lane| timing[*lane].as_u64())
+    .sum();
     assert!(
-        (shares + residue - 1.0).abs() < 1e-9,
-        "the breakdown must add up to the whole: {timing}"
+        measured * 1_000 + ms("unattributed_ms") <= ms("wall_ms")
+            && ms("wall_ms") - measured * 1_000 - ms("unattributed_ms") < 8_000,
+        "the measured buckets and the residue are the whole clock, to the second \
+         each of them is served in: {timing}"
     );
     // Measured where a record measured it, and absent where none did — never a
     // zero a reader could take for a measurement.
+    // The bucket is wall time the run spent blocked, which is what a breakdown
+    // of a clock means — not the `elapsed` the `lock-wait` record carries, which
+    // is how long that one wait had lasted when the turn finally came. The
+    // rollup on the timeline serves the second; this serves the first.
     assert_eq!(
-        ms("lock_wait_seconds"),
-        4,
-        "`onevcs` timed the wait: {timing}"
-    );
-    assert!(ms("llmlint_model_ms") > 0, "the lint member ran: {timing}");
-    assert_eq!(ms("judge_model_ms"), 0, "no judge chain ran: {timing}");
-    assert_eq!(
-        run["timing_quality"],
-        json!("partial"),
-        "and the presence flags say which of those zeros were measured"
+        timing["lock_wait_seconds"],
+        json!(2),
+        "the sibling attributed the block: {timing}"
     );
     assert!(
-        timing["idle_orchestration_ms"]
-            .as_u64()
-            .is_some_and(|ms| ms > 0),
-        "the wait on the planner and on the person is time the run spent: {timing}"
+        ms("llmlint_model_ms") > 0,
+        "the lint member reported a turn: {timing}"
+    );
+    assert_eq!(
+        timing["judge_model_ms"],
+        json!(null),
+        "no judge chain reported one, which is not zero of it: {timing}"
+    );
+    assert_eq!(timing["tool_ms"], json!(null), "nothing times a tool call");
+    // The run waited on a planner and on a person, and the sibling's vocabulary
+    // folds both into `scheduling` — which is where that time is, and why the
+    // wire's own lane for it is absent rather than a share of a bucket that is
+    // not it.
+    assert!(
+        timing["scheduling_seconds"].as_u64().is_some_and(|s| s > 0),
+        "the waits are time the run spent: {timing}"
+    );
+    assert_eq!(
+        timing["idle_orchestration_ms"],
+        json!(null),
+        "nothing measures the two waits apart from the rest of scheduling: {timing}"
     );
 }
 
@@ -1491,14 +1512,17 @@ fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
     )
     .json();
     let usage = &body["run"]["usage"];
-    assert_eq!(usage["agent"]["input_tokens"], json!(1_200));
-    assert_eq!(usage["agent"]["cost_usd"], json!(0.42));
-    assert_eq!(usage["judge"]["input_tokens"], json!(400));
+    // What the run spent, as the sibling folded it from the turns it relayed.
+    assert_eq!(usage["total"]["input_tokens"], json!(1_600));
     assert_eq!(usage["total"]["output_tokens"], json!(430));
-    // Nothing ran a lint chain here, and that is served as unknown rather than
-    // as a measured nothing: a null cost cannot be read as a free one.
-    assert_eq!(usage["llmlint"]["input_tokens"], json!(null));
-    assert_eq!(usage["llmlint"]["cost_usd"], json!(null));
+    assert_eq!(usage["total"]["cost_usd"], json!(0.53));
+    // The per-party split is read from the onejudge report each side keeps, and
+    // this run kept none — so each party is unknown rather than free. A null cost
+    // cannot be read as a run that cost nothing.
+    for party in ["agent", "judge", "llmlint"] {
+        assert_eq!(usage[party]["input_tokens"], json!(null), "{party}");
+        assert_eq!(usage[party]["cost_usd"], json!(null), "{party}");
+    }
 
     // The same distinction on the clock: the two parties that reported a turn
     // are present, and the one that did not is flagged absent beside its zero.
@@ -1508,21 +1532,17 @@ fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
     assert_eq!(presence["llmlint_model_ms"], json!(false));
     assert_eq!(presence["tool_ms"], json!(false));
     let timing = &body["run"]["timing"];
-    assert_eq!(timing["judge_seconds"], json!(3));
-    assert_eq!(timing["gate_seconds"], json!(2));
-    assert_eq!(timing["lock_wait_seconds"], json!(3));
-    assert_eq!(timing["llmlint_model_ms"], json!(0));
+    assert_eq!(timing["gate_seconds"], json!(2), "{timing}");
+    assert_eq!(timing["judge_model_ms"], json!(3_000), "{timing}");
+    assert_eq!(timing["llmlint_model_ms"], json!(null), "{timing}");
+    assert_eq!(timing["tool_ms"], json!(null), "{timing}");
 
-    // A node reports only what it measured; one that measured nothing says
-    // nothing at all.
-    let node = body["run"]["nodes"]
-        .as_array()
-        .expect("nodes")
-        .iter()
-        .find(|row| row["node"] == json!(fixture_run::REVIEW_NODE_ID))
-        .expect("the review node");
-    assert_eq!(node["usage"]["judge"]["cost_usd"], json!(0.11));
-    assert_eq!(node["usage"]["agent"]["cost_usd"], json!(null));
+    // The same discipline one level down: a party that reported no turn at a
+    // node has no time there, which is not zero of it.
+    let work = &body["run"]["node_work_ms"];
+    assert_eq!(work["judge_model_ms"], json!(3_000), "{work}");
+    assert_eq!(work["llmlint_model_ms"], json!(null), "{work}");
+    assert_eq!(work["tool_ms"], json!(null), "{work}");
 }
 
 #[test]
@@ -1697,4 +1717,209 @@ fn a_publication_that_never_landed_is_served_as_what_it_kept() {
         span.get("reference").is_none(),
         "no change was ever opened: {span}"
     );
+}
+
+#[test]
+fn the_run_clock_is_the_document_the_sibling_aggregates() {
+    let serving = two_runs();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let timing = &body["run"]["timing"];
+
+    // The same numbers `onepipeline telemetry` prints for this run, read through
+    // its own CLI rather than folded here a second time. Asserted against what
+    // that binary says right now, so a build whose attribution moves fails here
+    // instead of leaving two readings of one run's clock disagreeing.
+    let document = onepipeline_ui::telemetry::of_run(serving.runs_root(), fixture_run::RUN_ID)
+        .expect("the sibling aggregates the fixture run");
+    assert_eq!(timing["wall_ms"], json!(document.wall_ms));
+    for (lane, name) in [
+        ("agent_seconds", telemetry::BucketName::Agent),
+        ("judge_seconds", telemetry::BucketName::Judge),
+        ("llmlint_seconds", telemetry::BucketName::Llmlint),
+        ("gate_seconds", telemetry::BucketName::Gate),
+        (
+            "publication_wait_seconds",
+            telemetry::BucketName::PublicationWait,
+        ),
+        ("lock_wait_seconds", telemetry::BucketName::LockWait),
+        ("setup_seconds", telemetry::BucketName::Setup),
+        ("scheduling_seconds", telemetry::BucketName::Scheduling),
+    ] {
+        assert_eq!(
+            timing[lane],
+            json!(document.bucket(name).map(|ms| ms / 1_000)),
+            "{lane} is not the bucket the sibling measured: {timing}"
+        );
+    }
+    // Its invariant, carried onto the wire: the measured buckets sum exactly to
+    // the whole, so what is left over is what nothing measured.
+    assert_eq!(
+        timing["unattributed_ms"],
+        json!(document.wall_ms - document.measured_ms())
+    );
+
+    // A bucket nothing measured is absent on both sides — never a zero, which is
+    // what a measured nothing looks like.
+    assert!(document.bucket(telemetry::BucketName::Judge).is_none());
+    assert_eq!(timing["judge_seconds"], json!(null), "{timing}");
+    assert_eq!(
+        timing["fractions"]["judge_model"],
+        json!(0.0967741935483871)
+    );
+    assert_eq!(timing["fractions"]["llmlint_model"], json!(null));
+
+    // And what each party spent is the sibling's split, not a second reading of
+    // the records it already read.
+    assert_eq!(
+        body["run"]["usage"]["total"]["cost_usd"],
+        json!(document.usage_of(telemetry::Party::Total).cost_usd)
+    );
+    assert_eq!(body["run"]["usage"]["llmlint"]["cost_usd"], json!(null));
+}
+
+#[test]
+fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
+    // The sibling named but absent: the one condition under which this server
+    // knows nothing about where a run's time went. Every timing is then absent,
+    // and none of them is zero — a run nothing could be measured for must not
+    // read as a run that took no time.
+    let serving = Serving::start_with_env(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        &[(
+            onepipeline_ui::telemetry::BINARY_ENV,
+            "a-onepipeline-that-is-not-installed",
+        )],
+    );
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let timing = &body["run"]["timing"];
+    for lane in [
+        "agent_seconds",
+        "judge_seconds",
+        "llmlint_seconds",
+        "gate_seconds",
+        "publication_wait_seconds",
+        "lock_wait_seconds",
+        "setup_seconds",
+        "scheduling_seconds",
+        "wall_seconds",
+        "wall_ms",
+        "unattributed_ms",
+    ] {
+        assert_eq!(timing[lane], json!(null), "{lane} is not absent: {timing}");
+    }
+    // What this server measures for itself is unaffected: a turn reports its own
+    // model time, and that is not the sibling's to answer.
+    assert_eq!(timing["agent_model_ms"], json!(2_500));
+    assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
+
+    // The rest of the payload is untouched: a run with no clock is still a run.
+    assert_eq!(body["run"]["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(
+        body["node_details"][fixture_run::NODE_ID]["publication"]["merged"],
+        json!(true)
+    );
+}
+
+#[test]
+fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
+    let runs = tempfile::tempdir().expect("temp dir");
+    fixture_run::write(runs.path(), fixture_run::RUN_ID);
+
+    // Asked about a run it does not have: it ran, and refused. The reason names
+    // the command, because the alternative is a server serving no clock and no
+    // account of why.
+    let refused = telemetry::of_run(runs.path(), "run-that-was-never-recorded")
+        .expect_err("the sibling has no such run");
+    assert!(
+        matches!(refused, telemetry::Unavailable::Refused(_)),
+        "{refused:?}"
+    );
+    assert!(refused.to_string().contains("telemetry"), "{refused}");
+
+    // Not startable at all, which is what a missing install looks like: the
+    // message says how to fix it rather than only that it broke.
+    let missing = telemetry::of_run_from(
+        "a-onepipeline-that-is-not-installed",
+        runs.path(),
+        fixture_run::RUN_ID,
+    )
+    .expect_err("nothing to start");
+    assert!(
+        matches!(missing, telemetry::Unavailable::NoBinary(_)),
+        "{missing:?}"
+    );
+    assert!(
+        missing.to_string().contains(telemetry::BINARY_ENV),
+        "the refusal says how to point at one: {missing}"
+    );
+}
+
+#[test]
+fn a_document_this_build_cannot_read_is_refused_rather_than_read() {
+    let runs = tempfile::tempdir().expect("temp dir");
+    fixture_run::write(runs.path(), fixture_run::RUN_ID);
+
+    // A producer answering something else entirely.
+    let babbling = stub(runs.path(), "not-a-document", "hello");
+    let unreadable = telemetry::of_run_from(
+        &babbling.display().to_string(),
+        runs.path(),
+        fixture_run::RUN_ID,
+    )
+    .expect_err("not a document");
+    assert!(
+        matches!(unreadable, telemetry::Unavailable::Unreadable(_)),
+        "{unreadable:?}"
+    );
+
+    // And the case the version exists for: the document schema 1 named four
+    // spans and carried no usage at all, so reading one as this version would
+    // report a run as having spent nothing rather than as unmeasured.
+    let older = stub(
+        runs.path(),
+        "older-document",
+        &json!({
+            "schema_version": 1,
+            "run_id": fixture_run::RUN_ID,
+            "wall_ms": 31_000,
+            "buckets": [{ "name": "dispatching", "ms": 27_000 }],
+        })
+        .to_string(),
+    );
+    let wrong_version = telemetry::of_run_from(
+        &older.display().to_string(),
+        runs.path(),
+        fixture_run::RUN_ID,
+    )
+    .expect_err("another version");
+    assert!(
+        wrong_version.to_string().contains("schema_version 1"),
+        "the refusal names both versions: {wrong_version}"
+    );
+}
+
+/// A stand-in producer that prints `answer`, for the readings a real one cannot
+/// be made to give.
+#[cfg(unix)]
+fn stub(dir: &std::path::Path, name: &str, answer: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\ncat <<'ANSWER'\n{answer}\nANSWER\n"),
+    )
+    .expect("write the stand-in");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("make it runnable");
+    path
 }

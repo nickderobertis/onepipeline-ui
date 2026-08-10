@@ -15,9 +15,15 @@ here — until it lands, this list is the record of what an agent reading the CL
 cannot currently see that a human in the UI can. Do not add to it silently:
 anything new here is a proposal to make upstream first.
 
-- **The eight-way timing breakdown.** The SDK attributes a run's wall clock four
-  ways behind its contract surface; the wire's breakdown is finer, and
-  `payload::buckets` recomputes the fold to map onto it.
+- ~~**The eight-way timing breakdown.**~~ Landed upstream: `onepipeline` 0.1.4
+  attributes a run's wall clock into exactly the eight buckets the wire names and
+  folds what each party spent, so this crate reads that document rather than
+  folding the clock again. It is still behind the SDK's *library* surface — the
+  `telemetry` module is private in every published version — so the document is
+  reached through `onepipeline telemetry <run>`, which is the seam
+  `src/telemetry.rs` owns and `just _ensure-sibling` provisions the build for.
+  Making that fold importable is what is left of this proposal: a server would
+  then read it without starting a process.
 - **A dispatch id.** The journal stamps a dispatch with its run, round, and node
   but mints no id for it; schema 10 serves one, so `payload::dispatch_key`
   derives it from the three.
@@ -42,12 +48,11 @@ anything new here is a proposal to make upstream first.
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
   writes where it writes one, else the graph `member`, else the persona — and
   falls back to the agent side, which is the one side every dispatch has.
-- **The measured half of the eight-way timing, and the per-party usage.**
-  `payload::measured` and `payload::usage` walk the relayed records for what they
-  measured: `turn-completed`'s `usage`, `lock-wait`'s `elapsed`, the gate's own
-  interval, and the stretch between a publication being handed to the host and
-  the host landing it. Each producer measures its own; nothing adds them up but
-  this crate.
+- **Time inside a model.** The SDK's buckets are wall clock — where the *run's*
+  time went — and the wire also carries how long each party spent in a model,
+  which no fold of a clock can answer. `payload::measured` reads it off each
+  `turn-completed`'s own `usage.duration`, and it is absent for a party that
+  reported no turn rather than zero.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,

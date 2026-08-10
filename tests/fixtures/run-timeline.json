@@ -1,8 +1,8 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 10,
+  "telemetry_schema_version": 11,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 2,
+  "timeline_schema_version": 3,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {

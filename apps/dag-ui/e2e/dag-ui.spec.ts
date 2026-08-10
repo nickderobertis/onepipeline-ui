@@ -1193,7 +1193,9 @@ test("restores a bookmarked view and refreshes through the read API", async ({
   await expect(metric("Status")).toContainText("active");
   await expect(metric("Nodes")).toContainText(/[1-9]\d*/);
   // A duration in the units it is read in, never the raw second count the contract
-  // serves: `58000.0s` is arithmetic homework, `16h 6m 40s` is an answer.
+  // serves: `58000.0s` is arithmetic homework, `16h 6m 40s` is an answer. And a
+  // duration at all rather than "not measured", which is what this reads when the
+  // sibling that aggregates a run's clock could not be asked.
   await expect(metric("Wall time").locator("strong")).toHaveText(
     /^(\d{1,3}ms|[1-5]?\ds|\d+m [1-5]?\ds|\d+h [1-5]?\dm [1-5]?\ds)$/,
   );

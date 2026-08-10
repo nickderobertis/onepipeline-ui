@@ -1,3 +1,7 @@
+import {
+  TELEMETRY_SCHEMA_VERSION,
+  TIMELINE_SCHEMA_VERSION,
+} from "@onepipeline-ui/dag-model";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This verifies the package export over a real HTTP boundary.
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { expect, test } from "vitest";
@@ -12,7 +16,7 @@ test("a package consumer reads a validated response from a real HTTP server", as
     ) {
       return Response.json({
         api_version: 2,
-        telemetry_schema_version: 10,
+        telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       });
@@ -36,7 +40,7 @@ test("a package consumer receives typed HTTP and response-contract failures", as
     if (path.endsWith("/invalid")) {
       return Response.json({
         api_version: 2,
-        telemetry_schema_version: 10,
+        telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         run: {},
         rounds: [],
@@ -123,7 +127,7 @@ test("a package consumer fetches a run timeline over a real HTTP boundary", asyn
     if (url.pathname === "/api/v2/runs/demo/timeline") {
       return Response.json({
         api_version: 2,
-        timeline_schema_version: 2,
+        timeline_schema_version: TIMELINE_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [

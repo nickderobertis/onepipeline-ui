@@ -9,9 +9,10 @@
 //! Nothing here writes. Reading takes no lock the engine's single writer needs,
 //! which is what lets the server run beside a live round.
 
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use onepipeline::views::RunView;
@@ -25,6 +26,7 @@ use crate::contract::{
 };
 use crate::error::ApiError;
 use crate::payload::{self, Scope};
+use crate::telemetry::{self, RunTelemetry};
 
 /// How often the event stream re-reads the runs root, in milliseconds.
 pub const POLL_INTERVAL_MS: NonZeroU64 = NonZeroU64::new(500).expect("500 is not zero");
@@ -49,7 +51,22 @@ pub struct RunStore {
     root: PathBuf,
     poll: Duration,
     conversation_poll: Duration,
+    aggregated: Aggregated,
 }
+
+/// The sibling's telemetry document for each run, kept until that run moves.
+///
+/// Asking for it starts a process, and a run list serves fifty rows: doing that
+/// per row per read would make the cheapest surface in this server the most
+/// expensive one. The run's own change token is what the cached answer is held
+/// against, so a document is re-read exactly when the run it describes has
+/// recorded something — which is the same condition the event stream already
+/// invalidates on.
+type Aggregated = Arc<Mutex<HashMap<String, (Signature, Option<Arc<RunTelemetry>>)>>>;
+
+/// A run's change token: its round, how many events it has recorded, and when it
+/// last wrote.
+type Signature = (u64, usize, u64);
 
 impl RunStore {
     /// Read the runs recorded under `root`.
@@ -75,7 +92,45 @@ impl RunStore {
             root: root.as_path().to_path_buf(),
             poll,
             conversation_poll: poll * CONVERSATION_POLLS_PER_RUN_POLL,
+            aggregated: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// What `onepipeline` aggregated for this run, read through its own CLI and
+    /// kept until the run moves.
+    ///
+    /// `None` when the sibling cannot be asked, which leaves every timing the
+    /// payload carries absent rather than zero. The reason is written once per
+    /// run per change, to stderr beside the server's own output: a run served
+    /// with no clock at all is a thing an operator has to be able to explain,
+    /// and the alternative is a payload full of nulls with nothing saying why.
+    ///
+    /// A lock poisoned by a panicking reader is not a reason to stop serving:
+    /// the cache is an optimisation, and the worst a recovered one costs is a
+    /// re-read.
+    fn telemetry(&self, view: &RunView) -> Option<Arc<RunTelemetry>> {
+        let token = payload::signature(view);
+        let mut cache = self
+            .aggregated
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((cached, document)) = cache.get(&view.paths.run) {
+            if *cached == token {
+                return document.clone();
+            }
+        }
+        let document = match telemetry::of_run(&self.root, &view.paths.run) {
+            Ok(document) => Some(Arc::new(document)),
+            Err(unavailable) => {
+                eprintln!(
+                    "onepipeline-api: no telemetry for {}: {unavailable}",
+                    view.paths.run
+                );
+                None
+            }
+        };
+        cache.insert(view.paths.run.clone(), (token, document.clone()));
+        document
     }
 
     /// Every readable run under the root, oldest id first.
@@ -158,7 +213,11 @@ impl RunStore {
         let mut payload = serde_json::Map::new();
         payload.insert(
             "runs".into(),
-            Value::Array(rows.into_iter().map(payload::run_summary).collect()),
+            Value::Array(
+                rows.into_iter()
+                    .map(|view| payload::run_summary(view, self.telemetry(view).as_deref()))
+                    .collect(),
+            ),
         );
         if let Some(cursor) = next {
             payload.insert("next_cursor".into(), json!(cursor));
@@ -182,9 +241,11 @@ impl ReadApi for RunStore {
 
     fn run(&self, run: &RunId, query: &RunQuery) -> Result<Envelope<Value>, ApiError> {
         let view = self.view(run)?;
+        let aggregated = self.telemetry(&view);
         Ok(Self::envelope(payload::run_detail(
             &view,
             query.include_conversations,
+            aggregated.as_deref(),
         )))
     }
 

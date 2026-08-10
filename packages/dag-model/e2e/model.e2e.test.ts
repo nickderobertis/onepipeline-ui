@@ -17,6 +17,7 @@ import {
   runSummarySchema,
   sessionLinkSchema,
   sseEventNameSchema,
+  TIMELINE_SCHEMA_VERSION,
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "vitest";
 
@@ -80,7 +81,7 @@ test("a package consumer validates an API response through the public export", (
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 10,
+      telemetry_schema_version: 11,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }).runs,
@@ -101,7 +102,7 @@ test("the checked-in v2 run-timeline contract parses, and v1's meaning is refuse
   // server happens to record.
   const golden = await corpus("run-timeline-v2.json");
   const parsed = parseRunTimeline(golden);
-  expect(parsed.timeline_schema_version).toBe(2);
+  expect(parsed.timeline_schema_version).toBe(TIMELINE_SCHEMA_VERSION);
 
   // The pair a rollup of dispatches carries is what names the category it summarized,
   // and it survives the round trip: a worker and the lint run that carries the
@@ -251,7 +252,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(() =>
     parseRunList({
       api_version: 3,
-      telemetry_schema_version: 10,
+      telemetry_schema_version: 11,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }),
@@ -259,7 +260,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(
     runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 10,
+      telemetry_schema_version: 11,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       rounds: [{ node_states: { build: "paused" } }],
@@ -326,7 +327,7 @@ function completeDetail(conversations: unknown[]) {
   };
   return {
     api_version: 2,
-    telemetry_schema_version: 10,
+    telemetry_schema_version: 11,
     observed_at: "2026-07-26T12:00:00Z",
     run: {
       run_id: "run-1",
@@ -523,7 +524,7 @@ test("a package consumer validates populated telemetry and attribution", () => {
 test("a package consumer parses a served run timeline through the export", () => {
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 2,
+    timeline_schema_version: 3,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -582,7 +583,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   };
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 2,
+    timeline_schema_version: 3,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -612,7 +613,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   expect(() =>
     parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 2,
+      timeline_schema_version: 3,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "run-1",
       spans: [

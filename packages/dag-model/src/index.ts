@@ -62,6 +62,25 @@ export const API_V2_TIMELINE_SCOPES = {
   node: "node",
 } as const;
 
+/**
+ * The telemetry schema this client reads, pinned as a literal so a payload on
+ * another meaning is refused rather than rendered as though it agreed.
+ *
+ * `11` is where an unmeasured timing became `null` instead of `0`. A server on
+ * `10` served a measured-looking zero for every lane nothing reports, which is
+ * the reading this client must never show.
+ */
+export const TELEMETRY_SCHEMA_VERSION = 11;
+
+/**
+ * The timeline payload's own version, which moves independently.
+ *
+ * `3` is where a `rollup` span stopped implying a dispatch: one may now carry no
+ * roles and stand for the waits a publication spent blocked on a lock, named by
+ * the kind it summarizes.
+ */
+export const TIMELINE_SCHEMA_VERSION = 3;
+
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
 export const timingPresenceSchema = openObject({
@@ -71,32 +90,44 @@ export const timingPresenceSchema = openObject({
   tool_ms: z.boolean(),
 });
 
+/**
+ * A measured span, or `null` where nothing measured it.
+ *
+ * Schema 11's whole change: under 10 every one of these was a required number, so
+ * a lane no producer reports — a judge chain that never ran, the time inside a
+ * tool call, which nothing times — arrived as `0` and read as a measurement. A
+ * run whose cost cannot be answered must not read as a run that was free, so the
+ * absence is on the wire rather than inferred from a sidecar.
+ */
+const measuredSeconds = nonnegative.nullable();
+const measuredMs = counter.nullable();
+
 export const timingSchema = openObject({
-  agent_seconds: nonnegative,
-  judge_seconds: nonnegative,
-  llmlint_seconds: nonnegative,
-  gate_seconds: nonnegative,
-  publication_wait_seconds: nonnegative,
-  lock_wait_seconds: nonnegative,
-  setup_seconds: nonnegative,
-  scheduling_seconds: nonnegative,
-  wall_seconds: nonnegative,
-  agent_model_ms: counter,
-  judge_model_ms: counter,
-  llmlint_model_ms: counter,
-  tool_ms: counter,
-  idle_orchestration_ms: counter,
-  unattributed_ms: counter,
-  wall_ms: counter,
+  agent_seconds: measuredSeconds,
+  judge_seconds: measuredSeconds,
+  llmlint_seconds: measuredSeconds,
+  gate_seconds: measuredSeconds,
+  publication_wait_seconds: measuredSeconds,
+  lock_wait_seconds: measuredSeconds,
+  setup_seconds: measuredSeconds,
+  scheduling_seconds: measuredSeconds,
+  wall_seconds: measuredSeconds,
+  agent_model_ms: measuredMs,
+  judge_model_ms: measuredMs,
+  llmlint_model_ms: measuredMs,
+  tool_ms: measuredMs,
+  idle_orchestration_ms: measuredMs,
+  unattributed_ms: measuredMs,
+  wall_ms: measuredMs,
   fractions: openObject({
-    agent_model: nonnegative,
-    judge_model: nonnegative,
-    llmlint_model: nonnegative,
-    tool: nonnegative,
-    idle_orchestration: nonnegative,
-    lock_wait: nonnegative,
-    setup: nonnegative,
-    scheduling: nonnegative,
+    agent_model: measuredSeconds,
+    judge_model: measuredSeconds,
+    llmlint_model: measuredSeconds,
+    tool: measuredSeconds,
+    idle_orchestration: measuredSeconds,
+    lock_wait: measuredSeconds,
+    setup: measuredSeconds,
+    scheduling: measuredSeconds,
   }),
 });
 
@@ -260,11 +291,11 @@ export const runTelemetrySchema = openObject({
   timing_presence: timingPresenceSchema,
   sources: z.array(z.string()),
   node_work_ms: openObject({
-    agent_model_ms: counter,
-    judge_model_ms: counter,
-    llmlint_model_ms: counter,
-    tool_ms: counter,
-    wall_ms: counter,
+    agent_model_ms: measuredMs,
+    judge_model_ms: measuredMs,
+    llmlint_model_ms: measuredMs,
+    tool_ms: measuredMs,
+    wall_ms: measuredMs,
   }),
   turns: counter,
   lint: counter,
@@ -317,7 +348,7 @@ export const runSummarySchema = openObject({
 
 export const runListSchema = openObject({
   api_version: z.literal(2),
-  telemetry_schema_version: z.literal(10),
+  telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
   runs: z.array(runSummarySchema),
   next_cursor: z.string().min(1).optional(),
@@ -686,7 +717,7 @@ export const nodeDetailSchema = openObject({
 });
 export const runDetailSchema = openObject({
   api_version: z.literal(2),
-  telemetry_schema_version: z.literal(10),
+  telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
   run: runTelemetrySchema,
   rounds: z.array(roundSchema),
@@ -807,14 +838,17 @@ export const artifactContentSchema = openObject({
  * `api_version` says which API this is; `timeline_schema_version` says which *meaning*
  * of the payload under it this is, and moves on its own. Version 1 was the unversioned
  * shape, where the role pair appeared only on a `dispatch` span — so a client could
- * read "carries roles" as "is a dispatch". Version 2 serves that pair on a `scope=run`
- * rollup too, naming the category it summarizes, and that inference no longer holds.
- * Pinned as a literal so a payload from a server on the other meaning is refused here
+ * read "carries roles" as "is a dispatch". Version 2 served that pair on a `scope=run`
+ * rollup too, naming the category it summarizes, and that inference no longer held.
+ * Version 3 serves a rollup that is not a dispatch at all: one carrying no roles,
+ * standing for the waits a publication spent blocked on a lock and named by the kind
+ * it summarizes, so a client reads the label rather than assuming the kind.
+ * Pinned as a literal so a payload from a server on another meaning is refused here
  * rather than rendered as though it agreed.
  */
 export const runTimelineSchema = openObject({
   api_version: z.literal(2),
-  timeline_schema_version: z.literal(2),
+  timeline_schema_version: z.literal(TIMELINE_SCHEMA_VERSION),
   observed_at: timestamp,
   run_id: z.string().min(1),
   spans: z.array(timelineSpanSchema),

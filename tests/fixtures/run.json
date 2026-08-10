@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 10,
+  "telemetry_schema_version": 11,
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
@@ -9,30 +9,30 @@
     "last_event": "round-finished",
     "last_progress_at": 1786104031,
     "timing": {
-      "agent_seconds": 27,
-      "judge_seconds": 3,
-      "llmlint_seconds": 0,
+      "agent_seconds": 13,
+      "judge_seconds": null,
+      "llmlint_seconds": null,
       "gate_seconds": 2,
-      "publication_wait_seconds": 8,
-      "lock_wait_seconds": 3,
-      "setup_seconds": 2,
+      "publication_wait_seconds": 9,
+      "lock_wait_seconds": 1,
+      "setup_seconds": 1,
       "scheduling_seconds": 4,
       "wall_seconds": 31,
       "agent_model_ms": 2500,
       "judge_model_ms": 3000,
-      "llmlint_model_ms": 0,
-      "tool_ms": 0,
-      "idle_orchestration_ms": 0,
-      "unattributed_ms": 16500,
+      "llmlint_model_ms": null,
+      "tool_ms": null,
+      "idle_orchestration_ms": null,
+      "unattributed_ms": 0,
       "wall_ms": 31000,
       "fractions": {
         "agent_model": 0.08064516129032258,
         "judge_model": 0.0967741935483871,
-        "llmlint_model": 0.0,
-        "tool": 0.0,
-        "idle_orchestration": 0.0,
-        "lock_wait": 0.0967741935483871,
-        "setup": 0.06451612903225806,
+        "llmlint_model": null,
+        "tool": null,
+        "idle_orchestration": null,
+        "lock_wait": 0.035483870967741936,
+        "setup": 0.06129032258064516,
         "scheduling": 0.12903225806451613
       }
     },
@@ -42,36 +42,6 @@
         "status": "done",
         "outcome": "shipped",
         "branch": "feature/contract-interface",
-        "usage": {
-          "agent": {
-            "input_tokens": 1200,
-            "output_tokens": 340,
-            "cache_read_tokens": 800,
-            "cache_write_tokens": 120,
-            "cost_usd": 0.42
-          },
-          "judge": {
-            "input_tokens": null,
-            "output_tokens": null,
-            "cache_read_tokens": null,
-            "cache_write_tokens": null,
-            "cost_usd": null
-          },
-          "llmlint": {
-            "input_tokens": null,
-            "output_tokens": null,
-            "cache_read_tokens": null,
-            "cache_write_tokens": null,
-            "cost_usd": null
-          },
-          "total": {
-            "input_tokens": 1200,
-            "output_tokens": 340,
-            "cache_read_tokens": 800,
-            "cache_write_tokens": 120,
-            "cost_usd": 0.42
-          }
-        },
         "sessions": [
           {
             "session_id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
@@ -95,36 +65,6 @@
         "node": "review",
         "status": "done",
         "outcome": "approved",
-        "usage": {
-          "agent": {
-            "input_tokens": null,
-            "output_tokens": null,
-            "cache_read_tokens": null,
-            "cache_write_tokens": null,
-            "cost_usd": null
-          },
-          "judge": {
-            "input_tokens": 400,
-            "output_tokens": 90,
-            "cache_read_tokens": 0,
-            "cache_write_tokens": 0,
-            "cost_usd": 0.11
-          },
-          "llmlint": {
-            "input_tokens": null,
-            "output_tokens": null,
-            "cache_read_tokens": null,
-            "cache_write_tokens": null,
-            "cost_usd": null
-          },
-          "total": {
-            "input_tokens": 400,
-            "output_tokens": 90,
-            "cache_read_tokens": 0,
-            "cache_write_tokens": 0,
-            "cost_usd": 0.11
-          }
-        },
         "sessions": [
           {
             "session_id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16",
@@ -147,18 +87,18 @@
     ],
     "usage": {
       "agent": {
-        "input_tokens": 1200,
-        "output_tokens": 340,
-        "cache_read_tokens": 800,
-        "cache_write_tokens": 120,
-        "cost_usd": 0.42
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null
       },
       "judge": {
-        "input_tokens": 400,
-        "output_tokens": 90,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "cost_usd": 0.11
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null
       },
       "llmlint": {
         "input_tokens": null,
@@ -190,8 +130,8 @@
     "node_work_ms": {
       "agent_model_ms": 2500,
       "judge_model_ms": 3000,
-      "llmlint_model_ms": 0,
-      "tool_ms": 0,
+      "llmlint_model_ms": null,
+      "tool_ms": null,
       "wall_ms": 31000
     },
     "turns": 4,

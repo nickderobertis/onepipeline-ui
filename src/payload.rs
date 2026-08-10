@@ -24,6 +24,10 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::contract::{ArtifactId, ConversationId, DispatchId, NodeId, TIMELINE_SCHEMA_VERSION};
+// The sibling's spending party is imported under a name of its own: this module
+// also has a `Party`, and the two answer different questions — which side of a
+// conversation produced a record, and whose tokens a run spent.
+use crate::telemetry::{BucketName, Party as Spender, RunTelemetry};
 
 /// The bound on an artifact body served in one response.
 ///
@@ -93,8 +97,6 @@ mod vcs {
     pub const SESSION_OPENED: &str = "session-opened";
     /// `{identity, elapsed, queue_position}` — one wait on one identity's lock.
     pub const LOCK_WAIT: &str = "lock-wait";
-    /// `{command, comparison_remote, comparison_base}`.
-    pub const GATE_STARTED: &str = "gate-started";
     /// `{verdict, command, output, preserved_log}`, with the log as an artifact.
     pub const GATE_VERDICT: &str = "gate-verdict";
     /// `{branch, remote, accepted}`.
@@ -318,8 +320,12 @@ fn read_json(path: &Path) -> Option<Value> {
 }
 
 /// One run, as `GET /api/v2/runs` lists it.
+///
+/// `telemetry` is what the sibling aggregated for this run, or `None` when it
+/// could not be asked — in which case every timing the row carries is absent,
+/// which is what an unknown clock is.
 #[must_use]
-pub fn run_summary(view: &RunView) -> Value {
+pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for recorded in recorded_statuses(view).values() {
         *counts.entry(recorded.status.clone()).or_insert(0) += 1;
@@ -334,7 +340,7 @@ pub fn run_summary(view: &RunView) -> Value {
     }
     summary.insert("timing_quality".into(), json!(timing_quality(view)));
     summary.insert("linkage_quality".into(), json!("labelled"));
-    summary.insert("timing".into(), timing(view));
+    summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
     Value::Object(summary)
@@ -466,103 +472,15 @@ fn timing_quality(view: &RunView) -> &'static str {
     }
 }
 
-/// One span of the run's wall clock, named by what the run was doing across it.
-#[derive(Debug, Default, Clone, Copy)]
-struct Buckets {
-    dispatching_ms: u64,
-    awaiting_planner_ms: u64,
-    awaiting_human_ms: u64,
-    orchestrating_ms: u64,
-    wall_ms: u64,
-}
-
-/// Attribute the run's wall clock, one span between consecutive events at a
-/// time, so the parts add up to the whole.
+/// What one node's own records *measured*, as against what the run's clock shows.
 ///
-/// This is the SDK's own `telemetry` fold, which is behind its contract surface
-/// rather than on it. Recomputing it here is one of the computations AGENTS.md
-/// proposes moving into the SDK; the mapping onto the wire's eight-way timing is
-/// documented on [`timing`].
-fn buckets(view: &RunView) -> Buckets {
-    let stamps: Vec<(i128, &Envelope)> = view
-        .events
-        .iter()
-        .filter_map(|event| millis_of(&event.ts).map(|ms| (ms, event)))
-        .collect();
-    let Some((first, _)) = stamps.first().copied() else {
-        return Buckets::default();
-    };
-    let last = stamps.last().map_or(first, |(ms, _)| *ms);
-
-    let mut totals = Buckets {
-        wall_ms: u64::try_from(last.saturating_sub(first)).unwrap_or(0),
-        ..Buckets::default()
-    };
-    let mut in_flight: u64 = 0;
-    let mut awaiting_planner = false;
-    let mut awaiting_human: u64 = 0;
-    let mut previous = first;
-
-    for (ms, event) in &stamps {
-        let span = u64::try_from(ms.saturating_sub(previous)).unwrap_or(0);
-        if in_flight > 0 {
-            totals.dispatching_ms += span;
-        } else if awaiting_planner {
-            totals.awaiting_planner_ms += span;
-        } else if awaiting_human > 0 {
-            totals.awaiting_human_ms += span;
-        } else {
-            totals.orchestrating_ms += span;
-        }
-        previous = *ms;
-
-        if event.source != Source::Pipeline {
-            continue;
-        }
-        match PipelineKind::from_wire(&event.kind) {
-            Some(PipelineKind::NodeDispatched) => in_flight += 1,
-            Some(PipelineKind::NodeSettled) => {
-                in_flight = in_flight.saturating_sub(1);
-                if event.payload.get("status").and_then(Value::as_str) == Some("waiting") {
-                    awaiting_human += 1;
-                }
-            }
-            Some(PipelineKind::HumanAttested) => awaiting_human = awaiting_human.saturating_sub(1),
-            Some(PipelineKind::PlannerSurfaced) => {
-                awaiting_planner = event
-                    .payload
-                    .get("blocking")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-            }
-            Some(PipelineKind::PlannerReplied) => awaiting_planner = false,
-            _ => {}
-        }
-    }
-
-    // The invariant, enforced rather than asserted: any residue from a clock
-    // that moved backwards between two events lands in `orchestrating`, so the
-    // parts still add up to the whole.
-    let counted = totals.dispatching_ms
-        + totals.awaiting_planner_ms
-        + totals.awaiting_human_ms
-        + totals.orchestrating_ms;
-    if let Some(residue) = totals.wall_ms.checked_sub(counted) {
-        totals.orchestrating_ms += residue;
-    } else {
-        totals.orchestrating_ms = totals
-            .orchestrating_ms
-            .saturating_sub(counted - totals.wall_ms);
-    }
-    totals
-}
-
-/// What the run's records *measured*, as against what its wall clock shows.
-///
-/// Every field is `None` until a record fills it, and `None` is not zero: a run
-/// whose judge chain never reported a turn has no judge time, where one whose
-/// judge answered in no time at all has zero. Only the second is a measurement,
-/// and [`timing_presence`] is where the wire lets the two be told apart.
+/// The wall clock is the sibling's to attribute — [`crate::telemetry`] reads the
+/// document it aggregates — and these are the measurements no fold of that clock
+/// can produce: the time inside a model, which each turn reports for itself, and
+/// how much of a node's work each party did. Every field is `None` until a record
+/// fills it, and `None` is not zero: a run whose judge never reported a turn has
+/// no judge time, where one whose judge answered instantly has zero of it. Only
+/// the second is a measurement.
 #[derive(Debug, Default, Clone, Copy)]
 struct Measured {
     /// Turn time, per party, from `turn-completed`'s own `usage.duration`.
@@ -572,17 +490,8 @@ struct Measured {
     /// Time inside a tool call. `turn-activity` reports *what* a turn did and
     /// carries no interval, so nothing measures this yet.
     tool_ms: Option<u64>,
-    /// `gate-started` to `gate-verdict`, per node.
-    gate_ms: Option<u64>,
-    /// The waits on an identity's lock, from `lock-wait`'s own `elapsed`.
-    lock_wait_ms: Option<u64>,
-    /// Push or change opened, to the host's merge: the stretch a publication
-    /// spent in the host's hands rather than the run's.
-    publication_wait_ms: Option<u64>,
-    /// Dispatch to the first thing the dispatch's own libraries recorded.
-    setup_ms: Option<u64>,
-    /// How many relayed records each party produced, so a party that recorded
-    /// work with no timing on it is still visible as having run.
+    /// How many relayed records the lint party produced, so a party that
+    /// recorded work with no timing on it is still visible as having run.
     lint_records: u64,
 }
 
@@ -604,87 +513,32 @@ fn seconds_as_ms(value: Option<&Value>) -> Option<u64> {
     }
 }
 
-/// Everything the given records measured, walked once.
-///
-/// The intervals are closed by the record that ends them and dropped when nothing
-/// does: an in-flight gate, an unmerged publication and a dispatch that recorded
-/// nothing contribute no time rather than time running to the read.
+/// Everything the given records measured about their own turns, walked once.
 fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
-    /// Close an interval one node opened, and drop it if it never opened.
-    fn close(slot: &mut Option<u64>, opened: &mut BTreeMap<&str, i128>, node: &str, at: i128) {
-        if let Some(started) = opened.remove(node) {
-            measure(slot, u64::try_from(at.saturating_sub(started)).unwrap_or(0));
-        }
-    }
     let mut totals = Measured::default();
-    // One map per interval a record can open, keyed by the node that opened it:
-    // nodes publish concurrently, so a second node's gate must not close the
-    // first one's.
-    let mut setup: BTreeMap<&'a str, i128> = BTreeMap::new();
-    let mut gate: BTreeMap<&'a str, i128> = BTreeMap::new();
-    let mut publication: BTreeMap<&'a str, i128> = BTreeMap::new();
     for event in events {
-        let node: &'a str = event.labels.node.as_deref().unwrap_or_default();
-        let Some(at) = millis_of(&event.ts) else {
+        if event.source != Source::Agentgraph || event.kind.0 == graph::TURN_ACTIVITY {
+            continue;
+        }
+        let party = transport_role(event);
+        if party == Party::Llmlint {
+            totals.lint_records += 1;
+        }
+        if event.kind.0 != graph::TURN_COMPLETED {
+            continue;
+        }
+        let Some(ms) = seconds_as_ms(
+            event
+                .payload
+                .get(graph::USAGE)
+                .and_then(|usage| usage.get(graph::DURATION)),
+        ) else {
             continue;
         };
-        match event.source {
-            Source::Agentgraph => {
-                if event.kind.0 == graph::TURN_ACTIVITY {
-                    continue;
-                }
-                let party = transport_role(event);
-                if party == Party::Llmlint {
-                    totals.lint_records += 1;
-                }
-                // A dispatch has reported: whatever ran between it and the
-                // dispatch record was the graph getting itself ready.
-                close(&mut totals.setup_ms, &mut setup, node, at);
-                if event.kind.0 != graph::TURN_COMPLETED {
-                    continue;
-                }
-                let Some(ms) = seconds_as_ms(
-                    event
-                        .payload
-                        .get(graph::USAGE)
-                        .and_then(|usage| usage.get(graph::DURATION)),
-                ) else {
-                    continue;
-                };
-                match party {
-                    Party::Judge => measure(&mut totals.judge_model_ms, ms),
-                    Party::Llmlint => measure(&mut totals.llmlint_model_ms, ms),
-                    Party::Agent => measure(&mut totals.agent_model_ms, ms),
-                }
-            }
-            Source::Vcs => {
-                close(&mut totals.setup_ms, &mut setup, node, at);
-                match event.kind.0.as_str() {
-                    vcs::LOCK_WAIT => {
-                        if let Some(ms) = seconds_as_ms(event.payload.get("elapsed")) {
-                            measure(&mut totals.lock_wait_ms, ms);
-                        }
-                    }
-                    vcs::GATE_STARTED => {
-                        gate.insert(node, at);
-                    }
-                    vcs::GATE_VERDICT => close(&mut totals.gate_ms, &mut gate, node, at),
-                    // The first hand-off wins: a change is pushed and then opened,
-                    // and the wait on the host runs from the first of the two.
-                    vcs::PUSH | vcs::CHANGE_OPENED => {
-                        publication.entry(node).or_insert(at);
-                    }
-                    vcs::CHANGE_MERGED | vcs::MERGE_COMPLETED => {
-                        close(&mut totals.publication_wait_ms, &mut publication, node, at);
-                    }
-                    _ => {}
-                }
-            }
-            Source::Pipeline => {
-                if PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched) {
-                    setup.insert(node, at);
-                }
-            }
+        match party {
+            Party::Judge => measure(&mut totals.judge_model_ms, ms),
+            Party::Llmlint => measure(&mut totals.llmlint_model_ms, ms),
+            Party::Agent => measure(&mut totals.agent_model_ms, ms),
         }
     }
     totals
@@ -692,204 +546,104 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
 
 /// The run's timing, in the eight-way breakdown the wire carries.
 ///
-/// Two readings of one clock, and they answer different questions. The wall clock
-/// is attributed by the SDK's own fold — dispatching, the two waits, orchestrating
-/// — and `agent_seconds`, `idle_orchestration_ms` and `scheduling_seconds` are
-/// those buckets. Everything else is *measured* by a record: the model time each
-/// party's `turn-completed` reported, the gate's own interval, the waits `onevcs`
-/// timed on a lock, and the stretch a publication spent with the host.
+/// The eight are the sibling's own: `onepipeline` attributes a run's wall clock
+/// into exactly these buckets, keeps the invariant that the measured ones sum to
+/// the whole, and serves a bucket nothing measures as absent. This reads that
+/// document rather than folding the clock again, so the two readings of where a
+/// run's time went cannot come apart.
 ///
-/// `unattributed_ms` is what is left of the wall clock once every lane the wire
-/// names a fraction for has taken its share, which is where a run's unmeasured
-/// time goes — so an unmeasured lane makes the residue grow rather than reading
-/// as a measured zero.
-fn timing(view: &RunView) -> Value {
-    let totals = buckets(view);
-    let measured = measured(&view.events);
-    timing_document(&totals, &measured)
-}
-
-/// The timing document one wall-clock fold and one set of measurements make.
-fn timing_document(totals: &Buckets, measured: &Measured) -> Value {
-    let idle_ms = totals.awaiting_planner_ms + totals.awaiting_human_ms;
-    let wall = totals.wall_ms;
-    let fraction = |part: u64| {
-        if wall == 0 {
+/// What it adds is the one thing that document does not carry: the time inside a
+/// model, which each turn reports for itself. And what it never adds is a zero —
+/// an unmeasured lane is served `null`, here and in the fractions, because a
+/// zero is a measurement and reading one for an absence is how a run comes to
+/// look cheaper than it was.
+fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
+    let wall = document.map(|document| document.wall_ms);
+    let bucket = |name| document.and_then(|document| document.bucket(name));
+    let seconds = |ms: Option<u64>| ms.map(|ms| ms / 1_000);
+    let fraction = |part: Option<u64>| match (part, wall) {
+        (Some(part), Some(wall)) => Some(if wall == 0 {
             0.0
         } else {
             #[allow(clippy::cast_precision_loss)]
             // A millisecond count; f64 is exact well past any run's.
             let ratio = part as f64 / wall as f64;
             ratio
-        }
+        }),
+        _ => None,
     };
-    let seconds = |ms: u64| ms / 1_000;
-    let measured_ms = |slot: Option<u64>| slot.unwrap_or(0);
-    let agent_model_ms = measured_ms(measured.agent_model_ms);
-    let judge_model_ms = measured_ms(measured.judge_model_ms);
-    let llmlint_model_ms = measured_ms(measured.llmlint_model_ms);
-    let tool_ms = measured_ms(measured.tool_ms);
-    let lock_wait_ms = measured_ms(measured.lock_wait_ms);
-    let setup_ms = measured_ms(measured.setup_ms);
-    let attributed = agent_model_ms
-        + judge_model_ms
-        + llmlint_model_ms
-        + tool_ms
-        + idle_ms
-        + lock_wait_ms
-        + setup_ms
-        + totals.orchestrating_ms;
     json!({
-        "agent_seconds": seconds(totals.dispatching_ms),
-        "judge_seconds": seconds(judge_model_ms),
-        "llmlint_seconds": seconds(llmlint_model_ms),
-        "gate_seconds": seconds(measured_ms(measured.gate_ms)),
-        "publication_wait_seconds": seconds(measured_ms(measured.publication_wait_ms)),
-        "lock_wait_seconds": seconds(lock_wait_ms),
-        "setup_seconds": seconds(setup_ms),
-        "scheduling_seconds": seconds(totals.orchestrating_ms),
+        "agent_seconds": seconds(bucket(BucketName::Agent)),
+        "judge_seconds": seconds(bucket(BucketName::Judge)),
+        "llmlint_seconds": seconds(bucket(BucketName::Llmlint)),
+        "gate_seconds": seconds(bucket(BucketName::Gate)),
+        "publication_wait_seconds": seconds(bucket(BucketName::PublicationWait)),
+        "lock_wait_seconds": seconds(bucket(BucketName::LockWait)),
+        "setup_seconds": seconds(bucket(BucketName::Setup)),
+        "scheduling_seconds": seconds(bucket(BucketName::Scheduling)),
         "wall_seconds": seconds(wall),
-        "agent_model_ms": agent_model_ms,
-        "judge_model_ms": judge_model_ms,
-        "llmlint_model_ms": llmlint_model_ms,
-        "tool_ms": tool_ms,
-        "idle_orchestration_ms": idle_ms,
-        "unattributed_ms": wall.saturating_sub(attributed),
+        "agent_model_ms": measured.agent_model_ms,
+        "judge_model_ms": measured.judge_model_ms,
+        "llmlint_model_ms": measured.llmlint_model_ms,
+        "tool_ms": measured.tool_ms,
+        // The wire keeps a lane for the run waiting on a planner or a person,
+        // and the sibling's vocabulary folds both into `scheduling`. Nothing
+        // measures the two apart, so this is absent rather than a share of a
+        // bucket that is not it.
+        "idle_orchestration_ms": Value::Null,
+        // What the wall clock has no measured home for. Computed from the
+        // document's own invariant — its measured buckets sum exactly to the
+        // whole — so an unmeasured bucket grows this rather than reading as a
+        // measured nothing.
+        "unattributed_ms": document
+            .map(|document| document.wall_ms.saturating_sub(document.measured_ms())),
         "wall_ms": wall,
         "fractions": {
-            "agent_model": fraction(agent_model_ms),
-            "judge_model": fraction(judge_model_ms),
-            "llmlint_model": fraction(llmlint_model_ms),
-            "tool": fraction(tool_ms),
-            "idle_orchestration": fraction(idle_ms),
-            "lock_wait": fraction(lock_wait_ms),
-            "setup": fraction(setup_ms),
-            "scheduling": fraction(totals.orchestrating_ms),
+            "agent_model": fraction(measured.agent_model_ms),
+            "judge_model": fraction(measured.judge_model_ms),
+            "llmlint_model": fraction(measured.llmlint_model_ms),
+            "tool": fraction(measured.tool_ms),
+            "idle_orchestration": Value::Null,
+            "lock_wait": fraction(bucket(BucketName::LockWait)),
+            "setup": fraction(bucket(BucketName::Setup)),
+            "scheduling": fraction(bucket(BucketName::Scheduling)),
         },
     })
 }
 
-/// What one party spent, from the `turn-completed` records it produced.
+/// What each party spent, as the sibling's document reports it.
 ///
-/// Each field is its own `Option`: a harness that reports tokens and no cost
-/// leaves the cost unknown rather than free, and the wire's own `null` is what
-/// says so.
-#[derive(Debug, Default, Clone, Copy)]
-struct Spend {
-    input_tokens: Option<u64>,
-    output_tokens: Option<u64>,
-    cache_read_tokens: Option<u64>,
-    cache_write_tokens: Option<u64>,
-    cost_usd: Option<f64>,
-}
-
-impl Spend {
-    /// Whether any record filled any field of this party.
-    fn recorded(self) -> bool {
-        self.input_tokens.is_some()
-            || self.output_tokens.is_some()
-            || self.cache_read_tokens.is_some()
-            || self.cache_write_tokens.is_some()
-            || self.cost_usd.is_some()
-    }
-
-    /// The two parties added field by field, each field still `None` until one
-    /// of them measured it.
-    fn plus(self, other: Self) -> Self {
-        let add = |left: Option<u64>, right: Option<u64>| match (left, right) {
-            (None, None) => None,
-            (left, right) => Some(left.unwrap_or(0) + right.unwrap_or(0)),
-        };
-        Self {
-            input_tokens: add(self.input_tokens, other.input_tokens),
-            output_tokens: add(self.output_tokens, other.output_tokens),
-            cache_read_tokens: add(self.cache_read_tokens, other.cache_read_tokens),
-            cache_write_tokens: add(self.cache_write_tokens, other.cache_write_tokens),
-            cost_usd: match (self.cost_usd, other.cost_usd) {
-                (None, None) => None,
-                (left, right) => Some(left.unwrap_or(0.0) + right.unwrap_or(0.0)),
-            },
-        }
-    }
-
-    /// Fold one `turn-completed`'s `usage` into this party.
-    ///
-    /// The keys are `oneagentgraph`'s own — `tokens_in`, `tokens_out`,
-    /// `cache_read`, `cache_write`, `cost` — renamed onto the wire's rather than
-    /// recomputed, so a field that library did not record stays unknown here.
-    fn record(&mut self, usage: &Value) {
-        let count = |key: &str| usage.get(key).and_then(Value::as_u64);
-        let add = |slot: &mut Option<u64>, value: Option<u64>| {
-            if let Some(value) = value {
-                *slot = Some(slot.unwrap_or(0) + value);
-            }
-        };
-        add(&mut self.input_tokens, count(graph::TOKENS_IN));
-        add(&mut self.output_tokens, count(graph::TOKENS_OUT));
-        add(&mut self.cache_read_tokens, count(graph::CACHE_READ));
-        add(&mut self.cache_write_tokens, count(graph::CACHE_WRITE));
-        if let Some(cost) = usage
-            .get(graph::COST)
-            .and_then(Value::as_f64)
-            .filter(|cost| cost.is_finite() && *cost >= 0.0)
-        {
-            self.cost_usd = Some(self.cost_usd.unwrap_or(0.0) + cost);
-        }
-    }
-
-    /// This party as the wire carries it: every field it never measured `null`.
-    fn document(self) -> Value {
+/// Present whether or not anything was recorded, because the shape is required
+/// and a missing party would read as "no cost" rather than "unknown" — and every
+/// field of a party nothing reported for stays `null` for the same reason. The
+/// split is the SDK's: it reads each side's own onejudge report, which is a
+/// document this server has no business opening.
+fn usage(document: Option<&RunTelemetry>) -> Value {
+    let party = |party: Spender| {
+        let spent = document
+            .map(|document| document.usage_of(party))
+            .unwrap_or_default();
         json!({
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "cache_read_tokens": self.cache_read_tokens,
-            "cache_write_tokens": self.cache_write_tokens,
-            "cost_usd": self.cost_usd,
+            "input_tokens": spent.input,
+            "output_tokens": spent.output,
+            "cache_read_tokens": spent.cache_read,
+            "cache_write_tokens": spent.cache_write,
+            "cost_usd": spent.cost_usd,
         })
-    }
-}
-
-/// What each party of a set of records consumed, and the three of them together.
-///
-/// Present whether or not anything was recorded: the shape is required, and a
-/// missing party would read as "no cost" rather than "unknown" — which is why
-/// every field of a party nothing reported stays `null`.
-fn usage<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> (Value, bool) {
-    let (mut agent, mut judge, mut llmlint) =
-        (Spend::default(), Spend::default(), Spend::default());
-    for event in events {
-        if event.source != Source::Agentgraph || event.kind.0 != graph::TURN_COMPLETED {
-            continue;
-        }
-        let Some(recorded) = event
-            .payload
-            .get(graph::USAGE)
-            .filter(|usage| usage.is_object())
-        else {
-            continue;
-        };
-        match transport_role(event) {
-            Party::Judge => judge.record(recorded),
-            Party::Llmlint => llmlint.record(recorded),
-            Party::Agent => agent.record(recorded),
-        }
-    }
-    let total = agent.plus(judge).plus(llmlint);
-    (
-        json!({
-            "agent": agent.document(),
-            "judge": judge.document(),
-            "llmlint": llmlint.document(),
-            "total": total.document(),
-        }),
-        total.recorded(),
-    )
+    };
+    json!({
+        "agent": party(Spender::Agent),
+        "judge": party(Spender::Judge),
+        "llmlint": party(Spender::Llmlint),
+        "total": party(Spender::Total),
+    })
 }
 
 /// Which measured timings the records actually carried.
 ///
-/// The wire's own answer to a number that is zero because nothing measured it:
-/// a client reading `false` here knows the zero beside it is an absence.
+/// Kept beside the timings themselves, which are now absent when unmeasured: a
+/// conforming client reads either, and a producer that measures a real zero says
+/// so here rather than being indistinguishable from one that measured nothing.
 fn timing_presence(measured: &Measured) -> Value {
     json!({
         "agent_model_ms": measured.agent_model_ms.is_some(),
@@ -1017,9 +771,7 @@ fn events_of<'a>(view: &'a RunView, node: &str) -> Vec<&'a Envelope> {
 
 /// One node's telemetry row.
 fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
-    let mine = events_of(view, node);
-    let measurements = measured(mine.iter().copied());
-    let (spent, recorded_usage) = usage(mine.iter().copied());
+    let measurements = measured(events_of(view, node));
     let mut row = Map::new();
     row.insert("node".into(), json!(node));
     row.insert("status".into(), json!(status_word(&recorded.status)));
@@ -1035,11 +787,9 @@ fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
         // through to the prose the settlement itself recorded instead.
         row.insert("failure".into(), json!({ "class": class }));
     }
-    // Absent rather than four null parties: the field is optional here, so a node
-    // that reported nothing says nothing instead of reporting an unknown cost.
-    if recorded_usage {
-        row.insert("usage".into(), spent);
-    }
+    // No per-node usage: the sibling folds what a run spent, not what each of
+    // its nodes did, and splitting it here would be this crate answering a
+    // question with a second reading of the records the SDK already read.
     row.insert("sessions".into(), json!(sessions_of(view, node)));
     row.insert("turns".into(), json!(turns_of(view, Some(node))));
     // What the lint transport recorded here, which is a party of the pair rather
@@ -1053,13 +803,12 @@ fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
 }
 
 /// The run's own telemetry document, as `GET /api/v2/runs/{run}` serves it.
-fn run_telemetry(view: &RunView) -> Value {
+fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     let statuses = recorded_statuses(view);
     let nodes: Vec<Value> = statuses
         .iter()
         .map(|(node, recorded)| node_telemetry(view, node, recorded))
         .collect();
-    let totals = buckets(view);
     let measurements = measured(&view.events);
     // What the run measured at a node, rather than across its whole clock: the
     // same records, filtered to the ones a node's own work produced.
@@ -1076,21 +825,23 @@ fn run_telemetry(view: &RunView) -> Value {
     if let Some(at) = view.state.last_write_at {
         run.insert("last_progress_at".into(), json!(at / 1_000));
     }
-    run.insert("timing".into(), timing_document(&totals, &measurements));
+    run.insert("timing".into(), timing(telemetry, &measurements));
     run.insert("nodes".into(), Value::Array(nodes));
-    run.insert("usage".into(), usage(&view.events).0);
+    run.insert("usage".into(), usage(telemetry));
     run.insert("timing_quality".into(), json!(timing_quality(view)));
     run.insert("linkage_quality".into(), json!("labelled"));
     run.insert("timing_presence".into(), timing_presence(&measurements));
     run.insert("sources".into(), json!(["events.jsonl", "launch.json"]));
+    // The same discipline one level down: a party that reported no turn at a
+    // node has no time there, which is not zero of it.
     run.insert(
         "node_work_ms".into(),
         json!({
-            "agent_model_ms": at_nodes.agent_model_ms.unwrap_or(0),
-            "judge_model_ms": at_nodes.judge_model_ms.unwrap_or(0),
-            "llmlint_model_ms": at_nodes.llmlint_model_ms.unwrap_or(0),
-            "tool_ms": at_nodes.tool_ms.unwrap_or(0),
-            "wall_ms": totals.wall_ms,
+            "agent_model_ms": at_nodes.agent_model_ms,
+            "judge_model_ms": at_nodes.judge_model_ms,
+            "llmlint_model_ms": at_nodes.llmlint_model_ms,
+            "tool_ms": at_nodes.tool_ms,
+            "wall_ms": telemetry.map(|document| document.wall_ms),
         }),
     );
     run.insert("turns".into(), json!(turns_of(view, None)));
@@ -1505,12 +1256,16 @@ fn last_seq(view: &RunView, number: u64) -> u64 {
 
 /// The whole of `GET /api/v2/runs/{run}`'s payload.
 #[must_use]
-pub fn run_detail(view: &RunView, include_conversations: bool) -> Value {
+pub fn run_detail(
+    view: &RunView,
+    include_conversations: bool,
+    telemetry: Option<&RunTelemetry>,
+) -> Value {
     let rounds: Vec<Value> = (1..=view.state.round.max(1))
         .filter_map(|number| round(view, number))
         .collect();
     let mut payload = Map::new();
-    payload.insert("run".into(), run_telemetry(view));
+    payload.insert("run".into(), run_telemetry(view, telemetry));
     payload.insert("rounds".into(), Value::Array(rounds));
     payload.insert(
         "conversations".into(),

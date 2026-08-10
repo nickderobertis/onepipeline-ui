@@ -18,7 +18,7 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
     EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
-    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -132,6 +132,25 @@ fn every_route_serves_the_payload_its_golden_pins() {
         .expect("a readable runs root");
     let store = RunStore::new(&runs_root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+
+    // The timings in these goldens are `onepipeline`'s own document, read through
+    // its CLI, and every one of them is `null` when that CLI cannot be asked. So
+    // the sibling being missing would quietly rewrite the goldens to say the run
+    // had no clock — checked here rather than discovered in a diff.
+    let served = store
+        .run(
+            &run,
+            &RunQuery {
+                include_conversations: false,
+            },
+        )
+        .expect("the fixture run serves");
+    assert!(
+        !served.payload["run"]["timing"]["wall_ms"].is_null(),
+        "the sibling that aggregates a run's telemetry did not answer, so every timing here \
+         would be pinned absent — run `just bootstrap` to provision the `onepipeline` build \
+         the lock pins, or name one with ONEPIPELINE_UI_ONEPIPELINE_BIN"
+    );
 
     let served: [(&str, Value); 6] = [
         (
@@ -254,12 +273,41 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 }
 
 #[test]
-fn the_schema_version_the_envelope_carries_is_ten() {
+fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 10);
-    assert!(contract_text().contains("schema 10"));
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 11);
+    assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
+}
+
+/// The two versions move independently, and the browser client carries a copy of
+/// each across the language boundary.
+///
+/// TypeScript cannot read a Rust constant, so this is the gate between them:
+/// bump either here and the client's copy fails until it follows — which is what
+/// stops a server serving one meaning while the client renders another.
+#[test]
+fn the_browser_clients_copy_of_each_schema_version_matches_this_one() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copies has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    for declaration in [
+        format!("export const TELEMETRY_SCHEMA_VERSION = {TELEMETRY_SCHEMA_VERSION};"),
+        format!("export const TIMELINE_SCHEMA_VERSION = {TIMELINE_SCHEMA_VERSION};"),
+    ] {
+        assert!(
+            source.contains(&declaration),
+            "{} does not declare `{declaration}`; the client's schema versions have drifted \
+             from this crate's",
+            path.display()
+        );
+    }
 }
 
 #[test]
