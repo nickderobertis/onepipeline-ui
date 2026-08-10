@@ -60,6 +60,12 @@ tokio-stream = "0.1"
 [dev-dependencies]
 assert_cmd = "2"
 libc = "0.2"
+# The drift gate on the sibling vocabulary `src/payload.rs` reads: that library
+# declares its event kinds and its usage record in a public module, so the suite
+# holds this crate's copy of those names to the sibling's own type rather than to
+# a second reading of the wire. Already in the tree as a dependency of
+# `onepipeline`, which is what keeps this to one version of it.
+oneagentgraph = "0.1"
 predicates = "3"
 tempfile = "3"
 

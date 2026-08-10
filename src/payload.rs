@@ -87,6 +87,7 @@ const AGENT_ROLES: [&str; 5] = ["orchestrator", "worker", "judge", "check-in", "
 /// the strings the sibling emits rather than folded into an enum here — the same
 /// reason the SDK keeps a relayed `EventKind` a wire string. What each payload
 /// carries is `onevcs`'s own declaration, quoted where it is read.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onevcs` declares this vocabulary in a private module in every published version, so there is no type to generate from and nothing to compare against: the wire is the only declaration a consumer can reach. `tests/support/fixture_run.rs` writes these records as that library emits them and the goldens pin what this crate makes of them, which is the whole of the gate available. The sibling that *does* publish its own — `oneagentgraph` — is gated in `tests/contract.rs`.
 mod vcs {
     /// `{token, identity, branch, base, worktree, clone, …}`.
     pub const SESSION_OPENED: &str = "session-opened";
@@ -126,13 +127,33 @@ mod vcs {
     pub const GREEN_CONCLUSIONS: [&str; 3] = ["success", "skipped", "neutral"];
 }
 
-/// The kinds `oneagentgraph` relays, on the same terms as [`vcs`].
-mod graph {
+/// The kinds `oneagentgraph` relays, and the keys its own `Usage` is written
+/// with, on the same terms as the `onevcs` vocabulary beside it: matched as the
+/// wire strings that library writes, because the vocabulary is the sibling's.
+///
+/// Unlike `onevcs`, that library declares this vocabulary in a public module, so
+/// `tests/contract.rs` holds every name here to the sibling's own type rather
+/// than to a second reading of the wire.
+pub mod graph {
     /// `{kind, name, detail, truncated}` — one bounded tool summary, published
     /// from inside a turn rather than after it.
     pub const TURN_ACTIVITY: &str = "turn-activity";
-    /// `{usage: {tokens_in, tokens_out, cache_read, cache_write, cost, duration}}`.
+    /// A turn finished, carrying the [`USAGE`] it consumed.
     pub const TURN_COMPLETED: &str = "turn-completed";
+    /// Where that usage sits on the payload.
+    pub const USAGE: &str = "usage";
+    /// Input tokens.
+    pub const TOKENS_IN: &str = "tokens_in";
+    /// Output tokens.
+    pub const TOKENS_OUT: &str = "tokens_out";
+    /// Tokens read from the prompt cache.
+    pub const CACHE_READ: &str = "cache_read";
+    /// Tokens written to the prompt cache.
+    pub const CACHE_WRITE: &str = "cache_write";
+    /// What the turn cost.
+    pub const COST: &str = "cost";
+    /// How long the turn took, in seconds.
+    pub const DURATION: &str = "duration";
 }
 
 /// The party a record names as its own, when it names one this crate serves.
@@ -625,8 +646,8 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
                 let Some(ms) = seconds_as_ms(
                     event
                         .payload
-                        .get("usage")
-                        .and_then(|usage| usage.get("duration")),
+                        .get(graph::USAGE)
+                        .and_then(|usage| usage.get(graph::DURATION)),
                 ) else {
                     continue;
                 };
@@ -803,12 +824,12 @@ impl Spend {
                 *slot = Some(slot.unwrap_or(0) + value);
             }
         };
-        add(&mut self.input_tokens, count("tokens_in"));
-        add(&mut self.output_tokens, count("tokens_out"));
-        add(&mut self.cache_read_tokens, count("cache_read"));
-        add(&mut self.cache_write_tokens, count("cache_write"));
+        add(&mut self.input_tokens, count(graph::TOKENS_IN));
+        add(&mut self.output_tokens, count(graph::TOKENS_OUT));
+        add(&mut self.cache_read_tokens, count(graph::CACHE_READ));
+        add(&mut self.cache_write_tokens, count(graph::CACHE_WRITE));
         if let Some(cost) = usage
-            .get("cost")
+            .get(graph::COST)
             .and_then(Value::as_f64)
             .filter(|cost| cost.is_finite() && *cost >= 0.0)
         {
@@ -840,7 +861,11 @@ fn usage<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> (Value, bool) {
         if event.source != Source::Agentgraph || event.kind.0 != graph::TURN_COMPLETED {
             continue;
         }
-        let Some(recorded) = event.payload.get("usage").filter(|usage| usage.is_object()) else {
+        let Some(recorded) = event
+            .payload
+            .get(graph::USAGE)
+            .filter(|usage| usage.is_object())
+        else {
             continue;
         };
         match transport_role(event) {
@@ -1858,16 +1883,20 @@ fn tool_call(index: usize, event: &Envelope) -> Value {
 
 /// What one turn consumed, in the wire's own spelling of the record's fields.
 fn turn_usage(event: &Envelope) -> Value {
-    let Some(usage) = event.payload.get("usage").filter(|usage| usage.is_object()) else {
+    let Some(usage) = event
+        .payload
+        .get(graph::USAGE)
+        .filter(|usage| usage.is_object())
+    else {
         return Value::Object(Map::new());
     };
     let count = |key: &str| usage.get(key).and_then(Value::as_u64);
     json!({
-        "inputTokens": count("tokens_in"),
-        "outputTokens": count("tokens_out"),
-        "cacheReadTokens": count("cache_read"),
-        "cacheWriteTokens": count("cache_write"),
-        "costUsd": usage.get("cost").and_then(Value::as_f64),
+        "inputTokens": count(graph::TOKENS_IN),
+        "outputTokens": count(graph::TOKENS_OUT),
+        "cacheReadTokens": count(graph::CACHE_READ),
+        "cacheWriteTokens": count(graph::CACHE_WRITE),
+        "costUsd": usage.get(graph::COST).and_then(Value::as_f64),
     })
 }
 
@@ -1891,7 +1920,12 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
         let index = turns.len();
         turns.push(json!({
             "assistant": event.payload.get("message").and_then(Value::as_str),
-            "durationMs": seconds_as_ms(event.payload.get("usage").and_then(|usage| usage.get("duration"))),
+            "durationMs": seconds_as_ms(
+                event
+                    .payload
+                    .get(graph::USAGE)
+                    .and_then(|usage| usage.get(graph::DURATION)),
+            ),
             "failureKind": Value::Null,
             "harness": "oneagentgraph",
             "id": format!("{session}.{index}"),

@@ -63,6 +63,12 @@ payload each one carries. Read today: `session-opened`, `lock-wait`,
 `change-merged`, `merge-completed`, `commit-preserved` and `sync-conflict` from
 `onevcs`; `turn-activity` and `turn-completed` from `oneagentgraph`.
 
+`oneagentgraph` declares its own vocabulary in a public module, so
+`tests/contract.rs` holds this crate's copy of it to that library's types.
+`onevcs` declares its in a private one, so the wire is the only declaration a
+consumer can reach and the fixture — written in the records that library emits —
+is the whole of the gate there.
+
 Deliberately not read: `fetch`, `lock-acquired`, `merge-queued`,
 `session-closed`, `recovery-attested`. Each is a real record and none of them
 answers a field the wire asks for; they still reach a reader, as the node's own

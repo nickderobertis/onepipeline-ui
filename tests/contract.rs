@@ -721,3 +721,80 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
         0
     );
 }
+
+/// The `oneagentgraph` vocabulary this crate reads, against that library's own
+/// declaration of it.
+///
+/// The names in `payload::graph` are a copy — the stack has no shared crate, and
+/// each producer owns its own envelope types — so this is the gate that keeps the
+/// copy honest: a kind or a usage field renamed there fails here rather than in
+/// a payload that silently stops carrying what a turn consumed.
+///
+/// `onevcs` has no equivalent gate to offer. Its event module is private in every
+/// published version, so the only declaration of its vocabulary a consumer can
+/// reach is the wire itself; `tests/support/fixture_run.rs` writes those records
+/// as that library emits them, and the goldens are what pins the reading.
+#[test]
+fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
+    use onepipeline_ui::payload::graph;
+
+    let wire = |kind: oneagentgraph::event::EventKind| {
+        serde_json::to_value(kind)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .expect("a kind serializes as its wire string")
+    };
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnActivity),
+        graph::TURN_ACTIVITY
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnCompleted),
+        graph::TURN_COMPLETED
+    );
+
+    // The payload a `turn-completed` carries, as that library writes it: every
+    // key this crate reads is one of its fields, and none of its fields is one
+    // this crate has no reading for.
+    let usage = serde_json::to_value(oneagentgraph::event::Usage {
+        tokens_in: 1,
+        tokens_out: 2,
+        cache_read: 3,
+        cache_write: 4,
+        cost: 0.5,
+        duration: 1.5,
+    })
+    .expect("the usage record serializes");
+    let read = [
+        graph::TOKENS_IN,
+        graph::TOKENS_OUT,
+        graph::CACHE_READ,
+        graph::CACHE_WRITE,
+        graph::COST,
+        graph::DURATION,
+    ];
+    let declared: Vec<&str> = usage
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(declared, read.to_vec());
+    assert_eq!(
+        serde_json::to_value(oneagentgraph::event::TurnCompleted {
+            usage: oneagentgraph::event::Usage {
+                tokens_in: 1,
+                tokens_out: 2,
+                cache_read: 3,
+                cache_write: 4,
+                cost: 0.5,
+                duration: 1.5,
+            },
+        })
+        .expect("the payload serializes")
+        .as_object()
+        .and_then(|payload| payload.keys().next().cloned()),
+        Some(graph::USAGE.to_owned()),
+        "the usage sits where this crate looks for it"
+    );
+}
