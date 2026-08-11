@@ -239,7 +239,7 @@ const ARTIFACT_FILES: &[&str] = &[
 ];
 
 /// The files `cargo package` would upload, which is exactly the set release-plz
-/// diffs to decide a release is due.
+/// diffs to decide a release is due — spelled the way `files_under` spells one.
 fn packaged_files() -> Vec<String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     let listed = std::process::Command::new(cargo)
@@ -264,7 +264,12 @@ fn packaged_files() -> Vec<String> {
     String::from_utf8(listed.stdout)
         .expect("utf-8 file list")
         .lines()
-        .map(str::to_owned)
+        // `--list` prints each path the way the host spells one, so on Windows the
+        // separators are backslashes — even though the tarball it is describing
+        // always uses `/`, and so does the `include` glob that selected the file.
+        // Normalised here rather than at the comparison, so this stays a list of
+        // packaged files and not a list of Windows ones.
+        .map(|line| line.replace('\\', "/"))
         .collect()
 }
 
