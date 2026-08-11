@@ -21,6 +21,13 @@ called `onepipeline-ui` would be handed out by the wrapper while the package
 actually named `onepipeline-ui` installs no command at all. `tests/packaging.rs`
 holds every distribution to that split.
 
+`onepipeline-ui-cli` is a fourth name, retired rather than renamed: it is what
+the wrappers published as up to v0.1.0, and npm and PyPI still serve that
+version under it. Nothing here publishes it again, so a consumer pinning
+`onepipeline-ui-cli` is pinned to 0.1.0 and has to move to
+`onepipeline-api-cli`. `PYPI_TOKEN` must therefore be account-scoped: a token
+scoped to the old project cannot create the new one.
+
 Two rules govern what may be written here:
 
 - **[`docs/contract.md`](docs/contract.md) is the source of truth, in that
@@ -92,6 +99,24 @@ fans one uniformly-named target across all of them.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.
+- **`[package] include` in Cargo.toml is the release trigger, not just the crate
+  tarball.** release-plz opens a release PR only when one of the crate's
+  *packaged files* changed, and that is the only lever it offers. One version
+  stamps three deliverables here, so the set covers everything whose bytes reach
+  any of them — including the frontend the `onepipeline-ui` npm package ships,
+  whose sources ride along in the crate tarball as the price. Anything a
+  published artifact carries has to be added there, and `tests/packaging.rs`
+  fails if it is not.
+- **A release that did not publish must not look like one.** `release.yml`'s
+  last job runs `scripts/release-status.sh` over every other job's result: if a
+  job the operator's switches say had to succeed did not, the GitHub Release is
+  demoted to a prerelease with a banner naming the jobs, and the job fails. The
+  tag is never touched — tags here are immutable — so the recovery for any
+  stranded version is the next patch version, never a re-run of its tag, whose
+  tree is the one that failed. v0.2.0 and v0.3.0 are stranded that way and stay
+  unpublished.
+- **A tag is not evidence of a release; the registry is.** Check what npm, PyPI
+  and crates.io serve before reporting a version shipped.
 - **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
   `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
   workflow, so `release.yml` would never run and the release would ship nothing.

@@ -15,11 +15,14 @@
 //! asserted against the same script CI runs.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use tempfile::TempDir;
+
+use crate::stub_bin;
 
 /// The budget the sharding journeys run under. Small enough that a handful of
 /// fixture files must span several shards, so the split is exercised rather
@@ -60,18 +63,6 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-#[cfg(unix)]
-fn make_executable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("chmod the stub");
-}
-
-#[cfg(not(unix))]
-fn make_executable(_path: &Path) {
-    // The shell reads the `#!` line to decide a file is a program it can run,
-    // so there is no mode bit here to set.
-}
-
 /// One judge run the script asked for: which changed files it left in view, and
 /// which it excluded.
 struct Call {
@@ -87,6 +78,10 @@ struct Fixture {
     dir: TempDir,
     base: String,
     files: Vec<String>,
+    /// The PATH every run below is given: the stand-in's directory, then this
+    /// process's own. Held rather than rebuilt per run, so the substitution
+    /// happens once, where it is justified.
+    search_path: OsString,
 }
 
 impl Fixture {
@@ -126,21 +121,32 @@ impl Fixture {
         );
         files.sort();
 
-        let stub_dir = root.join("stub-bin");
-        fs::create_dir_all(&stub_dir).expect("create the stub directory");
-        let stub = stub_dir.join("llmlint");
-        fs::write(
-            &stub,
+        // llmlint: ignore-block[e2e_not_mocked] the real `llmlint` bills a model
+        // call per shard and answers differently each time, so a journey that
+        // drove it could assert nothing about what this script decided. The
+        // program on PATH is the narrowest cut available: the script under test is
+        // the real one, run the way the recipe runs it, and the stand-in is only
+        // what makes the shards it asked for readable. This call is the whole of
+        // that substitution — it writes the stand-in and answers with the PATH
+        // that puts it ahead of a real `llmlint` — so there is one site to
+        // justify rather than one per run.
+        let search_path = stub_bin::install(
+            &root.join("stub-bin"),
+            "llmlint",
             "#!/usr/bin/env bash\n\
              printf '%s\\n' \"$*\" >> \"$LLMLINT_CALLS\"\n\
              called=$(wc -l < \"$LLMLINT_CALLS\")\n\
              codes=($LLMLINT_EXITS)\n\
              exit \"${codes[$((called - 1))]:-0}\"\n",
-        )
-        .expect("write the stub");
-        make_executable(&stub);
+        );
+        // llmlint: ignore-end[e2e_not_mocked]
 
-        Self { dir, base, files }
+        Self {
+            dir,
+            base,
+            files,
+            search_path,
+        }
     }
 
     fn root(&self) -> &Path {
@@ -159,17 +165,13 @@ impl Fixture {
     }
 
     fn run_against(&self, base: &str, budget: Option<usize>, exits: &str, args: &[&str]) -> Output {
-        let mut path = vec![self.root().join("stub-bin")];
-        path.extend(std::env::split_paths(
-            &std::env::var_os("PATH").expect("PATH is set"),
-        ));
         let mut command = Command::new("bash");
         command
             .arg(repo_root().join("scripts/lint-llm-diff.sh"))
             .arg(base)
             .args(args)
             .current_dir(self.root())
-            .env("PATH", std::env::join_paths(path).expect("join PATH"))
+            .env("PATH", &self.search_path)
             .env("LLMLINT_CALLS", self.calls_log())
             .env("LLMLINT_EXITS", exits);
         match budget {
