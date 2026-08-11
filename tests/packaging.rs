@@ -11,6 +11,7 @@
 //! a released package must *contain*. Running the launcher a user installed is
 //! `tests/e2e/packaging.rs`.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -144,6 +145,96 @@ fn the_frontend_package_refuses_to_ship_without_a_built_bundle() {
     let stderr = String::from_utf8_lossy(&built.stderr);
     assert!(stderr.contains("no built frontend"), "{stderr}");
     assert!(stderr.contains("ACTION:"), "{stderr}");
+}
+
+/// Every `prefix<name>` in `source`, taking `name` for as long as `keep` holds.
+///
+/// Enough of a parser for the three declarations below and no more: each is a
+/// list of identifiers a compiler already checks the spelling of, so what is
+/// left to check is that the three lists say the same thing.
+fn names_after(source: &str, prefix: &str, keep: fn(char) -> bool) -> BTreeSet<String> {
+    source
+        .match_indices(prefix)
+        .map(|(at, _)| {
+            source[at + prefix.len()..]
+                .chars()
+                .take_while(|character| keep(*character))
+                .collect()
+        })
+        .collect()
+}
+
+/// `src/server.rs` is the one source for which stops this process honours, and
+/// the two `tokio::signal` kinds it names are read out of it here.
+///
+/// Adding one there is the whole of the change; this fails until the launcher
+/// and the journeys follow, which is the point.
+fn stop_signals_the_server_installs() -> BTreeSet<String> {
+    // tokio spells a signal by its disposition, POSIX by its number's name.
+    let posix = |kind: &str| match kind {
+        "terminate" => "SIGTERM",
+        "interrupt" => "SIGINT",
+        "hangup" => "SIGHUP",
+        "quit" => "SIGQUIT",
+        other => panic!(
+            "src/server.rs installs SignalKind::{other}(), which this gate cannot name — \
+             add it here, to the launcher's STOP_SIGNALS, and to tests/support/serving.rs's Stop"
+        ),
+    };
+    let kinds = names_after(&read("src/server.rs"), "SignalKind::", |character| {
+        character.is_ascii_alphanumeric() || character == '_'
+    });
+    assert!(
+        !kinds.is_empty(),
+        "src/server.rs installs no signal handler at all, so nothing can stop the server cleanly"
+    );
+    kinds.iter().map(|kind| posix(kind).to_owned()).collect()
+}
+
+/// The launcher forwards exactly the stops the server handles — no fewer, and
+/// no more.
+///
+/// The npm distribution puts a node process in front of the binary, and a
+/// supervisor signals *that*. So the two agree about this set or the command
+/// cannot be stopped cleanly, and they are written in different languages with
+/// no compiler between them — which is how v0.3.1 shipped forwarding none of
+/// them and exiting 143. Neither too few (the stop never reaches the server) nor
+/// too many: listening for a signal replaces node's default disposition, so
+/// forwarding one the binary does not handle leaves the launcher outliving it.
+///
+/// `tests/support/serving.rs` is held to the same set, so the journeys in
+/// `tests/e2e/` cannot cover only some of what the server promises.
+#[test]
+fn the_launcher_and_the_journeys_carry_exactly_the_stops_the_server_handles() {
+    let installed = stop_signals_the_server_installs();
+
+    let launcher = read(&format!("npm/{WRAPPER}/bin/{COMMAND}.js"));
+    let (_, declared) = launcher
+        .split_once("const STOP_SIGNALS = [")
+        .expect("the launcher declares no STOP_SIGNALS");
+    let (declared, _) = declared.split_once(']').expect("STOP_SIGNALS is unclosed");
+    let forwarded: BTreeSet<String> = declared
+        .split(',')
+        .map(|name| name.trim().trim_matches('"').to_owned())
+        .filter(|name| !name.is_empty())
+        .collect();
+    assert_eq!(
+        forwarded, installed,
+        "the npm launcher forwards a different set of stops than src/server.rs handles"
+    );
+
+    let signalled = names_after(
+        &read("tests/support/serving.rs"),
+        "libc::SIG",
+        char::is_alphanumeric,
+    )
+    .iter()
+    .map(|name| format!("SIG{name}"))
+    .collect::<BTreeSet<String>>();
+    assert_eq!(
+        signalled, installed,
+        "the e2e harness sends a different set of stops than src/server.rs handles"
+    );
 }
 
 #[test]
