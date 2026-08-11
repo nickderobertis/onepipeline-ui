@@ -207,8 +207,16 @@ trap '[ -z "$notes" ] || rm -f "$notes"' EXIT
 
 # Assigns rather than prints: a `fail` inside a command substitution would exit
 # only the subshell it ran in.
+#
+# The template is spelled out because `mktemp`'s default directory is not the
+# same one program to program: GNU's takes it from `$TMPDIR`, while macOS's
+# implies `-t` and asks `confstr(_CS_DARWIN_USER_TEMP_DIR)` first, reading
+# `$TMPDIR` only if that fails. Left to the default, a runner whose `TMPDIR` is
+# missing or unwritable would stop this job on Linux and be silently written
+# around on macOS — a platform-dependent gate, in the one script whose whole job
+# is that a release is labelled the same way whatever ran it.
 open_notes() {
-  if ! notes="$(mktemp)"; then
+  if ! notes="$(mktemp "${TMPDIR:-/tmp}/release-status.XXXXXXXXXX")"; then
     fail "cannot create a temporary file to assemble $RELEASE_TAG's notes in" \
       "check that the runner's TMPDIR exists and is writable"
   fi
