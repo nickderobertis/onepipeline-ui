@@ -11,8 +11,17 @@
 //! `tests/packaging.rs`.
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(unix)]
+use std::process::Stdio;
+
+#[cfg(unix)]
+use crate::http;
+#[cfg(unix)]
+use crate::serving::{self, Stop, STOP_DEADLINE};
 
 /// The Rust target triple for the host, as `.github/workflows/release.yml`
 /// spells it. The release matrix builds exactly these five, so a host outside
@@ -139,6 +148,117 @@ fn the_launcher_propagates_the_binarys_exit_code_and_stderr() {
         String::from_utf8_lossy(&output.stderr).contains("is not a readable directory"),
         "the shim swallowed the binary's diagnostics"
     );
+}
+
+/// Kill whatever the launcher left behind, so a failing journey cannot leave a
+/// server listening for as long as the machine is up.
+///
+/// The launcher is spawned as its own process group leader, which is what lets
+/// this reach the binary *it* started — the defect this journey exists for is
+/// precisely a launcher that exits without taking that binary with it, and there
+/// is no other handle on the grandchild. Disarmed on the way out of a journey
+/// that proved the group is already empty.
+#[cfg(unix)]
+struct Survivors {
+    group: i32,
+    armed: bool,
+}
+
+#[cfg(unix)]
+impl Survivors {
+    fn of(launcher: &std::process::Child) -> Self {
+        Self {
+            group: i32::try_from(launcher.id()).expect("a pid fits in an i32"),
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Survivors {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // SAFETY: `group` is the pid of a process this journey spawned as its
+        // own group leader, so the negated pid names that group and nothing
+        // else. Only reached on the failure path, where that group still has a
+        // live member holding the pid — the success path disarms first.
+        unsafe {
+            libc::kill(-self.group, libc::SIGKILL);
+        }
+    }
+}
+
+/// The npm distribution's shutdown journey: a launcher asked to stop passes it
+/// on, and answers with the status the server chose.
+///
+/// This is the whole of what `scripts/smoke-published.sh` asks a published
+/// artifact to do — serve on a kernel-chosen port, answer `/healthz`, then stop
+/// on a signal and exit `0` — run against the launcher a user actually types.
+/// It is the command a supervisor signals, so it and not the binary is what has
+/// to survive the signal: nothing here can be proven by starting the binary
+/// directly, which is why v0.3.1 shipped exiting 143.
+#[cfg(unix)]
+fn assert_the_launcher_stops_the_server(stop: Stop) {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let mut launcher = Command::new("node")
+        .arg(&entry)
+        .arg("serve")
+        .arg("--runs-root")
+        .arg(runs.path())
+        .args(["--bind", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .process_group(0)
+        .spawn()
+        .expect("node is on PATH");
+    let mut survivors = Survivors::of(&launcher);
+
+    // The server's own startup line, read through the launcher's inherited
+    // stdout — so this also proves the launcher did not swallow it.
+    let address = serving::address_of(&mut launcher);
+    assert_eq!(
+        http::get(address, "/healthz").status,
+        200,
+        "the launcher started something that does not serve"
+    );
+
+    serving::ask_to_stop(&mut launcher, stop);
+    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a supervisor stopping the launcher must see the server's own clean exit, not a kill: {status}"
+    );
+    // And the stop reached the *binary*, not only the shim: a launcher that
+    // exits on its own and leaves the server running is a stop that did not
+    // happen, however clean its status looks.
+    assert!(
+        std::net::TcpStream::connect(address).is_err(),
+        "the launcher exited but the server it started is still listening on {address}"
+    );
+    survivors.disarm();
+}
+
+/// Unix only, for the reason `tests/support/serving.rs` gives and
+/// `scripts/smoke-published.sh` repeats: Windows offers a parent no way to *ask*.
+#[cfg(unix)]
+#[test]
+fn the_launcher_stops_the_server_when_a_supervisor_asks() {
+    assert_the_launcher_stops_the_server(Stop::Terminate);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_launcher_stops_the_server_on_a_terminals_interrupt() {
+    assert_the_launcher_stops_the_server(Stop::Interrupt);
 }
 
 #[test]

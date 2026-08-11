@@ -16,7 +16,7 @@
 
 "use strict";
 
-const { spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 
 // process.platform-process.arch -> the platform package that carries the binary.
 // The keys mirror the Rust target matrix in .github/workflows/release.yml and
@@ -77,18 +77,49 @@ function binaryPath() {
   }
 }
 
-const result = spawnSync(binaryPath(), process.argv.slice(2), {
-  stdio: "inherit",
+// The signals that mean "stop", and the reason this launcher is asynchronous.
+//
+// A supervisor — systemd, Docker, a CI job, the smoke test in
+// scripts/smoke-published.sh — stops this command by signalling the process it
+// started, which is *this* one and not the binary behind it. Under a synchronous
+// spawn node has no chance to react: the default disposition kills the launcher
+// where it stands, so the caller sees 128+15 instead of the server's own `0`,
+// and the binary is left running with nothing waiting on it. So the child is
+// spawned asynchronously and each of these is passed on to it, which is what
+// lets the server run the graceful shutdown it already has and lets its exit
+// status be the one the caller observes.
+//
+// Exactly the two the server installs handlers for (`StopSignal` in
+// src/server.rs). Listening for a signal replaces node's default disposition, so
+// forwarding one the binary does not handle would trade a clean kill for a
+// launcher that outlives its terminal.
+const STOP_SIGNALS = ["SIGTERM", "SIGINT"];
+
+const child = spawn(binaryPath(), process.argv.slice(2), { stdio: "inherit" });
+
+child.on("error", (error) => {
+  fail(`failed to launch the onepipeline-api binary: ${error.message}`);
 });
 
-if (result.error) {
-  fail(`failed to launch the onepipeline-api binary: ${result.error.message}`);
+for (const signal of STOP_SIGNALS) {
+  // Passed to the child alone. A terminal's Ctrl-C already reached the whole
+  // foreground group, and the server treats the repeat as the same request to
+  // stop that it is already answering.
+  process.on(signal, () => child.kill(signal));
 }
 
-// Re-raise a terminating signal so callers observe the true cause; otherwise
-// propagate the child's exit code verbatim — a caller scripting against the
-// documented exit codes depends on seeing them.
-if (result.signal) {
-  process.kill(process.pid, result.signal);
-}
-process.exit(result.status === null ? 1 : result.status);
+child.on("exit", (status, signal) => {
+  // Re-raise a terminating signal so callers observe the true cause; otherwise
+  // propagate the child's exit code verbatim — a caller scripting against the
+  // documented exit codes depends on seeing them. The listeners go first:
+  // re-raising into one of them would be this process signalling itself in a
+  // loop instead of dying of what killed the binary.
+  for (const stop of STOP_SIGNALS) {
+    process.removeAllListeners(stop);
+  }
+  if (signal) {
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exit(status === null ? 1 : status);
+});
