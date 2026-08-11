@@ -15,6 +15,7 @@
 //! asserted against the same script CI runs.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -77,6 +78,10 @@ struct Fixture {
     dir: TempDir,
     base: String,
     files: Vec<String>,
+    /// The PATH every run below is given: the stand-in's directory, then this
+    /// process's own. Held rather than rebuilt per run, so the substitution
+    /// happens once, where it is justified.
+    search_path: OsString,
 }
 
 impl Fixture {
@@ -121,8 +126,11 @@ impl Fixture {
         // drove it could assert nothing about what this script decided. The
         // program on PATH is the narrowest cut available: the script under test is
         // the real one, run the way the recipe runs it, and the stand-in is only
-        // what makes the shards it asked for readable.
-        stub_bin::install(
+        // what makes the shards it asked for readable. This call is the whole of
+        // that substitution — it writes the stand-in and answers with the PATH
+        // that puts it ahead of a real `llmlint` — so there is one site to
+        // justify rather than one per run.
+        let search_path = stub_bin::install(
             &root.join("stub-bin"),
             "llmlint",
             "#!/usr/bin/env bash\n\
@@ -133,7 +141,12 @@ impl Fixture {
         );
         // llmlint: ignore-end[e2e_not_mocked]
 
-        Self { dir, base, files }
+        Self {
+            dir,
+            base,
+            files,
+            search_path,
+        }
     }
 
     fn root(&self) -> &Path {
@@ -158,7 +171,7 @@ impl Fixture {
             .arg(base)
             .args(args)
             .current_dir(self.root())
-            .env("PATH", stub_bin::path_with(&self.root().join("stub-bin")))
+            .env("PATH", &self.search_path)
             .env("LLMLINT_CALLS", self.calls_log())
             .env("LLMLINT_EXITS", exits);
         match budget {

@@ -13,6 +13,7 @@
 //! public GitHub Release. It is a recording stand-in (see `support/stub_bin.rs`),
 //! so the script is the real script and every edit it asked for is readable here.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -58,18 +59,20 @@ const ALL_ON: Switches = Switches {
 
 struct Fixture {
     dir: TempDir,
+    /// The PATH every run below is given: the stand-in's directory, then this
+    /// process's own. Held rather than rebuilt per run, so the substitution
+    /// happens once, where it is justified.
+    search_path: OsString,
 }
 
 impl Fixture {
     /// A Release whose notes are `body`, which GitHub currently reports as a
     /// prerelease or not.
     fn new(body: &str, is_prerelease: bool) -> Self {
-        let fixture = Self {
-            dir: TempDir::new().expect("temp dir"),
-        };
-        fs::write(fixture.path("body"), body).expect("write the release body");
+        let dir = TempDir::new().expect("temp dir");
+        fs::write(dir.path().join("body"), body).expect("write the release body");
         fs::write(
-            fixture.path("is-prerelease"),
+            dir.path().join("is-prerelease"),
             if is_prerelease { "true" } else { "false" },
         )
         .expect("write the prerelease flag");
@@ -83,8 +86,11 @@ impl Fixture {
         // in for the program on PATH is the narrowest cut available: the script
         // under test is the real script, run with the workflow's own environment,
         // and the stand-in is only what makes the edits it asked for readable.
-        stub_bin::install(
-            &fixture.path("stub-bin"),
+        // This call is the whole of that substitution — it writes the stand-in
+        // and answers with the PATH that puts it ahead of a real `gh` — so there
+        // is one site to justify rather than one per run.
+        let search_path = stub_bin::install(
+            &dir.path().join("stub-bin"),
             "gh",
             "#!/usr/bin/env bash\n\
              set -eu\n\
@@ -118,7 +124,7 @@ impl Fixture {
              esac\n",
         );
         // llmlint: ignore-end[e2e_not_mocked]
-        fixture
+        Self { dir, search_path }
     }
 
     /// A Release the workflow has just cut: real notes, not a prerelease.
@@ -171,7 +177,7 @@ impl Fixture {
         command
             .arg(repo_root().join("scripts/release-status.sh"))
             .current_dir(self.dir.path())
-            .env("PATH", stub_bin::path_with(&self.path("stub-bin")))
+            .env("PATH", &self.search_path)
             .env("GH_STATE", self.dir.path())
             .env("GH_CALLS", self.path("calls.log"))
             .env("RELEASE_TAG", TAG)
@@ -423,12 +429,12 @@ fn a_job_the_workflow_never_reported_strands_the_release() {
 #[test]
 fn no_release_to_hold_is_a_usage_error() {
     let fixture = Fixture::fresh();
-    let output = Command::new("bash")
-        .arg(repo_root().join("scripts/release-status.sh"))
-        .current_dir(fixture.dir.path())
-        .env("PATH", stub_bin::path_with(&fixture.path("stub-bin")))
+    // The workflow's own environment with the one variable taken out, rather
+    // than a command assembled by hand: what is missing is then the difference
+    // between this run and every other, and not whatever this one forgot.
+    let output = fixture
+        .command("test=success", &ALL_ON)
         .env_remove("RELEASE_TAG")
-        .env("JOB_RESULTS", "test=success")
         .output()
         .expect("bash is on PATH");
 
