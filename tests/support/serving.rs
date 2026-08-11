@@ -10,9 +10,48 @@
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
+
+/// How long a process asked to stop may take before a journey calls it hung.
+///
+/// A shutdown here is bounded work — stop accepting, finish the requests in
+/// flight, end the open streams — so the number only has to separate "a loaded
+/// CI runner" from "never". Generous for the first, and far inside the patience
+/// of anything supervising this process: `systemd` waits 90 seconds by default
+/// and `docker stop` 10 before they escalate to `SIGKILL`, which is the outcome
+/// this bound exists to catch before a release does.
+pub const STOP_DEADLINE: Duration = Duration::from_secs(20);
+
+/// How often [`wait_within`] looks. Short enough that the assertion is about the
+/// server's shutdown rather than about this poll.
+const WAIT_POLL: Duration = Duration::from_millis(10);
+
+/// The two ways a caller asks this process to stop.
+///
+/// Both mean the same thing to the server, and it installs a handler for each:
+/// a supervisor sends the first, a terminal the second. They are a journey's
+/// parameter because a server honouring only one of them is killed by whichever
+/// it ignored, and that is invisible to a test that only ever sends the other.
+#[derive(Debug, Clone, Copy)]
+pub enum Stop {
+    /// What `systemd`, `docker stop`, and `kill` with no argument send.
+    Terminate,
+    /// What a terminal sends on Ctrl-C.
+    Interrupt,
+}
+
+#[cfg(unix)]
+impl Stop {
+    fn signal(self) -> libc::c_int {
+        match self {
+            Self::Terminate => libc::SIGTERM,
+            Self::Interrupt => libc::SIGINT,
+        }
+    }
+}
 
 /// A serving process, stopped when it goes out of scope.
 pub struct Serving {
@@ -65,15 +104,7 @@ impl Serving {
             .spawn()
             .expect("the binary is built and runnable");
 
-        let stdout = child.stdout.take().expect("stdout is piped");
-        let mut line = String::new();
-        BufReader::new(stdout)
-            .read_line(&mut line)
-            .expect("the server names the address it took");
-        let address = line
-            .rsplit_once("http://")
-            .and_then(|(_, rest)| rest.trim().parse().ok())
-            .unwrap_or_else(|| panic!("the server did not name an address: {line:?}"));
+        let address = address_of(&mut child);
         Self {
             child,
             address,
@@ -93,43 +124,94 @@ impl Serving {
         self.runs.path()
     }
 
-    /// Ask the server to stop the way a supervisor does, and return its status.
+    /// Ask the server to stop the given way, and return the status it exited
+    /// with — or fail the journey if it has not exited [`STOP_DEADLINE`] later.
     ///
     /// This is the journey for the clean-shutdown path: a signalled server
-    /// finishes and exits `0` rather than being killed. Unix only — see
-    /// [`ask_to_stop`] for what a parent can and cannot say on Windows.
+    /// finishes and exits `0` rather than being killed, and does it in bounded
+    /// time. Both halves matter — a shutdown that never completes is answered by
+    /// a supervisor's `SIGKILL`, which is the same non-zero status by a slower
+    /// route. Unix only — see [`ask_to_stop`] for what a parent can and cannot
+    /// say on Windows.
     #[cfg(unix)]
-    pub fn stop(mut self) -> std::process::ExitStatus {
-        ask_to_stop(&mut self.child);
-        let status = self.child.wait().expect("the server exits");
+    pub fn stop_on(mut self, stop: Stop) -> ExitStatus {
+        ask_to_stop(&mut self.child, stop);
+        let status = wait_within(&mut self.child, STOP_DEADLINE);
         self.stopped = true;
         status
     }
 }
 
+/// The address a serving process names on its own first line of output.
+///
+/// Reading it rather than choosing it is what lets `--bind 127.0.0.1:0` be the
+/// rule here: the kernel picks a free port, so journeys run beside each other
+/// and beside another checkout doing the same thing.
+pub fn address_of(child: &mut Child) -> SocketAddr {
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let mut line = String::new();
+    BufReader::new(stdout)
+        .read_line(&mut line)
+        .expect("the server names the address it took");
+    line.rsplit_once("http://")
+        .and_then(|(_, rest)| rest.trim().parse().ok())
+        .unwrap_or_else(|| panic!("the server did not name an address: {line:?}"))
+}
+
 /// Send the platform's "please stop" to a child.
 ///
-/// On Unix that is `SIGTERM`, which the server handles and answers by finishing
-/// what it was doing. Windows offers a parent no equivalent: `kill` there is
-/// `TerminateProcess`, which ends the process unconditionally and reports a
-/// status the server never chose. That is why the clean-shutdown journey is
-/// asserted on Unix alone — a Windows assertion would be about the harness's
-/// own termination, not the server's shutdown.
-fn ask_to_stop(child: &mut Child) {
+/// On Unix that is a signal the server handles by finishing what it was doing.
+/// Windows offers a parent no equivalent: `kill` there is `TerminateProcess`,
+/// which ends the process unconditionally and reports a status the server never
+/// chose. That is why the clean-shutdown journeys are asserted on Unix alone — a
+/// Windows assertion would be about the harness's own termination, not the
+/// server's shutdown. `scripts/smoke-published.sh` draws the same line, for the
+/// same reason.
+pub fn ask_to_stop(child: &mut Child, stop: Stop) {
     #[cfg(unix)]
     {
-        // SAFETY: `child` is a live process this test started, and SIGTERM is
-        // the signal the server installs a handler for.
+        // SAFETY: `child` is a live process this test started, and both signals
+        // are ones the server installs a handler for.
         unsafe {
             libc::kill(
                 i32::try_from(child.id()).expect("a pid fits in an i32"),
-                libc::SIGTERM,
+                stop.signal(),
             );
         }
     }
     #[cfg(not(unix))]
     {
+        let _ = stop;
         let _ = child.kill();
+    }
+}
+
+/// Wait for `child` to exit, failing the journey if it takes longer than
+/// `deadline`.
+///
+/// Bounded rather than `wait()`: a process that was asked to stop and never
+/// does is the failure these journeys exist to catch, and an unbounded wait
+/// reports it as a suite that hangs — no status, no message, and on CI a job
+/// killed minutes later with nothing said about which test it was in.
+pub fn wait_within(child: &mut Child, deadline: Duration) -> ExitStatus {
+    wait_or_kill(child, deadline).unwrap_or_else(|| {
+        panic!("the process was asked to stop and had still not exited {deadline:?} later")
+    })
+}
+
+/// The same wait, but killing rather than failing — what a cleanup path needs.
+fn wait_or_kill(child: &mut Child, deadline: Duration) -> Option<ExitStatus> {
+    let asked = Instant::now();
+    loop {
+        match child.try_wait().expect("the child is waitable") {
+            Some(status) => return Some(status),
+            None if asked.elapsed() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            None => std::thread::sleep(WAIT_POLL),
+        }
     }
 }
 
@@ -139,9 +221,11 @@ impl Drop for Serving {
             return;
         }
         // Asked to stop rather than killed, so a journey that ends without
-        // calling `stop` still leaves the process to finish what it was doing —
-        // and, under coverage, to write what it measured.
-        ask_to_stop(&mut self.child);
-        let _ = self.child.wait();
+        // calling `stop_on` still leaves the process to finish what it was doing
+        // — and, under coverage, to write what it measured. Bounded all the
+        // same: a wedged server must not turn the whole suite into a hang, and
+        // a `Drop` cannot report the failure anyway.
+        ask_to_stop(&mut self.child, Stop::Terminate);
+        let _ = wait_or_kill(&mut self.child, STOP_DEADLINE);
     }
 }

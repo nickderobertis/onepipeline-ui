@@ -14,6 +14,8 @@ use onepipeline_ui::telemetry;
 use crate::fixture_run;
 use crate::http;
 use crate::serving::Serving;
+#[cfg(unix)]
+use crate::serving::Stop;
 
 /// A server over one settled run and one more, so the list has rows to page.
 fn two_runs() -> Serving {
@@ -770,19 +772,74 @@ fn a_directory_that_records_no_launch_is_not_a_run() {
     assert_eq!(ids, vec![fixture_run::RUN_ID]);
 }
 
-/// Unix only: `Serving::stop` needs a stop a parent can *ask* for, and Windows
-/// has none — see `tests/support/serving.rs`'s `ask_to_stop`.
+/// A server that was serving, asked to stop the given way, exits `0` before
+/// `STOP_DEADLINE`.
+///
+/// Being asked to stop is the *normal* end of a read surface, so anything else —
+/// a non-zero status, or a shutdown a supervisor has to escalate to `SIGKILL` —
+/// is a clean stop reported as a crash by everything supervising this process.
 #[cfg(unix)]
-#[test]
-fn a_server_asked_to_stop_finishes_cleanly() {
+fn assert_stops_cleanly(stop: Stop) {
     let serving = two_runs();
     // Proves it was serving before it was asked, so a `0` here cannot be a
     // process that failed to start.
     assert_eq!(http::get(serving.address, "/healthz").status, 200);
-    let status = serving.stop();
-    assert!(
-        status.success(),
+    let status = serving.stop_on(stop);
+    assert_eq!(
+        status.code(),
+        Some(0),
         "being asked to stop is the normal end of a read surface: {status}"
+    );
+}
+
+/// Unix only: `Serving::stop_on` needs a stop a parent can *ask* for, and
+/// Windows has none — see `tests/support/serving.rs`'s `ask_to_stop`.
+#[cfg(unix)]
+#[test]
+fn a_server_a_supervisor_asks_to_stop_finishes_cleanly() {
+    assert_stops_cleanly(Stop::Terminate);
+}
+
+/// The other half of the same contract. `SIGINT` is what a terminal sends, and a
+/// server that handled only `SIGTERM` would be killed by it — the same 130-shaped
+/// failure as the 143 the published binary gave, just from the other signal.
+#[cfg(unix)]
+#[test]
+fn a_server_interrupted_at_a_terminal_finishes_cleanly() {
+    assert_stops_cleanly(Stop::Interrupt);
+}
+
+/// A subscriber must not be able to hold the shutdown open, and must not have
+/// its response cut off mid-frame either.
+///
+/// Those pull in opposite directions, and the server resolves them at the frame
+/// boundary: the stop is noticed at the reader's next poll, so the frames
+/// already written arrive whole and the stream is then closed at the end of one
+/// rather than the socket being dropped in the middle of one. This asserts both
+/// halves — the client sees a clean end of stream, and the process still exits
+/// `0` inside the bound with the subscription open.
+#[cfg(unix)]
+#[test]
+fn a_server_asked_to_stop_ends_its_open_streams_rather_than_waiting_on_them() {
+    let serving = two_runs();
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    assert_eq!(stream.status, 200);
+    let snapshot = stream.next_frame().expect("a first frame");
+    assert_eq!(snapshot.event, "snapshot");
+
+    let address = serving.address;
+    let status = serving.stop_on(Stop::Terminate);
+    assert_eq!(status.code(), Some(0), "a subscriber held the stop open");
+
+    // Read to the end from *this* side: the server closed the stream, so the
+    // remaining frames are whole and then it ends. A truncated frame would come
+    // back as a parse failure here, and a dropped socket as a read error.
+    while let Some(frame) = stream.next_frame() {
+        let _ = frame.json();
+    }
+    assert!(
+        std::net::TcpStream::connect(address).is_err(),
+        "the process exited but something is still listening on {address}"
     );
 }
 

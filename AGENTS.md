@@ -140,7 +140,13 @@ fans one uniformly-named target across all of them.
   the other would reject.
 - **Exit codes are a contract**: `0` on success, `2` on a usage error, `70` when
   a command parsed but is not implemented. `scripts/smoke-published.sh` asserts
-  all three against every published artifact, on every platform.
+  all three against every published artifact, on every platform. Being asked to
+  stop is a success — the server handles `SIGTERM` and `SIGINT` and exits `0` —
+  and that one is the *wrapper's* contract as much as the binary's, because the
+  process a supervisor signals is whatever it started. The npm launcher is a
+  node process in front of the binary, so it forwards the signal and answers
+  with the status the binary chose; v0.3.1 shipped exiting 143 because it did
+  neither, with the binary itself already correct.
 - Do not commit secrets. Values live in the platform secret store, referenced by
   name in `gh-secrets.json`; the allowlist in `.claude/settings.json` stays
   narrow, and keeping it current — rather than re-approving a routine command
