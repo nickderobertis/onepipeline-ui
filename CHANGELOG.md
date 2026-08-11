@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.3.1...v0.3.2) - 2026-08-11
+
+### Fixed
+
+- pass a supervisor's stop through the npm launcher ([#10](https://github.com/nickderobertis/onepipeline-ui/pull/10))
+
 ## [0.3.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.3.0...v0.3.1) - 2026-08-11
 
 ### Fixed
