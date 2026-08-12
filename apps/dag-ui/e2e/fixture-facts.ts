@@ -31,6 +31,13 @@ const fixtureSchema = z.object({
     check_in: z.string().min(1),
     round_check_in: z.string().min(1),
     orchestrator: z.string().min(1),
+    orphan: z.string().min(1),
+  }),
+  /** The two planner notes the live run carries, and the words it refused one with. */
+  redirection: z.object({
+    live_note: z.string().min(1),
+    deferred_note: z.string().min(1),
+    no_control_reason: z.string().min(1),
   }),
   artifacts: z.object({
     gate: z.string().min(1),

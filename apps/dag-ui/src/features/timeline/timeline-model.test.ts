@@ -26,6 +26,8 @@ describe("one node's slice of the run timeline", () => {
       "dispatch-worker-session",
       "rollup-lock-wait-11",
       "event-9",
+      "event-10",
+      "event-11",
       "dispatch-check-in-session",
       "dispatch-pr-author-session",
     ]);
@@ -54,6 +56,30 @@ describe("one node's slice of the run timeline", () => {
     expect(dashboard.rows[1]).toMatchObject({
       displayKind: "Lock waits",
       displayLabel: "Lock waits: 1240 recorded",
+    });
+  });
+
+  test("names a redirection for what it changed rather than for the lever", () => {
+    const rows = nodeTimeline(timeline, "dashboard").rows;
+    const named = (id: string) =>
+      rows.find((row) => row.id === id) ??
+      (() => {
+        throw new Error(`no row ${id}`);
+      })();
+    // Two records of the same kind, and the reading is which of them happened: a
+    // reader of a turn that changed behaviour is asking whether the note reached it.
+    expect(named("event-10")).toMatchObject({
+      displayKind: "Redirection",
+      displayLabel: "Redirected into the running turn",
+    });
+    expect(named("event-11")).toMatchObject({
+      displayKind: "Redirection",
+      displayLabel: "Redirection deferred to the next dispatch",
+    });
+    // Every other journal record is still an ordinary event, named by its kind.
+    expect(named("event-9")).toMatchObject({
+      displayKind: "Event",
+      displayLabel: "checkpoint-recorded",
     });
   });
 

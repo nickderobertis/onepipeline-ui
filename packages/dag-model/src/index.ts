@@ -573,8 +573,7 @@ export const nodeControlSchema = openObject({
     context.addIssue({
       code: "custom",
       path: ["reason"],
-      message:
-        "a reason is carried exactly when the node is not interruptible",
+      message: "a reason is carried exactly when the node is not interruptible",
     });
   }
 });

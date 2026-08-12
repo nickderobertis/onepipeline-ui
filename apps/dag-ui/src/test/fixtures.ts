@@ -63,7 +63,7 @@ const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 11,
+  telemetry_schema_version: 12,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -189,12 +189,17 @@ export function runDetail(runId: string = LIVE_RUN) {
   const gatedBy: Record<string, string[]> = historical
     ? {}
     : { queued: ["approval"], abandoned: ["publish"] };
+  // One entry for every node the round has in flight, and for no other: `dashboard`
+  // is the only node running here, and it is talking in a turn the run can address.
+  const control = historical
+    ? {}
+    : { dashboard: { interruptible: true, member: "worker" } };
   const launchId = historical ? CLAUDE_LAUNCH : CODEX_LAUNCH;
   const launcher = historical ? "claude-code" : "codex";
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 11,
+    telemetry_schema_version: 12,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -256,6 +261,7 @@ export function runDetail(runId: string = LIVE_RUN) {
         node_states: states,
         node_status: status,
         node_gated_by: gatedBy,
+        node_control: control,
         node_results: historical
           ? { archive: { status: "done", ok: true } }
           : {
@@ -410,7 +416,7 @@ function stamp(seconds: number): string {
 export function runTimeline(runId: string = LIVE_RUN) {
   return {
     api_version: 2,
-    timeline_schema_version: 3,
+    timeline_schema_version: 4,
     // Read shortly after the last record it carries, which is what a poll of a live
     // run actually returns. The graph-level view plots an unfinished run out to this
     // instant, so a stamp an hour past the record would say the run had spent an
@@ -633,6 +639,29 @@ function liveSpans() {
           round: 1,
           node_id: "dashboard",
           status: "verified",
+        },
+        // The moment the planner changed what the running turn was doing, and the
+        // one it could not: a node's timeline carries both as its own records.
+        {
+          id: "event-10",
+          kind: "turn-interrupted",
+          at: stamp(50),
+          round: 1,
+          node_id: "dashboard",
+          redirection: { delivered: true, member: "worker", input_bytes: 41 },
+        },
+        {
+          id: "event-11",
+          kind: "turn-interrupted",
+          at: stamp(52),
+          round: 1,
+          node_id: "dashboard",
+          redirection: {
+            delivered: false,
+            member: "judge",
+            input_bytes: 26,
+            reason: "the member is between turns",
+          },
         },
       ],
     },
@@ -1019,7 +1048,7 @@ export function busyTimeline(sessions: number) {
   );
   return {
     api_version: 2,
-    timeline_schema_version: 3,
+    timeline_schema_version: 4,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: LIVE_RUN,
     spans: [
