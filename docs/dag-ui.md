@@ -258,12 +258,15 @@ Escape key. It is a **timeline over a transcript**, both projected from
   until this repository's read model emits it,
   `src/features/timeline/timeline-model.ts` recovers the same grouping from the
   nesting and roles schema 9 does serve.
-- whether the node can be **corrected or only cancelled** is stated in its header,
+- whether the run **has a turn it can reach** for this node is stated in its header,
   beside the state badge, for as long as it is working. A planner deciding whether
-  to redirect a running node or stop it has to know whether redirecting it is even
-  possible, because absent an answer the safe assumption is "cancel" — the expensive
-  one. `Round.node_control` carries one entry per node in flight and none for any
-  other, so a settled node says nothing here rather than saying it cannot be reached.
+  to redirect a running node or stop it needs that first, because absent an answer
+  the safe assumption is "cancel" — the expensive one. It is deliberately the
+  narrower claim: a reachable turn is one a note can be *delivered into*, not a
+  promise the harness will act on it, and nothing in the published stack reports the
+  latter for a turn in flight. `Round.node_control` carries one entry per node in
+  flight and none for any other, so a settled node says nothing here rather than
+  saying it cannot be reached.
   The badge is a word and not the clause behind it: this header is the one thing above
   a plot sized from what it leaves, and the collapsed line is the view a node opens
   on, so the reason rides the badge's accessible description — where a pointer and a
@@ -351,8 +354,8 @@ being photographed.
 | `06-node-expanded` | the same view with one row per category |
 | `07-node-item-detail` | a verification opened over that reading |
 | `08-conversation` | a conversation in the right panel |
-| `09-node-redirected` | a node reading as interruptible, with the redirection its running turn took open beside it |
-| `10-node-not-interruptible` | a node on a harness with no lever, with the note that could only be deferred open beside it |
+| `09-node-redirected` | a node reading as having a reachable turn, with the redirection that turn took open beside it |
+| `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

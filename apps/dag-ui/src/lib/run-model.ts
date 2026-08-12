@@ -34,9 +34,9 @@ export interface NodeView {
   readonly result?: GraphResultItem;
   readonly detail?: NodeDetail;
   /**
-   * Whether this node's turn can be redirected rather than only cancelled. Served
-   * for a node in flight and absent for every other, because a node with no turn
-   * has nothing to redirect — which is not the same answer as "cannot".
+   * Whether the run has a turn it can reach for this node. Served for a node in
+   * flight and absent for every other, because a node with no turn has none to
+   * reach — which is not the same answer as "cannot".
    */
   readonly control?: NodeControl;
   /** How this node failed, when it did; served typed rather than parsed out of prose. */

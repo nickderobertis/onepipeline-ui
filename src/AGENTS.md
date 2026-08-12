@@ -56,47 +56,53 @@ anything new here is a proposal to make upstream first.
 - **Whether an in-flight node's turn can be redirected.** `payload::node_control`
   answers, per node the open round has in flight, what `onepipeline`'s reconciler
   answers by pulling the lever — which a read surface must not do, because serving
-  a run would then interrupt it. Three sources, in this order, and the first that
-  answers wins:
+  a run would then interrupt it. What it can read is the same stream the engine
+  reads its `TurnAddress` from: whether a member is in a turn this run can address,
+  and the record of every interrupt anybody has already pulled, which
+  `oneagentgraph` publishes for *every* attempt carrying its own reason.
 
-  1. **onejudge's own `control`**, read out of the settled member's report. This
-     is the authoritative answer and it is not an inference: `control` is the
-     address `oneharness interrupt` uses, and a `null` one carrying
-     `control_unavailable` is the contract's own no-controllable-turn case. It
-     speaks for the *member* rather than for the turn that member was in, so it is
-     read across every round and still answers for the same member of the same
-     node when a later round dispatches it — which is what makes a node on a
-     harness with no lever read as not interruptible **before anybody has tried to
-     interrupt it**. `payload::reported_unavailable` is that read.
-  2. **A recorded `turn-interrupted`**, which `oneagentgraph` publishes for *every*
-     attempt, delivered or not, carrying its own reason. The lever's own account.
-  3. **The member's turn records** — whether one is running at all.
+  **What it deliberately does not do is claim to know the harness's answer.** The
+  published stack exposes no authoritative *current-turn* control state to any
+  process but the one running the turn, and each route out is closed for a reason
+  worth writing down, because the next person to try will find them in this order:
 
-  The report is read from **this run's own copy**, never from the `report_path` a
-  settlement names: `onepipeline` copies the document into the run's storage as it
-  ingests the envelope, which is the one moment that path carries the producer's
-  authority rather than the journal's, and `RunPaths::report_for` derives the
-  copy's name from the settlement's own stream and sequence. Following the named
-  path would make this an arbitrary-file reader driven by whatever wrote the
-  journal.
+  1. `onejudge::Report.control` is the authoritative answer, and onejudge reports
+     it **only on the finished run** — its own words. `oneagentgraph`'s
+     `record_control` states the consequence: "a member that spent its whole life
+     on a harness with no lever looked addressable until now."
+  2. `onejudge::Provider::control()` *is* live and authoritative, and it is an
+     in-process accessor (`self.control_outcome.borrow()`) inside the member's own
+     process. It is serialized nowhere while the run is in flight.
+  3. `oneagentgraph`'s `control.json` is written at spawn as an unconditional
+     provisional `Turn::Open` for **every** member, whatever its harness, and
+     replaced with the real answer only at finish. Reading it live would report
+     every in-flight node as reachable — worse than reading nothing. It is
+     also unaddressable here: the member's scratch path reaches the journal only
+     on `member-settled`.
+  4. The control protocol has no probe. `oneharness_core::domain::control::ControlVerb`
+     has exactly one variant, `Interrupt`, and an interrupt with no input still
+     aborts the turn. Learning the answer costs the turn.
 
-  **The one thing none of the three can answer**, and it is upstream's to fix:
-  *onejudge reports `control` only on the finished run* — that library's own words,
-  and `oneagentgraph`'s `record_control` says the consequence out loud ("a member
-  that spent its whole life on a harness with no lever looked addressable until
-  now"). While a member is in its first turn, the only live record is
-  `oneagentgraph`'s provisional `Turn::Open`, written unconditionally at spawn for
-  every member whether or not its harness has a lever — so reading *that* would
-  make every in-flight node read interruptible, which is worse than reading
-  nothing. A member that has never settled on this run therefore has no `control`
-  value to reflect, and is served interruptible on the turn records alone.
+  A **previous** dispatch's report is not a substitute, and must never be read as
+  one: `provider.control` is asked for per run and `Provider::reset` puts the
+  outcome back to `NotRequested` for the next, so a settled report describes a
+  dispatch that is over. `tests/e2e/server.rs` holds that line with a node whose
+  round-1 member settled reporting `control: null` and whose round-2 turn must
+  still read as addressable.
 
-  Two proposals follow. The smaller: `onepipeline` publishes `edits::Operation` and
+  So the field is `addressable`, and it means exactly what this crate can prove:
+  **this run has a turn it can address for that node**. It is the engine's own
+  precondition for delivering a note. Naming it `interruptible` would have been the
+  overclaim a planner acts on — whether the harness *takes* the redirection is
+  onejudge's `control`, which is the answer none of the routes above can supply.
+
+  The upstream change that would make it one, and the only one that will:
+  onejudge reports `control` for the *running* conversation rather than only the
+  finished one, and `oneagentgraph` writes that answer into `control.json` at spawn
+  and relays it — at which point this reading becomes a read rather than a fold.
+  A smaller one beside it: `onepipeline` publishes `edits::Operation` and
   `edits::Delivery`, which `payload::edits` copies as wire strings for want of a
-  type to gate against. The larger, and the one that closes the gap above:
-  onejudge reports `control` on the *running* conversation rather than only on the
-  finished one, and `oneagentgraph` writes the harness's real answer into
-  `control.json` at spawn instead of a provisional `Open`.
+  type to gate against.
 
 ## What the siblings record and this crate reads
 
@@ -107,10 +113,7 @@ payload each one carries. Read today: `session-opened`, `lock-wait`,
 `gate-started`, `gate-verdict`, `push`, `change-opened`, `change-check`,
 `change-merged`, `merge-completed`, `commit-preserved` and `sync-conflict` from
 `onevcs`; `turn-activity`, `turn-started`, `turn-completed`, `turn-interrupted`,
-`member-died` and `member-settled` from `oneagentgraph`. A `member-settled` is
-read twice: as the record it is, and for the onejudge report the run retained
-beside it, whose `control` and `control_unavailable` `payload::judge` names and
-`tests/contract.rs` holds to `onejudge::Report`.
+`member-died` and `member-settled` from `oneagentgraph`.
 
 `onepipeline`'s own vocabulary is an enum this crate imports, with one exception:
 the compiled operations an `edit-committed` carries. That library declares

@@ -193,7 +193,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   // is the only node running here, and it is talking in a turn the run can address.
   const control = historical
     ? {}
-    : { dashboard: { interruptible: true, member: "worker" } };
+    : { dashboard: { addressable: true, member: "worker" } };
   const launchId = historical ? CLAUDE_LAUNCH : CODEX_LAUNCH;
   const launcher = historical ? "claude-code" : "codex";
   const node = historical ? "archive" : "dashboard";

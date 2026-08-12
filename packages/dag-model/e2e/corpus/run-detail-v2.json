@@ -133,7 +133,7 @@
       },
       "node_gated_by": { "release": ["approve"], "cleanup": ["publish"] },
       "node_control": {
-        "build": { "interruptible": true, "member": "worker" }
+        "build": { "addressable": true, "member": "worker" }
       },
       "node_results": {
         "approve": { "status": "waiting" },

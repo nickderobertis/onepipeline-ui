@@ -387,7 +387,7 @@ describe("boundary failures", () => {
     ).toBe(false);
   });
 
-  test("carries whether each in-flight node's turn can be redirected", () => {
+  test("carries whether the run has a turn it can reach for each in-flight node", () => {
     const round = {
       run_id: "run-1",
       round: 1,
@@ -395,7 +395,7 @@ describe("boundary failures", () => {
       node_states: { build: "running" },
       node_status: { build: "running" },
       node_gated_by: {},
-      node_control: { build: { interruptible: true, member: "worker" } },
+      node_control: { build: { addressable: true, member: "worker" } },
       node_results: {},
       attestations: [],
       result: null,
@@ -409,7 +409,7 @@ describe("boundary failures", () => {
         ...round,
         node_control: {
           build: {
-            interruptible: false,
+            addressable: false,
             reason: "no out-of-band turn control",
           },
         },
@@ -418,14 +418,14 @@ describe("boundary failures", () => {
     expect(
       roundSchema.safeParse({
         ...round,
-        node_control: { build: { interruptible: false } },
+        node_control: { build: { addressable: false } },
       }).success,
     ).toBe(false);
     expect(
       roundSchema.safeParse({
         ...round,
         node_control: {
-          build: { interruptible: true, reason: "between turns" },
+          build: { addressable: true, reason: "between turns" },
         },
       }).success,
     ).toBe(false);

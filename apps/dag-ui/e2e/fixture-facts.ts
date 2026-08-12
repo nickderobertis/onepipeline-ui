@@ -38,8 +38,6 @@ const fixtureSchema = z.object({
     live_note: z.string().min(1),
     deferred_note: z.string().min(1),
     no_control_reason: z.string().min(1),
-    /** onejudge's own `control_unavailable`, which needed no lever pulled. */
-    no_control_reported: z.string().min(1),
   }),
   artifacts: z.object({
     gate: z.string().min(1),

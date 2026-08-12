@@ -180,23 +180,6 @@ pub mod graph {
     pub const REASON: &str = "reason";
 }
 
-/// The fields of a onejudge report this crate reads, as that library names them.
-///
-/// The report is a sibling's artifact, read structurally by field name for the
-/// reason `onepipeline` reads it structurally: a stricter read would refuse a
-/// whole report over one field it did not recognise, and for evidence that is
-/// the wrong direction to fail in. `tests/contract.rs` holds these two names to
-/// `onejudge::Report`'s own declaration.
-pub mod judge {
-    /// Where an `oneharness interrupt` addresses the controllable turn this
-    /// member's agent side opened, or `null` when control was not asked for or
-    /// could not be given. Report schema 8 is where it landed.
-    pub const CONTROL: &str = "control";
-    /// Why an *asked-for* control channel is missing, when one is. Absent
-    /// unless `provider.control` was on and the run could not be given a socket.
-    pub const CONTROL_UNAVAILABLE: &str = "control_unavailable";
-}
-
 /// What one accepted live edit compiled to, as `onepipeline` writes it on an
 /// `edit-committed` payload.
 ///
@@ -1051,84 +1034,6 @@ fn round_plan(view: &RunView, round: u64) -> Option<Plan> {
     Plan::load(&view.paths.round_plan(round)).ok()
 }
 
-/// What onejudge's own report said about one member's out-of-band turn control.
-///
-/// This is the authoritative answer and it is consulted before anything is
-/// inferred: `control` is the address `oneharness interrupt` uses, and a `null`
-/// one — carrying `control_unavailable`'s reason — is the contract's own
-/// no-controllable-turn case. A member whose report says that has no lever
-/// whatever its turn records show, and says so **without anybody having pulled
-/// the lever to find out**.
-///
-/// Read from *this run's own copy*, never from the path the settlement named.
-/// `onepipeline` copies the report into the run's storage as it ingests the
-/// envelope — the one moment that path carries the producer's authority rather
-/// than the journal's — and derives the copy's name from the settlement's own
-/// stream and sequence. `RunPaths::report_for` is that derivation, so both sides
-/// agree without this one following a stranger's path. A symlink found where the
-/// copy should be is refused rather than read through, for the same reason the
-/// producing library refuses one when it writes it.
-///
-/// Everything it cannot read, it answers `None` to — the report *did not say* —
-/// rather than either verdict: a copy that is a symlink, one past
-/// [`MAX_REPORT_BYTES`], one that is not JSON, and one whose `control` is neither
-/// null nor an address this build can read. Turning any of those into "no lever"
-/// would deny a lever the report never denied.
-fn reported_control(view: &RunView, settled: &Envelope) -> Option<ReportedControl> {
-    let kept = view.paths.report_for(&settled.stream, settled.seq);
-    if fs::symlink_metadata(&kept).ok()?.file_type().is_symlink() {
-        return None;
-    }
-    if fs::metadata(&kept).ok()?.len() > MAX_REPORT_BYTES {
-        return None;
-    }
-    let report: Value = serde_json::from_str(&fs::read_to_string(&kept).ok()?).ok()?;
-    // Present-and-null is the answer; absent is a report written before the
-    // field existed, which says nothing either way and must not read as `null`.
-    match report.get(judge::CONTROL)? {
-        Value::Null => Some(ReportedControl::Unavailable(
-            non_empty(
-                report
-                    .get(judge::CONTROL_UNAVAILABLE)
-                    .and_then(Value::as_str),
-            )
-            .unwrap_or("its report named no controllable turn")
-            .to_owned(),
-        )),
-        // An address, or nothing this build can read as one. `ControlAddress` is a
-        // mapping whose `session` is what `oneharness interrupt --session` takes,
-        // so a `control` that carries no session names no turn — and is answered
-        // with "the report did not say" rather than with either verdict. Reading
-        // it as an address would claim a lever on the strength of a field this
-        // build could not parse; reading it as `null` would deny one the report
-        // never denied.
-        control => {
-            non_empty(control.get("session").and_then(Value::as_str)).map(|_| ReportedControl::Open)
-        }
-    }
-    .filter(|_| settled.labels.node.is_some())
-}
-
-/// The most of a retained report this server will read to answer one field.
-///
-/// This crate's own ceiling, not a copy of the producer's: a read surface that
-/// pulls an unbounded file into memory to answer a boolean is a read surface that
-/// can be made to exhaust itself, which is the same reason [`ARTIFACT_TAIL_BYTES`]
-/// exists a few lines up. It is deliberately well past a real report — which is a
-/// transcript and its verdicts — so the bound only ever catches a copy that is not
-/// one, and a report past it is answered "the report did not say" rather than read.
-const MAX_REPORT_BYTES: u64 = 32 * 1024 * 1024;
-
-/// onejudge's own answer about one member's turn control.
-#[derive(Debug, Clone)]
-enum ReportedControl {
-    /// The report named a controllable turn: this member's agent side had one.
-    Open,
-    /// `control: null` — control was not asked for, or was asked for and could
-    /// not be given. The reason is `control_unavailable`'s own words.
-    Unavailable(String),
-}
-
 /// Whether one member is in a turn a planner's note could be delivered into.
 ///
 /// The three records that end a member's turn and the three that can only have
@@ -1156,24 +1061,20 @@ enum TurnState {
 /// has instead is the same stream the engine reads the address from, plus the
 /// record of every interrupt anybody has already pulled.
 ///
-/// **onejudge's own `control` is consulted first, and it settles the question.**
-/// A member whose report carries `control: null` had no controllable turn at all
-/// — that is the contract's own no-controllable-turn case — so it reads as not
-/// interruptible carrying `control_unavailable`'s words, *before anybody has
-/// pulled the lever to find out*. Nothing inferred from the turn records can
-/// overturn it: a member with no lever has none whatever it is doing.
+/// A recorded `turn-interrupted` is the strongest evidence there is, because it
+/// is the lever's own account of itself: `oneagentgraph` publishes one for
+/// **every** attempt, delivered or not, carrying its own reason — "the member's
+/// run has no out-of-band turn control", "the member is between turns". Where
+/// nobody has pulled it, the turn records say only whether a turn is running,
+/// which is the whole of what this fold claims.
 ///
-/// Where onejudge has not answered, the recorded interrupts do. `oneagentgraph`
-/// publishes a `turn-interrupted` for **every** attempt, delivered or not,
-/// carrying its own reason — "the member's run has no out-of-band turn control",
-/// "the member is between turns" — and that is the lever's own account of itself.
-/// The turn records are the last resort and say only whether a turn is running.
-///
-/// AGENTS.md records the one case none of the three can answer: **onejudge reports
-/// `control` only on the finished run**, in that library's own words, so a member
-/// that has never settled on this run has no `control` value to reflect. Until it
-/// does, a harness with no lever that nobody has yet interrupted is
-/// indistinguishable from one with a lever nobody has needed.
+/// **It does not claim to know the harness's answer, and must not.** No published
+/// component exposes an authoritative current-turn control state outside the
+/// process running the turn — onejudge reports `control` only on the finished
+/// run, its live provider accessor is in-process, `oneagentgraph`'s spawn-time
+/// record is provisional for every member whatever its harness, and the control
+/// protocol's only verb is `interrupt`, which costs the turn. `src/AGENTS.md`
+/// walks each closed route and names the upstream change that opens one.
 fn member_turn_states<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<(&'a str, TurnState)> {
     let mut order: Vec<&str> = Vec::new();
     let mut states: BTreeMap<&str, TurnState> = BTreeMap::new();
@@ -1245,96 +1146,41 @@ fn member_turn_states<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<(&'a
         .collect()
 }
 
-/// One in-flight node's answer to "can this be redirected, or only cancelled?".
+/// One in-flight node's answer to "does this run have a turn it can address?".
 ///
 /// Served for every node the open round records as `running` and for no other:
-/// `interruptible` is never absent for a node in flight, and never present for a
-/// node with no turn to have one. `reason` is carried exactly when
-/// `interruptible` is false, which is the discipline `turn-interrupted` itself
-/// keeps for its own — so a node that *can* be redirected can never be read as
-/// having had a reason it could not be.
+/// `addressable` is never absent for a node in flight, and never present for a
+/// node with no turn to have one. `reason` is carried exactly when `addressable`
+/// is false, which is the discipline `turn-interrupted` itself keeps for its own.
+///
+/// **`addressable`, not `interruptible`.** It says this run has a turn it can
+/// address for the node — the engine's own precondition for delivering a note —
+/// and that is the whole of what any of this can prove. Whether the harness will
+/// take the redirection is onejudge's `control`, which no published component
+/// exposes for a turn in flight; naming the field for the answer we cannot get
+/// would be the overclaim a planner acts on.
 fn node_control(view: &RunView, round: u64, node: &str) -> Value {
-    // onejudge's own answer, first and across every round this node has run: its
-    // report speaks for the *member*, not for the turn that member happened to be
-    // in, so a `control: null` from a previous round is still the answer for the
-    // same member now — and it is an answer nobody had to pull the lever to get.
-    let unavailable = reported_unavailable(view, node);
-    let refused = |member: &str| unavailable.get(member).cloned();
     let states = member_turn_states(view, round, node);
     // The latest member to have spoken wins, exactly as the engine's address does:
-    // that is the turn a note aimed at this node now would be correcting — but a
-    // member onejudge has said had no controllable turn has none now either,
-    // whatever its turn records show.
+    // that is the turn a note aimed at this node now would be correcting.
     if let Some((member, _)) = states
         .iter()
         .rev()
-        .find(|(member, state)| matches!(state, TurnState::InFlight) && refused(member).is_none())
+        .find(|(_, state)| matches!(state, TurnState::InFlight))
     {
-        return json!({ "interruptible": true, "member": member });
+        return json!({ "addressable": true, "member": member });
     }
     match states.last() {
-        Some((member, TurnState::Ended(recorded))) => {
-            let reason = refused(member).unwrap_or_else(|| recorded.clone());
-            json!({ "interruptible": false, "member": member, "reason": reason })
+        Some((member, TurnState::Ended(reason))) => {
+            json!({ "addressable": false, "member": member, "reason": reason })
         }
-        // A member in a turn onejudge says it never had a lever for — which is
-        // the only way this arm is reached, the search above having rejected
-        // every in-flight member for exactly that. The report's own words,
-        // because they are the whole of why it cannot be corrected.
-        Some((member, TurnState::InFlight)) => json!({
-            "interruptible": false,
-            "member": member,
-            "reason": refused(member)
-                .unwrap_or_else(|| "its report named no controllable turn".to_owned()),
-        }),
         // The engine's own words for a node it has no address for: a dispatch
         // that has reported no member yet, or no dispatch at all.
-        None => json!({
-            "interruptible": false,
+        _ => json!({
+            "addressable": false,
             "reason": "nothing of its dispatch has reported a member yet",
         }),
     }
-}
-
-/// Every member of one node onejudge has reported no controllable turn for, with
-/// the reason its report gave, latest settlement winning.
-///
-/// Read across every round rather than the open one: `control` is a fact about
-/// the member's own run, and the answer a settled round produced is the answer
-/// for the same member of the same node when the next round dispatches it. This
-/// is what makes a node on a harness with no lever read as not interruptible
-/// **before anybody has tried to interrupt it** — the case a fold of the turn
-/// records alone cannot reach.
-fn reported_unavailable<'a>(view: &'a RunView, node: &str) -> BTreeMap<&'a str, String> {
-    let mut refused: BTreeMap<&str, String> = BTreeMap::new();
-    for event in &view.events {
-        if event.source != Source::Agentgraph
-            || event.kind.0 != graph::MEMBER_SETTLED
-            || event.labels.node.as_deref() != Some(node)
-        {
-            continue;
-        }
-        let Some(member) = non_empty(
-            event
-                .labels
-                .extra
-                .get(graph::MEMBER)
-                .and_then(Value::as_str),
-        ) else {
-            continue;
-        };
-        match reported_control(view, event) {
-            Some(ReportedControl::Unavailable(reason)) => {
-                refused.insert(member, reason);
-            }
-            // A report that named an address, or one this run kept no copy of:
-            // neither says the member had no lever, and only that says it.
-            Some(ReportedControl::Open) | None => {
-                refused.remove(member);
-            }
-        }
-    }
-    refused
 }
 
 /// One round of the run, as the detail payload carries it.

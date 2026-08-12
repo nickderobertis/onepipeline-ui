@@ -58,10 +58,12 @@ pub const LINT_CONVERSATION_ID: &str = "2c9e4b71-6a83-4f20-97dd-1e6b4c2a8f37";
 pub const REDIRECTED_CONVERSATION_ID: &str = "4d0f6b32-8c15-4a09-b2ee-7f1c3d5a6e28";
 /// The session the node with no lever is talking in.
 pub const UNCONTROLLED_CONVERSATION_ID: &str = "5e1a7c43-9d26-4b1a-83ff-8a2d4e6b7f39";
-/// The live run's third in-flight node: one whose *previous* dispatch settled
-/// with a onejudge report naming no controllable turn. Nobody has interrupted
-/// this one, and nothing needs to — the report is the current answer for the
-/// member, and it is what a planner reads before deciding to cancel it.
+/// The live run's third in-flight node, and the trap this fixture exists to
+/// spring: its *previous* dispatch settled with a onejudge report naming no
+/// controllable turn, and its current one is a fresh turn nobody has interrupted.
+/// The old report must not label the new turn — `provider.control` is asked for
+/// per run and the provider's outcome is reset for the next one, so the round-1
+/// answer is a fact about a dispatch that is over.
 pub const REPORTED_NODE_ID: &str = "measure";
 /// The session that node's worker is talking in.
 pub const REPORTED_CONVERSATION_ID: &str = "6f2b8d54-0e37-4c2b-94aa-9b3e5f7c8a4b";
@@ -1231,11 +1233,11 @@ fn live_journal(run: &str, second: &Value) -> String {
             }],
         }),
     );
-    // The third in-flight node, and the case a fold of the turn records cannot
-    // reach on its own: its previous dispatch settled, and onejudge's report for
-    // that member named **no controllable turn at all**. Nobody has interrupted
-    // this node, and nobody needs to — the report is the current answer, and it
-    // is what says correcting this one is not on the table.
+    // The third in-flight node, and the trap: its round-1 member settled with a
+    // onejudge report naming no controllable turn, and this is a *fresh* turn in
+    // a *new* dispatch. `provider.control` is asked for per run and the provider's
+    // outcome is reset for the next, so the old report says nothing about this
+    // turn — and the reading must not borrow it.
     emit(
         "2026-08-07T12:00:44.000Z",
         "pipeline",

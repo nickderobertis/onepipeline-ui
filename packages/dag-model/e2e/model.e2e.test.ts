@@ -174,7 +174,7 @@ async function legacyRound(run: string) {
     // Every node of a legacy plan reads as running above, so every one of them has
     // a turn this run can address — which is the shape a recorded round really has.
     node_control: Object.fromEntries(
-      ids.map((id) => [id, { interruptible: true, member: "worker" }]),
+      ids.map((id) => [id, { addressable: true, member: "worker" }]),
     ),
     node_results: {},
     attestations: [],

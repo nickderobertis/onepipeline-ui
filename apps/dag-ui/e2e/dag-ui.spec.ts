@@ -646,33 +646,32 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
  * A node with a controllable turn in flight can be corrected; one without it can only
  * be cancelled, which is the expensive move. Absent an answer the safe assumption is
  * the expensive one, so both nodes still working here have to say which they are —
- * and the one whose harness has no lever has to read as *not interruptible* rather
- * than as an error or as nothing at all.
+ * and the one whose run has no turn to reach has to say so rather than reading as
+ * an error or as nothing at all.
  */
-test("says which of the nodes still working can be corrected", async ({
+test("says which of the nodes still working have a turn a note can reach", async ({
   page,
 }) => {
   // Asked for by the accessible name the badge carries, which is the word an
   // operator reads plus the reason behind it — the whole of what this states.
-  const control = page.getByLabel(/^(Not i|I)nterruptible: /);
+  const control = page.getByLabel(/^(Turn reachable|No turn to reach): /);
 
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
-  await expect(control).toHaveText("Interruptible");
+  await expect(control).toHaveText("Turn reachable");
   // The whole reason, for a pointer and for a screen reader alike: the header is the
   // one thing above a plot sized from what it leaves, so the clause cannot be painted
   // there — but it must still be reachable without leaving the view.
   await expect(control).toHaveAccessibleName(
-    /^Interruptible: a planner's note reaches the worker turn in flight$/,
+    /^Turn reachable: a planner's note can be delivered into the worker turn in flight$/,
   );
 
   // The run whose node is working on a harness with no lever at all.
   await openObservatory(page, `/?run=${runs().unattributed}&node=orphan`);
-  await expect(control).toHaveText("Not interruptible");
-  // onejudge's own `control_unavailable`, off the report an earlier member of this
-  // node stored — not the words of the one refused interrupt beside it. That is
-  // what makes this reading available before anybody pulls the lever.
+  await expect(control).toHaveText("No turn to reach");
+  // The producing library's own words for what the lever found, which is the only
+  // account of this node's control anything in the stack has recorded.
   await expect(control).toHaveAccessibleName(
-    `Not interruptible: ${fixture().redirection.no_control_reported}`,
+    `No turn to reach: ${fixture().redirection.no_control_reason}`,
   );
 
   // A node with no turn is not a node whose turn cannot be reached, and the two must

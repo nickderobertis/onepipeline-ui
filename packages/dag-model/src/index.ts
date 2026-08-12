@@ -555,25 +555,29 @@ export const nodeStatusSchema = z.enum([
   "unknown",
 ]);
 /**
- * Whether one in-flight node's turn can be redirected, or only cancelled.
+ * Whether the run has a turn it can address for one in-flight node.
  *
- * `interruptible` is never absent for a node the round has in flight: a node whose
- * harness offers no out-of-band turn control reads `false` carrying that harness's
- * own words, because "no answer" and "cannot" are the same reading to a planner and
- * only one of them is true. `reason` is present exactly when `interruptible` is
- * false, so a node that can be corrected can never be read as having had a reason
- * it could not be. `member` is the graph member whose turn the run would address.
+ * `addressable`, deliberately not `interruptible`: it is the precondition for
+ * delivering a planner's note into a running turn, and it is the whole of what a
+ * server can prove. Whether the harness will *take* the redirection is onejudge's
+ * `control`, which no published component reports for a turn in flight — so a
+ * field named for that answer would promise what nothing can supply.
+ *
+ * Never absent for a node the round has in flight, because "no answer" and "cannot"
+ * read the same to a planner and only one of them is true. `reason` is present
+ * exactly when `addressable` is false. `member` is the graph member whose turn the
+ * run would address.
  */
 export const nodeControlSchema = openObject({
-  interruptible: z.boolean(),
+  addressable: z.boolean(),
   member: z.string().min(1).optional(),
   reason: z.string().min(1).optional(),
 }).superRefine((control, context) => {
-  if (control.interruptible === (control.reason !== undefined)) {
+  if (control.addressable === (control.reason !== undefined)) {
     context.addIssue({
       code: "custom",
       path: ["reason"],
-      message: "a reason is carried exactly when the node is not interruptible",
+      message: "a reason is carried exactly when there is no turn to address",
     });
   }
 });
@@ -1025,7 +1029,7 @@ export type PlanTask = z.infer<typeof planTaskSchema>;
 export type GraphResultItem = z.infer<typeof graphResultItemSchema>;
 export type GraphPayload = z.infer<typeof graphPayloadSchema>;
 export type Round = z.infer<typeof roundSchema>;
-/** Whether one in-flight node can be corrected, and why not when it cannot. */
+/** Whether the run has a turn it can address for one in-flight node. */
 export type NodeControl = z.infer<typeof nodeControlSchema>;
 /** The moment a planner redirected a node's running turn. */
 export type Redirection = z.infer<typeof redirectionSchema>;
