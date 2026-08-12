@@ -3,7 +3,7 @@
   "event": "snapshot",
   "data": {
     "api_version": 2,
-    "telemetry_schema_version": 11,
+    "telemetry_schema_version": 12,
     "observed_at": "2026-08-07T12:00:00Z",
     "runs": [
       {

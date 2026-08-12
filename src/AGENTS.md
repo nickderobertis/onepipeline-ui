@@ -53,6 +53,25 @@ anything new here is a proposal to make upstream first.
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
   as the node's own records.
+- **Whether an in-flight node's turn can be redirected.** `payload::node_control`
+  is the read-side answer to the question `onepipeline`'s reconciler answers by
+  pulling the lever. That engine keeps a `TurnAddress` per in-flight dispatch —
+  read off `oneagentgraph`'s relayed envelopes, latest winning — and a `context`
+  note goes into a running turn only when there is one; a read surface must not
+  pull that lever, because serving a run would then interrupt it. So this reads
+  the same stream the engine reads the address from, and folds each member's last
+  record into one of two answers: in a turn, or not, with the reason. An interrupt
+  the sibling already refused is decisive, because `turn-interrupted` is published
+  for *every* attempt and carries the producing library's own words.
+  Two proposals, either of which would make this a read rather than a fold. The
+  smaller: `onepipeline` publishes `edits::Operation` and `edits::Delivery`, which
+  `payload::edits` currently copies as wire strings for want of a type to gate
+  against. The larger: a member's control record — `oneagentgraph` already writes
+  one per member into its own scratch, and onejudge reports `control` on the
+  finished run — reaches the merged store, so a harness with no lever says so
+  before anybody tries it. Until it does, a node nobody has yet tried to interrupt
+  is served as interruptible whether or not its harness has a lever, and only the
+  attempt tells them apart. That is the one thing this fold cannot answer.
 
 ## What the siblings record and this crate reads
 
@@ -62,7 +81,15 @@ strings they write, quoted in `payload::vcs` and `payload::graph` beside the
 payload each one carries. Read today: `session-opened`, `lock-wait`,
 `gate-started`, `gate-verdict`, `push`, `change-opened`, `change-check`,
 `change-merged`, `merge-completed`, `commit-preserved` and `sync-conflict` from
-`onevcs`; `turn-activity` and `turn-completed` from `oneagentgraph`.
+`onevcs`; `turn-activity`, `turn-started`, `turn-completed`, `turn-interrupted`,
+`member-died` and `member-settled` from `oneagentgraph`.
+
+`onepipeline`'s own vocabulary is an enum this crate imports, with one exception:
+the compiled operations an `edit-committed` carries. That library declares
+`edits::Operation` and `edits::Delivery` in a private module, so `payload::edits`
+quotes their wire strings on the same terms as the `onevcs` ones above. What is
+public beside them is the submitted `channel::Command`, and `tests/contract.rs`
+gates this crate's reading against it.
 
 `oneagentgraph` declares its own vocabulary in a public module, so
 `tests/contract.rs` holds this crate's copy of it to that library's types.
@@ -82,7 +109,13 @@ blocking a merge — because reading a check's `completed` as a pipeline status 
 what would make every passing check look like a failure. And a tool summary is
 carried on the turn it was published from, never as a turn of its own:
 `turn-activity` is streamed *during* a turn, so counting one as a turn would
-report a turn that had not happened.
+report a turn that had not happened. A `turn-interrupted` is excluded on exactly
+those terms: it is published from inside a turn too, and it is the moment a
+planner changed what the turn already running was doing rather than a turn of its
+own. Both `payload::is_turn_record` and `payload::conversation_document` have to
+exclude it, because a turn's id is its position in the transcript and the timeline
+numbers the same session by the same rule — excluding it in one alone would leave
+a plotted moment pointing at the wrong turn.
 
 ## What the wire asks for and no record fills
 

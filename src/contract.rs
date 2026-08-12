@@ -28,7 +28,14 @@ pub const API_VERSION: u32 = 2;
 /// each of them is `null` when no record measured it, which is a breaking change
 /// in the only direction that matters: a client that read a number now finds a
 /// null, and one that reads 11 knows the difference between free and unknown.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 11;
+///
+/// **Schema 12 says, per node the round has in flight, whether its turn can be
+/// redirected.** A round carries `node_control`, one entry for every node it
+/// records as `running` and for no other — so a planner deciding between
+/// correcting a node and cancelling it reads the answer instead of assuming the
+/// expensive one. Under 11 there was no entry to read and the safe reading of an
+/// absent one was "cannot", which is the wrong default for every node that can.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 12;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -43,7 +50,14 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 11;
 /// blocked on a lock, named by the kind it summarizes — so under 2 a client
 /// could read every rollup as a category of dispatches, and under 3 it must read
 /// the label.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 3;
+///
+/// **Version 4 carries the redirection a record was.** A timeline event produced
+/// by a `turn-interrupted` or by an `edit-committed` that added context to a node
+/// carries `redirection`, which says whether the running turn took the note and
+/// why it did not. Under 3 the event was served as its kind and its stamp alone,
+/// so a turn whose behaviour changed mid-flight read as a worker inexplicably
+/// switching tasks.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 4;
 
 /// The largest run-list page any request can ask for.
 ///

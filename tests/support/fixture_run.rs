@@ -42,12 +42,31 @@ pub const SHIP_NODE_ID: &str = "ship";
 pub const SIGNOFF_NODE_ID: &str = "signoff";
 /// The live run's node gated by that human action.
 pub const ANNOUNCE_NODE_ID: &str = "announce";
+/// The live run's in-flight node whose turn the planner redirected: it has a
+/// controllable turn, and the note went into the turn that was already running.
+pub const REDIRECTED_NODE_ID: &str = "docs";
+/// The live run's other in-flight node, running on a harness with no
+/// out-of-band turn control: the same note could only ride its next dispatch.
+pub const UNCONTROLLED_NODE_ID: &str = "benchmark";
 /// The agent-graph session the live run's dispatch ran under.
 pub const LIVE_CONVERSATION_ID: &str = "8a1d3c07-4b2f-4e55-91aa-6d3e2f0b7c14";
 /// The live run's own driving session, recorded at no node.
 pub const DRIVING_CONVERSATION_ID: &str = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
 /// The session the lint member of that dispatch ran under.
 pub const LINT_CONVERSATION_ID: &str = "2c9e4b71-6a83-4f20-97dd-1e6b4c2a8f37";
+/// The session the redirected node's worker is talking in.
+pub const REDIRECTED_CONVERSATION_ID: &str = "4d0f6b32-8c15-4a09-b2ee-7f1c3d5a6e28";
+/// The session the node with no lever is talking in.
+pub const UNCONTROLLED_CONVERSATION_ID: &str = "5e1a7c43-9d26-4b1a-83ff-8a2d4e6b7f39";
+/// What the sibling answered when the note could not reach a running turn. Its
+/// words, not this repository's: `oneagentgraph` publishes the reason on the
+/// `turn-interrupted` it emits for every interrupt, delivered or not.
+pub const NO_CONTROL_REASON: &str =
+    "the member's run has no out-of-band turn control to serve the request";
+/// The note the planner delivered into a turn that was already running.
+pub const LIVE_NOTE: &str = "document the read API's control field too";
+/// The note the planner could only leave for the next dispatch.
+pub const DEFERRED_NOTE: &str = "measure the cold start too";
 
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
@@ -612,7 +631,7 @@ fn live_plan() -> Value {
         "schema_version": 1,
         "goal": { "text": "get it shipped" },
         "name": "ship",
-        "concurrency": 2,
+        "concurrency": 4,
         "tasks": [
             {
                 "id": SHIP_NODE_ID,
@@ -638,6 +657,22 @@ fn live_plan() -> Value {
                 "persona": "check-in",
                 "task": "## What\nAnnounce it.",
                 "deps": [SIGNOFF_NODE_ID],
+            },
+            // The two nodes still working while the round is open, and the whole
+            // reason a planner asks whether a node can be corrected: one of them
+            // took the correction into the turn it was already running, and the
+            // other is on a harness with no lever to offer.
+            {
+                "id": REDIRECTED_NODE_ID,
+                "persona": "worker",
+                "task": "## What\nWrite the docs.",
+                "done_when": "the docs read",
+            },
+            {
+                "id": UNCONTROLLED_NODE_ID,
+                "persona": "worker",
+                "task": "## What\nMeasure it.",
+                "done_when": "the numbers are recorded",
             },
         ],
     })
@@ -935,6 +970,145 @@ fn live_journal(run: &str, second: &Value) -> String {
         "node-settled",
         json!({ "run_id": run, "round": 2, "node": SIGNOFF_NODE_ID }),
         json!({ "status": "waiting" }),
+    );
+
+    // Two nodes still working, and the planner correcting both of them. The
+    // records are the ones a real round writes: `oneagentgraph` relays a
+    // `turn-interrupted` for every interrupt the reconciler pulls — delivered or
+    // not — and `onepipeline` records where the note actually went as the
+    // `delivery` on the `context-added` operation its `edit-committed` compiled.
+    emit(
+        "2026-08-07T12:00:42.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "round": 2, "node": REDIRECTED_NODE_ID, "persona": "worker" }),
+        json!({ "persona": "worker" }),
+    );
+    emit(
+        "2026-08-07T12:00:43.000Z",
+        "agentgraph",
+        "turn-started",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": REDIRECTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({ "turn": 1 }),
+    );
+    emit(
+        "2026-08-07T12:00:44.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "round": 2, "node": UNCONTROLLED_NODE_ID, "persona": "worker" }),
+        json!({ "persona": "worker" }),
+    );
+    emit(
+        "2026-08-07T12:00:45.000Z",
+        "agentgraph",
+        "turn-started",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": UNCONTROLLED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": UNCONTROLLED_CONVERSATION_ID,
+        }),
+        json!({ "turn": 1 }),
+    );
+    // The correction that landed: the running turn took it, so the note is not
+    // also owed to the node's next dispatch.
+    emit(
+        "2026-08-07T12:00:50.000Z",
+        "agentgraph",
+        "turn-interrupted",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": REDIRECTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({ "member": "worker", "delivered": true, "input_bytes": LIVE_NOTE.len() }),
+    );
+    emit(
+        "2026-08-07T12:00:50.100Z",
+        "pipeline",
+        "edit-committed",
+        json!({ "run_id": run, "round": 2 }),
+        json!({
+            // `deliver` is absent because it was `auto`, which is what the
+            // sibling's own `Command` omits: an edit that says nothing about
+            // delivery is exactly the edit the live-edit table always described.
+            "command": { "op": "context", "id": REDIRECTED_NODE_ID, "note": LIVE_NOTE },
+            "operations": [{
+                "kind": "context-added",
+                "node": REDIRECTED_NODE_ID,
+                "note": LIVE_NOTE,
+                "delivery": "live",
+            }],
+        }),
+    );
+    // The same lever pulled at a node whose harness has none. The verb answers
+    // with the fact rather than a failure, and the note rides the next dispatch.
+    emit(
+        "2026-08-07T12:00:51.000Z",
+        "agentgraph",
+        "turn-interrupted",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": UNCONTROLLED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": UNCONTROLLED_CONVERSATION_ID,
+        }),
+        json!({
+            "member": "worker",
+            "delivered": false,
+            "input_bytes": DEFERRED_NOTE.len(),
+            "reason": NO_CONTROL_REASON,
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:51.100Z",
+        "pipeline",
+        "edit-committed",
+        json!({ "run_id": run, "round": 2 }),
+        json!({
+            "command": { "op": "context", "id": UNCONTROLLED_NODE_ID, "note": DEFERRED_NOTE },
+            "operations": [{
+                "kind": "context-added",
+                "node": UNCONTROLLED_NODE_ID,
+                "note": DEFERRED_NOTE,
+                "delivery": "deferred",
+            }],
+        }),
+    );
+    // What the redirected turn did next, which is the whole reason the moment
+    // above has to be readable: the worker changed task mid-turn.
+    emit(
+        "2026-08-07T12:00:52.000Z",
+        "agentgraph",
+        "turn-activity",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": REDIRECTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({
+            "kind": "tool_use",
+            "name": "Edit",
+            "detail": "docs/contract.md",
+            "truncated": false,
+        }),
     );
     format!("{}\n", lines.join("\n"))
 }

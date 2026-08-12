@@ -157,6 +157,56 @@ pub mod graph {
     pub const COST: &str = "cost";
     /// How long the turn took, in seconds.
     pub const DURATION: &str = "duration";
+
+    /// A turn began on one side of a member's conversation.
+    pub const TURN_STARTED: &str = "turn-started";
+    /// `{member, delivered, input_bytes, reason}` — an operator asked a member's
+    /// in-flight turn to do something else. Published for every interrupt,
+    /// delivered or not, which is what makes "the lever was pulled and nothing
+    /// happened" a thing a reader of the run can see.
+    pub const TURN_INTERRUPTED: &str = "turn-interrupted";
+    /// A member's process died: whatever it was doing, it is not doing it now.
+    pub const MEMBER_DIED: &str = "member-died";
+    /// A member settled, which ends its turns.
+    pub const MEMBER_SETTLED: &str = "member-settled";
+    /// The member a record is about, on a [`TURN_INTERRUPTED`] payload as well as
+    /// in the labels.
+    pub const MEMBER: &str = "member";
+    /// Whether the run took ownership of the redirection.
+    pub const DELIVERED: &str = "delivered";
+    /// How many bytes of redirection were offered.
+    pub const INPUT_BYTES: &str = "input_bytes";
+    /// Why the delivery did not land — carried exactly when it did not.
+    pub const REASON: &str = "reason";
+}
+
+/// What one accepted live edit compiled to, as `onepipeline` writes it on an
+/// `edit-committed` payload.
+///
+/// The SDK declares `edits::Operation` and `edits::Delivery` in a private module,
+/// so — like the `onevcs` vocabulary above and unlike `oneagentgraph`'s — the wire
+/// is the only declaration a consumer can reach. What is gated instead is the
+/// *submitted* command: `onepipeline::channel::Command` is public, so
+/// `tests/contract.rs` holds this crate's reading of a `context` edit to that
+/// library's own type, and `tests/support/fixture_run.rs` writes the operations as
+/// the reconciler compiles them.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module in 0.1.7, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
+mod edits {
+    /// The compiled mutations one accepted edit became.
+    pub const OPERATIONS: &str = "operations";
+    /// The tag each operation is discriminated by.
+    pub const KIND: &str = "kind";
+    /// `{node, note, delivery}` — a planner note reached a node.
+    pub const CONTEXT_ADDED: &str = "context-added";
+    /// The node the note was for.
+    pub const NODE: &str = "node";
+    /// Where the note actually went: [`LIVE`] or [`DEFERRED`].
+    pub const DELIVERY: &str = "delivery";
+    /// Into the turn that was running when the edit arrived.
+    pub const LIVE: &str = "live";
+    /// Onto the node's next dispatch. Also what a record written before delivery
+    /// had modes means, which is why an absent `delivery` reads as this one.
+    pub const DEFERRED: &str = "deferred";
 }
 
 /// The party a record names as its own, when it names one this crate serves.
@@ -745,8 +795,17 @@ fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'st
 /// the turn is done — so counting one as a turn would report a turn that had not
 /// happened. It is carried on the turn it belongs to instead; see
 /// [`conversation_document`].
+///
+/// A `turn-interrupted` is published from inside a turn for exactly the same
+/// reason and is excluded on exactly the same terms: it is the moment a planner
+/// redirected the turn that was running, not a turn of its own, and counting one
+/// would put a phantom turn in the transcript of every node anybody corrected.
+/// It reaches a reader as the node's own timeline record instead, carrying the
+/// redirection — see [`redirection`].
 fn is_turn_record(event: &Envelope) -> bool {
-    event.source == Source::Agentgraph && event.kind.0 != graph::TURN_ACTIVITY
+    event.source == Source::Agentgraph
+        && event.kind.0 != graph::TURN_ACTIVITY
+        && event.kind.0 != graph::TURN_INTERRUPTED
 }
 
 /// How many turns a node — or the whole run — has had relayed to it.
@@ -975,6 +1034,154 @@ fn round_plan(view: &RunView, round: u64) -> Option<Plan> {
     Plan::load(&view.paths.round_plan(round)).ok()
 }
 
+/// Whether one member is in a turn a planner's note could be delivered into.
+///
+/// The three records that end a member's turn and the three that can only have
+/// been published from inside one, and nothing else: a heartbeat says the member
+/// is alive rather than talking, and a fallback says which identity refused it.
+/// Every name is one `oneagentgraph::event::EventKind` declares, so
+/// `tests/contract.rs` gates each against that library's own vocabulary.
+#[derive(Debug, Clone, Copy)]
+enum TurnState<'a> {
+    /// A turn is running and the run has an address for it.
+    InFlight,
+    /// There is nothing to redirect, and this is why — in the words of whoever
+    /// said so, which for a refused delivery is the sibling's own.
+    Ended(&'a str),
+}
+
+/// What the node's own relayed records say about redirecting its running turn.
+///
+/// This is the read-side answer to the question `onepipeline`'s reconciler
+/// answers by pulling the lever: it keeps a `TurnAddress` per in-flight dispatch,
+/// read off the sibling's relayed envelopes with the latest winning, and a
+/// `context` note goes into a running turn only when there is one. A read surface
+/// must not pull that lever — serving a run would then interrupt it — so what it
+/// has instead is the same stream the engine reads the address from, plus the
+/// record of every interrupt anybody has already pulled.
+///
+/// That is why an interrupt the sibling refused is decisive here. `oneagentgraph`
+/// publishes a `turn-interrupted` for **every** attempt, delivered or not,
+/// carrying its own reason — "the member's run has no out-of-band turn control",
+/// "the member is between turns" — so a node on a harness with no control
+/// mechanism reads as not interruptible with that harness's own words, rather
+/// than as an error or as an absent value a client would have to guess at.
+///
+/// AGENTS.md records the gap this leaves: until a member's control record reaches
+/// the merged store, a harness with no lever that nobody has yet tried to
+/// interrupt is indistinguishable from one with a lever nobody has needed.
+fn member_turn_states<'a>(
+    view: &'a RunView,
+    round: u64,
+    node: &str,
+) -> Vec<(&'a str, TurnState<'a>)> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut states: BTreeMap<&str, TurnState<'a>> = BTreeMap::new();
+    let relayed = view.events.iter().filter(|event| {
+        event.source == Source::Agentgraph
+            && event.labels.round == Some(round)
+            && event.labels.node.as_deref() == Some(node)
+    });
+    for event in relayed {
+        // The address the engine keeps is the sibling's own run id and member, and
+        // a record naming neither addresses nothing.
+        let Some(member) = event
+            .labels
+            .extra
+            .get(graph::MEMBER)
+            .and_then(Value::as_str)
+            .or_else(|| event.payload.get(graph::MEMBER).and_then(Value::as_str))
+            .filter(|member| !member.trim().is_empty())
+        else {
+            continue;
+        };
+        if event
+            .labels
+            .run_id
+            .as_deref()
+            .is_none_or(|run| run.trim().is_empty())
+        {
+            continue;
+        }
+        let state = match event.kind.0.as_str() {
+            graph::TURN_STARTED | graph::TURN_ACTIVITY => TurnState::InFlight,
+            graph::TURN_COMPLETED => {
+                TurnState::Ended("its last turn completed, so the member is between turns")
+            }
+            graph::MEMBER_DIED | graph::MEMBER_SETTLED => {
+                TurnState::Ended("the member is no longer running")
+            }
+            graph::TURN_INTERRUPTED => {
+                if event
+                    .payload
+                    .get(graph::DELIVERED)
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    // A turn that has just taken a redirection is a controllable
+                    // turn, and is still running: that is what delivery means.
+                    TurnState::InFlight
+                } else {
+                    TurnState::Ended(
+                        event
+                            .payload
+                            .get(graph::REASON)
+                            .and_then(Value::as_str)
+                            .unwrap_or(
+                                "the last redirection this run offered it was not delivered",
+                            ),
+                    )
+                }
+            }
+            // Every other kind the sibling relays says something about the member
+            // that is not about its turn, and must not be read as either answer.
+            _ => continue,
+        };
+        if states.insert(member, state).is_none() {
+            order.push(member);
+        } else {
+            order.retain(|seen| *seen != member);
+            order.push(member);
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|member| states.get(member).map(|state| (member, *state)))
+        .collect()
+}
+
+/// One in-flight node's answer to "can this be redirected, or only cancelled?".
+///
+/// Served for every node the open round records as `running` and for no other:
+/// `interruptible` is never absent for a node in flight, and never present for a
+/// node with no turn to have one. `reason` is carried exactly when
+/// `interruptible` is false, which is the discipline `turn-interrupted` itself
+/// keeps for its own — so a node that *can* be redirected can never be read as
+/// having had a reason it could not be.
+fn node_control(view: &RunView, round: u64, node: &str) -> Value {
+    let states = member_turn_states(view, round, node);
+    // The latest member to have spoken wins, exactly as the engine's address does:
+    // that is the turn a note aimed at this node now would be correcting.
+    if let Some((member, _)) = states
+        .iter()
+        .rev()
+        .find(|(_, state)| matches!(state, TurnState::InFlight))
+    {
+        return json!({ "interruptible": true, "member": member });
+    }
+    match states.last() {
+        Some((member, TurnState::Ended(reason))) => {
+            json!({ "interruptible": false, "member": member, "reason": reason })
+        }
+        // The engine's own words for a node it has no address for: a dispatch
+        // that has reported no member yet, or no dispatch at all.
+        _ => json!({
+            "interruptible": false,
+            "reason": "nothing of its dispatch has reported a member yet",
+        }),
+    }
+}
+
 /// One round of the run, as the detail payload carries it.
 fn round(view: &RunView, number: u64) -> Option<Value> {
     let plan = round_plan(view, number)?;
@@ -1051,6 +1258,19 @@ fn round(view: &RunView, number: u64) -> Option<Value> {
         .filter_map(|node| node_result(view, node, current, result.as_ref()))
         .collect();
 
+    // Only an open round has work in flight, and only work in flight has a turn to
+    // redirect. A closed round carries an empty mapping rather than a stale one:
+    // whatever a driver that died mid-round left running, nothing is running now.
+    let node_control: Map<String, Value> = if current {
+        plan.tasks
+            .iter()
+            .filter(|node| node_status[&node.id].as_str() == Some("running"))
+            .map(|node| (node.id.clone(), self::node_control(view, number, &node.id)))
+            .collect()
+    } else {
+        Map::new()
+    };
+
     let mut out = Map::new();
     out.insert("run_id".into(), json!(view.paths.run));
     out.insert("round".into(), json!(number));
@@ -1058,6 +1278,7 @@ fn round(view: &RunView, number: u64) -> Option<Value> {
     out.insert("node_states".into(), Value::Object(node_states));
     out.insert("node_status".into(), Value::Object(node_status));
     out.insert("node_gated_by".into(), Value::Object(node_gated_by));
+    out.insert("node_control".into(), Value::Object(node_control));
     out.insert("node_results".into(), Value::Object(node_results));
     out.insert(
         "attestations".into(),
@@ -1673,6 +1894,14 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
             tools.push(tool_call(tools.len(), event));
             continue;
         }
+        // A redirection is published from inside a turn too, and is not one: it is
+        // the moment the planner changed what the turn already running was doing.
+        // Skipped here for the reason [`is_turn_record`] skips it — and it must be
+        // skipped in *both*, because a turn's id is its position in this list and
+        // the timeline numbers the same session by the same rule.
+        if !is_turn_record(event) {
+            continue;
+        }
         let index = turns.len();
         turns.push(json!({
             "assistant": event.payload.get("message").and_then(Value::as_str),
@@ -1861,6 +2090,102 @@ fn turn_ids(view: &RunView) -> Vec<Option<Turn>> {
     ids
 }
 
+/// The redirection one record was, when it was one.
+///
+/// Two records in the merged store describe the same act from the two sides that
+/// know different halves of it, and both are served under one shape so a reader
+/// does not have to know which producer they are looking at:
+///
+/// - `oneagentgraph`'s `turn-interrupted` is the lever itself. It is published
+///   for **every** interrupt, delivered or not, and says which member was
+///   addressed, how many bytes were offered, and — exactly when the running turn
+///   did not take them — why it did not.
+/// - `onepipeline`'s `edit-committed` carries the compiled `context-added`
+///   operation, whose `delivery` is that library's own word for where the note
+///   ended up: into the running turn, or onto the node's next dispatch.
+///
+/// `delivered` is the field both fill, because it is the one thing a reader of a
+/// turn that changed behaviour is asking: did this note reach the turn that was
+/// running. `reason` is carried only beside a `false`, which is the discipline
+/// `TurnInterrupted` itself keeps — a served redirection can never be read as
+/// having had a reason to fail.
+fn redirection(event: &Envelope) -> Option<Value> {
+    let mut record = Map::new();
+    match (event.source, event.kind.0.as_str()) {
+        (Source::Agentgraph, graph::TURN_INTERRUPTED) => {
+            let delivered = event
+                .payload
+                .get(graph::DELIVERED)
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            record.insert("delivered".into(), json!(delivered));
+            if let Some(member) = event
+                .payload
+                .get(graph::MEMBER)
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    event
+                        .labels
+                        .extra
+                        .get(graph::MEMBER)
+                        .and_then(Value::as_str)
+                })
+            {
+                record.insert("member".into(), json!(member));
+            }
+            if let Some(bytes) = event
+                .payload
+                .get(graph::INPUT_BYTES)
+                .and_then(Value::as_u64)
+            {
+                record.insert("input_bytes".into(), json!(bytes));
+            }
+            if !delivered {
+                if let Some(reason) = event.payload.get(graph::REASON).and_then(Value::as_str) {
+                    record.insert("reason".into(), json!(reason));
+                }
+            }
+        }
+        (Source::Pipeline, _)
+            if PipelineKind::from_wire(&event.kind) == Some(PipelineKind::EditCommitted) =>
+        {
+            let context = context_added(event)?;
+            // Absent is `deferred`, which is what a record written before
+            // delivery had modes means and the only thing those records did.
+            let delivery = context
+                .get(edits::DELIVERY)
+                .and_then(Value::as_str)
+                .unwrap_or(edits::DEFERRED);
+            record.insert("delivered".into(), json!(delivery == edits::LIVE));
+            record.insert("delivery".into(), json!(delivery));
+            if let Some(node) = context.get(edits::NODE).and_then(Value::as_str) {
+                record.insert("node_id".into(), json!(node));
+            }
+        }
+        _ => return None,
+    }
+    Some(Value::Object(record))
+}
+
+/// The `context-added` operation one `edit-committed` compiled to, if it did.
+///
+/// The first is the whole of it: the reconciler emits one `edit-committed` per
+/// submitted command, and only a `context` command compiles to this operation.
+/// The note itself is deliberately not read — it is the planner's prose, it is
+/// bounded by nothing this crate can promise, and what a reader of the timeline
+/// is asking is *whether* the turn took it rather than what it said.
+fn context_added(event: &Envelope) -> Option<&Map<String, Value>> {
+    event
+        .payload
+        .get(edits::OPERATIONS)?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|operation| {
+            operation.get(edits::KIND).and_then(Value::as_str) == Some(edits::CONTEXT_ADDED)
+        })
+}
+
 /// One journal envelope as a timeline event.
 fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
     let turn = turns.get(index).and_then(Option::as_ref);
@@ -1882,6 +2207,9 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     }
     if let Some(status) = event.payload.get("status").and_then(Value::as_str) {
         item.insert("status".into(), json!(status));
+    }
+    if let Some(redirection) = redirection(event) {
+        item.insert("redirection".into(), redirection);
     }
     // Where the event's own heavy content lives, never inlined: the transcript it
     // is a turn of, the change it published, or the first evidence it stored. A

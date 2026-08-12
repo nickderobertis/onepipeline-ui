@@ -28,7 +28,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(11), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(12), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -433,7 +433,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(3));
+    assert_eq!(body["timeline_schema_version"], json!(4));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -1043,6 +1043,195 @@ fn a_lifecycle_node_serves_the_steps_and_the_prose_it_actually_has() {
     let detail = &body["node_details"][fixture_run::SHIP_NODE_ID];
     assert_eq!(detail["publication"]["branch"], json!("feature/ship"));
     assert_eq!(detail["publication"]["merged"], json!(false));
+}
+
+/// The distinction a planner acts on: which of the nodes still working can be
+/// corrected, and which can only be cancelled.
+#[test]
+fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let round = &body["rounds"][1];
+    let control = round["node_control"]
+        .as_object()
+        .expect("the open round says what it has in flight")
+        .clone();
+
+    // One entry per node the round has in flight, and no other: a node with no
+    // turn has nothing to redirect, so it must not read as un-redirectable.
+    let mut named: Vec<&String> = control.keys().collect();
+    named.sort();
+    assert_eq!(
+        named,
+        vec![
+            fixture_run::UNCONTROLLED_NODE_ID,
+            fixture_run::REDIRECTED_NODE_ID
+        ],
+        "only the running nodes: {control:?}"
+    );
+    for node in [
+        fixture_run::SHIP_NODE_ID,
+        fixture_run::SIGNOFF_NODE_ID,
+        fixture_run::ANNOUNCE_NODE_ID,
+    ] {
+        assert_ne!(
+            round["node_status"][node],
+            json!("running"),
+            "{node} is not in flight, so it has no control entry to be missing"
+        );
+    }
+
+    // The node talking in a turn this run has an address for.
+    let redirectable = &control[fixture_run::REDIRECTED_NODE_ID];
+    assert_eq!(redirectable["interruptible"], json!(true));
+    assert_eq!(redirectable["member"], json!("worker"));
+    assert!(
+        redirectable.get("reason").is_none(),
+        "a node that can be corrected has no reason it cannot: {redirectable}"
+    );
+
+    // The node on a harness with no lever. Not an error, not an absent value,
+    // and carrying the words the sibling itself refused with.
+    let uncontrollable = &control[fixture_run::UNCONTROLLED_NODE_ID];
+    assert_eq!(uncontrollable["interruptible"], json!(false));
+    assert_eq!(
+        uncontrollable["reason"],
+        json!(fixture_run::NO_CONTROL_REASON),
+        "the reason is the producing library's own: {uncontrollable}"
+    );
+
+    // A round that has closed has nothing in flight, whatever it once had.
+    assert_eq!(body["rounds"][0]["node_control"], json!({}));
+}
+
+/// The moment a planner changed what a running turn was doing, on the timeline of
+/// the node whose behaviour changed.
+#[test]
+fn a_redirected_turn_is_a_record_on_the_nodes_own_timeline() {
+    let serving = live_run();
+    let node_events = |node: &str| -> Vec<Value> {
+        let body = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=node&node={node}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json();
+        body["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .filter(|span| span["kind"] == "node")
+            .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+            .collect()
+    };
+
+    let delivered = node_events(fixture_run::REDIRECTED_NODE_ID)
+        .into_iter()
+        .find(|event| event["kind"] == "turn-interrupted")
+        .expect("the node's timeline carries the redirection");
+    assert_eq!(delivered["at"], json!("2026-08-07T12:00:50.000Z"));
+    assert_eq!(delivered["redirection"]["delivered"], json!(true));
+    assert_eq!(delivered["redirection"]["member"], json!("worker"));
+    assert_eq!(
+        delivered["redirection"]["input_bytes"],
+        json!(fixture_run::LIVE_NOTE.len()),
+    );
+    assert!(
+        delivered["redirection"].get("reason").is_none(),
+        "a delivered redirection carries no reason it failed: {delivered}"
+    );
+
+    let refused = node_events(fixture_run::UNCONTROLLED_NODE_ID)
+        .into_iter()
+        .find(|event| event["kind"] == "turn-interrupted")
+        .expect("the lever was pulled here too, and that is a record");
+    assert_eq!(refused["at"], json!("2026-08-07T12:00:51.000Z"));
+    assert_eq!(refused["redirection"]["delivered"], json!(false));
+    assert_eq!(
+        refused["redirection"]["reason"],
+        json!(fixture_run::NO_CONTROL_REASON)
+    );
+
+    // And the planner's own edit says where each note ended up, in the SDK's word
+    // for it, on the run's row where the edit was made.
+    let run_timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    let edits: Vec<Value> = run_timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "edit-committed")
+        .collect();
+    let delivery = |node: &str| {
+        edits
+            .iter()
+            .find(|event| event["redirection"]["node_id"] == json!(node))
+            .unwrap_or_else(|| panic!("an edit-committed for {node}: {edits:?}"))["redirection"]
+            .clone()
+    };
+    assert_eq!(
+        delivery(fixture_run::REDIRECTED_NODE_ID)["delivery"],
+        json!("live"),
+        "the running turn took it, so it is not also owed to the next dispatch"
+    );
+    assert_eq!(
+        delivery(fixture_run::UNCONTROLLED_NODE_ID)["delivery"],
+        json!("deferred")
+    );
+}
+
+/// A redirection is published from inside a turn, so it is not a turn.
+#[test]
+fn a_redirection_is_not_counted_as_a_turn_of_the_transcript_it_interrupted() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?include_conversations=true",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    let node = body["run"]["nodes"]
+        .as_array()
+        .expect("the run's nodes")
+        .iter()
+        .find(|node| node["node"] == json!(fixture_run::REDIRECTED_NODE_ID))
+        .expect("the redirected node")
+        .clone();
+    assert_eq!(
+        node["turns"],
+        json!(1),
+        "the turn that was started, and not the interrupt published from inside it"
+    );
+    let transcript = body["conversations"]
+        .as_array()
+        .expect("the transcripts")
+        .iter()
+        .find(|held| held["conversation"]["id"] == json!(fixture_run::REDIRECTED_CONVERSATION_ID))
+        .expect("the redirected worker's transcript")
+        .clone();
+    let kinds: Vec<&str> = transcript["conversation"]["turns"]
+        .as_array()
+        .expect("turns")
+        .iter()
+        .filter_map(|turn| turn["status"].as_str())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["turn-started"],
+        "the redirection is the node's own record, never a phantom turn: {transcript}"
+    );
 }
 
 #[test]
