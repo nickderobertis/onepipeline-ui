@@ -1069,7 +1069,8 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
         named,
         vec![
             fixture_run::UNCONTROLLED_NODE_ID,
-            fixture_run::REDIRECTED_NODE_ID
+            fixture_run::REDIRECTED_NODE_ID,
+            fixture_run::REPORTED_NODE_ID
         ],
         "only the running nodes: {control:?}"
     );
@@ -1102,6 +1103,47 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
         uncontrollable["reason"],
         json!(fixture_run::NO_CONTROL_REASON),
         "the reason is the producing library's own: {uncontrollable}"
+    );
+
+    // The case a fold of the turn records cannot reach, and the one a planner
+    // meets most: a node in a turn **nobody has interrupted**, on a member
+    // onejudge has already reported no controllable turn for. The answer is the
+    // report's own, it is current, and no lever had to be pulled to get it.
+    let reported = &control[fixture_run::REPORTED_NODE_ID];
+    assert_eq!(reported["interruptible"], json!(false));
+    assert_eq!(reported["member"], json!("worker"));
+    assert_eq!(
+        reported["reason"],
+        json!(fixture_run::REPORTED_NO_CONTROL),
+        "the reason is onejudge's own `control_unavailable`: {reported}"
+    );
+    // And the report is what decided it, not the stream: this node's only turn
+    // record is a `turn-started`, which alone is the reading that would have made
+    // it interruptible, and no `turn-interrupted` was ever recorded for it.
+    let events: Vec<Value> = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::REPORTED_NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == "node")
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .collect();
+    assert!(
+        events.iter().any(|event| event["kind"] == "turn-started"),
+        "the node really is in a turn: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["kind"] == "turn-interrupted"),
+        "and nobody has pulled the lever at it: {events:?}"
     );
 
     // A round that has closed has nothing in flight, whatever it once had.
@@ -1188,6 +1230,206 @@ fn a_redirected_turn_is_a_record_on_the_nodes_own_timeline() {
         delivery(fixture_run::UNCONTROLLED_NODE_ID)["delivery"],
         json!("deferred")
     );
+}
+
+/// Every answer `node_control` can give, each driven from a run that produces it.
+///
+/// The reading has one job — telling a planner whether correcting a node is on
+/// the table — and each of these is a different sentence it says. A branch nobody
+/// drives is a sentence nobody has read, and the expensive mistake this whole
+/// field exists to prevent is exactly the one an untested branch makes.
+#[test]
+fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
+    let control = |plant: fn(&std::path::Path)| {
+        let serving = Serving::start(move |root| {
+            let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+            plant(&dir);
+        });
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+        )
+        .json()["rounds"][1]["node_control"]
+            .clone()
+    };
+    // A report that names an address says this member *had* a lever, so the node
+    // reads off its turn records — which is the answer a planner acts on.
+    let addressed = control(|dir| {
+        std::fs::write(
+            fixture_run::retained_report(dir),
+            serde_json::to_vec(&json!({
+                "schema_version": 8,
+                "control": {
+                    "session": "a-session-skill",
+                    "session_dir": "/a/oneharness/store",
+                    "cwd": "/a/worktree",
+                },
+            }))
+            .expect("a report"),
+        )
+        .expect("the retained copy");
+    })[fixture_run::REPORTED_NODE_ID]
+        .clone();
+    assert_eq!(addressed["interruptible"], json!(true), "{addressed}");
+    assert!(addressed.get("reason").is_none(), "{addressed}");
+
+    // A turn that completed: the member is between turns, which is a wait rather
+    // than a refusal — and the sentence says so.
+    let between = control(|dir| {
+        fixture_run::append_relayed(
+            dir,
+            "agentgraph",
+            "turn-completed",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "round": 2,
+                "node": fixture_run::REDIRECTED_NODE_ID,
+                "member": "worker",
+                "persona": "worker",
+            }),
+            json!({ "usage": { "duration": 1.0 } }),
+        );
+    })[fixture_run::REDIRECTED_NODE_ID]
+        .clone();
+    assert_eq!(between["interruptible"], json!(false));
+    assert!(
+        between["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("between turns")),
+        "{between}"
+    );
+
+    // A member that is gone. Nothing to redirect, and not because of a lever.
+    let gone = control(|dir| {
+        fixture_run::append_relayed(
+            dir,
+            "agentgraph",
+            "member-died",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "round": 2,
+                "node": fixture_run::REDIRECTED_NODE_ID,
+                "member": "worker",
+                "persona": "worker",
+            }),
+            json!({ "rule": "provider-failure" }),
+        );
+    })[fixture_run::REDIRECTED_NODE_ID]
+        .clone();
+    assert_eq!(gone["interruptible"], json!(false));
+    assert_eq!(gone["reason"], json!("the member is no longer running"));
+
+    // A node the round dispatched whose stream has said nothing yet: no address,
+    // which is the engine's own answer for a note aimed at it.
+    let silent = control(|dir| {
+        fixture_run::append_relayed(
+            dir,
+            "pipeline",
+            "node-dispatched",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "round": 2,
+                "node": fixture_run::ANNOUNCE_NODE_ID,
+                "persona": "check-in",
+            }),
+            json!({ "persona": "check-in" }),
+        );
+    })[fixture_run::ANNOUNCE_NODE_ID]
+        .clone();
+    assert_eq!(silent["interruptible"], json!(false));
+    assert_eq!(
+        silent["reason"],
+        json!("nothing of its dispatch has reported a member yet")
+    );
+    assert!(silent.get("member").is_none(), "{silent}");
+
+    // And the edit a run wrote before delivery had modes: no `delivery` at all,
+    // which is exactly the one thing those records did.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "pipeline",
+            "edit-committed",
+            json!({ "run_id": fixture_run::RUN_ID, "round": 2 }),
+            json!({
+                "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
+                "operations": [{
+                    "kind": "context-added",
+                    "node": fixture_run::REDIRECTED_NODE_ID,
+                    "note": "x",
+                }],
+            }),
+        );
+    });
+    let legacy = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+        .expect("the appended edit");
+    assert_eq!(legacy["redirection"]["delivery"], json!("deferred"));
+    assert_eq!(legacy["redirection"]["delivered"], json!(false));
+}
+
+/// A retained report this build cannot read answers nothing, never "no lever".
+///
+/// The copy is in the run's own storage, but "the run owns that directory" is a
+/// claim about a directory rather than a fact about the file found there. Each of
+/// these is a copy that is not a report — a symlink pointing elsewhere, a document
+/// past what one read may pull into memory, and bytes that are not JSON — and each
+/// has to leave the node reading exactly as it would with no report at all.
+/// Answering any of them "no controllable turn" would deny a lever onejudge never
+/// denied, and send a planner to cancel a node they could have corrected.
+#[test]
+fn a_retained_report_this_build_cannot_read_answers_neither_way() {
+    let unreadable = |plant: fn(&std::path::Path)| {
+        let serving = Serving::start(move |root| {
+            let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+            let kept = fixture_run::retained_report(&dir);
+            std::fs::remove_file(&kept).expect("the retained copy");
+            plant(&kept);
+        });
+        let body = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+        )
+        .json();
+        body["rounds"][1]["node_control"][fixture_run::REPORTED_NODE_ID].clone()
+    };
+
+    // A symlink where the copy was: read through, it would print whatever it
+    // points at under the name of onejudge's own answer.
+    let via_symlink = unreadable(|kept| {
+        std::os::unix::fs::symlink("/etc/hostname", kept).expect("the planted link");
+    });
+    // Past the ceiling one read may pull into memory.
+    let oversized = unreadable(|kept| {
+        std::fs::write(kept, vec![b'x'; 33 * 1024 * 1024]).expect("the oversized copy");
+    });
+    // Bytes that are not a report at all.
+    let malformed = unreadable(|kept| {
+        std::fs::write(kept, "this is not a report").expect("the malformed copy");
+    });
+
+    for (case, control) in [
+        ("a symlink", &via_symlink),
+        ("an oversized copy", &oversized),
+        ("a malformed copy", &malformed),
+    ] {
+        assert_eq!(
+            control["interruptible"],
+            json!(true),
+            "{case} says nothing about control, so the node reads off its turn \
+             records exactly as it would with no report: {control}"
+        );
+        assert_eq!(control["member"], json!("worker"), "{case}: {control}");
+    }
 }
 
 /// A record this build cannot read is served as no redirection, never as one

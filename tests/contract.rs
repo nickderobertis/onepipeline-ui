@@ -909,6 +909,63 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
 }
 
+/// The onejudge report fields the control reading rests on, against that
+/// library's own declaration of them.
+///
+/// `control` is the authoritative answer to whether a member had a turn a planner
+/// could redirect, and `control_unavailable` is why it did not. Both are read by
+/// field name out of the copy `onepipeline` retains — structurally, because the
+/// report is a sibling's artifact and a stricter read would refuse a whole report
+/// over one field it did not recognise. This is the gate that keeps the two names
+/// honest: rename either upstream and it fails here rather than in a payload that
+/// silently starts calling every in-flight node interruptible.
+#[test]
+fn the_onejudge_report_fields_this_crate_reads_are_the_ones_that_library_declares() {
+    use onepipeline_ui::payload::judge;
+
+    // Built through that library's own constructor, so the shape asserted here is
+    // the shape it produces rather than one this test composed.
+    let refused = onejudge::ControlOutcome::Unavailable("no lever here".into());
+    let report = serde_json::to_value(
+        onejudge::Report::new(onejudge::Transcript::default(), Vec::new(), None, false)
+            .with_control(&refused),
+    )
+    .expect("a report serializes");
+    let fields = report.as_object().expect("a mapping");
+    // A run that asked for control and could not be given it is the reading this
+    // crate treats as "this member had no lever": `control` present and null, with
+    // the reason beside it. Both names, and both meanings.
+    assert_eq!(
+        fields.get(judge::CONTROL),
+        Some(&Value::Null),
+        "`control` is present-and-null when no controllable turn was opened: {report}"
+    );
+    assert_eq!(
+        fields
+            .get(judge::CONTROL_UNAVAILABLE)
+            .and_then(Value::as_str),
+        Some("no lever here"),
+        "`control_unavailable` carries the reason the ask was refused: {report}"
+    );
+    // And a run that *was* given one names an address there, which is the other
+    // half: the reading must not treat a served address as an absence.
+    let opened = serde_json::to_value(
+        onejudge::Report::new(onejudge::Transcript::default(), Vec::new(), None, false)
+            .with_control(&onejudge::ControlOutcome::Open(onejudge::ControlAddress {
+                session: "a-session".into(),
+                session_dir: "/a/store".into(),
+                cwd: "/a/worktree".into(),
+            })),
+    )
+    .expect("a report serializes");
+    assert!(
+        opened
+            .get(judge::CONTROL)
+            .is_some_and(|control| !control.is_null()),
+        "a run that opened a controllable turn names it: {opened}"
+    );
+}
+
 /// The `context` edit whose delivery this crate serves, against the SDK's own
 /// declaration of it.
 ///

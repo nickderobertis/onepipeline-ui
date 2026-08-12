@@ -82,6 +82,15 @@ export const LIVE_NOTE = "check the transcript pane at phone width too";
 export const DEFERRED_NOTE = "measure the cold start too";
 export const NO_CONTROL_REASON =
   "the member's run has no out-of-band turn control to serve the request";
+/**
+ * onejudge's own `control_unavailable`, on the report a settled member stored.
+ *
+ * This is the answer a planner gets *without* anybody having pulled the lever, and
+ * it is the one the reading prefers: the report is authoritative about the member,
+ * where a refused interrupt is only the account of one attempt.
+ */
+export const NO_CONTROL_REPORTED =
+  "harness `qwen` has no out-of-band turn control";
 
 /** The verification log one node left behind, and one that was swept. */
 export const GATE_ARTIFACT = "artifact-foundation-gate";
@@ -1052,6 +1061,27 @@ function writeUnattributedRun(root) {
   // attempt, delivered or not — so the note could only ride this node's next
   // dispatch. It is this fixture's node that reads as *not* interruptible, which
   // is the reading a planner would otherwise have to assume for every node.
+  // An earlier member of this node that settled, storing the onejudge report the
+  // reading below rests on: `control: null` is that library's own answer that
+  // this member never had a controllable turn.
+  journal.advance(1).emit(
+    "agentgraph",
+    "member-settled",
+    {
+      ...round,
+      node: "orphan",
+      member: "worker",
+      persona: "worker",
+      session: ORPHAN_SESSION,
+    },
+    {
+      completed: false,
+      verdict: [],
+      completion_reason: null,
+      // Displayed by a reader, never opened by one: the copy is what is read.
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+  );
   journal.advance(1).emit(
     "agentgraph",
     "turn-started",
@@ -1098,6 +1128,45 @@ function writeUnattributedRun(root) {
     },
   );
   journal.write();
+  // What made the answer above knowable *before* anybody pulled that lever: an
+  // earlier member of this node settled, and the onejudge report the run retained
+  // for it named no controllable turn at all. `onepipeline` copies that report
+  // into the run's own storage as it ingests the settlement, and derives the
+  // copy's name from the settlement's own stream and sequence — so this writes it
+  // exactly where a reader derives it, and no reader follows `report_path`.
+  retainReport(dir, join(dir, "events.jsonl"), "orphan", {
+    schema_version: 8,
+    control: null,
+    control_unavailable: NO_CONTROL_REPORTED,
+    verdicts: [],
+    usage: {},
+  });
+}
+
+/**
+ * Write this run's own copy of the onejudge report one settlement stored.
+ *
+ * Named from the settlement's stream and sequence, which is how `RunPaths::report_for`
+ * derives it — read back off the journal here rather than counted, so a record added
+ * above this one cannot silently point the copy at the wrong settlement.
+ */
+function retainReport(dir, journalPath, node, report) {
+  const settlement = readFileSync(journalPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .find(
+      (event) => event.kind === "member-settled" && event.labels?.node === node,
+    );
+  if (settlement === undefined) {
+    throw new Error(`no member-settled for '${node}' to retain a report for`);
+  }
+  const reports = join(dir, "reports");
+  mkdirSync(reports, { recursive: true });
+  writeJson(
+    join(reports, `${settlement.stream}-${settlement.seq}.json`),
+    report,
+  );
 }
 
 /**
@@ -1235,6 +1304,7 @@ export function facts() {
       live_note: LIVE_NOTE,
       deferred_note: DEFERRED_NOTE,
       no_control_reason: NO_CONTROL_REASON,
+      no_control_reported: NO_CONTROL_REPORTED,
     },
     remote_open_pr: REMOTE_OPEN_PR,
     foundation_commit: FOUNDATION_COMMIT,

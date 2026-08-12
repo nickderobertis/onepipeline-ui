@@ -668,8 +668,11 @@ test("says which of the nodes still working can be corrected", async ({
   // The run whose node is working on a harness with no lever at all.
   await openObservatory(page, `/?run=${runs().unattributed}&node=orphan`);
   await expect(control).toHaveText("Not interruptible");
+  // onejudge's own `control_unavailable`, off the report an earlier member of this
+  // node stored — not the words of the one refused interrupt beside it. That is
+  // what makes this reading available before anybody pulls the lever.
   await expect(control).toHaveAccessibleName(
-    `Not interruptible: ${fixture().redirection.no_control_reason}`,
+    `Not interruptible: ${fixture().redirection.no_control_reported}`,
   );
 
   // A node with no turn is not a node whose turn cannot be reached, and the two must

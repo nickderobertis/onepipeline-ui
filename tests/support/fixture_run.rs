@@ -58,6 +58,16 @@ pub const LINT_CONVERSATION_ID: &str = "2c9e4b71-6a83-4f20-97dd-1e6b4c2a8f37";
 pub const REDIRECTED_CONVERSATION_ID: &str = "4d0f6b32-8c15-4a09-b2ee-7f1c3d5a6e28";
 /// The session the node with no lever is talking in.
 pub const UNCONTROLLED_CONVERSATION_ID: &str = "5e1a7c43-9d26-4b1a-83ff-8a2d4e6b7f39";
+/// The live run's third in-flight node: one whose *previous* dispatch settled
+/// with a onejudge report naming no controllable turn. Nobody has interrupted
+/// this one, and nothing needs to — the report is the current answer for the
+/// member, and it is what a planner reads before deciding to cancel it.
+pub const REPORTED_NODE_ID: &str = "measure";
+/// The session that node's worker is talking in.
+pub const REPORTED_CONVERSATION_ID: &str = "6f2b8d54-0e37-4c2b-94aa-9b3e5f7c8a4b";
+/// The words onejudge's own report gave for having no controllable turn, on the
+/// `control_unavailable` that accompanies a `control: null`.
+pub const REPORTED_NO_CONTROL: &str = "harness `qwen` has no out-of-band turn control";
 /// What the sibling answered when the note could not reach a running turn. Its
 /// words, not this repository's: `oneagentgraph` publishes the reason on the
 /// `turn-interrupted` it emits for every interrupt, delivered or not.
@@ -645,8 +655,71 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
     )
     .expect("the long artifact");
 
-    fs::write(dir.join("events.jsonl"), live_journal(run, &second)).expect("the journal");
+    let journal = live_journal(run, &second);
+    fs::write(dir.join("events.jsonl"), &journal).expect("the journal");
+    retain_reported_control(&dir, &journal);
     dir
+}
+
+/// Where the run's own copy of the reported node's report is, derived the way
+/// `RunPaths::report_for` derives it.
+///
+/// Exposed so a journey can put something else there — a symlink, a document too
+/// large, bytes that are not a report — and drive what this crate makes of a copy
+/// it cannot read.
+pub fn retained_report(dir: &Path) -> PathBuf {
+    let journal = fs::read_to_string(dir.join("events.jsonl")).expect("the journal");
+    let settlement = journal
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|event| {
+            event["kind"] == json!("member-settled")
+                && event["labels"]["node"] == json!(REPORTED_NODE_ID)
+        })
+        .expect("the settlement that stored a report");
+    dir.join("reports").join(format!(
+        "{}-{}.json",
+        settlement["stream"].as_str().expect("a stream"),
+        settlement["seq"].as_u64().expect("a sequence")
+    ))
+}
+
+/// The run's own copy of the onejudge report one settlement stored.
+///
+/// `onepipeline` makes this copy as it ingests the envelope — the one moment the
+/// producer's path carries the producer's authority rather than the journal's —
+/// and derives the copy's name from the settlement's own stream and sequence.
+/// The name is read back off the journal here for the same reason: it is derived
+/// from the settlement, never taken from anything the payload says.
+fn retain_reported_control(dir: &Path, journal: &str) {
+    let settlement = journal
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|event| {
+            event["kind"] == json!("member-settled")
+                && event["labels"]["node"] == json!(REPORTED_NODE_ID)
+        })
+        .expect("the settlement that stored a report");
+    let (stream, seq) = (
+        settlement["stream"].as_str().expect("a stream"),
+        settlement["seq"].as_u64().expect("a sequence"),
+    );
+    let reports = dir.join("reports");
+    fs::create_dir_all(&reports).expect("the run's own report storage");
+    fs::write(
+        reports.join(format!("{stream}-{seq}.json")),
+        pretty(&json!({
+            "schema_version": 8,
+            // The whole of what this crate reads: `control: null` is the
+            // contract's no-controllable-turn case, and `control_unavailable`
+            // says why the ask could not be honoured.
+            "control": Value::Null,
+            "control_unavailable": REPORTED_NO_CONTROL,
+            "verdicts": [],
+            "usage": {},
+        })),
+    )
+    .expect("the retained report");
 }
 
 /// The plan the live run's second round is converging toward.
@@ -697,6 +770,12 @@ fn live_plan() -> Value {
                 "persona": "worker",
                 "task": "## What\nMeasure it.",
                 "done_when": "the numbers are recorded",
+            },
+            {
+                "id": REPORTED_NODE_ID,
+                "persona": "worker",
+                "task": "## What\nProfile it.",
+                "done_when": "the profile is recorded",
             },
         ],
     })
@@ -755,6 +834,45 @@ fn live_journal(run: &str, second: &Value) -> String {
             "session": DRIVING_CONVERSATION_ID,
         }),
         json!({ "message": "driving the first round", "model": "a-model" }),
+    );
+    // The node round 2 retries. Its member settled here, and the onejudge report
+    // that settlement stored is the authoritative answer about its turn control:
+    // `control: null`, with `control_unavailable`'s own words beside it.
+    emit(
+        "2026-08-07T12:00:06.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "round": 1, "node": REPORTED_NODE_ID, "persona": "worker" }),
+        json!({ "persona": "worker" }),
+    );
+    emit(
+        "2026-08-07T12:00:07.000Z",
+        "agentgraph",
+        "member-settled",
+        json!({
+            "run_id": run,
+            "round": 1,
+            "node": REPORTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REPORTED_CONVERSATION_ID,
+        }),
+        // The payload `oneagentgraph` writes, `report_path` included: this crate
+        // never opens that path — `onepipeline` copied the document into the run's
+        // own storage at ingest, and the copy is what is read.
+        json!({
+            "completed": false,
+            "verdict": [],
+            "completion_reason": Value::Null,
+            "report_path": "/a/producing/librarys/scratch/report.json",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:08.000Z",
+        "pipeline",
+        "node-settled",
+        json!({ "run_id": run, "round": 1, "node": REPORTED_NODE_ID }),
+        json!({ "status": "failed", "detail": "the profile did not finish" }),
     );
     emit(
         "2026-08-07T12:00:09.000Z",
@@ -1112,6 +1230,32 @@ fn live_journal(run: &str, second: &Value) -> String {
                 "delivery": "deferred",
             }],
         }),
+    );
+    // The third in-flight node, and the case a fold of the turn records cannot
+    // reach on its own: its previous dispatch settled, and onejudge's report for
+    // that member named **no controllable turn at all**. Nobody has interrupted
+    // this node, and nobody needs to — the report is the current answer, and it
+    // is what says correcting this one is not on the table.
+    emit(
+        "2026-08-07T12:00:44.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "round": 2, "node": REPORTED_NODE_ID, "persona": "worker" }),
+        json!({ "persona": "worker" }),
+    );
+    emit(
+        "2026-08-07T12:00:45.000Z",
+        "agentgraph",
+        "turn-started",
+        json!({
+            "run_id": run,
+            "round": 2,
+            "node": REPORTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REPORTED_CONVERSATION_ID,
+        }),
+        json!({ "turn": 1 }),
     );
     // What the redirected turn did next, which is the whole reason the moment
     // above has to be readable: the worker changed task mid-turn.

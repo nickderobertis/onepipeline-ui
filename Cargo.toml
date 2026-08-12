@@ -116,6 +116,13 @@ libc = "0.2"
 # so the gate reads the same declaration the records reaching this crate were
 # written by, and the tree carries one version of it rather than two.
 oneagentgraph = "0.2"
+# The other sibling vocabulary this crate reads by field name: onejudge's report,
+# whose `control` is the authoritative answer to whether a member had a turn a
+# planner could redirect. It is not a runtime dependency — the document is read
+# structurally out of the copy `onepipeline` retains, for the reason that library
+# reads it structurally — so this is here only to hold `payload::judge`'s copy of
+# those names to the type that declares them. Same major the lock resolves.
+onejudge = "0.3"
 predicates = "3"
 tempfile = "3"
 

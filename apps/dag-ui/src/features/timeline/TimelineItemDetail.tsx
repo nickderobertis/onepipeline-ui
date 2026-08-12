@@ -458,18 +458,23 @@ function Redirection({
             <Timestamp at={row.startedAt} relative />
           </dd>
         </div>
-        <div>
-          <dt>Member</dt>
-          <dd>{redirection.member ?? "Not recorded"}</dd>
-        </div>
-        <div>
-          <dt>Note</dt>
-          <dd>
-            {redirection.input_bytes === undefined
-              ? "Not recorded"
-              : `${redirection.input_bytes} bytes offered`}
-          </dd>
-        </div>
+        {/* Only where the record carries them. The two producers describe the
+            same act from different sides — the lever names the member it
+            addressed and the bytes it offered, the compiled edit names neither —
+            so a row reading "Not recorded" would report a gap where there is
+            only a different record. */}
+        {redirection.member !== undefined && (
+          <div>
+            <dt>Member</dt>
+            <dd>{redirection.member}</dd>
+          </div>
+        )}
+        {redirection.input_bytes !== undefined && (
+          <div>
+            <dt>Note</dt>
+            <dd>{redirection.input_bytes} bytes offered</dd>
+          </div>
+        )}
       </dl>
       {redirection.reason !== undefined && (
         <>
