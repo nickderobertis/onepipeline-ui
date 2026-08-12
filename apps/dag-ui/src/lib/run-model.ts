@@ -2,6 +2,7 @@ import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
 import type {
   Failure,
   GraphResultItem,
+  NodeControl,
   NodeDetail,
   NodeStatus,
   NodeTelemetry,
@@ -32,6 +33,12 @@ export interface NodeView {
   readonly telemetry?: NodeTelemetry;
   readonly result?: GraphResultItem;
   readonly detail?: NodeDetail;
+  /**
+   * Whether the run has a turn it can reach for this node. Served for a node in
+   * flight and absent for every other, because a node with no turn has none to
+   * reach — which is not the same answer as "cannot".
+   */
+  readonly control?: NodeControl;
   /** How this node failed, when it did; served typed rather than parsed out of prose. */
   readonly failure?: Failure;
   /**
@@ -79,6 +86,7 @@ export function nodeViews(detail: RunDetail): NodeView[] {
         telemetry: telemetry.get(task.id),
         result,
         detail: detail.node_details[task.id],
+        control: round.node_control[task.id],
         failure: telemetry.get(task.id)?.failure,
         blockers: [
           ...(round.node_gated_by[task.id] ?? []),

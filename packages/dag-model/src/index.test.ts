@@ -14,6 +14,7 @@ import {
   sessionLinkSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
+  timelineEventSchema,
   timelineReferenceSchema,
   timelineSpanSchema,
   timingSchema,
@@ -95,7 +96,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 11,
+    telemetry_schema_version: 12,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -129,7 +130,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 11,
+    telemetry_schema_version: 12,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -161,7 +162,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 11,
+    telemetry_schema_version: 12,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -296,7 +297,7 @@ describe("boundary failures", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 11,
+        telemetry_schema_version: 12,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -313,7 +314,7 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 11,
+      telemetry_schema_version: 12,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       rounds: [{ node_states: { build: "paused" } }],
@@ -333,6 +334,7 @@ describe("boundary failures", () => {
       node_states: {},
       node_status: { build: "skipped" },
       node_gated_by: {},
+      node_control: {},
       node_results: {},
       attestations: [],
       result: null,
@@ -381,6 +383,63 @@ describe("boundary failures", () => {
       roundSchema.safeParse({
         ...round,
         node_gated_by: { build: ["missing"] },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("carries whether the run has a turn it can reach for each in-flight node", () => {
+    const round = {
+      run_id: "run-1",
+      round: 1,
+      plan: { tasks: [{ id: "build", task: "Build it" }] },
+      node_states: { build: "running" },
+      node_status: { build: "running" },
+      node_gated_by: {},
+      node_control: { build: { addressable: true, member: "worker" } },
+      node_results: {},
+      attestations: [],
+      result: null,
+      last_seq: 2,
+    };
+    expect(roundSchema.parse(round).node_control.build?.member).toBe("worker");
+    // Not interruptible carries the reason, and a node that is carries none: the
+    // two are exactly exclusive, so neither can be read as the other.
+    expect(
+      roundSchema.parse({
+        ...round,
+        node_control: {
+          build: {
+            addressable: false,
+            reason: "no out-of-band turn control",
+          },
+        },
+      }).node_control.build?.reason,
+    ).toBe("no out-of-band turn control");
+    expect(
+      roundSchema.safeParse({
+        ...round,
+        node_control: { build: { addressable: false } },
+      }).success,
+    ).toBe(false);
+    expect(
+      roundSchema.safeParse({
+        ...round,
+        node_control: {
+          build: { addressable: true, reason: "between turns" },
+        },
+      }).success,
+    ).toBe(false);
+    // The field is required, and it may name only nodes the round has in flight:
+    // a node with no turn has nothing to redirect, and an entry for one would read
+    // as an answer about work that is not happening.
+    expect(
+      roundSchema.safeParse({ ...round, node_control: undefined }).success,
+    ).toBe(false);
+    expect(
+      roundSchema.safeParse({
+        ...round,
+        node_status: { build: "done" },
+        node_states: { build: "done" },
       }).success,
     ).toBe(false);
   });
@@ -468,7 +527,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 3,
+      timeline_schema_version: 4,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -507,6 +566,47 @@ describe("run timeline", () => {
     expect(timeline.spans[2]?.parent_id).toBe("dispatch-worker-1");
   });
 
+  test("carries the redirection a turn-interrupted or a context edit was", () => {
+    const redirected = timelineEventSchema.parse({
+      id: "e9",
+      kind: "turn-interrupted",
+      at: "2026-07-26T12:00:05Z",
+      node_id: "api",
+      redirection: { delivered: true, member: "worker", input_bytes: 41 },
+    });
+    expect(redirected.redirection?.delivered).toBe(true);
+    expect(
+      timelineEventSchema.parse({
+        id: "e10",
+        kind: "edit-committed",
+        at: "2026-07-26T12:00:06Z",
+        redirection: { delivered: false, delivery: "deferred", node_id: "api" },
+      }).redirection?.delivery,
+    ).toBe("deferred");
+    // A delivery that landed has no reason it did not, and a mode outside the two
+    // the SDK records is refused rather than rendered as though it were one.
+    expect(
+      timelineEventSchema.safeParse({
+        ...redirected,
+        redirection: { delivered: true, reason: "between turns" },
+      }).success,
+    ).toBe(false);
+    expect(
+      timelineEventSchema.safeParse({
+        ...redirected,
+        redirection: { delivered: false, delivery: "soon" },
+      }).success,
+    ).toBe(false);
+    // An ordinary record carries none, and is still a valid event.
+    expect(
+      timelineEventSchema.parse({
+        id: "e11",
+        kind: "node-settled",
+        at: "2026-07-26T12:00:07Z",
+      }).redirection,
+    ).toBeUndefined();
+  });
+
   test("rejects an unsupported span kind, reference kind, or negative rollup", () => {
     expect(() =>
       timelineSpanSchema.parse({ ...span, kind: "guess" }),
@@ -524,7 +624,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 3,
+        timeline_schema_version: 4,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

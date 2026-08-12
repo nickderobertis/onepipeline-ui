@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 11,
+  "telemetry_schema_version": 12,
   "observed_at": "2026-08-03T00:00:00Z",
   "run": {
     "run_id": "gated",
@@ -132,6 +132,9 @@
         "cleanup": "skipped"
       },
       "node_gated_by": { "release": ["approve"], "cleanup": ["publish"] },
+      "node_control": {
+        "build": { "addressable": true, "member": "worker" }
+      },
       "node_results": {
         "approve": { "status": "waiting" },
         "publish": {

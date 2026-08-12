@@ -640,6 +640,96 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
   await expect(page.getByLabel("Item detail panel")).toHaveCount(0);
 });
 
+/**
+ * The reading a planner acts on before they act on anything else.
+ *
+ * A node with a controllable turn in flight can be corrected; one without it can only
+ * be cancelled, which is the expensive move. Absent an answer the safe assumption is
+ * the expensive one, so both nodes still working here have to say which they are —
+ * and the one whose run has no turn to reach has to say so rather than reading as
+ * an error or as nothing at all.
+ */
+test("says which of the nodes still working have a turn a note can reach", async ({
+  page,
+}) => {
+  // Asked for by the accessible name the badge carries, which is the word an
+  // operator reads plus the reason behind it — the whole of what this states.
+  const control = page.getByLabel(/^(Turn reachable|No turn to reach): /);
+
+  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await expect(control).toHaveText("Turn reachable");
+  // The whole reason, for a pointer and for a screen reader alike: the header is the
+  // one thing above a plot sized from what it leaves, so the clause cannot be painted
+  // there — but it must still be reachable without leaving the view.
+  await expect(control).toHaveAccessibleName(
+    /^Turn reachable: a planner's note can be delivered into the worker turn in flight$/,
+  );
+
+  // The run whose node is working on a harness with no lever at all.
+  await openObservatory(page, `/?run=${runs().unattributed}&node=orphan`);
+  await expect(control).toHaveText("No turn to reach");
+  // The producing library's own words for what the lever found, which is the only
+  // account of this node's control anything in the stack has recorded.
+  await expect(control).toHaveAccessibleName(
+    `No turn to reach: ${fixture().redirection.no_control_reason}`,
+  );
+
+  // A node with no turn is not a node whose turn cannot be reached, and the two must
+  // not read alike: the settled node says nothing here, and its state badge beside
+  // this one is what says why.
+  await openObservatory(page, `/?run=${runs().live}&node=foundation`);
+  await expect(page.locator(".node-view-state")).toHaveText("done");
+  await expect(control).toHaveCount(0);
+});
+
+/**
+ * A turn whose behaviour changed mid-flight is unreadable afterwards unless the
+ * redirection that caused it is on the record beside it.
+ */
+test("shows the moment a planner redirected a running turn", async ({
+  page,
+}) => {
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+
+  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  const redirected = transcript
+    .getByRole("article")
+    .filter({ hasText: "Redirected into the running turn" });
+  await expect(redirected).toHaveCount(1);
+  await redirected.click();
+  // Opened, it says which of the two things happened and what was offered — never the
+  // planner's prose, which is not what a reader of the turn is asking for.
+  await expect(itemDetail(page)).toContainText("Redirection");
+  await expect(itemDetail(page)).toContainText(
+    "Live — into the turn that was already running",
+  );
+  await expect(itemDetail(page)).toContainText(
+    `${fixture().redirection.live_note.length} bytes offered`,
+  );
+  await expect(itemDetail(page)).not.toContainText(
+    fixture().redirection.live_note,
+  );
+  // A delivery that landed carries no reason it did not.
+  await expect(itemDetail(page)).not.toContainText("Why it was not delivered");
+  await page.keyboard.press("Escape");
+
+  // The other half: the lever pulled at a node with none, which is a record of its
+  // own rather than silence — and it says why in the words the sibling refused with.
+  await openObservatory(page, `/?run=${runs().unattributed}&node=orphan`);
+  const deferred = transcript
+    .getByRole("article")
+    .filter({ hasText: "Redirection deferred to the next dispatch" });
+  await expect(deferred).toHaveCount(1);
+  await deferred.click();
+  await expect(itemDetail(page)).toContainText(
+    "Deferred — onto the node's next dispatch",
+  );
+  await expect(itemDetail(page)).toContainText("Why it was not delivered");
+  await expect(itemDetail(page)).toContainText(
+    fixture().redirection.no_control_reason,
+  );
+});
+
 test("scrolls the transcript to the journal record a marker names", async ({
   page,
 }) => {
@@ -2020,7 +2110,9 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   // is the only reading of it available to anyone who cannot rely on that colour.
   // Each reading is checked against its word too, so a selector that drifted onto
   // one of the view's other badges would fail rather than pass quietly.
-  const stateBadge = page.locator('.node-view-facts > [data-slot="badge"]');
+  const stateBadge = page.locator(
+    '.node-view-facts > [data-slot="badge"].node-view-state',
+  );
 
   /**
    * Open one node's view, retrying the *click* and not only the reading of what it
@@ -2540,9 +2632,12 @@ test("follows a growing transcript only while the reader is at its end", async (
   );
 
   // Long enough that the panel really scrolls, and short enough that the reader is
-  // still handed every turn rather than a page of them.
-  changeServedRuns(["--grow-worker-session", "20"]);
-  await expect(itemDetail(page)).toContainText("Dashboard turn 19 arrived");
+  // still handed every turn rather than a page of them. One fewer than it was: the
+  // worker's own record gained the open turn a planner redirected, and the count that
+  // matters here is the whole session's — one page of it, not one page plus a turn
+  // nobody asked to see hidden behind a `Show more`.
+  changeServedRuns(["--grow-worker-session", "19"]);
+  await expect(itemDetail(page)).toContainText("Dashboard turn 18 arrived");
   await wheelDetail(page, WHEEL_TO_THE_END);
   await expect
     .poll(async () => (await detailScroll(page)).bottom)
@@ -2552,8 +2647,8 @@ test("follows a growing transcript only while the reader is at its end", async (
   expect((await detailScroll(page)).top).toBeGreaterThan(0);
 
   // Read at the end, the panel follows what the run writes next.
-  changeServedRuns(["--grow-worker-session", "21"]);
-  await expect(itemDetail(page)).toContainText("Dashboard turn 20 arrived");
+  changeServedRuns(["--grow-worker-session", "20"]);
+  await expect(itemDetail(page)).toContainText("Dashboard turn 19 arrived");
   await expect
     .poll(async () => (await detailScroll(page)).bottom)
     .toBeLessThan(40);
@@ -2562,8 +2657,8 @@ test("follows a growing transcript only while the reader is at its end", async (
   // the transcript keeps growing underneath them.
   await wheelDetail(page, -WHEEL_TO_THE_END);
   await expect.poll(async () => (await detailScroll(page)).top).toBe(0);
-  changeServedRuns(["--grow-worker-session", "22"]);
-  await expect(itemDetail(page)).toContainText("Dashboard turn 21 arrived");
+  changeServedRuns(["--grow-worker-session", "21"]);
+  await expect(itemDetail(page)).toContainText("Dashboard turn 20 arrived");
   expect((await detailScroll(page)).top).toBe(0);
   // And the turn it was opened on was never taken away and put back.
   await expect(itemDetail(page)).toContainText(
@@ -2573,7 +2668,7 @@ test("follows a growing transcript only while the reader is at its end", async (
   // Opening this long a session lands at its beginning: following a transcript that
   // is still being written is not the same as skipping to the last thing it said.
   await page.reload();
-  await expect(itemDetail(page)).toContainText("Dashboard turn 21 arrived");
+  await expect(itemDetail(page)).toContainText("Dashboard turn 20 arrived");
   expect((await detailScroll(page)).top).toBe(0);
 });
 

@@ -470,6 +470,16 @@ p {
   font-size: 11px;
 }
 
+/* The one reading in this header that has a whole clause behind it, and the header
+   is the one place that clause cannot go: the plot below is sized to a share of what
+   is left, and the collapsed line is the view a node opens on. So the badge states
+   the word and nothing wraps out of it — the reason is its accessible description,
+   and the node's own timeline carries the record that says it at length. */
+.node-view-control {
+  flex: none;
+  white-space: nowrap;
+}
+
 .node-view-pr,
 .detail-link a {
   display: inline-flex;
@@ -542,8 +552,13 @@ p {
      supports, where the ten lane names wrap the legend onto a second row: this is the
      view an operator lands on, so it is the one view that has to be whole. Being
      `fit-content`, a plot that needs less than its share still takes only what it
-     needs, and the reading keeps the rest. */
-  grid-template-rows: fit-content(60%) minmax(0, 1fr);
+     needs, and the reading keeps the rest — so raising it costs the reading nothing
+     at any width where the plot already fits.
+     It is a share of what the header leaves, which is why it moved from 60%: the
+     header gained the reading that says whether the node can be corrected, that
+     reading takes a line of its own at the phone, and 60% of what was left there was
+     17px short of the collapsed line. */
+  grid-template-rows: fit-content(64%) minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -1177,11 +1192,15 @@ button.graph-row-name {
 
   /* The collapsed line is the view a node opens on, and at this width its legend
      needs five rows of the region before a single bar is drawn — more than the share
-     that holds the whole plot on a laptop. It takes three quarters here so the line
+     that holds the whole plot on a laptop. It takes four fifths here so the line
      and its clock are whole on arrival; the reading below keeps the rest and scrolls,
-     which is what a reading does anyway. */
+     which is what a reading does anyway.
+     It was three quarters until the header gained the reading that says whether the
+     node can be corrected. Two badges and the node's own facts do not share one row
+     at 390px, so the header takes a row more here than anywhere else — and three
+     quarters of what it then left was 17px short of the collapsed line. */
   .node-execution {
-    grid-template-rows: fit-content(75%) minmax(0, 1fr);
+    grid-template-rows: fit-content(80%) minmax(0, 1fr);
   }
 
   /* Wrapping earns its extra row between this width and the breakpoint above, where

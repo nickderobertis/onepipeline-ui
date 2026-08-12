@@ -42,6 +42,7 @@ import {
   NODE_TAB_LABELS,
   type NodeTab,
 } from "../../lib/useUrlSelection";
+import { ControlBadge } from "./ControlBadge";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
   compactTimelineItems,
@@ -123,7 +124,11 @@ export function NodeTimelineView({
           </ol>
         </nav>
         <div className="node-view-facts">
-          <StateBadge state={node.status} />
+          {/* Named so a reader of this header — and the journeys that hold its
+              tones — can say *which* badge they mean: the reading beside it is
+              also one, and the two answer different questions. */}
+          <StateBadge className="node-view-state" state={node.status} />
+          <ControlBadge control={node.control} />
           <span className="node-view-meta">
             {node.kind} node · {node.telemetry?.turns ?? 0} turns ·{" "}
             {node.telemetry?.lint ?? 0} lint turns

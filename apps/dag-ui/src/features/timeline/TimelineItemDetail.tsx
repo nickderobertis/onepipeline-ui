@@ -24,6 +24,7 @@ import {
 import type {
   AgentRole,
   DagConversation,
+  Redirection as RedirectionRecord,
   TimelineReference,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
@@ -146,6 +147,12 @@ function Body({
   readonly reference?: TimelineReference;
   readonly transcript: Transcript;
 }) {
+  // Before the conversation reading: a redirection names the session it happened
+  // in, and opening it as that session's whole transcript would answer a question
+  // nobody asked in place of the one they did.
+  const redirection = redirectionOf(row);
+  if (redirection !== undefined)
+    return <Redirection redirection={redirection} row={row} />;
   if (reference?.kind === "conversation")
     return <Session row={row} transcript={transcript} />;
   if (isVerification(row))
@@ -417,6 +424,68 @@ function Publication({
   );
 }
 
+/**
+ * The moment a planner redirected this node, read as what it changed.
+ *
+ * Whether the note reached the turn that was already running is the whole of it, so
+ * it is the first line and it is a word rather than a flag: `live` means the worker
+ * acted on the correction inside the turn a reader is looking at, and `deferred`
+ * means it did not and the note is owed to the node's next dispatch. A refusal
+ * carries the producing library's own reason, which is the sentence that says
+ * whether waiting would have helped.
+ */
+function Redirection({
+  redirection,
+  row,
+}: {
+  readonly redirection: RedirectionRecord;
+  readonly row: TimelineRow;
+}) {
+  return (
+    <>
+      <dl className="facts">
+        <div>
+          <dt>Delivery</dt>
+          <dd>
+            {redirection.delivered
+              ? "Live — into the turn that was already running"
+              : "Deferred — onto the node's next dispatch"}
+          </dd>
+        </div>
+        <div>
+          <dt>Redirected at</dt>
+          <dd>
+            <Timestamp at={row.startedAt} relative />
+          </dd>
+        </div>
+        {/* Only where the record carries them. The two producers describe the
+            same act from different sides — the lever names the member it
+            addressed and the bytes it offered, the compiled edit names neither —
+            so a row reading "Not recorded" would report a gap where there is
+            only a different record. */}
+        {redirection.member !== undefined && (
+          <div>
+            <dt>Member</dt>
+            <dd>{redirection.member}</dd>
+          </div>
+        )}
+        {redirection.input_bytes !== undefined && (
+          <div>
+            <dt>Note</dt>
+            <dd>{redirection.input_bytes} bytes offered</dd>
+          </div>
+        )}
+      </dl>
+      {redirection.reason !== undefined && (
+        <>
+          <h3 className="detail-heading">Why it was not delivered</h3>
+          <p className="detail-note">{redirection.reason}</p>
+        </>
+      )}
+    </>
+  );
+}
+
 /** Whatever the timeline recorded, in the fields the contract gives it. */
 function Recorded({
   row,
@@ -545,6 +614,11 @@ function availableTurnCount(
   if (transcript.conversation === undefined) return 0;
   if (row?.rowKind === "event") return 1;
   return transcript.conversation.conversation.turns.length;
+}
+
+/** The redirection one row is, when it is one. Only an event row can be. */
+function redirectionOf(row: TimelineRow): RedirectionRecord | undefined {
+  return row.rowKind === "event" ? row.event.redirection : undefined;
 }
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {

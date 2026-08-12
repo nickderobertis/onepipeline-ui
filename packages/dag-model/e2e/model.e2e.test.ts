@@ -81,7 +81,7 @@ test("a package consumer validates an API response through the public export", (
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 11,
+      telemetry_schema_version: 12,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }).runs,
@@ -171,6 +171,11 @@ async function legacyRound(run: string) {
     node_states: Object.fromEntries(ids.map((id) => [id, "running"])),
     node_status: Object.fromEntries(ids.map((id) => [id, "running"])),
     node_gated_by: {},
+    // Every node of a legacy plan reads as running above, so every one of them has
+    // a turn this run can address — which is the shape a recorded round really has.
+    node_control: Object.fromEntries(
+      ids.map((id) => [id, { addressable: true, member: "worker" }]),
+    ),
     node_results: {},
     attestations: [],
     result: null,
@@ -252,7 +257,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(() =>
     parseRunList({
       api_version: 3,
-      telemetry_schema_version: 11,
+      telemetry_schema_version: 12,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }),
@@ -260,7 +265,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(
     runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 11,
+      telemetry_schema_version: 12,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       rounds: [{ node_states: { build: "paused" } }],
@@ -327,7 +332,7 @@ function completeDetail(conversations: unknown[]) {
   };
   return {
     api_version: 2,
-    telemetry_schema_version: 11,
+    telemetry_schema_version: 12,
     observed_at: "2026-07-26T12:00:00Z",
     run: {
       run_id: "run-1",
@@ -444,6 +449,7 @@ test("a package consumer validates rounds and conversations", () => {
     // Served for every plan task, including the one the journal never recorded.
     node_status: { build: "done", ship: "waiting", announce: "blocked" },
     node_gated_by: { announce: ["ship"] },
+    node_control: {},
     node_results: { build: { status: "done" } },
     attestations: [],
     result: null,
@@ -524,7 +530,7 @@ test("a package consumer validates populated telemetry and attribution", () => {
 test("a package consumer parses a served run timeline through the export", () => {
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 3,
+    timeline_schema_version: 4,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -583,7 +589,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   };
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 3,
+    timeline_schema_version: 4,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -613,7 +619,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   expect(() =>
     parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 3,
+      timeline_schema_version: 4,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "run-1",
       spans: [

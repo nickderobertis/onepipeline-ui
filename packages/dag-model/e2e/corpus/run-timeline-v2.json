@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "timeline_schema_version": 3,
+  "timeline_schema_version": 4,
   "observed_at": "2026-07-19T00:10:00+00:00",
   "run_id": "demo",
   "spans": [
@@ -19,7 +19,31 @@
       "label": "api",
       "started_at": "2026-07-19T00:00:01+00:00",
       "ended_at": null,
-      "events": [],
+      "events": [
+        {
+          "id": "e7",
+          "kind": "turn-interrupted",
+          "at": "2026-07-19T00:00:05+00:00",
+          "node_id": "api",
+          "round": 1,
+          "redirection": {
+            "delivered": true,
+            "member": "worker",
+            "input_bytes": 41
+          }
+        },
+        {
+          "id": "e8",
+          "kind": "edit-committed",
+          "at": "2026-07-19T00:00:06+00:00",
+          "round": 1,
+          "redirection": {
+            "delivered": false,
+            "delivery": "deferred",
+            "node_id": "signoff"
+          }
+        }
+      ],
       "parent_id": "round-1",
       "node_id": "api",
       "round": 1

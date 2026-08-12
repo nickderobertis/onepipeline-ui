@@ -67,6 +67,21 @@ export const CHECK_IN_SESSION = "5d2e4f18-9c3a-4b66-82bb-7e4f3a1c8d25";
 export const ORCHESTRATOR_SESSION = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
 /** The round's own check-in, recorded beside it at no node either. */
 export const ROUND_CHECK_IN_SESSION = "9f2a6b31-7c48-4d09-a5ee-3b1d8e6f4a52";
+/** The session the node with no out-of-band turn control is talking in. */
+export const ORPHAN_SESSION = "4d0f6b32-8c15-4a09-b2ee-7f1c3d5a6e28";
+
+/**
+ * The two planner notes the live run carries, and what the run made of each.
+ *
+ * The words are the producing libraries' own: `oneagentgraph` writes the reason a
+ * delivery did not land onto the `turn-interrupted` it publishes for every attempt,
+ * and `onepipeline` records where the note actually went as the `delivery` on the
+ * `context-added` operation its `edit-committed` compiled.
+ */
+export const LIVE_NOTE = "check the transcript pane at phone width too";
+export const DEFERRED_NOTE = "measure the cold start too";
+export const NO_CONTROL_REASON =
+  "the member's run has no out-of-band turn control to serve the request";
 
 /** The verification log one node left behind, and one that was swept. */
 export const GATE_ARTIFACT = "artifact-foundation-gate";
@@ -599,6 +614,75 @@ function writeLiveRun(root) {
     journal.advance(8);
   }
 
+  // The turn the planner redirected. It is open — a `turn-started` with nothing
+  // closing it — which is what makes this node's turn one the run can address, and
+  // the `turn-activity` after the interrupt is the worker doing what it was
+  // redirected to do rather than what it had been doing.
+  journal.advance(2).emit(
+    "agentgraph",
+    "turn-started",
+    {
+      ...round,
+      node: "dashboard",
+      member: "worker",
+      persona: "worker",
+      session: WORKER_SESSION,
+    },
+    { turn: 4 },
+  );
+  journal.advance(3).emit(
+    "agentgraph",
+    "turn-interrupted",
+    {
+      ...round,
+      node: "dashboard",
+      member: "worker",
+      persona: "worker",
+      session: WORKER_SESSION,
+    },
+    {
+      member: "worker",
+      delivered: true,
+      input_bytes: Buffer.byteLength(LIVE_NOTE),
+    },
+  );
+  journal.emit(
+    "pipeline",
+    "edit-committed",
+    { ...round },
+    {
+      // `deliver` is absent because it was `auto`, which is what the SDK's own
+      // `Command` omits: an edit that says nothing about delivery is exactly the
+      // edit the live-edit table always described.
+      command: { op: "context", id: "dashboard", note: LIVE_NOTE },
+      operations: [
+        {
+          kind: "context-added",
+          node: "dashboard",
+          note: LIVE_NOTE,
+          delivery: "live",
+        },
+      ],
+    },
+  );
+  journal.advance(2).emit(
+    "agentgraph",
+    "turn-activity",
+    {
+      ...round,
+      node: "dashboard",
+      member: "worker",
+      persona: "worker",
+      session: WORKER_SESSION,
+    },
+    {
+      kind: "tool_use",
+      name: "Bash",
+      detail: "npx playwright test --grep 'at 390x844'",
+      truncated: false,
+    },
+  );
+
   journal.emit("pipeline", "node-dispatched", {
     ...round,
     node: "publish",
@@ -962,6 +1046,57 @@ function writeUnattributedRun(root) {
     node: "orphan",
     persona: "worker",
   });
+  // The node running on a harness with no out-of-band turn control. The planner
+  // pulled the lever here too, and `oneagentgraph` answered with the fact rather
+  // than a failure — publishing the `turn-interrupted` it publishes for every
+  // attempt, delivered or not — so the note could only ride this node's next
+  // dispatch. It is this fixture's node that reads as *not* interruptible, which
+  // is the reading a planner would otherwise have to assume for every node.
+  journal.advance(1).emit(
+    "agentgraph",
+    "turn-started",
+    {
+      ...round,
+      node: "orphan",
+      member: "worker",
+      persona: "worker",
+      session: ORPHAN_SESSION,
+    },
+    { turn: 1 },
+  );
+  journal.advance(1).emit(
+    "agentgraph",
+    "turn-interrupted",
+    {
+      ...round,
+      node: "orphan",
+      member: "worker",
+      persona: "worker",
+      session: ORPHAN_SESSION,
+    },
+    {
+      member: "worker",
+      delivered: false,
+      input_bytes: Buffer.byteLength(DEFERRED_NOTE),
+      reason: NO_CONTROL_REASON,
+    },
+  );
+  journal.emit(
+    "pipeline",
+    "edit-committed",
+    { ...round },
+    {
+      command: { op: "context", id: "orphan", note: DEFERRED_NOTE },
+      operations: [
+        {
+          kind: "context-added",
+          node: "orphan",
+          note: DEFERRED_NOTE,
+          delivery: "deferred",
+        },
+      ],
+    },
+  );
   journal.write();
 }
 
@@ -1094,6 +1229,12 @@ export function facts() {
       check_in: CHECK_IN_SESSION,
       round_check_in: ROUND_CHECK_IN_SESSION,
       orchestrator: ORCHESTRATOR_SESSION,
+      orphan: ORPHAN_SESSION,
+    },
+    redirection: {
+      live_note: LIVE_NOTE,
+      deferred_note: DEFERRED_NOTE,
+      no_control_reason: NO_CONTROL_REASON,
     },
     remote_open_pr: REMOTE_OPEN_PR,
     foundation_commit: FOUNDATION_COMMIT,

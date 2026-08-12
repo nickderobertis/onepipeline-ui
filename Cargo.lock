@@ -411,7 +411,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1048,9 +1048,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df15c323024ecb823db40b6124176952c24aa6589fb9c58c7f28314d35e82b1f"
+checksum = "4d0cfb34e553ce6a2fcf4501c273c9a963008a41b3f6f6796166c5fc21db50e8"
 dependencies = [
  "clap",
  "libc",
@@ -1068,9 +1068,9 @@ dependencies = [
 
 [[package]]
 name = "oneharness-core"
-version = "0.6.10"
+version = "0.6.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22b632ccb65f47a66e001426cb9a607013e2bd808ea7c3e9471f957fa063dc17"
+checksum = "02380b0b6b8360a7d05f7008a23f61c1c028b40d7a7473beb9e98b0137f4e852"
 dependencies = [
  "fs2",
  "jsonschema",
@@ -1089,9 +1089,9 @@ dependencies = [
 
 [[package]]
 name = "onejudge"
-version = "0.3.7"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb23767a1553205000c690f2706ac692e77f0230daf6fe0f0ed7494e63e5f01a"
+checksum = "2fa0d4ba61cb7c8752af70d05dcb0af31394961e0585a73017988df92b88651d"
 dependencies = [
  "clap",
  "oneharness-core",
@@ -1104,9 +1104,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.1.4"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b56e59596e50d2b032013422fecea36e8f554aa3ba959564c9cb2b5ba0c7abf3"
+checksum = "54afef1ca75dc00b75d0dc66f2a7833e2cd88e156efc03ee623a379a5caa8658"
 dependencies = [
  "clap",
  "libc",
@@ -1143,9 +1143,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.1.3"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e25ba270c8c3dae3cdc0ea44e87d4daa98bd2290661f6cbeb15024ad8dc5e8"
+checksum = "e7ce61240a8564eaa2f1b85e275c1a272b4f076199bd6735356f6ab07c2c3a36"
 dependencies = [
  "clap",
  "fs4",
@@ -1386,7 +1386,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1443,7 +1443,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1804,7 +1804,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2276,7 +2276,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

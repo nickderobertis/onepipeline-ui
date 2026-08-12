@@ -258,6 +258,27 @@ Escape key. It is a **timeline over a transcript**, both projected from
   until this repository's read model emits it,
   `src/features/timeline/timeline-model.ts` recovers the same grouping from the
   nesting and roles schema 9 does serve.
+- whether the run **has a turn it can reach** for this node is stated in its header,
+  beside the state badge, for as long as it is working. A planner deciding whether
+  to redirect a running node or stop it needs that first, because absent an answer
+  the safe assumption is "cancel" — the expensive one. It is deliberately the
+  narrower claim: a reachable turn is one a note can be *delivered into*, not a
+  promise the harness will act on it, and nothing in the published stack reports the
+  latter for a turn in flight. `Round.node_control` carries one entry per node in
+  flight and none for any other, so a settled node says nothing here rather than
+  saying it cannot be reached.
+  The badge is a word and not the clause behind it: this header is the one thing above
+  a plot sized from what it leaves, and the collapsed line is the view a node opens
+  on, so the reason rides the badge's accessible description — where a pointer and a
+  screen reader both reach it — and the record that states it at length is the
+  redirection below.
+- a **redirected turn** is a record in the transcript at the moment it happened,
+  saying whether the note went into the turn that was already running or onto the
+  node's next dispatch. A turn that ran for two hours and changed what it was doing
+  halfway is otherwise unreadable: the transcript shows a worker inexplicably
+  switching tasks. Opened, it states the delivery, the member addressed and how many
+  bytes were offered — never the planner's prose, which is not what a reader of the
+  turn is asking — and, for one that did not land, the producing library's own reason.
 - the node's **task, completion criteria, dependencies, PR and gate result** are
   tabs beside the timeline, one selection away rather than a wall of blocks. Six
   names do not fit every width, so below the breakpoint they wrap onto a second
@@ -333,6 +354,8 @@ being photographed.
 | `06-node-expanded` | the same view with one row per category |
 | `07-node-item-detail` | a verification opened over that reading |
 | `08-conversation` | a conversation in the right panel |
+| `09-node-redirected` | a node reading as having a reachable turn, with the redirection that turn took open beside it |
+| `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

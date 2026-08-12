@@ -562,7 +562,28 @@ export function laneLabel(lane: LaneId): string {
   return LANE_LABELS[lane];
 }
 
+/**
+ * What one redirection is called where it sits in the record it interrupted.
+ *
+ * A turn that ran for two hours and changed what it was doing halfway is unreadable
+ * afterwards unless this moment is named: the transcript otherwise shows a worker
+ * inexplicably switching tasks. So the row says which of the two things happened —
+ * the running turn took the note, or it did not and the note is owed to the node's
+ * next dispatch — rather than the served kind, which says only that a lever was
+ * pulled.
+ */
+export function redirectionLabel(event: TimelineEvent): string | undefined {
+  if (event.redirection === undefined) return undefined;
+  return event.redirection.delivered
+    ? "Redirected into the running turn"
+    : "Redirection deferred to the next dispatch";
+}
+
+/** The category a redirection is read under, in the words the lane legend uses. */
+export const REDIRECTION_KIND = "Redirection";
+
 function eventRow(event: TimelineEvent): TimelineRow {
+  const redirected = redirectionLabel(event);
   return {
     rowKind: "event",
     event,
@@ -575,10 +596,11 @@ function eventRow(event: TimelineEvent): TimelineRow {
     durationMs: null,
     children: [],
     displayLabel:
-      event.kind === "retry-requested"
+      redirected ??
+      (event.kind === "retry-requested"
         ? "Retry requested"
-        : (event.step_id ?? event.kind),
-    displayKind: "Event",
+        : (event.step_id ?? event.kind)),
+    displayKind: redirected === undefined ? "Event" : REDIRECTION_KIND,
   };
 }
 

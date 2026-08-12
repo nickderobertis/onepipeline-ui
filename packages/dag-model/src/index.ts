@@ -69,8 +69,13 @@ export const API_V2_TIMELINE_SCOPES = {
  * `11` is where an unmeasured timing became `null` instead of `0`. A server on
  * `10` served a measured-looking zero for every lane nothing reports, which is
  * the reading this client must never show.
+ *
+ * `12` is where a round began saying, per node it has in flight, whether that
+ * node's turn can be redirected. A server on `11` carries no `node_control` at
+ * all, and the only safe reading of an absent entry is "cannot be corrected" —
+ * which sends a planner to cancel every node that could have been corrected.
  */
-export const TELEMETRY_SCHEMA_VERSION = 11;
+export const TELEMETRY_SCHEMA_VERSION = 12;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -78,8 +83,14 @@ export const TELEMETRY_SCHEMA_VERSION = 11;
  * `3` is where a `rollup` span stopped implying a dispatch: one may now carry no
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
+ *
+ * `4` is where an event began carrying the redirection it was. A server on `3`
+ * serves a `turn-interrupted` as its kind and its stamp alone, so the moment a
+ * planner changed what a running turn was doing is indistinguishable from any
+ * other journal record — and the turn after it reads as a worker inexplicably
+ * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 3;
+export const TIMELINE_SCHEMA_VERSION = 4;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -543,6 +554,34 @@ export const nodeStatusSchema = z.enum([
   "cancelled",
   "unknown",
 ]);
+/**
+ * Whether the run has a turn it can address for one in-flight node.
+ *
+ * `addressable`, deliberately not `interruptible`: it is the precondition for
+ * delivering a planner's note into a running turn, and it is the whole of what a
+ * server can prove. Whether the harness will *take* the redirection is onejudge's
+ * `control`, which no published component reports for a turn in flight — so a
+ * field named for that answer would promise what nothing can supply.
+ *
+ * Never absent for a node the round has in flight, because "no answer" and "cannot"
+ * read the same to a planner and only one of them is true. `reason` is present
+ * exactly when `addressable` is false. `member` is the graph member whose turn the
+ * run would address.
+ */
+export const nodeControlSchema = openObject({
+  addressable: z.boolean(),
+  member: z.string().min(1).optional(),
+  reason: z.string().min(1).optional(),
+}).superRefine((control, context) => {
+  if (control.addressable === (control.reason !== undefined)) {
+    context.addIssue({
+      code: "custom",
+      path: ["reason"],
+      message: "a reason is carried exactly when there is no turn to address",
+    });
+  }
+});
+
 export const roundSchema = openObject({
   run_id: z.string().min(1),
   round: counter,
@@ -565,6 +604,11 @@ export const roundSchema = openObject({
    * refs on a settled result.
    */
   node_gated_by: z.record(z.string(), z.array(z.string().min(1))),
+  /**
+   * One entry for every node this round has in flight, and for no other: a node
+   * with no turn has nothing to redirect. Empty for a round that has closed.
+   */
+  node_control: z.record(z.string(), nodeControlSchema),
   node_results: z.record(z.string(), graphResultItemSchema),
   attestations: z.array(z.string()),
   result: graphPayloadSchema.nullable(),
@@ -592,6 +636,22 @@ export const roundSchema = openObject({
       code: "custom",
       path: ["node_gated_by"],
       message: "must name only nodes in this round's plan",
+    });
+  }
+  // A subset rather than an equality, which is the whole of what can be required
+  // here: a round that closed with a node still recorded `running` — a driver that
+  // died mid-round — has nothing in flight to report, and this repository's own
+  // server serves exactly that, an empty `node_control` beside a `running` status.
+  // Demanding an entry would refuse the payload of every run that ended that way.
+  // llmlint: ignore[boundary_inputs_validated] the missing direction is not a validation this contract can state: `node_status` is what the round *recorded* and `node_control` is what is *in flight now*, and a closed round has the first without the second. `src/payload.rs`'s `round` is where the two are decided together, and `tests/e2e/server.rs` holds it to serving one entry per running node of an open round and none for a closed one.
+  const invalidControl = Object.keys(round.node_control).find(
+    (nodeId) => round.node_status[nodeId] !== "running",
+  );
+  if (invalidControl !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["node_control"],
+      message: "must name only nodes this round has in flight",
     });
   }
 });
@@ -768,9 +828,57 @@ export const timelineReferenceSchema = openObject({
   value: z.string().min(1),
 });
 /**
+ * The moment a planner redirected a node, as the two records that describe it agree.
+ *
+ * `delivered` is the one field both fill and the one a reader of a turn that changed
+ * behaviour is asking: did the note reach the turn that was already running.
+ * `oneagentgraph`'s `turn-interrupted` adds the member it addressed, the bytes it
+ * offered, and — exactly when the turn did not take them — why; `onepipeline`'s
+ * `edit-committed` adds `delivery`, its own word for where the note ended up, and the
+ * node it was for. `reason` is never carried beside a delivered redirection, so one
+ * can never be read as having had a reason it failed.
+ */
+export const redirectionSchema = openObject({
+  delivered: z.boolean(),
+  delivery: z.enum(["live", "deferred"]).optional(),
+  member: z.string().min(1).optional(),
+  input_bytes: counter.optional(),
+  reason: z.string().min(1).optional(),
+  node_id: z.string().min(1).optional(),
+}).superRefine((redirection, context) => {
+  if (redirection.delivered && redirection.reason !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["reason"],
+      message: "a delivered redirection carries no reason it did not land",
+    });
+  }
+  // The two fields are one fact read by the two producers that record it, so a
+  // payload where they disagree is not a redirection this client can render: it
+  // would have to choose which half to believe, and either choice is a lie about
+  // where the planner's note went.
+  if (
+    redirection.delivery !== undefined &&
+    redirection.delivered !== (redirection.delivery === "live")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["delivery"],
+      message:
+        "`delivery` is `live` exactly when the running turn took the note",
+    });
+  }
+});
+
+/**
  * `kind` is an open string on purpose: it is the journal event kind that produced
  * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
+ *
+ * `redirection` appears only on the records that are one — a `turn-interrupted`, or
+ * an `edit-committed` that added context to a node — and is deliberately not *keyed*
+ * on those two names here, for the same reason `kind` is open at all.
  */
+// llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
   id: z.string().min(1),
   kind: z.string().min(1),
@@ -779,6 +887,7 @@ export const timelineEventSchema = openObject({
   step_id: z.string().min(1).optional(),
   round: counter.optional(),
   status: z.string().min(1).optional(),
+  redirection: redirectionSchema.optional(),
   reference: timelineReferenceSchema.optional(),
 });
 /**
@@ -920,6 +1029,10 @@ export type PlanTask = z.infer<typeof planTaskSchema>;
 export type GraphResultItem = z.infer<typeof graphResultItemSchema>;
 export type GraphPayload = z.infer<typeof graphPayloadSchema>;
 export type Round = z.infer<typeof roundSchema>;
+/** Whether the run has a turn it can address for one in-flight node. */
+export type NodeControl = z.infer<typeof nodeControlSchema>;
+/** The moment a planner redirected a node's running turn. */
+export type Redirection = z.infer<typeof redirectionSchema>;
 export type DagConversation = z.infer<typeof dagConversationSchema>;
 export type NodeConversations = z.infer<typeof nodeConversationsSchema>;
 export type RunConversations = z.infer<typeof runConversationsSchema>;

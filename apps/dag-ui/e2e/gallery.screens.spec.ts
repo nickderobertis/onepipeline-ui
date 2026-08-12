@@ -180,6 +180,41 @@ const SURFACES: readonly Surface[] = [
       ).toBeVisible();
     },
   },
+  {
+    name: "09-node-redirected",
+    title: "A node whose running turn a planner redirected",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
+      // The header's reading of whether this node can be corrected, and the record
+      // of the correction that already reached it, in one frame: the badge is what a
+      // planner acts on and the transcript row is what explains the turn afterwards.
+      await expect(page.getByLabel(/^Turn reachable: /)).toBeVisible();
+      await page
+        .getByRole("region", { name: "Node transcript" })
+        .getByRole("article")
+        .filter({ hasText: "Redirected into the running turn" })
+        .click();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).toContainText("Live — into the turn that was already running");
+    },
+  },
+  {
+    name: "10-node-no-turn-to-reach",
+    title: "A node with no lever, and the note that could only be deferred",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().unattributed}&node=orphan`);
+      await expect(page.getByLabel(/^No turn to reach: /)).toBeVisible();
+      await page
+        .getByRole("region", { name: "Node transcript" })
+        .getByRole("article")
+        .filter({ hasText: "Redirection deferred to the next dispatch" })
+        .click();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).toContainText("Why it was not delivered");
+    },
+  },
 ];
 
 const fileName = (surface: Surface, size: Viewport): string =>

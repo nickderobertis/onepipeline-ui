@@ -280,7 +280,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 11);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 12);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
@@ -805,6 +805,63 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         wire(oneagentgraph::event::EventKind::TurnCompleted),
         graph::TURN_COMPLETED
     );
+    // The six names the turn-control reading rests on: three that say a member is
+    // in a turn and three that say it is not. A kind renamed there fails here
+    // rather than making every in-flight node read as un-redirectable.
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnStarted),
+        graph::TURN_STARTED
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnInterrupted),
+        graph::TURN_INTERRUPTED
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::MemberDied),
+        graph::MEMBER_DIED
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::MemberSettled),
+        graph::MEMBER_SETTLED
+    );
+
+    // The `turn-interrupted` payload, as that library writes it: every key this
+    // crate reads is one of its fields, and none of its fields is one this crate
+    // has no reading for. The refusal carries a reason and the delivery does not,
+    // which is the discipline the served `redirection` keeps in turn.
+    let refused = serde_json::to_value(oneagentgraph::event::TurnInterrupted {
+        member: "worker".into(),
+        delivered: false,
+        input_bytes: 31,
+        reason: Some("the member is between turns".into()),
+    })
+    .expect("the refusal serializes");
+    let declared: Vec<&str> = refused
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            graph::MEMBER,
+            graph::DELIVERED,
+            graph::INPUT_BYTES,
+            graph::REASON
+        ]
+    );
+    let delivered = serde_json::to_value(oneagentgraph::event::TurnInterrupted {
+        member: "worker".into(),
+        delivered: true,
+        input_bytes: 31,
+        reason: None,
+    })
+    .expect("the delivery serializes");
+    assert!(
+        delivered.get(graph::REASON).is_none(),
+        "a delivered redirection has no reason it did not land: {delivered}"
+    );
 
     // The payload a `turn-completed` carries, as that library writes it: every
     // key this crate reads is one of its fields, and none of its fields is one
@@ -849,6 +906,50 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         .and_then(|payload| payload.keys().next().cloned()),
         Some(graph::USAGE.to_owned()),
         "the usage sits where this crate looks for it"
+    );
+}
+
+/// The `context` edit whose delivery this crate serves, against the SDK's own
+/// declaration of it.
+///
+/// `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private
+/// module, so the compiled operation an `edit-committed` carries is read as the
+/// wire strings that library writes — the same terms as the `onevcs` vocabulary,
+/// and for the same reason. What *is* public beside it is the submitted
+/// `channel::Command`, and it is what fixes the two words the operation's
+/// `delivery` can hold: `live` is the mode a planner asks for and `next` is the
+/// mode that refuses it, so a rename there is a rename of what this crate reads.
+///
+/// Making that module public is the proposal recorded in `src/AGENTS.md`; until
+/// it lands, this plus the goldens written from a real reconciler's records is
+/// the whole of the gate available.
+#[test]
+fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
+    use onepipeline::channel::{Command, Deliver};
+
+    let submitted = |deliver: Deliver| {
+        serde_json::to_value(Command::Context {
+            id: "docs".into(),
+            note: "and the control field".into(),
+            deliver,
+        })
+        .expect("the command serializes")
+    };
+    // The shape `tests/support/fixture_run.rs` writes onto an `edit-committed`.
+    assert_eq!(
+        submitted(Deliver::Auto),
+        serde_json::json!({ "op": "context", "id": "docs", "note": "and the control field" }),
+        "an edit that says nothing about delivery is the edit the table always described"
+    );
+    assert_eq!(
+        submitted(Deliver::Live)["deliver"],
+        serde_json::json!("live"),
+        "the word a delivered note's `delivery` is recorded as"
+    );
+    assert_eq!(
+        submitted(Deliver::Next)["deliver"],
+        serde_json::json!("next"),
+        "the mode that only ever defers, which is the other half of the pair"
     );
 }
 
