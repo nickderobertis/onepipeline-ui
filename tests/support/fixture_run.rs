@@ -553,6 +553,30 @@ pub fn append(dir: &Path, kind: &str, payload: Value) {
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
+/// Append one event a *sibling* relayed, with labels of its own.
+///
+/// [`append`] writes this crate's own kind at the run's level, which is all a
+/// live round's own progress needs. A relayed record is stamped with the node
+/// and the member the producing library named, and a journey about what this
+/// crate makes of one has to be able to write exactly that.
+pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, payload: Value) {
+    let journal = dir.join("events.jsonl");
+    let existing = fs::read_to_string(&journal).unwrap_or_default();
+    let seq = existing.lines().count();
+    let line = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:01:00.000Z",
+        "stream": "a-recording-host-4243",
+        "seq": seq,
+        "source": source,
+        "kind": kind,
+        "labels": labels,
+        "payload": payload,
+        "artifacts": [],
+    });
+    fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
+}
+
 /// A run whose second round is still open: a lifecycle node with steps, a human
 /// action nobody has taken, a node gated by it, and a surface the planner has
 /// not read.

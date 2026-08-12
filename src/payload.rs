@@ -1111,28 +1111,23 @@ fn member_turn_states<'a>(
             graph::MEMBER_DIED | graph::MEMBER_SETTLED => {
                 TurnState::Ended("the member is no longer running")
             }
-            graph::TURN_INTERRUPTED => {
-                if event
-                    .payload
-                    .get(graph::DELIVERED)
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    // A turn that has just taken a redirection is a controllable
-                    // turn, and is still running: that is what delivery means.
-                    TurnState::InFlight
-                } else {
-                    TurnState::Ended(
-                        event
-                            .payload
-                            .get(graph::REASON)
-                            .and_then(Value::as_str)
-                            .unwrap_or(
-                                "the last redirection this run offered it was not delivered",
-                            ),
-                    )
-                }
-            }
+            // A record that does not say whether it was delivered says nothing
+            // about the turn either. Reading it as a refusal would report a node
+            // as un-correctable on the strength of a record this build could not
+            // read, and `delivered` is required on the sibling's own type.
+            graph::TURN_INTERRUPTED => match delivered(event) {
+                // A turn that has just taken a redirection is a controllable
+                // turn, and is still running: that is what delivery means.
+                Some(true) => TurnState::InFlight,
+                Some(false) => TurnState::Ended(
+                    // A reason the sibling wrote nothing into is no reason: the
+                    // served `reason` is a sentence a planner reads, so an empty
+                    // one is replaced by this crate's own account of the record.
+                    non_empty(event.payload.get(graph::REASON).and_then(Value::as_str))
+                        .unwrap_or("the last redirection this run offered it was not delivered"),
+                ),
+                None => continue,
+            },
             // Every other kind the sibling relays says something about the member
             // that is not about its turn, and must not be read as either answer.
             _ => continue,
@@ -2109,26 +2104,32 @@ fn turn_ids(view: &RunView) -> Vec<Option<Turn>> {
 /// running. `reason` is carried only beside a `false`, which is the discipline
 /// `TurnInterrupted` itself keeps — a served redirection can never be read as
 /// having had a reason to fail.
+///
+/// Both readings are validated before anything is served, and a record that
+/// fails either is served as **no redirection at all** rather than as a
+/// redirection that did not land: `delivered` is required on the sibling's own
+/// type, and `delivery` is a closed pair. A malformed record read as `false`
+/// would tell a planner their note is still owed to a node it may already have
+/// reached, which is worse than the record being absent.
 fn redirection(event: &Envelope) -> Option<Value> {
     let mut record = Map::new();
     match (event.source, event.kind.0.as_str()) {
         (Source::Agentgraph, graph::TURN_INTERRUPTED) => {
-            let delivered = event
-                .payload
-                .get(graph::DELIVERED)
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let delivered = delivered(event)?;
             record.insert("delivered".into(), json!(delivered));
-            if let Some(member) = event
-                .payload
-                .get(graph::MEMBER)
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    event
-                        .labels
-                        .extra
-                        .get(graph::MEMBER)
-                        .and_then(Value::as_str)
+            // Each of the three strings below is served only when the record
+            // actually carries one: the wire types them non-empty, so a blank
+            // field is a record that said nothing and must be absent rather than
+            // present and empty.
+            if let Some(member) =
+                non_empty(event.payload.get(graph::MEMBER).and_then(Value::as_str)).or_else(|| {
+                    non_empty(
+                        event
+                            .labels
+                            .extra
+                            .get(graph::MEMBER)
+                            .and_then(Value::as_str),
+                    )
                 })
             {
                 record.insert("member".into(), json!(member));
@@ -2141,7 +2142,9 @@ fn redirection(event: &Envelope) -> Option<Value> {
                 record.insert("input_bytes".into(), json!(bytes));
             }
             if !delivered {
-                if let Some(reason) = event.payload.get(graph::REASON).and_then(Value::as_str) {
+                if let Some(reason) =
+                    non_empty(event.payload.get(graph::REASON).and_then(Value::as_str))
+                {
                     record.insert("reason".into(), json!(reason));
                 }
             }
@@ -2151,20 +2154,43 @@ fn redirection(event: &Envelope) -> Option<Value> {
         {
             let context = context_added(event)?;
             // Absent is `deferred`, which is what a record written before
-            // delivery had modes means and the only thing those records did.
-            let delivery = context
-                .get(edits::DELIVERY)
-                .and_then(Value::as_str)
-                .unwrap_or(edits::DEFERRED);
+            // delivery had modes means and the only thing those records did. A
+            // word outside the pair is a record this build cannot read, and is
+            // dropped rather than relayed for a client to fail on.
+            let delivery = match context.get(edits::DELIVERY).and_then(Value::as_str) {
+                None | Some(edits::DEFERRED) => edits::DEFERRED,
+                Some(edits::LIVE) => edits::LIVE,
+                Some(_) => return None,
+            };
             record.insert("delivered".into(), json!(delivery == edits::LIVE));
             record.insert("delivery".into(), json!(delivery));
-            if let Some(node) = context.get(edits::NODE).and_then(Value::as_str) {
+            if let Some(node) = non_empty(context.get(edits::NODE).and_then(Value::as_str)) {
                 record.insert("node_id".into(), json!(node));
             }
         }
         _ => return None,
     }
     Some(Value::Object(record))
+}
+
+/// One recorded string, or `None` when what was recorded is blank.
+///
+/// Every string the redirection and the control reading serve is typed non-empty
+/// on the wire, so a producer that wrote a field and left it blank has said
+/// nothing rather than said something empty — and absent is what nothing is.
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.filter(|recorded| !recorded.trim().is_empty())
+}
+
+/// Whether one `turn-interrupted` says the running turn took the redirection.
+///
+/// `None` when the record does not say — which is not the same as saying no.
+/// `TurnInterrupted::delivered` is a required `bool` on the sibling's own type,
+/// so a record missing it, or carrying anything else there, is one this build
+/// cannot read; both readers of it treat that as the record having said nothing
+/// rather than as a delivery that failed.
+fn delivered(event: &Envelope) -> Option<bool> {
+    event.payload.get(graph::DELIVERED)?.as_bool()
 }
 
 /// The `context-added` operation one `edit-committed` compiled to, if it did.

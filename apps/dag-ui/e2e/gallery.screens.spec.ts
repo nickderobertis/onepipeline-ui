@@ -188,9 +188,7 @@ const SURFACES: readonly Surface[] = [
       // The header's reading of whether this node can be corrected, and the record
       // of the correction that already reached it, in one frame: the badge is what a
       // planner acts on and the transcript row is what explains the turn afterwards.
-      await expect(page.locator(".node-view-control")).toHaveText(
-        "Interruptible",
-      );
+      await expect(page.getByLabel(/^Interruptible: /)).toBeVisible();
       await page
         .getByRole("region", { name: "Node transcript" })
         .getByRole("article")
@@ -206,9 +204,7 @@ const SURFACES: readonly Surface[] = [
     title: "A node with no lever, and the note that could only be deferred",
     open: async (page) => {
       await page.goto(`/?run=${runs().unattributed}&node=orphan`);
-      await expect(page.locator(".node-view-control")).toHaveText(
-        "Not interruptible",
-      );
+      await expect(page.getByLabel(/^Not interruptible: /)).toBeVisible();
       await page
         .getByRole("region", { name: "Node transcript" })
         .getByRole("article")

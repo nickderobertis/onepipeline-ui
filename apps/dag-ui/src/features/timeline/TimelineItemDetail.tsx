@@ -424,7 +424,6 @@ function Publication({
   );
 }
 
-/** Whatever the timeline recorded, in the fields the contract gives it. */
 /**
  * The moment a planner redirected this node, read as what it changed.
  *
@@ -482,6 +481,7 @@ function Redirection({
   );
 }
 
+/** Whatever the timeline recorded, in the fields the contract gives it. */
 function Recorded({
   row,
   reference,

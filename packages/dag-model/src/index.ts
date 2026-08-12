@@ -634,9 +634,12 @@ export const roundSchema = openObject({
       message: "must name only nodes in this round's plan",
     });
   }
-  // A subset rather than an equality: a round that closed with a node still
-  // recorded `running` — a driver that died mid-round — has nothing in flight to
-  // report, and demanding an entry there would sever exactly that history.
+  // A subset rather than an equality, which is the whole of what can be required
+  // here: a round that closed with a node still recorded `running` — a driver that
+  // died mid-round — has nothing in flight to report, and this repository's own
+  // server serves exactly that, an empty `node_control` beside a `running` status.
+  // Demanding an entry would refuse the payload of every run that ended that way.
+  // llmlint: ignore[boundary_inputs_validated] the missing direction is not a validation this contract can state: `node_status` is what the round *recorded* and `node_control` is what is *in flight now*, and a closed round has the first without the second. `src/payload.rs`'s `round` is where the two are decided together, and `tests/e2e/server.rs` holds it to serving one entry per running node of an open round and none for a closed one.
   const invalidControl = Object.keys(round.node_control).find(
     (nodeId) => round.node_status[nodeId] !== "running",
   );
@@ -846,6 +849,21 @@ export const redirectionSchema = openObject({
       message: "a delivered redirection carries no reason it did not land",
     });
   }
+  // The two fields are one fact read by the two producers that record it, so a
+  // payload where they disagree is not a redirection this client can render: it
+  // would have to choose which half to believe, and either choice is a lie about
+  // where the planner's note went.
+  if (
+    redirection.delivery !== undefined &&
+    redirection.delivered !== (redirection.delivery === "live")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["delivery"],
+      message:
+        "`delivery` is `live` exactly when the running turn took the note",
+    });
+  }
 });
 
 /**
@@ -853,8 +871,10 @@ export const redirectionSchema = openObject({
  * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
  *
  * `redirection` appears only on the records that are one — a `turn-interrupted`, or
- * an `edit-committed` that added context to a node.
+ * an `edit-committed` that added context to a node — and is deliberately not *keyed*
+ * on those two names here, for the same reason `kind` is open at all.
  */
+// llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
   id: z.string().min(1),
   kind: z.string().min(1),

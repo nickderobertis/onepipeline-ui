@@ -652,7 +652,9 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
 test("says which of the nodes still working can be corrected", async ({
   page,
 }) => {
-  const control = page.locator(".node-view-facts .node-view-control");
+  // Asked for by the accessible name the badge carries, which is the word an
+  // operator reads plus the reason behind it — the whole of what this states.
+  const control = page.getByLabel(/^(Not i|I)nterruptible: /);
 
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   await expect(control).toHaveText("Interruptible");

@@ -29,7 +29,6 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ControlBadge } from "../../lib/ControlBadge";
 import {
   isUnhealthy,
   type NodeView,
@@ -43,6 +42,7 @@ import {
   NODE_TAB_LABELS,
   type NodeTab,
 } from "../../lib/useUrlSelection";
+import { ControlBadge } from "./ControlBadge";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
   compactTimelineItems,

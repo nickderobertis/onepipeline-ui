@@ -1190,6 +1190,106 @@ fn a_redirected_turn_is_a_record_on_the_nodes_own_timeline() {
     );
 }
 
+/// A record this build cannot read is served as no redirection, never as one
+/// that did not land.
+///
+/// The two halves are the two producers'. `delivered` is a required `bool` on
+/// `oneagentgraph`'s own type, and `delivery` is `onepipeline`'s closed pair —
+/// so a record missing the first or carrying a third word in the second is one
+/// this build has no reading for. Serving it as "not delivered" would tell a
+/// planner their note is still owed to a node it may already have reached.
+#[test]
+fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let at_node = |node: &str| {
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "round": 2,
+                "node": node,
+                "member": "worker",
+                "persona": "worker",
+            })
+        };
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-interrupted",
+            at_node(fixture_run::REDIRECTED_NODE_ID),
+            json!({ "member": "worker", "input_bytes": 12 }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "pipeline",
+            "edit-committed",
+            json!({ "run_id": fixture_run::RUN_ID, "round": 2 }),
+            json!({
+                "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
+                "operations": [{
+                    "kind": "context-added",
+                    "node": fixture_run::REDIRECTED_NODE_ID,
+                    "note": "x",
+                    "delivery": "someday",
+                }],
+            }),
+        );
+    });
+
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::REDIRECTED_NODE_ID
+        ),
+    )
+    .json();
+    let unreadable = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == "node")
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+        .expect("the appended record is still on the node's timeline");
+    assert_eq!(unreadable["kind"], json!("turn-interrupted"));
+    assert!(
+        unreadable.get("redirection").is_none(),
+        "a record with no `delivered` says nothing about delivery: {unreadable}"
+    );
+
+    let run = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let control = &run["rounds"][1]["node_control"][fixture_run::REDIRECTED_NODE_ID];
+    assert_eq!(
+        control["interruptible"],
+        json!(true),
+        "a record this build cannot read must not turn a correctable node un-correctable: {control}"
+    );
+    let edits: Vec<Value> = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "edit-committed")
+        .collect();
+    let unknown = edits
+        .iter()
+        .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+        .expect("the appended edit is still on the run's timeline");
+    assert!(
+        unknown.get("redirection").is_none(),
+        "a delivery word outside the pair is not relayed for a client to fail on: {unknown}"
+    );
+}
+
 /// A redirection is published from inside a turn, so it is not a turn.
 #[test]
 fn a_redirection_is_not_counted_as_a_turn_of_the_transcript_it_interrupted() {
