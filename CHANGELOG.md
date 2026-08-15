@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.3.4...v0.4.0) - 2026-08-15
+
+### Added
+
+- [**breaking**] adopt the roundless onepipeline SDK and expose stream filters ([#17](https://github.com/nickderobertis/onepipeline-ui/pull/17))
+
 ## [0.3.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.3.2...v0.3.3) - 2026-08-12
 
 ### Added
