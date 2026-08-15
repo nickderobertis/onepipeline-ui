@@ -1630,7 +1630,9 @@ describe("the reading a viewer asks for", () => {
   /** The filter every read of the selected run was taken under, in order. */
   const filtersAsked = (fetch: { mock: { calls: unknown[][] } }): string[] =>
     fetch.mock.calls
-      .map((call: unknown[]) => new URL(String(call[0]), window.location.origin))
+      .map(
+        (call: unknown[]) => new URL(String(call[0]), window.location.origin),
+      )
       .filter((url) => isRunDetail(url) || isTimeline(url))
       .map((url) => url.searchParams.get("filter") ?? "");
 
@@ -1654,7 +1656,9 @@ describe("the reading a viewer asks for", () => {
       // so rather than leaving both settings looking equally selected.
       expect(activity).toHaveAttribute("aria-pressed", "true");
       expect(decisions).toHaveAttribute("aria-pressed", "false");
-      await waitFor(() => expect(filtersAsked(fetch).length).toBeGreaterThan(0));
+      await waitFor(() =>
+        expect(filtersAsked(fetch).length).toBeGreaterThan(0),
+      );
       expect(new Set(filtersAsked(fetch))).toEqual(new Set(["monitor"]));
 
       // Narrowing to the decisions is one click, and every read of the run is
@@ -1704,7 +1708,9 @@ describe("the reading a viewer asks for", () => {
       const { client, fetch } = telemetryHarness();
       render(<App client={client} />);
       await screen.findByRole("heading", { name: LIVE_RUN });
-      await waitFor(() => expect(filtersAsked(fetch).length).toBeGreaterThan(0));
+      await waitFor(() =>
+        expect(filtersAsked(fetch).length).toBeGreaterThan(0),
+      );
       // Every read from the first one: a bookmarked reading is not a reading the
       // app arrives at after showing the other one first.
       expect(new Set(filtersAsked(fetch))).toEqual(new Set(["planner"]));

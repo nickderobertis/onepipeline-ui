@@ -104,17 +104,13 @@
           "id": "approve",
           "kind": "human",
           "task": "Approve",
-          "deps": [
-            "build"
-          ]
+          "deps": ["build"]
         },
         {
           "id": "release",
           "persona": "engineer",
           "task": "Release",
-          "deps": [
-            "approve"
-          ]
+          "deps": ["approve"]
         },
         {
           "id": "publish",
@@ -125,9 +121,7 @@
           "id": "cleanup",
           "persona": "engineer",
           "task": "Clean up",
-          "deps": [
-            "publish"
-          ]
+          "deps": ["publish"]
         }
       ]
     },
@@ -144,12 +138,8 @@
       "cleanup": "skipped"
     },
     "node_gated_by": {
-      "release": [
-        "approve"
-      ],
-      "cleanup": [
-        "publish"
-      ]
+      "release": ["approve"],
+      "cleanup": ["publish"]
     },
     "node_control": {
       "build": {
@@ -171,9 +161,7 @@
       {
         "id": "approve",
         "kind": "human-action",
-        "unblocks": [
-          "release"
-        ]
+        "unblocks": ["release"]
       }
     ],
     "attestations": [],

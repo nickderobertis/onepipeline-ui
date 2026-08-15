@@ -1,8 +1,8 @@
 /**
  * The recorded run directories the browser journeys are driven against.
  *
- * These are the files `onepipeline` itself records — a launch record, a plan, a
- * per-round plan and result, and the merged event store — so the server under test
+ * These are the files `onepipeline` itself records — a launch record, a plan, the
+ * run's own recorded result, and the merged event store — so the server under test
  * reads them through the SDK exactly as it reads an operator's own runs. Nothing here
  * doubles the read API: it writes what an executor would have written and leaves the
  * projection entirely to the server.
@@ -19,7 +19,7 @@ import { join } from "node:path";
 export const LIVE_RUN = "dag-ui-live";
 /** A settled run, so the navigation has a second launching session to group. */
 export const HISTORY_RUN = "dag-ui-history";
-/** A settled round holding the outcomes only a finished round records. */
+/** A settled run holding the outcomes only a recorded result carries. */
 export const OUTCOMES_RUN = "dag-ui-outcomes";
 /** A run whose result was recorded with no authoritative journal behind it. */
 export const LEGACY_RUN = "dag-ui-legacy";
@@ -27,7 +27,7 @@ export const LEGACY_RUN = "dag-ui-legacy";
 export const SIBLING_RUN = "dag-ui-sibling";
 /** A run with no launching session recorded at all. */
 export const UNATTRIBUTED_RUN = "dag-ui-unattributed";
-/** A run whose round is prepared and whose journal is still empty. */
+/** A run whose plan is written and whose journal is still empty. */
 export const EVENTLESS_RUN = "dag-ui-eventless";
 /** One node whose recorded work is hundreds of dispatched sessions. */
 export const BUSY_RUN = "dag-ui-busy";
@@ -65,8 +65,8 @@ export const LINT_SESSION = "llmlint-dashboard";
 export const CHECK_IN_SESSION = "5d2e4f18-9c3a-4b66-82bb-7e4f3a1c8d25";
 /** The run's own driving session, recorded at no node. */
 export const ORCHESTRATOR_SESSION = "1b7c5a90-2d4e-4f11-93cc-8f5a2b0d9e36";
-/** The round's own check-in, recorded beside it at no node either. */
-export const ROUND_CHECK_IN_SESSION = "9f2a6b31-7c48-4d09-a5ee-3b1d8e6f4a52";
+/** The run's own check-in, recorded beside it at no node either. */
+export const RUN_CHECK_IN_SESSION = "9f2a6b31-7c48-4d09-a5ee-3b1d8e6f4a52";
 /** The session the node with no out-of-band turn control is talking in. */
 export const ORPHAN_SESSION = "4d0f6b32-8c15-4a09-b2ee-7f1c3d5a6e28";
 
@@ -112,7 +112,6 @@ function launch(runId, launcher, session, startedAt, pid) {
     // liveness verdict off whichever machine happens to run the browser tier.
     host: "a-recording-host",
     started_at: startedAt,
-    round_budget: 14400,
     heartbeat_interval: 1800,
     adoptions: 0,
   };
@@ -182,7 +181,7 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
 
 function runDir(root, runId) {
   const dir = join(root, runId);
-  mkdirSync(join(dir, "round-01"), { recursive: true });
+  mkdirSync(dir, { recursive: true });
   return dir;
 }
 
@@ -198,8 +197,7 @@ const LIVE_TASKS = [
   {
     id: "foundation",
     persona: "worker",
-    task: "## What\nPrepare the shared contracts.",
-    done_when: "The contract tests pass",
+    task: "## What\nPrepare the shared contracts.\n\n## Acceptance criteria\nThe contract tests pass",
     repo: "example/repo",
     branch: "feature/foundation",
     base_branch: "main",
@@ -212,36 +210,31 @@ const LIVE_TASKS = [
   {
     id: "local-direct",
     persona: "worker",
-    task: "## What\nPublish directly from a local-first workflow.",
-    done_when: "The commit reaches main",
+    task: "## What\nPublish directly from a local-first workflow.\n\n## Acceptance criteria\nThe commit reaches main",
   },
   {
     id: "remote-open",
     persona: "worker",
-    task: "## What\nPublish an open change request.",
-    done_when: "The branch and change request are visible",
+    task: "## What\nPublish an open change request.\n\n## Acceptance criteria\nThe branch and change request are visible",
   },
   {
     id: "missing-artifact",
     persona: "worker",
-    task: "## What\nInspect a no-longer-readable verification artifact.",
-    done_when: "The missing artifact is stated honestly",
+    task: "## What\nInspect a no-longer-readable verification artifact.\n\n## Acceptance criteria\nThe missing artifact is stated honestly",
   },
   {
     id: "dashboard",
     persona: "worker",
     deps: ["foundation", `run:${HISTORY_RUN}#archive`],
-    task: "## What\nBuild the live dashboard.",
+    task: "## What\nBuild the live dashboard.\n\n## Acceptance criteria\nUsers can inspect transcripts",
     context: "the reviewer asked for a changelog entry",
-    done_when: "Users can inspect transcripts",
     max_turns: 12,
   },
   {
     id: "publish",
     persona: "pr-author",
     deps: ["dashboard"],
-    task: "## What\nPublish the dashboard.",
-    done_when: "The release is reachable",
+    task: "## What\nPublish the dashboard.\n\n## Acceptance criteria\nThe release is reachable",
   },
   {
     id: "approval",
@@ -253,33 +246,29 @@ const LIVE_TASKS = [
     id: "queued",
     persona: "worker",
     deps: ["approval"],
-    task: "## What\nStart the queued follow-up.",
-    done_when: "The follow-up starts",
+    task: "## What\nStart the queued follow-up.\n\n## Acceptance criteria\nThe follow-up starts",
   },
   {
     id: "abandoned",
     persona: "worker",
     deps: ["publish"],
-    task: "## What\nClean up after the publish.",
-    done_when: "Cleanup runs",
+    task: "## What\nClean up after the publish.\n\n## Acceptance criteria\nCleanup runs",
   },
   {
     id: "followup",
     persona: "worker",
     deps: ["dashboard"],
-    task: "## What\nFollow the dashboard up.",
-    done_when: "The follow-up lands",
+    task: "## What\nFollow the dashboard up.\n\n## Acceptance criteria\nThe follow-up lands",
   },
   {
     id: "obsolete",
     persona: "worker",
-    task: "## What\nRetire the obsolete work.",
-    done_when: "The work is cancelled",
+    task: "## What\nRetire the obsolete work.\n\n## Acceptance criteria\nThe work is cancelled",
   },
 ];
 
 const livePlan = () => ({
-  schema_version: 1,
+  schema_version: 2,
   goal: { text: "Observe the live DAG safely" },
   name: "observe-live-run",
   concurrency: 3,
@@ -293,7 +282,6 @@ function turn(journal, node, session, persona, message, model = "a-model") {
     "agent-turn",
     {
       run_id: journal.runId,
-      round: 1,
       node,
       persona,
       session,
@@ -307,7 +295,6 @@ function writeLiveRun(root) {
   mkdirSync(join(dir, "artifacts"), { recursive: true });
   const plan = livePlan();
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
 
   // Stamped from the wall clock: the graph timeline plots the whole run on one
   // range, and a run pinned to a fixed calendar date stretches that range across the
@@ -324,11 +311,9 @@ function writeLiveRun(root) {
   const journal = new Journal(dir, `a-recording-host-${LIVE_RUN}`, start);
   journal.runId = LIVE_RUN;
   const run = { run_id: LIVE_RUN };
-  const round = { run_id: LIVE_RUN, round: 1 };
   journal.emit("pipeline", "run-started", run, { plan });
-  journal.advance(1).emit("pipeline", "round-started", round, { plan });
 
-  // The run's own driving session, opened well after the round started and before
+  // The run's own driving session, opened well after the run started and before
   // the first node was dispatched: the stretch before it is silence the plot has to
   // draw, and a hairline of it is a segment nobody can read or reach.
   journal.advance(12);
@@ -340,7 +325,7 @@ function writeLiveRun(root) {
     "Coordinating the execution frontier",
   );
   journal.advance(4).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "foundation",
     persona: "worker",
   });
@@ -350,7 +335,7 @@ function writeLiveRun(root) {
   journal.advance(1).emit(
     "vcs",
     "session-opened",
-    { ...round, node: "foundation" },
+    { ...run, node: "foundation" },
     {
       token: "a-vcs-session-token",
       identity: IDENTITY,
@@ -372,13 +357,13 @@ function writeLiveRun(root) {
     .emit(
       "vcs",
       "push",
-      { ...round, node: "foundation" },
+      { ...run, node: "foundation" },
       { branch: "feature/foundation", remote: "origin", accepted: true },
     );
   journal.advance(1).emit(
     "vcs",
     "change-opened",
-    { ...round, node: "foundation" },
+    { ...run, node: "foundation" },
     {
       url: FOUNDATION_PR,
       host: "github",
@@ -392,19 +377,19 @@ function writeLiveRun(root) {
     .emit(
       "vcs",
       "change-merged",
-      { ...round, node: "foundation" },
+      { ...run, node: "foundation" },
       { url: FOUNDATION_PR, sha: FOUNDATION_COMMIT },
     );
   journal.emit(
     "vcs",
     "merge-completed",
-    { ...round, node: "foundation" },
+    { ...run, node: "foundation" },
     { identity: IDENTITY, sha: FOUNDATION_COMMIT, base: "main" },
   );
   journal.advance(14).emit(
     "pipeline",
     "node-settled",
-    { ...round, node: "foundation" },
+    { ...run, node: "foundation" },
     {
       status: "done",
       outcome: "merged",
@@ -418,7 +403,7 @@ function writeLiveRun(root) {
   // Merged straight from a local workflow: no change was ever opened, so nothing
   // observed a check on it and the panel has to say so.
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "local-direct",
     persona: "worker",
   });
@@ -427,7 +412,7 @@ function writeLiveRun(root) {
     .emit(
       "pipeline",
       "node-settled",
-      { ...round, node: "local-direct" },
+      { ...run, node: "local-direct" },
       { status: "done", outcome: "merged", branch: "feature/local-direct" },
     );
 
@@ -435,14 +420,14 @@ function writeLiveRun(root) {
   // hook ran, the host is running the checks branch protection requires, and the
   // change is still open behind them. Every record here is one `onevcs` emits.
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "remote-open",
     persona: "worker",
   });
   journal.advance(1).emit(
     "vcs",
     "session-opened",
-    { ...round, node: "remote-open" },
+    { ...run, node: "remote-open" },
     {
       token: "a-second-vcs-session-token",
       identity: IDENTITY,
@@ -454,7 +439,7 @@ function writeLiveRun(root) {
   journal.advance(1).emit(
     "vcs",
     "gate-started",
-    { ...round, node: "remote-open" },
+    { ...run, node: "remote-open" },
     {
       command: PRE_PUSH_COMMAND,
       comparison_remote: "origin",
@@ -464,7 +449,7 @@ function writeLiveRun(root) {
   journal.advance(2).emit(
     "vcs",
     "gate-verdict",
-    { ...round, node: "remote-open" },
+    { ...run, node: "remote-open" },
     {
       verdict: "pass",
       command: PRE_PUSH_COMMAND,
@@ -478,13 +463,13 @@ function writeLiveRun(root) {
     .emit(
       "vcs",
       "push",
-      { ...round, node: "remote-open" },
+      { ...run, node: "remote-open" },
       { branch: "feature/remote-open", remote: "origin", accepted: true },
     );
   journal.advance(1).emit(
     "vcs",
     "change-opened",
-    { ...round, node: "remote-open" },
+    { ...run, node: "remote-open" },
     {
       url: REMOTE_OPEN_PR,
       host: "github",
@@ -514,7 +499,7 @@ function writeLiveRun(root) {
       .emit(
         "vcs",
         "change-check",
-        { ...round, node: "remote-open" },
+        { ...run, node: "remote-open" },
         { name, required, status, from_status: from, conclusion },
         log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
       );
@@ -531,14 +516,14 @@ function writeLiveRun(root) {
       .emit(
         "vcs",
         "lock-wait",
-        { ...round, node: "remote-open" },
+        { ...run, node: "remote-open" },
         { identity: IDENTITY, elapsed: waited, queue_position: position },
       );
   }
   journal.advance(1).emit(
     "pipeline",
     "node-settled",
-    { ...round, node: "remote-open" },
+    { ...run, node: "remote-open" },
     {
       status: "done",
       outcome: "published",
@@ -550,7 +535,7 @@ function writeLiveRun(root) {
   // A verification whose log the run recorded and something later swept: the id is
   // in the journal, and reading it finds nothing.
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "missing-artifact",
     persona: "worker",
   });
@@ -559,7 +544,7 @@ function writeLiveRun(root) {
     .emit(
       "pipeline",
       "node-settled",
-      { ...round, node: "missing-artifact" },
+      { ...run, node: "missing-artifact" },
       { status: "failed", detail: "log was removed before it could be read" },
       [{ id: MISSING_ARTIFACT, kind: "log", bytes: 24 }],
     );
@@ -567,7 +552,7 @@ function writeLiveRun(root) {
   // The node every transcript journey opens: still running, with one session per
   // attributed role, and a step of its own that finished.
   journal.advance(2).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "dashboard",
     persona: "worker",
   });
@@ -591,7 +576,7 @@ function writeLiveRun(root) {
     journal.emit(
       "agentgraph",
       "agent-turn",
-      { ...round, node: "dashboard", member, persona, session },
+      { ...run, node: "dashboard", member, persona, session },
       { message, model: "a-model" },
     );
     // What the turn consumed, which is the only measurement of model time and
@@ -599,7 +584,7 @@ function writeLiveRun(root) {
     journal.advance(2).emit(
       "agentgraph",
       "turn-completed",
-      { ...round, node: "dashboard", member, persona, session },
+      { ...run, node: "dashboard", member, persona, session },
       {
         usage: {
           tokens_in: 1200,
@@ -622,7 +607,7 @@ function writeLiveRun(root) {
     "agentgraph",
     "turn-started",
     {
-      ...round,
+      ...run,
       node: "dashboard",
       member: "worker",
       persona: "worker",
@@ -634,7 +619,7 @@ function writeLiveRun(root) {
     "agentgraph",
     "turn-interrupted",
     {
-      ...round,
+      ...run,
       node: "dashboard",
       member: "worker",
       persona: "worker",
@@ -649,7 +634,7 @@ function writeLiveRun(root) {
   journal.emit(
     "pipeline",
     "edit-committed",
-    { ...round },
+    { ...run },
     {
       // `deliver` is absent because it was `auto`, which is what the SDK's own
       // `Command` omits: an edit that says nothing about delivery is exactly the
@@ -669,7 +654,7 @@ function writeLiveRun(root) {
     "agentgraph",
     "turn-activity",
     {
-      ...round,
+      ...run,
       node: "dashboard",
       member: "worker",
       persona: "worker",
@@ -684,14 +669,14 @@ function writeLiveRun(root) {
   );
 
   journal.emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "publish",
     persona: "pr-author",
   });
   journal.advance(4).emit(
     "pipeline",
     "node-settled",
-    { ...round, node: "publish" },
+    { ...run, node: "publish" },
     {
       status: "failed",
       // No outcome word: the dispatch itself failed, which is the classification
@@ -708,29 +693,29 @@ function writeLiveRun(root) {
     .emit(
       "pipeline",
       "node-settled",
-      { ...round, node: "approval" },
+      { ...run, node: "approval" },
       { status: "waiting" },
     );
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "obsolete",
     persona: "worker",
   });
-  // A second session the round recorded at no node, late in it: the run level is
+  // A second session recorded at no node, late in the run: the run level is
   // not one conversation, so the plot has to tell two of them apart there — and
   // two open sessions that began together are one segment nobody can point at.
   journal.advance(1);
   turn(
     journal,
     undefined,
-    ROUND_CHECK_IN_SESSION,
+    RUN_CHECK_IN_SESSION,
     "check-in",
-    "Round 1 progress reported",
+    "Progress reported",
   );
   journal.advance(1).emit(
     "pipeline",
     "node-settled",
-    { ...round, node: "obsolete" },
+    { ...run, node: "obsolete" },
     // The scheduler's own words, in `error` rather than in a lifecycle's `detail`:
     // what the executor records when a live drop or retry cancels a node.
     { status: "cancelled", error: "cancelled cooperatively" },
@@ -754,9 +739,10 @@ function writeLiveRun(root) {
 
 /** One settled run, so the navigation has a second launching session to group. */
 function writeHistoryRun(root) {
+  const run = { run_id: HISTORY_RUN };
   const dir = runDir(root, HISTORY_RUN);
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     goal: { text: "Archive the release" },
     name: "archive",
     concurrency: 1,
@@ -764,30 +750,25 @@ function writeHistoryRun(root) {
       {
         id: "archive",
         persona: "worker",
-        task: "## What\nArchive the release.",
-        done_when: "The archive exists",
+        task: "## What\nArchive the release.\n\n## Acceptance criteria\nThe archive exists",
       },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
     launch(HISTORY_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4243),
   );
-  writeJson(join(dir, "round-01", "result.json"), {
+  writeJson(join(dir, "result.json"), {
     run_id: HISTORY_RUN,
-    round: 1,
     state: "complete",
     ok: true,
     nodes: [{ id: "archive", status: "done", outcome: "merged" }],
   });
   const journal = new Journal(dir, `a-recording-host-${HISTORY_RUN}`, HISTORIC);
-  const round = { run_id: HISTORY_RUN, round: 1 };
   journal.emit("pipeline", "run-started", { run_id: HISTORY_RUN }, { plan });
-  journal.advance(1).emit("pipeline", "round-started", round, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "archive",
     persona: "worker",
   });
@@ -795,7 +776,7 @@ function writeHistoryRun(root) {
   journal.emit(
     "agentgraph",
     "agent-turn",
-    { ...round, node: "archive", persona: "worker", session: JUDGE_SESSION },
+    { ...run, node: "archive", persona: "worker", session: JUDGE_SESSION },
     { message: "Archived the release", model: "a-model" },
   );
   journal
@@ -803,25 +784,22 @@ function writeHistoryRun(root) {
     .emit(
       "pipeline",
       "node-settled",
-      { ...round, node: "archive" },
+      { ...run, node: "archive" },
       { status: "done", outcome: "merged" },
     );
-  journal.advance(1).emit("pipeline", "round-finished", round, {
-    state: "complete",
-    ok: true,
-  });
   journal.write();
 }
 
 /**
- * One settled round holding the outcomes a live round cannot journal.
+ * One settled run holding the outcomes its journal alone cannot carry.
  *
- * A round's own result is the only account of it that survives the next round
- * starting, so a status recorded there — and never journalled as a settlement — is
+ * The result a driver writes as it closes out holds words no settlement carried,
+ * so a status recorded there — and never journalled as a settlement — is
  * how a client meets `not-completed`, a word outside the served vocabulary, and a
  * failure with nothing recorded about why.
  */
 function writeOutcomesRun(root) {
+  const run = { run_id: OUTCOMES_RUN };
   const dir = runDir(root, OUTCOMES_RUN);
   // The order is the layout's: the fan below ranks children in plan order, and a
   // journey clicks `backfill`, so it sits in the middle of the fan rather than at
@@ -836,7 +814,7 @@ function writeOutcomesRun(root) {
     "orphaned",
   ];
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     goal: { text: "Migrate the store" },
     name: "migrate",
     concurrency: 3,
@@ -848,20 +826,17 @@ function writeOutcomesRun(root) {
     tasks: ids.map((id) => ({
       id,
       persona: "worker",
-      task: `## What\n${id[0].toUpperCase()}${id.slice(1)} the store.`,
-      done_when: "The store is migrated",
+      task: `## What\n${id[0].toUpperCase()}${id.slice(1)} the store.\n\n## Acceptance criteria\nThe store is migrated`,
       ...(id === "migrate" || id === "orphaned" ? {} : { deps: ["migrate"] }),
     })),
   };
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
     launch(OUTCOMES_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4244),
   );
-  writeJson(join(dir, "round-01", "result.json"), {
+  writeJson(join(dir, "result.json"), {
     run_id: OUTCOMES_RUN,
-    round: 1,
     state: "failed",
     ok: false,
     nodes: [
@@ -896,11 +871,9 @@ function writeOutcomesRun(root) {
     `a-recording-host-${OUTCOMES_RUN}`,
     HISTORIC,
   );
-  const round = { run_id: OUTCOMES_RUN, round: 1 };
   journal.emit("pipeline", "run-started", { run_id: OUTCOMES_RUN }, { plan });
-  journal.advance(1).emit("pipeline", "round-started", round, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "migrate",
     persona: "worker",
   });
@@ -909,13 +882,9 @@ function writeOutcomesRun(root) {
     .emit(
       "pipeline",
       "node-settled",
-      { ...round, node: "migrate" },
+      { ...run, node: "migrate" },
       { status: "failed" },
     );
-  journal.advance(1).emit("pipeline", "round-finished", round, {
-    state: "failed",
-    ok: false,
-  });
   journal.write();
 }
 
@@ -923,13 +892,13 @@ function writeOutcomesRun(root) {
  * A recorded result with no authoritative journal behind it at all.
  *
  * This is what a run predating the journal looks like on an operator's machine,
- * permanently: there is nothing to fold, so the run list has only the round's own
+ * permanently: there is nothing to fold, so the run list has only the run's own
  * result to count, and its statuses are words the served vocabulary never closed.
  */
 function writeLegacyRun(root) {
   const dir = runDir(root, LEGACY_RUN);
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     goal: { text: "Convert the legacy store" },
     name: "convert",
     concurrency: 1,
@@ -937,20 +906,17 @@ function writeLegacyRun(root) {
       {
         id: "convert",
         persona: "worker",
-        task: "## What\nConvert the legacy store.",
-        done_when: "The store is converted",
+        task: "## What\nConvert the legacy store.\n\n## Acceptance criteria\nThe store is converted",
       },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
     launch(LEGACY_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4245),
   );
-  writeJson(join(dir, "round-01", "result.json"), {
+  writeJson(join(dir, "result.json"), {
     run_id: LEGACY_RUN,
-    round: 1,
     state: "complete",
     ok: true,
     nodes: [{ id: "convert", status: "improvised" }],
@@ -960,9 +926,10 @@ function writeLegacyRun(root) {
 
 /** A second run under the live run's launching session, whose driver then stopped. */
 function writeSiblingRun(root) {
+  const run = { run_id: SIBLING_RUN };
   const dir = runDir(root, SIBLING_RUN);
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     goal: { text: "Run beside the dashboard work" },
     name: "sibling",
     concurrency: 1,
@@ -970,13 +937,11 @@ function writeSiblingRun(root) {
       {
         id: "sibling",
         persona: "worker",
-        task: "## What\nRun beside the dashboard work.",
-        done_when: "The sibling settles",
+        task: "## What\nRun beside the dashboard work.\n\n## Acceptance criteria\nThe sibling settles",
       },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
     launch(SIBLING_RUN, "codex", CODEX_SESSION, stamp(HISTORIC), 4246),
@@ -989,11 +954,9 @@ function writeSiblingRun(root) {
     `a-recording-host-${SIBLING_RUN}`,
     HISTORIC + 10 * 60 * 1000,
   );
-  const round = { run_id: SIBLING_RUN, round: 1 };
   journal.emit("pipeline", "run-started", { run_id: SIBLING_RUN }, { plan });
-  journal.advance(1).emit("pipeline", "round-started", round, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "sibling",
     persona: "worker",
   });
@@ -1005,9 +968,10 @@ function writeSiblingRun(root) {
 
 /** One run with no launching session recorded, as every swept launch reads. */
 function writeUnattributedRun(root) {
+  const run = { run_id: UNATTRIBUTED_RUN };
   const dir = runDir(root, UNATTRIBUTED_RUN);
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     goal: { text: "Continue unattributed work" },
     name: "orphan",
     concurrency: 1,
@@ -1015,13 +979,11 @@ function writeUnattributedRun(root) {
       {
         id: "orphan",
         persona: "worker",
-        task: "## What\nContinue the unattributed work.",
-        done_when: "The work continues",
+        task: "## What\nContinue the unattributed work.\n\n## Acceptance criteria\nThe work continues",
       },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
     // The empty session is what the SDK records when nothing named the launcher, and
@@ -1033,16 +995,14 @@ function writeUnattributedRun(root) {
     `a-recording-host-${UNATTRIBUTED_RUN}`,
     HISTORIC,
   );
-  const round = { run_id: UNATTRIBUTED_RUN, round: 1 };
   journal.emit(
     "pipeline",
     "run-started",
     { run_id: UNATTRIBUTED_RUN },
     { plan },
   );
-  journal.advance(1).emit("pipeline", "round-started", round, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "orphan",
     persona: "worker",
   });
@@ -1056,7 +1016,7 @@ function writeUnattributedRun(root) {
     "agentgraph",
     "turn-started",
     {
-      ...round,
+      ...run,
       node: "orphan",
       member: "worker",
       persona: "worker",
@@ -1068,7 +1028,7 @@ function writeUnattributedRun(root) {
     "agentgraph",
     "turn-interrupted",
     {
-      ...round,
+      ...run,
       node: "orphan",
       member: "worker",
       persona: "worker",
@@ -1084,7 +1044,7 @@ function writeUnattributedRun(root) {
   journal.emit(
     "pipeline",
     "edit-committed",
-    { ...round },
+    { ...run },
     {
       command: { op: "context", id: "orphan", note: DEFERRED_NOTE },
       operations: [
@@ -1103,7 +1063,7 @@ function writeUnattributedRun(root) {
 /**
  * One run whose launch is recorded and whose journal is still empty.
  *
- * The read API serves it with a null `last_event` and no round at all. It has to
+ * The read API serves it with a null `last_event` and no graph at all. It has to
  * stay in the navigation beside the runs that do have events: the client validates
  * the run list in one parse, so a run this shape either renders with the rest or
  * takes every one of them down with it.
@@ -1137,9 +1097,10 @@ function writeEventlessRun(
  * conversation.
  */
 function writeBusyRun(root) {
+  const run = { run_id: BUSY_RUN };
   const dir = runDir(root, BUSY_RUN);
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     goal: { text: "Work a node that dispatches many sessions" },
     name: "sweep",
     concurrency: 1,
@@ -1147,23 +1108,19 @@ function writeBusyRun(root) {
       {
         id: "sweep",
         persona: "worker",
-        task: "## What\nWork a node that dispatches many sessions.",
-        done_when: "Every session settles",
+        task: "## What\nWork a node that dispatches many sessions.\n\n## Acceptance criteria\nEvery session settles",
       },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  writeJson(join(dir, "round-01", "plan.json"), plan);
   writeJson(
     join(dir, "launch.json"),
     launch(BUSY_RUN, "codex", CODEX_SESSION, stamp(HISTORIC), 4249),
   );
   const journal = new Journal(dir, `a-recording-host-${BUSY_RUN}`, HISTORIC);
-  const round = { run_id: BUSY_RUN, round: 1 };
   journal.emit("pipeline", "run-started", { run_id: BUSY_RUN }, { plan });
-  journal.advance(1).emit("pipeline", "round-started", round, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
-    ...round,
+    ...run,
     node: "sweep",
     persona: "worker",
   });
@@ -1178,7 +1135,7 @@ function writeBusyRun(root) {
         .emit(
           "agentgraph",
           "agent-turn",
-          { ...round, node: "sweep", persona: "worker", session },
+          { ...run, node: "sweep", persona: "worker", session },
           { message: `Swept batch ${index} (${step})`, model: "a-model" },
         );
     }
@@ -1227,7 +1184,7 @@ export function facts() {
       foundation: FOUNDATION_SESSION,
       judge: JUDGE_SESSION,
       check_in: CHECK_IN_SESSION,
-      round_check_in: ROUND_CHECK_IN_SESSION,
+      run_check_in: RUN_CHECK_IN_SESSION,
       orchestrator: ORCHESTRATOR_SESSION,
       orphan: ORPHAN_SESSION,
     },
@@ -1259,7 +1216,7 @@ export function settleDashboard(root) {
     join(root, LIVE_RUN),
     "pipeline",
     "node-settled",
-    { run_id: LIVE_RUN, round: 1, node: "dashboard" },
+    { run_id: LIVE_RUN, node: "dashboard" },
     { status: "done", outcome: "merged", detail: "Dashboard shipped" },
   );
 }
@@ -1297,7 +1254,6 @@ export function recordActivity(root, name, detail) {
     "turn-activity",
     {
       run_id: LIVE_RUN,
-      round: 1,
       node: "dashboard",
       member: "worker",
       persona: "worker",
@@ -1325,7 +1281,6 @@ export function growTranscript(root, turns) {
       "agent-turn",
       {
         run_id: LIVE_RUN,
-        round: 1,
         node: "dashboard",
         persona: "worker",
         session: WORKER_SESSION,

@@ -2,9 +2,9 @@ import { parseRunDetail, parseRunList } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { HISTORY_RUN, LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
+  graphOf,
   groupRuns,
   isUnhealthy,
-  graphOf,
   nodeReason,
   nodeViews,
 } from "./run-model";

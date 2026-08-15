@@ -9,11 +9,12 @@
 //! Nothing here writes. Reading takes no lock the engine's single writer needs,
 //! which is what lets the server run beside the engine's own reconcile loop.
 //!
-//! Filtering happens here, once per read: `?filter=` is resolved against the run
-//! being served — a built-in profile, one its launch config defined, or an inline
-//! spec — and the payload is built from a [`payload::filtered`] view. The fold
-//! behind that view is the whole journal either way, so a filter narrows what a
-//! response carries and never what the run is.
+//! Filtering is resolved here, once per read: `?filter=` is matched against the
+//! run being served — a built-in profile, one its launch config defined, or an
+//! inline spec — and the resolved [`EventFilter`] is handed to the projection.
+//! It reaches only the places events are *listed*, so a filter narrows what a
+//! response carries and never what the run is: every status, settlement,
+//! decision, count and timing is folded from the whole journal whatever it said.
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
