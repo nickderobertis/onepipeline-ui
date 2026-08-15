@@ -102,12 +102,45 @@ jobs:
           tag="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
           if [ -n "$tag" ]; then
             git worktree add --detach "${RUNNER_TEMP}/release-baseline" "$tag"
+            # Both surfaces are built by cargo-semver-checks through a manifest of
+            # its own that never reads a lockfile, so a requirement the *released*
+            # manifest left open resolves to whatever is newest today — for v0.3.3
+            # an SDK that no longer compiles at all. Fetching what each side's lock
+            # pins and resolving offline is what makes the comparison the tag's own
+            # dependencies instead, and a check that cannot build reads as a clean
+            # one, so this is load-bearing rather than a speed-up.
+            cargo fetch --locked --manifest-path "${RUNNER_TEMP}/release-baseline/Cargo.toml"
+            cargo fetch --locked
+            echo "root=${RUNNER_TEMP}/release-baseline" >> "$GITHUB_OUTPUT"
             echo "arg=--registry-manifest-path ${RUNNER_TEMP}/release-baseline/Cargo.toml" >> "$GITHUB_OUTPUT"
             echo "Baseline: $tag"
           else
+            echo "root=" >> "$GITHUB_OUTPUT"
             echo "arg=" >> "$GITHUB_OUTPUT"
             echo "No release tag yet; the first release uses the current version."
           fi
+
+      # release-plz reports a cargo-semver-checks run it could not complete as
+      # "API compatible" and versions from the commit type, saying nothing — so
+      # the same check runs here first, for its exit code alone. 0 and 100 are
+      # verdicts, and release-plz is left to act on them; anything else is a check
+      # that did not happen, which must fail the run rather than release on a
+      # reading nobody took.
+      - name: Refuse a semver check that could not run
+        if: "${{ steps.baseline.outputs.root != '' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          set +e
+          cargo semver-checks --baseline-root "${{ steps.baseline.outputs.root }}" --color never
+          status=$?
+          set -e
+          case "$status" in
+            0) echo "The public surface is unchanged against the baseline." ;;
+            100) echo "The public surface broke; release-plz raises the bump for it." ;;
+            *) echo "::error::cargo-semver-checks exited $status without a verdict; the release would otherwise be versioned as API compatible with nothing read"
+               exit 1 ;;
+          esac
 
       # Belt to the baseline fix: never open/merge a release PR on a push that is
       # itself a merged release commit.
@@ -115,6 +148,10 @@ jobs:
         if: "${{ !startsWith(github.event.head_commit.message, 'chore: release') }}"
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          # release-plz's own semver check resolves the same way the step above
+          # does, off what the baseline step fetched, or it reads a surface built
+          # against today's registry rather than the tag's.
+          CARGO_NET_OFFLINE: "true"
         run: release-plz release-pr ${{ steps.baseline.outputs.arg }} --git-token "$GITHUB_TOKEN"
 
       - name: Auto-merge the release PR when the gate is green
