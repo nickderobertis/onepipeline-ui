@@ -852,39 +852,18 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
               100,
               180,
             ),
-            categorySummary(
-              "node-dashboard",
-              "dashboard",
-              "dispatch",
-              12,
-              60,
-              {
-                agent_role: "worker",
-                transport_role: "agent",
-              },
-            ),
-            categorySummary(
-              "node-dashboard",
-              "dashboard",
-              "dispatch",
-              20,
-              50,
-              {
-                agent_role: "worker",
-                transport_role: "llmlint",
-              },
-            ),
-            categorySummary(
-              "node-dashboard",
-              "dashboard",
-              "dispatch",
-              62,
-              90,
-              {
-                agent_role: "judge",
-                transport_role: "judge",
-              },
-            ),
+            categorySummary("node-dashboard", "dashboard", "dispatch", 12, 60, {
+              agent_role: "worker",
+              transport_role: "agent",
+            }),
+            categorySummary("node-dashboard", "dashboard", "dispatch", 20, 50, {
+              agent_role: "worker",
+              transport_role: "llmlint",
+            }),
+            categorySummary("node-dashboard", "dashboard", "dispatch", 62, 90, {
+              agent_role: "judge",
+              transport_role: "judge",
+            }),
             categorySummary(
               "node-dashboard",
               "dashboard",
@@ -919,13 +898,7 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
               count: 1240,
               total_duration_ms: 4200,
             },
-            categorySummary(
-              "node-publish",
-              "publish",
-              "verification",
-              30,
-              50,
-            ),
+            categorySummary("node-publish", "publish", "verification", 30, 50),
             categorySummary("node-publish", "publish", "publication", 55, 70),
             // `approval` never started, so the run journalled no span to parent this
             // to — and the wait is still the only thing that node has recorded.

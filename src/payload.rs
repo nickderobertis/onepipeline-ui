@@ -412,35 +412,58 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
 /// graph it opens cannot describe different graphs — the disagreement an
 /// operator would otherwise see between the two.
 ///
-/// **The live fold leads, and under the continuous engine that is nearly always
-/// the whole answer.** Rounds are gone, and with them the reason this used to
-/// prefer a recorded document: a closed round's result was the only account of
-/// it that survived the *next* round starting, and nothing overwrites the fold
-/// now. What survives of that reading is the fallback — a run whose journal this
-/// host cannot read, or one predating it, still has its own `result.json`, which
-/// the SDK rewrites whenever a driver closes out.
+/// Three accounts, in the order they are worth: **what the journal settled for
+/// that node**, then **what the run's own recorded result held for it**, then
+/// **what the graph derives for it**. Rounds are gone, and with them the reason
+/// this used to prefer a recorded document wholesale — a closed round's result
+/// was the only account of it that survived the *next* round starting, and
+/// nothing overwrites the fold now.
+///
+/// The order is what the three *are*. The first two are records of the node; the
+/// third is a gate recomputed from its dependencies on every read, so it is what
+/// a node nothing has recorded reads as and never an overrule of something that
+/// did. `result.json` — which the SDK rewrites whenever a driver closes out —
+/// holds words no settlement carried, and is the whole account for a run whose
+/// journal this host cannot fold.
+///
+/// It is the same precedence [`node_result`] keeps, so a node's status and its
+/// result can never come from two different accounts of it.
 ///
 /// The words are unmapped on purpose: a count reports what the run wrote, where
 /// a status a client switches on cannot.
 fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
-    let folded: BTreeMap<String, Recorded> = view
+    let document: BTreeMap<String, Recorded> = recorded_result(view).into_iter().collect();
+    let mut statuses: BTreeMap<String, Recorded> = view
         .state
         .statuses()
         .into_iter()
-        .map(|(node, status)| {
-            let outcome = view.state.outcomes.get(&node).cloned();
-            (
-                node,
-                Recorded {
-                    status: status.as_str().to_owned(),
-                    outcome,
-                },
-            )
+        .map(|(node, derived)| {
+            let outcome = || view.state.outcomes.get(&node).cloned();
+            // What the journal settled for this node, which is an account of the
+            // node itself rather than of the graph around it.
+            let settled = view.state.recorded.get(&node).map(|status| Recorded {
+                status: status.as_str().to_owned(),
+                outcome: outcome(),
+            });
+            let recorded = settled
+                .or_else(|| document.get(&node).cloned())
+                .unwrap_or_else(|| Recorded {
+                    status: derived.as_str().to_owned(),
+                    outcome: outcome(),
+                });
+            (node, recorded)
         })
         .collect();
-    if !folded.is_empty() {
-        return folded;
+    // A node the document names and the graph does not: a run whose plan this
+    // host cannot read at all still counts what its result recorded.
+    for (node, recorded) in document {
+        statuses.entry(node).or_insert(recorded);
     }
+    statuses
+}
+
+/// Every node the run's own recorded result has an entry for, in its words.
+fn recorded_result(view: &RunView) -> Vec<(String, Recorded)> {
     read_json(&view.paths.result())
         .and_then(|result| result["nodes"].as_array().cloned())
         .unwrap_or_default()
@@ -1244,25 +1267,13 @@ fn graph_state(view: &RunView) -> Option<Value> {
     let task_ids: BTreeSet<&str> = plan.tasks.iter().map(|node| node.id.as_str()).collect();
     let result = read_json(&view.paths.result());
 
-    let mut statuses: BTreeMap<String, String> = view
-        .state
-        .statuses()
+    // The same derivation the list row renders from — the fold per node, with the
+    // recorded result filling the gaps — so a row and the graph it opens cannot
+    // describe different graphs.
+    let statuses: BTreeMap<String, String> = recorded_statuses(view)
         .into_iter()
-        .map(|(node, status)| (node, status_word(status.as_str()).to_owned()))
+        .map(|(node, recorded)| (node, status_word(&recorded.status).to_owned()))
         .collect();
-    // A run whose journal this host could not fold — one predating it, or one
-    // whose store is unreadable — still has the result the SDK rewrites whenever
-    // a driver closes out. Falling through to it is what keeps the graph a reader
-    // opens from describing a different run than the row they opened it from.
-    if statuses.is_empty() {
-        if let Some(nodes) = result.as_ref().and_then(|r| r["nodes"].as_array()) {
-            for node in nodes {
-                if let (Some(id), Some(status)) = (node["id"].as_str(), node["status"].as_str()) {
-                    statuses.insert(id.to_owned(), status_word(status).to_owned());
-                }
-            }
-        }
-    }
     // Exactly one entry per plan task, so a client never invents a status for a
     // node or renders one for a node the graph does not carry.
     let node_status: Map<String, Value> = plan
@@ -1457,13 +1468,15 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
         if let Some(url) = view.state.change_urls.get(&node.id) {
             item.insert("pr".into(), json!(url));
         }
-    } else if let Some(recorded) = result
-        .and_then(|r| r["nodes"].as_array())
-        .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))
-    {
+    } else {
         // The document a driver wrote as it closed out, for a node the journal
         // this host can read says nothing about. It holds words no settlement
-        // carried, which for a run predating the journal is the whole account.
+        // carried, which for a run predating the journal is the whole account —
+        // and a node in neither is one the run has nothing to say about, which is
+        // served no entry rather than an empty one.
+        let recorded = result
+            .and_then(|r| r["nodes"].as_array())
+            .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))?;
         for field in RESULT_FIELDS {
             if let Some(value) = recorded.get(field) {
                 item.insert((*field).to_owned(), value.clone());
@@ -1477,8 +1490,6 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
             item.insert("completed".into(), json!(word == "done"));
             item.insert("status".into(), json!(word));
         }
-    } else {
-        return None;
     }
     if let Some(finished) = view.state.completed_steps.get(&node.id) {
         let steps: Vec<Value> = node

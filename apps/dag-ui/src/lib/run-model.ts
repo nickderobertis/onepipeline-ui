@@ -2,10 +2,10 @@ import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
 import type {
   Failure,
   GraphResultItem,
+  GraphState,
   NodeControl,
   NodeDetail,
   NodeStatus,
-  GraphState,
   NodeTelemetry,
   PlanTask,
   RunDetail,

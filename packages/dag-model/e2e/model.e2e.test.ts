@@ -4,6 +4,7 @@ import {
   conversationSchema,
   conversationTurnSchema,
   dagConversationSchema,
+  graphStateSchema,
   launchProvenanceSchema,
   nodeConversationsSchema,
   nodeTelemetrySchema,
@@ -11,7 +12,6 @@ import {
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
-  graphStateSchema,
   runConversationsSchema,
   runDetailSchema,
   runSummarySchema,
@@ -152,7 +152,10 @@ test("the goal id the read boundary derives is what makes a legacy run parse", a
     ...golden,
     graph: {
       ...golden.graph,
-      plan: { ...golden.graph.plan, goal: { text: golden.graph.plan.goal.text } },
+      plan: {
+        ...golden.graph.plan,
+        goal: { text: golden.graph.plan.goal.text },
+      },
     },
   };
   expect(() => parseRunDetail(legacy)).toThrow();

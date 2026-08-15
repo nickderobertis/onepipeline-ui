@@ -3,11 +3,11 @@ import { describe, expect, test } from "vitest";
 import {
   graphPayloadSchema,
   graphResultItemSchema,
+  graphStateSchema,
   nodeTelemetrySchema,
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
-  graphStateSchema,
   runDetailSchema,
   runSummarySchema,
   runTelemetrySchema,
@@ -341,7 +341,9 @@ describe("boundary failures", () => {
       last_seq: 2,
     };
     expect(graphStateSchema.parse(graph).node_status.build).toBe("skipped");
-    expect(graphStateSchema.parse(graph).plan.goal?.text).toBe("Ship it safely");
+    expect(graphStateSchema.parse(graph).plan.goal?.text).toBe(
+      "Ship it safely",
+    );
     expect(
       graphStateSchema.safeParse({
         ...graph,
@@ -359,9 +361,9 @@ describe("boundary failures", () => {
     expect(
       graphStateSchema.safeParse({ ...graph, node_status: undefined }).success,
     ).toBe(false);
-    expect(graphStateSchema.safeParse({ ...graph, node_status: {} }).success).toBe(
-      false,
-    );
+    expect(
+      graphStateSchema.safeParse({ ...graph, node_status: {} }).success,
+    ).toBe(false);
     expect(
       graphStateSchema.safeParse({
         ...graph,
@@ -401,7 +403,9 @@ describe("boundary failures", () => {
       result: null,
       last_seq: 2,
     };
-    expect(graphStateSchema.parse(graph).node_control.build?.member).toBe("worker");
+    expect(graphStateSchema.parse(graph).node_control.build?.member).toBe(
+      "worker",
+    );
     // Not interruptible carries the reason, and a node that is carries none: the
     // two are exactly exclusive, so neither can be read as the other.
     expect(

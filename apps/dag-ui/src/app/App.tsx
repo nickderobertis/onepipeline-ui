@@ -162,22 +162,6 @@ export function App({
                     .join(" ") || telemetry.activity.at(-1)?.kind}
                 </span>
               )}
-              <fieldset className="detail-switch">
-                <legend className="sr-only">Level of detail</legend>
-                {detailLevels.map(([level, { label, description }]) => (
-                  <Button
-                    aria-pressed={selection.detail === level}
-                    key={level}
-                    onClick={() => selection.selectDetail(level)}
-                    size="sm"
-                    title={description}
-                    type="button"
-                    variant={selection.detail === level ? "default" : "outline"}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </fieldset>
               <Button
                 onClick={() => void telemetry.refresh()}
                 size="sm"
@@ -218,6 +202,26 @@ export function App({
                   <Route size={15} /> Overall
                 </TabsTrigger>
               </TabsList>
+              {/* How much of what the run recorded this reading carries. Beside
+                  the views rather than in the toolbar: it selects a reading, like
+                  they do, and the toolbar is a fixed-height row the timeline
+                  region's own share of the window is measured against. */}
+              <fieldset className="detail-switch">
+                <legend className="sr-only">Level of detail</legend>
+                {detailLevels.map(([level, { label, description }]) => (
+                  <Button
+                    aria-pressed={selection.detail === level}
+                    key={level}
+                    onClick={() => selection.selectDetail(level)}
+                    size="sm"
+                    title={description}
+                    type="button"
+                    variant={selection.detail === level ? "default" : "outline"}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </fieldset>
             </div>
             {/* One content region for whichever view is selected: the other tab's
                 panel is unmounted by the primitive, exactly as it is for any tab set. */}

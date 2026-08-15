@@ -29,7 +29,7 @@ const fixtureSchema = z.object({
     foundation: z.string().min(1),
     judge: z.string().min(1),
     check_in: z.string().min(1),
-    round_check_in: z.string().min(1),
+    run_check_in: z.string().min(1),
     orchestrator: z.string().min(1),
     orphan: z.string().min(1),
   }),

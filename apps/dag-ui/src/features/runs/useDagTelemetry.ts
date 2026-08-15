@@ -211,7 +211,14 @@ export function useDagTelemetry(
     return () => {
       active = false;
     };
-  }, [client, runId, revision, timelineScope?.nodeId, timelineScopeKey, filter]);
+  }, [
+    client,
+    runId,
+    revision,
+    timelineScope?.nodeId,
+    timelineScopeKey,
+    filter,
+  ]);
 
   useEffect(() => {
     void refresh();
