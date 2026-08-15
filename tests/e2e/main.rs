@@ -7,18 +7,22 @@
 //! bytes it serves; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
 //! platform package through node's own resolution; `lint_llm_diff` runs the
-//! gate's own llmlint recipe over a real git repository, and `release_status`
-//! runs the release workflow's own last job over a real GitHub Release's notes.
+//! gate's own llmlint recipe over a real git repository, `release_status` runs
+//! the release workflow's own last job over a real GitHub Release's notes, and
+//! `semver_check` runs the reading the release takes of this crate's public
+//! surface.
 //!
-//! Those last two each stand in for exactly one program on PATH — `llmlint`,
-//! which bills a model call, and `gh`, which rewrites a public Release. The
-//! script under test is the real one in both, and `support/stub_bin.rs` is what
-//! makes what it asked for readable.
+//! Those last three each stand in for exactly one program on PATH — `llmlint`,
+//! which bills a model call, `gh`, which rewrites a public Release, and `cargo`,
+//! whose reading downloads and builds two dependency trees. The script under test
+//! is the real one in each, and `support/stub_bin.rs` is what makes what it asked
+//! for readable.
 
 mod cli;
 mod lint_llm_diff;
 mod packaging;
 mod release_status;
+mod semver_check;
 mod server;
 
 #[path = "../support/fixture_run.rs"]

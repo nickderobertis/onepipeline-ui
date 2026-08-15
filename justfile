@@ -202,6 +202,18 @@ msrv:
     @RUSTFLAGS="-D warnings" cargo +{{msrv-version}} check --locked --all-targets --quiet \
       || { echo "the {{msrv-version}} floor no longer builds — install that toolchain, or raise rust-version in Cargo.toml (and clippy.toml)" >&2; exit 1; }
 
+# Separate from `check` for the same reason `deps-check` is: it fetches both
+# sides' dependency trees, and needs a checkout of the previous release to read
+# against. `.github/workflows/release-plz.yml` runs this before release-plz makes
+# the same reading, so a check that cannot run fails the release instead of
+# passing as compatible. `git worktree add --detach <dir> <tag>` makes a baseline.
+# Diff the crate's public API against a release checkout, as the release does.
+# The workflow interpolates a path it was handed into this call, so the recipe
+# passes it as an argument rather than pasting it into the command line.
+[positional-arguments]
+semver-check baseline:
+    @bash scripts/semver-check.sh "$1"
+
 # Separate from `check`: `cargo deny` needs a network-fetched advisory DB.
 # Advisory + license audit and unused-dependency check.
 deps-check:

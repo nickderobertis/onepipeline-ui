@@ -295,6 +295,148 @@ fn every_secret_the_workflows_read_is_in_the_manifest() {
     );
 }
 
+/// The requirement string a dependency is declared at under `[dependencies]`.
+///
+/// Section-scoped for the same reason [`manifest_name`] is: `onepipeline` is
+/// named in the dev-dependencies' prose and in `[package]`'s, and a substring
+/// search would read either as the requirement the resolver uses.
+fn dependency_requirement(cargo: &str, name: &str) -> String {
+    let mut inside = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            inside = line == "[dependencies]";
+        } else if inside {
+            if let Some(value) = line.strip_prefix(&format!("{name} = ")) {
+                return value.trim_matches('"').to_owned();
+            }
+        }
+    }
+    panic!("Cargo.toml declares no dependency on {name}");
+}
+
+/// The tools the workflow's `taiki-e/install-action` step provisions, read out of
+/// its `tool:` block.
+///
+/// The block rather than the file: every name here is also written in the prose
+/// around it, and a comment must not be able to satisfy an assertion about what
+/// the release run can execute.
+fn provisioned_tools(workflow: &str) -> Vec<String> {
+    let mut lines = workflow.lines().skip_while(|line| line.trim() != "tool: |");
+    let header = lines
+        .next()
+        .expect("release-plz.yml has no `tool: |` install block");
+    let indent = header.len() - header.trim_start().len();
+    lines
+        .take_while(|line| line.trim().is_empty() || line.len() - line.trim_start().len() > indent)
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// A `${{ env.NAME }}` reference resolved against the workflow's own `env:`, so
+/// the pin is read where it is written rather than assumed to be one.
+fn workflow_env(workflow: &str, reference: &str) -> String {
+    let Some(name) = reference
+        .strip_prefix("${{ env.")
+        .and_then(|rest| rest.strip_suffix(" }}"))
+    else {
+        return reference.to_owned();
+    };
+    workflow
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&format!("{name}:")))
+        .unwrap_or_else(|| panic!("release-plz.yml references {name}, which it never sets"))
+        .trim()
+        .trim_matches('"')
+        .to_owned()
+}
+
+/// release-plz's semver check is enabled and the workflow running it provisions
+/// the tool it shells out to, at a version.
+///
+/// release-plz skips a check whose tool it cannot find, warning where nobody is
+/// reading, so neither half is worth anything without the other.
+#[test]
+fn the_release_workflow_provisions_the_semver_check_it_enables() {
+    assert!(
+        read("release-plz.toml").contains("semver_check = true"),
+        "release-plz.toml does not enable semver_check, so a breaking change \
+         releases as whatever its commit type claimed"
+    );
+    let workflow = read(".github/workflows/release-plz.yml");
+    let installed = provisioned_tools(&workflow)
+        .into_iter()
+        .find_map(|tool| {
+            tool.strip_prefix("cargo-semver-checks@")
+                .map(|pin| workflow_env(&workflow, pin))
+        })
+        .expect(
+            "release-plz.yml provisions no cargo-semver-checks, so the check \
+             release-plz.toml enables is skipped with a warning nobody reads",
+        );
+    let exact = installed.split('.').count() == 3
+        && installed
+            .split('.')
+            .all(|part| part.parse::<u32>().is_ok() && !part.is_empty());
+    assert!(
+        exact,
+        "cargo-semver-checks is provisioned as `{installed}` rather than an exact \
+         x.y.z, so what reads the public surface is whatever was current that day"
+    );
+}
+
+/// The release takes the reading, and release-plz versions from the same resolve.
+///
+/// `scripts/semver-check.sh` is the reading itself and `tests/e2e/semver_check.rs`
+/// drives it; what is left to hold here is that the release still runs it, and
+/// that release-plz's own check resolves off what it fetched rather than today's
+/// registry — which is the resolve that fails and is reported as compatible.
+#[test]
+fn the_release_workflow_reads_the_surface_before_release_plz_versions_from_it() {
+    let workflow = read(".github/workflows/release-plz.yml");
+    assert!(
+        workflow.contains("just semver-check"),
+        "no step reads the public surface, leaving release-plz's silent \
+         \"API compatible\" as the only reading a release gets"
+    );
+    assert!(
+        workflow.contains("CARGO_NET_OFFLINE"),
+        "release-plz resolves its own check against today's registry, so the bump \
+         comes from a baseline that may no longer compile"
+    );
+}
+
+/// The SDK requirement is exact, and is the version the lockfile carries.
+///
+/// A crates.io consumer and cargo-semver-checks both resolve this crate without
+/// our `Cargo.lock`, so a range hands them an SDK the tree never tested.
+#[test]
+fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
+    let requirement = dependency_requirement(&read("Cargo.toml"), "onepipeline");
+    let pinned = requirement.strip_prefix('=').unwrap_or_else(|| {
+        panic!(
+            "onepipeline is required as `{requirement}`, a range: an unlocked resolve \
+             of this crate would build against an SDK the tree never tested"
+        )
+    });
+    let lock = read("Cargo.lock");
+    let (_, after) = lock
+        .split_once("\nname = \"onepipeline\"\n")
+        .expect("Cargo.lock does not resolve onepipeline");
+    let locked = after
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("version = "))
+        .expect("Cargo.lock resolves onepipeline to no version")
+        .trim_matches('"');
+    assert_eq!(
+        pinned, locked,
+        "Cargo.toml pins onepipeline {pinned} and Cargo.lock resolves {locked}, so \
+         `just bootstrap` provisions a CLI that speaks a different telemetry document \
+         than a consumer's build of this crate reads"
+    );
+}
+
 /// Directories whose every file reaches a published artifact, so a file added to
 /// one has to be covered without anyone remembering this test exists.
 const ARTIFACT_TREES: &[&str] = &[

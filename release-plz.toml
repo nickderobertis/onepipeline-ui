@@ -22,10 +22,16 @@
 # versioning/tagging from the registry push.
 publish = false
 
-# API breaking-change detection (cargo-semver-checks) needs an extra tool and
-# would block releases on any surface change; rely on review and the
-# conventional-commit type instead (a `!` or `BREAKING CHANGE:` still bumps).
-semver_check = false
+# The bump above is a reading of the commit *type*, which is a claim about the
+# author's intent; this reads the public surface instead, so a breaking change no
+# longer releases as a compatible one whenever nobody wrote the `!`. It is worth
+# as much as a baseline that builds and no more — release-plz reports a check that
+# could not run as "API compatible", never as a failure, so a baseline that stops
+# compiling would quietly return the bump to the commit type. Making it build, and
+# refusing a release when it does not, is .github/workflows/release-plz.yml's job.
+#
+# llmlint: ignore[changed_behavior_has_e2e] the journey needs a released tag, both dependency trees fetched, and two binaries the gate does not provision, so it runs in the release workflow — which fails the run when the check returns no verdict.
+semver_check = true
 
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
