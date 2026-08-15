@@ -20,9 +20,11 @@ anything new here is a proposal to make upstream first.
   private, so the document is read through `onepipeline telemetry <run>` rather
   than imported. `src/telemetry.rs` owns that seam; making the fold importable is
   the proposal, and a server would then read it without starting a process.
-- **A dispatch id.** The journal stamps a dispatch with its run, round, and node
-  but mints no id for it; schema 10 serves one, so `payload::dispatch_key`
-  derives it from the three.
+- **A dispatch id.** The journal stamps a dispatch with its run and node but
+  mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
+  from the pair. Execution is continuous, so the pair is the whole of what
+  identifies a dispatch — the round that used to be its third part is not a thing
+  any run has.
 - **An opaque session key.** The raw launching session id may be sensitive and is
   never served, so runs are grouped by a digest of it.
 - **The run list's order.** `RunStore::run_list` orders by most recent progress,
@@ -53,10 +55,17 @@ anything new here is a proposal to make upstream first.
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
   as the node's own records.
+- **Which of three accounts of a node's status is the one to serve.**
+  `payload::recorded_statuses` orders them — what the journal settled for that
+  node, then what the run's own `result.json` held for it, then what the graph
+  derives for it — because the SDK exposes the fold and the document separately
+  and nothing in it rules on which speaks for a node they disagree about. The
+  ordering is what the three *are*: the first two are records of the node, the
+  third is a gate recomputed on every read.
 - **Whether an in-flight node's turn can be redirected.** `payload::node_control`
-  answers, per node the open round has in flight, what `onepipeline`'s reconciler
-  answers by pulling the lever — which a read surface must not do, because serving
-  a run would then interrupt it. What it can read is the same stream the engine
+  answers, per node the run has in flight, what `onepipeline`'s reconciler answers
+  by pulling the lever — which a read surface must not do, because serving a run
+  would then interrupt it. What it can read is the same stream the engine
   reads its `TurnAddress` from: whether a member is in a turn this run can address,
   and the record of every interrupt anybody has already pulled, which
   `oneagentgraph` publishes for *every* attempt carrying its own reason.
@@ -87,8 +96,10 @@ anything new here is a proposal to make upstream first.
   one: `provider.control` is asked for per run and `Provider::reset` puts the
   outcome back to `NotRequested` for the next, so a settled report describes a
   dispatch that is over. `tests/e2e/server.rs` holds that line with a node whose
-  round-1 member settled reporting `control: null` and whose round-2 turn must
-  still read as addressable.
+  earlier member settled reporting `control: null` and whose re-asked dispatch's
+  turn must still read as addressable. Under rounds those two were told apart by
+  their round labels; there are none, and the reading must still not borrow the
+  old answer.
 
   So the field is `addressable`, and it means exactly what this crate can prove:
   **this run has a turn it can address for that node**. It is the engine's own
@@ -103,6 +114,41 @@ anything new here is a proposal to make upstream first.
   A smaller one beside it: `onepipeline` publishes `edits::Operation` and
   `edits::Delivery`, which `payload::edits` copies as wire strings for want of a
   type to gate against.
+
+## Where a reader's filter may reach, and where it may not
+
+`?filter=` is this crate's own — the CLI is told once, at launch, what to put on
+a stream, and a read API is asked per request by a reader who did not launch the
+run. `src/filter.rs` owns the grammar (duplicated per repository by design, like
+the envelope) and the two profiles every run answers to; `src/store.rs` resolves
+a request's spec against the run being read.
+
+**It reaches exactly two places, and both are listings of events:** the events a
+timeline span carries (`payload::Lens`), and the transcripts a detail carries
+(`payload::conversations_under`). Beside them sit the two change tokens an open
+stream compares — `payload::signature` and `payload::conversation_signature` —
+which are filtered for the same reason: the stream invalidates rather than
+restating state, so a run whose only new records this reader excluded has not
+moved as far as they are concerned.
+
+Everywhere else reads the **whole** journal, whatever the filter said. Every
+status, settlement, decision, count, piece of evidence and timing a payload
+carries is a fold, and a fold taken over a narrowed store is a different answer
+about the run rather than a narrower listing of it — `node_control` under a
+decisions-only filter reported every in-flight node as having no member, which
+is the opposite of the truth on the one field a planner decides whether to cancel
+by. `tests/e2e/server.rs`'s `a_filter_shapes_the_response_and_never_the_run` is
+the guard, and it is the test that caught it.
+
+Two consequences worth stating because they look like oversights:
+
+- **The telemetry document is asked for unfiltered.** It describes the run, not
+  the reading of it, and a reader narrowing their attention must not be told the
+  run spent less time than it did.
+- **The turn numbering is built over the whole store.** A turn's id is its
+  position in its session's transcript, so numbering a filtered store would hand
+  a client an id naming a different turn than the one the transcript route serves
+  under it.
 
 ## What the siblings record and this crate reads
 

@@ -1,7 +1,7 @@
 # DAG Observatory web UI
 
 `apps/dag-ui` is the read-only live and historical view of orchestrated DAG
-execution. It visualizes each round with React Flow, using the exact coordinates
+execution. It visualizes the run's graph with React Flow, using the exact coordinates
 from `@onepipeline-ui/dag-layout`, and builds its surface out of the published
 `@oneharness/ui` components. Every payload it reads is validated by
 `@onepipeline-ui/dag-model` through `@onepipeline-ui/telemetry-client`; the app
@@ -142,9 +142,9 @@ three in the vocabulary the node view already uses, projected from
   browser's clock, so the line says how long the run had been going when it was
   last read instead of drifting between polls.
 - **Opened once** it is one row per plan node, plus a **run-level row** for the
-  sessions recorded at no node — the orchestrator driving the graph and the
-  per-round check-ins. Each row says how long it recorded work and how long it
-  did not.
+  sessions recorded at no node — the orchestrator driving the graph and the run's
+  own check-ins. Each row says how long it recorded work and how long it did
+  not.
 - **Opened again**, a row is that node's own category lanes: the same words the
   node view draws, read out of the `scope=run` summaries. A summary's lane comes
   from the *pair* of roles it carries, which is what tells a lint run from the
@@ -231,7 +231,7 @@ Escape key. It is a **timeline over a transcript**, both projected from
   Publication, Lock waits, Human wait. Those are the served `agent_role`,
   `transport_role` and span-kind vocabulary rendered as words — an operator never
   reads a served identifier such as `rollup` or `pr-drafting`, and the span kinds
-  that *hold* work rather than being work (a round, the node, a lifecycle step)
+  that *hold* work rather than being work (the run, the node, a lifecycle step)
   occupy no lane at all. A journal record is a moment rather than an interval, so
   it is a **marker** — an icon on a full-height line over every lane. The axis
   reads local wall-clock time and elapsed-from-start, and the compact line and the
@@ -264,8 +264,8 @@ Escape key. It is a **timeline over a transcript**, both projected from
   the safe assumption is "cancel" — the expensive one. It is deliberately the
   narrower claim: a reachable turn is one a note can be *delivered into*, not a
   promise the harness will act on it, and nothing in the published stack reports the
-  latter for a turn in flight. `Round.node_control` carries one entry per node in
-  flight and none for any other, so a settled node says nothing here rather than
+  latter for a turn in flight. `GraphState.node_control` carries one entry per node
+  in flight and none for any other, so a settled node says nothing here rather than
   saying it cannot be reached.
   The badge is a word and not the clause behind it: this header is the one thing above
   a plot sized from what it leaves, and the collapsed line is the view a node opens
@@ -410,8 +410,8 @@ views through the real telemetry client with only the browser's `fetch` and
 `EventSource` replaced. Playwright then drives the built user journeys in a real
 browser against a real `onepipeline-api serve` process:
 `apps/dag-ui/e2e/fixtures/runs.mjs` writes a throwaway run directory in the SDK's
-own on-disk shape — a launch record, a plan, a per-round plan and result, and the
-merged event store — `serve-fixture.mjs` serves it through the compiled binary,
+own on-disk shape — a launch record, a plan, the run's own recorded result, and
+the merged event store — `serve-fixture.mjs` serves it through the compiled binary,
 and `playwright.config.ts` starts both that server and Vite. Nothing between the
 browser and the read model is doubled.
 
