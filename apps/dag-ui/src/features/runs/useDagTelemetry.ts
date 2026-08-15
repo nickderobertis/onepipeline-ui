@@ -310,9 +310,16 @@ export function useDagTelemetry(
  * Swallow the one read failure that is not a failure: a run removed between the
  * read that listed it and the read that fetched it. The next list already drops it,
  * so reporting "no recorded run" would only describe the race, not a problem.
+ *
+ * Matched on the code and not on the status, because that race is no longer the
+ * only 404 these routes serve: a `filter` naming a profile the run does not have
+ * is one too, and it is a reading the viewer asked for and did not get. Swallowed
+ * on the status alone, it would leave them looking at the previous reading with
+ * nothing saying the switch did nothing.
  */
 function ignoreRemovedRun(caught: unknown): void {
-  if (caught instanceof TelemetryClientError && caught.status === 404) return;
+  if (caught instanceof TelemetryClientError && caught.code === "run_not_found")
+    return;
   throw caught;
 }
 

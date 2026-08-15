@@ -1371,6 +1371,29 @@ pub fn write_launched(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// Define a named filter profile on a run's launch record.
+///
+/// `onepipeline start --set filters.NAME=SPEC` forwards the override opaquely to
+/// the dag-scope launch and the SDK retains it verbatim, which is where a
+/// run-specific decision this crate can read lives. Written by rewriting the
+/// record the same way a relaunch would, so what the server reads is a launch
+/// record and not a fixture shape of its own.
+pub fn define_filter_profile(dir: &Path, name: &str, spec: &str) {
+    let path = dir.join("launch.json");
+    let mut record: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    let sets = record
+        .as_object_mut()
+        .expect("a mapping")
+        .entry("dag_sets")
+        .or_insert_with(|| json!([]));
+    sets.as_array_mut()
+        .expect("the retained overrides")
+        .push(json!(format!("filters.{name}={spec}")));
+    fs::write(&path, pretty(&record)).expect("the launch record");
+}
+
 fn pretty(value: &Value) -> String {
     format!(
         "{}\n",

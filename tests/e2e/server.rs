@@ -2448,3 +2448,348 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
         "the refusal says how to point at one: {missing}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Read-time filtering
+//
+// Every journey below drives the compiled binary over real HTTP against a real
+// recorded run, because `?filter=` is a query the server parses, resolves
+// against the run's own launch record, and applies to what it serves — four
+// seams a payload built in-process would skip.
+// ---------------------------------------------------------------------------
+
+/// Every event kind a timeline carries, at whichever scope it was read.
+fn kinds_on(body: &Value) -> Vec<String> {
+    body["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter_map(|event| event["kind"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The run-scoped timeline of the live fixture, read under one filter.
+fn timeline_under(serving: &Serving, filter: Option<&str>) -> Value {
+    let query = filter.map_or_else(String::new, |spec| format!("&filter={}", urlencode(spec)));
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run{query}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()
+}
+
+/// Percent-encode a query value, which an inline spec needs and a profile name
+/// does not: a spec is JSON, and `{`, `"` and `,` are not query-safe.
+fn urlencode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_named_profile_narrows_the_stream_to_the_decisions_or_leaves_it_whole() {
+    let serving = live_run();
+
+    // Unfiltered: the whole merged store, all three producing libraries.
+    let whole = kinds_on(&timeline_under(&serving, None));
+    assert!(whole.iter().any(|kind| kind == "node-settled"), "{whole:?}");
+    assert!(
+        whole.iter().any(|kind| kind == "turn-activity"),
+        "{whole:?}"
+    );
+    assert!(
+        whole.iter().any(|kind| kind == "change-opened"),
+        "{whole:?}"
+    );
+
+    // `planner` is the decisions-level reading: onepipeline's own vocabulary is a
+    // closed set and it is exactly the decisions. Nothing a sibling relayed is a
+    // decision, so none of it survives.
+    let decisions = kinds_on(&timeline_under(&serving, Some("planner")));
+    assert!(!decisions.is_empty(), "the decisions are still served");
+    for kind in [
+        "node-ready",
+        "node-settled",
+        "decision-pending",
+        "edit-committed",
+    ] {
+        assert!(
+            decisions.iter().any(|served| served == kind),
+            "{kind} is a decision and must survive: {decisions:?}"
+        );
+    }
+    for kind in [
+        "turn-activity",
+        "turn-completed",
+        "change-opened",
+        "gate-verdict",
+    ] {
+        assert!(
+            !decisions.iter().any(|served| served == kind),
+            "{kind} is activity, not a decision: {decisions:?}"
+        );
+    }
+
+    // `monitor` is the detailed stream, which is what that persona's own contract
+    // says it reads: it narrows nothing, and is named so that the two readings a
+    // viewer switches between are two profiles rather than a profile and nothing.
+    assert_eq!(kinds_on(&timeline_under(&serving, Some("monitor"))), whole);
+}
+
+#[test]
+fn an_inline_spec_is_read_in_the_grammar_the_stack_shares() {
+    let serving = live_run();
+    let whole = kinds_on(&timeline_under(&serving, None));
+
+    // `exclude` wins, and `kind` is a glob over the wire string — so one matcher
+    // drops every turn record a sibling relayed while leaving the rest.
+    let quiet = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"exclude":[{"kind":"turn-*"}]}"#),
+    ));
+    assert!(
+        !quiet.iter().any(|kind| kind.starts_with("turn-")),
+        "the glob matched nothing: {quiet:?}"
+    );
+    assert!(quiet.iter().any(|kind| kind == "node-settled"), "{quiet:?}");
+    assert!(quiet.len() < whole.len());
+
+    // An absent `include` admits everything, so a broad include beside a narrow
+    // exclude is how "all of this except that" is written — and `exclude` still
+    // wins over whatever `include` admitted.
+    let vcs_only = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"source":"vcs"}],"exclude":[{"kind":"lock-wait"}]}"#),
+    ));
+    assert!(
+        vcs_only.iter().any(|kind| kind == "change-opened"),
+        "{vcs_only:?}"
+    );
+    assert!(
+        !vcs_only.iter().any(|kind| kind == "lock-wait"),
+        "{vcs_only:?}"
+    );
+    assert!(
+        !vcs_only.iter().any(|kind| kind == "node-settled"),
+        "{vcs_only:?}"
+    );
+
+    // A reserved label the envelope carries under the same name, matched exactly.
+    let one_node = kinds_on(&timeline_under(
+        &serving,
+        Some(&format!(
+            r#"{{"include":[{{"node":"{}"}}]}}"#,
+            fixture_run::REDIRECTED_NODE_ID
+        )),
+    ));
+    assert!(!one_node.is_empty(), "the node's own records are served");
+    assert!(
+        one_node.iter().any(|kind| kind == "turn-interrupted"),
+        "{one_node:?}"
+    );
+    assert!(
+        !one_node.iter().any(|kind| kind == "change-opened"),
+        "{one_node:?}"
+    );
+}
+
+#[test]
+fn a_filter_shapes_the_response_and_never_the_run() {
+    // The whole point of the read API staying read-only: a reader who narrowed
+    // their attention is shown the same graph, in the same states, as one who
+    // asked for everything. Only the records served beside it change.
+    let serving = live_run();
+    let detail = |filter: &str| -> Value {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=false&filter={filter}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()
+    };
+    let wide = detail("monitor");
+    let narrow = detail("planner");
+    assert_eq!(narrow["graph"]["node_status"], wide["graph"]["node_status"]);
+    assert_eq!(
+        narrow["graph"]["node_control"],
+        wide["graph"]["node_control"]
+    );
+    assert_eq!(narrow["graph"]["decisions"], wide["graph"]["decisions"]);
+    assert_eq!(
+        narrow["graph"]["node_results"],
+        wide["graph"]["node_results"]
+    );
+    assert_eq!(narrow["run"]["nodes"], wide["run"]["nodes"]);
+    // Including the clock: the document describes the run, not the reading of it.
+    assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+}
+
+#[test]
+fn a_profile_the_runs_launch_config_defined_answers_for_that_run_alone() {
+    // A retained `--set filters.NAME=SPEC` is where a launch's own opaque
+    // decisions are kept, and it is the one place this crate can read a
+    // run-specific one from. The launch record is written by the SDK and read
+    // here verbatim.
+    let defined = "change-watch";
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::define_filter_profile(&dir, defined, r#"{"include":[{"kind":"change-*"}]}"#);
+        // A second run, launched with none: the same name must not answer for it.
+        fixture_run::write_live(root, fixture_run::OTHER_RUN_ID);
+    });
+
+    let served = kinds_on(&timeline_under(&serving, Some(defined)));
+    assert!(
+        !served.is_empty(),
+        "the profile resolved and served records"
+    );
+    assert!(
+        served.iter().all(|kind| kind.starts_with("change-")),
+        "the launch's own spec is what shaped it: {served:?}"
+    );
+
+    // The same name, at a run whose launch defined nothing: not a 500, not a
+    // silently unfiltered payload, but the refusal naming what that run does have.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter={defined}",
+            fixture_run::OTHER_RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404);
+    let error = &refused.json()["error"];
+    assert_eq!(error["code"], json!("unknown_filter_profile"));
+    let message = error["message"].as_str().expect("a message");
+    assert!(message.contains(defined), "{message}");
+    assert!(
+        message.contains("planner") && message.contains("monitor"),
+        "a reader who mistyped a name is told which names exist: {message}"
+    );
+
+    // And a launch-defined name may not shadow a built-in one: those two mean the
+    // same thing for every run, which is the whole reason a reader names them.
+    let shadowing = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::define_filter_profile(&dir, "planner", r#"{"include":[{"kind":"change-*"}]}"#);
+    });
+    let planner = kinds_on(&timeline_under(&shadowing, Some("planner")));
+    assert!(
+        planner.iter().any(|kind| kind == "node-settled"),
+        "the built-in profile is what `planner` still means: {planner:?}"
+    );
+}
+
+#[test]
+fn a_filter_that_could_match_nothing_is_refused_at_the_boundary() {
+    let serving = live_run();
+    let refused = |spec: &str| -> http::Response {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run&filter={}",
+                fixture_run::RUN_ID,
+                urlencode(spec)
+            ),
+        )
+    };
+    // A matcher naming no field at all matches *every* event, so one in `exclude`
+    // silences the whole stream — far likelier a typo than an intent, and not a
+    // thing the empty payload it produces could tell anyone.
+    let empty = refused(r#"{"exclude":[{}]}"#);
+    assert_eq!(empty.status, 422);
+    let message = empty.json()["error"]["message"]
+        .as_str()
+        .expect("a message")
+        .to_owned();
+    assert_eq!(empty.json()["error"]["code"], json!("invalid_request"));
+    assert!(
+        message.contains("exclude[0]") && message.contains("name at least one"),
+        "the refusal names which matcher and what is wrong with it: {message}"
+    );
+
+    // A field the stream carries no empty value for matches nothing at all.
+    let blank = refused(r#"{"include":[{"kind":"node-ready"},{"node":"  "}]}"#);
+    assert_eq!(blank.status, 422);
+    assert!(
+        blank.json()["error"]["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("include[1]") && why.contains("`node` is empty")),
+        "{:?}",
+        blank.json()
+    );
+
+    // A spec that is not a spec, and a name that is not a usable name.
+    assert_eq!(refused(r#"{"include":"everything"}"#).status, 422);
+    assert_eq!(refused(r#"{"include":[{"round":1}]}"#).status, 422);
+    assert_eq!(refused("../etc/passwd").status, 422);
+}
+
+#[test]
+fn a_filtered_stream_is_not_woken_by_a_movement_it_excluded() {
+    // The stream invalidates rather than restating state, so a filter decides
+    // which movements are worth announcing. A subscriber narrowed to decisions
+    // must not be woken by every tool call — and must still be woken by a
+    // decision.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let mut stream = http::stream(
+        serving.address,
+        &format!(
+            "/api/v2/events?run_id={}&filter=planner",
+            fixture_run::RUN_ID
+        ),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    assert_eq!(stream.frames(1)[0].event, "snapshot");
+
+    // Activity this connection excluded: the run really moved, and this
+    // subscriber is deliberately not told, because nothing it is watching for
+    // changed. The harness polls every 50ms, so this waits out many polls before
+    // concluding the silence is the filter's doing rather than a slow read.
+    let dir = serving.run_dir(fixture_run::RUN_ID);
+    fixture_run::append_relayed(
+        &dir,
+        "agentgraph",
+        "turn-activity",
+        json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "member": "worker",
+            "session": fixture_run::REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({ "kind": "tool_use", "name": "Read", "detail": "docs/contract.md" }),
+    );
+    let woken = stream.frame_within(std::time::Duration::from_millis(750));
+    assert!(
+        woken.is_none(),
+        "a subscriber narrowed to decisions was woken by a tool call: {:?}",
+        woken.map(|frame| (frame.event, frame.data))
+    );
+
+    // Then a decision, which it *is* watching for: the same run, the same poll
+    // loop, and this time a frame.
+    fixture_run::append(&dir, "node-settled", json!({ "status": "done" }));
+    let frame = stream.next_frame().expect("the stream stayed open");
+    assert_eq!(frame.event, "run.changed");
+    assert_eq!(frame.json()["run_id"], json!(fixture_run::RUN_ID));
+    assert!(
+        frame.json().get("round").is_none(),
+        "an invalidation names the run that moved and nothing else: {}",
+        frame.data
+    );
+}

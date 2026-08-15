@@ -1625,3 +1625,127 @@ test(
     cleanup();
   },
 );
+
+describe("the reading a viewer asks for", () => {
+  /** The filter every read of the selected run was taken under, in order. */
+  const filtersAsked = (fetch: { mock: { calls: unknown[][] } }): string[] =>
+    fetch.mock.calls
+      .map((call: unknown[]) => new URL(String(call[0]), window.location.origin))
+      .filter((url) => isRunDetail(url) || isTimeline(url))
+      .map((url) => url.searchParams.get("filter") ?? "");
+
+  test(
+    "switches between decisions and detailed activity, and says which is on",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
+      const { client, fetch } = telemetryHarness();
+      render(<App client={client} />);
+      await screen.findByRole("heading", { name: LIVE_RUN });
+
+      const choice = (name: string) =>
+        within(
+          screen.getByRole("group", { name: "Level of detail" }),
+        ).getByRole("button", { name });
+      const decisions = choice("Decisions");
+      const activity = choice("Detailed activity");
+
+      // A reader who asked for nothing is shown everything, and the control says
+      // so rather than leaving both settings looking equally selected.
+      expect(activity).toHaveAttribute("aria-pressed", "true");
+      expect(decisions).toHaveAttribute("aria-pressed", "false");
+      await waitFor(() => expect(filtersAsked(fetch).length).toBeGreaterThan(0));
+      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["monitor"]));
+
+      // Narrowing to the decisions is one click, and every read of the run is
+      // taken again under the profile it names — so the graph, the timeline and
+      // the stream can never be showing three different slices of one run.
+      const before = filtersAsked(fetch).length;
+      await userEvent.click(decisions);
+      expect(decisions).toHaveAttribute("aria-pressed", "true");
+      expect(activity).toHaveAttribute("aria-pressed", "false");
+      await waitFor(() =>
+        expect(filtersAsked(fetch).length).toBeGreaterThan(before),
+      );
+      expect(filtersAsked(fetch).slice(before)).toContain("planner");
+      expect(filtersAsked(fetch).slice(before)).not.toContain("monitor");
+
+      // And the reading is in the address, like every other selection: a reader
+      // who narrowed their attention can send someone what they were looking at.
+      expect(window.location.search).toContain("detail=decisions");
+      // The run and the view they were on are untouched by it.
+      expect(window.location.search).toContain(`run=${LIVE_RUN}`);
+      expect(window.location.search).toContain("view=overall");
+
+      // Back returns to the detailed reading, so the switch is undoable the way
+      // the rest of the drill-down is.
+      act(() => {
+        window.history.back();
+      });
+      await waitFor(() =>
+        expect(choice("Detailed activity")).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        ),
+      );
+      cleanup();
+    },
+  );
+
+  test(
+    "opens on the decisions-level reading when the address names one",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&view=overall&detail=decisions`,
+      );
+      const { client, fetch } = telemetryHarness();
+      render(<App client={client} />);
+      await screen.findByRole("heading", { name: LIVE_RUN });
+      await waitFor(() => expect(filtersAsked(fetch).length).toBeGreaterThan(0));
+      // Every read from the first one: a bookmarked reading is not a reading the
+      // app arrives at after showing the other one first.
+      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["planner"]));
+      expect(
+        within(
+          screen.getByRole("group", { name: "Level of detail" }),
+        ).getByRole("button", { name: "Decisions" }),
+      ).toHaveAttribute("aria-pressed", "true");
+      cleanup();
+    },
+  );
+
+  test(
+    "a reading the server has no profile for is reported, not silently widened",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&view=overall&detail=decisions`,
+      );
+      const { client } = telemetryHarness((url) => {
+        if (!isRunDetail(url)) return defaultResponder(url);
+        // What a server serves for a profile the run does not have. A viewer
+        // must be told rather than shown an unnarrowed payload under the name
+        // they asked for.
+        return Response.json(
+          {
+            error: {
+              code: "unknown_filter_profile",
+              message: '"planner" is not a filter profile of this run',
+            },
+          },
+          { status: 404 },
+        );
+      });
+      render(<App client={client} />);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /not a filter profile/,
+      );
+      cleanup();
+    },
+  );
+});

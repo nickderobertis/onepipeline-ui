@@ -117,7 +117,9 @@ impl RunStore {
         // could not name is one no argument list is built from either — the same
         // filter the stream applies before announcing a run.
         let run = RunId::try_from(view.paths.run.as_str()).ok()?;
-        let token = payload::signature(view);
+        // The run's own change token, unfiltered: the cached document describes
+        // the run, so what invalidates it is the run moving at all.
+        let token = payload::signature(view, &EventFilter::default());
         let mut cache = self
             .aggregated
             .lock()
@@ -183,17 +185,6 @@ impl RunStore {
             None => Ok(EventFilter::default()),
             Some(spec) => spec.resolve(&LaunchProfiles::of(&view.launch.dag_sets)),
         }
-    }
-
-    /// The reading one request gets: the run as it is, or a copy carrying only
-    /// the events its filter admits.
-    ///
-    /// A filter that narrows nothing takes no copy — the overwhelmingly common
-    /// read, and one where cloning a long-running run's whole event store to
-    /// prove it changed nothing would be the most expensive thing this server
-    /// does.
-    fn reading(view: &RunView, filter: &EventFilter) -> Option<RunView> {
-        (!filter.admits_everything()).then(|| payload::filtered(view, filter))
     }
 
     /// The run list as one page, with the cursor the next page resumes from.
@@ -271,15 +262,15 @@ impl ReadApi for RunStore {
     fn run(&self, run: &RunId, query: &RunQuery) -> Result<Envelope<Value>, ApiError> {
         let view = self.view(run)?;
         let filter = Self::resolve(&view, query.filter.as_ref())?;
-        // The telemetry document describes the run, not the reading of it, so it
-        // is asked for against the unfiltered view: a reader narrowing their
-        // attention must not be told the run spent less time than it did.
+        // The telemetry document describes the run, not the reading of it: a
+        // reader narrowing their attention must not be told the run spent less
+        // time than it did.
         let aggregated = self.telemetry(&view);
-        let reading = Self::reading(&view, &filter);
         Ok(Self::envelope(payload::run_detail(
-            reading.as_ref().unwrap_or(&view),
+            &view,
             query.include_conversations,
             aggregated.as_deref(),
+            &filter,
         )))
     }
 
@@ -290,11 +281,7 @@ impl ReadApi for RunStore {
             TimelineScope::Run => Scope::Run,
             TimelineScope::Node { node } => Scope::Node(node),
         };
-        let reading = Self::reading(&view, &filter);
-        Ok(Self::envelope(payload::timeline(
-            reading.as_ref().unwrap_or(&view),
-            &scope,
-        )))
+        Ok(Self::envelope(payload::timeline(&view, &scope, &filter)))
     }
 
     fn conversation(
@@ -374,15 +361,19 @@ impl Frames {
     /// are an invalidation, and the refusal a reader can act on is the one the
     /// detail route serves when they refetch.
     fn signature_of(&self, view: &RunView) -> Signature {
-        let Some(spec) = self.spec.as_ref() else {
-            return payload::signature(view);
-        };
-        match RunStore::resolve(view, Some(spec)) {
-            Ok(filter) if !filter.admits_everything() => {
-                payload::signature(&payload::filtered(view, &filter))
-            }
-            _ => payload::signature(view),
-        }
+        payload::signature(view, &self.filter_for(view))
+    }
+
+    /// This connection's filter, resolved against one run.
+    ///
+    /// A filter that run has no profile for narrows nothing rather than failing
+    /// the stream: the frames are an invalidation, and the refusal a reader can
+    /// act on is the one the detail route serves when they refetch.
+    fn filter_for(&self, view: &RunView) -> EventFilter {
+        self.spec
+            .as_ref()
+            .and_then(|spec| RunStore::resolve(view, Some(spec)).ok())
+            .unwrap_or_default()
     }
 
     /// End the stream the moment `stop` says to.
@@ -421,10 +412,16 @@ impl Frames {
     }
 
     /// The watched run's transcript digest, or `None` when nothing is watched.
+    ///
+    /// Under this connection's own filter, so it is a digest of the transcripts
+    /// this reader would be served rather than of every one the run holds.
     fn transcript_digest(&self) -> Option<String> {
         let watched = self.watched.as_ref()?;
         let view = self.store.view(watched).ok()?;
-        Some(payload::conversation_signature(&view))
+        Some(payload::conversation_signature(
+            &view,
+            &self.filter_for(&view),
+        ))
     }
 
     /// What the watched run's nodes were last reported doing from inside a turn.
@@ -436,7 +433,7 @@ impl Frames {
     fn activity(&self) -> Option<Vec<Value>> {
         let watched = self.watched.as_ref()?;
         let view = self.store.view(watched).ok()?;
-        Some(payload::live_activity(&view))
+        Some(payload::live_activity(&view, &self.filter_for(&view)))
     }
 
     fn frame(&mut self, event: SseEvent, data: Value) -> EventFrame {
