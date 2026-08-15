@@ -315,14 +315,48 @@ fn dependency_requirement(cargo: &str, name: &str) -> String {
     panic!("Cargo.toml declares no dependency on {name}");
 }
 
-/// release-plz's semver check is enabled and the workflow running it provisions
-/// the tool it shells out to.
+/// The tools the workflow's `taiki-e/install-action` step provisions, read out of
+/// its `tool:` block.
 ///
-/// The two are one setting written in two files: `semver_check = true` makes
-/// `cargo-semver-checks` a dependency of the release, and release-plz does not
-/// fall back to the commit type when it is missing — it fails, taking the release
-/// PR with it. Enabling the check is what stops the bump from being a claim about
-/// the author's intent (`feat` vs `feat!`) instead of a reading of the surface.
+/// The block rather than the file: every name here is also written in the prose
+/// around it, and a comment must not be able to satisfy an assertion about what
+/// the release run can execute.
+fn provisioned_tools(workflow: &str) -> Vec<String> {
+    let mut lines = workflow.lines().skip_while(|line| line.trim() != "tool: |");
+    let header = lines
+        .next()
+        .expect("release-plz.yml has no `tool: |` install block");
+    let indent = header.len() - header.trim_start().len();
+    lines
+        .take_while(|line| line.trim().is_empty() || line.len() - line.trim_start().len() > indent)
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// A `${{ env.NAME }}` reference resolved against the workflow's own `env:`, so
+/// the pin is read where it is written rather than assumed to be one.
+fn workflow_env(workflow: &str, reference: &str) -> String {
+    let Some(name) = reference
+        .strip_prefix("${{ env.")
+        .and_then(|rest| rest.strip_suffix(" }}"))
+    else {
+        return reference.to_owned();
+    };
+    workflow
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&format!("{name}:")))
+        .unwrap_or_else(|| panic!("release-plz.yml references {name}, which it never sets"))
+        .trim()
+        .trim_matches('"')
+        .to_owned()
+}
+
+/// release-plz's semver check is enabled and the workflow running it provisions
+/// the tool it shells out to, at a version.
+///
+/// release-plz skips a check whose tool it cannot find, warning where nobody is
+/// reading, so neither half is worth anything without the other.
 #[test]
 fn the_release_workflow_provisions_the_semver_check_it_enables() {
     assert!(
@@ -330,21 +364,32 @@ fn the_release_workflow_provisions_the_semver_check_it_enables() {
         "release-plz.toml does not enable semver_check, so a breaking change \
          releases as whatever its commit type claimed"
     );
+    let workflow = read(".github/workflows/release-plz.yml");
+    let installed = provisioned_tools(&workflow)
+        .into_iter()
+        .find_map(|tool| {
+            tool.strip_prefix("cargo-semver-checks@")
+                .map(|pin| workflow_env(&workflow, pin))
+        })
+        .expect(
+            "release-plz.yml provisions no cargo-semver-checks, so the check \
+             release-plz.toml enables is skipped with a warning nobody reads",
+        );
+    let exact = installed.split('.').count() == 3
+        && installed
+            .split('.')
+            .all(|part| part.parse::<u32>().is_ok() && !part.is_empty());
     assert!(
-        read(".github/workflows/release-plz.yml").contains("cargo-semver-checks@"),
-        "release-plz.yml installs no pinned cargo-semver-checks, so the check \
-         release-plz.toml enables has nothing to run"
+        exact,
+        "cargo-semver-checks is provisioned as `{installed}` rather than an exact \
+         x.y.z, so what reads the public surface is whatever was current that day"
     );
 }
 
 /// The SDK requirement is exact, and is the version the lockfile carries.
 ///
-/// A range means everyone who resolves this crate without our `Cargo.lock` builds
-/// against a different `onepipeline` than the one the tree is tested and
-/// bootstrapped against — and two of them matter: a crates.io consumer, and
-/// cargo-semver-checks, which reads the public surface through a generated
-/// placeholder manifest that never sees a lockfile. `^0.1.7` resolved both up to
-/// an `onepipeline` that does not compile at all.
+/// A crates.io consumer and cargo-semver-checks both resolve this crate without
+/// our `Cargo.lock`, so a range hands them an SDK the tree never tested.
 #[test]
 fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
     let requirement = dependency_requirement(&read("Cargo.toml"), "onepipeline");

@@ -35,10 +35,8 @@ permissions:
 env:
   # Pin release-plz so the release process is reproducible; bump deliberately.
   RELEASE_PLZ_VERSION: "0.3.158"
-  # `semver_check = true` in release-plz.toml makes this a dependency of the
-  # release, not a nicety: release-plz shells out to `cargo-semver-checks` to read
-  # the public surface against the baseline, and without it on PATH the run fails
-  # rather than falling back to the commit type. Pinned for the same reason.
+  # What release-plz.toml's `semver_check` shells out to, pinned for the same
+  # reason release-plz above it is.
   CARGO_SEMVER_CHECKS_VERSION: "0.50.0"
 
 jobs:

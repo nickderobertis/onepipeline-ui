@@ -22,17 +22,13 @@
 # versioning/tagging from the registry push.
 publish = false
 
-# API breaking-change detection. The bump above is computed from the commit
-# *type*, which is a claim about the author's intent rather than a reading of the
-# crate's public surface — a `!` nobody wrote is a breaking change released as a
-# compatible one, and the family has already shipped one that way (onevcs 0.2.1,
-# public trait methods added in a patch). This is the reading: cargo-semver-checks
-# diffs the surface against the baseline release and raises the bump when the two
-# disagree, so the classification stops depending on remembering the marker.
+# The bump above is a reading of the commit *type*, which is a claim about the
+# author's intent; this reads the public surface instead, so a breaking change no
+# longer releases as a compatible one whenever nobody wrote the `!`. It is worth
+# as much as a baseline that builds and no more — a check that could not run is
+# reported as "API compatible", never as a failure.
 #
-# It needs `cargo-semver-checks` on PATH — .github/workflows/release-plz.yml
-# provisions it beside release-plz itself, and `tests/packaging.rs` holds the two
-# together, because the flag without the tool is a release that cannot run.
+# llmlint: ignore[changed_behavior_has_e2e] driving this check is a network resolve third-party publishes decide, so it belongs to the release path rather than an offline gate — as `deps-check` does.
 semver_check = true
 
 git_tag_name = "v{{ version }}"

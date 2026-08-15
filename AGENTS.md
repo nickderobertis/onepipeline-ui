@@ -117,6 +117,15 @@ fans one uniformly-named target across all of them.
   unpublished.
 - **A tag is not evidence of a release; the registry is.** Check what npm, PyPI
   and crates.io serve before reporting a version shipped.
+- **The bump is read off the public surface, and a green reading is only as good
+  as a baseline that builds.** `semver_check = true` has release-plz diff the API
+  against the last release with cargo-semver-checks, so a breaking change no
+  longer depends on someone remembering the `!`. But release-plz reports a check
+  it *could not run* as "API compatible" rather than as a failure, and
+  cargo-semver-checks builds both sides through a generated manifest that never
+  sees `Cargo.lock` — so every dependency requirement has to resolve to something
+  that compiles on its own. That is why `onepipeline` is pinned exactly, and it
+  is the first thing to suspect behind a surprisingly compatible verdict.
 - **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
   `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
   workflow, so `release.yml` would never run and the release would ship nothing.
