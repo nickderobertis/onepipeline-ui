@@ -137,7 +137,7 @@ describe("TelemetryClient fetch boundary", () => {
           telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
           observed_at: "2026-07-26T12:00:00Z",
           run: runTelemetry,
-          rounds: [],
+          graph: null,
           conversations: [],
         });
       },

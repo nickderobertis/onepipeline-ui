@@ -261,6 +261,21 @@ p {
   gap: 12px;
 }
 
+/*
+ * The two readings, offered as one control rather than two loose buttons: a
+ * `fieldset` with a legend is what says the pair is a choice, and the pressed
+ * state is what says which one is taken. Borderless because the buttons carry
+ * their own.
+ */
+.detail-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .connection {
   gap: 7px;
   color: var(--muted-foreground);

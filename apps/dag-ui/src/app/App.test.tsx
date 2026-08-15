@@ -23,7 +23,7 @@ import {
   LONG_SESSION,
   longConversation,
   PR_URL,
-  ROUND_CHECK_IN_SESSION,
+  RUN_CHECK_IN_SESSION,
   runDetail,
   runList,
   runScopeTimeline,
@@ -97,10 +97,10 @@ configure({ asyncUtilTimeout: 10_000 });
 
 /**
  * The two sessions the live fixture recorded at no node, by the span id that opens
- * each one: the orchestrator driving the graph, and the round's own check-in.
+ * each one: the orchestrator driving the graph, and the run's own check-in.
  */
 const ORCHESTRATOR_SPAN = "dispatch-orchestrator-session";
-const CHECK_IN_SPAN = `dispatch-${ROUND_CHECK_IN_SESSION}`;
+const CHECK_IN_SPAN = `dispatch-${RUN_CHECK_IN_SESSION}`;
 
 /** Nodes of the live fixture whose status every surface has to agree on. */
 const SERVED_STATUSES: readonly { node: string; status: string }[] = [
@@ -365,7 +365,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await within(detail()).findByText("Verification record"),
     ).toBeVisible();
     expect(within(detail()).getByText("Full log")).toBeInTheDocument();
-    expect(within(detail()).queryByText(/round-01\/foundation/)).toBeNull();
+    expect(within(detail()).queryByText(/foundation\/gate\.log/)).toBeNull();
 
     await userEvent.click(railRow(/local\/example/));
     expect(
@@ -401,10 +401,9 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       id: "step-dense",
       kind: "step",
       label: "Supervised conversations",
-      parent_id: "node-1-dashboard",
+      parent_id: "node-dashboard",
       node_id: "dashboard",
       step_id: "supervision",
-      round: 1,
       started_at: "2026-07-26T11:01:01.000Z",
       ended_at: "2026-07-26T11:10:00.000Z",
       status: "done",
@@ -441,7 +440,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
   test("labels a worker dispatched after a retry request as the retry", async () => {
     const retried = parseRunTimeline(runTimeline(LIVE_RUN));
-    const node = retried.spans.find(({ id }) => id === "node-1-dashboard");
+    const node = retried.spans.find(({ id }) => id === "node-dashboard");
     const worker = retried.spans.find(
       ({ id }) => id === "dispatch-worker-session",
     );
@@ -452,7 +451,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       kind: "retry-requested",
       at: "2026-07-26T11:02:35.000Z",
       node_id: "dashboard",
-      round: 1,
     });
     retried.spans.push({
       ...worker,
@@ -690,10 +688,13 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
     await userEvent.click(await screen.findByRole("tab", { name: "Task" }));
     expect(
-      await screen.findByText("Build the live dashboard"),
+      await screen.findByText(/Build the live dashboard/),
     ).toBeInTheDocument();
+    // Plan schema 2 retired `done_when`: the bar is the `## Acceptance criteria`
+    // section of the node's own task, which is the text the judge is handed, and
+    // the tab shows that section alone rather than the whole prose again.
     await userEvent.click(
-      screen.getByRole("tab", { name: "Completion criteria" }),
+      screen.getByRole("tab", { name: "Acceptance criteria" }),
     );
     expect(
       await screen.findByText("Users can inspect transcripts"),
@@ -732,7 +733,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     const { client } = telemetryHarness();
     render(<App client={client} />);
     const criteria = await screen.findByRole("tab", {
-      name: "Completion criteria",
+      name: "Acceptance criteria",
     });
     expect(criteria).toHaveAttribute("aria-selected", "true");
     criteria.focus();
@@ -926,7 +927,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(await screen.findByText("archive")).toBeInTheDocument();
 
     const before = fetch.mock.calls.length;
-    sources[0]?.emit("run.changed", { run_id: HISTORY_RUN, round: 1 }, "8");
+    sources[0]?.emit("run.changed", { run_id: HISTORY_RUN }, "8");
     await waitFor(() =>
       expect(fetch.mock.calls.length).toBeGreaterThan(before),
     );
@@ -955,7 +956,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         run_id: LIVE_RUN,
         activity: [
           {
-            round: "1",
             node: "dashboard",
             at: Date.now() / 1000,
             kind: "tool",
@@ -1351,12 +1351,12 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     // labelled by the role the plot named the segment with.
     const panel = await openedDetail();
     expect(
-      await within(panel).findByText("Round 1 progress reported"),
+      await within(panel).findByText("Progress reported"),
     ).toBeInTheDocument();
     expect(
       within(panel).getByRole("heading", { name: /^Check-in \(/ }),
     ).toBeInTheDocument();
-    expect(transcripts()).toEqual([ROUND_CHECK_IN_SESSION]);
+    expect(transcripts()).toEqual([RUN_CHECK_IN_SESSION]);
     expect(window.location.search).toContain(`event=${CHECK_IN_SPAN}`);
 
     // Escape closes it, exactly as it closes the node view's own panel.
@@ -1533,7 +1533,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN, round: 1 }, "2");
+    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "2");
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Detail unavailable",
     );
@@ -1559,7 +1559,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     // The invalidation names a run the sweep has already taken away; the view
     // follows the list instead of reporting a telemetry failure.
     removed = true;
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN, round: 1 }, "4");
+    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "4");
     expect(await screen.findByText("archive")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -1573,7 +1573,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       const detail = runDetail(LIVE_RUN);
       // A dependency cycle: the layout rejects it, and no partial graph may be
       // shown in its place.
-      const tasks: { deps?: string[] }[] = detail.rounds[0]?.plan.tasks ?? [];
+      const tasks: { deps?: string[] }[] = detail.graph.plan.tasks ?? [];
       if (tasks[0]) tasks[0].deps = ["dashboard"];
       return Response.json(detail);
     });

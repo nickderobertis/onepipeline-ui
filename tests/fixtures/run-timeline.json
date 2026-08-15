@@ -1,33 +1,36 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 12,
+  "telemetry_schema_version": 13,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 4,
+  "timeline_schema_version": 5,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
-      "id": "node.01.contract-interface",
+      "id": "node.contract-interface",
       "kind": "node",
       "label": "contract-interface",
-      "started_at": "2026-08-07T12:00:02.000Z",
+      "started_at": "2026-08-07T12:00:01.000Z",
       "ended_at": "2026-08-07T12:00:20.000Z",
       "node_id": "contract-interface",
-      "round": 1,
       "status": "done",
       "events": [
+        {
+          "id": "e1",
+          "kind": "node-ready",
+          "at": "2026-08-07T12:00:01.000Z",
+          "node_id": "contract-interface"
+        },
         {
           "id": "e2",
           "kind": "node-dispatched",
           "at": "2026-08-07T12:00:02.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
           "kind": "agent-turn",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "conversation",
             "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
@@ -38,7 +41,6 @@
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "conversation",
             "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
@@ -48,22 +50,19 @@
           "id": "e5",
           "kind": "session-opened",
           "at": "2026-08-07T12:00:06.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e6",
           "kind": "gate-started",
           "at": "2026-08-07T12:00:07.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e7",
           "kind": "gate-verdict",
           "at": "2026-08-07T12:00:09.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "gate_log",
             "value": "artifact-5c8f0a1b"
@@ -73,15 +72,14 @@
           "id": "e8",
           "kind": "push",
           "at": "2026-08-07T12:00:10.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e9",
           "kind": "change-opened",
           "at": "2026-08-07T12:00:11.000Z",
           "node_id": "contract-interface",
-          "round": 1,
+          "author": "a-recording-host",
           "reference": {
             "kind": "pr",
             "value": "https://example.invalid/changes/1"
@@ -92,7 +90,6 @@
           "kind": "change-check",
           "at": "2026-08-07T12:00:12.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "status": "queued"
         },
         {
@@ -100,7 +97,6 @@
           "kind": "change-check",
           "at": "2026-08-07T12:00:13.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "status": "completed",
           "reference": {
             "kind": "gate_log",
@@ -112,7 +108,6 @@
           "kind": "change-check",
           "at": "2026-08-07T12:00:14.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "status": "completed",
           "reference": {
             "kind": "gate_log",
@@ -123,22 +118,19 @@
           "id": "e13",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:15.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e14",
           "kind": "lock-acquired",
           "at": "2026-08-07T12:00:15.100Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e15",
           "kind": "merge-queued",
           "at": "2026-08-07T12:00:16.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "pr",
             "value": "https://example.invalid/changes/1"
@@ -148,15 +140,13 @@
           "id": "e16",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:17.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e17",
           "kind": "change-merged",
           "at": "2026-08-07T12:00:18.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "pr",
             "value": "https://example.invalid/changes/1"
@@ -166,29 +156,26 @@
           "id": "e18",
           "kind": "merge-completed",
           "at": "2026-08-07T12:00:19.000Z",
-          "node_id": "contract-interface",
-          "round": 1
+          "node_id": "contract-interface"
         },
         {
           "id": "e19",
           "kind": "node-settled",
           "at": "2026-08-07T12:00:20.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "status": "done"
         }
       ]
     },
     {
-      "id": "dispatch.01.3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+      "id": "dispatch.3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
       "kind": "dispatch",
       "label": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
       "started_at": "2026-08-07T12:00:02.000Z",
       "ended_at": "2026-08-07T12:00:20.000Z",
-      "parent_id": "node.01.contract-interface",
+      "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
-      "round": 1,
-      "dispatch_id": "run-20260807-a1b2c3.01.contract-interface",
+      "dispatch_id": "run-20260807-a1b2c3.contract-interface",
       "transport_role": "agent",
       "agent_role": "worker",
       "status": "done",
@@ -202,7 +189,6 @@
           "kind": "agent-turn",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "conversation",
             "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
@@ -213,7 +199,6 @@
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
-          "round": 1,
           "reference": {
             "kind": "conversation",
             "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
@@ -222,14 +207,13 @@
       ]
     },
     {
-      "id": "verification.01.contract-interface.artifact-5c8f0a1b",
+      "id": "verification.contract-interface.artifact-5c8f0a1b",
       "kind": "verification",
       "label": "artifact-5c8f0a1b",
       "started_at": "2026-08-07T12:00:07.000Z",
       "ended_at": "2026-08-07T12:00:09.000Z",
-      "parent_id": "node.01.contract-interface",
+      "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
-      "round": 1,
       "status": "ok",
       "detail": {
         "ok": true,
@@ -239,14 +223,13 @@
       "events": []
     },
     {
-      "id": "verification.01.contract-interface.artifact-published-smoke",
+      "id": "verification.contract-interface.artifact-published-smoke",
       "kind": "verification",
       "label": "artifact-published-smoke",
       "started_at": "2026-08-07T12:00:12.000Z",
       "ended_at": "2026-08-07T12:00:13.000Z",
-      "parent_id": "node.01.contract-interface",
+      "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
-      "round": 1,
       "status": "failed",
       "detail": {
         "ok": false,
@@ -256,14 +239,13 @@
       "events": []
     },
     {
-      "id": "verification.01.contract-interface.artifact-gate-check",
+      "id": "verification.contract-interface.artifact-gate-check",
       "kind": "verification",
       "label": "artifact-gate-check",
       "started_at": "2026-08-07T12:00:13.000Z",
       "ended_at": "2026-08-07T12:00:14.000Z",
-      "parent_id": "node.01.contract-interface",
+      "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
-      "round": 1,
       "status": "ok",
       "detail": {
         "ok": true,
@@ -273,14 +255,13 @@
       "events": []
     },
     {
-      "id": "publication.01.contract-interface",
+      "id": "publication.contract-interface",
       "kind": "publication",
       "label": "feature/contract-interface",
       "started_at": "2026-08-07T12:00:06.000Z",
       "ended_at": "2026-08-07T12:00:19.000Z",
-      "parent_id": "node.01.contract-interface",
+      "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
-      "round": 1,
       "status": "merged",
       "reference": {
         "kind": "pr",
@@ -289,14 +270,13 @@
       "events": []
     },
     {
-      "id": "rollup.01.contract-interface.lock-wait",
+      "id": "rollup.contract-interface.lock-wait",
       "kind": "rollup",
       "label": "lock-wait",
       "started_at": "2026-08-07T12:00:14.250Z",
       "ended_at": "2026-08-07T12:00:17.000Z",
-      "parent_id": "node.01.contract-interface",
+      "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
-      "round": 1,
       "count": 2,
       "total_duration_ms": 3000,
       "events": []

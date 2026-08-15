@@ -41,6 +41,15 @@ pub enum ApiError {
     /// A payload carried a `dispatch_id` that is not a usable identifier.
     #[error("invalid dispatch id: {0}")]
     InvalidDispatchId(String),
+    /// `?filter=` named a profile the run being read does not have.
+    ///
+    /// Separate from [`InvalidRequest`](Self::InvalidRequest) because it is not
+    /// a malformed request: the name is a usable one and the spec is well
+    /// formed, and whether it resolves depends on the run. A reader who asked
+    /// one run for a profile its launch config defined and then asked another
+    /// has to be able to tell that from a typo.
+    #[error("no such filter profile: {0}")]
+    UnknownFilterProfile(String),
     /// No run is recorded under that identifier.
     #[error("no recorded run {0}")]
     RunNotFound(RunId),
@@ -70,6 +79,7 @@ impl ApiError {
             Self::InvalidConversationId(_) => "invalid_conversation_id",
             Self::InvalidArtifactId(_) => "invalid_artifact_id",
             Self::InvalidDispatchId(_) => "invalid_dispatch_id",
+            Self::UnknownFilterProfile(_) => "unknown_filter_profile",
             Self::RunNotFound(_) => "run_not_found",
             Self::ConversationNotFound(_) => "conversation_not_found",
             Self::ArtifactNotFound(_) => "artifact_not_found",
@@ -96,7 +106,8 @@ impl ApiError {
             Self::NoSuchRoute
             | Self::RunNotFound(_)
             | Self::ConversationNotFound(_)
-            | Self::ArtifactNotFound(_) => StatusCode::NOT_FOUND,
+            | Self::ArtifactNotFound(_)
+            | Self::UnknownFilterProfile(_) => StatusCode::NOT_FOUND,
             Self::ProjectionFailed(_) => StatusCode::CONFLICT,
             Self::Read(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

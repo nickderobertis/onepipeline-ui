@@ -1,20 +1,19 @@
 {
   "api_version": 2,
-  "timeline_schema_version": 4,
+  "timeline_schema_version": 5,
   "observed_at": "2026-07-19T00:10:00+00:00",
   "run_id": "demo",
   "spans": [
     {
-      "id": "round-1",
-      "kind": "round",
-      "label": "round 1",
+      "id": "run-demo",
+      "kind": "run",
+      "label": "demo",
       "started_at": "2026-07-19T00:00:00+00:00",
       "ended_at": null,
-      "events": [],
-      "round": 1
+      "events": []
     },
     {
-      "id": "node-1-api",
+      "id": "node-api",
       "kind": "node",
       "label": "api",
       "started_at": "2026-07-19T00:00:01+00:00",
@@ -25,7 +24,6 @@
           "kind": "turn-interrupted",
           "at": "2026-07-19T00:00:05+00:00",
           "node_id": "api",
-          "round": 1,
           "redirection": {
             "delivered": true,
             "member": "worker",
@@ -36,7 +34,6 @@
           "id": "e8",
           "kind": "edit-committed",
           "at": "2026-07-19T00:00:06+00:00",
-          "round": 1,
           "redirection": {
             "delivered": false,
             "delivery": "deferred",
@@ -44,12 +41,11 @@
           }
         }
       ],
-      "parent_id": "round-1",
-      "node_id": "api",
-      "round": 1
+      "parent_id": "run-demo",
+      "node_id": "api"
     },
     {
-      "id": "summary-node-1-api-rollup-activity",
+      "id": "summary-node-api-rollup-activity",
       "kind": "rollup",
       "label": "rollup",
       "started_at": "2026-07-19T00:00:02+00:00",
@@ -58,11 +54,10 @@
       "total_duration_ms": 3000,
       "node_id": "api",
       "events": [],
-      "parent_id": "node-1-api",
-      "round": 1
+      "parent_id": "node-api"
     },
     {
-      "id": "summary-node-1-api-verification-activity",
+      "id": "summary-node-api-verification-activity",
       "kind": "rollup",
       "label": "verification",
       "started_at": "2026-07-19T00:00:04+00:00",
@@ -71,8 +66,7 @@
       "total_duration_ms": 5000,
       "node_id": "api",
       "events": [],
-      "parent_id": "node-1-api",
-      "round": 1
+      "parent_id": "node-api"
     },
     {
       "id": "summary-signoff-human-wait-activity",
@@ -83,11 +77,10 @@
       "count": 1,
       "total_duration_ms": 0,
       "node_id": "signoff",
-      "events": [],
-      "round": 1
+      "events": []
     },
     {
-      "id": "summary-node-1-api-dispatch-worker-agent",
+      "id": "summary-node-api-dispatch-worker-agent",
       "kind": "rollup",
       "label": "worker",
       "started_at": "2026-07-19T00:00:20+00:00",
@@ -96,13 +89,12 @@
       "total_duration_ms": 0,
       "node_id": "api",
       "events": [],
-      "parent_id": "node-1-api",
-      "round": 1,
+      "parent_id": "node-api",
       "agent_role": "worker",
       "transport_role": "agent"
     },
     {
-      "id": "summary-node-1-api-dispatch-worker-llmlint",
+      "id": "summary-node-api-dispatch-worker-llmlint",
       "kind": "rollup",
       "label": "worker",
       "started_at": "2026-07-19T00:00:30+00:00",
@@ -111,8 +103,7 @@
       "total_duration_ms": 0,
       "node_id": "api",
       "events": [],
-      "parent_id": "node-1-api",
-      "round": 1,
+      "parent_id": "node-api",
       "agent_role": "worker",
       "transport_role": "llmlint"
     }

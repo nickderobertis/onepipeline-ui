@@ -7,7 +7,7 @@ import {
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
-  roundSchema,
+  graphStateSchema,
   runDetailSchema,
   runSummarySchema,
   runTelemetrySchema,
@@ -96,7 +96,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 12,
+    telemetry_schema_version: 13,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -130,7 +130,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 12,
+    telemetry_schema_version: 13,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -162,7 +162,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 12,
+    telemetry_schema_version: 13,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -297,7 +297,7 @@ describe("boundary failures", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 12,
+        telemetry_schema_version: 13,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -314,19 +314,18 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 12,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
-      rounds: [{ node_states: { build: "paused" } }],
+      graph: { node_states: { build: "paused" } },
       conversations: [],
     });
     expect(result.success).toBe(false);
   });
 
   test("accepts the served node status and rejects one outside the vocabulary", () => {
-    const round = {
+    const graph = {
       run_id: "run-1",
-      round: 1,
       plan: {
         tasks: [{ id: "build", task: "Build it" }],
         goal: { id: "ship-it", text: "Ship it safely" },
@@ -336,41 +335,42 @@ describe("boundary failures", () => {
       node_gated_by: {},
       node_control: {},
       node_results: {},
+      decisions: [],
       attestations: [],
       result: null,
       last_seq: 2,
     };
-    expect(roundSchema.parse(round).node_status.build).toBe("skipped");
-    expect(roundSchema.parse(round).plan.goal?.text).toBe("Ship it safely");
+    expect(graphStateSchema.parse(graph).node_status.build).toBe("skipped");
+    expect(graphStateSchema.parse(graph).plan.goal?.text).toBe("Ship it safely");
     expect(
-      roundSchema.safeParse({
-        ...round,
-        plan: { ...round.plan, goal: { id: "ship-it" } },
+      graphStateSchema.safeParse({
+        ...graph,
+        plan: { ...graph.plan, goal: { id: "ship-it" } },
       }).success,
     ).toBe(false);
     // A status the vocabulary does not hold is refused at the parse rather than
     // reaching a renderer that has no meaning for it.
     expect(
-      roundSchema.safeParse({ ...round, node_status: { build: "paused" } })
+      graphStateSchema.safeParse({ ...graph, node_status: { build: "paused" } })
         .success,
     ).toBe(false);
     // And the field itself is required: a payload without it would leave a client
     // inventing the status for every node, which is the defect this replaced.
     expect(
-      roundSchema.safeParse({ ...round, node_status: undefined }).success,
+      graphStateSchema.safeParse({ ...graph, node_status: undefined }).success,
     ).toBe(false);
-    expect(roundSchema.safeParse({ ...round, node_status: {} }).success).toBe(
+    expect(graphStateSchema.safeParse({ ...graph, node_status: {} }).success).toBe(
       false,
     );
     expect(
-      roundSchema.safeParse({
-        ...round,
+      graphStateSchema.safeParse({
+        ...graph,
         node_status: { build: "skipped", extra: "pending" },
       }).success,
     ).toBe(false);
     expect(
-      roundSchema.safeParse({
-        ...round,
+      graphStateSchema.safeParse({
+        ...graph,
         plan: {
           tasks: [
             { id: "build", task: "Build it" },
@@ -380,33 +380,33 @@ describe("boundary failures", () => {
       }).success,
     ).toBe(false);
     expect(
-      roundSchema.safeParse({
-        ...round,
+      graphStateSchema.safeParse({
+        ...graph,
         node_gated_by: { build: ["missing"] },
       }).success,
     ).toBe(false);
   });
 
   test("carries whether the run has a turn it can reach for each in-flight node", () => {
-    const round = {
+    const graph = {
       run_id: "run-1",
-      round: 1,
       plan: { tasks: [{ id: "build", task: "Build it" }] },
       node_states: { build: "running" },
       node_status: { build: "running" },
       node_gated_by: {},
       node_control: { build: { addressable: true, member: "worker" } },
       node_results: {},
+      decisions: [],
       attestations: [],
       result: null,
       last_seq: 2,
     };
-    expect(roundSchema.parse(round).node_control.build?.member).toBe("worker");
+    expect(graphStateSchema.parse(graph).node_control.build?.member).toBe("worker");
     // Not interruptible carries the reason, and a node that is carries none: the
     // two are exactly exclusive, so neither can be read as the other.
     expect(
-      roundSchema.parse({
-        ...round,
+      graphStateSchema.parse({
+        ...graph,
         node_control: {
           build: {
             addressable: false,
@@ -416,28 +416,28 @@ describe("boundary failures", () => {
       }).node_control.build?.reason,
     ).toBe("no out-of-band turn control");
     expect(
-      roundSchema.safeParse({
-        ...round,
+      graphStateSchema.safeParse({
+        ...graph,
         node_control: { build: { addressable: false } },
       }).success,
     ).toBe(false);
     expect(
-      roundSchema.safeParse({
-        ...round,
+      graphStateSchema.safeParse({
+        ...graph,
         node_control: {
           build: { addressable: true, reason: "between turns" },
         },
       }).success,
     ).toBe(false);
-    // The field is required, and it may name only nodes the round has in flight:
+    // The field is required, and it may name only nodes the graph has in flight:
     // a node with no turn has nothing to redirect, and an entry for one would read
     // as an answer about work that is not happening.
     expect(
-      roundSchema.safeParse({ ...round, node_control: undefined }).success,
+      graphStateSchema.safeParse({ ...graph, node_control: undefined }).success,
     ).toBe(false);
     expect(
-      roundSchema.safeParse({
-        ...round,
+      graphStateSchema.safeParse({
+        ...graph,
         node_status: { build: "done" },
         node_states: { build: "done" },
       }).success,
@@ -517,7 +517,7 @@ describe("run timeline", () => {
         kind: "pr-created",
         at: "2026-07-26T12:00:01Z",
         node_id: "api",
-        round: 1,
+        graph: 1,
         status: "OPEN",
         reference: { kind: "pr", value: "https://x/pull/7" },
       },
@@ -527,7 +527,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 4,
+      timeline_schema_version: 5,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -624,7 +624,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 4,
+        timeline_schema_version: 5,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

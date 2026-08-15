@@ -11,7 +11,7 @@ import {
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
-  roundSchema,
+  graphStateSchema,
   runConversationsSchema,
   runDetailSchema,
   runSummarySchema,
@@ -81,7 +81,7 @@ test("a package consumer validates an API response through the public export", (
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 12,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }).runs,
@@ -91,8 +91,13 @@ test("a package consumer validates an API response through the public export", (
 test("the checked-in v2 run-detail contract parses and v1 is rejected", async () => {
   const golden = await corpus("run-detail-v2.json");
   const parsed = parseRunDetail(golden);
-  expect(parsed.rounds[0]?.node_status.release).toBe("blocked");
-  expect(parsed.rounds[0]?.node_gated_by.release).toEqual(["approve"]);
+  expect(parsed.graph?.node_status.release).toBe("blocked");
+  expect(parsed.graph?.node_gated_by.release).toEqual(["approve"]);
+  // The one thing a continuous engine pauses for, and it pauses only what depends
+  // on it: `release` is held behind a human action nobody has attested.
+  expect(parsed.graph?.decisions).toEqual([
+    { id: "approve", kind: "human-action", unblocks: ["release"] },
+  ]);
   expect(() => parseRunDetail({ ...golden, api_version: 1 })).toThrow();
 });
 
@@ -138,21 +143,17 @@ test("the goal id the read boundary derives is what makes a legacy run parse", a
   // A conforming server derives this fixture's `plan.goal.id`; the run behind it
   // recorded text alone. Without that id the contract rejects the whole detail.
   const golden = await corpus("run-detail-v2.json");
-  expect(parseRunDetail(golden).rounds[0]?.plan.goal).toEqual({
+  expect(parseRunDetail(golden).graph?.plan.goal).toEqual({
     id: "Ship-the-gated-release",
     text: "Ship the gated release",
   });
 
-  const [round, ...rest] = golden.rounds;
   const legacy = {
     ...golden,
-    rounds: [
-      {
-        ...round,
-        plan: { ...round.plan, goal: { text: round.plan.goal.text } },
-      },
-      ...rest,
-    ],
+    graph: {
+      ...golden.graph,
+      plan: { ...golden.graph.plan, goal: { text: golden.graph.plan.goal.text } },
+    },
   };
   expect(() => parseRunDetail(legacy)).toThrow();
 });
@@ -161,22 +162,23 @@ test("the goal id the read boundary derives is what makes a legacy run parse", a
 // Tuple literals keep each fixture name visible to test.each instead of widening to string[].
 const LEGACY_RUNS = ["legacy-resume-object", "legacy-steps-node"] as const;
 
-async function legacyRound(run: string) {
+async function legacyGraph(run: string) {
   const plan = await corpus(`legacy-runs/${run}.plan.json`);
   const ids: string[] = plan.tasks.map((task: { id: string }) => task.id);
   return {
     run_id: run,
-    round: 1,
     plan,
     node_states: Object.fromEntries(ids.map((id) => [id, "running"])),
     node_status: Object.fromEntries(ids.map((id) => [id, "running"])),
     node_gated_by: {},
     // Every node of a legacy plan reads as running above, so every one of them has
-    // a turn this run can address — which is the shape a recorded round really has.
+    // a turn this run can address — which is the shape a run with work in flight
+    // really has.
     node_control: Object.fromEntries(
       ids.map((id) => [id, { addressable: true, member: "worker" }]),
     ),
     node_results: {},
+    decisions: [],
     attestations: [],
     result: null,
     last_seq: 3,
@@ -192,9 +194,9 @@ test.each(LEGACY_RUNS)(
     const golden = await corpus("run-detail-v2.json");
     const parsed = parseRunDetail({
       ...golden,
-      rounds: [await legacyRound(run)],
+      graph: await legacyGraph(run),
     });
-    expect(parsed.rounds[0]?.plan.tasks).toHaveLength(1);
+    expect(parsed.graph?.plan.tasks).toHaveLength(1);
   },
 );
 
@@ -257,7 +259,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(() =>
     parseRunList({
       api_version: 3,
-      telemetry_schema_version: 12,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }),
@@ -265,10 +267,10 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(
     runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 12,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
-      rounds: [{ node_states: { build: "paused" } }],
+      graph: { node_states: { build: "paused" } },
       conversations: [],
     }).success,
   ).toBe(false);
@@ -332,7 +334,7 @@ function completeDetail(conversations: unknown[]) {
   };
   return {
     api_version: 2,
-    telemetry_schema_version: 12,
+    telemetry_schema_version: 13,
     observed_at: "2026-07-26T12:00:00Z",
     run: {
       run_id: "run-1",
@@ -366,7 +368,7 @@ function completeDetail(conversations: unknown[]) {
       turns: 0,
       lint: 0,
     },
-    rounds: [],
+    graph: null,
     conversations,
   };
 }
@@ -433,10 +435,9 @@ test("a package consumer validates provenance, SSE names, and counters", () => {
   ).toThrow();
 });
 
-test("a package consumer validates rounds and conversations", () => {
-  const round = roundSchema.parse({
+test("a package consumer validates the graph and conversations", () => {
+  const graph = graphStateSchema.parse({
     run_id: "run-1",
-    round: 1,
     plan: {
       tasks: [
         { id: "build", task: "Build it" },
@@ -451,13 +452,14 @@ test("a package consumer validates rounds and conversations", () => {
     node_gated_by: { announce: ["ship"] },
     node_control: {},
     node_results: { build: { status: "done" } },
+    decisions: [],
     attestations: [],
     result: null,
     last_seq: 3,
   });
-  expect(round.node_states.build).toBe("done");
-  expect(round.node_status.announce).toBe("blocked");
-  expect(round.node_gated_by.announce).toEqual(["ship"]);
+  expect(graph.node_states.build).toBe("done");
+  expect(graph.node_status.announce).toBe("blocked");
+  expect(graph.node_gated_by.announce).toEqual(["ship"]);
   const conversation = {
     canContinue: false,
     harnesses: ["codex"],
@@ -530,14 +532,14 @@ test("a package consumer validates populated telemetry and attribution", () => {
 test("a package consumer parses a served run timeline through the export", () => {
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 4,
+    timeline_schema_version: 5,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
       {
-        id: "round-1",
-        kind: "round",
-        label: "round 1",
+        id: "run-run-1",
+        kind: "run",
+        label: "run-1",
         started_at: "2026-07-26T12:00:00Z",
         ended_at: null,
         events: [],
@@ -548,9 +550,8 @@ test("a package consumer parses a served run timeline through the export", () =>
         label: "engineer-build",
         started_at: "2026-07-26T12:00:01Z",
         ended_at: "2026-07-26T12:04:00Z",
-        parent_id: "round-1",
+        parent_id: "run-run-1",
         node_id: "build",
-        round: 1,
         status: "completed",
         reference: { kind: "conversation", value: "worker-1" },
         events: [
@@ -589,7 +590,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   };
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 4,
+    timeline_schema_version: 5,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -619,7 +620,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   expect(() =>
     parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 4,
+      timeline_schema_version: 5,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "run-1",
       spans: [
@@ -693,8 +694,8 @@ test("this repository's own served goldens parse through the public parsers", as
   expect(parseRunList(await served("runs.json")).runs).toHaveLength(2);
 
   const detail = parseRunDetail(await served("run.json"));
-  expect(detail.run.run_id).toBe(detail.rounds[0]?.run_id);
-  expect(Object.keys(detail.rounds[0]?.node_status ?? {})).not.toHaveLength(0);
+  expect(detail.run.run_id).toBe(detail.graph?.run_id);
+  expect(Object.keys(detail.graph?.node_status ?? {})).not.toHaveLength(0);
 
   // The node-scoped timeline names the dispatch that did the work, which is what
   // lets a client join a span to its transcript.

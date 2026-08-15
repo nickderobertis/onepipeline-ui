@@ -24,6 +24,7 @@ pub mod api;
 pub mod cli;
 pub mod contract;
 pub mod error;
+pub mod filter;
 pub mod payload;
 pub mod server;
 pub mod store;

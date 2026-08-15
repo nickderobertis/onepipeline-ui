@@ -38,7 +38,7 @@ const rowFor = (
 describe("the whole graph on one clock", () => {
   test("runs from launch to the moment an unfinished record was read", () => {
     const graph = graphTimeline(live, liveNodes);
-    // The round span opened at the first record and has never closed, so the run is
+    // The run span opened at the first record and has never closed, so the run is
     // still going and the plot runs to when the server read it — not to the last
     // thing that happened to be recorded, which would shrink as the run went on.
     expect(graph.live).toBe(true);
@@ -58,7 +58,7 @@ describe("the whole graph on one clock", () => {
       liveNodes.map(({ id }) => id),
     );
 
-    // The run row is the orchestrator driving the graph and the round's check-in,
+    // The run row is the orchestrator driving the graph and the run's check-in,
     // each in the lane its served roles name — not one undifferentiated "planner".
     expect(rowFor(graph, RUN_ROW_ID).lanes.map(({ id }) => id)).toEqual([
       "orchestrator",

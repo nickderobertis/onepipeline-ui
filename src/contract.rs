@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::ApiError;
+use crate::filter::FilterSpec;
 
 /// The API version every path under `/api/v2` and every envelope carries.
 pub const API_VERSION: u32 = 2;
@@ -29,13 +30,24 @@ pub const API_VERSION: u32 = 2;
 /// in the only direction that matters: a client that read a number now finds a
 /// null, and one that reads 11 knows the difference between free and unknown.
 ///
-/// **Schema 12 says, per node the round has in flight, whether its turn can be
-/// redirected.** A round carries `node_control`, one entry for every node it
-/// records as `running` and for no other — so a planner deciding between
-/// correcting a node and cancelling it reads the answer instead of assuming the
-/// expensive one. Under 11 there was no entry to read and the safe reading of an
-/// absent one was "cannot", which is the wrong default for every node that can.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 12;
+/// **Schema 12 says, per node in flight, whether its turn can be redirected.**
+/// `node_control` carries one entry for every node recorded as `running` and for
+/// no other — so a planner deciding between correcting a node and cancelling it
+/// reads the answer instead of assuming the expensive one. Under 11 there was no
+/// entry to read and the safe reading of an absent one was "cannot", which is
+/// the wrong default for every node that can.
+///
+/// **Schema 13 is the removal of rounds.** Execution in the onepipeline SDK is
+/// continuous and dependency-driven: a node dispatches the moment its
+/// dependencies settle, nothing batches them, and the deprecated `round` label
+/// is stamped by nothing. So the payload's `rounds` array — with its per-round
+/// `round` number, per-round plan and per-round result — is replaced by one
+/// [`graph`](https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md)
+/// object describing the run's whole continuous state, no `round` field survives
+/// anywhere in a response, and `phase` names a continuous phase rather than
+/// `driving-round`. A client reading 12 must not read a 13 payload: the array it
+/// indexed is gone, not renamed.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 13;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -57,7 +69,16 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 12;
 /// why it did not. Under 3 the event was served as its kind and its stamp alone,
 /// so a turn whose behaviour changed mid-flight read as a worker inexplicably
 /// switching tasks.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 4;
+///
+/// **Version 5 is continuous.** Under 4 the top of a `scope=run` timeline was one
+/// span per round, every span carried the `round` it belonged to, and every span
+/// id was numbered by one. There are no rounds: the run itself is the single root
+/// span, no span carries a `round`, and every id is keyed by what it identifies —
+/// `node.ID`, `dispatch.SESSION`, `publication.ID` — rather than by a round that
+/// does not exist. Version 5 is also where a span may be **filtered**: the events
+/// a span carries are the ones `?filter=` admitted, while the span itself, its
+/// bounds and its status stay what the run recorded.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 5;
 
 /// The largest run-list page any request can ask for.
 ///
@@ -295,6 +316,16 @@ pub struct EventsQuery {
     /// snapshot, because no event history is retained to replay from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<u64>,
+    /// Which events this connection is watching for; see [`FilterSpec`].
+    ///
+    /// The stream *invalidates* rather than restating state, so a filter here
+    /// decides which movements are worth announcing: a run whose only new
+    /// records the filter excludes has not moved as far as this connection is
+    /// concerned, and its subscriber is not woken to refetch a detail that would
+    /// come back unchanged. What the connection then refetches is filtered by
+    /// the same spec on the detail route, which is what keeps the two agreeing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterSpec>,
 }
 
 /// The query of `GET /api/v2/runs/{run}`.
@@ -307,6 +338,13 @@ pub struct RunQuery {
     /// client that reads the timeline instead of refetching every transcript.
     #[serde(default = "yes")]
     pub include_conversations: bool,
+    /// Which events this reading carries; see [`FilterSpec`].
+    ///
+    /// It shapes the response and never the run: the node statuses, settlements
+    /// and counts a detail carries are folded from the whole journal whatever
+    /// this says, and what it narrows is the records served beside them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterSpec>,
 }
 
 fn yes() -> bool {
@@ -314,13 +352,28 @@ fn yes() -> bool {
 }
 
 /// The query of `GET /api/v2/runs/{run}/timeline`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimelineQuery {
+    /// Which items to serve.
+    #[serde(flatten)]
+    pub scope: TimelineScope,
+    /// Which events the served spans carry; see [`FilterSpec`].
+    ///
+    /// A span's own bounds and status are what the run recorded and are never
+    /// narrowed — a filter that could hide a node from its own timeline would be
+    /// a reader's attention deciding what the run did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterSpec>,
+}
+
+/// What a timeline request is scoped to.
 ///
 /// `scope` selects the variant and `node` belongs to exactly one of them, so
 /// `scope=node` with no node — and `scope=run` with one — are both
 /// unrepresentable rather than validated after the fact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "scope", rename_all = "lowercase")]
-pub enum TimelineQuery {
+pub enum TimelineScope {
     /// `?scope=run` — the run's own items.
     Run,
     /// `?scope=node&node=ID` — one node's items.

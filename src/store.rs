@@ -7,7 +7,13 @@
 //! [`crate::payload`]'s projection of what the SDK read.
 //!
 //! Nothing here writes. Reading takes no lock the engine's single writer needs,
-//! which is what lets the server run beside a live round.
+//! which is what lets the server run beside the engine's own reconcile loop.
+//!
+//! Filtering happens here, once per read: `?filter=` is resolved against the run
+//! being served — a built-in profile, one its launch config defined, or an inline
+//! spec — and the payload is built from a [`payload::filtered`] view. The fold
+//! behind that view is the whole journal either way, so a filter narrows what a
+//! response carries and never what the run is.
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -22,10 +28,12 @@ use crate::api::ReadApi;
 use crate::cli::RunsRoot;
 use crate::contract::{
     ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, RunId,
-    RunQuery, RunsQuery, SseEvent, TimelineQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    RunQuery, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
+    TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
-use crate::payload::{self, Scope};
+use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
+use crate::payload::{self, Scope, Signature};
 use crate::telemetry::{self, RunTelemetry};
 
 /// How often the event stream re-reads the runs root, in milliseconds.
@@ -63,10 +71,6 @@ pub struct RunStore {
 /// recorded something — which is the same condition the event stream already
 /// invalidates on.
 type Aggregated = Arc<Mutex<HashMap<String, (Signature, Option<Arc<RunTelemetry>>)>>>;
-
-/// A run's change token: its round, how many events it has recorded, and when it
-/// last wrote.
-type Signature = (u64, usize, u64);
 
 impl RunStore {
     /// Read the runs recorded under `root`.
@@ -157,15 +161,39 @@ impl RunStore {
         }
     }
 
-    /// Whether a run's graph has completed and nothing is driving it.
+    /// Whether a run's graph has completed.
+    ///
+    /// Every node it recorded settled `done`. Under rounds this also had to ask
+    /// whether the open round had closed; execution is continuous and there is no
+    /// such flag — a graph whose every node is done has nothing left to
+    /// dispatch, which is the whole of what completion is now.
     fn settled(view: &RunView) -> bool {
-        !view.state.round_open
-            && !view.state.statuses().is_empty()
-            && view
-                .state
-                .statuses()
-                .values()
-                .all(|status| status.as_str() == "done")
+        let statuses = view.state.statuses();
+        !statuses.is_empty() && statuses.values().all(|status| status.as_str() == "done")
+    }
+
+    /// The filter one request asked for, resolved against the run it is reading.
+    ///
+    /// A request naming none is served everything, which is what an unfiltered
+    /// read has always been. A name is resolved against the run's own profiles,
+    /// so `planner` and `monitor` answer for every run and a launch-defined name
+    /// answers only for the run that defined it.
+    fn resolve(view: &RunView, spec: Option<&FilterSpec>) -> Result<EventFilter, ApiError> {
+        match spec {
+            None => Ok(EventFilter::default()),
+            Some(spec) => spec.resolve(&LaunchProfiles::of(&view.launch.dag_sets)),
+        }
+    }
+
+    /// The reading one request gets: the run as it is, or a copy carrying only
+    /// the events its filter admits.
+    ///
+    /// A filter that narrows nothing takes no copy — the overwhelmingly common
+    /// read, and one where cloning a long-running run's whole event store to
+    /// prove it changed nothing would be the most expensive thing this server
+    /// does.
+    fn reading(view: &RunView, filter: &EventFilter) -> Option<RunView> {
+        (!filter.admits_everything()).then(|| payload::filtered(view, filter))
     }
 
     /// The run list as one page, with the cursor the next page resumes from.
@@ -242,9 +270,14 @@ impl ReadApi for RunStore {
 
     fn run(&self, run: &RunId, query: &RunQuery) -> Result<Envelope<Value>, ApiError> {
         let view = self.view(run)?;
+        let filter = Self::resolve(&view, query.filter.as_ref())?;
+        // The telemetry document describes the run, not the reading of it, so it
+        // is asked for against the unfiltered view: a reader narrowing their
+        // attention must not be told the run spent less time than it did.
         let aggregated = self.telemetry(&view);
+        let reading = Self::reading(&view, &filter);
         Ok(Self::envelope(payload::run_detail(
-            &view,
+            reading.as_ref().unwrap_or(&view),
             query.include_conversations,
             aggregated.as_deref(),
         )))
@@ -252,11 +285,16 @@ impl ReadApi for RunStore {
 
     fn timeline(&self, run: &RunId, query: &TimelineQuery) -> Result<Envelope<Value>, ApiError> {
         let view = self.view(run)?;
-        let scope = match query {
-            TimelineQuery::Run => Scope::Run,
-            TimelineQuery::Node { node } => Scope::Node(node),
+        let filter = Self::resolve(&view, query.filter.as_ref())?;
+        let scope = match &query.scope {
+            TimelineScope::Run => Scope::Run,
+            TimelineScope::Node { node } => Scope::Node(node),
         };
-        Ok(Self::envelope(payload::timeline(&view, &scope)))
+        let reading = Self::reading(&view, &filter);
+        Ok(Self::envelope(payload::timeline(
+            reading.as_ref().unwrap_or(&view),
+            &scope,
+        )))
     }
 
     fn conversation(
@@ -295,9 +333,12 @@ pub struct Frames {
     store: RunStore,
     stop: Arc<dyn Fn() -> bool + Send + Sync>,
     watched: Option<RunId>,
+    /// What this connection is watching for, unresolved: a profile resolves
+    /// against a run, and this stream may be watching every run in the root.
+    spec: Option<FilterSpec>,
     cursor: u64,
     opened: bool,
-    baseline: Vec<(RunId, (u64, usize, u64))>,
+    baseline: Vec<(RunId, Signature)>,
     transcripts: Option<String>,
     activity: Option<Vec<Value>>,
     pending: std::collections::VecDeque<(SseEvent, Value)>,
@@ -313,6 +354,7 @@ impl Frames {
             // the route promises.
             stop: Arc::new(|| false),
             watched: query.run_id.clone(),
+            spec: query.filter.clone(),
             cursor: query.after.unwrap_or(0),
             opened: false,
             baseline: Vec::new(),
@@ -320,6 +362,26 @@ impl Frames {
             activity: None,
             pending: std::collections::VecDeque::new(),
             since_conversation_poll: Duration::ZERO,
+        }
+    }
+
+    /// One run's signature as this connection sees it.
+    ///
+    /// A filtered connection is asking about the events it admitted, so a run
+    /// whose only new records this connection excluded has not moved as far as
+    /// this subscriber is concerned and is not announced. A filter this run has
+    /// no profile for narrows nothing rather than failing the stream: the frames
+    /// are an invalidation, and the refusal a reader can act on is the one the
+    /// detail route serves when they refetch.
+    fn signature_of(&self, view: &RunView) -> Signature {
+        let Some(spec) = self.spec.as_ref() else {
+            return payload::signature(view);
+        };
+        match RunStore::resolve(view, Some(spec)) {
+            Ok(filter) if !filter.admits_everything() => {
+                payload::signature(&payload::filtered(view, &filter))
+            }
+            _ => payload::signature(view),
         }
     }
 
@@ -341,7 +403,7 @@ impl Frames {
     /// hands this back as the `run_id` a client refetches the run with, so a
     /// directory the contract's own boundary would refuse is one this stream
     /// must not announce as a run to go and read.
-    fn signatures(&self) -> Vec<(RunId, (u64, usize, u64))> {
+    fn signatures(&self) -> Vec<(RunId, Signature)> {
         self.store
             .views()
             .iter()
@@ -353,7 +415,7 @@ impl Frames {
             .filter_map(|view| {
                 RunId::try_from(view.paths.run.as_str())
                     .ok()
-                    .map(|run| (run, payload::signature(view)))
+                    .map(|run| (run, self.signature_of(view)))
             })
             .collect()
     }
@@ -422,10 +484,12 @@ impl Iterator for Frames {
                     .find(|(name, _)| name == run)
                     .map(|(_, token)| token);
                 if known != Some(token) {
-                    self.pending.push_back((
-                        SseEvent::RunChanged,
-                        json!({ "run_id": run, "round": token.0 }),
-                    ));
+                    // The run that moved, and nothing else: the client refetches
+                    // its detail. There is no round to name here, and naming the
+                    // event count instead would be this stream restating state it
+                    // deliberately does not carry.
+                    self.pending
+                        .push_back((SseEvent::RunChanged, json!({ "run_id": run })));
                     // The same movement, read for what it was: a run that moved
                     // because a turn reported from inside itself has something in
                     // flight to say, and a client watching it is told rather than
