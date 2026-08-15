@@ -1261,3 +1261,67 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
         assert_eq!(read, party);
     }
 }
+
+/// This crate's copy of the stack's shared filter grammar, held to the wire the
+/// grammar fixes.
+///
+/// The grammar is duplicated per repository by design — there is no shared util
+/// crate here, exactly as with the envelope. `oneagentgraph` *does* declare
+/// `EventFilter` and `Matcher` in a public module, which would make this a type
+/// gate like the event vocabulary above rather than a wire one; it cannot be
+/// today, and the reason is worth writing down. That declaration landed in
+/// `oneagentgraph` 0.2.13, which added a field to `run::Request` in the same
+/// patch release — so `onepipeline` 0.4.0, built against 0.2.12, does not compile
+/// against it, and this tree pins 0.2.12. The gate becomes a type gate the moment
+/// a published `onepipeline` compiles against a sibling that declares the filter.
+///
+/// One field is deliberately *not* shared: this grammar has no `round` matcher.
+/// Execution is continuous, the label is deprecated and stamped by nothing, and a
+/// matcher over it would be a filter that silently matched nothing.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the sibling's own declaration is unreachable from this tree for the reason above — the release that added it broke the `onepipeline` this crate depends on — so the wire the grammar fixes is the only declaration a consumer can compare against, which is the same footing `onevcs`'s vocabulary is read on.
+#[test]
+fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
+    use onepipeline_ui::filter::{EventFilter, Matcher};
+
+    // Every field a matcher may name, and exactly those, under exactly these
+    // names: this is the document a sibling producer reads off the same query.
+    let mine = serde_json::to_value(Matcher {
+        source: Some(onepipeline::event::Source::Agentgraph),
+        kind: Some("turn-*".into()),
+        run_id: Some("run-1".into()),
+        node: Some("build".into()),
+        step: Some("compile".into()),
+        member: Some("worker".into()),
+        persona: Some("engineer".into()),
+    })
+    .expect("this crate's matcher serializes");
+    assert_eq!(
+        mine,
+        serde_json::json!({
+            "source": "agentgraph",
+            "kind": "turn-*",
+            "run_id": "run-1",
+            "node": "build",
+            "step": "compile",
+            "member": "worker",
+            "persona": "engineer",
+        }),
+        "the shared grammar's matcher has drifted"
+    );
+
+    // A matcher that names nothing serializes to nothing, so a spec round-trips
+    // as the file wrote it rather than gaining every key it left unasked.
+    assert_eq!(
+        serde_json::to_value(EventFilter::default()).expect("serializes"),
+        serde_json::json!({})
+    );
+
+    // `round` is refused rather than ignored: `deny_unknown_fields` is what stops
+    // a spec written against the round era from silently matching everything.
+    assert!(
+        serde_json::from_str::<EventFilter>(r#"{"include":[{"round":1}]}"#).is_err(),
+        "a matcher over a label nothing stamps must not parse"
+    );
+    // And so is a list this grammar does not have, for the same reason.
+    assert!(serde_json::from_str::<EventFilter>(r#"{"only":[]}"#).is_err());
+}

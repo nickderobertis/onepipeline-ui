@@ -1552,14 +1552,21 @@ pub fn run_detail(
     view: &RunView,
     include_conversations: bool,
     telemetry: Option<&RunTelemetry>,
+    filter: &EventFilter,
 ) -> Value {
     let mut payload = Map::new();
+    // Everything below the transcripts is read from the whole journal, whatever
+    // the filter said: the graph's statuses, the answer about each in-flight
+    // node's turn, the evidence each node kept and the run's own clock are what
+    // the *run* is, and a reader narrowing their attention must be shown the same
+    // one. The transcripts are the detail's own event listing, and are the one
+    // thing here a filter narrows.
     payload.insert("run".into(), run_telemetry(view, telemetry));
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),
         Value::Array(if include_conversations {
-            conversations(view)
+            conversations_under(view, filter)
         } else {
             Vec::new()
         }),
@@ -1874,10 +1881,19 @@ fn node_details(view: &RunView) -> Value {
 /// AGENTS.md proposes the read for it should land.
 #[must_use]
 pub fn conversations(view: &RunView) -> Vec<Value> {
+    conversations_under(view, &EventFilter::default())
+}
+
+/// The transcripts a reader's filter admits, each as the whole session it is.
+///
+/// A session whose every record the filter excluded is not served at all — an
+/// empty transcript would say the session recorded nothing, which is a different
+/// fact from "this reading is not about it".
+fn conversations_under(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut grouped: BTreeMap<String, Vec<&Envelope>> = BTreeMap::new();
     for event in &view.events {
-        if event.source != Source::Agentgraph {
+        if event.source != Source::Agentgraph || !filter.allows(event) {
             continue;
         }
         let Some(session) = event
@@ -2090,19 +2106,52 @@ fn reference_kind(kind: &str) -> &'static str {
 /// The scope a timeline request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope<'a> {
-    /// Every round of the run and the nodes under them.
+    /// The run and the nodes under it.
     Run,
     /// One node's own work.
     Node(&'a NodeId),
 }
 
+/// What a span's event list is built through: the turn numbering, and the
+/// reader's filter.
+///
+/// The filter reaches exactly here and nowhere else in the timeline. **Which
+/// spans exist, where they start and end, and what status each carries are what
+/// the run recorded**, and a filter must not be able to hide a node from its own
+/// timeline or move the ends of a dispatch — that would be a reader's attention
+/// deciding what the run did. What it narrows is the records listed inside them.
+///
+/// The turn numbering is likewise built over the whole store: a turn's id is its
+/// position in its session's transcript, so numbering a filtered store would
+/// hand a client an id that names a different turn than the one the transcript
+/// route serves under it.
+struct Lens<'a> {
+    turns: &'a [Option<Turn>],
+    filter: &'a EventFilter,
+}
+
+impl Lens<'_> {
+    /// The events of one span, as the reader asked for them.
+    fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
+        events
+            .iter()
+            .filter(|(_, event)| self.filter.allows(event))
+            .map(|(index, event)| timeline_event(*index, event, self.turns))
+            .collect()
+    }
+}
+
 /// The whole of `GET /api/v2/runs/{run}/timeline`'s payload.
 #[must_use]
-pub fn timeline(view: &RunView, scope: &Scope<'_>) -> Value {
+pub fn timeline(view: &RunView, scope: &Scope<'_>, filter: &EventFilter) -> Value {
     let turns = turn_ids(view);
+    let lens = Lens {
+        turns: &turns,
+        filter,
+    };
     let spans = match scope {
-        Scope::Run => run_spans(view, &turns),
-        Scope::Node(node) => node_spans(view, node.as_str(), &turns),
+        Scope::Run => run_spans(view, &lens),
+        Scope::Node(node) => node_spans(view, node.as_str(), &lens),
     };
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
@@ -2341,7 +2390,7 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
 /// settle and independent branches proceed beside a decision that is holding
 /// another subtree back. Under rounds the top of this list was a stack of
 /// batches, which is a shape nothing in the engine has any more.
-fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
+fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view.events.iter().enumerate().collect();
     let Some((_, first)) = events.first() else {
@@ -2367,13 +2416,15 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
         // What the run itself recorded: the relayed turns belong to the
         // sessions below, and carrying them here too would draw every one
         // of them on the run's row twice.
-        "events": events
-            .iter()
-            .filter(|(_, event)| {
-                event.labels.node.is_none() && event.source != Source::Agentgraph
-            })
-            .map(|(index, event)| timeline_event(*index, event, turns))
-            .collect::<Vec<_>>(),
+        "events": lens.items(
+            &events
+                .iter()
+                .filter(|(_, event)| {
+                    event.labels.node.is_none() && event.source != Source::Agentgraph
+                })
+                .copied()
+                .collect::<Vec<_>>(),
+        ),
     }));
     // The sessions relayed at no node: the run's own driving conversations,
     // which belong to the run rather than to any of its work. Left open until
@@ -2425,13 +2476,7 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
             "reference".into(),
             json!({ "kind": "conversation", "value": session }),
         );
-        span.insert(
-            "events".into(),
-            json!(relayed
-                .iter()
-                .map(|(index, event)| timeline_event(*index, event, turns))
-                .collect::<Vec<_>>()),
-        );
+        span.insert("events".into(), json!(lens.items(&relayed)));
         spans.push(Value::Object(span));
     }
 
@@ -2443,7 +2488,7 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
         if !seen.insert(node) {
             continue;
         }
-        spans.push(node_span(view, node, Some(&run_id), turns));
+        spans.push(node_span(view, node, Some(&run_id), lens));
         // What that node did, as categories rather than as records: the graph
         // draws one lane per category and opens the node for the rest.
         let node_id = format!("node.{node}");
@@ -2464,7 +2509,7 @@ fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
 }
 
 /// One node's span.
-fn node_span(view: &RunView, node: &str, parent: Option<&str>, turns: &[Option<Turn>]) -> Value {
+fn node_span(view: &RunView, node: &str, parent: Option<&str>, lens: &Lens<'_>) -> Value {
     let events: Vec<(usize, &Envelope)> = view
         .events
         .iter()
@@ -2500,13 +2545,7 @@ fn node_span(view: &RunView, node: &str, parent: Option<&str>, turns: &[Option<T
     {
         span.insert("status".into(), json!(status_word(status)));
     }
-    span.insert(
-        "events".into(),
-        json!(events
-            .iter()
-            .map(|(index, event)| timeline_event(*index, event, turns))
-            .collect::<Vec<_>>()),
-    );
+    span.insert("events".into(), json!(lens.items(&events)));
     Value::Object(span)
 }
 
@@ -2793,7 +2832,7 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
 /// produced nothing, and every attempt is the same node doing the same work, so
 /// the node has one span and the sessions under it are all of the sessions it
 /// ran.
-fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> {
+fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view
         .events
@@ -2805,7 +2844,7 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
         return spans;
     }
     let node_id = format!("node.{node}");
-    spans.push(node_span(view, node, None, turns));
+    spans.push(node_span(view, node, None, lens));
     // The last settlement, for the same reason [`node_span`] takes it: a node the
     // planner retried settled once already, and the attempt that is running now
     // is not closed by the record that closed the one it superseded.
@@ -2929,13 +2968,7 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
                 json!({ "kind": "conversation", "value": session }),
             );
         }
-        span.insert(
-            "events".into(),
-            json!(relayed
-                .iter()
-                .map(|(index, event)| timeline_event(*index, event, turns))
-                .collect::<Vec<_>>()),
-        );
+        span.insert("events".into(), json!(lens.items(&relayed)));
         spans.push(Value::Object(span));
     }
     spans.append(&mut inside);
@@ -2954,13 +2987,17 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
 /// A summary stamped at no node is not served, and neither is one whose node is
 /// a name a route would refuse: the client's own record requires the node, and it
 /// reads the node's timeline by it — so a node it cannot ask for is a node this
-/// crate must not offer.
+/// crate must not offer. Neither is one the reader's filter excluded: an activity
+/// summary is a record like any other, and this is the listing of them.
 #[must_use]
-pub fn live_activity(view: &RunView) -> Vec<Value> {
+pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
     for event in &view.events {
-        if event.source != Source::Agentgraph || event.kind.0 != graph::TURN_ACTIVITY {
+        if event.source != Source::Agentgraph
+            || event.kind.0 != graph::TURN_ACTIVITY
+            || !filter.allows(event)
+        {
             continue;
         }
         // One entry per node, keyed by the node alone: a node is dispatched once
@@ -3020,50 +3057,58 @@ pub fn live_activity(view: &RunView) -> Vec<Value> {
     activity.into_iter().map(|(_, entry)| entry).collect()
 }
 
-/// A change token for one run: what a poll compares to decide it moved.
+/// A change token for one run, as one connection sees it.
 ///
-/// How many events the run has recorded and when it last wrote. The round it was
-/// in used to lead this tuple, and there is no round — which costs the token
-/// nothing, because a run that moved recorded something and both remaining
-/// halves say so.
+/// How many events the run has recorded that this connection is watching for,
+/// and when it last wrote. The round it was in used to lead this tuple, and there
+/// is no round — which costs the token nothing, because a run that moved recorded
+/// something and both remaining halves say so.
+///
+/// The filter is what makes this token the *connection's*: the stream
+/// invalidates rather than restating state, so a run whose only new records this
+/// reader excluded has not moved as far as they are concerned and is not
+/// announced.
+///
+/// **Both halves have to come from the admitted events, not one of them.** The
+/// run's own `last_write_at` moves on every record it writes, admitted or not, so
+/// a token that kept it would change on the very events the filter exists to
+/// suppress — and the filter would narrow the payloads while announcing every
+/// movement anyway. A filtered connection is therefore keyed on how many records
+/// it admitted and when the last of them was stamped.
 #[must_use]
-pub fn signature(view: &RunView) -> Signature {
-    (view.events.len(), view.state.last_write_at.unwrap_or(0))
+pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
+    if filter.admits_everything() {
+        return (view.events.len(), view.state.last_write_at.unwrap_or(0));
+    }
+    let admitted: Vec<&Envelope> = view
+        .events
+        .iter()
+        .filter(|event| filter.allows(event))
+        .collect();
+    let last = admitted
+        .last()
+        .and_then(|event| millis_of(&event.ts))
+        .and_then(|at| u64::try_from(at).ok())
+        .unwrap_or(0);
+    (admitted.len(), last)
 }
 
 /// What [`signature`] compares: how much the run has recorded, and when it last
 /// did.
 pub type Signature = (usize, u64);
 
-/// The same run, carrying only the events a filter admits.
-///
-/// **The fold is copied through untouched.** A filter shapes responses and never
-/// run state: every status, settlement, decision and count a payload carries is
-/// read from [`RunView::state`], which is the whole journal folded whatever this
-/// narrowed — so a reader who asked for decisions only is shown the same graph,
-/// in the same states, as one who asked for everything. What changes is the
-/// records served beside it.
-#[must_use]
-pub fn filtered(view: &RunView, filter: &EventFilter) -> RunView {
-    RunView {
-        paths: view.paths.clone(),
-        launch: view.launch.clone(),
-        events: view
-            .events
-            .iter()
-            .filter(|event| filter.allows(event))
-            .cloned()
-            .collect(),
-        state: view.state.clone(),
-    }
-}
-
 /// A change token for one run's transcripts, so a watcher can tell an edited
 /// turn from a new one.
+///
+/// Taken over the transcripts this reader is being *served*, for the same reason
+/// [`signature`] counts only admitted events: a connection narrowed to decisions
+/// is served no transcripts at all, so a turn arriving in one is not a change to
+/// anything it is watching — and a digest over the whole store would wake it on
+/// every tool call the filter exists to keep out of its way.
 #[must_use]
-pub fn conversation_signature(view: &RunView) -> String {
+pub fn conversation_signature(view: &RunView, filter: &EventFilter) -> String {
     let mut hasher = Sha256::new();
-    for document in conversations(view) {
+    for document in conversations_under(view, filter) {
         hasher.update(document.to_string().as_bytes());
     }
     hasher
