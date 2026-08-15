@@ -295,6 +295,82 @@ fn every_secret_the_workflows_read_is_in_the_manifest() {
     );
 }
 
+/// The requirement string a dependency is declared at under `[dependencies]`.
+///
+/// Section-scoped for the same reason [`manifest_name`] is: `onepipeline` is
+/// named in the dev-dependencies' prose and in `[package]`'s, and a substring
+/// search would read either as the requirement the resolver uses.
+fn dependency_requirement(cargo: &str, name: &str) -> String {
+    let mut inside = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            inside = line == "[dependencies]";
+        } else if inside {
+            if let Some(value) = line.strip_prefix(&format!("{name} = ")) {
+                return value.trim_matches('"').to_owned();
+            }
+        }
+    }
+    panic!("Cargo.toml declares no dependency on {name}");
+}
+
+/// release-plz's semver check is enabled and the workflow running it provisions
+/// the tool it shells out to.
+///
+/// The two are one setting written in two files: `semver_check = true` makes
+/// `cargo-semver-checks` a dependency of the release, and release-plz does not
+/// fall back to the commit type when it is missing — it fails, taking the release
+/// PR with it. Enabling the check is what stops the bump from being a claim about
+/// the author's intent (`feat` vs `feat!`) instead of a reading of the surface.
+#[test]
+fn the_release_workflow_provisions_the_semver_check_it_enables() {
+    assert!(
+        read("release-plz.toml").contains("semver_check = true"),
+        "release-plz.toml does not enable semver_check, so a breaking change \
+         releases as whatever its commit type claimed"
+    );
+    assert!(
+        read(".github/workflows/release-plz.yml").contains("cargo-semver-checks@"),
+        "release-plz.yml installs no pinned cargo-semver-checks, so the check \
+         release-plz.toml enables has nothing to run"
+    );
+}
+
+/// The SDK requirement is exact, and is the version the lockfile carries.
+///
+/// A range means everyone who resolves this crate without our `Cargo.lock` builds
+/// against a different `onepipeline` than the one the tree is tested and
+/// bootstrapped against — and two of them matter: a crates.io consumer, and
+/// cargo-semver-checks, which reads the public surface through a generated
+/// placeholder manifest that never sees a lockfile. `^0.1.7` resolved both up to
+/// an `onepipeline` that does not compile at all.
+#[test]
+fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
+    let requirement = dependency_requirement(&read("Cargo.toml"), "onepipeline");
+    let pinned = requirement.strip_prefix('=').unwrap_or_else(|| {
+        panic!(
+            "onepipeline is required as `{requirement}`, a range: an unlocked resolve \
+             of this crate would build against an SDK the tree never tested"
+        )
+    });
+    let lock = read("Cargo.lock");
+    let (_, after) = lock
+        .split_once("\nname = \"onepipeline\"\n")
+        .expect("Cargo.lock does not resolve onepipeline");
+    let locked = after
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("version = "))
+        .expect("Cargo.lock resolves onepipeline to no version")
+        .trim_matches('"');
+    assert_eq!(
+        pinned, locked,
+        "Cargo.toml pins onepipeline {pinned} and Cargo.lock resolves {locked}, so \
+         `just bootstrap` provisions a CLI that speaks a different telemetry document \
+         than a consumer's build of this crate reads"
+    );
+}
+
 /// Directories whose every file reaches a published artifact, so a file added to
 /// one has to be covered without anyone remembering this test exists.
 const ARTIFACT_TREES: &[&str] = &[

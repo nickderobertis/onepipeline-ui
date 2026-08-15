@@ -22,10 +22,18 @@
 # versioning/tagging from the registry push.
 publish = false
 
-# API breaking-change detection (cargo-semver-checks) needs an extra tool and
-# would block releases on any surface change; rely on review and the
-# conventional-commit type instead (a `!` or `BREAKING CHANGE:` still bumps).
-semver_check = false
+# API breaking-change detection. The bump above is computed from the commit
+# *type*, which is a claim about the author's intent rather than a reading of the
+# crate's public surface — a `!` nobody wrote is a breaking change released as a
+# compatible one, and the family has already shipped one that way (onevcs 0.2.1,
+# public trait methods added in a patch). This is the reading: cargo-semver-checks
+# diffs the surface against the baseline release and raises the bump when the two
+# disagree, so the classification stops depending on remembering the marker.
+#
+# It needs `cargo-semver-checks` on PATH — .github/workflows/release-plz.yml
+# provisions it beside release-plz itself, and `tests/packaging.rs` holds the two
+# together, because the flag without the tool is a release that cannot run.
+semver_check = true
 
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"

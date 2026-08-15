@@ -94,7 +94,18 @@ path = "src/lib.rs"
 axum = "0.8"
 clap = { version = "4.6", features = ["derive"] }
 futures-core = "0.3"
-onepipeline = "0.1.7"
+# Exact, not a caret range. `just bootstrap` provisions the `onepipeline` CLI at
+# the version the lock pins this library to because the two speak a versioned
+# telemetry document and a mismatched pair serves every run with no clock at all
+# — and a range says the opposite of that to everyone who resolves this crate
+# without our lockfile. Two of them matter: a crates.io consumer, and
+# cargo-semver-checks, which builds the API surface through a generated
+# placeholder manifest of its own and so never sees `Cargo.lock`. Both resolved
+# `^0.1.7` up to 0.1.15, which does not compile against the `oneagentgraph 0.2.13`
+# its own `^0.2.10` accepts — so the range published a crate that cannot be built
+# and a release whose semver check cannot run. Bump this deliberately, with the
+# sibling CLI, as one change.
+onepipeline = "=0.1.7"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
