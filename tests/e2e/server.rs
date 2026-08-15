@@ -28,7 +28,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(12), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(13), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -84,7 +84,7 @@ fn the_run_list_leads_with_the_run_that_moved_most_recently() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::OTHER_RUN_ID);
         let dir = fixture_run::write(root, fixture_run::RUN_ID);
-        fixture_run::append(&dir, "round-started", json!({}));
+        fixture_run::append(&dir, "node-ready", json!({}));
     });
     let body = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
     let ids: Vec<&str> = body["runs"]
@@ -135,8 +135,9 @@ fn a_cursor_naming_a_run_that_has_gone_serves_the_list_from_its_start() {
 }
 
 #[test]
-fn a_run_with_no_journal_is_served_from_the_result_its_round_recorded() {
-    // Nothing to fold, so the round's own result is the only account there is. It
+fn a_run_with_no_journal_is_served_from_the_result_the_run_recorded() {
+    // Nothing to fold, so the run's own recorded result is the only account there
+    // is. It
     // must reach the list, the graph and the node telemetry as one derivation:
     // a row and the graph it opens describing different graphs is the
     // disagreement an operator actually saw.
@@ -155,13 +156,13 @@ fn a_run_with_no_journal_is_served_from_the_result_its_round_recorded() {
         &format!("/api/v2/runs/{}", fixture_run::RECORDED_ONLY_RUN_ID),
     )
     .json();
-    let round = &detail["rounds"][0];
+    let graph = &detail["graph"];
     // The word outside the vocabulary is served as `unknown` rather than passed
     // through — a client switches on this exhaustively and refuses the whole run
     // over a member it does not have — and never as a neighbouring meaning.
-    assert_eq!(round["node_status"][fixture_run::NODE_ID], json!("unknown"));
+    assert_eq!(graph["node_status"][fixture_run::NODE_ID], json!("unknown"));
     assert_eq!(
-        round["node_status"][fixture_run::REVIEW_NODE_ID],
+        graph["node_status"][fixture_run::REVIEW_NODE_ID],
         json!("failed")
     );
 
@@ -222,8 +223,8 @@ fn the_run_list_pages_by_opaque_cursor() {
 fn a_settled_node_serves_the_words_its_settlement_recorded() {
     // A card that says only "failed" tells a reader less than the run knows. The
     // two recorded texts mean different things — the lifecycle's own prose, and
-    // what the dispatch reported — so both reach the wire, from a finished round's
-    // recorded result and from the live fold alike.
+    // what the dispatch reported — so both reach the wire, whether they came off
+    // the settlement envelope or the run's own recorded result.
     let serving = Serving::start(|root| {
         fixture_run::write_live(root, fixture_run::RUN_ID);
     });
@@ -232,27 +233,24 @@ fn a_settled_node_serves_the_words_its_settlement_recorded() {
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
     )
     .json();
-    let rounds = body["rounds"].as_array().expect("rounds is an array");
+    let results = &body["graph"]["node_results"];
 
-    let finished = &rounds[0]["node_results"][fixture_run::REVIEW_NODE_ID];
-    assert_eq!(
-        finished["detail"],
-        json!("the reviewer asked for a changelog entry")
-    );
-    assert_eq!(finished["error"], json!("review exited non-zero"));
-    assert_eq!(finished["exit_code"], json!(2));
-    assert_eq!(finished["ok"], json!(false));
+    // The fold keeps a node's status, outcome and branch but not the prose beside
+    // them, so every one of these comes off the settlement envelope itself.
+    let failed = &results[fixture_run::REPORTED_NODE_ID];
+    assert_eq!(failed["detail"], json!("the profile did not finish"));
+    assert_eq!(failed["error"], json!("profile exited non-zero"));
+    assert_eq!(failed["exit_code"], json!(2));
+    assert_eq!(failed["ok"], json!(false));
 
-    // The live round's fold keeps a node's status and outcome but not the prose
-    // beside them, so the settlement envelope is where this comes from.
-    let live = &rounds[1]["node_results"][fixture_run::SHIP_NODE_ID];
+    let live = &results[fixture_run::SHIP_NODE_ID];
     assert_eq!(live["detail"], json!("the change request is open"));
     // Nothing recorded is nothing served: an absent field is not a null one.
     assert!(live.get("error").is_none(), "{live}");
 }
 
 #[test]
-fn a_run_detail_serves_its_rounds_plan_and_transcripts() {
+fn a_run_detail_serves_its_graph_plan_and_transcripts() {
     let serving = two_runs();
     let response = http::get(
         serving.address,
@@ -262,14 +260,16 @@ fn a_run_detail_serves_its_rounds_plan_and_transcripts() {
     let body = response.json();
     assert_enveloped(&body);
     assert_eq!(body["run"]["run_id"], json!(fixture_run::RUN_ID));
-    assert_eq!(body["run"]["last_event"], json!("round-finished"));
+    assert_eq!(body["run"]["last_event"], json!("node-settled"));
 
-    let rounds = body["rounds"].as_array().expect("rounds is an array");
-    assert_eq!(rounds.len(), 1);
-    let round = &rounds[0];
-    assert_eq!(round["round"], json!(1));
+    let graph = &body["graph"];
+    // One graph, not an array of rounds: nothing in a continuous engine batches
+    // nodes, so there is one desired graph and one account of where it has got to.
+    assert!(body.get("rounds").is_none(), "{body}");
+    assert_eq!(graph["run_id"], json!(fixture_run::RUN_ID));
+    assert!(graph.get("round").is_none(), "{graph}");
     // One status per plan task, so a client never invents one for a node.
-    let tasks: Vec<&str> = round["plan"]["tasks"]
+    let tasks: Vec<&str> = graph["plan"]["tasks"]
         .as_array()
         .expect("tasks")
         .iter()
@@ -280,11 +280,12 @@ fn a_run_detail_serves_its_rounds_plan_and_transcripts() {
         vec![fixture_run::NODE_ID, fixture_run::REVIEW_NODE_ID]
     );
     for task in &tasks {
-        assert_eq!(round["node_status"][*task], json!("done"), "{round}");
+        assert_eq!(graph["node_status"][*task], json!("done"), "{graph}");
     }
-    assert_eq!(round["result"]["state"], json!("complete"));
+    assert_eq!(graph["result"]["state"], json!("complete"));
+    assert!(graph["result"].get("round").is_none(), "{graph}");
     assert_eq!(
-        round["node_results"][fixture_run::NODE_ID]["pr"],
+        graph["node_results"][fixture_run::NODE_ID]["pr"],
         json!("https://example.invalid/changes/1")
     );
 
@@ -330,7 +331,7 @@ fn opting_out_of_transcripts_keeps_the_field_and_empties_it() {
         json!([]),
         "the opt-out is a size lever, not a schema change"
     );
-    assert!(body["rounds"].as_array().is_some_and(|r| !r.is_empty()));
+    assert!(body["graph"]["node_status"].is_object(), "{body}");
 }
 
 #[test]
@@ -368,10 +369,10 @@ fn a_run_id_that_could_traverse_the_root_never_reaches_storage() {
 
 /// `dispatch_id` is the key a client sends back to ask about the dispatch, so
 /// it is a validated identifier or it is absent. The key is derived by joining
-/// the run, the round and the node, and each is short enough on its own while
-/// the three together overrun what an identifier may be — the run is still
-/// served, and the span still groups its sessions, but it carries no id the
-/// contract's own boundary would refuse.
+/// the run and the node, and each is short enough on its own while the two
+/// together overrun what an identifier may be — the run is still served, and the
+/// span still groups its sessions, but it carries no id the contract's own
+/// boundary would refuse.
 #[test]
 fn a_dispatch_whose_derived_key_is_too_long_to_name_is_served_without_one() {
     // Valid on its own: a run id may be 128 characters, and this is 120 of them.
@@ -411,11 +412,7 @@ fn a_dispatch_whose_derived_key_is_too_long_to_name_is_served_without_one() {
     let named = dispatch(fixture_run::RUN_ID);
     assert_eq!(
         named["dispatch_id"],
-        json!(format!(
-            "{}.01.{}",
-            fixture_run::RUN_ID,
-            fixture_run::NODE_ID
-        ))
+        json!(format!("{}.{}", fixture_run::RUN_ID, fixture_run::NODE_ID))
     );
 }
 
@@ -433,7 +430,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(4));
+    assert_eq!(body["timeline_schema_version"], json!(5));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -441,17 +438,13 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
         .expect("the node's dispatch");
     assert_eq!(
         dispatch["dispatch_id"],
-        json!(format!(
-            "{}.01.{}",
-            fixture_run::RUN_ID,
-            fixture_run::NODE_ID
-        )),
+        json!(format!("{}.{}", fixture_run::RUN_ID, fixture_run::NODE_ID)),
         "schema 10 names the dispatch its sessions belong to"
     );
     assert_eq!(dispatch["transport_role"], json!("agent"));
     assert_eq!(dispatch["agent_role"], json!("worker"));
     assert_eq!(dispatch["status"], json!("done"));
-    assert_eq!(dispatch["parent_id"], json!("node.01.contract-interface"));
+    assert_eq!(dispatch["parent_id"], json!("node.contract-interface"));
 
     // The count beside the node is the transcript a reader opens from it: one
     // relayed envelope, one turn, and the run's own total over every node.
@@ -478,7 +471,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
 }
 
 #[test]
-fn the_run_timeline_covers_the_round_and_the_nodes_under_it() {
+fn the_run_timeline_covers_the_run_and_the_nodes_under_it() {
     let serving = two_runs();
     let body = http::get(
         serving.address,
@@ -486,12 +479,17 @@ fn the_run_timeline_covers_the_round_and_the_nodes_under_it() {
     )
     .json();
     let spans = body["spans"].as_array().expect("spans");
-    let round = spans
-        .iter()
-        .find(|span| span["kind"] == "round")
-        .expect("a round span");
-    assert_eq!(round["round"], json!(1));
-    assert_eq!(round["ended_at"], json!("2026-08-07T12:00:31.000Z"));
+    // One root span, and it is the run: nothing batches nodes, so there is no
+    // stack of rounds above them and no span carries one.
+    let roots: Vec<&Value> = spans.iter().filter(|span| span["kind"] == "run").collect();
+    assert_eq!(roots.len(), 1, "{spans:?}");
+    let run = roots[0];
+    assert_eq!(run["id"], json!(format!("run.{}", fixture_run::RUN_ID)));
+    assert_eq!(run["ended_at"], json!("2026-08-07T12:00:30.000Z"));
+    assert!(
+        spans.iter().all(|span| span.get("round").is_none()),
+        "a span still carries a round: {spans:?}"
+    );
     let nodes: Vec<&str> = spans
         .iter()
         .filter(|span| span["kind"] == "node")
@@ -502,7 +500,14 @@ fn the_run_timeline_covers_the_round_and_the_nodes_under_it() {
         vec![fixture_run::NODE_ID, fixture_run::REVIEW_NODE_ID]
     );
     for span in spans.iter().filter(|span| span["kind"] == "node") {
-        assert_eq!(span["parent_id"], json!("round-01"));
+        assert_eq!(span["parent_id"], run["id"]);
+        assert_eq!(
+            span["id"],
+            json!(format!(
+                "node.{}",
+                span["node_id"].as_str().expect("a node")
+            ))
+        );
     }
 }
 
@@ -619,7 +624,7 @@ fn the_stream_opens_with_a_fresh_snapshot_and_invalidates_on_a_live_append() {
         "the snapshot carries every run, settled or not"
     );
 
-    // A real append to a real journal, exactly as a live round makes one.
+    // A real append to a real journal, exactly as the running loop makes one.
     fixture_run::append(
         &serving.run_dir(fixture_run::RUN_ID),
         "planner-surface-queued",
@@ -647,10 +652,10 @@ fn a_run_directory_the_contract_cannot_name_is_never_announced_on_the_stream() {
     assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
 
     // Both move: only the one a client could refetch is reported.
-    fixture_run::append(&serving.run_dir(unnameable), "round-started", json!({}));
+    fixture_run::append(&serving.run_dir(unnameable), "node-ready", json!({}));
     fixture_run::append(
         &serving.run_dir(fixture_run::RUN_ID),
-        "round-started",
+        "node-ready",
         json!({}),
     );
 
@@ -749,7 +754,7 @@ fn a_journal_line_this_build_cannot_read_does_not_stop_the_run_being_served() {
     );
     assert_eq!(response.status, 200);
     assert_eq!(
-        response.json()["rounds"][0]["node_status"][fixture_run::NODE_ID],
+        response.json()["graph"]["node_status"][fixture_run::NODE_ID],
         json!("done"),
         "a reader skips records it cannot read rather than refusing the run around them"
     );
@@ -843,7 +848,7 @@ fn a_server_asked_to_stop_ends_its_open_streams_rather_than_waiting_on_them() {
     );
 }
 
-/// A server over the run whose second round is still open.
+/// A server over the run that is still being driven.
 fn live_run() -> Serving {
     Serving::start(|root| {
         fixture_run::write_live(root, fixture_run::RUN_ID);
@@ -851,13 +856,15 @@ fn live_run() -> Serving {
 }
 
 #[test]
-fn a_live_run_reports_the_round_it_is_driving_and_what_it_is_waiting_on() {
+fn a_live_run_reports_what_it_is_doing_and_what_it_is_waiting_on() {
     let serving = live_run();
     let body = http::get(serving.address, "/api/v2/runs?include_settled=false").json();
     let run = &body["runs"][0];
     assert_eq!(run["run_id"], json!(fixture_run::RUN_ID));
-    assert_eq!(run["state"], json!("active"), "a live round is not settled");
-    assert_eq!(run["phase"], json!("driving-round"));
+    assert_eq!(run["state"], json!("active"), "a live run is not settled");
+    // A decision point is outstanding — a human action nobody has attested — and
+    // that is what the run is doing, whatever else is dispatched beside it.
+    assert_eq!(run["phase"], json!("deciding"));
     assert_eq!(run["timing_quality"], json!("partial"));
     assert_eq!(run["launch"]["launcher"], json!("codex"));
     // The human action is waiting and the node behind it is gated by it.
@@ -931,55 +938,68 @@ fn a_live_run_reports_the_round_it_is_driving_and_what_it_is_waiting_on() {
 }
 
 #[test]
-fn every_round_the_run_recorded_is_served_with_its_own_plan_and_result() {
+fn the_run_is_served_as_one_graph_with_the_decisions_holding_it_back() {
     let serving = live_run();
     let body = http::get(
         serving.address,
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
     )
     .json();
-    let rounds = body["rounds"].as_array().expect("rounds");
-    assert_eq!(rounds.len(), 2, "a finished round is not forgotten");
-
-    let first = &rounds[0];
-    assert_eq!(first["round"], json!(1));
-    assert_eq!(first["result"]["state"], json!("waiting"));
+    let graph = &body["graph"];
+    // One graph and one recorded result, whatever a node did earlier: the loop is
+    // continuous, so what a reader is told is where the whole thing has got to.
+    assert!(body.get("rounds").is_none(), "{body}");
     assert_eq!(
-        first["node_status"][fixture_run::REVIEW_NODE_ID],
-        json!("failed"),
-        "a finished round's statuses are the ones its own result recorded"
-    );
-
-    let second = &rounds[1];
-    assert_eq!(second["round"], json!(2));
-    assert_eq!(
-        second["result"],
+        graph["result"],
         Value::Null,
-        "an open round has recorded no result"
+        "no driver has closed out, so there is no recorded result"
+    );
+    // The node that failed and was superseded is still in the graph's account of
+    // itself — a settlement is not forgotten because a later edit replaced it.
+    assert_eq!(
+        graph["node_status"][fixture_run::REPORTED_NODE_ID],
+        json!("running"),
+        "the re-asked dispatch is what the node is doing now: {graph}"
     );
     assert_eq!(
-        second["node_status"][fixture_run::SIGNOFF_NODE_ID],
+        graph["node_status"][fixture_run::SIGNOFF_NODE_ID],
         json!("waiting")
     );
     assert_eq!(
-        second["node_status"][fixture_run::ANNOUNCE_NODE_ID],
+        graph["node_status"][fixture_run::ANNOUNCE_NODE_ID],
         json!("blocked")
     );
     assert_eq!(
-        second["node_gated_by"][fixture_run::ANNOUNCE_NODE_ID],
+        graph["node_gated_by"][fixture_run::ANNOUNCE_NODE_ID],
         json!([fixture_run::SIGNOFF_NODE_ID]),
         "a client is told which nodes are holding a blocked one, in plan order"
     );
     // `node_states` carries only what the journal recorded, never a derived gate.
     assert!(
-        second["node_states"]
+        graph["node_states"]
             .get(fixture_run::ANNOUNCE_NODE_ID)
             .is_none(),
-        "blocked is derived on every read, not recorded: {second}"
+        "blocked is derived on every read, not recorded: {graph}"
     );
     assert_eq!(
-        second["node_states"][fixture_run::SIGNOFF_NODE_ID],
+        graph["node_states"][fixture_run::SIGNOFF_NODE_ID],
         json!("waiting")
+    );
+    // The one thing a continuous engine pauses for, and the reason a reader of a
+    // stalled run can tell "waiting on a person" from "abandoned". The blocking
+    // surface this run raised was answered, so what is left is the human action.
+    let decisions = graph["decisions"].as_array().expect("decisions");
+    assert_eq!(
+        decisions
+            .iter()
+            .map(|decision| decision["id"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![fixture_run::SIGNOFF_NODE_ID],
+        "{decisions:?}"
+    );
+    assert_eq!(
+        decisions[0]["unblocks"],
+        json!([fixture_run::ANNOUNCE_NODE_ID])
     );
 }
 
@@ -991,7 +1011,7 @@ fn a_lifecycle_node_serves_the_steps_and_the_prose_it_actually_has() {
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
     )
     .json();
-    let ship = body["rounds"][1]["plan"]["tasks"]
+    let ship = body["graph"]["plan"]["tasks"]
         .as_array()
         .expect("tasks")
         .iter()
@@ -1004,12 +1024,30 @@ fn a_lifecycle_node_serves_the_steps_and_the_prose_it_actually_has() {
     assert_eq!(ship["title"], json!("Ship it"));
     assert_eq!(ship["execution_checkout"], json!("primary"));
     assert_eq!(ship["max_turns"], json!(12));
-    assert_eq!(ship["done_when"], json!("the change request is open"));
-    // The planner's carried note reaches the reader as the section the SDK
-    // renders it as, not as a second acceptance bar.
+    // Plan schema 2 retired `done_when`, and a node has no such field to serve:
+    // the bar is the `## Acceptance criteria` section of the node's own prose,
+    // written once and handed to the judge as the first message of its transcript.
+    assert!(ship.get("done_when").is_none(), "{ship}");
+    // A `context` note carries exactly one dispatch and is consumed on delivery,
+    // and this node has been dispatched — so the note it was given is gone rather
+    // than still owed to a dispatch that already had it.
     let prose = ship["task"].as_str().expect("the node's prose");
-    assert!(prose.contains("Planner context"), "{prose}");
-    assert!(prose.contains("adds no acceptance criteria"), "{prose}");
+    assert!(!prose.contains("Planner context"), "{prose}");
+
+    // The other half: a node nothing has dispatched still carries its note, and
+    // it reaches the reader as the section the SDK renders it as — never as a
+    // second acceptance bar.
+    let announce = body["graph"]["plan"]["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["id"] == json!(fixture_run::ANNOUNCE_NODE_ID))
+        .expect("the blocked node")
+        .clone();
+    let owed = announce["task"].as_str().expect("the node's prose");
+    assert!(owed.contains("Planner context"), "{owed}");
+    assert!(owed.contains("adds no acceptance criteria"), "{owed}");
+    assert!(owed.contains(fixture_run::CARRIED_NOTE), "{owed}");
 
     let steps = ship["steps"].as_array().expect("steps");
     assert_eq!(steps.len(), 2);
@@ -1021,7 +1059,7 @@ fn a_lifecycle_node_serves_the_steps_and_the_prose_it_actually_has() {
     assert_eq!(steps[1]["task"], json!("hand-over"));
 
     // A human node carries its action prose and no persona.
-    let signoff = body["rounds"][1]["plan"]["tasks"]
+    let signoff = body["graph"]["plan"]["tasks"]
         .as_array()
         .expect("tasks")
         .iter()
@@ -1032,7 +1070,7 @@ fn a_lifecycle_node_serves_the_steps_and_the_prose_it_actually_has() {
     assert_eq!(signoff["task"], json!("Approve the change."));
 
     // The steps the attempt finished are the ones a continuation may skip.
-    let results = &body["rounds"][1]["node_results"][fixture_run::SHIP_NODE_ID];
+    let results = &body["graph"]["node_results"][fixture_run::SHIP_NODE_ID];
     assert_eq!(results["completed"], json!(true));
     assert_eq!(results["pr"], json!("https://example.invalid/changes/2"));
     let recorded_steps = results["steps"].as_array().expect("recorded steps");
@@ -1055,14 +1093,14 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
     )
     .json();
-    let round = &body["rounds"][1];
-    let control = round["node_control"]
+    let graph = &body["graph"];
+    let control = graph["node_control"]
         .as_object()
-        .expect("the open round says what it has in flight")
+        .expect("the graph says what it has in flight")
         .clone();
 
-    // One entry per node the round has in flight, and no other: a node with no
-    // turn has nothing to redirect, so it must not read as un-redirectable.
+    // One entry per node in flight, and no other: a node with no turn has nothing
+    // to redirect, so it must not read as un-redirectable.
     let mut named: Vec<&String> = control.keys().collect();
     named.sort();
     assert_eq!(
@@ -1080,7 +1118,7 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
         fixture_run::ANNOUNCE_NODE_ID,
     ] {
         assert_ne!(
-            round["node_status"][node],
+            graph["node_status"][node],
             json!("running"),
             "{node} is not in flight, so it has no control entry to be missing"
         );
@@ -1107,26 +1145,21 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
 
     // A previous dispatch's report must not label the turn running now.
     // `provider.control` is asked for per run and the provider's outcome is reset
-    // to `NotRequested` for the next one, so this node's round-1 `control: null`
+    // to `NotRequested` for the next one, so this node's earlier `control: null`
     // is a fact about a dispatch that is over. Reading it as this turn's answer
     // would tell a planner to cancel a node they may well be able to correct.
+    //
+    // Under rounds the two dispatches were told apart by their round labels.
+    // There are none, and this reading must still not borrow the old answer.
     let reported = &control[fixture_run::REPORTED_NODE_ID];
     assert_eq!(
         reported["addressable"],
         json!(true),
-        "the round-1 report describes a dispatch that has ended: {reported}"
+        "the earlier report describes a dispatch that has ended: {reported}"
     );
     assert!(
         reported.get("reason").is_none(),
         "and it contributes no reason to this turn: {reported}"
-    );
-    // The round-1 settlement really did report no controllable turn — so this is
-    // the corrected reading rather than a fixture that never had the trap in it.
-    let round_one = &body["rounds"][0]["node_control"];
-    assert_eq!(
-        round_one,
-        &json!({}),
-        "a closed round has nothing in flight: {round_one}"
     );
     let events: Vec<Value> = http::get(
         serving.address,
@@ -1143,10 +1176,12 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
         .filter(|span| span["kind"] == "node")
         .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
         .collect();
+    // The earlier settlement really did report no controllable turn — so this is
+    // the corrected reading rather than a fixture that never had the trap in it.
     assert!(
         events.iter().any(|event| event["kind"] == "member-settled"),
-        "round 1 settled a member here, and its report named no controllable \
-         turn: {events:?}"
+        "an earlier dispatch settled a member here, and its report named no \
+         controllable turn: {events:?}"
     );
     assert!(
         !events
@@ -1154,9 +1189,6 @@ fn each_in_flight_node_says_whether_its_turn_can_be_redirected() {
             .any(|event| event["kind"] == "turn-interrupted"),
         "and nobody has pulled the lever at this node at all: {events:?}"
     );
-
-    // A round that has closed has nothing in flight, whatever it once had.
-    assert_eq!(body["rounds"][0]["node_control"], json!({}));
 }
 
 /// The moment a planner changed what a running turn was doing, on the timeline of
@@ -1258,7 +1290,7 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
             serving.address,
             &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
         )
-        .json()["rounds"][1]["node_control"]
+        .json()["graph"]["node_control"]
             .clone()
     };
     // A report that names an address says this member *had* a lever, so the node
@@ -1291,7 +1323,6 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
             "turn-completed",
             json!({
                 "run_id": fixture_run::RUN_ID,
-                "round": 2,
                 "node": fixture_run::REDIRECTED_NODE_ID,
                 "member": "worker",
                 "persona": "worker",
@@ -1316,7 +1347,6 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
             "member-died",
             json!({
                 "run_id": fixture_run::RUN_ID,
-                "round": 2,
                 "node": fixture_run::REDIRECTED_NODE_ID,
                 "member": "worker",
                 "persona": "worker",
@@ -1328,7 +1358,7 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
     assert_eq!(gone["addressable"], json!(false));
     assert_eq!(gone["reason"], json!("the member is no longer running"));
 
-    // A node the round dispatched whose stream has said nothing yet: no address,
+    // A node the run dispatched whose stream has said nothing yet: no address,
     // which is the engine's own answer for a note aimed at it.
     let silent = control(|dir| {
         fixture_run::append_relayed(
@@ -1337,7 +1367,6 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
             "node-dispatched",
             json!({
                 "run_id": fixture_run::RUN_ID,
-                "round": 2,
                 "node": fixture_run::ANNOUNCE_NODE_ID,
                 "persona": "check-in",
             }),
@@ -1360,7 +1389,7 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
             &dir,
             "pipeline",
             "edit-committed",
-            json!({ "run_id": fixture_run::RUN_ID, "round": 2 }),
+            json!({ "run_id": fixture_run::RUN_ID }),
             json!({
                 "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
                 "operations": [{
@@ -1401,7 +1430,6 @@ fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
         let at_node = |node: &str| {
             json!({
                 "run_id": fixture_run::RUN_ID,
-                "round": 2,
                 "node": node,
                 "member": "worker",
                 "persona": "worker",
@@ -1418,7 +1446,7 @@ fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
             &dir,
             "pipeline",
             "edit-committed",
-            json!({ "run_id": fixture_run::RUN_ID, "round": 2 }),
+            json!({ "run_id": fixture_run::RUN_ID }),
             json!({
                 "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
                 "operations": [{
@@ -1459,7 +1487,7 @@ fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
     )
     .json();
-    let control = &run["rounds"][1]["node_control"][fixture_run::REDIRECTED_NODE_ID];
+    let control = &run["graph"]["node_control"][fixture_run::REDIRECTED_NODE_ID];
     assert_eq!(
         control["addressable"],
         json!(true),
@@ -1608,7 +1636,7 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
     assert_eq!(verification["ended_at"], json!("2026-08-07T12:00:40.000Z"));
     assert_eq!(
         verification["parent_id"],
-        json!(format!("node.02.{}", fixture_run::SHIP_NODE_ID))
+        json!(format!("node.{}", fixture_run::SHIP_NODE_ID))
     );
 
     // The publication is the interval between the two ends `onevcs` recorded.
@@ -1681,7 +1709,7 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
     );
     assert_eq!(
         rollups[0]["parent_id"],
-        json!(format!("node.02.{}", fixture_run::SHIP_NODE_ID))
+        json!(format!("node.{}", fixture_run::SHIP_NODE_ID))
     );
 
     // And the node's own scope still serves the sessions themselves, so the two
@@ -1726,9 +1754,9 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
 }
 
 #[test]
-fn a_round_that_wrote_no_result_is_described_by_the_fold_behind_it() {
+fn a_run_that_wrote_no_result_is_described_by_the_fold_behind_it() {
     let serving = Serving::start(|root| {
-        fixture_run::write_stopped_mid_round(root, fixture_run::STOPPED_RUN_ID);
+        fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
     });
     let body = http::get(
         serving.address,
@@ -1755,9 +1783,9 @@ fn a_round_that_wrote_no_result_is_described_by_the_fold_behind_it() {
         "nothing was relayed before the driver went, so nothing is counted"
     );
     assert_eq!(
-        body["rounds"][0]["node_status"][fixture_run::NODE_ID],
+        body["graph"]["node_status"][fixture_run::NODE_ID],
         json!("running"),
-        "the round it stopped in has no result of its own, and the fold does"
+        "no driver closed out, so there is no recorded result — and the fold has it"
     );
 }
 
@@ -1781,35 +1809,35 @@ fn a_node_that_stored_nothing_serves_no_verification_and_no_publication() {
         .collect();
     assert!(
         !kinds.contains(&"verification") && !kinds.contains(&"publication"),
-        "a node whose round recorded neither is served neither, not an empty one: {kinds:?}"
+        "a node that recorded neither is served neither, not an empty one: {kinds:?}"
     );
 }
 
 #[test]
-fn the_run_timeline_covers_every_round_the_run_has_had() {
+fn the_run_timeline_is_one_unbroken_span_over_everything_the_run_has_done() {
     let serving = live_run();
     let body = http::get(
         serving.address,
         &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
     )
     .json();
-    let rounds: Vec<&Value> = body["spans"]
+    let roots: Vec<&Value> = body["spans"]
         .as_array()
         .expect("spans")
         .iter()
-        .filter(|span| span["kind"] == "round")
+        .filter(|span| span["kind"] == "run")
         .collect();
-    assert_eq!(rounds.len(), 2);
-    assert_eq!(rounds[0]["phase"], json!("reviewing-results"));
+    // One root, over the whole run — not one per batch, because nothing batches.
+    assert_eq!(roots.len(), 1, "{roots:?}");
     assert_eq!(
-        rounds[1]["ended_at"],
+        roots[0]["ended_at"],
         Value::Null,
-        "the round being driven has not ended"
+        "a run still being driven has not ended"
     );
-    assert_eq!(rounds[1]["phase"], json!("driving-round"));
+    assert_eq!(roots[0]["phase"], json!("deciding"));
 
     // The run's own driving session, recorded at no node: it is running for as
-    // long as the round it is driving is, rather than a state nothing named.
+    // long as the run it is driving is, rather than a state nothing named.
     let driving: Vec<&Value> = body["spans"]
         .as_array()
         .expect("spans")
@@ -1817,10 +1845,11 @@ fn the_run_timeline_covers_every_round_the_run_has_had() {
         .filter(|span| span["kind"] == "dispatch" && span["node_id"].is_null())
         .collect();
     assert!(!driving.is_empty(), "no run-level session was served");
-    assert_eq!(driving[0]["status"], json!("done"));
-    assert_eq!(
-        driving.last().expect("the open round's session")["status"],
-        json!("running")
+    assert!(
+        driving
+            .iter()
+            .all(|span| span["status"] == json!("running")),
+        "the run has not closed, so neither has a session it is driving: {driving:?}"
     );
 }
 
@@ -1873,9 +1902,9 @@ fn a_run_that_recorded_only_its_launch_reads_as_undriven_and_starting() {
     )
     .json();
     assert_eq!(
-        detail["rounds"],
-        json!([]),
-        "a run with no round has no round to serve"
+        detail["graph"],
+        Value::Null,
+        "a run whose plan nothing recorded has no graph to serve"
     );
     assert_eq!(detail["conversations"], json!([]));
 }
@@ -1948,7 +1977,6 @@ fn a_watched_stream_reports_only_that_run_and_notices_its_transcripts() {
                 "kind": "agent-turn",
                 "labels": {
                     "run_id": fixture_run::RUN_ID,
-                    "round": 2,
                     "node": fixture_run::SHIP_NODE_ID,
                     "session": fixture_run::LIVE_CONVERSATION_ID,
                 },
@@ -2116,7 +2144,6 @@ fn a_watched_stream_reports_what_a_turn_is_doing_before_it_is_done() {
                 "kind": "turn-activity",
                 "labels": {
                     "run_id": fixture_run::RUN_ID,
-                    "round": 2,
                     "node": fixture_run::SHIP_NODE_ID,
                     "persona": "pr-author",
                     "session": fixture_run::LIVE_CONVERSATION_ID,
@@ -2150,7 +2177,10 @@ fn a_watched_stream_reports_what_a_turn_is_doing_before_it_is_done() {
         .expect("the most recent summary")
         .clone();
     assert_eq!(latest["node"], json!(fixture_run::SHIP_NODE_ID));
-    assert_eq!(latest["round"], json!("2"));
+    assert!(
+        latest.get("round").is_none(),
+        "a summary is keyed by its node, not by a batch: {latest}"
+    );
     assert_eq!(latest["name"], json!("Edit"));
     assert_eq!(latest["detail"], json!("CHANGELOG.md"));
     assert_eq!(latest["kind"], json!("tool_use"));
@@ -2310,10 +2340,14 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     // what a measured nothing looks like.
     assert!(document.bucket(telemetry::BucketName::Judge).is_none());
     assert_eq!(timing["judge_seconds"], json!(null), "{timing}");
-    assert_eq!(
-        timing["fractions"]["judge_model"],
-        json!(0.0967741935483871)
-    );
+    // Derived from the document's own wall clock rather than restated, so a
+    // fixture whose timings move does not need this number rewritten with it.
+    #[allow(clippy::cast_precision_loss)]
+    let judge_share = timing["judge_model_ms"]
+        .as_f64()
+        .expect("the judge chain reported turns")
+        / document.wall_ms as f64;
+    assert_eq!(timing["fractions"]["judge_model"], json!(judge_share));
     assert_eq!(timing["fractions"]["llmlint_model"], json!(null));
 
     // And what each party spent is the sibling's split, not a second reading of
@@ -2412,5 +2446,617 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
     assert!(
         missing.to_string().contains(telemetry::BINARY_ENV),
         "the refusal says how to point at one: {missing}"
+    );
+}
+
+// Every filtering journey below drives the compiled binary over real HTTP against
+// a real recorded run, because `?filter=` is a query the server parses, resolves
+// against the run's own launch record, and applies to what it serves — four seams
+// a payload built in-process would skip.
+
+/// Every event kind a timeline carries, at whichever scope it was read.
+fn kinds_on(body: &Value) -> Vec<String> {
+    body["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter_map(|event| event["kind"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The run-scoped timeline of the live fixture, read under one filter.
+fn timeline_under(serving: &Serving, filter: Option<&str>) -> Value {
+    let query = filter.map_or_else(String::new, |spec| format!("&filter={}", urlencode(spec)));
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run{query}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()
+}
+
+/// Percent-encode a query value, which an inline spec needs and a profile name
+/// does not: a spec is JSON, and `{`, `"` and `,` are not query-safe.
+fn urlencode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_named_profile_narrows_the_stream_to_the_decisions_or_leaves_it_whole() {
+    let serving = live_run();
+
+    // Unfiltered: the whole merged store, all three producing libraries.
+    let whole = kinds_on(&timeline_under(&serving, None));
+    assert!(whole.iter().any(|kind| kind == "node-settled"), "{whole:?}");
+    assert!(
+        whole.iter().any(|kind| kind == "turn-activity"),
+        "{whole:?}"
+    );
+    assert!(
+        whole.iter().any(|kind| kind == "change-opened"),
+        "{whole:?}"
+    );
+
+    // `planner` is the decisions-level reading: onepipeline's own vocabulary is a
+    // closed set and it is exactly the decisions. Nothing a sibling relayed is a
+    // decision, so none of it survives.
+    let decisions = kinds_on(&timeline_under(&serving, Some("planner")));
+    assert!(!decisions.is_empty(), "the decisions are still served");
+    for kind in [
+        "node-ready",
+        "node-settled",
+        "decision-pending",
+        "edit-committed",
+    ] {
+        assert!(
+            decisions.iter().any(|served| served == kind),
+            "{kind} is a decision and must survive: {decisions:?}"
+        );
+    }
+    for kind in [
+        "turn-activity",
+        "turn-completed",
+        "change-opened",
+        "gate-verdict",
+    ] {
+        assert!(
+            !decisions.iter().any(|served| served == kind),
+            "{kind} is activity, not a decision: {decisions:?}"
+        );
+    }
+
+    // `monitor` is the detailed stream, which is what that persona's own contract
+    // says it reads: it narrows nothing, and is named so that the two readings a
+    // viewer switches between are two profiles rather than a profile and nothing.
+    assert_eq!(kinds_on(&timeline_under(&serving, Some("monitor"))), whole);
+}
+
+#[test]
+fn an_inline_spec_is_read_in_the_grammar_the_stack_shares() {
+    let serving = live_run();
+    let whole = kinds_on(&timeline_under(&serving, None));
+
+    // `exclude` wins, and `kind` is a glob over the wire string — so one matcher
+    // drops every turn record a sibling relayed while leaving the rest.
+    let quiet = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"exclude":[{"kind":"turn-*"}]}"#),
+    ));
+    assert!(
+        !quiet.iter().any(|kind| kind.starts_with("turn-")),
+        "the glob matched nothing: {quiet:?}"
+    );
+    assert!(quiet.iter().any(|kind| kind == "node-settled"), "{quiet:?}");
+    assert!(quiet.len() < whole.len());
+
+    // An absent `include` admits everything, so a broad include beside a narrow
+    // exclude is how "all of this except that" is written — and `exclude` still
+    // wins over whatever `include` admitted.
+    let vcs_only = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"source":"vcs"}],"exclude":[{"kind":"lock-wait"}]}"#),
+    ));
+    assert!(
+        vcs_only.iter().any(|kind| kind == "change-opened"),
+        "{vcs_only:?}"
+    );
+    assert!(
+        !vcs_only.iter().any(|kind| kind == "lock-wait"),
+        "{vcs_only:?}"
+    );
+    assert!(
+        !vcs_only.iter().any(|kind| kind == "node-settled"),
+        "{vcs_only:?}"
+    );
+
+    // A reserved label the envelope carries under the same name, matched exactly.
+    let one_node = kinds_on(&timeline_under(
+        &serving,
+        Some(&format!(
+            r#"{{"include":[{{"node":"{}"}}]}}"#,
+            fixture_run::REDIRECTED_NODE_ID
+        )),
+    ));
+    assert!(!one_node.is_empty(), "the node's own records are served");
+    assert!(
+        one_node.iter().any(|kind| kind == "turn-interrupted"),
+        "{one_node:?}"
+    );
+    assert!(
+        !one_node.iter().any(|kind| kind == "change-opened"),
+        "{one_node:?}"
+    );
+}
+
+#[test]
+fn a_filter_shapes_the_response_and_never_the_run() {
+    // The whole point of the read API staying read-only: a reader who narrowed
+    // their attention is shown the same graph, in the same states, as one who
+    // asked for everything. Only the records served beside it change.
+    let serving = live_run();
+    let detail = |filter: &str| -> Value {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=false&filter={filter}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()
+    };
+    let wide = detail("monitor");
+    let narrow = detail("planner");
+    assert_eq!(narrow["graph"]["node_status"], wide["graph"]["node_status"]);
+    assert_eq!(
+        narrow["graph"]["node_control"],
+        wide["graph"]["node_control"]
+    );
+    assert_eq!(narrow["graph"]["decisions"], wide["graph"]["decisions"]);
+    assert_eq!(
+        narrow["graph"]["node_results"],
+        wide["graph"]["node_results"]
+    );
+    assert_eq!(narrow["run"]["nodes"], wide["run"]["nodes"]);
+    // Including the clock: the document describes the run, not the reading of it.
+    assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+}
+
+#[test]
+fn a_profile_the_runs_launch_config_defined_answers_for_that_run_alone() {
+    // A retained `--set filters.NAME=SPEC` is where a launch's own opaque
+    // decisions are kept, and it is the one place this crate can read a
+    // run-specific one from. The launch record is written by the SDK and read
+    // here verbatim.
+    let defined = "change-watch";
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::define_filter_profile(&dir, defined, r#"{"include":[{"kind":"change-*"}]}"#);
+        // A second run, launched with none: the same name must not answer for it.
+        fixture_run::write_live(root, fixture_run::OTHER_RUN_ID);
+    });
+
+    let served = kinds_on(&timeline_under(&serving, Some(defined)));
+    assert!(
+        !served.is_empty(),
+        "the profile resolved and served records"
+    );
+    assert!(
+        served.iter().all(|kind| kind.starts_with("change-")),
+        "the launch's own spec is what shaped it: {served:?}"
+    );
+
+    // The same name, at a run whose launch defined nothing: not a 500, not a
+    // silently unfiltered payload, but the refusal naming what that run does have.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter={defined}",
+            fixture_run::OTHER_RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404);
+    let error = &refused.json()["error"];
+    assert_eq!(error["code"], json!("unknown_filter_profile"));
+    let message = error["message"].as_str().expect("a message");
+    assert!(message.contains(defined), "{message}");
+    assert!(
+        message.contains("planner") && message.contains("monitor"),
+        "a reader who mistyped a name is told which names exist: {message}"
+    );
+
+    // And a launch-defined name may not shadow a built-in one: those two mean the
+    // same thing for every run, which is the whole reason a reader names them.
+    let shadowing = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::define_filter_profile(&dir, "planner", r#"{"include":[{"kind":"change-*"}]}"#);
+    });
+    let planner = kinds_on(&timeline_under(&shadowing, Some("planner")));
+    assert!(
+        planner.iter().any(|kind| kind == "node-settled"),
+        "the built-in profile is what `planner` still means: {planner:?}"
+    );
+}
+
+#[test]
+fn a_filter_that_could_match_nothing_is_refused_at_the_boundary() {
+    let serving = live_run();
+    let refused = |spec: &str| -> http::Response {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run&filter={}",
+                fixture_run::RUN_ID,
+                urlencode(spec)
+            ),
+        )
+    };
+    // A matcher naming no field at all matches *every* event, so one in `exclude`
+    // silences the whole stream — far likelier a typo than an intent, and not a
+    // thing the empty payload it produces could tell anyone.
+    let empty = refused(r#"{"exclude":[{}]}"#);
+    assert_eq!(empty.status, 422);
+    let message = empty.json()["error"]["message"]
+        .as_str()
+        .expect("a message")
+        .to_owned();
+    assert_eq!(empty.json()["error"]["code"], json!("invalid_request"));
+    assert!(
+        message.contains("exclude[0]") && message.contains("name at least one"),
+        "the refusal names which matcher and what is wrong with it: {message}"
+    );
+
+    // A field the stream carries no empty value for matches nothing at all.
+    let blank = refused(r#"{"include":[{"kind":"node-ready"},{"node":"  "}]}"#);
+    assert_eq!(blank.status, 422);
+    assert!(
+        blank.json()["error"]["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("include[1]") && why.contains("`node` is empty")),
+        "{:?}",
+        blank.json()
+    );
+
+    // A spec that is not a spec, and a name that is not a usable name.
+    assert_eq!(refused(r#"{"include":"everything"}"#).status, 422);
+    assert_eq!(refused(r#"{"include":[{"round":1}]}"#).status, 422);
+    assert_eq!(refused("../etc/passwd").status, 422);
+}
+
+#[test]
+fn a_filtered_stream_is_not_woken_by_a_movement_it_excluded() {
+    // The stream invalidates rather than restating state, so a filter decides
+    // which movements are worth announcing. A subscriber narrowed to decisions
+    // must not be woken by every tool call — and must still be woken by a
+    // decision.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let mut stream = http::stream(
+        serving.address,
+        &format!(
+            "/api/v2/events?run_id={}&filter=planner",
+            fixture_run::RUN_ID
+        ),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    assert_eq!(stream.frames(1)[0].event, "snapshot");
+
+    // Activity this connection excluded: the run really moved, and this
+    // subscriber is deliberately not told, because nothing it is watching for
+    // changed. The harness polls every 50ms, so this waits out many polls before
+    // concluding the silence is the filter's doing rather than a slow read.
+    let dir = serving.run_dir(fixture_run::RUN_ID);
+    fixture_run::append_relayed(
+        &dir,
+        "agentgraph",
+        "turn-activity",
+        json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "member": "worker",
+            "session": fixture_run::REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({ "kind": "tool_use", "name": "Read", "detail": "docs/contract.md" }),
+    );
+    let woken = stream.frame_within(std::time::Duration::from_millis(750));
+    assert!(
+        woken.is_none(),
+        "a subscriber narrowed to decisions was woken by a tool call: {:?}",
+        woken.map(|frame| (frame.event, frame.data))
+    );
+
+    // Then a decision, which it *is* watching for: the same run, the same poll
+    // loop, and this time a frame.
+    fixture_run::append(&dir, "node-settled", json!({ "status": "done" }));
+    let frame = stream.next_frame().expect("the stream stayed open");
+    assert_eq!(frame.event, "run.changed");
+    assert_eq!(frame.json()["run_id"], json!(fixture_run::RUN_ID));
+    assert!(
+        frame.json().get("round").is_none(),
+        "an invalidation names the run that moved and nothing else: {}",
+        frame.data
+    );
+}
+
+#[test]
+fn a_filtered_detail_carries_the_transcripts_that_reading_is_about() {
+    // The detail's own event listing is its transcripts, and the filter narrows
+    // exactly that. A decisions-level reading is served none — a session whose
+    // every record was excluded is absent rather than present and empty, because
+    // an empty transcript says the session recorded nothing.
+    let serving = live_run();
+    let detail = |filter: &str| -> Value {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=true&filter={filter}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()
+    };
+    let sessions = |body: &Value| -> Vec<String> {
+        body["conversations"]
+            .as_array()
+            .expect("conversations")
+            .iter()
+            .filter_map(|held| held["conversation"]["id"].as_str().map(str::to_owned))
+            .collect()
+    };
+
+    let detailed = sessions(&detail("monitor"));
+    assert!(
+        detailed.contains(&fixture_run::LIVE_CONVERSATION_ID.to_owned()),
+        "{detailed:?}"
+    );
+    assert_eq!(sessions(&detail("planner")), Vec::<String>::new());
+
+    // A spec that admits one node's records is served that node's session and no
+    // other, which is the narrowing a reader writes an inline spec for.
+    let one = sessions(&detail(&urlencode(&format!(
+        r#"{{"include":[{{"node":"{}"}}]}}"#,
+        fixture_run::REDIRECTED_NODE_ID
+    ))));
+    assert_eq!(
+        one,
+        vec![fixture_run::REDIRECTED_CONVERSATION_ID.to_owned()]
+    );
+}
+
+#[test]
+fn a_node_scoped_timeline_is_narrowed_by_the_same_filter_as_the_run() {
+    // The two scopes are different payloads rather than one a subset of the
+    // other, so a filter proven at run scope is not proven at node scope.
+    let serving = live_run();
+    let node_timeline = |filter: Option<&str>| -> Value {
+        let query = filter.map_or_else(String::new, |spec| format!("&filter={spec}"));
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=node&node={}{query}",
+                fixture_run::RUN_ID,
+                fixture_run::SHIP_NODE_ID
+            ),
+        )
+        .json()
+    };
+
+    let whole = node_timeline(None);
+    let kinds = kinds_on(&whole);
+    assert!(
+        kinds.iter().any(|kind| kind == "turn-completed"),
+        "{kinds:?}"
+    );
+    assert!(kinds.iter().any(|kind| kind == "node-settled"), "{kinds:?}");
+
+    let decisions = node_timeline(Some("planner"));
+    let narrowed = kinds_on(&decisions);
+    assert!(
+        narrowed.iter().any(|kind| kind == "node-settled"),
+        "{narrowed:?}"
+    );
+    assert!(
+        !narrowed.iter().any(|kind| kind.starts_with("turn-")),
+        "{narrowed:?}"
+    );
+
+    // The spans themselves are what the run recorded, whatever the filter said: a
+    // reader narrowing their attention must not lose the node from its own
+    // timeline, nor find its dispatch bracketed somewhere else.
+    let spans = |body: &Value| -> Vec<(String, String, Value)> {
+        body["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .map(|span| {
+                (
+                    span["id"].as_str().unwrap_or_default().to_owned(),
+                    span["kind"].as_str().unwrap_or_default().to_owned(),
+                    span["started_at"].clone(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(spans(&decisions), spans(&whole));
+}
+
+#[test]
+fn an_unknown_profile_is_refused_by_the_detail_route_too() {
+    // Every route that takes the parameter resolves it against the run, so each
+    // of them answers for a name that run has no profile for.
+    let serving = live_run();
+    for route in [
+        format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+        format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    ] {
+        let joiner = if route.contains('?') { '&' } else { '?' };
+        let refused = http::get(
+            serving.address,
+            &format!("{route}{joiner}filter=nothing-defines-this"),
+        );
+        assert_eq!(refused.status, 404, "{route}");
+        assert_eq!(
+            refused.json()["error"]["code"],
+            json!("unknown_filter_profile"),
+            "{route}"
+        );
+        // And a malformed spec is the request's own fault on every one of them.
+        let malformed = http::get(
+            serving.address,
+            &format!("{route}{joiner}filter={}", urlencode(r#"{"exclude":[{}]}"#)),
+        );
+        assert_eq!(malformed.status, 422, "{route}");
+    }
+}
+
+#[test]
+fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
+    // `activity.changed` is a listing of records like any other, so it is narrowed
+    // by the same filter — and a connection that admits those records is still
+    // told what its nodes are doing.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let latest = |filter: &str| -> Option<Value> {
+        let mut stream = http::stream(
+            serving.address,
+            &format!(
+                "/api/v2/events?run_id={}&filter={filter}",
+                fixture_run::RUN_ID
+            ),
+            None,
+        );
+        assert_eq!(stream.status, 200);
+        assert_eq!(stream.frames(1)[0].event, "snapshot");
+        fixture_run::append_relayed(
+            &serving.run_dir(fixture_run::RUN_ID),
+            "agentgraph",
+            "turn-activity",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::REDIRECTED_NODE_ID,
+                "member": "worker",
+                "session": fixture_run::REDIRECTED_CONVERSATION_ID,
+            }),
+            json!({ "kind": "tool_use", "name": "Grep", "detail": "docs/contract.md" }),
+        );
+        let mut activity = None;
+        while let Some(frame) = stream.frame_within(std::time::Duration::from_millis(750)) {
+            if frame.event == "activity.changed" {
+                activity = Some(frame.json());
+                break;
+            }
+        }
+        activity
+    };
+
+    let told = latest("monitor").expect("the detailed reading is told what the turn is doing");
+    let summary = told["activity"]
+        .as_array()
+        .expect("the live activity")
+        .last()
+        .expect("the most recent summary")
+        .clone();
+    assert_eq!(summary["node"], json!(fixture_run::REDIRECTED_NODE_ID));
+    assert_eq!(summary["name"], json!("Grep"));
+
+    // The decisions-level reading is not about tool calls, so it is told none —
+    // neither an `activity.changed` carrying an empty list, which would be this
+    // server saying the node is doing nothing.
+    assert!(
+        latest("planner").is_none(),
+        "a decisions-level watcher was told about a tool call"
+    );
+}
+
+#[test]
+fn an_accepted_edit_is_served_with_the_author_that_submitted_it() {
+    // The run enforces a per-author op allowlist — a planner may issue every op
+    // and a monitor a narrower set — so who asked for a change is a fact about
+    // the change. Without it an observer's self-applied fix and the planner's own
+    // decision read as one thing on a reader's timeline.
+    let serving = live_run();
+    let edits: Vec<Value> = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "edit-committed")
+        .collect();
+    let authors: Vec<&str> = edits
+        .iter()
+        .filter_map(|edit| edit["author"].as_str())
+        .collect();
+    assert!(authors.contains(&"planner"), "{edits:?}");
+    assert!(authors.contains(&"monitor"), "{edits:?}");
+
+    // Recorded rather than defaulted: the two edits this run's reconciler
+    // compiled from a `context` command carry no author at all, and an absent one
+    // is served absent rather than assumed to be the planner's.
+    assert!(
+        edits.iter().any(|edit| edit.get("author").is_none()),
+        "an author nothing recorded is not invented: {edits:?}"
+    );
+}
+
+#[test]
+fn a_stream_watching_a_run_with_no_such_profile_is_served_rather_than_broken() {
+    // The frames are an invalidation, and the refusal a reader can act on is the
+    // one the detail route serves when they refetch. A stream that failed instead
+    // would leave a browser with no live updates at all over a name one of the
+    // runs it is watching happens not to define — so an unknown profile narrows
+    // nothing here, and the connection keeps working.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let mut stream = http::stream(
+        serving.address,
+        &format!(
+            "/api/v2/events?run_id={}&filter=nothing-defines-this",
+            fixture_run::RUN_ID
+        ),
+        None,
+    );
+    assert_eq!(stream.status, 200, "the stream opened rather than refusing");
+    assert_eq!(stream.frames(1)[0].event, "snapshot");
+
+    // And it is still a working subscription: a record this run writes reaches it.
+    fixture_run::append(
+        &serving.run_dir(fixture_run::RUN_ID),
+        "node-settled",
+        json!({ "status": "done" }),
+    );
+    let frame = stream.next_frame().expect("the stream stayed open");
+    assert_eq!(frame.event, "run.changed");
+    assert_eq!(frame.json()["run_id"], json!(fixture_run::RUN_ID));
+
+    // The refusal is the detail route's, which is where a reader can act on it.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?filter=nothing-defines-this",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404);
+    assert_eq!(
+        refused.json()["error"]["code"],
+        json!("unknown_filter_profile")
     );
 }

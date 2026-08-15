@@ -35,6 +35,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  */
 interface RunRecord {
   readonly runId: string;
+  /**
+   * Which filter this record was read under. Part of the record's identity, so a
+   * reading taken under one attention is never shown under another's name — the
+   * same rule the run id and the timeline scope already keep.
+   */
+  readonly filter?: string;
   readonly timelineScope?: string;
   readonly detail?: RunDetail;
   readonly timeline?: RunTimeline;
@@ -62,6 +68,15 @@ export function useDagTelemetry(
   client: TelemetryClient,
   requestedRunId?: string,
   timelineScope?: { readonly nodeId?: string },
+  /**
+   * Which events every read this hook takes carries — a filter profile name.
+   *
+   * It shapes what is served and never the run: the node statuses and counts a
+   * detail carries are folded from the whole journal whatever this says, so
+   * switching it changes what a reader is shown and not what they are shown
+   * *about*.
+   */
+  filter?: string,
 ): DagTelemetryState {
   const [list, setList] = useState<RunList>();
   const [record, setRecord] = useState<RunRecord>();
@@ -136,27 +151,41 @@ export function useDagTelemetry(
     // Keep what is already on screen while the same run is re-read; drop it the
     // moment a different run is selected, so no view renders one run's detail
     // under another's name.
-    setRecord((current) =>
-      current?.runId === runId && current.timelineScope === timelineScopeKey
-        ? current
-        : {
-            runId: runId,
-            timelineScope: timelineScopeKey,
-            ...(current?.runId === runId && current.detail !== undefined
-              ? { detail: current.detail }
-              : {}),
-          },
-    );
+    // What makes a record *this* reading's: all three of the run, the scope, and
+    // the attention it was read under. Taking a `RunRecord` rather than an optional
+    // one keeps the `undefined` case at each call site, where it means something
+    // different — nothing read yet, as against something read for another reading.
+    const reading = (candidate: RunRecord) =>
+      candidate.runId === runId &&
+      candidate.timelineScope === timelineScopeKey &&
+      candidate.filter === filter;
+    setRecord((current) => {
+      if (current !== undefined && reading(current)) return current;
+      // The detail already on screen is carried over only when it describes the
+      // *same* reading of the same run — a detail read under a different filter
+      // describes a different slice, and showing it under the new one would be
+      // the reader's own toggle appearing not to have done anything.
+      const reusable =
+        current?.runId === runId &&
+        current.filter === filter &&
+        current.detail !== undefined
+          ? current.detail
+          : undefined;
+      return {
+        runId,
+        filter,
+        timelineScope: timelineScopeKey,
+        ...(reusable === undefined ? {} : { detail: reusable }),
+      };
+    });
     const amend = (change: (current: RunRecord) => RunRecord) => {
       if (!active) return;
       setRecord((current) =>
-        current?.runId === runId && current.timelineScope === timelineScopeKey
-          ? change(current)
-          : current,
+        current !== undefined && reading(current) ? change(current) : current,
       );
     };
     void client
-      .getRun(runId, { includeConversations: false })
+      .getRun(runId, { includeConversations: false, filter })
       .then((detail) => {
         amend((current) => ({ ...current, detail }));
         if (active) setError(undefined);
@@ -167,7 +196,7 @@ export function useDagTelemetry(
       });
     if (timelineScope !== undefined)
       void client
-        .getTimeline(runId, timelineScope.nodeId)
+        .getTimeline(runId, timelineScope.nodeId, filter)
         .then((timeline) =>
           amend((current) => ({
             ...current,
@@ -182,7 +211,14 @@ export function useDagTelemetry(
     return () => {
       active = false;
     };
-  }, [client, runId, revision, timelineScope?.nodeId, timelineScopeKey]);
+  }, [
+    client,
+    runId,
+    revision,
+    timelineScope?.nodeId,
+    timelineScopeKey,
+    filter,
+  ]);
 
   useEffect(() => {
     void refresh();
@@ -219,6 +255,7 @@ export function useDagTelemetry(
     }
     const subscription = client.subscribe({
       runId,
+      filter,
       onEvent: (event) => {
         setLastUpdated(new Date().toISOString());
         setError(undefined);
@@ -239,11 +276,14 @@ export function useDagTelemetry(
       onError: (caught) => setError(asError(caught)),
     });
     return () => subscription.close();
-  }, [client, runId]);
+  }, [client, runId, filter]);
 
-  // A record read for a run that is no longer selected is not this run's record.
+  // A record read for a run that is no longer selected, or under an attention the
+  // reader has since changed, is not this reading's record.
   const current =
-    record !== undefined && record.runId === runId ? record : undefined;
+    record !== undefined && record.runId === runId && record.filter === filter
+      ? record
+      : undefined;
   return useMemo(
     () => ({
       list,
@@ -277,9 +317,16 @@ export function useDagTelemetry(
  * Swallow the one read failure that is not a failure: a run removed between the
  * read that listed it and the read that fetched it. The next list already drops it,
  * so reporting "no recorded run" would only describe the race, not a problem.
+ *
+ * Matched on the code and not on the status, because that race is no longer the
+ * only 404 these routes serve: a `filter` naming a profile the run does not have
+ * is one too, and it is a reading the viewer asked for and did not get. Swallowed
+ * on the status alone, it would leave them looking at the previous reading with
+ * nothing saying the switch did nothing.
  */
 function ignoreRemovedRun(caught: unknown): void {
-  if (caught instanceof TelemetryClientError && caught.status === 404) return;
+  if (caught instanceof TelemetryClientError && caught.code === "run_not_found")
+    return;
   throw caught;
 }
 

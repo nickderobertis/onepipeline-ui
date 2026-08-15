@@ -2,9 +2,9 @@ import { parseRunDetail, parseRunList } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { HISTORY_RUN, LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
+  graphOf,
   groupRuns,
   isUnhealthy,
-  latestRound,
   nodeReason,
   nodeViews,
 } from "./run-model";
@@ -90,32 +90,31 @@ describe("node views", () => {
 
   test("says a node failed with no recorded reason rather than showing nothing", () => {
     const payload = runDetail(LIVE_RUN);
-    const round = payload.rounds[0];
-    if (round === undefined) throw new Error("fixture has no round");
     const bare = parseRunDetail({
       ...payload,
       run: {
         ...payload.run,
         nodes: payload.run.nodes.filter(({ node }) => node !== "publish"),
       },
-      rounds: [
-        {
-          ...round,
-          node_results: {
-            ...round.node_results,
-            publish: { status: "failed" },
-          },
+      graph: {
+        ...payload.graph,
+        node_results: {
+          ...payload.graph.node_results,
+          publish: { status: "failed" },
         },
-      ],
+      },
     });
     const publish = nodeViews(bare).find(({ id }) => id === "publish");
     if (publish === undefined) throw new Error("fixture has no publish node");
     expect(nodeReason(publish)).toBe("failed, with no reason recorded");
   });
 
-  test("renders nothing for a detail with no projected round", () => {
-    const empty = parseRunDetail({ ...runDetail(LIVE_RUN), rounds: [] });
-    expect(latestRound(empty)).toBeUndefined();
+  test("renders nothing for a detail with no projected graph", () => {
+    // A run whose plan this host cannot read at all: the server serves `graph:
+    // null` rather than inventing one, and the view shows nothing rather than a
+    // graph it made up.
+    const empty = parseRunDetail({ ...runDetail(LIVE_RUN), graph: null });
+    expect(graphOf(empty)).toBeUndefined();
     expect(nodeViews(empty)).toEqual([]);
   });
 });

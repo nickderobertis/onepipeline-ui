@@ -23,7 +23,8 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
     EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
-    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -147,6 +148,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
             &run,
             &RunQuery {
                 include_conversations: false,
+                filter: None,
             },
         )
         .expect("the fixture run serves");
@@ -171,6 +173,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
                 &run,
                 &RunQuery {
                     include_conversations: true,
+                    filter: None,
                 },
             )),
         ),
@@ -178,8 +181,11 @@ fn every_route_serves_the_payload_its_golden_pins() {
             "run-timeline.json",
             enveloped(store.timeline(
                 &run,
-                &TimelineQuery::Node {
-                    node: NodeId::try_from(fixture_run::NODE_ID).expect("valid"),
+                &TimelineQuery {
+                    scope: TimelineScope::Node {
+                        node: NodeId::try_from(fixture_run::NODE_ID).expect("valid"),
+                    },
+                    filter: None,
                 },
             )),
         ),
@@ -280,7 +286,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 12);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 13);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
@@ -533,12 +539,12 @@ fn the_run_query_serves_conversations_unless_asked_not_to() {
 #[test]
 fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
     let run: TimelineQuery = serde_json::from_str(r#"{"scope":"run"}"#).expect("parse");
-    assert_eq!(run, TimelineQuery::Run);
+    assert_eq!(run.scope, TimelineScope::Run);
     let node: TimelineQuery =
         serde_json::from_str(r#"{"scope":"node","node":"contract-interface"}"#).expect("parse");
     assert_eq!(
-        node,
-        TimelineQuery::Node {
+        node.scope,
+        TimelineScope::Node {
             node: NodeId::try_from("contract-interface").unwrap()
         }
     );
@@ -547,7 +553,8 @@ fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
         r#"{"scope":"node","node":"contract-interface"}"#
     );
     // `scope=node` with no node, and a scope the contract does not define, are
-    // both unrepresentable rather than validated after parsing.
+    // both unrepresentable rather than validated after parsing. `round` is named
+    // here on purpose: it was never a scope, and now it is not a thing a run has.
     assert!(serde_json::from_str::<TimelineQuery>(r#"{"scope":"node"}"#).is_err());
     assert!(serde_json::from_str::<TimelineQuery>(r#"{"scope":"round"}"#).is_err());
 }
@@ -744,7 +751,8 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
         api.run(
             &run,
             &RunQuery {
-                include_conversations: true
+                include_conversations: true,
+                filter: None
             }
         )
         .expect_err("stub")
@@ -752,9 +760,15 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
         "run_not_found"
     );
     assert_eq!(
-        api.timeline(&run, &TimelineQuery::Run)
-            .expect_err("stub")
-            .status(),
+        api.timeline(
+            &run,
+            &TimelineQuery {
+                scope: TimelineScope::Run,
+                filter: None
+            }
+        )
+        .expect_err("stub")
+        .status(),
         404
     );
     assert_eq!(
@@ -1246,4 +1260,68 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
             .unwrap_or_else(|err| panic!("`{}` is not a party: {err}", party.as_str()));
         assert_eq!(read, party);
     }
+}
+
+/// This crate's copy of the stack's shared filter grammar, held to the wire the
+/// grammar fixes.
+///
+/// The grammar is duplicated per repository by design — there is no shared util
+/// crate here, exactly as with the envelope. `oneagentgraph` *does* declare
+/// `EventFilter` and `Matcher` in a public module, which would make this a type
+/// gate like the event vocabulary above rather than a wire one; it cannot be
+/// today, and the reason is worth writing down. That declaration landed in
+/// `oneagentgraph` 0.2.13, which added a field to `run::Request` in the same
+/// patch release — so `onepipeline` 0.4.0, built against 0.2.12, does not compile
+/// against it, and this tree pins 0.2.12. The gate becomes a type gate the moment
+/// a published `onepipeline` compiles against a sibling that declares the filter.
+///
+/// One field is deliberately *not* shared: this grammar has no `round` matcher.
+/// Execution is continuous, the label is deprecated and stamped by nothing, and a
+/// matcher over it would be a filter that silently matched nothing.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the sibling's own declaration is unreachable from this tree for the reason above — the release that added it broke the `onepipeline` this crate depends on — so the wire the grammar fixes is the only declaration a consumer can compare against, which is the same footing `onevcs`'s vocabulary is read on.
+#[test]
+fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
+    use onepipeline_ui::filter::{EventFilter, Matcher};
+
+    // Every field a matcher may name, and exactly those, under exactly these
+    // names: this is the document a sibling producer reads off the same query.
+    let mine = serde_json::to_value(Matcher {
+        source: Some(onepipeline::event::Source::Agentgraph),
+        kind: Some("turn-*".into()),
+        run_id: Some("run-1".into()),
+        node: Some("build".into()),
+        step: Some("compile".into()),
+        member: Some("worker".into()),
+        persona: Some("engineer".into()),
+    })
+    .expect("this crate's matcher serializes");
+    assert_eq!(
+        mine,
+        serde_json::json!({
+            "source": "agentgraph",
+            "kind": "turn-*",
+            "run_id": "run-1",
+            "node": "build",
+            "step": "compile",
+            "member": "worker",
+            "persona": "engineer",
+        }),
+        "the shared grammar's matcher has drifted"
+    );
+
+    // A matcher that names nothing serializes to nothing, so a spec round-trips
+    // as the file wrote it rather than gaining every key it left unasked.
+    assert_eq!(
+        serde_json::to_value(EventFilter::default()).expect("serializes"),
+        serde_json::json!({})
+    );
+
+    // `round` is refused rather than ignored: `deny_unknown_fields` is what stops
+    // a spec written against the round era from silently matching everything.
+    assert!(
+        serde_json::from_str::<EventFilter>(r#"{"include":[{"round":1}]}"#).is_err(),
+        "a matcher over a label nothing stamps must not parse"
+    );
+    // And so is a list this grammar does not have, for the same reason.
+    assert!(serde_json::from_str::<EventFilter>(r#"{"only":[]}"#).is_err());
 }

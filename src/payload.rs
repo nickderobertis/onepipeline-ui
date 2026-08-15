@@ -1,7 +1,8 @@
 //! Projecting the onepipeline SDK's run records onto the wire shapes.
 //!
 //! The SDK owns the records — the launch record, the merged event store, the
-//! folded run state, the per-round plan and result, and the telemetry document
+//! folded run state, the run's plan and its one recorded result, and the
+//! telemetry document
 //! [`crate::telemetry`] reads. This module owns only the projection onto what
 //! `docs/contract.md` serves: it renames nothing the SDK already names and
 //! computes nothing the SDK already computes, and every place it does derive
@@ -25,6 +26,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::contract::{ArtifactId, ConversationId, DispatchId, NodeId, TIMELINE_SCHEMA_VERSION};
+use crate::filter::EventFilter;
 // The sibling's spending party is imported under a name of its own: this module
 // also has a `Party`, and the two answer different questions — which side of a
 // conversation produced a record, and whose tokens a run spent.
@@ -302,8 +304,8 @@ fn launcher_word(launcher: &str) -> &'static str {
 /// The per-node statuses the wire's vocabulary holds, and exactly those.
 ///
 /// Closed because a client switches on it exhaustively: a word outside this set
-/// has no rendering, and one round's recorded result can hold any word at all.
-// llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field a round's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
+/// has no rendering, and the run's recorded result can hold any word at all.
+// llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field the run's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
 const NODE_STATUSES: [&str; 11] = [
     "pending",
     "running",
@@ -347,25 +349,32 @@ fn is_recorded_state(status: &str) -> bool {
     )
 }
 
-/// The key that groups the sessions of one node's dispatch within one round.
+/// The key that groups the sessions of one node's dispatch.
 ///
 /// Derived rather than recorded: the SDK's journal stamps a dispatch with its
-/// run, round, and node but mints no id for it, and schema 10 serves one. The
-/// three together identify the dispatch exactly, so the derived key is stable
-/// across reads and across processes.
+/// run and node but mints no id for it, and schema 10 serves one. Execution is
+/// continuous, so the pair is the whole of what identifies a dispatch — the
+/// round that used to be its third part is not a thing any run has — and the
+/// derived key is stable across reads and across processes.
+///
+/// A node that is re-dispatched keeps the key: the SDK re-asks a dispatch that
+/// produced nothing and records each attempt as its own `node-dispatched`
+/// carrying `attempt`, and every one of them is the same node's same work. The
+/// key groups the sessions of a node's dispatch, which is what a reader telling
+/// a worker's transcript from its judge's needs it for.
 ///
 /// A [`DispatchId`] rather than a bare `String`, and `None` when the run and
 /// node on disk cannot form one: a client reads `dispatch_id` to ask about the
 /// dispatch, so minting one the contract's own boundary would reject is the
 /// drift the newtype exists to prevent.
-fn dispatch_key(run: &str, round: u64, node: &str) -> Option<DispatchId> {
-    DispatchId::try_from(format!("{run}.{round:02}.{node}")).ok()
+fn dispatch_key(run: &str, node: &str) -> Option<DispatchId> {
+    DispatchId::try_from(format!("{run}.{node}")).ok()
 }
 
 /// Read one JSON document, or `None` if it is missing or unreadable.
 ///
-/// A run directory is recorded, not curated: a half-written round result is a
-/// file this read skips, not a run it refuses to serve.
+/// A run directory is recorded, not curated: a half-written result is a file
+/// this read skips, not a run it refuses to serve.
 fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
@@ -399,64 +408,85 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
 
 /// Every node's status as the run itself last wrote it, in the run's own words.
 ///
-/// The same derivation the round payload renders from, so a list row and the
+/// The same derivation the graph payload renders from, so a list row and the
 /// graph it opens cannot describe different graphs — the disagreement an
-/// operator would otherwise see between the two. An *open* round is the live
-/// fold; a closed one is its own recorded result, which is the only account of
-/// it that survives the next round starting, and which is all a run predating
-/// the journal ever had. The words are unmapped on purpose: a count reports what
-/// the run wrote, where a status a client switches on cannot.
+/// operator would otherwise see between the two.
+///
+/// Three accounts, in the order they are worth: **what the journal settled for
+/// that node**, then **what the run's own recorded result held for it**, then
+/// **what the graph derives for it**. Rounds are gone, and with them the reason
+/// this used to prefer a recorded document wholesale — a closed round's result
+/// was the only account of it that survived the *next* round starting, and
+/// nothing overwrites the fold now.
+///
+/// The order is what the three *are*. The first two are records of the node; the
+/// third is a gate recomputed from its dependencies on every read, so it is what
+/// a node nothing has recorded reads as and never an overrule of something that
+/// did. `result.json` — which the SDK rewrites whenever a driver closes out —
+/// holds words no settlement carried, and is the whole account for a run whose
+/// journal this host cannot fold.
+///
+/// It is the same precedence [`node_result`] keeps, so a node's status and its
+/// result can never come from two different accounts of it.
+///
+/// The words are unmapped on purpose: a count reports what the run wrote, where
+/// a status a client switches on cannot.
 fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
-    let folded = || -> BTreeMap<String, Recorded> {
-        view.state
-            .statuses()
-            .into_iter()
-            .map(|(node, status)| {
-                let outcome = view.state.outcomes.get(&node).cloned();
-                (
-                    node,
-                    Recorded {
-                        status: status.as_str().to_owned(),
-                        outcome,
-                    },
-                )
-            })
-            .collect()
-    };
-    if view.state.round_open {
-        return folded();
+    let document: BTreeMap<String, Recorded> = recorded_result(view).into_iter().collect();
+    let mut statuses: BTreeMap<String, Recorded> = view
+        .state
+        .statuses()
+        .into_iter()
+        .map(|(node, derived)| {
+            let outcome = || view.state.outcomes.get(&node).cloned();
+            // What the journal settled for this node, which is an account of the
+            // node itself rather than of the graph around it.
+            let settled = view.state.recorded.get(&node).map(|status| Recorded {
+                status: status.as_str().to_owned(),
+                outcome: outcome(),
+            });
+            let recorded = settled
+                .or_else(|| document.get(&node).cloned())
+                .unwrap_or_else(|| Recorded {
+                    status: derived.as_str().to_owned(),
+                    outcome: outcome(),
+                });
+            (node, recorded)
+        })
+        .collect();
+    // A node the document names and the graph does not: a run whose plan this
+    // host cannot read at all still counts what its result recorded.
+    for (node, recorded) in document {
+        statuses.entry(node).or_insert(recorded);
     }
-    // `max(1)` because a run predating the journal has no round-started event to
-    // fold at all: its round number is zero and its result is still on disk.
-    let recorded: BTreeMap<String, Recorded> =
-        read_json(&view.paths.round_result(view.state.round.max(1)))
-            .and_then(|result| result["nodes"].as_array().cloned())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|node| {
-                Some((
-                    node["id"].as_str()?.to_owned(),
-                    Recorded {
-                        status: node["status"].as_str()?.to_owned(),
-                        outcome: node["outcome"].as_str().map(str::to_owned),
-                    },
-                ))
-            })
-            .collect();
-    if recorded.is_empty() {
-        folded()
-    } else {
-        recorded
-    }
+    statuses
+}
+
+/// Every node the run's own recorded result has an entry for, in its words.
+fn recorded_result(view: &RunView) -> Vec<(String, Recorded)> {
+    read_json(&view.paths.result())
+        .and_then(|result| result["nodes"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|node| {
+            Some((
+                node["id"].as_str()?.to_owned(),
+                Recorded {
+                    status: node["status"].as_str()?.to_owned(),
+                    outcome: node["outcome"].as_str().map(str::to_owned),
+                },
+            ))
+        })
+        .collect()
 }
 
 /// What one node's last account of itself said: its status word, and the outcome
 /// word beside it when it recorded one.
 ///
-/// Both are the run's own words, unmapped. A round's recorded result can hold
-/// any word at all in either field, and `node_counts` reports exactly what it
-/// held; the mapping onto the vocabulary a client switches on happens where a
-/// client is being served, in [`status_word`] and [`failure_class`].
+/// Both are the run's own words, unmapped. The recorded result can hold any word
+/// at all in either field, and `node_counts` reports exactly what it held; the
+/// mapping onto the vocabulary a client switches on happens where a client is
+/// being served, in [`status_word`] and [`failure_class`].
 #[derive(Debug, Clone)]
 // llmlint: ignore-block[invalid_states_unrepresentable] a narrower type here would refuse a word the run really did write, which is the one thing this must not do: it carries the account rather than deciding what it means.
 struct Recorded {
@@ -488,20 +518,40 @@ fn state_word(view: &RunView) -> String {
 }
 
 /// Which part of its loop the run is in, derived from what it recorded.
+///
+/// The engine's loop is continuous, so these name what it is *doing* rather than
+/// where in a batch it is. They are ordered by what a reader has to act on
+/// soonest, and the first that holds wins: a stopped run is over whatever else it
+/// records, a graph whose every node is done has nothing left to do, a decision
+/// holds a subtree back until somebody answers it, an unread surface is a
+/// question in a queue, and a run with work in flight is dispatching. `waiting`
+/// is the honest last word — the loop is converging and nothing is dispatched
+/// right now, which under rounds was a run between them and is now a run whose
+/// frontier is empty. `starting` is the run that has no graph to converge on
+/// yet, which is what a launch that has recorded nothing since really is.
 fn phase_word(view: &RunView) -> &'static str {
-    if view.state.stopped {
+    if view.state.stop_recorded() {
         return "finished";
     }
-    if view.state.round_open {
-        return "driving-round";
-    }
-    if view.state.round == 0 {
+    let statuses = view.state.statuses();
+    // A run with no graph yet has not begun converging on anything: a launch that
+    // has recorded nothing since, or one whose plan this host cannot read.
+    if statuses.is_empty() {
         return "starting";
+    }
+    if statuses.values().all(|status| status.as_str() == "done") {
+        return "settled";
+    }
+    if !view.state.decisions_pending.is_empty() || view.state.awaiting_human_action() {
+        return "deciding";
     }
     if view.state.surfaces_queued > view.state.surfaces_read {
         return "surfacing";
     }
-    "reviewing-results"
+    if statuses.values().any(|status| status.as_str() == "running") {
+        return "dispatching";
+    }
+    "waiting"
 }
 
 /// The kind of the run's most recent event, or `null` for a run that has
@@ -513,14 +563,24 @@ fn last_event(view: &RunView) -> Value {
 }
 
 /// How completely the run's own clock is accounted for.
+///
+/// A run still being driven is `partial` and one that has stopped driving is
+/// `complete`, which is the same distinction the round-open flag used to draw:
+/// what a run has not finished doing it has not finished measuring.
 fn timing_quality(view: &RunView) -> &'static str {
     if view.events.is_empty() {
         "legacy"
-    } else if view.state.round_open {
-        "partial"
-    } else {
+    } else if view.state.stop_recorded() || graph_complete(view) {
         "complete"
+    } else {
+        "partial"
     }
+}
+
+/// Whether every node the run recorded has settled `done`.
+fn graph_complete(view: &RunView) -> bool {
+    let statuses = view.state.statuses();
+    !statuses.is_empty() && statuses.values().all(|status| status.as_str() == "done")
 }
 
 /// What one node's own records *measured*, as against what the run's clock shows.
@@ -931,9 +991,12 @@ fn plan_task(node: &Node) -> Value {
     if !node.deps.is_empty() {
         task.insert("deps".into(), json!(node.deps));
     }
-    if let Some(done_when) = &node.done_when {
-        task.insert("done_when".into(), json!(done_when));
-    }
+    // Deliberately absent: `done_when`. Plan schema 2 retired it — the per-node
+    // bar is the task's own `## Acceptance criteria`, which the judge reads as
+    // the first message of the transcript it is given, and a plan still carrying
+    // the field is refused by name where it is read. There is no such field on a
+    // node to serve, and a client rendering one would be showing a bar nothing
+    // judges against.
     if let Some(max_turns) = node.max_turns.filter(|turns| *turns > 0) {
         task.insert("max_turns".into(), json!(max_turns));
     }
@@ -1025,13 +1088,18 @@ fn kind_word(node: &Node) -> &'static str {
     }
 }
 
-/// The plan a round executed, with every committed live edit applied.
-fn round_plan(view: &RunView, round: u64) -> Option<Plan> {
-    if round == view.state.round {
-        let source = view.state.plan.clone()?;
-        return Some(view.state.graph.to_plan(&source));
+/// The graph the run is converging toward, with every committed live edit
+/// applied.
+///
+/// One plan rather than one per round: the desired graph *is* the run's plan as
+/// it now stands, and the SDK's fold applies every accepted edit to it. The file
+/// on disk is the fallback for a run whose journal this host cannot fold — it is
+/// the plan the run was launched with, so it carries no edit committed since.
+fn plan_of(view: &RunView) -> Option<Plan> {
+    if let Some(source) = view.state.plan.as_ref() {
+        return Some(view.state.graph.to_plan(source));
     }
-    Plan::load(&view.paths.round_plan(round)).ok()
+    Plan::load(&view.paths.plan()).ok()
 }
 
 /// Whether one member is in a turn a planner's note could be delivered into.
@@ -1075,13 +1143,11 @@ enum TurnState {
 /// record is provisional for every member whatever its harness, and the control
 /// protocol's only verb is `interrupt`, which costs the turn. `src/AGENTS.md`
 /// walks each closed route and names the upstream change that opens one.
-fn member_turn_states<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<(&'a str, TurnState)> {
+fn member_turn_states<'a>(view: &'a RunView, node: &str) -> Vec<(&'a str, TurnState)> {
     let mut order: Vec<&str> = Vec::new();
     let mut states: BTreeMap<&str, TurnState> = BTreeMap::new();
     let relayed = view.events.iter().filter(|event| {
-        event.source == Source::Agentgraph
-            && event.labels.round == Some(round)
-            && event.labels.node.as_deref() == Some(node)
+        event.source == Source::Agentgraph && event.labels.node.as_deref() == Some(node)
     });
     for event in relayed {
         // The address the engine keeps is the sibling's own run id and member, and
@@ -1148,10 +1214,15 @@ fn member_turn_states<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<(&'a
 
 /// One in-flight node's answer to "does this run have a turn it can address?".
 ///
-/// Served for every node the open round records as `running` and for no other:
+/// Served for every node the run records as `running` and for no other:
 /// `addressable` is never absent for a node in flight, and never present for a
 /// node with no turn to have one. `reason` is carried exactly when `addressable`
 /// is false, which is the discipline `turn-interrupted` itself keeps for its own.
+///
+/// The latest record wins, over the node's whole history rather than within a
+/// round: a node that ran, was re-dispatched, and is running again is one node
+/// with one current turn, and the records of the attempt that ended are exactly
+/// the ones a later `turn-started` supersedes.
 ///
 /// **`addressable`, not `interruptible`.** It says this run has a turn it can
 /// address for the node — the engine's own precondition for delivering a note —
@@ -1159,8 +1230,8 @@ fn member_turn_states<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<(&'a
 /// take the redirection is onejudge's `control`, which no published component
 /// exposes for a turn in flight; naming the field for the answer we cannot get
 /// would be the overclaim a planner acts on.
-fn node_control(view: &RunView, round: u64, node: &str) -> Value {
-    let states = member_turn_states(view, round, node);
+fn node_control(view: &RunView, node: &str) -> Value {
+    let states = member_turn_states(view, node);
     // The latest member to have spoken wins, exactly as the engine's address does:
     // that is the turn a note aimed at this node now would be correcting.
     if let Some((member, _)) = states
@@ -1183,43 +1254,28 @@ fn node_control(view: &RunView, round: u64, node: &str) -> Value {
     }
 }
 
-/// One round of the run, as the detail payload carries it.
-fn round(view: &RunView, number: u64) -> Option<Value> {
-    let plan = round_plan(view, number)?;
+/// The run's continuous graph state, as the detail payload carries it.
+///
+/// One object rather than an array of rounds. Execution is continuous: a node
+/// dispatches the moment its dependencies settle, nothing batches them, and
+/// there is exactly one desired graph and one recorded result. The fold is the
+/// account of it — nothing overwrites the fold now that no next round starts —
+/// and the recorded result is the fallback for a run whose journal folded to
+/// nothing.
+fn graph_state(view: &RunView) -> Option<Value> {
+    let plan = plan_of(view)?;
     let task_ids: BTreeSet<&str> = plan.tasks.iter().map(|node| node.id.as_str()).collect();
-    let result = read_json(&view.paths.round_result(number));
-    // Only an *open* round is described by the live fold. Once it closes, its own
-    // recorded result is the sole account of it that survives the next round
-    // starting — and it holds outcomes the fold never saw, because a status a
-    // round records at its end was never journalled as a settlement.
-    let current = number == view.state.round && view.state.round_open;
+    let result = read_json(&view.paths.result());
 
-    // The current round's statuses are the live fold; a finished round's are
-    // what its own result recorded, which is the only account of it that
-    // survives the next round starting.
-    let mut statuses: BTreeMap<String, String> = BTreeMap::new();
-    if current {
-        for (node, status) in view.state.statuses() {
-            statuses.insert(node, status_word(status.as_str()).to_owned());
-        }
-    } else if let Some(nodes) = result.as_ref().and_then(|r| r["nodes"].as_array()) {
-        for node in nodes {
-            if let (Some(id), Some(status)) = (node["id"].as_str(), node["status"].as_str()) {
-                statuses.insert(id.to_owned(), status_word(status).to_owned());
-            }
-        }
-    }
-    // A round that closed without writing a result — a driver that died mid-round,
-    // a stop — still has the fold behind it, and that is what the run's own
-    // telemetry reports. Falling through to it is what keeps the graph a reader
-    // opens from describing a different run than the row they opened it from.
-    if statuses.is_empty() {
-        for (node, status) in view.state.statuses() {
-            statuses.insert(node, status_word(status.as_str()).to_owned());
-        }
-    }
+    // The same derivation the list row renders from — the fold per node, with the
+    // recorded result filling the gaps — so a row and the graph it opens cannot
+    // describe different graphs.
+    let statuses: BTreeMap<String, String> = recorded_statuses(view)
+        .into_iter()
+        .map(|(node, recorded)| (node, status_word(&recorded.status).to_owned()))
+        .collect();
     // Exactly one entry per plan task, so a client never invents a status for a
-    // node or renders one for a node the round did not carry.
+    // node or renders one for a node the graph does not carry.
     let node_status: Map<String, Value> = plan
         .tasks
         .iter()
@@ -1256,41 +1312,63 @@ fn round(view: &RunView, number: u64) -> Option<Value> {
     let node_results: Map<String, Value> = plan
         .tasks
         .iter()
-        .filter_map(|node| node_result(view, node, current, result.as_ref()))
+        .filter_map(|node| node_result(view, node, result.as_ref()))
         .collect();
 
-    // Only an open round has work in flight, and only work in flight has a turn to
-    // redirect. A closed round carries an empty mapping rather than a stale one:
-    // whatever a driver that died mid-round left running, nothing is running now.
-    let node_control: Map<String, Value> = if current {
-        plan.tasks
-            .iter()
-            .filter(|node| node_status[&node.id].as_str() == Some("running"))
-            .map(|node| (node.id.clone(), self::node_control(view, number, &node.id)))
-            .collect()
-    } else {
-        Map::new()
-    };
+    // Only work in flight has a turn to redirect, so this is one entry per node
+    // the run records as `running` and none for any other.
+    let node_control: Map<String, Value> = plan
+        .tasks
+        .iter()
+        .filter(|node| node_status[&node.id].as_str() == Some("running"))
+        .map(|node| (node.id.clone(), self::node_control(view, &node.id)))
+        .collect();
 
     let mut out = Map::new();
     out.insert("run_id".into(), json!(view.paths.run));
-    out.insert("round".into(), json!(number));
     out.insert("plan".into(), plan_document(&plan));
     out.insert("node_states".into(), Value::Object(node_states));
     out.insert("node_status".into(), Value::Object(node_status));
     out.insert("node_gated_by".into(), Value::Object(node_gated_by));
     out.insert("node_control".into(), Value::Object(node_control));
     out.insert("node_results".into(), Value::Object(node_results));
+    out.insert("decisions".into(), Value::Array(decisions(view)));
     out.insert(
         "attestations".into(),
         json!(view.state.attestations.iter().collect::<Vec<_>>()),
     );
-    out.insert("result".into(), round_result(number, result.as_ref()));
-    out.insert("last_seq".into(), json!(last_seq(view, number)));
+    out.insert("result".into(), run_result(result.as_ref()));
+    out.insert("last_seq".into(), json!(last_seq(view)));
     Some(Value::Object(out))
 }
 
-/// The plan document a round carries, in the wire's shape.
+/// The decision points holding subtrees back, in the run's own words.
+///
+/// The continuous engine pauses **only** at a decision point, and only the
+/// subtree that depends on it: a blocking surface, or a ready human action
+/// nobody has attested. Everything else keeps running beside it. That is the one
+/// thing a reader of a stalled run has to be able to see, and under rounds there
+/// was no such record to serve — a paused run read as a round that had not
+/// finished.
+///
+/// Each entry is the decision's own kind and the nodes it unblocks when it is
+/// cleared, which is exactly what `decision-pending` carries and what
+/// `decision-cleared` will release.
+fn decisions(view: &RunView) -> Vec<Value> {
+    view.state
+        .decisions_pending
+        .iter()
+        .map(|(id, pending)| {
+            json!({
+                "id": id,
+                "kind": pending.kind,
+                "unblocks": pending.unblocks,
+            })
+        })
+        .collect()
+}
+
+/// The plan document the graph carries, in the wire's shape.
 fn plan_document(plan: &Plan) -> Value {
     let mut document = Map::new();
     document.insert(
@@ -1318,7 +1396,7 @@ fn plan_document(plan: &Plan) -> Value {
 
 /// The fields of a recorded node result the wire carries, each as recorded.
 ///
-/// Deliberately an allowlist rather than a passthrough: a round's result is a
+/// Deliberately an allowlist rather than a passthrough: the run's result is a
 /// wider record than `graphResultItemSchema` describes, and serving a key the
 /// client has no meaning for would be this crate inventing contract.
 const RESULT_FIELDS: &[&str] = &[
@@ -1334,10 +1412,10 @@ const RESULT_FIELDS: &[&str] = &[
     "ok",
 ];
 
-/// The payload of the settlement the current round recorded for `node`.
+/// The payload of the settlement the run last recorded for `node`.
 ///
-/// The last one wins: a node that settled more than once in a round is a node
-/// that was retried, and the retry is what happened.
+/// The last one wins: a node that settled more than once is a node that was
+/// retried or replaced, and the latest settlement is what happened.
 fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
     view.events
         .iter()
@@ -1345,40 +1423,23 @@ fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
         .find(|event| {
             event.source == Source::Pipeline
                 && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-                && event.labels.round == Some(view.state.round)
                 && event.labels.node.as_deref() == Some(node)
         })
         .map(|event| event.payload.clone())
 }
 
-/// One node's recorded result within a round, when the round recorded one.
-fn node_result(
-    view: &RunView,
-    node: &Node,
-    current: bool,
-    result: Option<&Value>,
-) -> Option<(String, Value)> {
+/// One node's result: what the live fold says, or — for a node the fold has
+/// nothing for — what the run's own recorded result document held.
+///
+/// The fold leads, in the same order [`recorded_statuses`] reads them. There is
+/// no closed round whose fold has moved on, so the fold is always the current
+/// account; the recorded document is what a run whose journal this host cannot
+/// fold still has, and it holds words no settlement carried. A node in neither is
+/// a node the run has nothing to say about, and it is served no entry at all.
+fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(String, Value)> {
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
-    if let Some(recorded) = result
-        .and_then(|r| r["nodes"].as_array())
-        .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))
-    {
-        for field in RESULT_FIELDS {
-            if let Some(value) = recorded.get(field) {
-                item.insert((*field).to_owned(), value.clone());
-            }
-        }
-        if let Some(url) = recorded.get("change_url").and_then(Value::as_str) {
-            item.insert("pr".into(), json!(url));
-        }
-        if let Some(status) = item.get("status").and_then(Value::as_str) {
-            let word = status_word(status).to_owned();
-            item.insert("completed".into(), json!(word == "done"));
-            item.insert("status".into(), json!(word));
-        }
-    } else if current {
-        let status = view.state.recorded.get(&node.id)?;
+    if let Some(status) = view.state.recorded.get(&node.id) {
         item.insert("status".into(), json!(status_word(status.as_str())));
         item.insert(
             "completed".into(),
@@ -1408,7 +1469,27 @@ fn node_result(
             item.insert("pr".into(), json!(url));
         }
     } else {
-        return None;
+        // The document a driver wrote as it closed out, for a node the journal
+        // this host can read says nothing about. It holds words no settlement
+        // carried, which for a run predating the journal is the whole account —
+        // and a node in neither is one the run has nothing to say about, which is
+        // served no entry rather than an empty one.
+        let recorded = result
+            .and_then(|r| r["nodes"].as_array())
+            .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))?;
+        for field in RESULT_FIELDS {
+            if let Some(value) = recorded.get(field) {
+                item.insert((*field).to_owned(), value.clone());
+            }
+        }
+        if let Some(url) = recorded.get("change_url").and_then(Value::as_str) {
+            item.insert("pr".into(), json!(url));
+        }
+        if let Some(status) = item.get("status").and_then(Value::as_str) {
+            let word = status_word(status).to_owned();
+            item.insert("completed".into(), json!(word == "done"));
+            item.insert("status".into(), json!(word));
+        }
     }
     if let Some(finished) = view.state.completed_steps.get(&node.id) {
         let steps: Vec<Value> = node
@@ -1442,8 +1523,9 @@ fn kind_word_of_step(step: &onepipeline::plan::Step) -> &'static str {
     }
 }
 
-/// The round's own recorded result document, or `null` while it is still open.
-fn round_result(number: u64, result: Option<&Value>) -> Value {
+/// The run's own recorded result document, or `null` before a driver has closed
+/// out and written one.
+fn run_result(result: Option<&Value>) -> Value {
     let Some(result) = result else {
         return Value::Null;
     };
@@ -1454,7 +1536,6 @@ fn round_result(number: u64, result: Option<&Value>) -> Value {
     if let Some(state) = result.get("state") {
         out.insert("state".into(), state.clone());
     }
-    out.insert("round".into(), json!(number));
     if let Some(nodes) = result["nodes"].as_array() {
         out.insert(
             "started_order".into(),
@@ -1467,33 +1548,36 @@ fn round_result(number: u64, result: Option<&Value>) -> Value {
     Value::Object(out)
 }
 
-/// The highest per-stream sequence number the round recorded.
-fn last_seq(view: &RunView, number: u64) -> u64 {
-    view.events
-        .iter()
-        .filter(|event| event.labels.round == Some(number))
-        .map(|event| event.seq)
-        .max()
-        .unwrap_or(0)
+/// The highest per-stream sequence number the run recorded.
+fn last_seq(view: &RunView) -> u64 {
+    view.events.iter().map(|event| event.seq).max().unwrap_or(0)
 }
 
 /// The whole of `GET /api/v2/runs/{run}`'s payload.
+///
+/// `graph` is one object, not an array: the run has one continuous graph state,
+/// and a client that used to index `rounds` is reading a schema this no longer
+/// serves.
 #[must_use]
 pub fn run_detail(
     view: &RunView,
     include_conversations: bool,
     telemetry: Option<&RunTelemetry>,
+    filter: &EventFilter,
 ) -> Value {
-    let rounds: Vec<Value> = (1..=view.state.round.max(1))
-        .filter_map(|number| round(view, number))
-        .collect();
     let mut payload = Map::new();
+    // Everything below the transcripts is read from the whole journal, whatever
+    // the filter said: the graph's statuses, the answer about each in-flight
+    // node's turn, the evidence each node kept and the run's own clock are what
+    // the *run* is, and a reader narrowing their attention must be shown the same
+    // one. The transcripts are the detail's own event listing, and are the one
+    // thing here a filter narrows.
     payload.insert("run".into(), run_telemetry(view, telemetry));
-    payload.insert("rounds".into(), Value::Array(rounds));
+    payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),
         Value::Array(if include_conversations {
-            conversations(view)
+            conversations_under(view, filter)
         } else {
             Vec::new()
         }),
@@ -1566,14 +1650,12 @@ fn verdict_of(event: &Envelope) -> bool {
         .is_none_or(|status| status_word(status) == "done")
 }
 
-/// Every artifact one node's events stored in `round`, oldest first.
-fn evidence<'a>(view: &'a RunView, round: u64, node: &str) -> Vec<Evidence<'a>> {
+/// Every artifact one node's events stored, oldest first.
+fn evidence<'a>(view: &'a RunView, node: &str) -> Vec<Evidence<'a>> {
     let mine: Vec<&Envelope> = view
         .events
         .iter()
-        .filter(|event| {
-            event.labels.round == Some(round) && event.labels.node.as_deref() == Some(node)
-        })
+        .filter(|event| event.labels.node.as_deref() == Some(node))
         .collect();
     mine.iter()
         .enumerate()
@@ -1732,7 +1814,6 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
 
 /// The publication and verification evidence each node left behind.
 fn node_details(view: &RunView) -> Value {
-    let round = view.state.round.max(1);
     let mut details: Map<String, Value> = Map::new();
     let mut nodes: BTreeSet<&str> = view
         .state
@@ -1743,7 +1824,6 @@ fn node_details(view: &RunView) -> Value {
     nodes.extend(
         view.events
             .iter()
-            .filter(|event| event.labels.round == Some(round))
             .filter(|event| !event.artifacts.is_empty() || event.source == Source::Vcs)
             .filter_map(|event| event.labels.node.as_deref()),
     );
@@ -1753,7 +1833,7 @@ fn node_details(view: &RunView) -> Value {
             .iter()
             .filter(|event| event.labels.node.as_deref() == Some(node))
             .collect();
-        let records: Vec<Value> = evidence(view, round, node)
+        let records: Vec<Value> = evidence(view, node)
             .into_iter()
             .map(|record| {
                 json!({
@@ -1812,10 +1892,19 @@ fn node_details(view: &RunView) -> Value {
 /// AGENTS.md proposes the read for it should land.
 #[must_use]
 pub fn conversations(view: &RunView) -> Vec<Value> {
+    conversations_under(view, &EventFilter::default())
+}
+
+/// The transcripts a reader's filter admits, each as the whole session it is.
+///
+/// A session whose every record the filter excluded is not served at all — an
+/// empty transcript would say the session recorded nothing, which is a different
+/// fact from "this reading is not about it".
+fn conversations_under(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut grouped: BTreeMap<String, Vec<&Envelope>> = BTreeMap::new();
     for event in &view.events {
-        if event.source != Source::Agentgraph {
+        if event.source != Source::Agentgraph || !filter.allows(event) {
             continue;
         }
         let Some(session) = event
@@ -1932,8 +2021,11 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
     }
     let mut attribution = Map::new();
     attribution.insert("runId".into(), json!(view.paths.run));
-    if let Some(round) = first.and_then(|event| event.labels.round) {
-        attribution.insert("round".into(), json!(round));
+    if let Some(step) = first.and_then(|event| event.labels.step.clone()) {
+        // The step within a node that runs several in sequence on one branch —
+        // which is what a continuous graph has where a round-numbered stack used
+        // to be, and the one addressing a transcript of a lifecycle node needs.
+        attribution.insert("stepId".into(), json!(step));
     }
     if let Some(node) = &node {
         attribution.insert("nodeId".into(), json!(node));
@@ -2025,19 +2117,52 @@ fn reference_kind(kind: &str) -> &'static str {
 /// The scope a timeline request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope<'a> {
-    /// Every round of the run and the nodes under them.
+    /// The run and the nodes under it.
     Run,
     /// One node's own work.
     Node(&'a NodeId),
 }
 
+/// What a span's event list is built through: the turn numbering, and the
+/// reader's filter.
+///
+/// The filter reaches exactly here and nowhere else in the timeline. **Which
+/// spans exist, where they start and end, and what status each carries are what
+/// the run recorded**, and a filter must not be able to hide a node from its own
+/// timeline or move the ends of a dispatch — that would be a reader's attention
+/// deciding what the run did. What it narrows is the records listed inside them.
+///
+/// The turn numbering is likewise built over the whole store: a turn's id is its
+/// position in its session's transcript, so numbering a filtered store would
+/// hand a client an id that names a different turn than the one the transcript
+/// route serves under it.
+struct Lens<'a> {
+    turns: &'a [Option<Turn>],
+    filter: &'a EventFilter,
+}
+
+impl Lens<'_> {
+    /// The events of one span, as the reader asked for them.
+    fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
+        events
+            .iter()
+            .filter(|(_, event)| self.filter.allows(event))
+            .map(|(index, event)| timeline_event(*index, event, self.turns))
+            .collect()
+    }
+}
+
 /// The whole of `GET /api/v2/runs/{run}/timeline`'s payload.
 #[must_use]
-pub fn timeline(view: &RunView, scope: &Scope<'_>) -> Value {
+pub fn timeline(view: &RunView, scope: &Scope<'_>, filter: &EventFilter) -> Value {
     let turns = turn_ids(view);
+    let lens = Lens {
+        turns: &turns,
+        filter,
+    };
     let spans = match scope {
-        Scope::Run => run_spans(view, &turns),
-        Scope::Node(node) => node_spans(view, node.as_str(), &turns),
+        Scope::Run => run_spans(view, &lens),
+        Scope::Node(node) => node_spans(view, node.as_str(), &lens),
     };
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
@@ -2234,11 +2359,17 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     if let Some(step) = &event.labels.step {
         item.insert("step_id".into(), json!(step));
     }
-    if let Some(round) = event.labels.round {
-        item.insert("round".into(), json!(round));
-    }
     if let Some(status) = event.payload.get("status").and_then(Value::as_str) {
         item.insert("status".into(), json!(status));
+    }
+    // Who submitted an accepted live edit. The SDK carries an `author` on every
+    // `edit-committed`, and the run enforces a per-author op allowlist — the
+    // planner may issue every op and the monitor a narrower set — so an edit that
+    // changed the graph and an edit the monitor self-applied are two different
+    // facts about the same run, and a reader that could not tell them apart was
+    // reading the second as the planner's own decision.
+    if let Some(author) = event.payload.get("author").and_then(Value::as_str) {
+        item.insert("author".into(), json!(author));
     }
     if let Some(redirection) = redirection(event) {
         item.insert("redirection".into(), redirection);
@@ -2262,165 +2393,152 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     Value::Object(item)
 }
 
-/// The rounds of the run, each with the nodes it carried beneath it.
-fn run_spans(view: &RunView, turns: &[Option<Turn>]) -> Vec<Value> {
+/// The run, with the nodes it is executing beneath it.
+///
+/// One root span, not one per round. Execution is continuous, so what the run is
+/// doing is one unbroken stretch from its first record to its last, and the
+/// nodes under it overlap freely: a node dispatches the moment its dependencies
+/// settle and independent branches proceed beside a decision that is holding
+/// another subtree back. Under rounds the top of this list was a stack of
+/// batches, which is a shape nothing in the engine has any more.
+fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
-    for number in 1..=view.state.round.max(1) {
-        let events: Vec<(usize, &Envelope)> = view
-            .events
-            .iter()
-            .enumerate()
-            .filter(|(_, event)| event.labels.round == Some(number))
-            .collect();
-        let Some((_, first)) = events.first() else {
-            continue;
-        };
-        let round_id = format!("round-{number:02}");
-        let closed = events.iter().any(|(_, event)| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::RoundFinished)
-        });
-        let ended = if closed {
-            events.last().map_or(Value::Null, |(_, e)| json!(e.ts))
-        } else {
-            Value::Null
-        };
-        spans.push(json!({
-            "id": round_id,
-            "kind": "round",
-            "label": format!("round {number}"),
-            "started_at": first.ts,
-            "ended_at": ended,
-            "round": number,
-            "phase": if closed { "reviewing-results" } else { "driving-round" },
-            // What the round itself recorded: the relayed turns belong to the
-            // sessions below, and carrying them here too would draw every one
-            // of them on the run's row twice.
-            "events": events
+    let events: Vec<(usize, &Envelope)> = view.events.iter().enumerate().collect();
+    let Some((_, first)) = events.first() else {
+        return spans;
+    };
+    let run_id = format!("run.{}", view.paths.run);
+    // A run ends when it stops being driven, and only then. A graph that has
+    // completed and a run that recorded a stop are both over; anything else is
+    // still open, however quiet it has gone.
+    let closed = view.state.stop_recorded() || graph_complete(view);
+    let ended = if closed {
+        events.last().map_or(Value::Null, |(_, e)| json!(e.ts))
+    } else {
+        Value::Null
+    };
+    spans.push(json!({
+        "id": run_id,
+        "kind": "run",
+        "label": view.paths.run,
+        "started_at": first.ts,
+        "ended_at": ended,
+        "phase": phase_word(view),
+        // What the run itself recorded: the relayed turns belong to the
+        // sessions below, and carrying them here too would draw every one
+        // of them on the run's row twice.
+        "events": lens.items(
+            &events
                 .iter()
                 .filter(|(_, event)| {
                     event.labels.node.is_none() && event.source != Source::Agentgraph
                 })
-                .map(|(index, event)| timeline_event(*index, event, turns))
+                .copied()
                 .collect::<Vec<_>>(),
-        }));
-        // The sessions the round relayed at no node: the run's own driving
-        // conversations, which belong to the run rather than to any of its work.
-        // Left open until the round closes, because a session that has stopped
-        // talking has not necessarily stopped.
-        let unattached: Vec<(usize, &Envelope)> = events
+        ),
+    }));
+    // The sessions relayed at no node: the run's own driving conversations,
+    // which belong to the run rather than to any of its work. Left open until
+    // the run closes, because a session that has stopped talking has not
+    // necessarily stopped.
+    let unattached: Vec<(usize, &Envelope)> = events
+        .iter()
+        .filter(|(_, event)| event.labels.node.is_none())
+        .copied()
+        .collect();
+    for (session, relayed) in relayed_sessions(&unattached) {
+        let mut span = Map::new();
+        span.insert("id".into(), json!(format!("run-session.{session}")));
+        span.insert("kind".into(), json!("dispatch"));
+        span.insert("label".into(), json!(session));
+        span.insert(
+            "started_at".into(),
+            json!(relayed.first().map(|(_, event)| &event.ts)),
+        );
+        span.insert(
+            "ended_at".into(),
+            if closed {
+                json!(relayed.last().map(|(_, event)| &event.ts))
+            } else {
+                Value::Null
+            },
+        );
+        span.insert("parent_id".into(), json!(run_id));
+        // Running for as long as the run it is driving is: nothing closes a
+        // run-level session of its own, so the run's own end is the only thing
+        // that can speak for it, and "unknown" would be this crate declining to
+        // say what the run already said.
+        span.insert(
+            "status".into(),
+            json!(if closed { "done" } else { "running" }),
+        );
+        span.insert(
+            "transport_role".into(),
+            json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
+        );
+        if let Some(role) = agent_role(
+            relayed
+                .first()
+                .and_then(|(_, event)| event.labels.persona.as_deref()),
+        ) {
+            span.insert("agent_role".into(), json!(role));
+        }
+        span.insert(
+            "reference".into(),
+            json!({ "kind": "conversation", "value": session }),
+        );
+        span.insert("events".into(), json!(lens.items(&relayed)));
+        spans.push(Value::Object(span));
+    }
+
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for node in events
+        .iter()
+        .filter_map(|(_, event)| event.labels.node.as_deref())
+    {
+        if !seen.insert(node) {
+            continue;
+        }
+        spans.push(node_span(view, node, Some(&run_id), lens));
+        // What that node did, as categories rather than as records: the graph
+        // draws one lane per category and opens the node for the rest.
+        let node_id = format!("node.{node}");
+        let mine: Vec<(usize, &Envelope)> = events
             .iter()
-            .filter(|(_, event)| event.labels.node.is_none())
+            .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
             .copied()
             .collect();
-        for (session, relayed) in relayed_sessions(&unattached) {
-            let mut span = Map::new();
-            span.insert("id".into(), json!(format!("run.{number:02}.{session}")));
-            span.insert("kind".into(), json!("dispatch"));
-            span.insert("label".into(), json!(session));
-            span.insert(
-                "started_at".into(),
-                json!(relayed.first().map(|(_, event)| &event.ts)),
-            );
-            span.insert(
-                "ended_at".into(),
-                if closed {
-                    json!(relayed.last().map(|(_, event)| &event.ts))
-                } else {
-                    Value::Null
-                },
-            );
-            span.insert("parent_id".into(), json!(round_id));
-            span.insert("round".into(), json!(number));
-            // Running for as long as the round it is driving is: nothing closes a
-            // run-level session of its own, so the round's own end is the only
-            // thing that can speak for it, and "unknown" would be this crate
-            // declining to say what the round already said.
-            span.insert(
-                "status".into(),
-                json!(if closed { "done" } else { "running" }),
-            );
-            span.insert(
-                "transport_role".into(),
-                json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
-            );
-            if let Some(role) = agent_role(
-                relayed
-                    .first()
-                    .and_then(|(_, event)| event.labels.persona.as_deref()),
-            ) {
-                span.insert("agent_role".into(), json!(role));
-            }
-            span.insert(
-                "reference".into(),
-                json!({ "kind": "conversation", "value": session }),
-            );
-            span.insert(
-                "events".into(),
-                json!(relayed
-                    .iter()
-                    .map(|(index, event)| timeline_event(*index, event, turns))
-                    .collect::<Vec<_>>()),
-            );
-            spans.push(Value::Object(span));
-        }
-
-        let mut nodes: Vec<&str> = events
-            .iter()
-            .filter_map(|(_, event)| event.labels.node.as_deref())
-            .collect();
-        nodes.dedup();
-        let mut seen: BTreeSet<&str> = BTreeSet::new();
-        for node in nodes {
-            if !seen.insert(node) {
-                continue;
-            }
-            spans.push(node_span(view, number, node, Some(&round_id), turns));
-            // What that node did, as categories rather than as records: the graph
-            // draws one lane per category and opens the node for the rest.
-            let node_id = format!("node.{number:02}.{node}");
-            let mine: Vec<(usize, &Envelope)> = events
-                .iter()
-                .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
-                .copied()
-                .collect();
-            let settled = mine.iter().find(|(_, event)| {
-                event.source == Source::Pipeline
-                    && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-            });
-            spans.extend(waiting_span(view, settled, &node_id, node, number));
-            spans.extend(role_rollups(&mine, &node_id, node, number));
-            spans.extend(kept_spans(view, &mine, &node_id, node, number));
-        }
+        let settled = mine.iter().find(|(_, event)| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+        });
+        spans.extend(waiting_span(view, settled, &node_id, node));
+        spans.extend(role_rollups(&mine, &node_id, node));
+        spans.extend(kept_spans(view, &mine, &node_id, node));
     }
     spans
 }
 
-/// One node's span within a round.
-fn node_span(
-    view: &RunView,
-    round: u64,
-    node: &str,
-    parent: Option<&str>,
-    turns: &[Option<Turn>],
-) -> Value {
+/// One node's span.
+fn node_span(view: &RunView, node: &str, parent: Option<&str>, lens: &Lens<'_>) -> Value {
     let events: Vec<(usize, &Envelope)> = view
         .events
         .iter()
         .enumerate()
-        .filter(|(_, event)| {
-            event.labels.round == Some(round) && event.labels.node.as_deref() == Some(node)
-        })
+        .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
         .collect();
     let started = events
         .first()
         .map_or_else(now_rfc3339, |(_, event)| event.ts.clone());
-    let settled = events.iter().find(|(_, event)| {
+    // The *last* settlement, not the first: a node the planner retried settles
+    // more than once, and the span has to close where the node's work actually
+    // ended rather than where its superseded attempt did.
+    let settled = events.iter().rev().find(|(_, event)| {
         event.source == Source::Pipeline
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
     let mut span = Map::new();
-    span.insert("id".into(), json!(format!("node.{round:02}.{node}")));
+    span.insert("id".into(), json!(format!("node.{node}")));
     span.insert("kind".into(), json!("node"));
     span.insert("label".into(), json!(node));
     span.insert("started_at".into(), json!(started));
@@ -2432,20 +2550,13 @@ fn node_span(
         span.insert("parent_id".into(), json!(parent));
     }
     span.insert("node_id".into(), json!(node));
-    span.insert("round".into(), json!(round));
     if let Some(status) = settled
         .and_then(|(_, event)| event.payload.get("status"))
         .and_then(Value::as_str)
     {
         span.insert("status".into(), json!(status_word(status)));
     }
-    span.insert(
-        "events".into(),
-        json!(events
-            .iter()
-            .map(|(index, event)| timeline_event(*index, event, turns))
-            .collect::<Vec<_>>()),
-    );
+    span.insert("events".into(), json!(lens.items(&events)));
     Value::Object(span)
 }
 
@@ -2485,15 +2596,10 @@ fn relayed_sessions<'a>(
 ///
 /// This is the publication interval the journal actually holds: the session open
 /// and whatever closed it are separate relayed records, so the span between them
-/// is recorded rather than derived. A node whose round opened no session
-/// contributes none, and one that opened a session nothing closed is served
-/// open-ended, which is what an in-flight publication is.
-fn publication_span(
-    events: &[(usize, &Envelope)],
-    parent: &str,
-    node: &str,
-    round: u64,
-) -> Option<Value> {
+/// is recorded rather than derived. A node that opened no session contributes
+/// none, and one that opened a session nothing closed is served open-ended,
+/// which is what an in-flight publication is.
+fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Option<Value> {
     let relayed = |kinds: &[&str]| {
         events
             .iter()
@@ -2525,7 +2631,7 @@ fn publication_span(
         .and_then(Value::as_str)
         .unwrap_or(node);
     let mut span = Map::new();
-    span.insert("id".into(), json!(format!("publication.{round:02}.{node}")));
+    span.insert("id".into(), json!(format!("publication.{node}")));
     span.insert("kind".into(), json!("publication"));
     span.insert("label".into(), json!(branch));
     span.insert("started_at".into(), json!(opened.ts));
@@ -2535,7 +2641,6 @@ fn publication_span(
     );
     span.insert("parent_id".into(), json!(parent));
     span.insert("node_id".into(), json!(node));
-    span.insert("round".into(), json!(round));
     if closed.is_some() {
         span.insert(
             "status".into(),
@@ -2570,12 +2675,7 @@ fn publication_span(
 ///
 /// The interval is the recorded one read backwards: the record is written when
 /// the turn came, and carries how long it had been waiting for it.
-fn lock_wait_rollup(
-    events: &[(usize, &Envelope)],
-    parent: &str,
-    node: &str,
-    round: u64,
-) -> Option<Value> {
+fn lock_wait_rollup(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Option<Value> {
     let waits: Vec<(&Envelope, u64)> = events
         .iter()
         .filter(|(_, event)| event.source == Source::Vcs && event.kind.0 == vcs::LOCK_WAIT)
@@ -2589,7 +2689,7 @@ fn lock_wait_rollup(
         .and_then(rfc3339_of)
         .unwrap_or_else(|| first.0.ts.clone());
     Some(json!({
-        "id": format!("rollup.{round:02}.{node}.lock-wait"),
+        "id": format!("rollup.{node}.lock-wait"),
         "kind": "rollup",
         // The kind it summarizes, which is how a client reads its lane: a rollup
         // is never named for being one.
@@ -2598,7 +2698,6 @@ fn lock_wait_rollup(
         "ended_at": last.0.ts,
         "parent_id": parent,
         "node_id": node,
-        "round": round,
         "count": waits.len(),
         "total_duration_ms": total,
         "events": Vec::<Value>::new(),
@@ -2615,7 +2714,6 @@ fn waiting_span(
     settled: Option<&(usize, &Envelope)>,
     parent: &str,
     node: &str,
-    round: u64,
 ) -> Option<Value> {
     let (_, wait_start) = settled.filter(|(_, event)| {
         event.payload.get("status").and_then(Value::as_str) == Some("waiting")
@@ -2626,14 +2724,13 @@ fn waiting_span(
             && event.labels.node.as_deref() == Some(node)
     });
     Some(json!({
-        "id": format!("human-wait.{round:02}.{node}"),
+        "id": format!("human-wait.{node}"),
         "kind": "human-wait",
         "label": format!("{node} awaiting a person"),
         "started_at": wait_start.ts,
         "ended_at": attested.map_or(Value::Null, |event| json!(event.ts)),
         "parent_id": parent,
         "node_id": node,
-        "round": round,
         "events": Vec::<Value>::new(),
     }))
 }
@@ -2644,20 +2741,18 @@ fn kept_spans(
     events: &[(usize, &Envelope)],
     parent: &str,
     node: &str,
-    round: u64,
 ) -> Vec<Value> {
-    let mut kept: Vec<Value> = evidence(view, round, node)
+    let mut kept: Vec<Value> = evidence(view, node)
         .into_iter()
         .map(|record| {
             json!({
-                "id": format!("verification.{round:02}.{node}.{}", record.artifact),
+                "id": format!("verification.{node}.{}", record.artifact),
                 "kind": "verification",
                 "label": record.artifact,
                 "started_at": record.since,
                 "ended_at": record.at,
                 "parent_id": parent,
                 "node_id": node,
-                "round": round,
                 "status": if record.ok { "ok" } else { "failed" },
                 "detail": {
                     "ok": record.ok,
@@ -2668,8 +2763,8 @@ fn kept_spans(
             })
         })
         .collect();
-    kept.extend(publication_span(events, parent, node, round));
-    kept.extend(lock_wait_rollup(events, parent, node, round));
+    kept.extend(publication_span(events, parent, node));
+    kept.extend(lock_wait_rollup(events, parent, node));
     kept
 }
 
@@ -2684,7 +2779,7 @@ fn kept_spans(
 /// The category is the *pair* and not either half of it, which is what tells a
 /// lint run from the worker whose semantic role it borrows: both are `worker`
 /// work, and only the transport half says which of them ran.
-fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: u64) -> Vec<Value> {
+fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<Value> {
     let dispatched = events.iter().find(|(_, event)| {
         event.source == Source::Pipeline
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
@@ -2725,14 +2820,13 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: 
         .into_iter()
         .map(|((transport, role), count)| {
             json!({
-                "id": format!("rollup.{round:02}.{node}.{}.{role}", transport.as_str()),
+                "id": format!("rollup.{node}.{}.{role}", transport.as_str()),
                 "kind": "rollup",
                 "label": "dispatch",
                 "started_at": start.ts,
                 "ended_at": settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
                 "parent_id": parent,
                 "node_id": node,
-                "round": round,
                 "count": count,
                 "agent_role": role,
                 "transport_role": transport.as_str(),
@@ -2742,131 +2836,153 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str, round: 
         .collect()
 }
 
-/// One node's own work: the node span, then a dispatch span per attempt.
-fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> {
+/// One node's own work: the node span, then a dispatch span per session.
+///
+/// One pass rather than one per round. A node's records are its records: the
+/// engine dispatches it when its dependencies settle and re-asks a dispatch that
+/// produced nothing, and every attempt is the same node doing the same work, so
+/// the node has one span and the sessions under it are all of the sessions it
+/// ran.
+fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
-    for number in 1..=view.state.round.max(1) {
-        let events: Vec<(usize, &Envelope)> = view
-            .events
-            .iter()
-            .enumerate()
-            .filter(|(_, event)| {
-                event.labels.round == Some(number) && event.labels.node.as_deref() == Some(node)
-            })
-            .collect();
-        if events.is_empty() {
-            continue;
-        }
-        let node_id = format!("node.{number:02}.{node}");
-        spans.push(node_span(view, number, node, None, turns));
-        let settled = events.iter().find(|(_, event)| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-        });
+    let events: Vec<(usize, &Envelope)> = view
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
+        .collect();
+    if events.is_empty() {
+        return spans;
+    }
+    let node_id = format!("node.{node}");
+    spans.push(node_span(view, node, None, lens));
+    // The last settlement, for the same reason [`node_span`] takes it: a node the
+    // planner retried settled once already, and the attempt that is running now
+    // is not closed by the record that closed the one it superseded.
+    let settled = events.iter().rev().find(|(_, event)| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+    });
 
-        spans.extend(waiting_span(view, settled, &node_id, node, number));
+    spans.extend(waiting_span(view, settled, &node_id, node));
 
-        // The evidence the node kept and the branch it published: both sit inside
-        // the dispatch they were recorded during, so both are appended after it.
-        // The plot paints in the order it is given, and a segment underneath one
-        // that covers it is a segment no pointer can reach.
-        let mut inside = kept_spans(view, &events, &node_id, node, number);
+    // The evidence the node kept and the branch it published: both sit inside
+    // the dispatch they were recorded during, so both are appended after it.
+    // The plot paints in the order it is given, and a segment underneath one
+    // that covers it is a segment no pointer can reach.
+    let mut inside = kept_spans(view, &events, &node_id, node);
 
-        let dispatched = events.iter().find(|(_, event)| {
+    let dispatched = events.iter().find(|(_, event)| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
+    });
+    let Some((_, start)) = dispatched else {
+        spans.append(&mut inside);
+        return spans;
+    };
+    let key = dispatch_key(&view.paths.run, node);
+    // A node whose latest settlement is older than its latest dispatch was
+    // re-asked and is running again; one the run has not settled at all is
+    // running for the first time. Both are a state the run is asserting rather
+    // than one this crate is guessing, and leaving it absent would leave a reader
+    // with "unknown" for the one case they can see is in flight.
+    let settled_position = settled.map(|(index, _)| *index);
+    let redispatched = events
+        .iter()
+        .rev()
+        .find(|(_, event)| {
             event.source == Source::Pipeline
                 && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
-        });
-        let Some((_, start)) = dispatched else {
-            spans.append(&mut inside);
-            continue;
-        };
-        let key = dispatch_key(&view.paths.run, number, node);
-        // A dispatch the node has not settled is running, which is a state the
-        // run is asserting rather than one this crate is guessing: the node was
-        // dispatched and nothing has closed it. Leaving it absent would leave a
-        // reader with "unknown" for the one case they can see is in flight.
-        let status = settled
+        })
+        .is_some_and(|(index, _)| settled_position.is_none_or(|settled| *index > settled));
+    let status = if redispatched {
+        "running"
+    } else {
+        settled
             .and_then(|(_, event)| event.payload.get("status"))
             .and_then(Value::as_str)
-            .map_or("running", status_word);
+            .map_or("running", status_word)
+    };
 
-        // One span per session the dispatch ran under, all carrying the same
-        // `dispatch_id`: that key is what groups them back into the one dispatch
-        // they are, and a node that ran a worker, a judge and a check-in at once
-        // is three transcripts an operator has to be able to tell apart. A
-        // dispatch that relayed no session at all is still one span, because the
-        // node was dispatched and that is a fact of its own.
-        let mut sessions = relayed_sessions(&events);
-        if sessions.is_empty() {
-            sessions.push((node, Vec::new()));
-        }
-
-        for (session, relayed) in sessions {
-            let named = relayed.is_empty().then(|| format!("{node} dispatch"));
-            let mut span = Map::new();
-            span.insert(
-                "id".into(),
-                json!(format!("dispatch.{number:02}.{session}")),
-            );
-            span.insert("kind".into(), json!("dispatch"));
-            span.insert(
-                "label".into(),
-                json!(named.clone().unwrap_or_else(|| session.to_owned())),
-            );
-            // The dispatch, and the settlement that closed it. A session's own
-            // first and last envelopes are the first and last things it *said*,
-            // not its ends: a session says nothing while it works, so bracketing
-            // it by its own messages would draw a dispatch that ran for minutes
-            // as the instant between two of them — and would put the node's own
-            // dispatch record outside the window drawn for it.
-            span.insert("started_at".into(), json!(start.ts));
-            span.insert(
-                "ended_at".into(),
-                settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
-            );
-            span.insert("parent_id".into(), json!(node_id));
-            span.insert("node_id".into(), json!(node));
-            span.insert("round".into(), json!(number));
-            if let Some(key) = &key {
-                span.insert("dispatch_id".into(), json!(key));
-            }
-            // The party that ran this session, not the party the node was
-            // dispatched under: the two differ exactly when the dispatch ran a
-            // supervising or a lint chain beside its worker, which is the pair a
-            // reader needs to tell three concurrent transcripts apart.
-            span.insert(
-                "transport_role".into(),
-                json!(if relayed.is_empty() {
-                    transport_role(start).as_str()
-                } else {
-                    relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
-                }),
-            );
-            let persona = relayed
-                .first()
-                .and_then(|(_, event)| event.labels.persona.as_deref())
-                .or(start.labels.persona.as_deref());
-            if let Some(role) = agent_role(persona) {
-                span.insert("agent_role".into(), json!(role));
-            }
-            span.insert("status".into(), json!(status));
-            if named.is_none() {
-                span.insert(
-                    "reference".into(),
-                    json!({ "kind": "conversation", "value": session }),
-                );
-            }
-            span.insert(
-                "events".into(),
-                json!(relayed
-                    .iter()
-                    .map(|(index, event)| timeline_event(*index, event, turns))
-                    .collect::<Vec<_>>()),
-            );
-            spans.push(Value::Object(span));
-        }
-        spans.append(&mut inside);
+    // One span per session the node ran under, all carrying the same
+    // `dispatch_id`: that key is what groups them back into the one dispatch
+    // they are, and a node that ran a worker, a judge and a check-in at once
+    // is three transcripts an operator has to be able to tell apart. A
+    // dispatch that relayed no session at all is still one span, because the
+    // node was dispatched and that is a fact of its own.
+    let mut sessions = relayed_sessions(&events);
+    if sessions.is_empty() {
+        sessions.push((node, Vec::new()));
     }
+
+    for (session, relayed) in sessions {
+        let named = relayed.is_empty().then(|| format!("{node} dispatch"));
+        let mut span = Map::new();
+        span.insert("id".into(), json!(format!("dispatch.{session}")));
+        span.insert("kind".into(), json!("dispatch"));
+        span.insert(
+            "label".into(),
+            json!(named.clone().unwrap_or_else(|| session.to_owned())),
+        );
+        // The dispatch, and the settlement that closed it. A session's own
+        // first and last envelopes are the first and last things it *said*,
+        // not its ends: a session says nothing while it works, so bracketing
+        // it by its own messages would draw a dispatch that ran for minutes
+        // as the instant between two of them — and would put the node's own
+        // dispatch record outside the window drawn for it.
+        span.insert("started_at".into(), json!(start.ts));
+        span.insert(
+            "ended_at".into(),
+            if redispatched {
+                Value::Null
+            } else {
+                settled.map_or(Value::Null, |(_, event)| json!(event.ts))
+            },
+        );
+        span.insert("parent_id".into(), json!(node_id));
+        span.insert("node_id".into(), json!(node));
+        if let Some(step) = relayed
+            .first()
+            .and_then(|(_, event)| event.labels.step.as_deref())
+        {
+            // Which step of a lifecycle node this session ran: the node runs
+            // several in sequence on one branch, and the label is the only thing
+            // that tells one of their transcripts from the next.
+            span.insert("step_id".into(), json!(step));
+        }
+        if let Some(key) = &key {
+            span.insert("dispatch_id".into(), json!(key));
+        }
+        // The party that ran this session, not the party the node was
+        // dispatched under: the two differ exactly when the dispatch ran a
+        // supervising or a lint chain beside its worker, which is the pair a
+        // reader needs to tell three concurrent transcripts apart.
+        span.insert(
+            "transport_role".into(),
+            json!(if relayed.is_empty() {
+                transport_role(start).as_str()
+            } else {
+                relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
+            }),
+        );
+        let persona = relayed
+            .first()
+            .and_then(|(_, event)| event.labels.persona.as_deref())
+            .or(start.labels.persona.as_deref());
+        if let Some(role) = agent_role(persona) {
+            span.insert("agent_role".into(), json!(role));
+        }
+        span.insert("status".into(), json!(status));
+        if named.is_none() {
+            span.insert(
+                "reference".into(),
+                json!({ "kind": "conversation", "value": session }),
+            );
+        }
+        span.insert("events".into(), json!(lens.items(&relayed)));
+        spans.push(Value::Object(span));
+    }
+    spans.append(&mut inside);
     spans
 }
 
@@ -2882,54 +2998,66 @@ fn node_spans(view: &RunView, node: &str, turns: &[Option<Turn>]) -> Vec<Value> 
 /// A summary stamped at no node is not served, and neither is one whose node is
 /// a name a route would refuse: the client's own record requires the node, and it
 /// reads the node's timeline by it — so a node it cannot ask for is a node this
-/// crate must not offer.
+/// crate must not offer. Neither is one the reader's filter excluded: an activity
+/// summary is a record like any other, and this is the listing of them.
 #[must_use]
-pub fn live_activity(view: &RunView) -> Vec<Value> {
-    let mut order: Vec<(String, u64)> = Vec::new();
-    let mut latest: BTreeMap<(String, u64), (i128, Value)> = BTreeMap::new();
+pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
+    let mut order: Vec<String> = Vec::new();
+    let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
     for event in &view.events {
-        if event.source != Source::Agentgraph || event.kind.0 != graph::TURN_ACTIVITY {
+        if event.source != Source::Agentgraph
+            || event.kind.0 != graph::TURN_ACTIVITY
+            || !filter.allows(event)
+        {
             continue;
         }
-        let (Some(node), Some(round), Some(at)) = (
+        // One entry per node, keyed by the node alone: a node is dispatched once
+        // per readiness and re-asked in place, so what it is doing now is one
+        // answer rather than one per batch it belonged to.
+        let (Some(node), Some(at)) = (
             event
                 .labels
                 .node
                 .as_deref()
                 .and_then(|node| NodeId::try_from(node).ok()),
-            event.labels.round,
             millis_of(&event.ts),
         ) else {
             continue;
         };
         let node = node.as_str().to_owned();
-        let key = (node.clone(), round);
         let counted = latest
-            .get(&key)
+            .get(&node)
             .and_then(|(_, seen)| seen["events"].as_u64())
             .unwrap_or(0);
         #[allow(clippy::cast_precision_loss)]
         // Epoch milliseconds, which f64 carries exactly past any date a run
         // records; the client reads this as its own clock.
         let stamp = at as f64;
-        if latest.insert(
-            key.clone(),
-            (
-                at,
-                json!({
-                    "round": round.to_string(),
-                    "node": node,
-                    "at": stamp,
-                    "kind": event.payload.get("kind").and_then(Value::as_str).unwrap_or_default(),
-                    "name": event.payload.get("name").and_then(Value::as_str).unwrap_or_default(),
-                    "detail": event.payload.get("detail").and_then(Value::as_str).unwrap_or_default(),
-                    "events": counted + 1,
-                }),
-            ),
-        )
-        .is_none()
+        let mut entry = Map::new();
+        entry.insert("node".into(), json!(node));
+        // The step within a lifecycle node, when the record names one: the node
+        // runs several in sequence on one branch, and which of them is talking is
+        // what a reader watching it needs.
+        if let Some(step) = event.labels.step.as_deref() {
+            entry.insert("step".into(), json!(step));
+        }
+        entry.insert("at".into(), json!(stamp));
+        for field in ["kind", "name", "detail"] {
+            entry.insert(
+                field.into(),
+                json!(event
+                    .payload
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()),
+            );
+        }
+        entry.insert("events".into(), json!(counted + 1));
+        if latest
+            .insert(node.clone(), (at, Value::Object(entry)))
+            .is_none()
         {
-            order.push(key);
+            order.push(node);
         }
     }
     let mut activity: Vec<(i128, Value)> = order
@@ -2940,22 +3068,58 @@ pub fn live_activity(view: &RunView) -> Vec<Value> {
     activity.into_iter().map(|(_, entry)| entry).collect()
 }
 
-/// A change token for one run: what a poll compares to decide it moved.
+/// A change token for one run, as one connection sees it.
+///
+/// How many events the run has recorded that this connection is watching for,
+/// and when it last wrote. The round it was in used to lead this tuple, and there
+/// is no round — which costs the token nothing, because a run that moved recorded
+/// something and both remaining halves say so.
+///
+/// The filter is what makes this token the *connection's*: the stream
+/// invalidates rather than restating state, so a run whose only new records this
+/// reader excluded has not moved as far as they are concerned and is not
+/// announced.
+///
+/// **Both halves have to come from the admitted events, not one of them.** The
+/// run's own `last_write_at` moves on every record it writes, admitted or not, so
+/// a token that kept it would change on the very events the filter exists to
+/// suppress — and the filter would narrow the payloads while announcing every
+/// movement anyway. A filtered connection is therefore keyed on how many records
+/// it admitted and when the last of them was stamped.
 #[must_use]
-pub fn signature(view: &RunView) -> (u64, usize, u64) {
-    (
-        view.state.round,
-        view.events.len(),
-        view.state.last_write_at.unwrap_or(0),
-    )
+pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
+    if filter.admits_everything() {
+        return (view.events.len(), view.state.last_write_at.unwrap_or(0));
+    }
+    let admitted: Vec<&Envelope> = view
+        .events
+        .iter()
+        .filter(|event| filter.allows(event))
+        .collect();
+    let last = admitted
+        .last()
+        .and_then(|event| millis_of(&event.ts))
+        .and_then(|at| u64::try_from(at).ok())
+        .unwrap_or(0);
+    (admitted.len(), last)
 }
+
+/// What [`signature`] compares: how much the run has recorded, and when it last
+/// did.
+pub type Signature = (usize, u64);
 
 /// A change token for one run's transcripts, so a watcher can tell an edited
 /// turn from a new one.
+///
+/// Taken over the transcripts this reader is being *served*, for the same reason
+/// [`signature`] counts only admitted events: a connection narrowed to decisions
+/// is served no transcripts at all, so a turn arriving in one is not a change to
+/// anything it is watching — and a digest over the whole store would wake it on
+/// every tool call the filter exists to keep out of its way.
 #[must_use]
-pub fn conversation_signature(view: &RunView) -> String {
+pub fn conversation_signature(view: &RunView, filter: &EventFilter) -> String {
     let mut hasher = Sha256::new();
-    for document in conversations(view) {
+    for document in conversations_under(view, filter) {
         hasher.update(document.to_string().as_bytes());
     }
     hasher

@@ -62,7 +62,7 @@ pub const UNCONTROLLED_CONVERSATION_ID: &str = "5e1a7c43-9d26-4b1a-83ff-8a2d4e6b
 /// spring: its *previous* dispatch settled with a onejudge report naming no
 /// controllable turn, and its current one is a fresh turn nobody has interrupted.
 /// The old report must not label the new turn — `provider.control` is asked for
-/// per run and the provider's outcome is reset for the next one, so the round-1
+/// per run and the provider's outcome is reset for the next one, so the earlier
 /// answer is a fact about a dispatch that is over.
 pub const REPORTED_NODE_ID: &str = "measure";
 /// The session that node's worker is talking in.
@@ -79,6 +79,13 @@ pub const NO_CONTROL_REASON: &str =
 pub const LIVE_NOTE: &str = "document the read API's control field too";
 /// The note the planner could only leave for the next dispatch.
 pub const DEFERRED_NOTE: &str = "measure the cold start too";
+/// The note the *monitor* left, under its own narrower op allowlist. Its author
+/// is what tells an observer's self-applied fix from the planner's decision.
+pub const MONITOR_NOTE: &str = "the benchmark node has been quiet for a while";
+/// A note still owed to a node's next dispatch. A `context` note carries exactly
+/// one dispatch and is consumed on delivery, so only a node that has not been
+/// dispatched since still carries one.
+pub const CARRIED_NOTE: &str = "the reviewer asked for a changelog entry";
 
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
@@ -90,7 +97,6 @@ const START: &str = "2026-08-07T12:00:00.000Z";
 pub fn write(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
     fs::create_dir_all(dir.join("channel")).expect("the run directory");
-    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
     fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
 
     fs::write(
@@ -106,7 +112,6 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
             "pid": 4242,
             "host": "a-recording-host",
             "started_at": START,
-            "round_budget": 14_400,
             "heartbeat_interval": 1_800,
             "adoptions": 0,
         })),
@@ -115,12 +120,11 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
 
     let plan = plan();
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
-    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
     fs::write(
-        dir.join("round-01/result.json"),
+        dir.join("result.json"),
         pretty(&json!({
+            "schema_version": 3,
             "run_id": run,
-            "round": 1,
             "state": "complete",
             "ok": true,
             "nodes": [
@@ -135,7 +139,7 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
             ],
         })),
     )
-    .expect("the round's result");
+    .expect("the run's result");
 
     fs::write(
         dir.join("artifacts").join(ARTIFACT_ID),
@@ -160,7 +164,7 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
 /// The plan the run executed.
 fn plan() -> Value {
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "goal": { "text": "serve the read contract" },
         "name": "contract",
         "concurrency": 4,
@@ -169,7 +173,6 @@ fn plan() -> Value {
                 "id": NODE_ID,
                 "persona": "worker",
                 "task": "## What\nLand the wire contract.",
-                "done_when": "the routes serve",
             },
             {
                 "id": REVIEW_NODE_ID,
@@ -252,8 +255,7 @@ impl Journal {
 /// the usage that turn consumed. What this crate makes of them is the whole of
 /// what the goldens pin.
 fn journal(run: &str) -> String {
-    let round = json!({ "run_id": run, "round": 1 });
-    let at_node = json!({ "run_id": run, "round": 1, "node": NODE_ID });
+    let at_node = json!({ "run_id": run, "node": NODE_ID });
     let identity = "github.com/nickderobertis/onepipeline-ui";
     let mut journal = Journal::new("a-recording-host-4242");
     journal
@@ -264,18 +266,21 @@ fn journal(run: &str) -> String {
             json!({ "run_id": run }),
             json!({ "plan": plan() }),
         )
+        // Every dependency of this node has settled, so it may dispatch now —
+        // which under the continuous engine is the moment a node starts, and
+        // there is no batch it waited for.
         .emit(
             "2026-08-07T12:00:01.000Z",
             "pipeline",
-            "round-started",
-            round.clone(),
+            "node-ready",
+            at_node.clone(),
             json!({}),
         )
         .emit(
             "2026-08-07T12:00:02.000Z",
             "pipeline",
             "node-dispatched",
-            json!({ "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" }),
+            json!({ "run_id": run, "node": NODE_ID, "persona": "worker" }),
             json!({ "persona": "worker" }),
         )
         .emit(
@@ -284,7 +289,6 @@ fn journal(run: &str) -> String {
             "agent-turn",
             json!({
                 "run_id": run,
-                "round": 1,
                 "node": NODE_ID,
                 "member": "worker",
                 "persona": "worker",
@@ -301,7 +305,6 @@ fn journal(run: &str) -> String {
             "turn-completed",
             json!({
                 "run_id": run,
-                "round": 1,
                 "node": NODE_ID,
                 "member": "worker",
                 "persona": "worker",
@@ -482,11 +485,21 @@ fn journal(run: &str) -> String {
                 "change_url": "https://example.invalid/changes/1",
             }),
         )
+        // The dependent node became ready the instant the node above settled
+        // `done`: settlement triggers the frontier immediately, with nothing
+        // between the two but the reconcile pass that observed it.
+        .emit(
+            "2026-08-07T12:00:20.500Z",
+            "pipeline",
+            "node-ready",
+            json!({ "run_id": run, "node": REVIEW_NODE_ID }),
+            json!({}),
+        )
         .emit(
             "2026-08-07T12:00:21.000Z",
             "pipeline",
             "node-dispatched",
-            json!({ "run_id": run, "round": 1, "node": REVIEW_NODE_ID, "persona": "judge" }),
+            json!({ "run_id": run, "node": REVIEW_NODE_ID, "persona": "judge" }),
             json!({ "persona": "judge" }),
         )
         // The other side of the pair: a member the graph runs as the judge
@@ -498,7 +511,6 @@ fn journal(run: &str) -> String {
             "agent-turn",
             json!({
                 "run_id": run,
-                "round": 1,
                 "node": REVIEW_NODE_ID,
                 "member": "judge",
                 "persona": "judge",
@@ -512,7 +524,6 @@ fn journal(run: &str) -> String {
             "turn-completed",
             json!({
                 "run_id": run,
-                "round": 1,
                 "node": REVIEW_NODE_ID,
                 "member": "judge",
                 "persona": "judge",
@@ -529,24 +540,20 @@ fn journal(run: &str) -> String {
                 },
             }),
         )
+        // The last node settles and the graph is complete. Nothing follows it:
+        // there is no round to close, and the run's own result is the document
+        // the driver rewrites as it closes out.
         .emit(
             "2026-08-07T12:00:30.000Z",
             "pipeline",
             "node-settled",
-            json!({ "run_id": run, "round": 1, "node": REVIEW_NODE_ID }),
+            json!({ "run_id": run, "node": REVIEW_NODE_ID }),
             json!({ "status": "done", "outcome": "approved" }),
-        )
-        .emit(
-            "2026-08-07T12:00:31.000Z",
-            "pipeline",
-            "round-finished",
-            round,
-            json!({ "state": "complete", "ok": true }),
         );
     journal.text()
 }
 
-/// Append one event to a run's journal, the way a live round does.
+/// Append one event to a run's journal, the way the running loop does.
 pub fn append(dir: &Path, kind: &str, payload: Value) {
     let journal = dir.join("events.jsonl");
     let existing = fs::read_to_string(&journal).unwrap_or_default();
@@ -558,7 +565,7 @@ pub fn append(dir: &Path, kind: &str, payload: Value) {
         "seq": seq,
         "source": "pipeline",
         "kind": kind,
-        "labels": { "run_id": dir.file_name().and_then(|n| n.to_str()), "round": 1 },
+        "labels": { "run_id": dir.file_name().and_then(|n| n.to_str()) },
         "payload": payload,
         "artifacts": [],
     });
@@ -568,7 +575,7 @@ pub fn append(dir: &Path, kind: &str, payload: Value) {
 /// Append one event a *sibling* relayed, with labels of its own.
 ///
 /// [`append`] writes this crate's own kind at the run's level, which is all a
-/// live round's own progress needs. A relayed record is stamped with the node
+/// live run's own progress needs. A relayed record is stamped with the node
 /// and the member the producing library named, and a journey about what this
 /// crate makes of one has to be able to write exactly that.
 pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, payload: Value) {
@@ -589,17 +596,17 @@ pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, paylo
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
-/// A run whose second round is still open: a lifecycle node with steps, a human
-/// action nobody has taken, a node gated by it, and a surface the planner has
-/// not read.
+/// A run still being driven: a node that failed and was replaced, a lifecycle
+/// node with steps, a human action nobody has taken, a node gated by it, a
+/// decision that held a subtree back and was cleared, and a surface the planner
+/// has not read.
 ///
 /// It is the other half of what the payloads have to describe — everything the
 /// settled run above cannot show, because it is finished and everything in it
-/// went well.
+/// went well. Under rounds this was "a second round, still open"; the engine has
+/// no such thing, and what makes this run live is that nodes are in flight.
 pub fn write_live(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
-    fs::create_dir_all(dir.join("round-01")).expect("the first round");
-    fs::create_dir_all(dir.join("round-02")).expect("the second round");
     fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
     fs::write(
         dir.join("launch.json"),
@@ -612,43 +619,17 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
             "pid": 4243,
             "host": "a-recording-host",
             "started_at": START,
-            "round_budget": 14_400,
             "heartbeat_interval": 1_800,
             "adoptions": 1,
         })),
     )
     .expect("the launch record");
 
-    let first = plan();
-    fs::write(dir.join("plan.json"), pretty(&first)).expect("the plan");
-    fs::write(dir.join("round-01/plan.json"), pretty(&first)).expect("the first round's plan");
-    fs::write(
-        dir.join("round-01/result.json"),
-        pretty(&json!({
-            "run_id": run,
-            "round": 1,
-            "state": "waiting",
-            "ok": false,
-            "nodes": [
-                { "id": NODE_ID, "status": "done", "outcome": "shipped" },
-                {
-                    "id": REVIEW_NODE_ID,
-                    "status": "failed",
-                    "outcome": "rejected",
-                    // The two texts a failure records are written by different
-                    // parts of the executor and mean different things: the
-                    // lifecycle's own prose, and what the dispatch reported.
-                    "detail": "the reviewer asked for a changelog entry",
-                    "error": "review exited non-zero",
-                    "exit_code": 2,
-                    "ok": false,
-                },
-            ],
-        })),
-    )
-    .expect("the first round's result");
-    let second = live_plan();
-    fs::write(dir.join("round-02/plan.json"), pretty(&second)).expect("the second round's plan");
+    let plan = live_plan();
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    // Deliberately no `result.json`: the SDK rewrites that document whenever a
+    // driver closes out, and this run is still being driven. What a reader is told
+    // about it comes from the fold alone.
 
     // Bigger than one response may carry, so the tail is a tail.
     fs::write(
@@ -657,7 +638,7 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
     )
     .expect("the long artifact");
 
-    let journal = live_journal(run, &second);
+    let journal = live_journal(run, &plan);
     fs::write(dir.join("events.jsonl"), &journal).expect("the journal");
     retain_reported_control(&dir, &journal);
     dir
@@ -724,10 +705,10 @@ fn retain_reported_control(dir: &Path, journal: &str) {
     .expect("the retained report");
 }
 
-/// The plan the live run's second round is converging toward.
+/// The graph the live run is converging toward, with its committed edits applied.
 fn live_plan() -> Value {
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "goal": { "text": "get it shipped" },
         "name": "ship",
         "concurrency": 4,
@@ -737,7 +718,6 @@ fn live_plan() -> Value {
                 "persona": "pr-author",
                 "task": "## What\nShip it.",
                 "context": "the reviewer asked for a changelog entry",
-                "done_when": "the change request is open",
                 "max_turns": 12,
                 "expects_no_diff": false,
                 "repo": "nickderobertis/onepipeline-ui",
@@ -751,40 +731,42 @@ fn live_plan() -> Value {
                 ],
             },
             { "id": SIGNOFF_NODE_ID, "kind": "human", "task": "Approve the change." },
+            // A planner note nothing has delivered yet: this node is blocked
+            // behind a human action, so the note is still owed to its next
+            // dispatch and still reaches a reader. The note on `ship` above was
+            // consumed when `ship` was dispatched, which is the other half.
             {
                 "id": ANNOUNCE_NODE_ID,
                 "persona": "check-in",
                 "task": "## What\nAnnounce it.",
+                "context": CARRIED_NOTE,
                 "deps": [SIGNOFF_NODE_ID],
             },
-            // The two nodes still working while the round is open, and the whole
-            // reason a planner asks whether a node can be corrected: one of them
+            // The two nodes still working, and the whole reason a planner asks
+            // whether a node can be corrected: one of them
             // took the correction into the turn it was already running, and the
             // other is on a harness with no lever to offer.
             {
                 "id": REDIRECTED_NODE_ID,
                 "persona": "worker",
                 "task": "## What\nWrite the docs.",
-                "done_when": "the docs read",
             },
             {
                 "id": UNCONTROLLED_NODE_ID,
                 "persona": "worker",
                 "task": "## What\nMeasure it.",
-                "done_when": "the numbers are recorded",
             },
             {
                 "id": REPORTED_NODE_ID,
                 "persona": "worker",
                 "task": "## What\nProfile it.",
-                "done_when": "the profile is recorded",
             },
         ],
     })
 }
 
-/// Two rounds of events, the second still open.
-fn live_journal(run: &str, second: &Value) -> String {
+/// One continuous stream of events, with work still in flight at the end of it.
+fn live_journal(run: &str, plan: &Value) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut seq = 0;
     let mut emit = |at: &str, source: &str, kind: &str, labels: Value, payload: Value| {
@@ -809,19 +791,15 @@ fn live_journal(run: &str, second: &Value) -> String {
         seq += 1;
     };
 
+    // One `run-started`, carrying the graph the run is converging toward. Under
+    // rounds a second plan arrived with the second `round-started`; there is no
+    // such record, and a live edit is what changes the graph now.
     emit(
         START,
         "pipeline",
         "run-started",
         json!({ "run_id": run }),
-        json!({ "plan": plan() }),
-    );
-    emit(
-        "2026-08-07T12:00:01.000Z",
-        "pipeline",
-        "round-started",
-        json!({ "run_id": run, "round": 1 }),
-        json!({}),
+        json!({ "plan": plan }),
     );
     // The run's own driving session, recorded at no node: what starts the run
     // rather than any of the work in it.
@@ -831,20 +809,20 @@ fn live_journal(run: &str, second: &Value) -> String {
         "agent-turn",
         json!({
             "run_id": run,
-            "round": 1,
             "persona": "orchestrator",
             "session": DRIVING_CONVERSATION_ID,
         }),
-        json!({ "message": "driving the first round", "model": "a-model" }),
+        json!({ "message": "driving the run", "model": "a-model" }),
     );
-    // The node round 2 retries. Its member settled here, and the onejudge report
-    // that settlement stored is the authoritative answer about its turn control:
-    // `control: null`, with `control_unavailable`'s own words beside it.
+    // The node that is re-dispatched further down. Its member settled here, and
+    // the onejudge report that settlement stored is the authoritative answer
+    // about *that* dispatch's turn control: `control: null`, with
+    // `control_unavailable`'s own words beside it.
     emit(
         "2026-08-07T12:00:06.000Z",
         "pipeline",
         "node-dispatched",
-        json!({ "run_id": run, "round": 1, "node": REPORTED_NODE_ID, "persona": "worker" }),
+        json!({ "run_id": run, "node": REPORTED_NODE_ID, "persona": "worker" }),
         json!({ "persona": "worker" }),
     );
     emit(
@@ -853,7 +831,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "member-settled",
         json!({
             "run_id": run,
-            "round": 1,
             "node": REPORTED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -869,49 +846,94 @@ fn live_journal(run: &str, second: &Value) -> String {
             "report_path": "/a/producing/librarys/scratch/report.json",
         }),
     );
+    // The two texts a failure records are written by different parts of the
+    // executor and mean different things: the lifecycle's own prose, and what the
+    // dispatch reported. Both ride the settlement envelope, which is the only
+    // account of them — the SDK's fold keeps a node's status, outcome and branch
+    // and none of the prose beside them.
     emit(
         "2026-08-07T12:00:08.000Z",
         "pipeline",
         "node-settled",
-        json!({ "run_id": run, "round": 1, "node": REPORTED_NODE_ID }),
-        json!({ "status": "failed", "detail": "the profile did not finish" }),
+        json!({ "run_id": run, "node": REPORTED_NODE_ID }),
+        json!({
+            "status": "failed",
+            "outcome": "rejected",
+            "detail": "the profile did not finish",
+            "error": "profile exited non-zero",
+            "exit_code": 2,
+            "ok": false,
+        }),
     );
-    emit(
-        "2026-08-07T12:00:09.000Z",
-        "pipeline",
-        "round-finished",
-        json!({ "run_id": run, "round": 1 }),
-        json!({ "state": "waiting", "ok": false }),
-    );
-    // A surface the planner has been sent but has not read: the run is waiting
-    // on a decision, and that wait is its own bucket of the wall clock.
+    // A blocking surface the planner has been sent but has not read. This is the
+    // one thing that pauses anything in a continuous engine, and it pauses only
+    // the subtree that depends on it — so it is recorded as a decision that began
+    // holding dependents back, named by the surface it is.
     emit(
         "2026-08-07T12:00:10.000Z",
         "pipeline",
         "planner-surface-queued",
-        json!({ "run_id": run, "round": 1 }),
+        json!({ "run_id": run }),
         json!({ "kind": "decision", "message": "retry or park?", "blocking": true }),
+    );
+    emit(
+        "2026-08-07T12:00:10.500Z",
+        "pipeline",
+        "decision-pending",
+        json!({ "run_id": run, "node": "surface:retry-or-park" }),
+        json!({
+            "reference": "surface:retry-or-park",
+            "kind": "decision",
+            "unblocks": [SHIP_NODE_ID],
+        }),
     );
     emit(
         "2026-08-07T12:00:11.000Z",
         "pipeline",
         "planner-surfaced",
-        json!({ "run_id": run, "round": 1 }),
+        json!({ "run_id": run }),
         json!({ "blocking": true }),
     );
     emit(
         "2026-08-07T12:00:25.000Z",
         "pipeline",
         "planner-replied",
-        json!({ "run_id": run, "round": 1 }),
+        json!({ "run_id": run }),
         json!({}),
+    );
+    // Answered, so the subtree it held is released and the loop resumes it —
+    // inside the running loop, with no external driver action.
+    emit(
+        "2026-08-07T12:00:25.500Z",
+        "pipeline",
+        "decision-cleared",
+        json!({ "run_id": run, "node": "surface:retry-or-park" }),
+        json!({
+            "reference": "surface:retry-or-park",
+            "kind": "decision",
+            "released": [SHIP_NODE_ID],
+        }),
+    );
+    // The reply's own edit, attributed to the author that submitted it: a
+    // planner may issue every op, and a monitor a narrower set, so who asked for
+    // a change is a fact about the change.
+    emit(
+        "2026-08-07T12:00:25.700Z",
+        "pipeline",
+        "edit-committed",
+        json!({ "run_id": run }),
+        json!({
+            "author": "planner",
+            "command": { "op": "retry", "id": REPORTED_NODE_ID },
+            "operations": [{ "kind": "node-added", "node": REPORTED_NODE_ID }],
+        }),
     );
     emit(
         "2026-08-07T12:00:26.000Z",
         "pipeline",
-        "round-started",
-        json!({ "run_id": run, "round": 2 }),
-        json!({ "plan": second }),
+        "node-ready",
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
+        json!({}),
     );
     emit(
         "2026-08-07T12:00:26.500Z",
@@ -919,17 +941,16 @@ fn live_journal(run: &str, second: &Value) -> String {
         "agent-turn",
         json!({
             "run_id": run,
-            "round": 2,
             "persona": "orchestrator",
             "session": DRIVING_CONVERSATION_ID,
         }),
-        json!({ "message": "driving the second round", "model": "a-model" }),
+        json!({ "message": "reconciling the frontier", "model": "a-model" }),
     );
     emit(
         "2026-08-07T12:00:27.000Z",
         "pipeline",
         "node-dispatched",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID, "persona": "pr-author" }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID, "persona": "pr-author" }),
         json!({ "persona": "pr-author" }),
     );
     emit(
@@ -938,7 +959,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "agent-turn",
         json!({
             "run_id": run,
-            "round": 2,
             "node": SHIP_NODE_ID,
             "step": "build",
             "persona": "pr-author",
@@ -955,7 +975,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-activity",
         json!({
             "run_id": run,
-            "round": 2,
             "node": SHIP_NODE_ID,
             "step": "build",
             "member": "worker",
@@ -975,7 +994,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-completed",
         json!({
             "run_id": run,
-            "round": 2,
             "node": SHIP_NODE_ID,
             "step": "build",
             "member": "worker",
@@ -1001,7 +1019,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "agent-turn",
         json!({
             "run_id": run,
-            "round": 2,
             "node": SHIP_NODE_ID,
             "member": "llmlint",
             "persona": "pr-author",
@@ -1015,7 +1032,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-completed",
         json!({
             "run_id": run,
-            "round": 2,
             "node": SHIP_NODE_ID,
             "member": "llmlint",
             "persona": "pr-author",
@@ -1039,7 +1055,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:29.000Z",
         "vcs",
         "session-opened",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
         json!({
             "token": "a-vcs-session-token",
             "identity": "github.com/nickderobertis/onepipeline-ui",
@@ -1052,7 +1068,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:33.000Z",
         "vcs",
         "lock-wait",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
         json!({
             "identity": "github.com/nickderobertis/onepipeline-ui",
             "elapsed": 4.5,
@@ -1063,14 +1079,14 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:35.000Z",
         "vcs",
         "push",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
         json!({ "branch": "feature/ship", "remote": "origin", "accepted": true }),
     );
     emit(
         "2026-08-07T12:00:38.000Z",
         "vcs",
         "change-opened",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
         json!({
             "url": "https://example.invalid/changes/2",
             "host": "github",
@@ -1083,7 +1099,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:39.000Z",
         "vcs",
         "change-check",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
         json!({
             "name": "gate",
             "required": true,
@@ -1096,7 +1112,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:40.000Z",
         "pipeline",
         "node-settled",
-        json!({ "run_id": run, "round": 2, "node": SHIP_NODE_ID }),
+        json!({ "run_id": run, "node": SHIP_NODE_ID }),
         json!({
             "status": "done",
             "outcome": "published",
@@ -1112,12 +1128,26 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:41.000Z",
         "pipeline",
         "node-settled",
-        json!({ "run_id": run, "round": 2, "node": SIGNOFF_NODE_ID }),
+        json!({ "run_id": run, "node": SIGNOFF_NODE_ID }),
         json!({ "status": "waiting" }),
+    );
+    // The second form a decision point takes, and the one still outstanding: a
+    // ready human action nobody has attested. It holds only what depends on it,
+    // which is why `announce` is blocked while everything else keeps running.
+    emit(
+        "2026-08-07T12:00:41.500Z",
+        "pipeline",
+        "decision-pending",
+        json!({ "run_id": run, "node": SIGNOFF_NODE_ID }),
+        json!({
+            "reference": SIGNOFF_NODE_ID,
+            "kind": "human-action",
+            "unblocks": [ANNOUNCE_NODE_ID],
+        }),
     );
 
     // Two nodes still working, and the planner correcting both of them. The
-    // records are the ones a real round writes: `oneagentgraph` relays a
+    // records are the ones a real run writes: `oneagentgraph` relays a
     // `turn-interrupted` for every interrupt the reconciler pulls — delivered or
     // not — and `onepipeline` records where the note actually went as the
     // `delivery` on the `context-added` operation its `edit-committed` compiled.
@@ -1125,7 +1155,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:42.000Z",
         "pipeline",
         "node-dispatched",
-        json!({ "run_id": run, "round": 2, "node": REDIRECTED_NODE_ID, "persona": "worker" }),
+        json!({ "run_id": run, "node": REDIRECTED_NODE_ID, "persona": "worker" }),
         json!({ "persona": "worker" }),
     );
     emit(
@@ -1134,7 +1164,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-started",
         json!({
             "run_id": run,
-            "round": 2,
             "node": REDIRECTED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -1146,7 +1175,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:44.000Z",
         "pipeline",
         "node-dispatched",
-        json!({ "run_id": run, "round": 2, "node": UNCONTROLLED_NODE_ID, "persona": "worker" }),
+        json!({ "run_id": run, "node": UNCONTROLLED_NODE_ID, "persona": "worker" }),
         json!({ "persona": "worker" }),
     );
     emit(
@@ -1155,7 +1184,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-started",
         json!({
             "run_id": run,
-            "round": 2,
             "node": UNCONTROLLED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -1171,7 +1199,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-interrupted",
         json!({
             "run_id": run,
-            "round": 2,
             "node": REDIRECTED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -1183,7 +1210,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:50.100Z",
         "pipeline",
         "edit-committed",
-        json!({ "run_id": run, "round": 2 }),
+        json!({ "run_id": run }),
         json!({
             // `deliver` is absent because it was `auto`, which is what the
             // sibling's own `Command` omits: an edit that says nothing about
@@ -1205,7 +1232,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-interrupted",
         json!({
             "run_id": run,
-            "round": 2,
             "node": UNCONTROLLED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -1222,7 +1248,7 @@ fn live_journal(run: &str, second: &Value) -> String {
         "2026-08-07T12:00:51.100Z",
         "pipeline",
         "edit-committed",
-        json!({ "run_id": run, "round": 2 }),
+        json!({ "run_id": run }),
         json!({
             "command": { "op": "context", "id": UNCONTROLLED_NODE_ID, "note": DEFERRED_NOTE },
             "operations": [{
@@ -1233,16 +1259,18 @@ fn live_journal(run: &str, second: &Value) -> String {
             }],
         }),
     );
-    // The third in-flight node, and the trap: its round-1 member settled with a
-    // onejudge report naming no controllable turn, and this is a *fresh* turn in
-    // a *new* dispatch. `provider.control` is asked for per run and the provider's
-    // outcome is reset for the next, so the old report says nothing about this
-    // turn — and the reading must not borrow it.
+    // The third in-flight node, and the trap: its *earlier* dispatch settled with
+    // a onejudge report naming no controllable turn, and this is a *fresh* turn
+    // in a *re-asked* dispatch. `provider.control` is asked for per run and the
+    // provider's outcome is reset for the next, so the old report says nothing
+    // about this turn — and the reading must not borrow it. Under rounds the two
+    // dispatches were told apart by their round labels; here they are told apart
+    // by nothing but their order, which is exactly what makes this worth pinning.
     emit(
         "2026-08-07T12:00:44.000Z",
         "pipeline",
         "node-dispatched",
-        json!({ "run_id": run, "round": 2, "node": REPORTED_NODE_ID, "persona": "worker" }),
+        json!({ "run_id": run, "node": REPORTED_NODE_ID, "persona": "worker" }),
         json!({ "persona": "worker" }),
     );
     emit(
@@ -1251,7 +1279,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-started",
         json!({
             "run_id": run,
-            "round": 2,
             "node": REPORTED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -1267,7 +1294,6 @@ fn live_journal(run: &str, second: &Value) -> String {
         "turn-activity",
         json!({
             "run_id": run,
-            "round": 2,
             "node": REDIRECTED_NODE_ID,
             "member": "worker",
             "persona": "worker",
@@ -1280,11 +1306,30 @@ fn live_journal(run: &str, second: &Value) -> String {
             "truncated": false,
         }),
     );
+    // An edit the *monitor* self-applied. Its op allowlist is narrower than the
+    // planner's, and a reader that could not tell the two apart would be reading
+    // an observer's fix as the planner's own decision.
+    emit(
+        "2026-08-07T12:00:53.000Z",
+        "pipeline",
+        "edit-committed",
+        json!({ "run_id": run }),
+        json!({
+            "author": "monitor",
+            "command": { "op": "context", "id": UNCONTROLLED_NODE_ID, "note": MONITOR_NOTE },
+            "operations": [{
+                "kind": "context-added",
+                "node": UNCONTROLLED_NODE_ID,
+                "note": MONITOR_NOTE,
+                "delivery": "deferred",
+            }],
+        }),
+    );
     format!("{}\n", lines.join("\n"))
 }
 
 /// A run that recorded its launch and nothing since — how a just-started run
-/// reads on disk, and the only shape with no round at all.
+/// reads on disk: the one shape with no work at all.
 pub fn write_launched(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
     fs::create_dir_all(&dir).expect("the run directory");
@@ -1300,7 +1345,6 @@ pub fn write_launched(root: &Path, run: &str) -> PathBuf {
             "pid": 4244,
             "host": "a-recording-host",
             "started_at": START,
-            "round_budget": 14_400,
             "heartbeat_interval": 1_800,
             "adoptions": 0,
         })),
@@ -1327,6 +1371,29 @@ pub fn write_launched(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// Define a named filter profile on a run's launch record.
+///
+/// `onepipeline start --set filters.NAME=SPEC` forwards the override opaquely to
+/// the dag-scope launch and the SDK retains it verbatim, which is where a
+/// run-specific decision this crate can read lives. Written by rewriting the
+/// record the same way a relaunch would, so what the server reads is a launch
+/// record and not a fixture shape of its own.
+pub fn define_filter_profile(dir: &Path, name: &str, spec: &str) {
+    let path = dir.join("launch.json");
+    let mut record: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    let sets = record
+        .as_object_mut()
+        .expect("a mapping")
+        .entry("dag_sets")
+        .or_insert_with(|| json!([]));
+    sets.as_array_mut()
+        .expect("the retained overrides")
+        .push(json!(format!("filters.{name}={spec}")));
+    fs::write(&path, pretty(&record)).expect("the launch record");
+}
+
 fn pretty(value: &Value) -> String {
     format!(
         "{}\n",
@@ -1334,17 +1401,18 @@ fn pretty(value: &Value) -> String {
     )
 }
 
-/// The run id of the stopped-mid-round fixture below.
+/// The run id of the stopped-mid-flight fixture below.
 pub const STOPPED_RUN_ID: &str = "run-20260807-5c4b3a";
 
-/// A run whose driver stopped part way through a round it never wrote a result for.
+/// A run whose driver was stopped with a node still dispatched, and which never
+/// wrote a result.
 ///
-/// The one shape where the round's own account and the run's fold could disagree:
-/// the round is not open, so a reader that only ever consults a result finds
+/// The one shape where a recorded account and the run's fold could disagree: no
+/// driver closed out, so a reader that only ever consults `result.json` finds
 /// nothing, while the fold still knows exactly what the run got to.
-pub fn write_stopped_mid_round(root: &Path, run: &str) -> PathBuf {
+pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
-    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
+    fs::create_dir_all(&dir).expect("the run directory");
     fs::write(
         dir.join("launch.json"),
         pretty(&json!({
@@ -1356,14 +1424,13 @@ pub fn write_stopped_mid_round(root: &Path, run: &str) -> PathBuf {
             "pid": 4250,
             "host": "a-recording-host",
             "started_at": START,
-            "round_budget": 14_400,
             "heartbeat_interval": 1_800,
             "adoptions": 0,
         })),
     )
     .expect("the launch record");
     let plan = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "stopped",
         "concurrency": 1,
         "tasks": [
@@ -1371,7 +1438,6 @@ pub fn write_stopped_mid_round(root: &Path, run: &str) -> PathBuf {
         ],
     });
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
-    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
     let lines = [
         json!({
             "v": 1, "ts": START, "stream": "a-recording-host-4250", "seq": 0,
@@ -1380,13 +1446,13 @@ pub fn write_stopped_mid_round(root: &Path, run: &str) -> PathBuf {
         }),
         json!({
             "v": 1, "ts": "2026-08-07T12:00:01.000Z", "stream": "a-recording-host-4250",
-            "seq": 1, "source": "pipeline", "kind": "round-started",
-            "labels": { "run_id": run, "round": 1 }, "payload": {}, "artifacts": [],
+            "seq": 1, "source": "pipeline", "kind": "node-ready",
+            "labels": { "run_id": run, "node": NODE_ID }, "payload": {}, "artifacts": [],
         }),
         json!({
             "v": 1, "ts": "2026-08-07T12:00:02.000Z", "stream": "a-recording-host-4250",
             "seq": 2, "source": "pipeline", "kind": "node-dispatched",
-            "labels": { "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" },
+            "labels": { "run_id": run, "node": NODE_ID, "persona": "worker" },
             "payload": {}, "artifacts": [],
         }),
         json!({
@@ -1407,16 +1473,16 @@ pub fn write_stopped_mid_round(root: &Path, run: &str) -> PathBuf {
 /// The run id of the recorded-only fixture below.
 pub const RECORDED_ONLY_RUN_ID: &str = "run-20260807-9f8e7d";
 
-/// A run whose round recorded a result and whose journal never existed.
+/// A run whose driver closed out and whose journal never existed.
 ///
 /// This is what a run predating the journal looks like on an operator's machine,
-/// permanently: there is nothing to fold, so the round's own result is the only
-/// account of it — and that result holds words no journal settlement can carry,
-/// including a status outside the vocabulary a client switches on and a failure
-/// with an outcome but no prose.
+/// permanently: there is nothing to fold, so the run's own recorded result is the
+/// only account of it — and that result holds words no journal settlement can
+/// carry, including a status outside the vocabulary a client switches on and a
+/// failure with an outcome but no prose.
 pub fn write_recorded_only(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
-    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
+    fs::create_dir_all(&dir).expect("the run directory");
     fs::write(
         dir.join("launch.json"),
         pretty(&json!({
@@ -1428,14 +1494,13 @@ pub fn write_recorded_only(root: &Path, run: &str) -> PathBuf {
             "pid": 4245,
             "host": "a-recording-host",
             "started_at": START,
-            "round_budget": 14_400,
             "heartbeat_interval": 1_800,
             "adoptions": 0,
         })),
     )
     .expect("the launch record");
     let plan = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "recorded",
         "concurrency": 1,
         "tasks": [
@@ -1444,23 +1509,34 @@ pub fn write_recorded_only(root: &Path, run: &str) -> PathBuf {
         ],
     });
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
-    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
     fs::write(
-        dir.join("round-01/result.json"),
+        dir.join("result.json"),
         pretty(&json!({
+            "schema_version": 3,
             "run_id": run,
-            "round": 1,
             "state": "failed",
             "ok": false,
             "nodes": [
                 // A word the served vocabulary does not hold.
                 { "id": NODE_ID, "status": "improvised" },
-                // A failure whose only recorded explanation is its outcome word.
-                { "id": REVIEW_NODE_ID, "status": "failed", "outcome": "gate-failed" },
+                // A failure and everything the document recorded about it. The
+                // two texts are written by different parts of the executor and
+                // mean different things — the lifecycle's own prose, and what the
+                // dispatch reported — and with no journal to fold, this document
+                // is the only account of either.
+                {
+                    "id": REVIEW_NODE_ID,
+                    "status": "failed",
+                    "outcome": "gate-failed",
+                    "detail": "the reviewer asked for a changelog entry",
+                    "error": "review exited non-zero",
+                    "exit_code": 2,
+                    "ok": false,
+                },
             ],
         })),
     )
-    .expect("the round's result");
+    .expect("the run's result");
     fs::write(dir.join("events.jsonl"), "").expect("the empty journal");
     dir
 }
@@ -1477,7 +1553,7 @@ pub const PRESERVED_SHA: &str = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
 /// merged fixture above cannot show, because that one went through.
 pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
-    fs::create_dir_all(dir.join("round-01")).expect("the round directory");
+    fs::create_dir_all(&dir).expect("the run directory");
     fs::write(
         dir.join("launch.json"),
         pretty(&json!({
@@ -1489,14 +1565,13 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
             "pid": 4251,
             "host": "a-recording-host",
             "started_at": START,
-            "round_budget": 14_400,
             "heartbeat_interval": 1_800,
             "adoptions": 0,
         })),
     )
     .expect("the launch record");
     let plan = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "preserved",
         "concurrency": 1,
         "tasks": [
@@ -1504,8 +1579,7 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
         ],
     });
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
-    fs::write(dir.join("round-01/plan.json"), pretty(&plan)).expect("the round's plan");
-    let at_node = json!({ "run_id": run, "round": 1, "node": NODE_ID });
+    let at_node = json!({ "run_id": run, "node": NODE_ID });
     let mut journal = Journal::new("a-recording-host-4251");
     journal
         .emit(
@@ -1518,15 +1592,15 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
         .emit(
             "2026-08-07T12:00:01.000Z",
             "pipeline",
-            "round-started",
-            json!({ "run_id": run, "round": 1 }),
+            "node-ready",
+            json!({ "run_id": run, "node": NODE_ID }),
             json!({}),
         )
         .emit(
             "2026-08-07T12:00:02.000Z",
             "pipeline",
             "node-dispatched",
-            json!({ "run_id": run, "round": 1, "node": NODE_ID, "persona": "worker" }),
+            json!({ "run_id": run, "node": NODE_ID, "persona": "worker" }),
             json!({ "persona": "worker" }),
         )
         .emit(

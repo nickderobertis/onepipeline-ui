@@ -87,10 +87,8 @@ export function OverallView({
           <section className="overall-hero">
             <p className="eyebrow">Whole DAG</p>
             <h2>{runId}</h2>
-            {detail.rounds.at(-1)?.plan.goal?.text && (
-              <p className="run-goal">
-                {detail.rounds.at(-1)?.plan.goal?.text}
-              </p>
+            {detail.graph?.plan.goal?.text && (
+              <p className="run-goal">{detail.graph.plan.goal.text}</p>
             )}
             <p>
               {detail.run.phase} ·{" "}

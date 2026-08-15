@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 12,
+  "telemetry_schema_version": 13,
   "observed_at": "2026-08-07T12:00:00Z",
   "conversation": {
     "canContinue": false,
@@ -53,7 +53,6 @@
   },
   "attribution": {
     "runId": "run-20260807-a1b2c3",
-    "round": 1,
     "nodeId": "contract-interface",
     "launchId": "run-20260807-a1b2c3",
     "launcher": "claude-code",

@@ -23,7 +23,7 @@ import {
   LONG_SESSION,
   longConversation,
   PR_URL,
-  ROUND_CHECK_IN_SESSION,
+  RUN_CHECK_IN_SESSION,
   runDetail,
   runList,
   runScopeTimeline,
@@ -97,10 +97,10 @@ configure({ asyncUtilTimeout: 10_000 });
 
 /**
  * The two sessions the live fixture recorded at no node, by the span id that opens
- * each one: the orchestrator driving the graph, and the round's own check-in.
+ * each one: the orchestrator driving the graph, and the run's own check-in.
  */
 const ORCHESTRATOR_SPAN = "dispatch-orchestrator-session";
-const CHECK_IN_SPAN = `dispatch-${ROUND_CHECK_IN_SESSION}`;
+const CHECK_IN_SPAN = `dispatch-${RUN_CHECK_IN_SESSION}`;
 
 /** Nodes of the live fixture whose status every surface has to agree on. */
 const SERVED_STATUSES: readonly { node: string; status: string }[] = [
@@ -365,7 +365,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await within(detail()).findByText("Verification record"),
     ).toBeVisible();
     expect(within(detail()).getByText("Full log")).toBeInTheDocument();
-    expect(within(detail()).queryByText(/round-01\/foundation/)).toBeNull();
+    expect(within(detail()).queryByText(/foundation\/gate\.log/)).toBeNull();
 
     await userEvent.click(railRow(/local\/example/));
     expect(
@@ -401,10 +401,9 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       id: "step-dense",
       kind: "step",
       label: "Supervised conversations",
-      parent_id: "node-1-dashboard",
+      parent_id: "node-dashboard",
       node_id: "dashboard",
       step_id: "supervision",
-      round: 1,
       started_at: "2026-07-26T11:01:01.000Z",
       ended_at: "2026-07-26T11:10:00.000Z",
       status: "done",
@@ -441,7 +440,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
   test("labels a worker dispatched after a retry request as the retry", async () => {
     const retried = parseRunTimeline(runTimeline(LIVE_RUN));
-    const node = retried.spans.find(({ id }) => id === "node-1-dashboard");
+    const node = retried.spans.find(({ id }) => id === "node-dashboard");
     const worker = retried.spans.find(
       ({ id }) => id === "dispatch-worker-session",
     );
@@ -452,7 +451,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       kind: "retry-requested",
       at: "2026-07-26T11:02:35.000Z",
       node_id: "dashboard",
-      round: 1,
     });
     retried.spans.push({
       ...worker,
@@ -690,10 +688,13 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
     await userEvent.click(await screen.findByRole("tab", { name: "Task" }));
     expect(
-      await screen.findByText("Build the live dashboard"),
+      await screen.findByText(/Build the live dashboard/),
     ).toBeInTheDocument();
+    // Plan schema 2 retired `done_when`: the bar is the `## Acceptance criteria`
+    // section of the node's own task, which is the text the judge is handed, and
+    // the tab shows that section alone rather than the whole prose again.
     await userEvent.click(
-      screen.getByRole("tab", { name: "Completion criteria" }),
+      screen.getByRole("tab", { name: "Acceptance criteria" }),
     );
     expect(
       await screen.findByText("Users can inspect transcripts"),
@@ -732,7 +733,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     const { client } = telemetryHarness();
     render(<App client={client} />);
     const criteria = await screen.findByRole("tab", {
-      name: "Completion criteria",
+      name: "Acceptance criteria",
     });
     expect(criteria).toHaveAttribute("aria-selected", "true");
     criteria.focus();
@@ -926,7 +927,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(await screen.findByText("archive")).toBeInTheDocument();
 
     const before = fetch.mock.calls.length;
-    sources[0]?.emit("run.changed", { run_id: HISTORY_RUN, round: 1 }, "8");
+    sources[0]?.emit("run.changed", { run_id: HISTORY_RUN }, "8");
     await waitFor(() =>
       expect(fetch.mock.calls.length).toBeGreaterThan(before),
     );
@@ -955,7 +956,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         run_id: LIVE_RUN,
         activity: [
           {
-            round: "1",
             node: "dashboard",
             at: Date.now() / 1000,
             kind: "tool",
@@ -1351,12 +1351,12 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     // labelled by the role the plot named the segment with.
     const panel = await openedDetail();
     expect(
-      await within(panel).findByText("Round 1 progress reported"),
+      await within(panel).findByText("Progress reported"),
     ).toBeInTheDocument();
     expect(
       within(panel).getByRole("heading", { name: /^Check-in \(/ }),
     ).toBeInTheDocument();
-    expect(transcripts()).toEqual([ROUND_CHECK_IN_SESSION]);
+    expect(transcripts()).toEqual([RUN_CHECK_IN_SESSION]);
     expect(window.location.search).toContain(`event=${CHECK_IN_SPAN}`);
 
     // Escape closes it, exactly as it closes the node view's own panel.
@@ -1533,7 +1533,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN, round: 1 }, "2");
+    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "2");
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Detail unavailable",
     );
@@ -1559,7 +1559,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     // The invalidation names a run the sweep has already taken away; the view
     // follows the list instead of reporting a telemetry failure.
     removed = true;
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN, round: 1 }, "4");
+    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "4");
     expect(await screen.findByText("archive")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -1573,7 +1573,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       const detail = runDetail(LIVE_RUN);
       // A dependency cycle: the layout rejects it, and no partial graph may be
       // shown in its place.
-      const tasks: { deps?: string[] }[] = detail.rounds[0]?.plan.tasks ?? [];
+      const tasks: { deps?: string[] }[] = detail.graph.plan.tasks ?? [];
       if (tasks[0]) tasks[0].deps = ["dashboard"];
       return Response.json(detail);
     });
@@ -1625,3 +1625,133 @@ test(
     cleanup();
   },
 );
+
+describe("the reading a viewer asks for", () => {
+  /** The filter every read of the selected run was taken under, in order. */
+  const filtersAsked = (fetch: { mock: { calls: unknown[][] } }): string[] =>
+    fetch.mock.calls
+      .map(
+        (call: unknown[]) => new URL(String(call[0]), window.location.origin),
+      )
+      .filter((url) => isRunDetail(url) || isTimeline(url))
+      .map((url) => url.searchParams.get("filter") ?? "");
+
+  test(
+    "switches between decisions and detailed activity, and says which is on",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
+      const { client, fetch } = telemetryHarness();
+      render(<App client={client} />);
+      await screen.findByRole("heading", { name: LIVE_RUN });
+
+      const choice = (name: string) =>
+        within(
+          screen.getByRole("group", { name: "Level of detail" }),
+        ).getByRole("button", { name });
+      const decisions = choice("Decisions");
+      const activity = choice("Detailed activity");
+
+      // A reader who asked for nothing is shown everything, and the control says
+      // so rather than leaving both settings looking equally selected.
+      expect(activity).toHaveAttribute("aria-pressed", "true");
+      expect(decisions).toHaveAttribute("aria-pressed", "false");
+      await waitFor(() =>
+        expect(filtersAsked(fetch).length).toBeGreaterThan(0),
+      );
+      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["monitor"]));
+
+      // Narrowing to the decisions is one click, and every read of the run is
+      // taken again under the profile it names — so the graph, the timeline and
+      // the stream can never be showing three different slices of one run.
+      const before = filtersAsked(fetch).length;
+      await userEvent.click(decisions);
+      expect(decisions).toHaveAttribute("aria-pressed", "true");
+      expect(activity).toHaveAttribute("aria-pressed", "false");
+      await waitFor(() =>
+        expect(filtersAsked(fetch).length).toBeGreaterThan(before),
+      );
+      expect(filtersAsked(fetch).slice(before)).toContain("planner");
+      expect(filtersAsked(fetch).slice(before)).not.toContain("monitor");
+
+      // And the reading is in the address, like every other selection: a reader
+      // who narrowed their attention can send someone what they were looking at.
+      expect(window.location.search).toContain("detail=decisions");
+      // The run and the view they were on are untouched by it.
+      expect(window.location.search).toContain(`run=${LIVE_RUN}`);
+      expect(window.location.search).toContain("view=overall");
+
+      // Back returns to the detailed reading, so the switch is undoable the way
+      // the rest of the drill-down is.
+      act(() => {
+        window.history.back();
+      });
+      await waitFor(() =>
+        expect(choice("Detailed activity")).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        ),
+      );
+      cleanup();
+    },
+  );
+
+  test(
+    "opens on the decisions-level reading when the address names one",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&view=overall&detail=decisions`,
+      );
+      const { client, fetch } = telemetryHarness();
+      render(<App client={client} />);
+      await screen.findByRole("heading", { name: LIVE_RUN });
+      await waitFor(() =>
+        expect(filtersAsked(fetch).length).toBeGreaterThan(0),
+      );
+      // Every read from the first one: a bookmarked reading is not a reading the
+      // app arrives at after showing the other one first.
+      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["planner"]));
+      expect(
+        within(
+          screen.getByRole("group", { name: "Level of detail" }),
+        ).getByRole("button", { name: "Decisions" }),
+      ).toHaveAttribute("aria-pressed", "true");
+      cleanup();
+    },
+  );
+
+  test(
+    "a reading the server has no profile for is reported, not silently widened",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&view=overall&detail=decisions`,
+      );
+      const { client } = telemetryHarness((url) => {
+        if (!isRunDetail(url)) return defaultResponder(url);
+        // What a server serves for a profile the run does not have. A viewer
+        // must be told rather than shown an unnarrowed payload under the name
+        // they asked for.
+        return Response.json(
+          {
+            error: {
+              code: "unknown_filter_profile",
+              message: '"planner" is not a filter profile of this run',
+            },
+          },
+          { status: 404 },
+        );
+      });
+      render(<App client={client} />);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /not a filter profile/,
+      );
+      cleanup();
+    },
+  );
+});

@@ -22,7 +22,9 @@ import {
 test("every fixture payload satisfies the published read-API contract", () => {
   expect(parseRunList(runList).runs).toHaveLength(2);
   expect(parseRunDetail(runDetail(LIVE_RUN)).run.run_id).toBe(LIVE_RUN);
-  expect(parseRunDetail(runDetail(HISTORY_RUN)).rounds).toHaveLength(1);
+  expect(parseRunDetail(runDetail(HISTORY_RUN)).graph?.run_id).toBe(
+    HISTORY_RUN,
+  );
   expect(parseRunTimeline(runTimeline(LIVE_RUN)).spans.length).toBeGreaterThan(
     5,
   );

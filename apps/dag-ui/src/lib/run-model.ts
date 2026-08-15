@@ -2,12 +2,12 @@ import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
 import type {
   Failure,
   GraphResultItem,
+  GraphState,
   NodeControl,
   NodeDetail,
   NodeStatus,
   NodeTelemetry,
   PlanTask,
-  Round,
   RunDetail,
   RunLaunch,
   RunSummary,
@@ -27,7 +27,7 @@ export interface NodeView {
   readonly id: string;
   readonly label: string;
   readonly kind: "agent" | "human" | "lifecycle";
-  /** The authoritative `Round.node_status`, rendered without client-side defaults. */
+  /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
   readonly task: PlanTask;
   readonly telemetry?: NodeTelemetry;
@@ -49,15 +49,23 @@ export interface NodeView {
   readonly blockers: readonly string[];
 }
 
-export function latestRound(detail: RunDetail): Round | undefined {
-  return detail.rounds.at(-1);
+/**
+ * The run's graph state, or `undefined` for a run the server could not project one
+ * for — a run whose plan this host cannot read at all.
+ *
+ * One object, not the last of a list. Execution is continuous, so a run has one
+ * graph it is converging toward rather than a round per batch, and reading "the
+ * latest" of anything is what this replaced.
+ */
+export function graphOf(detail: RunDetail): GraphState | undefined {
+  return detail.graph ?? undefined;
 }
 
 export function nodeViews(detail: RunDetail): NodeView[] {
-  const round = latestRound(detail);
-  if (!round) return [];
+  const graph = graphOf(detail);
+  if (!graph) return [];
   const telemetry = new Map(detail.run.nodes.map((node) => [node.node, node]));
-  return round.plan.tasks.flatMap((task) => {
+  return graph.plan.tasks.flatMap((task) => {
     const rawKind = readString(task, "kind");
     const kind =
       rawKind === "human"
@@ -66,12 +74,12 @@ export function nodeViews(detail: RunDetail): NodeView[] {
           ? "lifecycle"
           : "agent";
     // `node_results` holds only what a *terminal journal event* carried, so it is
-    // empty for every node the scheduler settled without dispatching. A round that
-    // finished also recorded a whole-graph result, and for those nodes it is the only
-    // record there is — the one that carries what blocked them.
+    // empty for every node the scheduler settled without dispatching. A run whose
+    // driver closed out also recorded a whole-graph result, and for those nodes it is
+    // the only record there is — the one that carries what blocked them.
     const result =
-      round.node_results[task.id] ?? round.result?.results?.[task.id];
-    const status = round.node_status[task.id];
+      graph.node_results[task.id] ?? graph.result?.results?.[task.id];
+    const status = graph.node_status[task.id];
     // The server excludes a run it cannot fold into authoritative node statuses.
     // Stay defensive if an older server violates that invariant: omit the unusable
     // task instead of inventing a state for it or taking down the remaining graph.
@@ -86,10 +94,10 @@ export function nodeViews(detail: RunDetail): NodeView[] {
         telemetry: telemetry.get(task.id),
         result,
         detail: detail.node_details[task.id],
-        control: round.node_control[task.id],
+        control: graph.node_control[task.id],
         failure: telemetry.get(task.id)?.failure,
         blockers: [
-          ...(round.node_gated_by[task.id] ?? []),
+          ...(graph.node_gated_by[task.id] ?? []),
           ...(result?.blocked_by ?? []),
         ],
       },

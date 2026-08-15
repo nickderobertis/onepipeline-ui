@@ -8,7 +8,14 @@
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -290,9 +297,12 @@ test("leads a node that is not moving with the reason it is not", async ({
   );
 });
 
-test("renders the outcomes only a settled round records", async ({ page }) => {
-  // A finished round records statuses a live one cannot journal. Each has to reach
-  // the canvas as itself and read as the kind of outcome it is.
+test("renders the outcomes only a recorded result carries", async ({
+  page,
+}) => {
+  // The result a driver writes as it closes out holds statuses no settlement
+  // journals. Each has to reach the canvas as itself and read as the kind of
+  // outcome it is.
   await openObservatory(page, `/?run=${runs().outcomes}&view=graph`);
   await expect(graphNodes(page, "not-completed")).toContainText("backfill");
   await expect(graphNodes(page, "unknown")).toContainText("verify");
@@ -471,7 +481,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   await worker.click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("event"))
-    .toBe(`dispatch.01.${fixture().sessions.worker}`);
+    .toBe(`dispatch.${fixture().sessions.worker}`);
   await expect(itemDetail(page)).toContainText(
     "Implementing the dashboard now",
   );
@@ -547,7 +557,7 @@ test("restores a bookmarked moment inside a session from the address alone", asy
   await turn.click();
   const bookmarked = new URL(page.url());
   expect(bookmarked.searchParams.get("event")).not.toBe(
-    `dispatch.01.${fixture().sessions.worker}`,
+    `dispatch.${fixture().sessions.worker}`,
   );
 
   // Loading the graph in between is what makes the next load cold: nothing the
@@ -611,7 +621,7 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
   await judge.click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("event"))
-    .toBe(`dispatch.01.${fixture().sessions.judge}`);
+    .toBe(`dispatch.${fixture().sessions.judge}`);
 
   const judgeItem = transcript
     .getByRole("article")
@@ -833,9 +843,7 @@ test("shows a verification and a publication as the records they are", async ({
   await expect(
     itemDetail(page).getByRole("button", { name: "Collapse log" }),
   ).toBeVisible();
-  await expect(itemDetail(page)).not.toContainText(
-    "round-01/foundation/gate.log",
-  );
+  await expect(itemDetail(page)).not.toContainText("foundation/gate.log");
   await page.getByRole("button", { name: "Close detail" }).click();
 
   // The publication carries the change it published and says, rather than implies,
@@ -1066,8 +1074,11 @@ test("keeps a node's task, criteria, dependencies and verification reachable", a
     .click();
   await expect(page).toHaveURL(/node=dashboard/);
   await page.getByRole("tab", { name: "Task" }).click();
-  await expect(page.getByText("Build the live dashboard")).toBeVisible();
-  await page.getByRole("tab", { name: "Completion criteria" }).click();
+  await expect(page.getByText(/Build the live dashboard/)).toBeVisible();
+  // Plan schema 2 retired `done_when`: a node's bar is the `## Acceptance
+  // criteria` section of its own task, which is the text handed to the judge, and
+  // the tab shows that section alone rather than the whole prose again.
+  await page.getByRole("tab", { name: "Acceptance criteria" }).click();
   await expect(page.getByText("Users can inspect transcripts")).toBeVisible();
 
   await page.getByRole("tab", { name: "Dependencies" }).click();
@@ -1083,13 +1094,90 @@ test("keeps a node's task, criteria, dependencies and verification reachable", a
   await expect(pr).toHaveAttribute("target", "_blank");
   await expect(pr).toHaveAttribute("rel", "noreferrer");
 
-  // A human action names work for a person, so the contract forbids it a completion
-  // bar; the summary has to say that rather than render an empty criteria block.
+  // A human action names work for a person and states no bar of its own; the
+  // summary has to say that rather than render an empty criteria block.
   await openObservatory(page, `/?run=${runs().live}&node=approval`);
-  await page.getByRole("tab", { name: "Completion criteria" }).click();
+  await page.getByRole("tab", { name: "Acceptance criteria" }).click();
   await expect(
-    page.getByText("No completion criteria recorded."),
+    page.getByText("No acceptance criteria recorded in this node's task."),
   ).toBeVisible();
+});
+
+/**
+ * The one affordance a viewer has over how much of a run they are reading, driven
+ * in a real browser against the real read API.
+ *
+ * The component tier proves the switch asks the server for the right profile; only
+ * this proves the server answers, that what comes back is genuinely narrower, and
+ * that the narrowed reading is an address a reader can send someone.
+ */
+test("switches the reading between decisions and detailed activity", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
+
+  const choice = (name: string) =>
+    page.getByRole("group", { name: "Level of detail" }).getByRole("button", {
+      name,
+    });
+  // The journal records the plot draws over its lanes. A record is exactly what a
+  // filter admits or excludes, so this is the count that has to move.
+  const markers = () =>
+    timeline(page).getByRole("button", { name: /, marker$/ });
+
+  // A reader who asked for nothing is reading everything, and the control says so.
+  await expect(choice("Detailed activity")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(markers().first()).toBeVisible();
+  const detailed = await markers().count();
+
+  // Narrowing to the decisions is one click, and fewer records are drawn — but
+  // not none, because a decision is a record too.
+  await choice("Decisions").click();
+  await expect(page).toHaveURL(/detail=decisions/);
+  await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
+  await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
+  await expect.poll(() => markers().count()).toBeLessThan(detailed);
+  expect(await markers().count()).toBeGreaterThan(0);
+  // The node's own dispatch is still drawn at the bounds the run recorded: a
+  // filter narrows what is listed, never what the run did.
+  await expect(
+    timeline(page).getByRole("button", {
+      name: /Worker \(engineer-dashboard\)/,
+    }),
+  ).toBeVisible();
+
+  // The narrowed reading is an address: opened cold it arrives on the same one
+  // rather than showing the detailed reading first.
+  await page.reload();
+  await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => markers().count()).toBeLessThan(detailed);
+
+  // And back returns to the detailed reading, so the switch is undoable the way
+  // the rest of the drill-down is.
+  await page.goBack();
+  await expect(choice("Detailed activity")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect.poll(() => markers().count()).toBe(detailed);
+
+  // An address naming a reading this app does not have is a hand-edited or an
+  // outgrown link, and it lands on the detailed one — everything — rather than on
+  // an empty view or a refusal. A reader who mistyped it still sees their run.
+  await openObservatory(
+    page,
+    `/?run=${runs().live}&node=dashboard&detail=whatever`,
+  );
+  await expect(choice("Detailed activity")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect.poll(() => markers().count()).toBe(detailed);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("keeps a node of hundreds of recorded sessions scannable", async ({
@@ -1393,7 +1481,7 @@ test("restores node tabs and moves between them from the keyboard", async ({
     page,
     `/?run=${runs().live}&node=dashboard&tab=criteria`,
   );
-  const criteria = page.getByRole("tab", { name: "Completion criteria" });
+  const criteria = page.getByRole("tab", { name: "Acceptance criteria" });
   await expect(criteria).toHaveAttribute("aria-selected", "true");
   await criteria.focus();
   await page.keyboard.press("ArrowRight");
@@ -1583,14 +1671,14 @@ test("opens a run-level session other than the one shown on arrival", async ({
   });
 
   // The served run records two sessions at no node: the orchestrator's own, and the
-  // round's check-in beside it. The graph view plots them and reads neither, because
+  // run's check-in beside it. The graph view plots them and reads neither, because
   // it is a reading of the record rather than a download of it.
   await openObservatory(page, `/?run=${runs().live}&view=overall`);
   await expandGraphRows(page);
   const runLevel = page.getByRole("region", { name: "Run-level timeline" });
   await expect(runLevel).toBeVisible();
   await expect.poll(() => transcripts.size).toBe(0);
-  // Opened into its own lanes: two sessions the round never closed both run to the
+  // Opened into its own lanes: two sessions the run never closed both run to the
   // moment this payload was read, so on the one collapsed line the later one lies
   // inside the earlier and only one of them can own a moment.
   await runLevel.getByRole("button", { name: "Expand timeline" }).click();
@@ -1616,7 +1704,7 @@ test("opens a run-level session other than the one shown on arrival", async ({
   await page.keyboard.press("Escape");
   await expect(itemDetail(page)).toHaveCount(0);
   await runLevel.getByRole("button", { name: /^Run-level · Check-in/ }).click();
-  await expect(itemDetail(page)).toContainText("Round 1 progress reported");
+  await expect(itemDetail(page)).toContainText("Progress reported");
   await expect(itemDetail(page)).toContainText("Check-in");
   await expect.poll(() => transcripts.size).toBe(2);
 });
@@ -1714,7 +1802,7 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
   await expandGraphRows(page);
   const runLevel = page.getByRole("region", { name: "Run-level timeline" });
 
-  // The run-level row records the driver, then a gap, then the round's check-in.
+  // The run-level row records the driver, then a gap, then the run's check-in.
   // That gap is drawn as a segment of its own: blank space is the one reading to
   // avoid here, because it cannot be told from a record that is missing.
   const idle = runLevel.getByRole("button", { name: /^Idle · / }).first();
@@ -1786,7 +1874,7 @@ test("frames a different run from scratch when the reader moves to it", async ({
 test("says a run has recorded no timeline rather than drawing an empty one", async ({
   page,
 }) => {
-  // The served `dag-ui-eventless` run has its round prepared and has journalled
+  // The served `dag-ui-eventless` run has its plan written and has journalled
   // nothing at all — what every run looks like for its first moments. There is no
   // clock to plot, and saying so is not the same answer as an empty plot.
   await openObservatory(page, `/?run=${runs().eventless}&view=overall`);
@@ -2536,21 +2624,38 @@ function freePort(): Promise<number> {
 }
 
 /**
- * And what it does when the binary is where `CARGO_TARGET_DIR` says: it serves
- * through that one, under either name cargo writes.
+ * The served binary at `path`: linked if this host can, copied if it cannot.
+ *
+ * A link rather than a copy where one is possible — it is the same 160 MB binary
+ * this run is already being served through. A hard link needs both paths on one
+ * filesystem, though, and `tmpdir()` is a different one from the checkout on
+ * plenty of hosts: a container with `/tmp` on tmpfs, or a workspace on its own
+ * mount. That is a fact about where the test happens to be running and not about
+ * the thing under test, so it costs a copy rather than the journey.
+ */
+function stageBinary(path: string): void {
+  try {
+    linkSync(API_BINARY, path);
+  } catch (caught) {
+    if ((caught as NodeJS.ErrnoException).code !== "EXDEV") throw caught;
+    copyFileSync(API_BINARY, path);
+  }
+}
+
+/**
+ * And what the server does when the binary is where `CARGO_TARGET_DIR` says: it
+ * serves through that one, under either name cargo writes.
  *
  * Both names are driven here rather than only this platform's, because the browser
- * tier runs on Linux and a name chosen from `process.platform` would leave the other
- * one proven nowhere. A link rather than a copy: it is the same 160 MB binary this
- * run is already being served through, named the way the other platform's cargo
- * would have named it.
+ * tier runs on Linux and a name chosen from `process.platform` would leave the
+ * other one proven nowhere.
  */
 for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
   test(`serves through the ${name} a custom CARGO_TARGET_DIR names`, async () => {
     const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));
     const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-space-"));
     mkdirSync(join(target, "debug"), { recursive: true });
-    linkSync(API_BINARY, join(target, "debug", name));
+    stageBinary(join(target, "debug", name));
     const port = await freePort();
     const served = spawn(
       process.execPath,

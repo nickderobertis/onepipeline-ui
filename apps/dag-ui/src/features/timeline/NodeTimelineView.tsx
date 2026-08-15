@@ -172,7 +172,7 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">
-          <pre>{node.task.done_when ?? "No completion criteria recorded."}</pre>
+          <pre>{acceptanceCriteria(node.task)}</pre>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="dependencies">
           <dl className="facts">
@@ -500,6 +500,32 @@ function taskProse(task: NodeView["task"]): string {
   const steps = task.steps ?? [];
   if (steps.length === 0) return "No task prose recorded.";
   return steps.map((step) => `## ${step.id}\n\n${step.task}`).join("\n\n");
+}
+
+/**
+ * The bar this node is judged against: the `## Acceptance criteria` section of
+ * its own task prose.
+ *
+ * Read out of the prose rather than off a field, because plan schema 2 retired
+ * `done_when` and there is no such field to read. The criterion is written once,
+ * in the task, and the judge reads it as the first message of the transcript it is
+ * given — so this shows the reader exactly the text the judge was handed, and says
+ * so when the task names no bar at all.
+ */
+function acceptanceCriteria(task: NodeView["task"]): string {
+  const prose = taskProse(task);
+  // Any `##` heading whose words are "acceptance criteria", however it was cased
+  // or spaced, up to the next heading of the same level or the end of the prose.
+  // Written without the `m` flag on purpose: `$` has to mean end-of-prose for the
+  // last section, and the line anchors are spelled out as newlines instead.
+  const section =
+    /(?:^|\n)##[ \t]*acceptance[ \t]+criteria[ \t]*\r?\n([\s\S]*?)(?=\r?\n##[ \t]|$)/i.exec(
+      prose,
+    );
+  const body = section?.[1]?.trim();
+  return body === undefined || body.length === 0
+    ? "No acceptance criteria recorded in this node's task."
+    : body;
 }
 
 function Publication({ node }: { readonly node: NodeView }) {

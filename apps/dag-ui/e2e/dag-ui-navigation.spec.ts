@@ -220,7 +220,7 @@ test("walks graph to node to timeline item and back, restoring each selection", 
     "Implementing the dashboard now",
   );
   await expect(page).toHaveURL(
-    new RegExp(`event=dispatch.01.${fixture().sessions.worker}`),
+    new RegExp(`event=dispatch.${fixture().sessions.worker}`),
   );
 
   // Back once leaves the item and keeps the node: the reader stepped out of one
@@ -260,7 +260,7 @@ test("restores a deep-linked moment at a narrow viewport", async ({ page }) => {
   await open(
     page,
     PHONE,
-    `/?run=${runs().live}&node=dashboard&event=dispatch.01.${fixture().sessions.worker}`,
+    `/?run=${runs().live}&node=dashboard&event=dispatch.${fixture().sessions.worker}`,
   );
   await expect(
     page.getByRole("region", { name: "Timeline for dashboard" }),

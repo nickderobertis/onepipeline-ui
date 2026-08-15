@@ -1,13 +1,13 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 12,
+  "telemetry_schema_version": 13,
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
     "state": "settled",
-    "phase": "reviewing-results",
-    "last_event": "round-finished",
-    "last_progress_at": 1786104031,
+    "phase": "settled",
+    "last_event": "node-settled",
+    "last_progress_at": 1786104030,
     "timing": {
       "agent_seconds": 13,
       "judge_seconds": null,
@@ -16,24 +16,24 @@
       "publication_wait_seconds": 9,
       "lock_wait_seconds": 1,
       "setup_seconds": 1,
-      "scheduling_seconds": 4,
-      "wall_seconds": 31,
+      "scheduling_seconds": 3,
+      "wall_seconds": 30,
       "agent_model_ms": 2500,
       "judge_model_ms": 3000,
       "llmlint_model_ms": null,
       "tool_ms": null,
       "idle_orchestration_ms": null,
       "unattributed_ms": 0,
-      "wall_ms": 31000,
+      "wall_ms": 30000,
       "fractions": {
-        "agent_model": 0.08064516129032258,
-        "judge_model": 0.0967741935483871,
+        "agent_model": 0.08333333333333333,
+        "judge_model": 0.1,
         "llmlint_model": null,
         "tool": null,
         "idle_orchestration": null,
-        "lock_wait": 0.035483870967741936,
-        "setup": 0.06129032258064516,
-        "scheduling": 0.12903225806451613
+        "lock_wait": 0.03666666666666667,
+        "setup": 0.06333333333333334,
+        "scheduling": 0.1
       }
     },
     "nodes": [
@@ -132,81 +132,77 @@
       "judge_model_ms": 3000,
       "llmlint_model_ms": null,
       "tool_ms": null,
-      "wall_ms": 31000
+      "wall_ms": 30000
     },
     "turns": 4,
     "lint": 0
   },
-  "rounds": [
-    {
-      "run_id": "run-20260807-a1b2c3",
-      "round": 1,
-      "plan": {
-        "tasks": [
-          {
-            "id": "contract-interface",
-            "kind": "agent",
-            "persona": "worker",
-            "task": "## What\nLand the wire contract.",
-            "done_when": "the routes serve"
-          },
-          {
-            "id": "review",
-            "kind": "agent",
-            "persona": "judge",
-            "task": "## What\nReview it.",
-            "deps": [
-              "contract-interface"
-            ]
-          }
-        ],
-        "schema_version": 1,
-        "concurrency": 4,
-        "name": "contract",
-        "goal": {
-          "id": "5b4501007f42",
-          "text": "serve the read contract"
-        }
-      },
-      "node_states": {
-        "contract-interface": "done",
-        "review": "done"
-      },
-      "node_status": {
-        "contract-interface": "done",
-        "review": "done"
-      },
-      "node_gated_by": {},
-      "node_control": {},
-      "node_results": {
-        "contract-interface": {
+  "graph": {
+    "run_id": "run-20260807-a1b2c3",
+    "plan": {
+      "tasks": [
+        {
+          "id": "contract-interface",
           "kind": "agent",
-          "status": "done",
-          "outcome": "shipped",
-          "branch": "feature/contract-interface",
-          "pr": "https://example.invalid/changes/1",
-          "completed": true
+          "persona": "worker",
+          "task": "## What\nLand the wire contract."
         },
-        "review": {
+        {
+          "id": "review",
           "kind": "agent",
-          "status": "done",
-          "outcome": "approved",
-          "completed": true
+          "persona": "judge",
+          "task": "## What\nReview it.",
+          "deps": [
+            "contract-interface"
+          ]
         }
+      ],
+      "schema_version": 2,
+      "concurrency": 4,
+      "name": "contract",
+      "goal": {
+        "id": "5b4501007f42",
+        "text": "serve the read contract"
+      }
+    },
+    "node_states": {
+      "contract-interface": "done",
+      "review": "done"
+    },
+    "node_status": {
+      "contract-interface": "done",
+      "review": "done"
+    },
+    "node_gated_by": {},
+    "node_control": {},
+    "node_results": {
+      "contract-interface": {
+        "kind": "agent",
+        "status": "done",
+        "completed": true,
+        "outcome": "shipped",
+        "branch": "feature/contract-interface",
+        "pr": "https://example.invalid/changes/1"
       },
-      "attestations": [],
-      "result": {
-        "ok": true,
-        "state": "complete",
-        "round": 1,
-        "started_order": [
-          "contract-interface",
-          "review"
-        ]
-      },
-      "last_seq": 24
-    }
-  ],
+      "review": {
+        "kind": "agent",
+        "status": "done",
+        "completed": true,
+        "outcome": "approved"
+      }
+    },
+    "decisions": [],
+    "attestations": [],
+    "result": {
+      "ok": true,
+      "state": "complete",
+      "started_order": [
+        "contract-interface",
+        "review"
+      ]
+    },
+    "last_seq": 24
+  },
   "conversations": [
     {
       "conversation": {
@@ -260,7 +256,6 @@
       },
       "attribution": {
         "runId": "run-20260807-a1b2c3",
-        "round": 1,
         "nodeId": "contract-interface",
         "launchId": "run-20260807-a1b2c3",
         "launcher": "claude-code",
@@ -322,7 +317,6 @@
       },
       "attribution": {
         "runId": "run-20260807-a1b2c3",
-        "round": 1,
         "nodeId": "review",
         "launchId": "run-20260807-a1b2c3",
         "launcher": "claude-code",

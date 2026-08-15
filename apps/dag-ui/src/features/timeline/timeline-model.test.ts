@@ -19,7 +19,7 @@ const timeline = parseRunTimeline(runTimeline(LIVE_RUN));
 describe("one node's slice of the run timeline", () => {
   test("lists the node's own recorded work, in order, with its durations", () => {
     const dashboard = nodeTimeline(timeline, "dashboard");
-    expect(dashboard.span?.id).toBe("node-1-dashboard");
+    expect(dashboard.span?.id).toBe("node-dashboard");
     // The node's own span is the subject of the view, so what the rail lists is
     // what happened inside it — its dispatches, its rollup, its own events.
     expect(dashboard.rows.map(({ id }) => id)).toEqual([
@@ -178,7 +178,7 @@ describe("one node's slice of the run timeline", () => {
 
   test("names lifecycle steps and distinguishes a retried worker dispatch", () => {
     const fixture = parseRunTimeline(runTimeline(LIVE_RUN));
-    const node = fixture.spans.find(({ id }) => id === "node-1-dashboard");
+    const node = fixture.spans.find(({ id }) => id === "node-dashboard");
     const worker = fixture.spans.find(
       ({ id }) => id === "dispatch-worker-session",
     );
@@ -189,7 +189,6 @@ describe("one node's slice of the run timeline", () => {
       kind: "retry-requested",
       at: "2026-07-26T11:02:35.000Z",
       node_id: "dashboard",
-      round: 1,
     });
     fixture.spans.push(
       {
@@ -203,10 +202,9 @@ describe("one node's slice of the run timeline", () => {
         id: "step-build",
         kind: "step",
         label: "Build and verify",
-        parent_id: "node-1-dashboard",
+        parent_id: "node-dashboard",
         node_id: "dashboard",
         step_id: "build",
-        round: 1,
         started_at: "2026-07-26T11:03:01.000Z",
         ended_at: "2026-07-26T11:03:20.000Z",
         status: "done",
@@ -230,7 +228,7 @@ describe("one node's slice of the run timeline", () => {
       displayKind: "Lifecycle",
       displayLabel: "Lifecycle: Build and verify",
     });
-    expect(projected.rows.some(({ id }) => id === "node-1-dashboard")).toBe(
+    expect(projected.rows.some(({ id }) => id === "node-dashboard")).toBe(
       false,
     );
   });

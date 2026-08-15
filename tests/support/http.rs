@@ -169,10 +169,20 @@ impl Stream {
                 return Some(frame);
             }
             let mut line = String::new();
-            let read = self
-                .reader
-                .read_line(&mut line)
-                .expect("read from the stream");
+            let read = match self.reader.read_line(&mut line) {
+                Ok(read) => read,
+                // A bounded wait that expired: the server said nothing, which is
+                // an answer rather than a failure. Any other error is not.
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return None
+                }
+                Err(err) => panic!("read from the stream: {err}"),
+            };
             if read == 0 {
                 return None;
             }
@@ -185,6 +195,29 @@ impl Stream {
             }
             self.buffered.push_str(&line);
         }
+    }
+
+    /// The next frame, or `None` if none arrives within `patience`.
+    ///
+    /// The one way to assert a frame did **not** arrive. `next_frame` blocks
+    /// until the server sends something or drops the connection, so a journey
+    /// about a subscriber deliberately *not* being woken has to bound the wait
+    /// itself — and the bound is on the socket, so it is the server's silence
+    /// being measured rather than this client's.
+    ///
+    /// The stream's own read timeout is restored before returning, so a bounded
+    /// wait does not leave every later read on a short fuse.
+    pub fn frame_within(&mut self, patience: Duration) -> Option<Frame> {
+        self.reader
+            .get_ref()
+            .set_read_timeout(Some(patience))
+            .expect("read timeout");
+        let frame = self.next_frame();
+        self.reader
+            .get_ref()
+            .set_read_timeout(Some(TIMEOUT))
+            .expect("read timeout");
+        frame
     }
 
     /// The next `count` frames, which is what a journey asserts on.

@@ -75,7 +75,16 @@ and because nothing else recovers *why* the tooling is what it is.
 pre-push bar.** `just bootstrap` also provisions the `onepipeline` CLI at the
 version the lock pins its library to, into `.tools/`: the read API asks it for
 each run's telemetry document, the two speak a versioned document, and a
-mismatched pair serves every run with no clock at all. `just deps-check` is deliberately outside it: it needs a network
+mismatched pair serves every run with no clock at all.
+
+**`oneagentgraph` is pinned to 0.2.12 in the lockfile, and `cargo update` on it
+will break the build.** That library added a field to `run::Request` in 0.2.13 —
+a patch release — and `onepipeline` 0.4.0 is built against 0.2.12, so cargo's
+semver unification picks a version the SDK does not compile against. The pin
+comes off when a published `onepipeline` compiles against 0.2.13 or later; until
+then it is also what keeps `tests/contract.rs` from gating this crate's copy of
+the shared filter grammar against that library's own declaration of it, which
+landed in the same release. `just deps-check` is deliberately outside it: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx
@@ -144,6 +153,12 @@ fans one uniformly-named target across all of them.
 - **Tests are realistic, not mocked, and complete, not minimal.** Nothing under
   test is stubbed, and a change is not done until a real journey covers it —
   happy path and at least one failure a user can cause.
+- **A filter shapes a response and never the run.** `?filter=` narrows the
+  *events* a payload lists; every status, settlement, decision, count and timing
+  beside them is folded from the whole journal whatever it said. A reader who
+  narrowed their attention must be shown the same graph, in the same states, as
+  one who asked for everything. It reaches the events a timeline span lists and
+  the transcripts a detail lists, and nothing else.
 - **Validate external input at its trust boundary.** Every `{...}` a route
   interpolates is a validated identifier newtype constructible only through
   `TryFrom`; a raw `String` must never reach storage, and a runs root is a

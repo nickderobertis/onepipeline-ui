@@ -63,7 +63,7 @@ const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 12,
+  telemetry_schema_version: 13,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -88,8 +88,7 @@ export function runDetail(runId: string = LIVE_RUN) {
     ? [
         {
           id: "archive",
-          task: "Archive the release",
-          done_when: "Archive exists",
+          task: "## What\nArchive the release\n\n## Acceptance criteria\nArchive exists",
         },
         // A lifecycle node that delegates to `steps`: it has no `task` prose and no
         // `persona` of its own, which is a shape the read API has always served and
@@ -116,21 +115,18 @@ export function runDetail(runId: string = LIVE_RUN) {
     : [
         {
           id: "foundation",
-          task: "Prepare shared contracts",
-          done_when: "Contract tests pass",
+          task: "## What\nPrepare shared contracts\n\n## Acceptance criteria\nContract tests pass",
           repo: "local/example",
         },
         {
           id: "dashboard",
           deps: ["foundation"],
-          task: "Build the live dashboard",
-          done_when: "Users can inspect transcripts",
+          task: "## What\nBuild the live dashboard\n\n## Acceptance criteria\nUsers can inspect transcripts",
         },
         {
           id: "publish",
           deps: ["dashboard"],
-          task: "Publish the dashboard",
-          done_when: "The release is reachable",
+          task: "## What\nPublish the dashboard\n\n## Acceptance criteria\nThe release is reachable",
         },
         {
           id: "approval",
@@ -141,29 +137,25 @@ export function runDetail(runId: string = LIVE_RUN) {
         {
           id: "queued",
           deps: ["approval"],
-          task: "Start queued follow-up",
-          done_when: "Follow-up starts",
+          task: "## What\nStart queued follow-up\n\n## Acceptance criteria\nFollow-up starts",
         },
         // Held behind the failed publish rather than behind a human action: the
         // scheduler's other derived gate, and the other word a card has to say.
         {
           id: "abandoned",
           deps: ["publish"],
-          task: "Clean up after the publish",
-          done_when: "Cleanup runs",
+          task: "## What\nClean up after the publish\n\n## Acceptance criteria\nCleanup runs",
         },
         // Eligible work whose dependency is still running: the one node here that
         // really has nothing to report.
         {
           id: "followup",
           deps: ["dashboard"],
-          task: "Follow the dashboard up",
-          done_when: "The follow-up lands",
+          task: "## What\nFollow the dashboard up\n\n## Acceptance criteria\nThe follow-up lands",
         },
         {
           id: "obsolete",
-          task: "Retire obsolete work",
-          done_when: "Work is cancelled",
+          task: "## What\nRetire obsolete work\n\n## Acceptance criteria\nWork is cancelled",
         },
       ];
   // What the journal recorded: the strict fold, and only for nodes it saw.
@@ -189,8 +181,8 @@ export function runDetail(runId: string = LIVE_RUN) {
   const gatedBy: Record<string, string[]> = historical
     ? {}
     : { queued: ["approval"], abandoned: ["publish"] };
-  // One entry for every node the round has in flight, and for no other: `dashboard`
-  // is the only node running here, and it is talking in a turn the run can address.
+  // One entry for every node in flight, and for no other: `dashboard` is the only
+  // node running here, and it is talking in a turn the run can address.
   const control = historical
     ? {}
     : { dashboard: { addressable: true, member: "worker" } };
@@ -199,7 +191,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 12,
+    telemetry_schema_version: 13,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -210,8 +202,8 @@ export function runDetail(runId: string = LIVE_RUN) {
     run: {
       run_id: runId,
       state: historical ? "complete" : "running",
-      phase: historical ? "complete" : "agent",
-      last_event: historical ? "round-finished" : "node-started",
+      phase: historical ? "settled" : "dispatching",
+      last_event: historical ? "node-settled" : "node-ready",
       timing,
       nodes: tasks
         .filter(({ id }) => states[id] !== undefined)
@@ -253,38 +245,40 @@ export function runDetail(runId: string = LIVE_RUN) {
       turns: 4,
       lint: 0,
     },
-    rounds: [
-      {
-        run_id: runId,
-        round: 1,
-        plan: { tasks },
-        node_states: states,
-        node_status: status,
-        node_gated_by: gatedBy,
-        node_control: control,
-        node_results: historical
-          ? { archive: { status: "done", ok: true } }
-          : {
-              foundation: {
-                status: "done",
-                ok: true,
-                pr: PR_URL,
-                detail: "Gate completed successfully",
-                telemetry: { checks: { unit: "passed", lint: "passed" } },
-              },
-              publish: {
-                status: "failed",
-                ok: false,
-                detail: "Deploy failed",
-                error: "publication exited non-zero",
-                exit_code: 2,
-              },
+    graph: {
+      run_id: runId,
+      plan: { tasks },
+      node_states: states,
+      node_status: status,
+      node_gated_by: gatedBy,
+      node_control: control,
+      node_results: historical
+        ? { archive: { status: "done", ok: true } }
+        : {
+            foundation: {
+              status: "done",
+              ok: true,
+              pr: PR_URL,
+              detail: "Gate completed successfully",
+              telemetry: { checks: { unit: "passed", lint: "passed" } },
             },
-        attestations: [],
-        result: null,
-        last_seq: 7,
-      },
-    ],
+            publish: {
+              status: "failed",
+              ok: false,
+              detail: "Deploy failed",
+              error: "publication exited non-zero",
+              exit_code: 2,
+            },
+          },
+      // The live run is held behind one decision point: a human has to approve
+      // before `queued` can start, which is why that node reads `blocked`.
+      decisions: historical
+        ? []
+        : [{ id: "approval", kind: "human-action", unblocks: ["queued"] }],
+      attestations: [],
+      result: null,
+      last_seq: 7,
+    },
     node_details: historical
       ? {}
       : {
@@ -366,13 +360,13 @@ export function runDetail(runId: string = LIVE_RUN) {
         "Coordinating the execution frontier",
       ),
       conversation(
-        ROUND_CHECK_IN_SESSION,
+        RUN_CHECK_IN_SESSION,
         "check-in",
         "agent",
         undefined,
         launchId,
         launcher,
-        "Round 1 progress reported",
+        "Progress reported",
       ),
     ],
   };
@@ -387,8 +381,8 @@ function summary(
   return {
     run_id: runId,
     state,
-    phase: state === "complete" ? "complete" : "agent",
-    last_event: state === "complete" ? "round-finished" : "node-started",
+    phase: state === "complete" ? "settled" : "dispatching",
+    last_event: state === "complete" ? "node-settled" : "node-ready",
     timing_quality: "complete",
     linkage_quality: "labelled",
     timing,
@@ -410,13 +404,13 @@ function stamp(seconds: number): string {
 
 /**
  * The served timeline of a run, shaped exactly as `src/payload.rs::timeline` folds
- * one: a round span holding node spans, each holding the dispatches, verification,
+ * one: the run span holding node spans, each holding the dispatches, verification,
  * publication and rollups recorded inside it, with references instead of bodies.
  */
 export function runTimeline(runId: string = LIVE_RUN) {
   return {
     api_version: 2,
-    timeline_schema_version: 4,
+    timeline_schema_version: 5,
     // Read shortly after the last record it carries, which is what a poll of a live
     // run actually returns. The graph-level view plots an unfinished run out to this
     // instant, so a stamp an hour past the record would say the run had spent an
@@ -514,22 +508,20 @@ export function longConversation(turns = 30) {
 function historySpans() {
   return [
     {
-      id: "round-1",
-      kind: "round",
-      label: "round 1",
+      id: "run-1",
+      kind: "run",
+      label: "the run",
       started_at: stamp(0),
       ended_at: stamp(120),
-      round: 1,
       status: "finished",
       events: [],
     },
     {
-      id: "node-1-archive",
+      id: "node-archive",
       kind: "node",
       label: "archive",
-      parent_id: "round-1",
+      parent_id: "run-1",
       node_id: "archive",
-      round: 1,
       started_at: stamp(10),
       ended_at: stamp(90),
       status: "done",
@@ -547,34 +539,31 @@ function historySpans() {
 function liveSpans() {
   return [
     {
-      id: "round-1",
-      kind: "round",
-      label: "round 1",
+      id: "run-1",
+      kind: "run",
+      label: "the run",
       started_at: stamp(0),
       ended_at: null,
-      round: 1,
       events: [
         {
           id: "event-0",
           kind: "node-added",
           at: stamp(0),
-          round: 1,
         },
       ],
     },
     {
-      id: "node-1-foundation",
+      id: "node-foundation",
       kind: "node",
       label: "foundation",
-      parent_id: "round-1",
+      parent_id: "run-1",
       node_id: "foundation",
-      round: 1,
       started_at: stamp(5),
       ended_at: stamp(180),
       status: "done",
       reference: {
         kind: "worker_report",
-        value: "round-01/foundation/report.md",
+        value: "foundation/report.md",
       },
       events: [],
     },
@@ -582,22 +571,20 @@ function liveSpans() {
       id: "verification-4",
       kind: "verification",
       label: "just gate",
-      parent_id: "node-1-foundation",
+      parent_id: "node-foundation",
       node_id: "foundation",
-      round: 1,
       started_at: stamp(30),
       ended_at: stamp(95),
       status: "ok",
-      reference: { kind: "gate_log", value: "round-01/foundation/gate.log" },
+      reference: { kind: "gate_log", value: "foundation/gate.log" },
       events: [],
     },
     {
       id: "publication-6",
       kind: "publication",
       label: "local/example",
-      parent_id: "node-1-foundation",
+      parent_id: "node-foundation",
       node_id: "foundation",
-      round: 1,
       started_at: stamp(100),
       ended_at: stamp(180),
       status: "finished",
@@ -607,7 +594,6 @@ function liveSpans() {
           id: "event-6",
           kind: "pr-created",
           at: stamp(100),
-          round: 1,
           node_id: "foundation",
           reference: { kind: "pr", value: PR_URL },
         },
@@ -615,7 +601,6 @@ function liveSpans() {
           id: "event-7",
           kind: "pr-checks-observed",
           at: stamp(140),
-          round: 1,
           node_id: "foundation",
           status: "passing",
           reference: { kind: "pr", value: PR_URL },
@@ -623,12 +608,11 @@ function liveSpans() {
       ],
     },
     {
-      id: "node-1-dashboard",
+      id: "node-dashboard",
       kind: "node",
       label: "dashboard",
-      parent_id: "round-1",
+      parent_id: "run-1",
       node_id: "dashboard",
-      round: 1,
       started_at: stamp(10),
       ended_at: null,
       events: [
@@ -636,7 +620,6 @@ function liveSpans() {
           id: "event-9",
           kind: "checkpoint-recorded",
           at: stamp(45),
-          round: 1,
           node_id: "dashboard",
           status: "verified",
         },
@@ -646,7 +629,6 @@ function liveSpans() {
           id: "event-10",
           kind: "turn-interrupted",
           at: stamp(50),
-          round: 1,
           node_id: "dashboard",
           redirection: { delivered: true, member: "worker", input_bytes: 41 },
         },
@@ -654,7 +636,6 @@ function liveSpans() {
           id: "event-11",
           kind: "turn-interrupted",
           at: stamp(52),
-          round: 1,
           node_id: "dashboard",
           redirection: {
             delivered: false,
@@ -711,9 +692,8 @@ function liveSpans() {
       id: "rollup-lock-wait-11",
       kind: "rollup",
       label: "lock-wait",
-      parent_id: "node-1-dashboard",
+      parent_id: "node-dashboard",
       node_id: "dashboard",
-      round: 1,
       started_at: stamp(15),
       ended_at: stamp(155),
       count: 1240,
@@ -721,12 +701,11 @@ function liveSpans() {
       events: [],
     },
     {
-      id: "node-1-publish",
+      id: "node-publish",
       kind: "node",
       label: "publish",
-      parent_id: "round-1",
+      parent_id: "run-1",
       node_id: "publish",
-      round: 1,
       started_at: stamp(20),
       ended_at: stamp(70),
       status: "failed",
@@ -738,9 +717,8 @@ function liveSpans() {
       id: "verification-12",
       kind: "verification",
       label: "branch push ai-orchestrator/engineer/publish",
-      parent_id: "node-1-publish",
+      parent_id: "node-publish",
       node_id: "publish",
-      round: 1,
       started_at: stamp(30),
       ended_at: stamp(50),
       status: "failed",
@@ -750,9 +728,8 @@ function liveSpans() {
       id: "publication-13",
       kind: "publication",
       label: "publication",
-      parent_id: "node-1-publish",
+      parent_id: "node-publish",
       node_id: "publish",
-      round: 1,
       started_at: stamp(55),
       ended_at: stamp(70),
       status: "failed",
@@ -762,16 +739,15 @@ function liveSpans() {
       id: "human-wait-14",
       kind: "human-wait",
       label: "approval",
-      parent_id: "round-1",
+      parent_id: "run-1",
       node_id: "approval",
-      round: 1,
       started_at: stamp(75),
       ended_at: null,
       status: "waiting",
       events: [],
     },
     // Run-level work, recorded at no node: the planner driving the whole graph, and
-    // the round's own check-in dispatched beside it once the round was under way.
+    // the run's own check-in dispatched beside it once work was under way.
     runLevelDispatch(
       "orchestrator-session",
       "orchestrator-dag-ui-live",
@@ -782,15 +758,15 @@ function liveSpans() {
         transport_role: "agent",
       },
     ),
-    runLevelDispatch(ROUND_CHECK_IN_SESSION, "check-in-round-1", 160, 170, {
+    runLevelDispatch(RUN_CHECK_IN_SESSION, "check-in", 160, 170, {
       agent_role: "check-in",
       transport_role: "agent",
     }),
   ];
 }
 
-/** The second run-level session: the per-round check-in, recorded at no node. */
-export const ROUND_CHECK_IN_SESSION = "round-check-in-session";
+/** The second run-level session: the run's own check-in, recorded at no node. */
+export const RUN_CHECK_IN_SESSION = "run-check-in-session";
 
 /**
  * Both roles a dispatch span carries: the party oneharness recorded, and what the
@@ -815,8 +791,7 @@ function runLevelDispatch(
     id: `dispatch-${conversationId}`,
     kind: "dispatch",
     label,
-    parent_id: "round-1",
-    round: 1,
+    parent_id: "run-1",
     started_at: stamp(from),
     ended_at: stamp(to),
     status: "completed",
@@ -827,7 +802,6 @@ function runLevelDispatch(
         id: `${conversationId}-0`,
         kind: "conversation-turn",
         at: stamp(from),
-        round: 1,
         status: "completed",
         reference,
       },
@@ -852,9 +826,9 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
     spans:
       runId === HISTORY_RUN
         ? [
-            ...served.spans.filter(({ kind }) => kind === "round"),
+            ...served.spans.filter(({ kind }) => kind === "run"),
             { ...historySpans()[0], events: [] },
-            categorySummary("node-1-archive", "archive", "dispatch", 20, 80, {
+            categorySummary("node-archive", "archive", "dispatch", 20, 80, {
               agent_role: "worker",
               transport_role: "agent",
             }),
@@ -865,54 +839,33 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
               .filter((span) => span.kind === "node")
               .map((span) => ({ ...span, events: [] })),
             categorySummary(
-              "node-1-foundation",
+              "node-foundation",
               "foundation",
               "verification",
               30,
               95,
             ),
             categorySummary(
-              "node-1-foundation",
+              "node-foundation",
               "foundation",
               "publication",
               100,
               180,
             ),
+            categorySummary("node-dashboard", "dashboard", "dispatch", 12, 60, {
+              agent_role: "worker",
+              transport_role: "agent",
+            }),
+            categorySummary("node-dashboard", "dashboard", "dispatch", 20, 50, {
+              agent_role: "worker",
+              transport_role: "llmlint",
+            }),
+            categorySummary("node-dashboard", "dashboard", "dispatch", 62, 90, {
+              agent_role: "judge",
+              transport_role: "judge",
+            }),
             categorySummary(
-              "node-1-dashboard",
-              "dashboard",
-              "dispatch",
-              12,
-              60,
-              {
-                agent_role: "worker",
-                transport_role: "agent",
-              },
-            ),
-            categorySummary(
-              "node-1-dashboard",
-              "dashboard",
-              "dispatch",
-              20,
-              50,
-              {
-                agent_role: "worker",
-                transport_role: "llmlint",
-              },
-            ),
-            categorySummary(
-              "node-1-dashboard",
-              "dashboard",
-              "dispatch",
-              62,
-              90,
-              {
-                agent_role: "judge",
-                transport_role: "judge",
-              },
-            ),
-            categorySummary(
-              "node-1-dashboard",
+              "node-dashboard",
               "dashboard",
               "dispatch",
               92,
@@ -923,7 +876,7 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
               },
             ),
             categorySummary(
-              "node-1-dashboard",
+              "node-dashboard",
               "dashboard",
               "dispatch",
               112,
@@ -936,7 +889,7 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
             // The aggregate keeps the 4.2s it measured, not the 140s window it fell in.
             {
               ...categorySummary(
-                "node-1-dashboard",
+                "node-dashboard",
                 "dashboard",
                 "rollup",
                 15,
@@ -945,19 +898,13 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
               count: 1240,
               total_duration_ms: 4200,
             },
-            categorySummary(
-              "node-1-publish",
-              "publish",
-              "verification",
-              30,
-              50,
-            ),
-            categorySummary("node-1-publish", "publish", "publication", 55, 70),
+            categorySummary("node-publish", "publish", "verification", 30, 50),
+            categorySummary("node-publish", "publish", "publication", 55, 70),
             // `approval` never started, so the run journalled no span to parent this
             // to — and the wait is still the only thing that node has recorded.
             {
               ...categorySummary(
-                "node-1-approval",
+                "node-approval",
                 "approval",
                 "human-wait",
                 75,
@@ -989,7 +936,6 @@ function categorySummary(
     label: roles?.agent_role ?? kind,
     parent_id: parentId,
     node_id: nodeId,
-    round: 1,
     started_at: stamp(from),
     ended_at: stamp(to),
     count: 1,
@@ -1011,7 +957,7 @@ function dispatch(
   roles: DispatchRoles = WORKER,
   // A lint run happens inside the dispatch it is verifying, and the server serves it
   // nested there rather than beside it; every other session hangs off its node.
-  parentId: string = `node-1-${nodeId}`,
+  parentId: string = `node-${nodeId}`,
 ) {
   const reference = { kind: "conversation", value: conversationId };
   return {
@@ -1020,7 +966,6 @@ function dispatch(
     label,
     parent_id: parentId,
     node_id: nodeId,
-    round: 1,
     started_at: stamp(from),
     ended_at: stamp(to),
     status: "completed",
@@ -1030,7 +975,6 @@ function dispatch(
       id,
       kind: "conversation-turn",
       at: stamp(from + index),
-      round: 1,
       node_id: nodeId,
       status: "completed",
       reference,
@@ -1048,7 +992,7 @@ export function busyTimeline(sessions: number) {
   );
   return {
     api_version: 2,
-    timeline_schema_version: 4,
+    timeline_schema_version: 5,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: LIVE_RUN,
     spans: [

@@ -261,6 +261,38 @@ p {
   gap: 12px;
 }
 
+/*
+ * The two readings, offered as one control rather than two loose buttons: a
+ * `fieldset` with a legend is what says the pair is a choice, and the pressed
+ * state is what says which one is taken. Borderless because the buttons carry
+ * their own.
+ */
+.detail-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* The topbar is a row of things that each know their own width, and the widest of
+   them is the live-activity line, whose text is whatever a node last reported.
+   Without this it refuses to shrink and pushes the row — the reading switch
+   included — past the edge of a narrow viewport, which is a control scrolled out
+   of reach rather than a line truncated. It truncates instead. */
+.topbar-actions > .connection {
+  min-width: 0;
+}
+
+.topbar-actions > .connection > :last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .connection {
   gap: 7px;
   color: var(--muted-foreground);
@@ -272,7 +304,20 @@ p {
   animation: pulse 1.8s ease-in-out infinite;
 }
 
+/* The two view selections and the reading switch, on one row that scrolls rather
+   than wraps. A second row here is a row the view region below does not have: the
+   collapsed timeline is measured against the share of the window this strip
+   leaves, and it is already the whole of that share at the narrow viewports. So
+   the strip behaves the way `.node-tabs` does at every width — every control
+   stays reachable by drag, by swipe and by the keyboard, and none of them costs
+   the reading below a row. */
 .view-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 12px;
+  overflow-x: auto;
   padding: 5px 28px 6px;
   border-bottom: 1px solid var(--border);
 }
