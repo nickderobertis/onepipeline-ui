@@ -12,9 +12,11 @@ mocked suite would be worse than none here — nobody clicks through this produc
 
 The run directories the server journeys read are built by
 `tests/support/fixture_run.rs`, and they are the files the onepipeline SDK itself
-writes — a launch record, a merged `events.jsonl`, `round-NN/plan.json`,
-`round-NN/result.json`. They are deliberately not a stub of the SDK: an SDK build
-that changed those files fails here rather than in production.
+writes — a launch record, a `plan.json`, a merged `events.jsonl`, and the one
+`result.json` a driver rewrites as it closes out. They are deliberately not a
+stub of the SDK: an SDK build that changed those files fails here rather than in
+production. Execution is continuous, so there is no per-round directory in that
+shape and a run being driven has no recorded result at all.
 
 One thing those journeys need that the tree does not carry: the `onepipeline`
 build whose telemetry document this server serves. `just bootstrap` provisions
