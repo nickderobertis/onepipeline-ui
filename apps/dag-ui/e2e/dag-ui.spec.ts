@@ -1103,6 +1103,83 @@ test("keeps a node's task, criteria, dependencies and verification reachable", a
   ).toBeVisible();
 });
 
+/**
+ * The one affordance a viewer has over how much of a run they are reading, driven
+ * in a real browser against the real read API.
+ *
+ * The component tier proves the switch asks the server for the right profile; only
+ * this proves the server answers, that what comes back is genuinely narrower, and
+ * that the narrowed reading is an address a reader can send someone.
+ */
+test("switches the reading between decisions and detailed activity", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
+
+  const choice = (name: string) =>
+    page.getByRole("group", { name: "Level of detail" }).getByRole("button", {
+      name,
+    });
+  // The journal records the plot draws over its lanes. A record is exactly what a
+  // filter admits or excludes, so this is the count that has to move.
+  const markers = () =>
+    timeline(page).getByRole("button", { name: /, marker$/ });
+
+  // A reader who asked for nothing is reading everything, and the control says so.
+  await expect(choice("Detailed activity")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(markers().first()).toBeVisible();
+  const detailed = await markers().count();
+
+  // Narrowing to the decisions is one click, and fewer records are drawn — but
+  // not none, because a decision is a record too.
+  await choice("Decisions").click();
+  await expect(page).toHaveURL(/detail=decisions/);
+  await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
+  await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
+  await expect.poll(() => markers().count()).toBeLessThan(detailed);
+  expect(await markers().count()).toBeGreaterThan(0);
+  // The node's own dispatch is still drawn at the bounds the run recorded: a
+  // filter narrows what is listed, never what the run did.
+  await expect(
+    timeline(page).getByRole("button", {
+      name: /Worker \(engineer-dashboard\)/,
+    }),
+  ).toBeVisible();
+
+  // The narrowed reading is an address: opened cold it arrives on the same one
+  // rather than showing the detailed reading first.
+  await page.reload();
+  await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => markers().count()).toBeLessThan(detailed);
+
+  // And back returns to the detailed reading, so the switch is undoable the way
+  // the rest of the drill-down is.
+  await page.goBack();
+  await expect(choice("Detailed activity")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect.poll(() => markers().count()).toBe(detailed);
+
+  // An address naming a reading this app does not have is a hand-edited or an
+  // outgrown link, and it lands on the detailed one — everything — rather than on
+  // an empty view or a refusal. A reader who mistyped it still sees their run.
+  await openObservatory(
+    page,
+    `/?run=${runs().live}&node=dashboard&detail=whatever`,
+  );
+  await expect(choice("Detailed activity")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect.poll(() => markers().count()).toBe(detailed);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
 test("keeps a node of hundreds of recorded sessions scannable", async ({
   page,
 }) => {
@@ -2547,23 +2624,14 @@ function freePort(): Promise<number> {
 }
 
 /**
- * And what it does when the binary is where `CARGO_TARGET_DIR` says: it serves
- * through that one, under either name cargo writes.
+ * The served binary at `path`: linked if this host can, copied if it cannot.
  *
- * Both names are driven here rather than only this platform's, because the browser
- * tier runs on Linux and a name chosen from `process.platform` would leave the other
- * one proven nowhere. A link rather than a copy where one is possible: it is the
- * same 160 MB binary this run is already being served through, named the way the
- * other platform's cargo would have named it.
- */
-/**
- * The binary at `path`, linked if this host can and copied if it cannot.
- *
- * A hard link needs both paths on one filesystem, and `tmpdir()` is a different
- * one from the checkout on plenty of hosts — a container with `/tmp` on tmpfs, or
- * a workspace on its own mount. That is a fact about where the test happens to be
- * running and not about the thing under test, so it costs a copy rather than the
- * journey.
+ * A link rather than a copy where one is possible — it is the same 160 MB binary
+ * this run is already being served through. A hard link needs both paths on one
+ * filesystem, though, and `tmpdir()` is a different one from the checkout on
+ * plenty of hosts: a container with `/tmp` on tmpfs, or a workspace on its own
+ * mount. That is a fact about where the test happens to be running and not about
+ * the thing under test, so it costs a copy rather than the journey.
  */
 function stageBinary(path: string): void {
   try {
@@ -2573,6 +2641,15 @@ function stageBinary(path: string): void {
     copyFileSync(API_BINARY, path);
   }
 }
+
+/**
+ * And what the server does when the binary is where `CARGO_TARGET_DIR` says: it
+ * serves through that one, under either name cargo writes.
+ *
+ * Both names are driven here rather than only this platform's, because the browser
+ * tier runs on Linux and a name chosen from `process.platform` would leave the
+ * other one proven nowhere.
+ */
 for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
   test(`serves through the ${name} a custom CARGO_TARGET_DIR names`, async () => {
     const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));

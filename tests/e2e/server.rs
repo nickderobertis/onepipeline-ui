@@ -2449,14 +2449,10 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Read-time filtering
-//
-// Every journey below drives the compiled binary over real HTTP against a real
-// recorded run, because `?filter=` is a query the server parses, resolves
-// against the run's own launch record, and applies to what it serves — four
-// seams a payload built in-process would skip.
-// ---------------------------------------------------------------------------
+// Every filtering journey below drives the compiled binary over real HTTP against
+// a real recorded run, because `?filter=` is a query the server parses, resolves
+// against the run's own launch record, and applies to what it serves — four seams
+// a payload built in-process would skip.
 
 /// Every event kind a timeline carries, at whichever scope it was read.
 fn kinds_on(body: &Value) -> Vec<String> {
@@ -2791,5 +2787,276 @@ fn a_filtered_stream_is_not_woken_by_a_movement_it_excluded() {
         frame.json().get("round").is_none(),
         "an invalidation names the run that moved and nothing else: {}",
         frame.data
+    );
+}
+
+#[test]
+fn a_filtered_detail_carries_the_transcripts_that_reading_is_about() {
+    // The detail's own event listing is its transcripts, and the filter narrows
+    // exactly that. A decisions-level reading is served none — a session whose
+    // every record was excluded is absent rather than present and empty, because
+    // an empty transcript says the session recorded nothing.
+    let serving = live_run();
+    let detail = |filter: &str| -> Value {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=true&filter={filter}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()
+    };
+    let sessions = |body: &Value| -> Vec<String> {
+        body["conversations"]
+            .as_array()
+            .expect("conversations")
+            .iter()
+            .filter_map(|held| held["conversation"]["id"].as_str().map(str::to_owned))
+            .collect()
+    };
+
+    let detailed = sessions(&detail("monitor"));
+    assert!(
+        detailed.contains(&fixture_run::LIVE_CONVERSATION_ID.to_owned()),
+        "{detailed:?}"
+    );
+    assert_eq!(sessions(&detail("planner")), Vec::<String>::new());
+
+    // A spec that admits one node's records is served that node's session and no
+    // other, which is the narrowing a reader writes an inline spec for.
+    let one = sessions(&detail(&urlencode(&format!(
+        r#"{{"include":[{{"node":"{}"}}]}}"#,
+        fixture_run::REDIRECTED_NODE_ID
+    ))));
+    assert_eq!(
+        one,
+        vec![fixture_run::REDIRECTED_CONVERSATION_ID.to_owned()]
+    );
+}
+
+#[test]
+fn a_node_scoped_timeline_is_narrowed_by_the_same_filter_as_the_run() {
+    // The two scopes are different payloads rather than one a subset of the
+    // other, so a filter proven at run scope is not proven at node scope.
+    let serving = live_run();
+    let node_timeline = |filter: Option<&str>| -> Value {
+        let query = filter.map_or_else(String::new, |spec| format!("&filter={spec}"));
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=node&node={}{query}",
+                fixture_run::RUN_ID,
+                fixture_run::SHIP_NODE_ID
+            ),
+        )
+        .json()
+    };
+
+    let whole = node_timeline(None);
+    let kinds = kinds_on(&whole);
+    assert!(
+        kinds.iter().any(|kind| kind == "turn-completed"),
+        "{kinds:?}"
+    );
+    assert!(kinds.iter().any(|kind| kind == "node-settled"), "{kinds:?}");
+
+    let decisions = node_timeline(Some("planner"));
+    let narrowed = kinds_on(&decisions);
+    assert!(
+        narrowed.iter().any(|kind| kind == "node-settled"),
+        "{narrowed:?}"
+    );
+    assert!(
+        !narrowed.iter().any(|kind| kind.starts_with("turn-")),
+        "{narrowed:?}"
+    );
+
+    // The spans themselves are what the run recorded, whatever the filter said: a
+    // reader narrowing their attention must not lose the node from its own
+    // timeline, nor find its dispatch bracketed somewhere else.
+    let spans = |body: &Value| -> Vec<(String, String, Value)> {
+        body["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .map(|span| {
+                (
+                    span["id"].as_str().unwrap_or_default().to_owned(),
+                    span["kind"].as_str().unwrap_or_default().to_owned(),
+                    span["started_at"].clone(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(spans(&decisions), spans(&whole));
+}
+
+#[test]
+fn an_unknown_profile_is_refused_by_the_detail_route_too() {
+    // Every route that takes the parameter resolves it against the run, so each
+    // of them answers for a name that run has no profile for.
+    let serving = live_run();
+    for route in [
+        format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+        format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    ] {
+        let joiner = if route.contains('?') { '&' } else { '?' };
+        let refused = http::get(
+            serving.address,
+            &format!("{route}{joiner}filter=nothing-defines-this"),
+        );
+        assert_eq!(refused.status, 404, "{route}");
+        assert_eq!(
+            refused.json()["error"]["code"],
+            json!("unknown_filter_profile"),
+            "{route}"
+        );
+        // And a malformed spec is the request's own fault on every one of them.
+        let malformed = http::get(
+            serving.address,
+            &format!("{route}{joiner}filter={}", urlencode(r#"{"exclude":[{}]}"#)),
+        );
+        assert_eq!(malformed.status, 422, "{route}");
+    }
+}
+
+#[test]
+fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
+    // `activity.changed` is a listing of records like any other, so it is narrowed
+    // by the same filter — and a connection that admits those records is still
+    // told what its nodes are doing.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let latest = |filter: &str| -> Option<Value> {
+        let mut stream = http::stream(
+            serving.address,
+            &format!(
+                "/api/v2/events?run_id={}&filter={filter}",
+                fixture_run::RUN_ID
+            ),
+            None,
+        );
+        assert_eq!(stream.status, 200);
+        assert_eq!(stream.frames(1)[0].event, "snapshot");
+        fixture_run::append_relayed(
+            &serving.run_dir(fixture_run::RUN_ID),
+            "agentgraph",
+            "turn-activity",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::REDIRECTED_NODE_ID,
+                "member": "worker",
+                "session": fixture_run::REDIRECTED_CONVERSATION_ID,
+            }),
+            json!({ "kind": "tool_use", "name": "Grep", "detail": "docs/contract.md" }),
+        );
+        let mut activity = None;
+        while let Some(frame) = stream.frame_within(std::time::Duration::from_millis(750)) {
+            if frame.event == "activity.changed" {
+                activity = Some(frame.json());
+                break;
+            }
+        }
+        activity
+    };
+
+    let told = latest("monitor").expect("the detailed reading is told what the turn is doing");
+    let summary = told["activity"]
+        .as_array()
+        .expect("the live activity")
+        .last()
+        .expect("the most recent summary")
+        .clone();
+    assert_eq!(summary["node"], json!(fixture_run::REDIRECTED_NODE_ID));
+    assert_eq!(summary["name"], json!("Grep"));
+
+    // The decisions-level reading is not about tool calls, so it is told none —
+    // neither an `activity.changed` carrying an empty list, which would be this
+    // server saying the node is doing nothing.
+    assert!(
+        latest("planner").is_none(),
+        "a decisions-level watcher was told about a tool call"
+    );
+}
+
+#[test]
+fn an_accepted_edit_is_served_with_the_author_that_submitted_it() {
+    // The run enforces a per-author op allowlist — a planner may issue every op
+    // and a monitor a narrower set — so who asked for a change is a fact about
+    // the change. Without it an observer's self-applied fix and the planner's own
+    // decision read as one thing on a reader's timeline.
+    let serving = live_run();
+    let edits: Vec<Value> = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "edit-committed")
+        .collect();
+    let authors: Vec<&str> = edits
+        .iter()
+        .filter_map(|edit| edit["author"].as_str())
+        .collect();
+    assert!(authors.contains(&"planner"), "{edits:?}");
+    assert!(authors.contains(&"monitor"), "{edits:?}");
+
+    // Recorded rather than defaulted: the two edits this run's reconciler
+    // compiled from a `context` command carry no author at all, and an absent one
+    // is served absent rather than assumed to be the planner's.
+    assert!(
+        edits.iter().any(|edit| edit.get("author").is_none()),
+        "an author nothing recorded is not invented: {edits:?}"
+    );
+}
+
+#[test]
+fn a_stream_watching_a_run_with_no_such_profile_is_served_rather_than_broken() {
+    // The frames are an invalidation, and the refusal a reader can act on is the
+    // one the detail route serves when they refetch. A stream that failed instead
+    // would leave a browser with no live updates at all over a name one of the
+    // runs it is watching happens not to define — so an unknown profile narrows
+    // nothing here, and the connection keeps working.
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let mut stream = http::stream(
+        serving.address,
+        &format!(
+            "/api/v2/events?run_id={}&filter=nothing-defines-this",
+            fixture_run::RUN_ID
+        ),
+        None,
+    );
+    assert_eq!(stream.status, 200, "the stream opened rather than refusing");
+    assert_eq!(stream.frames(1)[0].event, "snapshot");
+
+    // And it is still a working subscription: a record this run writes reaches it.
+    fixture_run::append(
+        &serving.run_dir(fixture_run::RUN_ID),
+        "node-settled",
+        json!({ "status": "done" }),
+    );
+    let frame = stream.next_frame().expect("the stream stayed open");
+    assert_eq!(frame.event, "run.changed");
+    assert_eq!(frame.json()["run_id"], json!(fixture_run::RUN_ID));
+
+    // The refusal is the detail route's, which is where a reader can act on it.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?filter=nothing-defines-this",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404);
+    assert_eq!(
+        refused.json()["error"]["code"],
+        json!("unknown_filter_profile")
     );
 }

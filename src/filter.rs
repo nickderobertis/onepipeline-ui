@@ -364,7 +364,17 @@ pub const PROFILES: [Profile; 2] = [Profile::Planner, Profile::Monitor];
 /// through anything else would be a second reading of the same parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub enum FilterSpec {
+pub struct FilterSpec(Spec);
+
+/// The two forms, kept private so [`FilterSpec::parse`] is the only way to hold
+/// one.
+///
+/// A caller that could name the variants could build a `Named("")` no route
+/// would accept or an `Inline` whose matchers match nothing — the two things
+/// `parse` exists to refuse — and the type would then promise a validation it
+/// had not done.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Spec {
     /// A profile, by name. Whether it exists depends on the run: the two
     /// built-in ones exist for every run, and a run's launch config may define
     /// more.
@@ -400,7 +410,7 @@ impl FilterSpec {
             filter
                 .validate()
                 .map_err(|why| ApiError::InvalidRequest(format!("filter: {why}")))?;
-            return Ok(Self::Inline(filter));
+            return Ok(Self(Spec::Inline(filter)));
         }
         if value.is_empty() {
             return Err(ApiError::InvalidRequest(
@@ -415,15 +425,15 @@ impl FilterSpec {
                 "filter profile must use only ASCII letters, digits, '-' and '_', got {value:?}"
             )));
         }
-        Ok(Self::Named(value.to_owned()))
+        Ok(Self(Spec::Named(value.to_owned())))
     }
 
     /// The string a request sends this spec as.
     #[must_use]
     pub fn as_query_value(&self) -> String {
-        match self {
-            Self::Named(name) => name.clone(),
-            Self::Inline(filter) => {
+        match &self.0 {
+            Spec::Named(name) => name.clone(),
+            Spec::Inline(filter) => {
                 serde_json::to_string(filter).unwrap_or_else(|_| "{}".to_owned())
             }
         }
@@ -437,9 +447,9 @@ impl FilterSpec {
     /// have, because a reader who mistyped one cannot otherwise discover the
     /// name their run's launch defined.
     pub fn resolve(&self, launch: &LaunchProfiles) -> Result<EventFilter, ApiError> {
-        match self {
-            Self::Inline(filter) => Ok(filter.clone()),
-            Self::Named(name) => launch.get(name),
+        match &self.0 {
+            Spec::Inline(filter) => Ok(filter.clone()),
+            Spec::Named(name) => launch.get(name),
         }
     }
 }

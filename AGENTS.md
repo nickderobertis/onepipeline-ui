@@ -145,8 +145,8 @@ fans one uniformly-named target across all of them.
   *events* a payload lists; every status, settlement, decision, count and timing
   beside them is folded from the whole journal whatever it said. A reader who
   narrowed their attention must be shown the same graph, in the same states, as
-  one who asked for everything — `src/AGENTS.md` records where the filter may
-  reach and where it may not, and why the two places it does are the only two.
+  one who asked for everything. It reaches the events a timeline span lists and
+  the transcripts a detail lists, and nothing else.
 - **Validate external input at its trust boundary.** Every `{...}` a route
   interpolates is a validated identifier newtype constructible only through
   `TryFrom`; a raw `String` must never reach storage, and a runs root is a
