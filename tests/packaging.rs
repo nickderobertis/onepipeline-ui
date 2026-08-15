@@ -386,34 +386,24 @@ fn the_release_workflow_provisions_the_semver_check_it_enables() {
     );
 }
 
-/// The release path builds the baseline from what the tag locked, and stops when
-/// the check returns no verdict.
+/// The release takes the reading, and release-plz versions from the same resolve.
 ///
-/// Both halves are the check. cargo-semver-checks reads a lockfile on neither
-/// side, so a released manifest's open requirement resolves to whatever is newest
-/// — for v0.3.3 an SDK that no longer compiles — and release-plz reports the
-/// resulting failure as "API compatible". Fetching each side's locked versions is
-/// what makes the baseline the tag's; running the check for its exit code is what
-/// makes a missing verdict visible.
+/// `scripts/semver-check.sh` is the reading itself and `tests/e2e/semver_check.rs`
+/// drives it; what is left to hold here is that the release still runs it, and
+/// that release-plz's own check resolves off what it fetched rather than today's
+/// registry — which is the resolve that fails and is reported as compatible.
 #[test]
-fn the_release_workflow_reads_the_baseline_the_tag_locked_or_fails() {
+fn the_release_workflow_reads_the_surface_before_release_plz_versions_from_it() {
     let workflow = read(".github/workflows/release-plz.yml");
     assert!(
-        workflow.contains(
-            "cargo fetch --locked --manifest-path \"${RUNNER_TEMP}/release-baseline/Cargo.toml\""
-        ),
-        "the baseline's own locked dependencies are never fetched, so the check \
-         resolves today's registry and builds a baseline that may not compile"
+        workflow.contains("bash scripts/semver-check.sh"),
+        "no step reads the public surface, leaving release-plz's silent \
+         \"API compatible\" as the only reading a release gets"
     );
     assert!(
         workflow.contains("CARGO_NET_OFFLINE"),
-        "nothing holds the resolve to what was fetched, so both surfaces are built \
-         against whatever the registry serves that day"
-    );
-    assert!(
-        workflow.contains("cargo semver-checks --baseline-root"),
-        "no step runs the check for its exit code, leaving release-plz's silent \
-         \"API compatible\" as the only reading a release gets"
+        "release-plz resolves its own check against today's registry, so the bump \
+         comes from a baseline that may no longer compile"
     );
 }
 
