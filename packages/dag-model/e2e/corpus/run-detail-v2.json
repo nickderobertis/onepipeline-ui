@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 12,
+  "telemetry_schema_version": 13,
   "observed_at": "2026-08-03T00:00:00Z",
   "run": {
     "run_id": "gated",
@@ -85,69 +85,105 @@
     "turns": 0,
     "lint": 0
   },
-  "rounds": [
-    {
-      "run_id": "gated",
-      "round": 1,
-      "plan": {
-        "schema_version": 4,
-        "concurrency": 2,
-        "goal": {
-          "id": "Ship-the-gated-release",
-          "text": "Ship the gated release"
+  "graph": {
+    "run_id": "gated",
+    "plan": {
+      "schema_version": 4,
+      "concurrency": 2,
+      "goal": {
+        "id": "Ship-the-gated-release",
+        "text": "Ship the gated release"
+      },
+      "tasks": [
+        {
+          "id": "build",
+          "persona": "engineer",
+          "task": "Build"
         },
-        "tasks": [
-          { "id": "build", "persona": "engineer", "task": "Build" },
-          {
-            "id": "approve",
-            "kind": "human",
-            "task": "Approve",
-            "deps": ["build"]
-          },
-          {
-            "id": "release",
-            "persona": "engineer",
-            "task": "Release",
-            "deps": ["approve"]
-          },
-          { "id": "publish", "persona": "engineer", "task": "Publish" },
-          {
-            "id": "cleanup",
-            "persona": "engineer",
-            "task": "Clean up",
-            "deps": ["publish"]
-          }
-        ]
-      },
-      "node_states": {
-        "build": "running",
-        "approve": "waiting",
-        "publish": "failed"
-      },
-      "node_status": {
-        "build": "running",
-        "approve": "waiting",
-        "release": "blocked",
-        "publish": "failed",
-        "cleanup": "skipped"
-      },
-      "node_gated_by": { "release": ["approve"], "cleanup": ["publish"] },
-      "node_control": {
-        "build": { "addressable": true, "member": "worker" }
-      },
-      "node_results": {
-        "approve": { "status": "waiting" },
-        "publish": {
-          "status": "failed",
-          "detail": "push rejected",
-          "exit_code": 2
+        {
+          "id": "approve",
+          "kind": "human",
+          "task": "Approve",
+          "deps": [
+            "build"
+          ]
+        },
+        {
+          "id": "release",
+          "persona": "engineer",
+          "task": "Release",
+          "deps": [
+            "approve"
+          ]
+        },
+        {
+          "id": "publish",
+          "persona": "engineer",
+          "task": "Publish"
+        },
+        {
+          "id": "cleanup",
+          "persona": "engineer",
+          "task": "Clean up",
+          "deps": [
+            "publish"
+          ]
         }
+      ]
+    },
+    "node_states": {
+      "build": "running",
+      "approve": "waiting",
+      "publish": "failed"
+    },
+    "node_status": {
+      "build": "running",
+      "approve": "waiting",
+      "release": "blocked",
+      "publish": "failed",
+      "cleanup": "skipped"
+    },
+    "node_gated_by": {
+      "release": [
+        "approve"
+      ],
+      "cleanup": [
+        "publish"
+      ]
+    },
+    "node_control": {
+      "build": {
+        "addressable": true,
+        "member": "worker"
+      }
+    },
+    "node_results": {
+      "approve": {
+        "status": "waiting"
       },
-      "attestations": [],
-      "result": null,
-      "last_seq": 10
-    }
-  ],
+      "publish": {
+        "status": "failed",
+        "detail": "push rejected",
+        "exit_code": 2
+      }
+    },
+    "decisions": [
+      {
+        "id": "approve",
+        "kind": "human-action",
+        "unblocks": [
+          "release"
+        ]
+      }
+    ],
+    "attestations": [],
+    "result": null,
+    "last_seq": 10
+  },
   "conversations": [],
-  "details": { "version": 1, "commits": {}, "prs": {} }
+  "details": {
+    "version": 1,
+    "commits": {},
+    "prs": {}
+  }
 }

@@ -48,6 +48,12 @@ export interface TelemetrySubscription {
 export interface SubscribeOptions {
   readonly runId?: string;
   readonly after?: string;
+  /**
+   * Which events this connection is watching for, as a profile name or an inline
+   * spec. A run whose only new records the filter excludes is not announced, so a
+   * subscriber narrowed to decisions is not woken by every tool call.
+   */
+  readonly filter?: string;
   readonly onEvent: (event: TelemetryEvent) => void;
   readonly onError?: (error: unknown) => void;
 }
@@ -61,6 +67,15 @@ type Fetch = (
 export interface RunDetailOptions {
   /** Omit to accept the server default (`true`). */
   readonly includeConversations?: boolean;
+  /**
+   * Which events this reading carries: a built-in profile (`planner`, `monitor`),
+   * one the run's own launch config defined, or an inline spec.
+   *
+   * A `string` rather than the built-in union, deliberately: a run may answer to
+   * a name this client has never heard of, and refusing to send one would make
+   * the browser the only reader that cannot use a profile its own run defined.
+   */
+  readonly filter?: string;
 }
 
 export interface TelemetryClientOptions {
@@ -119,13 +134,26 @@ export class TelemetryClient {
         String(options.includeConversations),
       );
     }
+    if (options.filter !== undefined) {
+      url.searchParams.set(API_V2_QUERY.filter, options.filter);
+    }
     return this.#request(url, runDetailSchema.parse);
   }
 
-  /** One node's timeline, or the run-level timeline when nodeId is omitted. */
-  async getTimeline(runId: string, nodeId?: string): Promise<RunTimeline> {
+  /**
+   * One node's timeline, or the run-level timeline when nodeId is omitted.
+   *
+   * `filter` narrows the events the served spans carry; the spans themselves,
+   * their bounds and their statuses are what the run recorded either way.
+   */
+  async getTimeline(
+    runId: string,
+    nodeId?: string,
+    filter?: string,
+  ): Promise<RunTimeline> {
     requireOpaqueId(runId, "run ID");
     const url = this.#url(API_V2_PATHS.timeline(runId));
+    if (filter !== undefined) url.searchParams.set(API_V2_QUERY.filter, filter);
     // The scope is always stated, and a node scope always names its node: the two
     // are one query the contract refuses to read half of.
     if (nodeId === undefined) {
@@ -169,6 +197,8 @@ export class TelemetryClient {
       url.searchParams.set(API_V2_QUERY.runId, options.runId);
     if (options.after !== undefined)
       url.searchParams.set(API_V2_QUERY.after, options.after);
+    if (options.filter !== undefined)
+      url.searchParams.set(API_V2_QUERY.filter, options.filter);
     const create =
       this.#eventSource ??
       ((sourceUrl: string) => {

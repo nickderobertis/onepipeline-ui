@@ -112,7 +112,8 @@ export const NODE_LANES: readonly TimelineLane[] = Object.entries(
  * rather than silently landing in whichever one a string comparison reached first.
  */
 const LANE_BY_SPAN_KIND: Readonly<Record<TimelineSpanKind, LaneId | null>> = {
-  round: null,
+  // The run is the root every other span hangs off, and holds no work of its own.
+  run: null,
   node: null,
   // A lifecycle step brackets the sessions inside it; the transcript names it, and
   // giving it a lane of its own would plot the container over its own contents.
@@ -452,7 +453,7 @@ export function nodeTimeline(
  * One span on its own as a row, for a reader that reached it outside a node.
  *
  * The graph-level view opens run-level sessions — the orchestrator's own, and the
- * per-round check-ins — and they are read in the same panel a node's sessions are.
+ * the run's own check-ins — and they are read in the same panel a node's sessions are.
  * Projecting them through the same function is what keeps the two readings identical
  * rather than merely similar.
  */
@@ -759,7 +760,7 @@ function sameKindSpan(
 
 /**
  * Events this node recorded that landed on a span belonging to another scope — a
- * record made before the node's own span opened hangs off the round instead, and
+ * record made before the node's own span opened hangs off the run instead, and
  * would otherwise be invisible from the node it names.
  */
 function orphanEvents(

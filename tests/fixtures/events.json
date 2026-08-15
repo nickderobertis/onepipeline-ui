@@ -3,15 +3,15 @@
   "event": "snapshot",
   "data": {
     "api_version": 2,
-    "telemetry_schema_version": 12,
+    "telemetry_schema_version": 13,
     "observed_at": "2026-08-07T12:00:00Z",
     "runs": [
       {
         "run_id": "run-20260807-a1b2c3",
         "state": "settled",
-        "phase": "reviewing-results",
-        "last_event": "round-finished",
-        "last_progress_at": 1786104031,
+        "phase": "settled",
+        "last_event": "node-settled",
+        "last_progress_at": 1786104030,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
         "timing": {
@@ -22,24 +22,24 @@
           "publication_wait_seconds": 9,
           "lock_wait_seconds": 1,
           "setup_seconds": 1,
-          "scheduling_seconds": 4,
-          "wall_seconds": 31,
+          "scheduling_seconds": 3,
+          "wall_seconds": 30,
           "agent_model_ms": 2500,
           "judge_model_ms": 3000,
           "llmlint_model_ms": null,
           "tool_ms": null,
           "idle_orchestration_ms": null,
           "unattributed_ms": 0,
-          "wall_ms": 31000,
+          "wall_ms": 30000,
           "fractions": {
-            "agent_model": 0.08064516129032258,
-            "judge_model": 0.0967741935483871,
+            "agent_model": 0.08333333333333333,
+            "judge_model": 0.1,
             "llmlint_model": null,
             "tool": null,
             "idle_orchestration": null,
-            "lock_wait": 0.035483870967741936,
-            "setup": 0.06129032258064516,
-            "scheduling": 0.12903225806451613
+            "lock_wait": 0.03666666666666667,
+            "setup": 0.06333333333333334,
+            "scheduling": 0.1
           }
         },
         "node_counts": {
@@ -54,9 +54,9 @@
       {
         "run_id": "run-20260807-d4e5f6",
         "state": "settled",
-        "phase": "reviewing-results",
-        "last_event": "round-finished",
-        "last_progress_at": 1786104031,
+        "phase": "settled",
+        "last_event": "node-settled",
+        "last_progress_at": 1786104030,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
         "timing": {
@@ -67,24 +67,24 @@
           "publication_wait_seconds": 9,
           "lock_wait_seconds": 1,
           "setup_seconds": 1,
-          "scheduling_seconds": 4,
-          "wall_seconds": 31,
+          "scheduling_seconds": 3,
+          "wall_seconds": 30,
           "agent_model_ms": 2500,
           "judge_model_ms": 3000,
           "llmlint_model_ms": null,
           "tool_ms": null,
           "idle_orchestration_ms": null,
           "unattributed_ms": 0,
-          "wall_ms": 31000,
+          "wall_ms": 30000,
           "fractions": {
-            "agent_model": 0.08064516129032258,
-            "judge_model": 0.0967741935483871,
+            "agent_model": 0.08333333333333333,
+            "judge_model": 0.1,
             "llmlint_model": null,
             "tool": null,
             "idle_orchestration": null,
-            "lock_wait": 0.035483870967741936,
-            "setup": 0.06129032258064516,
-            "scheduling": 0.12903225806451613
+            "lock_wait": 0.03666666666666667,
+            "setup": 0.06333333333333334,
+            "scheduling": 0.1
           }
         },
         "node_counts": {

@@ -56,10 +56,36 @@ export const API_V2_QUERY = {
    */
   node: "node",
   scope: "scope",
+  /**
+   * Which events a reading carries: a named profile, or an inline spec in the
+   * stack's shared filter grammar.
+   *
+   * It shapes the response and never the run — every node status, settlement and
+   * count is folded from the whole journal whatever this says — so switching it is
+   * a change of attention rather than a different account of what happened.
+   */
+  filter: "filter",
 } as const;
 export const API_V2_TIMELINE_SCOPES = {
   run: "run",
   node: "node",
+} as const;
+
+/**
+ * The filter profiles the read API defines for every run, whatever it was
+ * launched with. A run's own launch config may define further names, which are
+ * this client's to pass through rather than to enumerate.
+ *
+ * `planner` is the decisions-level view: onepipeline's own event vocabulary is a
+ * closed set and it is exactly the decision vocabulary — a node became ready, was
+ * dispatched, settled; an edit was committed; a decision began holding dependents
+ * back and was cleared. `monitor` is detailed activity: the whole merged stream,
+ * all three sources, which is what the monitor persona's own contract says it
+ * reads.
+ */
+export const API_V2_FILTER_PROFILES = {
+  planner: "planner",
+  monitor: "monitor",
 } as const;
 
 /**
@@ -70,12 +96,19 @@ export const API_V2_TIMELINE_SCOPES = {
  * `10` served a measured-looking zero for every lane nothing reports, which is
  * the reading this client must never show.
  *
- * `12` is where a round began saying, per node it has in flight, whether that
+ * `12` is where the payload began saying, per node in flight, whether that
  * node's turn can be redirected. A server on `11` carries no `node_control` at
  * all, and the only safe reading of an absent entry is "cannot be corrected" —
  * which sends a planner to cancel every node that could have been corrected.
+ *
+ * `13` is the removal of rounds. Execution in onepipeline is continuous and
+ * dependency-driven — a node dispatches the moment its dependencies settle, and
+ * nothing batches them — so the `rounds` array is replaced by one `graph` object
+ * describing the run's whole state, and no `round` survives anywhere in a
+ * payload. A server on `12` serves the array this client no longer has a shape
+ * for, which is why the literal is pinned rather than ranged.
  */
-export const TELEMETRY_SCHEMA_VERSION = 12;
+export const TELEMETRY_SCHEMA_VERSION = 13;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -84,13 +117,19 @@ export const TELEMETRY_SCHEMA_VERSION = 12;
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
  *
+ * `5` is where the timeline became continuous: the run is one root span rather
+ * than a stack of rounds, no span carries a `round`, and every span id is keyed
+ * by what it identifies rather than by a round number. It is also where a span's
+ * events may be narrowed by `?filter=` while the span's own bounds and status
+ * stay what the run recorded.
+ *
  * `4` is where an event began carrying the redirection it was. A server on `3`
  * serves a `turn-interrupted` as its kind and its stamp alone, so the moment a
  * planner changed what a running turn was doing is indistinguishable from any
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 4;
+export const TIMELINE_SCHEMA_VERSION = 5;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -372,21 +411,25 @@ const planStepSchema = openObject({
   persona: z.string().min(1).optional(),
   task: z.string().min(1),
   deps: z.array(z.string().min(1)).optional(),
-  done_when: z.string().min(1).optional(),
   max_turns: counter.positive().optional(),
   expects_no_diff: z.boolean().optional(),
 });
 /**
  * Where a preserved workstream is picked back up, as the plan records it for the
- * round that continues it. Never a boolean: the field this schema types has always
+ * attempt that continues it. Never a boolean: the field this schema types has always
  * carried the executor's own resume metadata, and typing it `boolean` is what made
  * every replanned run fail whole-detail validation in the browser. The committed
  * `e2e/corpus/legacy-runs` plans are the record of what has actually been written.
  *
  * Only the four fields that locate the work are required. A journal written before
- * a later field existed omits it — `completed_steps` and `pr` are both absent from
- * recorded rounds — so requiring them here would sever exactly the history this
- * contract exists to read.
+ * a later field existed omits it — `completed_steps` and `pr` are absent from the
+ * older recorded documents — so requiring them here would sever exactly the history
+ * this contract exists to read.
+ *
+ * `source_round` is gone rather than optional. It named the round a continuation
+ * came from, nothing writes a round any more, and no committed corpus document
+ * carries it — and because every object here is a passthrough, a historical plan
+ * that does still parses, with the field simply untyped rather than refused.
  */
 export const planTaskResumeSchema = openObject({
   branch: z.string().min(1),
@@ -396,7 +439,6 @@ export const planTaskResumeSchema = openObject({
   completed_steps: z.array(z.string()).optional(),
   pr: z.string().nullable().optional(),
   mode: z.enum(["pause", "retry", "continue"]).optional(),
-  source_round: counter.positive().optional(),
   attempts: counter.optional(),
 });
 /**
@@ -475,7 +517,6 @@ const resumeSchema = openObject({
   completed_steps: z.array(z.string()),
   pr: z.string().nullable(),
   mode: z.string().optional(),
-  source_round: counter.optional(),
 });
 export const graphResultItemSchema = openObject({
   kind: z.string().optional(),
@@ -520,7 +561,6 @@ export const graphPayloadSchema = openObject({
   started_order: z.array(z.string()).optional(),
   results: z.record(z.string(), graphResultItemSchema).optional(),
   schema_version: counter.optional(),
-  round: counter.optional(),
 });
 export const nodeStateSchema = z.enum([
   "running",
@@ -537,9 +577,9 @@ export const nodeStateSchema = z.enum([
  *
  * `nodeStateSchema` above is the strict journal fold and is a subset of this: it can
  * only speak for nodes the journal recorded something about, so `pending`, `blocked`
- * and `skipped` appear only here. A consumer renders from `Round.node_status` and
- * never from an absent `node_states` entry — inferring one is how the sidebar and the
- * detail view came to disagree about the same node.
+ * and `skipped` appear only here. A consumer renders from `GraphState.node_status`
+ * and never from an absent `node_states` entry — inferring one is how the sidebar and
+ * the detail view came to disagree about the same node.
  */
 export const nodeStatusSchema = z.enum([
   "pending",
@@ -563,7 +603,7 @@ export const nodeStatusSchema = z.enum([
  * `control`, which no published component reports for a turn in flight — so a
  * field named for that answer would promise what nothing can supply.
  *
- * Never absent for a node the round has in flight, because "no answer" and "cannot"
+ * Never absent for a node the run has in flight, because "no answer" and "cannot"
  * read the same to a planner and only one of them is true. `reason` is present
  * exactly when `addressable` is false. `member` is the graph member whose turn the
  * run would address.
@@ -582,9 +622,30 @@ export const nodeControlSchema = openObject({
   }
 });
 
-export const roundSchema = openObject({
+/**
+ * One decision point holding a subtree of dependents back.
+ *
+ * The only thing that pauses anything in a continuous engine, and it pauses only
+ * what depends on it — a ready human action nobody has attested, or a blocking
+ * surface nobody has answered. Independent branches keep running beside it, so a
+ * run carrying one of these is *waiting on a person*, never stalled.
+ */
+export const decisionSchema = openObject({
+  id: z.string().min(1),
+  kind: z.string(),
+  unblocks: z.array(z.string().min(1)),
+});
+
+/**
+ * The run's whole graph state, as one object.
+ *
+ * There is exactly one of these per run. Under telemetry schema 12 this was one
+ * entry of a `rounds` array and carried the round it described; execution is
+ * continuous, so the graph a run is converging toward is one graph, with every
+ * committed live edit applied to it.
+ */
+export const graphStateSchema = openObject({
   run_id: z.string().min(1),
-  round: counter,
   plan: openObject({
     tasks: z.array(planTaskSchema),
     schema_version: counter.optional(),
@@ -605,19 +666,21 @@ export const roundSchema = openObject({
    */
   node_gated_by: z.record(z.string(), z.array(z.string().min(1))),
   /**
-   * One entry for every node this round has in flight, and for no other: a node
-   * with no turn has nothing to redirect. Empty for a round that has closed.
+   * One entry for every node in flight, and for no other: a node with no turn has
+   * nothing to redirect.
    */
   node_control: z.record(z.string(), nodeControlSchema),
   node_results: z.record(z.string(), graphResultItemSchema),
+  /** Every decision point currently holding a subtree back; empty when none is. */
+  decisions: z.array(decisionSchema),
   attestations: z.array(z.string()),
   result: graphPayloadSchema.nullable(),
   last_seq: counter,
-}).superRefine((round, context) => {
-  const taskIds = new Set(round.plan.tasks.map((task) => task.id));
-  const statusIds = new Set(Object.keys(round.node_status));
+}).superRefine((graph, context) => {
+  const taskIds = new Set(graph.plan.tasks.map((task) => task.id));
+  const statusIds = new Set(Object.keys(graph.node_status));
   if (
-    taskIds.size !== round.plan.tasks.length ||
+    taskIds.size !== graph.plan.tasks.length ||
     taskIds.size !== statusIds.size ||
     [...taskIds].some((taskId) => !statusIds.has(taskId))
   ) {
@@ -627,7 +690,7 @@ export const roundSchema = openObject({
       message: "must contain exactly one entry for every plan task",
     });
   }
-  const invalidGate = Object.entries(round.node_gated_by).find(
+  const invalidGate = Object.entries(graph.node_gated_by).find(
     ([nodeId, blockers]) =>
       !taskIds.has(nodeId) || blockers.some((blocker) => !taskIds.has(blocker)),
   );
@@ -635,23 +698,23 @@ export const roundSchema = openObject({
     context.addIssue({
       code: "custom",
       path: ["node_gated_by"],
-      message: "must name only nodes in this round's plan",
+      message: "must name only nodes in this graph's plan",
     });
   }
   // A subset rather than an equality, which is the whole of what can be required
-  // here: a round that closed with a node still recorded `running` — a driver that
-  // died mid-round — has nothing in flight to report, and this repository's own
-  // server serves exactly that, an empty `node_control` beside a `running` status.
-  // Demanding an entry would refuse the payload of every run that ended that way.
-  // llmlint: ignore[boundary_inputs_validated] the missing direction is not a validation this contract can state: `node_status` is what the round *recorded* and `node_control` is what is *in flight now*, and a closed round has the first without the second. `src/payload.rs`'s `round` is where the two are decided together, and `tests/e2e/server.rs` holds it to serving one entry per running node of an open round and none for a closed one.
-  const invalidControl = Object.keys(round.node_control).find(
-    (nodeId) => round.node_status[nodeId] !== "running",
+  // here: a run whose driver died with a node still recorded `running` has nothing
+  // in flight to report, and this repository's own server serves exactly that — an
+  // empty `node_control` beside a `running` status. Demanding an entry would refuse
+  // the payload of every run that ended that way.
+  // llmlint: ignore[boundary_inputs_validated] the missing direction is not a validation this contract can state: `node_status` is what the run *recorded* and `node_control` is what is *in flight now*, and a run whose driver died has the first without the second. `src/payload.rs`'s `graph_state` is where the two are decided together, and `tests/e2e/server.rs` holds it to serving one entry per running node and none for a node with no turn.
+  const invalidControl = Object.keys(graph.node_control).find(
+    (nodeId) => graph.node_status[nodeId] !== "running",
   );
   if (invalidControl !== undefined) {
     context.addIssue({
       code: "custom",
       path: ["node_control"],
-      message: "must name only nodes this round has in flight",
+      message: "must name only nodes the run has in flight",
     });
   }
 });
@@ -709,7 +772,6 @@ export const dagConversationSchema = openObject({
   conversation: conversationSchema,
   attribution: openObject({
     runId: z.string().optional(),
-    round: counter.optional(),
     nodeId: z.string().optional(),
     stepId: z.string().optional(),
     launchId: z.string().optional(),
@@ -780,7 +842,7 @@ export const runDetailSchema = openObject({
   telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
   run: runTelemetrySchema,
-  rounds: z.array(roundSchema),
+  graph: graphStateSchema.nullable(),
   conversations: runConversationsSchema,
   node_details: z.record(z.string(), nodeDetailSchema).optional().default({}),
   launch: runLaunchSchema.optional(),
@@ -795,7 +857,7 @@ export const timelineReferenceKindSchema = z.enum([
   "pr",
 ]);
 export const timelineSpanKindSchema = z.enum([
-  "round",
+  "run",
   "node",
   "step",
   "dispatch",
@@ -813,10 +875,11 @@ export const timelineSpanKindSchema = z.enum([
  */
 export const supervisoryPhaseSchema = z.enum([
   "starting",
-  "driving-round",
-  "executing-run-plan",
-  "reviewing-results",
+  "dispatching",
+  "deciding",
   "surfacing",
+  "waiting",
+  "settled",
   "finished",
 ]);
 /**
@@ -885,8 +948,14 @@ export const timelineEventSchema = openObject({
   at: timestamp,
   node_id: z.string().min(1).optional(),
   step_id: z.string().min(1).optional(),
-  round: counter.optional(),
   status: z.string().min(1).optional(),
+  /**
+   * Who submitted an accepted live edit, on an `edit-committed`. The run enforces
+   * a per-author op allowlist — a planner may issue every op and a monitor a
+   * narrower set — so an observer's self-applied fix and the planner's own
+   * decision are two different facts about the same graph.
+   */
+  author: z.string().min(1).optional(),
   redirection: redirectionSchema.optional(),
   reference: timelineReferenceSchema.optional(),
 });
@@ -919,7 +988,6 @@ export const timelineSpanSchema = openObject({
   parent_id: z.string().min(1).optional(),
   node_id: z.string().min(1).optional(),
   step_id: z.string().min(1).optional(),
-  round: counter.optional(),
   status: z.string().min(1).optional(),
   count: counter.optional(),
   total_duration_ms: counter.optional(),
@@ -986,8 +1054,8 @@ export const sseEventNameSchema = z.enum([
 export const sseEventDataSchema = arbitraryRecord;
 
 export interface LiveActivity {
-  round: string;
   node: string;
+  step?: string;
   at: number;
   kind: string;
   name: string;
@@ -995,8 +1063,8 @@ export interface LiveActivity {
   events: number;
 }
 export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
-  round: z.string().min(1),
   node: z.string().min(1),
+  step: z.string().min(1).optional(),
   at: z.number().finite(),
   kind: z.string(),
   name: z.string(),
@@ -1028,7 +1096,9 @@ export type RunList = z.infer<typeof runListSchema>;
 export type PlanTask = z.infer<typeof planTaskSchema>;
 export type GraphResultItem = z.infer<typeof graphResultItemSchema>;
 export type GraphPayload = z.infer<typeof graphPayloadSchema>;
-export type Round = z.infer<typeof roundSchema>;
+export type GraphState = z.infer<typeof graphStateSchema>;
+/** One decision point holding a subtree of dependents back. */
+export type Decision = z.infer<typeof decisionSchema>;
 /** Whether the run has a turn it can address for one in-flight node. */
 export type NodeControl = z.infer<typeof nodeControlSchema>;
 /** The moment a planner redirected a node's running turn. */
@@ -1050,6 +1120,13 @@ export type RunTimeline = z.infer<typeof runTimelineSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type LaunchProvenance = z.infer<typeof launchProvenanceSchema>;
 export type SseEventName = z.infer<typeof sseEventNameSchema>;
+/**
+ * A built-in filter profile. Deliberately not the type of the `filter` query — a
+ * run's launch config may define names this client has never heard of, and those
+ * are passed through as the strings they are.
+ */
+export type FilterProfile =
+  (typeof API_V2_FILTER_PROFILES)[keyof typeof API_V2_FILTER_PROFILES];
 
 export const parseRunList = (value: unknown): RunList =>
   runListSchema.parse(value);

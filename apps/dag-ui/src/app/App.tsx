@@ -34,11 +34,28 @@ import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
 import { groupRuns, nodeViews } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
-import { useUrlSelection } from "../lib/useUrlSelection";
+import {
+  DETAIL_LEVELS,
+  type DetailLevel,
+  useUrlSelection,
+} from "../lib/useUrlSelection";
 
 const defaultClient = new TelemetryClient(window.location.origin, {
   fetch: window.fetch.bind(window),
 });
+
+/**
+ * The two readings, in the order they are offered: the narrow one first, because
+ * it is the one a reader reaches for when there is too much to read.
+ *
+ * `Object.entries` widens the key to `string`, which would make the click handler
+ * take a level this app has no profile for — so the pairs are typed back to the
+ * union they came from, once, here.
+ */
+const detailLevels = Object.entries(DETAIL_LEVELS) as [
+  DetailLevel,
+  (typeof DETAIL_LEVELS)[DetailLevel],
+][];
 
 export function App({
   client = defaultClient,
@@ -55,7 +72,16 @@ export function App({
           : { nodeId: selection.nodeId },
     [selection.view, selection.nodeId],
   );
-  const telemetry = useDagTelemetry(client, selection.runId, timelineScope);
+  // The reading the viewer asked for, as the filter profile the server names it
+  // by. Every read this app takes goes through it, so the graph, the timeline and
+  // the live stream can never be showing three different slices of one run.
+  const filter = DETAIL_LEVELS[selection.detail].profile;
+  const telemetry = useDagTelemetry(
+    client,
+    selection.runId,
+    timelineScope,
+    filter,
+  );
   const groups = useMemo(
     () => groupRuns(telemetry.list?.runs ?? []),
     [telemetry.list],
@@ -136,6 +162,22 @@ export function App({
                     .join(" ") || telemetry.activity.at(-1)?.kind}
                 </span>
               )}
+              <fieldset className="detail-switch">
+                <legend className="sr-only">Level of detail</legend>
+                {detailLevels.map(([level, { label, description }]) => (
+                  <Button
+                    aria-pressed={selection.detail === level}
+                    key={level}
+                    onClick={() => selection.selectDetail(level)}
+                    size="sm"
+                    title={description}
+                    type="button"
+                    variant={selection.detail === level ? "default" : "outline"}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </fieldset>
               <Button
                 onClick={() => void telemetry.refresh()}
                 size="sm"

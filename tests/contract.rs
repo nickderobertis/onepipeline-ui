@@ -23,7 +23,8 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
     EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
-    TimelineQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -147,6 +148,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
             &run,
             &RunQuery {
                 include_conversations: false,
+                filter: None,
             },
         )
         .expect("the fixture run serves");
@@ -171,6 +173,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
                 &run,
                 &RunQuery {
                     include_conversations: true,
+                    filter: None,
                 },
             )),
         ),
@@ -178,8 +181,11 @@ fn every_route_serves_the_payload_its_golden_pins() {
             "run-timeline.json",
             enveloped(store.timeline(
                 &run,
-                &TimelineQuery::Node {
-                    node: NodeId::try_from(fixture_run::NODE_ID).expect("valid"),
+                &TimelineQuery {
+                    scope: TimelineScope::Node {
+                        node: NodeId::try_from(fixture_run::NODE_ID).expect("valid"),
+                    },
+                    filter: None,
                 },
             )),
         ),
@@ -280,7 +286,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 12);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 13);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
@@ -533,12 +539,12 @@ fn the_run_query_serves_conversations_unless_asked_not_to() {
 #[test]
 fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
     let run: TimelineQuery = serde_json::from_str(r#"{"scope":"run"}"#).expect("parse");
-    assert_eq!(run, TimelineQuery::Run);
+    assert_eq!(run.scope, TimelineScope::Run);
     let node: TimelineQuery =
         serde_json::from_str(r#"{"scope":"node","node":"contract-interface"}"#).expect("parse");
     assert_eq!(
-        node,
-        TimelineQuery::Node {
+        node.scope,
+        TimelineScope::Node {
             node: NodeId::try_from("contract-interface").unwrap()
         }
     );
@@ -547,7 +553,8 @@ fn the_timeline_query_pairs_a_node_with_node_scope_and_only_node_scope() {
         r#"{"scope":"node","node":"contract-interface"}"#
     );
     // `scope=node` with no node, and a scope the contract does not define, are
-    // both unrepresentable rather than validated after parsing.
+    // both unrepresentable rather than validated after parsing. `round` is named
+    // here on purpose: it was never a scope, and now it is not a thing a run has.
     assert!(serde_json::from_str::<TimelineQuery>(r#"{"scope":"node"}"#).is_err());
     assert!(serde_json::from_str::<TimelineQuery>(r#"{"scope":"round"}"#).is_err());
 }
@@ -744,7 +751,8 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
         api.run(
             &run,
             &RunQuery {
-                include_conversations: true
+                include_conversations: true,
+                filter: None
             }
         )
         .expect_err("stub")
@@ -752,9 +760,15 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
         "run_not_found"
     );
     assert_eq!(
-        api.timeline(&run, &TimelineQuery::Run)
-            .expect_err("stub")
-            .status(),
+        api.timeline(
+            &run,
+            &TimelineQuery {
+                scope: TimelineScope::Run,
+                filter: None
+            }
+        )
+        .expect_err("stub")
+        .status(),
         404
     );
     assert_eq!(

@@ -31,9 +31,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::ReadApi;
 use crate::contract::{
     routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, PageLimit, RunId, RunQuery,
-    RunsQuery, TimelineQuery,
+    RunsQuery, TimelineQuery, TimelineScope,
 };
 use crate::error::ApiError;
+use crate::filter::FilterSpec;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
 
 /// How many frames the stream may buffer ahead of the client.
@@ -236,8 +237,13 @@ async fn run(
         Ok(value) => value,
         Err(error) => return error.into_response(),
     };
+    let filter = match filter_spec(&raw) {
+        Ok(filter) => filter,
+        Err(error) => return error.into_response(),
+    };
     let query = RunQuery {
         include_conversations,
+        filter,
     };
     read(move || serving.store.run(&run, &query)).await
 }
@@ -356,22 +362,45 @@ fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
 /// it names, so `scope=node` with no node — and `scope=run` with one — are both
 /// refused here rather than served as something the caller did not ask for.
 fn timeline_query(raw: &HashMap<String, String>) -> Result<TimelineQuery, ApiError> {
-    match (raw.get("scope").map(String::as_str), raw.get("node")) {
-        (Some("run"), None) => Ok(TimelineQuery::Run),
-        (Some("node"), Some(node)) => Ok(TimelineQuery::Node {
+    let scope = match (raw.get("scope").map(String::as_str), raw.get("node")) {
+        (Some("run"), None) => TimelineScope::Run,
+        (Some("node"), Some(node)) => TimelineScope::Node {
             node: NodeId::try_from(node.as_str())?,
-        }),
-        (Some("node"), None) => Err(ApiError::InvalidNodeId(
-            "scope=node needs the node it scopes to".to_owned(),
-        )),
-        (Some("run"), Some(_)) => Err(ApiError::InvalidNodeId(
-            "scope=run covers the whole run and takes no node".to_owned(),
-        )),
-        (scope, _) => Err(ApiError::InvalidRequest(format!(
-            "scope must be run or node, got {:?}",
-            scope.unwrap_or_default()
-        ))),
-    }
+        },
+        (Some("node"), None) => {
+            return Err(ApiError::InvalidNodeId(
+                "scope=node needs the node it scopes to".to_owned(),
+            ))
+        }
+        (Some("run"), Some(_)) => {
+            return Err(ApiError::InvalidNodeId(
+                "scope=run covers the whole run and takes no node".to_owned(),
+            ))
+        }
+        (scope, _) => {
+            return Err(ApiError::InvalidRequest(format!(
+                "scope must be run or node, got {:?}",
+                scope.unwrap_or_default()
+            )))
+        }
+    };
+    Ok(TimelineQuery {
+        scope,
+        filter: filter_spec(raw)?,
+    })
+}
+
+/// `?filter=`, as either the profile it names or the spec it carries.
+///
+/// Parsed here, at the boundary, rather than carried to the store as the string
+/// it arrived as: a malformed spec is a bad request whichever run it was sent
+/// about, and refusing it before a run is opened is what keeps a crafted one from
+/// reaching a read at all. Whether a *name* resolves is the run's answer, not
+/// this one's, so a name is only checked for being a usable name here.
+fn filter_spec(raw: &HashMap<String, String>) -> Result<Option<FilterSpec>, ApiError> {
+    raw.get("filter")
+        .map(|value| FilterSpec::parse(value))
+        .transpose()
 }
 
 /// The stream's query, and the resume point a reconnecting browser sends.
@@ -395,5 +424,9 @@ fn events_query(
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok()),
     };
-    Ok(EventsQuery { run_id, after })
+    Ok(EventsQuery {
+        run_id,
+        after,
+        filter: filter_spec(raw)?,
+    })
 }
