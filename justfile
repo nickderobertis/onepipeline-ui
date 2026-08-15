@@ -207,10 +207,12 @@ msrv:
 # against. `.github/workflows/release-plz.yml` runs this before release-plz makes
 # the same reading, so a check that cannot run fails the release instead of
 # passing as compatible. `git worktree add --detach <dir> <tag>` makes a baseline.
-# Read the public surface against a checkout of the previous release.
+# Diff the crate's public API against a release checkout, as the release does.
+# The workflow interpolates a path it was handed into this call, so the recipe
+# passes it as an argument rather than pasting it into the command line.
+[positional-arguments]
 semver-check baseline:
-    @command -v cargo-semver-checks >/dev/null || { echo "cargo-semver-checks not installed: cargo install cargo-semver-checks --locked" >&2; exit 1; }
-    @bash scripts/semver-check.sh {{baseline}}
+    @bash scripts/semver-check.sh "$1"
 
 # Separate from `check`: `cargo deny` needs a network-fetched advisory DB.
 # Advisory + license audit and unused-dependency check.

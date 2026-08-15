@@ -396,7 +396,7 @@ fn the_release_workflow_provisions_the_semver_check_it_enables() {
 fn the_release_workflow_reads_the_surface_before_release_plz_versions_from_it() {
     let workflow = read(".github/workflows/release-plz.yml");
     assert!(
-        workflow.contains("bash scripts/semver-check.sh"),
+        workflow.contains("just semver-check"),
         "no step reads the public surface, leaving release-plz's silent \
          \"API compatible\" as the only reading a release gets"
     );

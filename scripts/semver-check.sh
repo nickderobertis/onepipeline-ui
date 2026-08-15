@@ -27,31 +27,45 @@
 # the worktree it made of the tag. `cargo-semver-checks` must be on PATH.
 set -euo pipefail
 
-baseline="${1:-}"
-if [ -z "$baseline" ] || [ ! -f "$baseline/Cargo.toml" ]; then
+usage() {
+  echo "semver-check: $1" >&2
   echo "usage: bash scripts/semver-check.sh <baseline-root>" >&2
-  echo "  <baseline-root> is a checkout of the previous release; it has no Cargo.toml" >&2
+  echo "  <baseline-root> is a checkout of the previous release, and the only argument" >&2
   exit 2
-fi
+}
+
+[ "$#" -eq 1 ] || usage "expected exactly one argument, got $#"
+baseline="$1"
+[ -f "$baseline/Cargo.toml" ] || usage "$baseline has no Cargo.toml, so it is not a checkout"
 
 # Both sides, because the resolve below can reach neither.
-cargo fetch --locked --manifest-path "$baseline/Cargo.toml"
-cargo fetch --locked
+if ! cargo fetch --locked --quiet --manifest-path "$baseline/Cargo.toml"; then
+  echo "::error::the baseline at $baseline has dependencies that no longer resolve" >&2
+  echo "ACTION: run 'cargo fetch --locked' in that checkout and fix what it reports — until it resolves, that release has no surface to read" >&2
+  exit 1
+fi
+if ! cargo fetch --locked --quiet; then
+  echo "::error::this tree's locked dependencies could not be fetched" >&2
+  echo "ACTION: run 'cargo fetch --locked' here and fix what it reports; the reading below can download nothing itself" >&2
+  exit 1
+fi
 
 set +e
+# llmlint: ignore[tool_output_is_signal] this report *is* the reading — on 100 it names every item that broke, on 0 it says how many checks ran — and the release is versioned from it, so a verdict whose evidence was swallowed is the thing this script exists to stop.
 CARGO_NET_OFFLINE=true cargo semver-checks --baseline-root "$baseline" --color never
 status=$?
 set -e
 
 case "$status" in
   0)
-    echo "semver-check: the public surface is unchanged against $baseline"
+    echo "semver-check: the public surface is compatible with $baseline"
     ;;
   100)
     echo "semver-check: the public surface broke; release-plz raises the bump for it"
     ;;
   *)
-    echo "::error::cargo-semver-checks exited $status without a verdict; the release would otherwise be versioned as API compatible with nothing read" >&2
+    echo "::error::the reading exited $status without a verdict; the release would otherwise be versioned as API compatible with nothing read" >&2
+    echo "ACTION: check that cargo-semver-checks is installed ('cargo install cargo-semver-checks --locked'), then read the failure above and take the reading again with 'just semver-check $baseline'. A baseline whose requirements no longer resolve to something that compiles is fixed by a new release carrying tighter ones, never by editing that tag" >&2
     exit 1
     ;;
 esac

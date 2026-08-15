@@ -86,6 +86,7 @@ jobs:
           tool: |
             release-plz@${{ env.RELEASE_PLZ_VERSION }}
             cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
+            just
 
       - name: Tag and publish a merged version bump
         env:
@@ -116,11 +117,12 @@ jobs:
       # reading is taken here first, where a missing verdict is a failed release —
       # and where each side's locked dependencies are fetched, without which the
       # baseline is built against today's registry and may not compile at all.
-      # `scripts/semver-check.sh` holds both, and `tests/e2e/semver_check.rs`
-      # drives it.
+      # `just semver-check` holds both, and `tests/e2e/semver_check.rs` drives it.
+      #
+      # llmlint: ignore-block[changed_behavior_has_e2e] what these two lines add is a condition GitHub Actions evaluates and an environment it hands over, neither of which an offline gate can run; the work behind them is `scripts/semver-check.sh`, which `tests/e2e/semver_check.rs` drives through every answer it can get.
       - name: Read the public surface against the baseline
         if: "${{ steps.baseline.outputs.root != '' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
-        run: bash scripts/semver-check.sh "${{ steps.baseline.outputs.root }}"
+        run: just semver-check "${{ steps.baseline.outputs.root }}"
 
       # Belt to the baseline fix: never open/merge a release PR on a push that is
       # itself a merged release commit.
@@ -134,6 +136,7 @@ jobs:
           # compatible. Offline exactly when there was a baseline to fetch: with
           # no previous release there is nothing cached and nothing to compare.
           CARGO_NET_OFFLINE: ${{ steps.baseline.outputs.root != '' && 'true' || 'false' }}
+          # llmlint: ignore-end[changed_behavior_has_e2e]
         run: release-plz release-pr ${{ steps.baseline.outputs.arg }} --git-token "$GITHUB_TOKEN"
 
       - name: Auto-merge the release PR when the gate is green
