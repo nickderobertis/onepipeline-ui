@@ -33,7 +33,14 @@ export CARGO_TERM_QUIET := "true"
 # from PATH for exactly that reason, and exported so every tier — the crate's own
 # suite and the browser tier's server alike — asks the same one.
 onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^version = /{gsub(/[",]/, "", $3); print $3; exit}' Cargo.lock`
-export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onepipeline"
+
+# The extension `cargo install` gives the file it writes, so the name below is
+# the one the platform actually produced. Derived rather than spelled out a
+# second time: a Windows-only literal beside the portable one drifts the moment
+# either changes, and the failure it drifts into is silent — `_ensure-sibling`
+# probes a path nothing ever writes, never matches, and reinstalls on every run.
+sibling-exe := if os_family() == "windows" { ".exe" } else { "" }
+export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onepipeline" + sibling-exe
 
 # List available recipes.
 default:
@@ -63,8 +70,14 @@ _crate-bootstrap:
 # Not `bootstrap`'s alone: the test tiers that start the read API reach this recipe
 # through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
 # need is clone-local (`AGENTS.md`).
+#
+# The probe reads the exported variable instead of interpolating it: an
+# interpolation is pasted into the shell line, and `justfile_directory()` is
+# separated by backslashes on Windows, which that line would spend as escapes.
+# Either way the path never resolves, and a probe that cannot resolve reinstalls
+# on every run rather than failing — quietly, and only on that platform.
 _ensure-sibling:
-    @[ "$({{ONEPIPELINE_UI_ONEPIPELINE_BIN}} --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
+    @[ "$("$ONEPIPELINE_UI_ONEPIPELINE_BIN" --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
       || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
       || { echo "cannot provision onepipeline {{onepipeline-version}} — the read API serves no timing without it" >&2; exit 1; }
 

@@ -83,25 +83,22 @@ impl Fixture {
 
     /// Put a build of the sibling where the recipe looks, reporting `version`.
     fn sibling_in_the_tree(&self, version: &str) {
-        self.write_stub_sibling(&self.dir.path().join(".tools/bin/onepipeline"), version);
+        self.write_stub_sibling(&self.dir.path().join(".tools/bin"), version);
     }
 
     /// Put a build of the sibling on PATH — where the recipe must never look.
     fn sibling_on_path(&self, version: &str) {
-        self.write_stub_sibling(&self.dir.path().join("stub-bin/onepipeline"), version);
+        self.write_stub_sibling(&self.dir.path().join("stub-bin"), version);
     }
 
     // llmlint: ignore[e2e_not_mocked] this stands in for the *provisioned
     // artifact*, not for the recipe under test: what the journeys need is a
     // program that answers `--version`, and building the real CLI to ask it that
     // is the download this suite exists without.
-    fn write_stub_sibling(&self, at: &Path, version: &str) {
+    fn write_stub_sibling(&self, dir: &Path, version: &str) {
         stub_bin::install(
-            at.parent().expect("a parent directory"),
-            at.file_name()
-                .expect("a file name")
-                .to_str()
-                .expect("utf-8 file name"),
+            dir,
+            &provisioned_sibling(),
             &format!("#!/usr/bin/env bash\nprintf 'onepipeline {version}\\n'\n"),
         );
     }
@@ -129,6 +126,18 @@ impl Fixture {
     fn calls(&self) -> String {
         fs::read_to_string(self.dir.path().join("cargo-calls")).unwrap_or_default()
     }
+}
+
+/// The file a `cargo install` of the sibling leaves in `.tools/bin`, named the
+/// way the platform running this suite names an executable.
+///
+/// Read from Rust's own executable extension — the one cargo appends to the
+/// binary it writes — so this journey derives that name from the platform and
+/// the recipe derives it from the platform, separately. A recipe that probed the
+/// extensionless name on Windows would find nothing here either, which is the
+/// reinstall-every-run these journeys are here to refuse.
+fn provisioned_sibling() -> String {
+    format!("onepipeline{}", std::env::consts::EXE_SUFFIX)
 }
 
 fn stderr(output: &Output) -> String {
