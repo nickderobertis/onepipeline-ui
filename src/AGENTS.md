@@ -215,6 +215,23 @@ record it before anything here can serve it.
   turn did and carries no interval, so the presence flag beside that zero says it
   was never measured — which is the wire's own way of telling an unmeasured zero
   from a measured one, and is why nothing here is hardcoded to it.
+- **Any artifact that is not a settled member's report.** `payload::artifact`
+  serves a `worker_report` from the copy the run itself keeps — `onepipeline`
+  retains it as the settlement is ingested, and this crate resolves it by calling
+  that SDK's own `RunPaths::report_for` on the envelope the artifact was recorded
+  on, so writer and reader are one published promise and neither restates the
+  other's sanitiser. Every other recorded artifact — the `log` `onevcs` stores on
+  a `gate-verdict` or a `change-check`, ids like `a-e3bd2fe52826` — is resolved
+  under `runs/<run>/artifacts/`, and **no library in this stack creates that
+  directory**: `onepipeline` retains member reports and nothing else, so there is
+  no file here to find and the route answers `404`. The check's own record still
+  reaches a reader, with the id the producer stored; only its bytes do not. The
+  upstream change that fills it, and the only one that will: `onepipeline`
+  retains what the other producers store on the same terms it retains a report,
+  at which point this crate resolves it through a published `paths` accessor
+  exactly as it resolves a report today. Nothing here may copy or follow a
+  producer's own path — that is the arbitrary-file read the retention contract
+  exists to prevent.
 - **A provider refusal's own evidence** (`providerFailureSchema`). A member that
   died records a classified cause, but the identity, the chain and the reset time
   a planner would act on are `oneagentgraph`'s to relay and are not on the
