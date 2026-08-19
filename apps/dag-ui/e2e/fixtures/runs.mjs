@@ -89,6 +89,61 @@ export const MISSING_ARTIFACT = "artifact-swept-gate";
 /** The pre-push hook's own log, and the log the host's failing check stored. */
 export const HOOK_ARTIFACT = "artifact-remote-open-hook";
 export const CHECK_ARTIFACT = "artifact-published-smoke";
+/**
+ * The report the foundation node's member settled with.
+ *
+ * `oneagentgraph` records exactly one artifact on a `member-settled`, named for
+ * its own stream — and the id is all it names: the file the run keeps is derived
+ * from the settlement's stream *and* its sequence, which is why the reader
+ * derives it from the envelope rather than from this.
+ */
+export const REPORT_ARTIFACT = "report-a-recording-host-dag-ui-live";
+/**
+ * A settlement whose report this run kept no copy of.
+ *
+ * `retain` refuses a report that is a symlink, is not a plain file, is misnamed,
+ * or is past its size bound, and it refuses it as the settlement is ingested — so
+ * the record still names an artifact and there is no file behind it. Named for
+ * the member rather than for a stream, because this fixture writes one merged
+ * stream where a real run has one per producing process.
+ */
+export const UNRETAINED_REPORT = "report-missing-artifact-worker";
+
+/**
+ * That report, as onejudge writes one: a ruling per acceptance criterion, the
+ * follow-ups the worker surfaced, and why the member stopped.
+ *
+ * Longer than one screen on purpose — a real one is a transcript's worth of
+ * verdicts — so the panel's bounded reading and the control that opens the rest
+ * are driven by a document that really needs them.
+ */
+const FOUNDATION_REPORT = `${JSON.stringify(
+  {
+    schema_version: 8,
+    control: null,
+    verdicts: [
+      {
+        criterion: "the shared contracts are published",
+        met: true,
+        reason: "the earliest ruling this report recorded",
+      },
+      ...Array.from({ length: 60 }, (_, index) => ({
+        criterion: `the route table answers request ${index}`,
+        met: true,
+        reason: "the contract tests cover it end to end",
+      })),
+      {
+        criterion: "the follow-ups are surfaced",
+        met: true,
+        reason: "the last ruling this report recorded",
+      },
+    ],
+    follow_ups: ["the gate logs onevcs stores are retained by nothing"],
+    stopped_because: "every acceptance criterion was met",
+  },
+  null,
+  2,
+)}\n`;
 
 /** The clock every recorded run but the live one is stamped from. */
 const HISTORIC = Date.parse("2026-07-26T09:00:00.000Z");
@@ -177,6 +232,24 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
     artifacts: [],
   });
   writeFileSync(path, `${existing}${line}\n`);
+}
+
+/**
+ * The run's own copy of one settlement's report, where the engine keeps it.
+ *
+ * `onepipeline` copies a member's report into the run as it ingests the
+ * settlement and derives the name from that envelope — its stream and its
+ * sequence — which is `RunPaths::report_for`, and the same derivation the read
+ * API resolves the artifact through. This is the one place in the repository
+ * that spells it, because a `.mjs` fixture cannot link the crate that owns it:
+ * what holds the two sides together is the Rust round trip in
+ * `tests/e2e/server.rs`, which writes through the published `report::retain` and
+ * reads back through the served route, and the journey below, which stops
+ * finding this report the moment either side moves.
+ */
+function retainReport(dir, stream, seq, report) {
+  mkdirSync(join(dir, "reports"), { recursive: true });
+  writeFileSync(join(dir, "reports", `${stream}-${seq}.json`), report);
 }
 
 function runDir(root, runId) {
@@ -386,6 +459,31 @@ function writeLiveRun(root) {
     { ...run, node: "foundation" },
     { identity: IDENTITY, sha: FOUNDATION_COMMIT, base: "main" },
   );
+  // The member behind this node, settling with the report it wrote. Its sequence
+  // is taken before the line is written because that is half of what names the
+  // run's own copy of the report — see `retainReport`.
+  const settled = journal.advance(2).lines.length;
+  journal.emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "foundation", member: "worker", persona: "worker" },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: null,
+      // The producing library's own scratch. Displayed by nothing and opened by
+      // nobody: the engine copied the document into this run as it ingested the
+      // settlement, and every reader afterwards opens only that copy.
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [
+      {
+        id: REPORT_ARTIFACT,
+        kind: "report",
+        bytes: FOUNDATION_REPORT.length,
+      },
+    ],
+  );
   journal.advance(14).emit(
     "pipeline",
     "node-settled",
@@ -539,6 +637,26 @@ function writeLiveRun(root) {
     node: "missing-artifact",
     persona: "worker",
   });
+  // And a member whose report the engine refused to retain, so the settlement
+  // names a report the run holds no copy of. Nothing is written for it here,
+  // which is exactly what that state is on disk.
+  journal.advance(1).emit(
+    "agentgraph",
+    "member-settled",
+    {
+      ...run,
+      node: "missing-artifact",
+      member: "worker",
+      persona: "worker",
+    },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: null,
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [{ id: UNRETAINED_REPORT, kind: "report", bytes: 24 }],
+  );
   journal
     .advance(3)
     .emit(
@@ -722,6 +840,7 @@ function writeLiveRun(root) {
   );
   journal.write();
 
+  retainReport(dir, journal.stream, settled, FOUNDATION_REPORT);
   writeFileSync(
     join(dir, "artifacts", GATE_ARTIFACT),
     `oldest verification output\n${"full verification output\n".repeat(220)}pre-push verification passed\n`,
@@ -1200,6 +1319,8 @@ export function facts() {
       missing: MISSING_ARTIFACT,
       hook: HOOK_ARTIFACT,
       check: CHECK_ARTIFACT,
+      report: REPORT_ARTIFACT,
+      unretained_report: UNRETAINED_REPORT,
     },
   };
 }

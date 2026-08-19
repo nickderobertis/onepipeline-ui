@@ -882,6 +882,93 @@ test("shows a verification and a publication as the records they are", async ({
   ).toBeVisible();
 });
 
+/**
+ * The report a settled member left, read in the run the operator is looking at.
+ *
+ * This is the document a reader opens a settlement for — the ruling against each
+ * acceptance criterion, the follow-ups the worker surfaced, why it stopped — and
+ * it is the run's *own* retained copy, asked for by the opaque artifact id the
+ * settlement recorded. Both halves are driven: the report this run kept, and the
+ * settlement whose report it refused to keep, which has to be said rather than
+ * left as a blank pane.
+ */
+test("reads the report a settled node's member left behind", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=foundation`);
+
+  const served = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/artifacts/${fixture().artifacts.report}`) &&
+      response.status() === 200,
+  );
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "member-settled" })
+    .getByRole("button")
+    .click();
+
+  // Asserted before the response is awaited, so a panel that renders nothing
+  // fails saying what is missing rather than as a wait that never ended — and
+  // the read is still proven to have gone to the API below.
+  await expect(itemDetail(page)).toContainText("Worker report");
+  await served;
+
+  // The end of the report first — the verdicts it closed on and the follow-ups it
+  // surfaced are what the operator came for — and never a path on the producing
+  // host, which is a stranger's directory this stack deliberately never opens.
+  await expect(itemDetail(page)).toContainText(
+    "the last ruling this report recorded",
+  );
+  await expect(itemDetail(page)).toContainText(
+    "the gate logs onevcs stores are retained by nothing",
+  );
+  await expect(itemDetail(page)).not.toContainText(
+    "/a/producing/librarys/scratch",
+  );
+  await expect(itemDetail(page)).not.toContainText(
+    "the earliest ruling this report recorded",
+  );
+
+  // The rest of it is one control away, and that control is in the tab order and
+  // answers the keyboard like every other one here.
+  const expand = itemDetail(page).getByRole("button", {
+    name: "Expand report",
+  });
+  await expand.focus();
+  await page.keyboard.press("Enter");
+  await expect(itemDetail(page)).toContainText(
+    "the earliest ruling this report recorded",
+  );
+  await expect(
+    itemDetail(page).getByRole("button", { name: "Collapse report" }),
+  ).toBeVisible();
+
+  // The record itself stays beside the report rather than being replaced by it.
+  await expect(itemDetail(page)).toContainText("Recorded at");
+  await expect(itemDetail(page)).toContainText(fixture().artifacts.report);
+
+  // The other half: a settlement whose report the engine refused to retain. The
+  // run holds no copy, the route answers 404, and the panel says so.
+  await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
+  const refused = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .includes(`/artifacts/${fixture().artifacts.unretained_report}`) &&
+      response.status() === 404,
+  );
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "member-settled" })
+    .getByRole("button")
+    .click();
+  await expect(itemDetail(page)).toContainText(
+    "This run kept no readable copy of that report.",
+  );
+  await refused;
+});
+
 test("states when a verification artifact is unavailable", async ({ page }) => {
   await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
   const checksTab = page.getByRole("tab", { name: "Checks" });
@@ -1902,8 +1989,11 @@ test("drills from a graph row into that node's own view", async ({ page }) => {
   await expandGraphRows(page);
   const foundation = graphRow(page, "foundation");
   await foundation.getByRole("button", { name: "Expand timeline" }).click();
+  // The first of them: this node kept two pieces of evidence — its member's report
+  // and its gate's log — and either segment is the same way in.
   await foundation
     .getByRole("button", { name: /^foundation · Verification/ })
+    .first()
     .click();
   await expect(page).toHaveURL(/node=foundation/);
 

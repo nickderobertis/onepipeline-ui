@@ -44,6 +44,9 @@ import { useStickyBottom } from "./useStickyBottom";
 /** How many turns of a long transcript are handed to the reader at once. */
 const PAGE_SIZE = 25;
 
+/** How much of a stored artifact is shown before the reader asks for the rest. */
+const ARTIFACT_PREVIEW_CHARS = 4000;
+
 /**
  * The one timeline item the operator opened, expanded across the working area.
  *
@@ -162,6 +165,24 @@ function Body({
         runId={runId}
         reference={reference}
         row={row}
+      />
+    );
+  // A settled member's report, which the run keeps a copy of and serves under the
+  // opaque id the settlement recorded. Only where that id is one this API can be
+  // asked for: a reference the server cannot serve is still a reference, and the
+  // recorded rendering below states it rather than reporting a read that never
+  // happened.
+  if (
+    reference?.kind === "worker_report" &&
+    servableArtifact(reference.value) !== undefined
+  )
+    return (
+      <SettledReport
+        artifactId={reference.value}
+        client={client}
+        reference={reference}
+        row={row}
+        runId={runId}
       />
     );
   if (isPublication(row, reference) && node !== undefined)
@@ -288,30 +309,6 @@ function Verification({
   const artifactId =
     detail?.artifact_id ??
     (reference?.kind === "gate_log" ? reference.value : undefined);
-  const [content, setContent] = useState<string | null>();
-  const [artifactFailed, setArtifactFailed] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  useEffect(() => {
-    let active = true;
-    setContent(undefined);
-    setArtifactFailed(false);
-    setExpanded(false);
-    if (artifactId === undefined || /[/?#]/u.test(artifactId)) return;
-    void client
-      .getArtifact(runId, artifactId)
-      .then((artifact) => {
-        if (active) setContent(artifact.content);
-      })
-      .catch(() => {
-        if (active) {
-          setArtifactFailed(true);
-          setContent(null);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [artifactId, client, runId]);
   return (
     <>
       <h3 className="detail-heading">Verification record</h3>
@@ -333,31 +330,164 @@ function Verification({
           <pre>{detail.output_tail}</pre>
         </>
       )}
-      <h3 className="detail-heading">Full log</h3>
-      {artifactId === undefined ? (
-        <p className="detail-note">No readable log was recorded.</p>
+      <StoredArtifact
+        artifactId={artifactId}
+        client={client}
+        heading="Full log"
+        missing="No readable log was recorded."
+        noun="log"
+        runId={runId}
+        unreadable="No readable log was recorded."
+      />
+      <p className="detail-note">Verification {row.status ?? "in progress"}.</p>
+    </>
+  );
+}
+
+/**
+ * The report a settled member left behind, and the stamps the timeline recorded
+ * beside it.
+ *
+ * This is what a reader opens a settlement for: the judge's ruling against each
+ * acceptance criterion, the follow-ups the worker surfaced, and why it stopped.
+ * The bytes are the copy the *run* kept — asked for by the opaque artifact id the
+ * settlement recorded, so no path on the producing host ever reaches the browser
+ * — and the row's own record stays beneath it rather than being replaced by it.
+ */
+function SettledReport({
+  artifactId,
+  client,
+  reference,
+  row,
+  runId,
+}: {
+  readonly artifactId: string;
+  readonly client: TelemetryClient;
+  readonly reference: TimelineReference;
+  readonly row: TimelineRow;
+  readonly runId: string;
+}) {
+  return (
+    <>
+      <StoredArtifact
+        artifactId={artifactId}
+        client={client}
+        heading="Worker report"
+        missing="This settlement recorded no report."
+        noun="report"
+        runId={runId}
+        unreadable="This run kept no readable copy of that report."
+      />
+      <Recorded reference={reference} row={row} />
+    </>
+  );
+}
+
+/**
+ * One recorded artifact's bytes, read through the API's artifact route.
+ *
+ * The route serves the *end* of a file rather than all of it, and this shows the
+ * end of that again until the reader asks for the rest — a stored log or report
+ * has no size its producer promised, and a panel that pastes an unbounded one
+ * into the page is a panel that stops being readable. The button that opens it is
+ * the design system's own, so it is in the tab order and answers Enter and Space
+ * like every other control here.
+ *
+ * A read that failed is *said*, never left blank: the two sentences a caller
+ * gives are what tells "nothing was recorded" from "something was, and this run
+ * has no readable copy of it", which are different facts about the record.
+ */
+function StoredArtifact({
+  artifactId,
+  client,
+  heading,
+  missing,
+  noun,
+  runId,
+  unreadable,
+}: {
+  readonly artifactId?: string;
+  readonly client: TelemetryClient;
+  /** The heading this reading sits under. */
+  readonly heading: string;
+  /** What to say when the record named no artifact this API can be asked for. */
+  readonly missing: string;
+  /** What this document is called, in the controls that page through it. */
+  readonly noun: string;
+  readonly runId: string;
+  /** What to say when the artifact was named and the read did not answer. */
+  readonly unreadable: string;
+}) {
+  const [content, setContent] = useState<string | null>();
+  const [artifactFailed, setArtifactFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const servable = servableArtifact(artifactId);
+  useEffect(() => {
+    let active = true;
+    setContent(undefined);
+    setArtifactFailed(false);
+    setExpanded(false);
+    if (servable === undefined) return;
+    void client
+      .getArtifact(runId, servable)
+      .then((artifact) => {
+        if (active) setContent(artifact.content);
+      })
+      .catch(() => {
+        if (active) {
+          setArtifactFailed(true);
+          setContent(null);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, runId, servable]);
+  return (
+    <>
+      <h3 className="detail-heading">{heading}</h3>
+      {servable === undefined ? (
+        <p className="detail-note">{missing}</p>
       ) : content === undefined ? (
-        <p className="detail-note">Loading log…</p>
+        <p aria-live="polite" className="detail-note">
+          Loading {noun}…
+        </p>
       ) : artifactFailed || content === null ? (
-        <p className="detail-note">No readable log was recorded.</p>
+        <p aria-live="polite" className="detail-note">
+          {unreadable}
+        </p>
       ) : (
         <>
-          <pre>{expanded ? content : content.slice(-4000)}</pre>
-          {content.length > 4000 && (
+          <pre>
+            {expanded ? content : content.slice(-ARTIFACT_PREVIEW_CHARS)}
+          </pre>
+          {content.length > ARTIFACT_PREVIEW_CHARS && (
             <Button
               onClick={() => setExpanded(!expanded)}
               size="sm"
               type="button"
               variant="outline"
             >
-              {expanded ? "Collapse log" : "Expand log"}
+              {expanded ? `Collapse ${noun}` : `Expand ${noun}`}
             </Button>
           )}
         </>
       )}
-      <p className="detail-note">Verification {row.status ?? "in progress"}.</p>
     </>
   );
+}
+
+/**
+ * The artifact id a reference names, when the API can be asked for it.
+ *
+ * An id is opaque to this app and validated at the server's own boundary, so the
+ * one thing checked here is that it is a single path segment: a value carrying a
+ * separator or a query would be a request for a different route than the one
+ * intended, and the reference is shown as the record rather than fetched.
+ */
+function servableArtifact(artifactId?: string): string | undefined {
+  if (artifactId === undefined || /[/?#]/u.test(artifactId)) return undefined;
+  return artifactId;
 }
 
 function Publication({

@@ -44,6 +44,10 @@ const fixtureSchema = z.object({
     missing: z.string().min(1),
     hook: z.string().min(1),
     check: z.string().min(1),
+    /** The report a settled node's member left, served from the run's own copy. */
+    report: z.string().min(1),
+    /** A settlement naming a report this run kept no copy of. */
+    unretained_report: z.string().min(1),
   }),
 });
 
