@@ -60,14 +60,9 @@ _crate-bootstrap:
 # test runners above this *is* a rule: it produces the telemetry document this
 # server serves, and a different version of it is a different document.
 #
-# It is `bootstrap`'s, but not only `bootstrap`'s. `.tools/` is the one thing the
-# gate needs that lives inside the clone rather than in a user-wide cache, so a
-# tree nobody bootstrapped by hand is a tree where every journey that starts the
-# read API fails on a missing binary — which is what a publication clone is. The
-# `onepipeline-ui:ensure-sibling` Nx target runs this recipe, and both suites that
-# start that server depend on it (`onepipeline-ui:test` and `dag-ui:test`), so the
-# tier that needs it provisions it. Nx runs the one task once however many
-# dependents ask, which is also what keeps two of them out of `.tools` at once.
+# Not `bootstrap`'s alone: the test tiers that start the read API reach this recipe
+# through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
+# need is clone-local (`AGENTS.md`).
 _ensure-sibling:
     @[ "$({{ONEPIPELINE_UI_ONEPIPELINE_BIN}} --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
       || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
