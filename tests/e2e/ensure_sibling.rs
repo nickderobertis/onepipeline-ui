@@ -289,8 +289,10 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
         .expect("bash is on PATH");
     assert!(
         output.status.success(),
-        "Nx could not build the task graph for `test`:\n{}",
-        stderr(&output)
+        "Nx could not build the task graph for `test` ({}):\n{}{}",
+        output.status,
+        stderr(&output),
+        String::from_utf8_lossy(&output.stdout)
     );
 
     let dependencies = task_dependencies(&graph);
