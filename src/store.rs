@@ -22,14 +22,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use onepipeline::views::RunView;
+use onepipeline::views::{RunView, Survey};
 use serde_json::{json, Value};
 
 use crate::api::ReadApi;
 use crate::cli::RunsRoot;
 use crate::contract::{
-    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, RunId,
-    RunQuery, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
+    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, Release,
+    RunId, RunQuery, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
     TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
@@ -142,8 +142,13 @@ impl RunStore {
     }
 
     /// Every readable run under the root, oldest id first.
+    ///
+    /// The survey's `skipped` — the run roots it could not read — is deliberately
+    /// dropped here, which is what the SDK's own listing did before it carried
+    /// them. Serving a refused root as a fact rather than as an absence is a
+    /// change to what this API reports, not to what pinning the SDK costs.
     fn views(&self) -> Vec<RunView> {
-        RunView::all(&self.root)
+        Survey::of(&self.root).views
     }
 
     /// One run, or the not-found this route serves for it.
@@ -253,6 +258,7 @@ impl ReadApi for RunStore {
     fn health(&self) -> Health {
         Health {
             status: HealthStatus::Ok,
+            onepipeline_version: Release::linked(),
         }
     }
 

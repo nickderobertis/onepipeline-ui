@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
@@ -60,6 +61,9 @@ pub struct Serving {
     pub address: SocketAddr,
     /// The runs root it is serving, kept alive for as long as it is.
     pub runs: TempDir,
+    /// What it has said on its own log, when a journey asked for that to be
+    /// captured rather than inherited.
+    log: Option<Arc<Mutex<String>>>,
     stopped: bool,
 }
 
@@ -87,8 +91,24 @@ impl Serving {
         Self::start_in(runs, environment)
     }
 
+    /// The same, reading the server's own log rather than letting it through to
+    /// the terminal.
+    ///
+    /// For the journeys where what the operator is *told* is part of the
+    /// behaviour under test. Inherited otherwise, so a failing journey still
+    /// prints the server's own account of what it did.
+    pub fn start_with_log(build: impl FnOnce(&Path)) -> Self {
+        let runs = tempfile::tempdir().expect("temp dir");
+        build(runs.path());
+        Self::spawn(runs, &[], true)
+    }
+
     /// Start a server over a runs root the caller already built.
     pub fn start_in(runs: TempDir, environment: &[(&str, &str)]) -> Self {
+        Self::spawn(runs, environment, false)
+    }
+
+    fn spawn(runs: TempDir, environment: &[(&str, &str)], capture: bool) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let mut child = Command::new(binary)
             .arg("serve")
@@ -100,16 +120,71 @@ impl Serving {
             .args(["--poll-interval-ms", "50"])
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(if capture {
+                Stdio::piped()
+            } else {
+                Stdio::inherit()
+            })
             .spawn()
             .expect("the binary is built and runnable");
+
+        // Drained by a thread rather than read on demand: a captured pipe
+        // nobody empties fills, and a server blocked writing to it would be a
+        // hang in the journey rather than the answer it was asked for.
+        let log = child.stderr.take().map(|stderr| {
+            let said = Arc::new(Mutex::new(String::new()));
+            let writing = Arc::clone(&said);
+            std::thread::spawn(move || {
+                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    let mut said = writing.lock().expect("the log is not poisoned");
+                    said.push_str(&line);
+                    said.push('\n');
+                }
+            });
+            said
+        });
 
         let address = address_of(&mut child);
         Self {
             child,
             address,
             runs,
+            log,
             stopped: false,
+        }
+    }
+
+    /// Everything the server has said on its log so far.
+    ///
+    /// Only a server started by [`Serving::start_with_log`] has one to read;
+    /// asking any other is the journey's own mistake rather than an empty log.
+    pub fn said(&self) -> String {
+        self.log
+            .as_ref()
+            .expect("this server's log is captured")
+            .lock()
+            .expect("the log is not poisoned")
+            .clone()
+    }
+
+    /// Wait until the server has said `line`, or fail the journey.
+    ///
+    /// A bounded wait rather than an immediate read: the server writes its log
+    /// before it answers, but this side reads it through a pipe and a thread, so
+    /// the two are ordered only by the deadline. Bounded so a line that never
+    /// comes is a named failure rather than a suite that hangs.
+    pub fn wait_until_said(&self, line: &str) -> String {
+        let asked = Instant::now();
+        loop {
+            let said = self.said();
+            if said.contains(line) {
+                return said;
+            }
+            assert!(
+                asked.elapsed() < STOP_DEADLINE,
+                "the server never said {line:?}; it said: {said}"
+            );
+            std::thread::sleep(WAIT_POLL);
         }
     }
 

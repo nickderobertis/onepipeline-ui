@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+use oneharness_core::io::history;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::plan::{Node, Plan};
 use onepipeline::views::{liveness_word, RunView};
@@ -25,7 +26,10 @@ use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::contract::{ArtifactId, ConversationId, DispatchId, NodeId, TIMELINE_SCHEMA_VERSION};
+use crate::contract::{
+    ArtifactId, Confined, ConversationId, DispatchId, NamedStore, NodeId, PathSegment,
+    ReferenceKind, StoreRoot, TIMELINE_SCHEMA_VERSION,
+};
 use crate::filter::EventFilter;
 // The sibling's spending party is imported under a name of its own: this module
 // also has a `Party`, and the two answer different questions — which side of a
@@ -442,7 +446,7 @@ fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
             // What the journal settled for this node, which is an account of the
             // node itself rather than of the graph around it.
             let settled = view.state.recorded.get(&node).map(|status| Recorded {
-                status: status.as_str().to_owned(),
+                status: status.status().as_str().to_owned(),
                 outcome: outcome(),
             });
             let recorded = settled
@@ -1440,11 +1444,9 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
     if let Some(status) = view.state.recorded.get(&node.id) {
-        item.insert("status".into(), json!(status_word(status.as_str())));
-        item.insert(
-            "completed".into(),
-            json!(status_word(status.as_str()) == "done"),
-        );
+        let word = status_word(status.status().as_str());
+        item.insert("status".into(), json!(word));
+        item.insert("completed".into(), json!(word == "done"));
         // The words the settlement itself carried. The SDK's fold keeps a node's
         // status, outcome and branch but not the prose beside them, and a node
         // that stopped without them is a card that says only "failed" — which
@@ -2083,36 +2085,120 @@ pub fn conversation(view: &RunView, id: &ConversationId) -> Option<Value> {
 /// reads nothing.
 #[must_use]
 pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
-    let recorded = view.events.iter().find_map(|event| {
+    let (event, recorded) = view.events.iter().find_map(|event| {
         event
             .artifacts
             .iter()
             .find(|artifact| artifact.id.0 == id.as_str())
+            .map(|artifact| (event, artifact))
     })?;
-    let path = view.paths.dir.join("artifacts").join(id.as_str());
-    let bytes = fs::read(&path).ok()?;
+    let kind = ReferenceKind::of(&recorded.kind);
+    let bytes = artifact_bytes(view, event, id, kind)?;
     let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
     let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
     Some(json!({
         "id": id.as_str(),
-        "kind": reference_kind(&recorded.kind),
+        "kind": kind.as_str(),
         "content": String::from_utf8_lossy(tail),
         "truncated": truncated,
     }))
 }
 
-/// The wire's closed reference vocabulary, from the producing library's own word
-/// for the artifact. Anything unrecognized is a log, which is what the producing
-/// libraries store.
-fn reference_kind(kind: &str) -> &'static str {
-    match kind {
-        "conversation" => "conversation",
-        "worker_report" | "report" => "worker_report",
-        "oneharness_session" | "session" => "oneharness_session",
-        "pr" => "pr",
-        _ => "gate_log",
-    }
+/// One recorded artifact's bytes, read from wherever the producing library said
+/// it stored them.
+///
+/// A settled member's report is the one kind this run holds a copy of: the SDK
+/// copies it into the run's own storage as the settlement is ingested, and
+/// [`RunPaths::report_for`] is the published name of that copy — derived from
+/// the envelope the artifact was recorded on, because **the artifact id names
+/// the stream and not the seq**, so nothing about the id alone locates the file.
+/// The sanitiser behind that name is private to `onepipeline` on purpose and is
+/// never restated here: writer and reader share one implementation of it rather
+/// than two that happen to agree.
+///
+/// A oneharness session is the kind whose bytes are *not* a file this crate
+/// picks: they are one record inside the history store oneharness itself keeps,
+/// read through that library — see [`harness_session`].
+///
+/// Everything else is a log the producing library stored beside the run, under
+/// its own id.
+///
+/// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
+fn artifact_bytes(
+    view: &RunView,
+    event: &Envelope,
+    id: &ArtifactId,
+    kind: ReferenceKind,
+) -> Option<Vec<u8>> {
+    // Listed rather than defaulted: where a kind's bytes live is a decision, and
+    // a kind added to the vocabulary must be made to answer it rather than
+    // inheriting an answer that happens to compile.
+    let path = match kind {
+        ReferenceKind::WorkerReport => view.paths.report_for(&event.stream, event.seq),
+        ReferenceKind::OneharnessSession => return harness_session(event, id),
+        ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
+            view.paths.dir.join("artifacts").join(id.as_str())
+        }
+    };
+    fs::read(&path).ok()
 }
+
+/// The oneharness conversation one `oneharness_session` artifact names, rendered
+/// as the reader reads it.
+///
+/// The one artifact resolved outside the run directory: `oneagentgraph` publishes
+/// a pointer and nothing is copied. `src/AGENTS.md` holds why the record alone
+/// names the store, why this reads without locking, and why every component is
+/// checked; [`Confined`] holds what each outcome of the check means.
+///
+// llmlint: ignore[comments_earn_their_place] the paragraph the rule objects to is the one the manager required survive: the checks are on how a record *spelled* a path, and a bare name that climbs nowhere still lands anywhere if a component is a symlink, so the resolved path is proved under a `StoreRoot` before it is opened. That sentence is what stops a future reader relaxing the confinement this change exists to add. The design it links to is in `src/AGENTS.md` and is not repeated here.
+/// **The one thing that must not be relaxed here:** those checks are on how a
+/// record *spelled* a path, and a bare name that climbs nowhere still lands
+/// anywhere if a component of it is a symlink, so the resolved path is proved
+/// under a [`StoreRoot`] before it is opened.
+///
+/// What is served is [`history::read_session_display`]'s record rather than the
+/// file's bytes, which is what `docs/contract.md` names this artifact as.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes recorded, and the store, project and session are read off that envelope — and what the record names is confined below before it is opened.
+fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
+    let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
+    // An empty value names no store, which is what oneharness itself reads
+    // `history_dir = ""` as, so it falls back rather than being refused.
+    let named = match field("history_dir").filter(|value| !value.is_empty()) {
+        Some(named) => Some(NamedStore::try_from(named).ok()?),
+        None => None,
+    };
+    let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
+    let store = StoreRoot::read(&dir)?;
+    let project = PathSegment::try_from(field("history_project")?).ok()?;
+    let session = PathSegment::try_from(field("history_session")?).ok()?;
+    let listed = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
+        .ok()
+        .flatten()?;
+    let path = match store.confine(&listed) {
+        Confined::Under(path) => path,
+        // The artifact id and not the pointer: an id has crossed the identifier
+        // boundary and is safe to print, where every field of the pointer is a
+        // record's own bytes and one of them could otherwise write a line of
+        // this log itself. Where it landed is deliberately absent — an operator
+        // needs to know their journal carries a pointer that escapes, and a
+        // reader must not be told what is on the host by reading the answer.
+        Confined::Escaped => {
+            eprintln!(
+                "onepipeline-api: artifact {}: refusing a oneharness session that resolves outside the store its record named",
+                id.as_str()
+            );
+            return None;
+        }
+        Confined::Missing => return None,
+    };
+    let record = history::read_session_display(path.as_path())
+        .ok()?
+        .into_iter()
+        .find(|record| record["history_id"] == json!(id.as_str()))?;
+    serde_json::to_vec_pretty(&record).ok()
+}
+// llmlint: ignore-end[authorization_enforced_server_side]
 
 /// The scope a timeline request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2387,7 +2473,7 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     } else if let Some(artifact) = event.artifacts.first() {
         item.insert(
             "reference".into(),
-            json!({ "kind": reference_kind(&artifact.kind), "value": artifact.id.0 }),
+            json!({ "kind": ReferenceKind::of(&artifact.kind).as_str(), "value": artifact.id.0 }),
         );
     }
     Value::Object(item)

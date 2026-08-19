@@ -194,6 +194,39 @@ exclude it, because a turn's id is its position in the transcript and the timeli
 numbers the same session by the same rule — excluding it in one alone would leave
 a plotted moment pointing at the wrong turn.
 
+## The one store this crate opens that no run owns
+
+A `oneharness_session` artifact's bytes are the only ones this API serves from
+outside the runs root: `oneagentgraph` publishes a pointer and nothing is copied,
+so `payload::harness_session` opens another tool's directory. Four constraints on
+it, each because the obvious alternative is worse:
+
+- **Link `oneharness-core`; never spawn the `oneharness` CLI.** A process is a
+  second contract — arguments, output shape, version — that nothing here pins.
+- **Read, never write, never lock.** `find_record_by_id` reconciles the store's
+  index under an exclusive `flock`; a read surface must not stand in the way of
+  the single writer the engine runs.
+- **The record names the store; nothing here does.** No flag, no config key. A
+  second source for that path is how a reader and a writer come to disagree about
+  where the transcripts are.
+- **Every component of the pointer is checked before it is used** — the two names
+  as `contract::PathSegment`, the store as a `contract::NamedStore`, which is
+  absolute and non-climbing. A record is external input exactly as a URL is, and
+  joining one unchecked is the arbitrary-file read the retention contract exists
+  to prevent.
+- **And checking how a path is spelled is not confining where it lands.** Those
+  checks are lexical, and every component they clear is still a name in somebody
+  else's directory: a bare name that climbs nowhere reaches anywhere on the host
+  if what it names is a symlink, which the store's project layer and its session
+  files both can be. So the resolved path is proved to sit under a
+  `contract::StoreRoot` — the store canonicalized, which exists only once the
+  directory has been read, on `cli::RunsRoot`'s own terms — and only what
+  `Confined::Under` returns is opened. `Confined` is three-valued because a path
+  that resolved *outside* and a path that resolved *nowhere* are different facts
+  about the host: the first is said to the operator's log, naming the artifact
+  and never where it went, and the second is a transcript that was rotated away
+  and is a plain `404`. The wire cannot tell them apart on purpose.
+
 ## What the wire asks for and no record fills
 
 Not derivations but gaps: a client's model has fields this API cannot fill from
@@ -215,6 +248,17 @@ record it before anything here can serve it.
   turn did and carries no interval, so the presence flag beside that zero says it
   was never measured — which is the wire's own way of telling an unmeasured zero
   from a measured one, and is why nothing here is hardcoded to it.
+- **Any artifact that is neither a settled member's report nor a oneharness
+  session.** Those two resolve — a `worker_report` through `onepipeline`'s own
+  `RunPaths::report_for`, a `oneharness_session` through the store above. Every
+  other recorded artifact — the `log` `onevcs` stores on a `gate-verdict` or a
+  `change-check` — resolves under `runs/<run>/artifacts/`, and **no library in
+  this stack creates that directory**, so the route answers `404` and only the
+  bytes are missing: the record still reaches a reader with the id the producer
+  stored. The upstream change that fills it: `onepipeline` retains what the other
+  producers store on the same terms it retains a report. Nothing here may copy or
+  follow a producer's own path — that is the arbitrary-file read the retention
+  contract exists to prevent.
 - **A provider refusal's own evidence** (`providerFailureSchema`). A member that
   died records a classified cause, but the identity, the chain and the reset time
   a planner would act on are `oneagentgraph`'s to relay and are not on the

@@ -28,7 +28,10 @@
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts && npx playwright test --config playwright.config.ts && npx playwright test --config isolation.config.ts",
       "inputs": ["default", "apiServerSurface"],
-      "dependsOn": ["build-api-server"]
+      "dependsOn": [
+        "build-api-server",
+        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" }
+      ]
     },
     "typecheck": {
       "command": "npx tsc -p apps/dag-ui/tsconfig.json --noEmit"

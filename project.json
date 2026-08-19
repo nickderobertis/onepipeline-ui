@@ -11,6 +11,10 @@
     "bootstrap": {
       "command": "just _crate-bootstrap"
     },
+    "ensure-sibling": {
+      "command": "just _ensure-sibling",
+      "cache": false
+    },
     "format": {
       "command": "just _crate-format"
     },
@@ -21,7 +25,8 @@
       "command": "just _crate-lint"
     },
     "test": {
-      "command": "just _crate-test"
+      "command": "just _crate-test",
+      "dependsOn": ["ensure-sibling"]
     },
     "doc": {
       "command": "just _crate-doc"

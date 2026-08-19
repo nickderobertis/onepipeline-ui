@@ -89,6 +89,139 @@ export const MISSING_ARTIFACT = "artifact-swept-gate";
 /** The pre-push hook's own log, and the log the host's failing check stored. */
 export const HOOK_ARTIFACT = "artifact-remote-open-hook";
 export const CHECK_ARTIFACT = "artifact-published-smoke";
+/** The report the foundation node's member settled with. */
+export const REPORT_ARTIFACT = "report-a-recording-host-dag-ui-live";
+/**
+ * A settlement naming a report this run kept no copy of.
+ *
+ * Named for the member rather than for a stream, because this fixture writes one
+ * merged stream where a real run has one per producing process.
+ */
+export const UNRETAINED_REPORT = "report-missing-artifact-worker";
+
+/**
+ * The oneharness invocation the dashboard node's worker made.
+ *
+ * Its bytes are the one thing not under the run (`src/AGENTS.md`), so this
+ * fixture writes them somewhere else entirely and points at that. The id is the
+ * history record's own, which is what the pointer names it by.
+ */
+export const HARNESS_SESSION_ARTIFACT = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
+/**
+ * An invocation the store no longer holds: the pointer names the store this
+ * fixture wrote and a history id no record in it carries.
+ */
+export const SWEPT_HARNESS_SESSION = "01a00d0f-c094-7660-b26c-000000000000";
+/**
+ * Two ids no route can be asked for. The envelope constrains none of an id's
+ * characters, so one carrying a separator is a reference a reader is still shown
+ * and a request nothing may be turned into.
+ */
+export const UNASKABLE_REPORT = "report/local-direct/worker";
+export const UNASKABLE_HARNESS_SESSION = "01a00d0f/c094/7660/b26c/1";
+/** What that conversation ended on, which is what an operator opens it to read. */
+export const HARNESS_SESSION_TEXT =
+  "wired the dashboard to the read API and left the rail alone";
+/** The project layer of the store, as oneharness slugs a project directory. */
+const HARNESS_PROJECT = "tmp-dag-ui-e2e-project";
+/** The session file inside it, as oneharness names one: name, instant, pid. */
+const HARNESS_SESSION_FILE = "engineer-dashboard-20260817T001158Z-3163805";
+
+/**
+ * One oneharness history record, in the line format that library writes.
+ *
+ * This is the second place in the repository that spells another crate's file
+ * format, and for the same reason `retainReport` above spells the first: a
+ * `.mjs` fixture cannot link the crate that owns it. What holds the two together
+ * is the Rust side — `tests/support/harness_history.rs` writes this store through
+ * `oneharness_core`'s own `HistoryWriter` and `tests/e2e/server.rs` reads it back
+ * through the served route — plus the journey below, which stops finding this
+ * conversation the moment either side moves.
+ */
+function harnessSessionRecord() {
+  return `${JSON.stringify({
+    type: "run",
+    schema_version: "1.1",
+    history_id: HARNESS_SESSION_ARTIFACT,
+    session: HARNESS_SESSION_FILE,
+    name: "engineer-dashboard",
+    project: "/tmp/dag-ui-e2e/project",
+    timestamp: "2026-08-17T00:11:58Z",
+    harness: "claude-code",
+    variant: "alternate",
+    harness_id: "claude-code:alternate",
+    model: "a-model",
+    prompt: "wire the dashboard to the read API",
+    permission_mode: "default",
+    status: "ok",
+    exit_code: 0,
+    duration_ms: 4200,
+    finished_at: null,
+    text: HARNESS_SESSION_TEXT,
+    text_source: "json:result",
+    usage: {
+      input_tokens: 1200,
+      output_tokens: 340,
+      cache_read_tokens: 800,
+      cache_write_tokens: 120,
+      cost_usd: 0.42,
+    },
+    session_id: "54e7ad34-ce6d-4979-8b4d-531b88026e15",
+    failure_kind: null,
+  })}\n`;
+}
+
+/**
+ * Write that store beside the runs root rather than inside it.
+ *
+ * Beside, because that is where it really is: oneharness keeps its history under
+ * the operator's own state directory and no run owns it. Returning the directory
+ * is what lets the pointer name it — the reader takes the store from the record
+ * and has no configuration of its own for it.
+ */
+function writeHarnessHistory(root) {
+  const dir = join(root, "..", "oneharness-history");
+  mkdirSync(join(dir, HARNESS_PROJECT), { recursive: true });
+  const path = join(dir, HARNESS_PROJECT, `${HARNESS_SESSION_FILE}.jsonl`);
+  writeFileSync(path, harnessSessionRecord());
+  return { dir, bytes: readFileSync(path).length };
+}
+
+/**
+ * That report, as onejudge writes one: a ruling per acceptance criterion, the
+ * follow-ups the worker surfaced, and why the member stopped.
+ *
+ * Longer than one screen on purpose — a real one is a transcript's worth of
+ * verdicts — so the panel's bounded reading and the control that opens the rest
+ * are driven by a document that really needs them.
+ */
+const FOUNDATION_REPORT = `${JSON.stringify(
+  {
+    schema_version: 8,
+    control: null,
+    verdicts: [
+      {
+        criterion: "the shared contracts are published",
+        met: true,
+        reason: "the earliest ruling this report recorded",
+      },
+      ...Array.from({ length: 60 }, (_, index) => ({
+        criterion: `the route table answers request ${index}`,
+        met: true,
+        reason: "the contract tests cover it end to end",
+      })),
+      {
+        criterion: "the follow-ups are surfaced",
+        met: true,
+        reason: "the last ruling this report recorded",
+      },
+    ],
+    follow_ups: ["the gate logs onevcs stores are retained by nothing"],
+    stopped_because: "every acceptance criterion was met",
+  },
+  null,
+  2,
+)}\n`;
 
 /** The clock every recorded run but the live one is stamped from. */
 const HISTORIC = Date.parse("2026-07-26T09:00:00.000Z");
@@ -177,6 +310,24 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
     artifacts: [],
   });
   writeFileSync(path, `${existing}${line}\n`);
+}
+
+/**
+ * The run's own copy of one settlement's report, where the engine keeps it.
+ *
+ * `onepipeline` copies a member's report into the run as it ingests the
+ * settlement and derives the name from that envelope — its stream and its
+ * sequence — which is `RunPaths::report_for`, and the same derivation the read
+ * API resolves the artifact through. This is the one place in the repository
+ * that spells it, because a `.mjs` fixture cannot link the crate that owns it:
+ * what holds the two sides together is the Rust round trip in
+ * `tests/e2e/server.rs`, which writes through the published `report::retain` and
+ * reads back through the served route, and the journey below, which stops
+ * finding this report the moment either side moves.
+ */
+function retainReport(dir, stream, seq, report) {
+  mkdirSync(join(dir, "reports"), { recursive: true });
+  writeFileSync(join(dir, "reports", `${stream}-${seq}.json`), report);
 }
 
 function runDir(root, runId) {
@@ -279,7 +430,7 @@ const livePlan = () => ({
 function turn(journal, node, session, persona, message, model = "a-model") {
   journal.emit(
     "agentgraph",
-    "agent-turn",
+    "turn-started",
     {
       run_id: journal.runId,
       node,
@@ -293,6 +444,9 @@ function turn(journal, node, session, persona, message, model = "a-model") {
 function writeLiveRun(root) {
   const dir = runDir(root, LIVE_RUN);
   mkdirSync(join(dir, "artifacts"), { recursive: true });
+  // The oneharness store this run's worker wrote its conversation into. Outside
+  // the run, and named by the record rather than by any setting of this server's.
+  const harnessHistory = writeHarnessHistory(root);
   const plan = livePlan();
   writeJson(join(dir, "plan.json"), plan);
 
@@ -386,6 +540,31 @@ function writeLiveRun(root) {
     { ...run, node: "foundation" },
     { identity: IDENTITY, sha: FOUNDATION_COMMIT, base: "main" },
   );
+  // The member behind this node, settling with the report it wrote. Its sequence
+  // is taken before the line is written because that is half of what names the
+  // run's own copy of the report — see `retainReport`.
+  const settled = journal.advance(2).lines.length;
+  journal.emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "foundation", member: "worker", persona: "worker" },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: null,
+      // The producing library's own scratch. Displayed by nothing and opened by
+      // nobody: the engine copied the document into this run as it ingested the
+      // settlement, and every reader afterwards opens only that copy.
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [
+      {
+        id: REPORT_ARTIFACT,
+        kind: "report",
+        bytes: FOUNDATION_REPORT.length,
+      },
+    ],
+  );
   journal.advance(14).emit(
     "pipeline",
     "node-settled",
@@ -407,6 +586,39 @@ function writeLiveRun(root) {
     node: "local-direct",
     persona: "worker",
   });
+  // Two records whose artifact ids no route can be asked for. An artifact id is
+  // the producing library's own string and nothing on the envelope constrains
+  // its characters, so one carrying a separator reaches a reader as the
+  // reference it is — and the panel has to *state* it rather than turn it into a
+  // request for some other route. Both kinds that fetch are driven, because a
+  // guard that only one of them keeps is a guard the other has already lost.
+  journal.advance(1).emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "local-direct", member: "worker", persona: "worker" },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: null,
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [{ id: UNASKABLE_REPORT, kind: "report", bytes: 24 }],
+  );
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "local-direct", member: "worker", persona: "worker" },
+    {
+      role: "agent",
+      turn: 1,
+      identity: "claude-code:alternate",
+      history_id: UNASKABLE_HARNESS_SESSION,
+      history_dir: harnessHistory.dir,
+      history_project: HARNESS_PROJECT,
+      history_session: HARNESS_SESSION_FILE,
+    },
+    [{ id: UNASKABLE_HARNESS_SESSION, kind: "oneharness_session", bytes: 0 }],
+  );
   journal
     .advance(3)
     .emit(
@@ -539,6 +751,47 @@ function writeLiveRun(root) {
     node: "missing-artifact",
     persona: "worker",
   });
+  // And a member whose report the engine refused to retain, so the settlement
+  // names a report the run holds no copy of. Nothing is written for it here,
+  // which is exactly what that state is on disk.
+  journal.advance(1).emit(
+    "agentgraph",
+    "member-settled",
+    {
+      ...run,
+      node: "missing-artifact",
+      member: "worker",
+      persona: "worker",
+    },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: null,
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [{ id: UNRETAINED_REPORT, kind: "report", bytes: 24 }],
+  );
+  // And an invocation whose conversation the history store no longer holds: the
+  // pointer is in the journal and the record it names has been swept, which is
+  // the ordinary end of a store nothing here owns or retains. Reading it has to
+  // *say* so — the difference between "nothing was written down" and "something
+  // was, and it is not there now" is what an operator decides where to look
+  // next by.
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "missing-artifact", member: "worker", persona: "worker" },
+    {
+      role: "agent",
+      turn: 1,
+      identity: "claude-code:alternate",
+      history_id: SWEPT_HARNESS_SESSION,
+      history_dir: harnessHistory.dir,
+      history_project: HARNESS_PROJECT,
+      history_session: HARNESS_SESSION_FILE,
+    },
+    [{ id: SWEPT_HARNESS_SESSION, kind: "oneharness_session", bytes: 0 }],
+  );
   journal
     .advance(3)
     .emit(
@@ -575,7 +828,7 @@ function writeLiveRun(root) {
   ]) {
     journal.emit(
       "agentgraph",
-      "agent-turn",
+      "turn-started",
       { ...run, node: "dashboard", member, persona, session },
       { message, model: "a-model" },
     );
@@ -668,6 +921,34 @@ function writeLiveRun(root) {
     },
   );
 
+  // Where that worker's conversation was actually written down. Published once
+  // per oneharness invocation, carrying the pointer at the record and one
+  // artifact naming it — and carrying **no** `session` label, because the
+  // producer stamps that on its four turn kinds and on nothing else. The bytes
+  // stay in the store `writeHarnessHistory` wrote; nothing is copied here.
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "dashboard", member: "worker", persona: "worker" },
+    {
+      role: "agent",
+      turn: 4,
+      identity: "claude-code:alternate",
+      session_id: "54e7ad34-ce6d-4979-8b4d-531b88026e15",
+      history_id: HARNESS_SESSION_ARTIFACT,
+      history_dir: harnessHistory.dir,
+      history_project: HARNESS_PROJECT,
+      history_session: HARNESS_SESSION_FILE,
+    },
+    [
+      {
+        id: HARNESS_SESSION_ARTIFACT,
+        kind: "oneharness_session",
+        bytes: harnessHistory.bytes,
+      },
+    ],
+  );
+
   journal.emit("pipeline", "node-dispatched", {
     ...run,
     node: "publish",
@@ -722,6 +1003,7 @@ function writeLiveRun(root) {
   );
   journal.write();
 
+  retainReport(dir, journal.stream, settled, FOUNDATION_REPORT);
   writeFileSync(
     join(dir, "artifacts", GATE_ARTIFACT),
     `oldest verification output\n${"full verification output\n".repeat(220)}pre-push verification passed\n`,
@@ -775,7 +1057,7 @@ function writeHistoryRun(root) {
   journal.advance(2);
   journal.emit(
     "agentgraph",
-    "agent-turn",
+    "turn-started",
     { ...run, node: "archive", persona: "worker", session: JUDGE_SESSION },
     { message: "Archived the release", model: "a-model" },
   );
@@ -1134,7 +1416,7 @@ function writeBusyRun(root) {
         .advance(1)
         .emit(
           "agentgraph",
-          "agent-turn",
+          "turn-started",
           { ...run, node: "sweep", persona: "worker", session },
           { message: `Swept batch ${index} (${step})`, model: "a-model" },
         );
@@ -1200,7 +1482,14 @@ export function facts() {
       missing: MISSING_ARTIFACT,
       hook: HOOK_ARTIFACT,
       check: CHECK_ARTIFACT,
+      report: REPORT_ARTIFACT,
+      unretained_report: UNRETAINED_REPORT,
+      harness_session: HARNESS_SESSION_ARTIFACT,
+      swept_harness_session: SWEPT_HARNESS_SESSION,
+      unaskable_report: UNASKABLE_REPORT,
+      unaskable_harness_session: UNASKABLE_HARNESS_SESSION,
     },
+    harness_session_text: HARNESS_SESSION_TEXT,
   };
 }
 
@@ -1272,13 +1561,14 @@ export function growTranscript(root, turns) {
     .map((line) => JSON.parse(line))
     .filter(
       (event) =>
-        event.labels?.session === WORKER_SESSION && event.kind === "agent-turn",
+        event.labels?.session === WORKER_SESSION &&
+        event.kind === "turn-started",
     ).length;
   for (let index = recorded; index < turns; index += 1) {
     appendEvent(
       dir,
       "agentgraph",
-      "agent-turn",
+      "turn-started",
       {
         run_id: LIVE_RUN,
         node: "dashboard",

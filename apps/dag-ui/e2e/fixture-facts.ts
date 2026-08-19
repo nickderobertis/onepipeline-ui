@@ -44,7 +44,16 @@ const fixtureSchema = z.object({
     missing: z.string().min(1),
     hook: z.string().min(1),
     check: z.string().min(1),
+    report: z.string().min(1),
+    unretained_report: z.string().min(1),
+    /** By its history id: its bytes are in oneharness's store, not the run's. */
+    harness_session: z.string().min(1),
+    swept_harness_session: z.string().min(1),
+    /** These two carry a separator, so no route can be asked for them. */
+    unaskable_report: z.string().min(1),
+    unaskable_harness_session: z.string().min(1),
   }),
+  harness_session_text: z.string().min(1),
 });
 
 export type FixtureFacts = z.infer<typeof fixtureSchema>;

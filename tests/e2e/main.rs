@@ -8,17 +8,19 @@
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
 //! platform package through node's own resolution; `lint_llm_diff` runs the
 //! gate's own llmlint recipe over a real git repository, `release_status` runs
-//! the release workflow's own last job over a real GitHub Release's notes, and
+//! the release workflow's own last job over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
-//! surface.
+//! surface, and `ensure_sibling` runs the recipe the gate provisions the sibling
+//! CLI with, plus the task graph Nx itself builds for `test`.
 //!
-//! Those last three each stand in for exactly one program on PATH — `llmlint`,
+//! Those last four each stand in for exactly one program on PATH — `llmlint`,
 //! which bills a model call, `gh`, which rewrites a public Release, and `cargo`,
-//! whose reading downloads and builds two dependency trees. The script under test
-//! is the real one in each, and `support/stub_bin.rs` is what makes what it asked
-//! for readable.
+//! whose reading downloads and builds two dependency trees and whose install
+//! compiles a second CLI. The script under test is the real one in each, and
+//! `support/stub_bin.rs` is what makes what it asked for readable.
 
 mod cli;
+mod ensure_sibling;
 mod lint_llm_diff;
 mod packaging;
 mod release_status;
@@ -27,6 +29,8 @@ mod server;
 
 #[path = "../support/fixture_run.rs"]
 mod fixture_run;
+#[path = "../support/harness_history.rs"]
+mod harness_history;
 #[path = "../support/http.rs"]
 mod http;
 #[path = "../support/serving.rs"]

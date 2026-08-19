@@ -75,16 +75,27 @@ and because nothing else recovers *why* the tooling is what it is.
 pre-push bar.** `just bootstrap` also provisions the `onepipeline` CLI at the
 version the lock pins its library to, into `.tools/`: the read API asks it for
 each run's telemetry document, the two speak a versioned document, and a
-mismatched pair serves every run with no clock at all.
+mismatched pair serves every run with no clock at all. `/healthz` reports that
+release from `onepipeline::VERSION`, so a host pinning the engine that writes a
+run store and this reader of it separately can *prove* the two match rather than
+assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
 
-**`oneagentgraph` is pinned to 0.2.12 in the lockfile, and `cargo update` on it
-will break the build.** That library added a field to `run::Request` in 0.2.13 —
-a patch release — and `onepipeline` 0.4.0 is built against 0.2.12, so cargo's
-semver unification picks a version the SDK does not compile against. The pin
-comes off when a published `onepipeline` compiles against 0.2.13 or later; until
-then it is also what keeps `tests/contract.rs` from gating this crate's copy of
-the shared filter grammar against that library's own declaration of it, which
-landed in the same release. `just deps-check` is deliberately outside it: it needs a network
+**The tier that needs that CLI provisions it; `bootstrap` is not the only path to
+it.** Everything else a tier needs lands in a user-wide cache that outlives any
+one clone, so `.tools/` is the one thing a fresh clone lacks — and a fresh clone
+is where the gate is asked to rule, because `onevcs publish-branch` cuts one.
+A new project whose tests start the read API joins that dependency. Reaching the
+recipe from more places must never soften it: falling back to a build on PATH is
+the failure the pin exists to prevent.
+
+**`oneagentgraph` is not pinned here: the SDK's requirement decides it and the
+lock follows.** Cargo unifies one version of it across this crate and
+`onepipeline`, and that library has shipped a breaking field in a *patch*
+release, so `cargo update` on it can hand the pinned SDK a sibling it does not
+compile against. Move it only by moving the SDK. Sharing one resolution is also
+what lets `tests/contract.rs` hold this crate's copy of the shared filter grammar
+to `oneagentgraph`'s own declaration of it rather than to a second reading of the
+wire. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx

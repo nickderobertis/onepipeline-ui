@@ -44,7 +44,7 @@
         "branch": "feature/contract-interface",
         "sessions": [
           {
-            "session_id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+            "session_id": "node-scope-1786925518098-3163646.worker",
             "role": "agent",
             "agent_role": "worker",
             "started_at": "2026-08-07T12:00:03.000Z"
@@ -67,7 +67,7 @@
         "outcome": "approved",
         "sessions": [
           {
-            "session_id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16",
+            "session_id": "node-scope-1786925518102-3163741.judge",
             "role": "judge",
             "agent_role": "judge",
             "started_at": "2026-08-07T12:00:22.000Z"
@@ -210,7 +210,7 @@
         "harnesses": [
           "oneagentgraph"
         ],
-        "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+        "id": "node-scope-1786925518098-3163646.worker",
         "name": "contract-interface",
         "project": "run-20260807-a1b2c3",
         "startedAt": "2026-08-07T12:00:03.000Z",
@@ -221,10 +221,10 @@
             "durationMs": null,
             "failureKind": null,
             "harness": "oneagentgraph",
-            "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
+            "id": "node-scope-1786925518098-3163646.worker.0",
             "model": "a-model",
             "reasoning": null,
-            "status": "agent-turn",
+            "status": "turn-started",
             "timestamp": "2026-08-07T12:00:03.000Z",
             "tools": [],
             "unknown": {},
@@ -236,7 +236,7 @@
             "durationMs": 2500,
             "failureKind": null,
             "harness": "oneagentgraph",
-            "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+            "id": "node-scope-1786925518098-3163646.worker.1",
             "model": null,
             "reasoning": null,
             "status": "turn-completed",
@@ -271,7 +271,7 @@
         "harnesses": [
           "oneagentgraph"
         ],
-        "id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16",
+        "id": "node-scope-1786925518102-3163741.judge",
         "name": "review",
         "project": "run-20260807-a1b2c3",
         "startedAt": "2026-08-07T12:00:22.000Z",
@@ -282,10 +282,10 @@
             "durationMs": null,
             "failureKind": null,
             "harness": "oneagentgraph",
-            "id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16.0",
+            "id": "node-scope-1786925518102-3163741.judge.0",
             "model": "a-model",
             "reasoning": null,
-            "status": "agent-turn",
+            "status": "turn-started",
             "timestamp": "2026-08-07T12:00:22.000Z",
             "tools": [],
             "unknown": {},
@@ -297,7 +297,7 @@
             "durationMs": 3000,
             "failureKind": null,
             "harness": "oneagentgraph",
-            "id": "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16.1",
+            "id": "node-scope-1786925518102-3163741.judge.1",
             "model": null,
             "reasoning": null,
             "status": "turn-completed",

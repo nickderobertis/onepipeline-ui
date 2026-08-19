@@ -315,6 +315,54 @@ fn dependency_requirement(cargo: &str, name: &str) -> String {
     panic!("Cargo.toml declares no dependency on {name}");
 }
 
+/// The version of `dependency` that `package` resolved to, as `Cargo.lock`
+/// records the edge.
+///
+/// The lock disambiguates an edge by version only when more than one of that
+/// package is in the graph, so an entry with no version is the single resolution
+/// — read back off that package's own block.
+fn locked_dependency(lock: &str, package: &str, dependency: &str) -> String {
+    let block = lock
+        .split("\n[[package]]\n")
+        .find(|block| {
+            block
+                .lines()
+                .any(|line| line == format!("name = \"{package}\""))
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock does not resolve {package}"));
+    let edge = block
+        .lines()
+        .map(str::trim)
+        .find_map(|line| {
+            line.trim_matches(|c| c == '"' || c == ',')
+                .strip_prefix(dependency)
+                .map(|rest| rest.trim().to_owned())
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock records no {dependency} under {package}"));
+    if edge.is_empty() {
+        return locked_version(lock, dependency);
+    }
+    edge
+}
+
+/// The one version of `package` the lock resolved, for an edge that named none.
+fn locked_version(lock: &str, package: &str) -> String {
+    let block = lock
+        .split("\n[[package]]\n")
+        .find(|block| {
+            block
+                .lines()
+                .any(|line| line == format!("name = \"{package}\""))
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock does not resolve {package}"));
+    block
+        .lines()
+        .find_map(|line| line.strip_prefix("version = "))
+        .unwrap_or_else(|| panic!("Cargo.lock resolves {package} to no version"))
+        .trim_matches('"')
+        .to_owned()
+}
+
 /// The tools the workflow's `taiki-e/install-action` step provisions, read out of
 /// its `tool:` block.
 ///
@@ -435,6 +483,62 @@ fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
          `just bootstrap` provisions a CLI that speaks a different telemetry document \
          than a consumer's build of this crate reads"
     );
+}
+
+/// The oneharness history store is read by linking its library, never by
+/// spawning its CLI.
+///
+/// Both halves matter and only one of them is visible in a manifest. A
+/// `oneharness_session` artifact's bytes live in a store this crate does not
+/// own, and the two ways to reach them are not equivalent: the library reads,
+/// while the CLI is a program on `PATH` whose version nothing here pins, whose
+/// arguments are a second contract, and whose lookups reconcile the store's own
+/// index. So the requirement is declared under `[dependencies]` — not
+/// `[dev-dependencies]`, which would leave the shipped binary unable to serve
+/// one — and no source or suite spawns a `oneharness` process.
+#[test]
+fn the_history_store_is_read_by_linking_its_library_and_never_by_spawning_its_cli() {
+    let requirement = dependency_requirement(&read("Cargo.toml"), "oneharness-core");
+    assert!(
+        !requirement.is_empty(),
+        "oneharness-core is declared with no version requirement"
+    );
+    // The reader and the producer of the pointer it resolves must be the same
+    // release of that library, and the requirement string alone cannot say so:
+    // a caret admits a whole 0.x line and nothing reconciles the two ends. The
+    // lockfile does — it records what each side resolved — so this reads both
+    // edges rather than restating one of them in prose.
+    let lock = read("Cargo.lock");
+    let resolved = |package: &str| locked_dependency(&lock, package, "oneharness-core");
+    assert_eq!(
+        resolved("onepipeline-ui"),
+        resolved("oneagentgraph"),
+        "this crate reads the oneharness history store through a different release of \
+         oneharness-core than `oneagentgraph`, which writes the pointer into it"
+    );
+    for path in files_under("src")
+        .into_iter()
+        .chain(files_under("tests"))
+        .filter(|path| path.ends_with(".rs"))
+    {
+        let source = read(&path);
+        // Spelled in halves so this assertion is not itself a hit. What it looks
+        // for is the program being *run* — the spawn spellings — rather than the
+        // word, which is also a directory in the store's own default path.
+        let program = format!("{}{}", "onehar", "ness");
+        for spawned in [
+            format!("new(\"{program}"),
+            format!("arg(\"{program}"),
+            format!("args([\"{program}"),
+        ] {
+            assert!(
+                !source.contains(&spawned),
+                "{path} names the `{program}` program as a string: its history store is \
+                 read by linking that library, and a process is a second contract \
+                 nothing here pins"
+            );
+        }
+    }
 }
 
 /// Directories whose every file reaches a published artifact, so a file added to

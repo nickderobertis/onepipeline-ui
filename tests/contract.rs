@@ -22,9 +22,9 @@ use onepipeline_ui::api::ReadApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
-    EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
-    TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
-    TIMELINE_SCHEMA_VERSION,
+    EventsQuery, Health, HealthStatus, NodeId, PageLimit, ReferenceKind, Release, RunId, RunQuery,
+    RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT,
+    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -257,12 +257,83 @@ fn normalized(document: Value) -> Value {
     }
 }
 
+/// The liveness body, and the release it names.
+///
+/// The version is the point of the second field: a golden carrying a release
+/// this crate no longer links would have a host prove its engine and its reader
+/// match against a number nothing kept true, so the SDK pin and this golden move
+/// in one change or this fails.
 #[test]
-fn the_health_body_round_trips() {
+fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
     let raw = read_fixture("healthz.json");
     let health: Health = serde_json::from_str(&raw).expect("parse healthz.json");
     assert_eq!(health.status, HealthStatus::Ok);
+    assert_eq!(
+        health.onepipeline_version.as_str(),
+        onepipeline::VERSION,
+        "tests/fixtures/healthz.json pins an `onepipeline` release this crate does not link"
+    );
     assert_eq!(canonical(&health), raw);
+
+    // The field is a validated release, not a string: a liveness body claiming a
+    // release nobody could have published is refused at the parse rather than
+    // compared against.
+    for refused in [
+        r#"{"status":"ok","onepipeline_version":"0.7"}"#,
+        r#"{"status":"ok","onepipeline_version":"latest"}"#,
+        r#"{"status":"ok","onepipeline_version":"0.7.x"}"#,
+        r#"{"status":"ok","onepipeline_version":""}"#,
+        r#"{"status":"ok","onepipeline_version":"0.7.3-"}"#,
+        // Bounded, so a body nobody published cannot become an unbounded string
+        // a host then repeats in whatever it renders the comparison into.
+        r#"{"status":"ok","onepipeline_version":"0.7.3-000000000000000000000000000000000000000000000000000000000000000"}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<Health>(refused).is_err(),
+            "{refused} parsed as a liveness body"
+        );
+    }
+
+    // The grammar is cargo's, not a shape that merely looks like it: a string no
+    // registry could have served must not become a `Release` that a host then
+    // compares its engine against as if it had.
+    for refused in [
+        "0.7",
+        "0.7.3.1",
+        "0.7.x",
+        "",
+        "01.2.3",
+        "0.07.3",
+        "1.2.3-",
+        "1.2.3-alpha..1",
+        "1.2.3-01",
+        "1.2.3+",
+        "1.2.3+one+two",
+        "1.2.3+build..5",
+        "1.2.3-alpha_1",
+        " 1.2.3",
+        // Digits, and a number no registry could have served: cargo's version
+        // components are `u64`, so this one names a release nobody is running.
+        "18446744073709551616.0.0",
+        "1.18446744073709551616.0",
+    ] {
+        assert!(
+            Release::try_from(refused).is_err(),
+            "`{refused}` was accepted as a release"
+        );
+    }
+    // And what cargo does publish is one, metadata and all.
+    for accepted in [
+        "0.7.3",
+        "0.0.0",
+        "1.0.0-rc.1",
+        "0.7.3+build.5",
+        "1.0.0-alpha-1+build-9.2",
+        "1.2.3-0.3.7",
+    ] {
+        Release::try_from(accepted).unwrap_or_else(|err| panic!("{accepted}: {err}"));
+    }
+    assert_eq!(Release::linked().as_str(), onepipeline::VERSION);
 }
 
 #[test]
@@ -319,6 +390,37 @@ fn the_browser_clients_copy_of_each_schema_version_matches_this_one() {
             path.display()
         );
     }
+}
+
+/// The reference vocabulary is declared twice — here and in the browser client's
+/// model — because a Rust enum cannot be read from TypeScript.
+///
+/// It is the one vocabulary that decides *behaviour* on both sides: this crate
+/// reads a `worker_report`'s bytes from the run's retained copy and every other
+/// kind from the run's artifact directory, and the client renders each kind as
+/// what it is. A word added on one side alone is a reference a reader's model
+/// rejects, so the two lists are reconciled here rather than by inspection.
+#[test]
+fn the_browser_clients_copy_of_the_reference_vocabulary_matches_this_one() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let words: String = ReferenceKind::ALL
+        .iter()
+        .map(|kind| format!("  \"{}\",\n", kind.as_str()))
+        .collect();
+    let declaration = format!("export const timelineReferenceKindSchema = z.enum([\n{words}]);");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's reference vocabulary has drifted \
+         from this crate's",
+        path.display()
+    );
 }
 
 #[test]
@@ -706,6 +808,7 @@ impl ReadApi for Unimplemented {
     fn health(&self) -> Health {
         Health {
             status: HealthStatus::Ok,
+            onepipeline_version: Release::linked(),
         }
     }
 
@@ -1266,19 +1369,17 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
 /// grammar fixes.
 ///
 /// The grammar is duplicated per repository by design — there is no shared util
-/// crate here, exactly as with the envelope. `oneagentgraph` *does* declare
-/// `EventFilter` and `Matcher` in a public module, which would make this a type
-/// gate like the event vocabulary above rather than a wire one; it cannot be
-/// today, and the reason is worth writing down. That declaration landed in
-/// `oneagentgraph` 0.2.13, which added a field to `run::Request` in the same
-/// patch release — so `onepipeline` 0.4.0, built against 0.2.12, does not compile
-/// against it, and this tree pins 0.2.12. The gate becomes a type gate the moment
-/// a published `onepipeline` compiles against a sibling that declares the filter.
+/// crate here, exactly as with the envelope — so this is the drift gate that
+/// stands in for the shared declaration. It is a **type** gate, like the event
+/// vocabulary above: `oneagentgraph` declares `EventFilter` and `Matcher` in a
+/// public module, and this crate's copy is held to that library's own
+/// serialization rather than to a second reading of the wire alone. Which is why
+/// the sibling's resolution is the SDK's to decide: a tree that cannot reach that
+/// declaration has only the wire to compare against.
 ///
 /// One field is deliberately *not* shared: this grammar has no `round` matcher.
 /// Execution is continuous, the label is deprecated and stamped by nothing, and a
 /// matcher over it would be a filter that silently matched nothing.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the sibling's own declaration is unreachable from this tree for the reason above — the release that added it broke the `onepipeline` this crate depends on — so the wire the grammar fixes is the only declaration a consumer can compare against, which is the same footing `onevcs`'s vocabulary is read on.
 #[test]
 fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
     use onepipeline_ui::filter::{EventFilter, Matcher};
@@ -1309,10 +1410,34 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         "the shared grammar's matcher has drifted"
     );
 
+    // And the same document off the sibling's own type, filled the same way:
+    // this is what makes the gate read that library's declaration rather than a
+    // second transcription of what it happens to emit.
+    assert_eq!(
+        mine,
+        serde_json::to_value(oneagentgraph::event::Matcher {
+            source: Some(oneagentgraph::event::Source::Agentgraph),
+            kind: Some("turn-*".into()),
+            run_id: Some("run-1".into()),
+            node: Some("build".into()),
+            step: Some("compile".into()),
+            member: Some("worker".into()),
+            persona: Some("engineer".into()),
+        })
+        .expect("the sibling's matcher serializes"),
+        "this crate's matcher has drifted from the one `oneagentgraph` declares"
+    );
+
     // A matcher that names nothing serializes to nothing, so a spec round-trips
-    // as the file wrote it rather than gaining every key it left unasked.
+    // as the file wrote it rather than gaining every key it left unasked — which
+    // is the sibling's behaviour too, not a convention this crate chose.
     assert_eq!(
         serde_json::to_value(EventFilter::default()).expect("serializes"),
+        serde_json::json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(oneagentgraph::event::EventFilter::default())
+            .expect("the sibling's filter serializes"),
         serde_json::json!({})
     );
 

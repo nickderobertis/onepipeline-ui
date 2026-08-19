@@ -417,7 +417,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1054,13 +1054,13 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.2.12"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b9dffb6aced5cc70d08d07350c5f47b0773df07e8f0dcbd6da51f313c3fb7be"
+checksum = "c7cdd46d9c05961388ad9daf847b5022d4f2f2ebb28b8765eb1a68054ecd0db8"
 dependencies = [
  "clap",
  "libc",
- "oneharness-core 0.8.0",
+ "oneharness-core 0.10.1",
  "onejudge",
  "serde",
  "serde_json",
@@ -1069,27 +1069,6 @@ dependencies = [
  "thiserror",
  "toml_edit",
  "ureq",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "oneharness-core"
-version = "0.6.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02380b0b6b8360a7d05f7008a23f61c1c028b40d7a7473beb9e98b0137f4e852"
-dependencies = [
- "fs2",
- "jsonschema",
- "libc",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
- "toml",
- "uuid",
- "wait-timeout",
- "which",
  "windows-sys 0.61.2",
 ]
 
@@ -1115,13 +1094,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "onejudge"
-version = "0.3.8"
+name = "oneharness-core"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fa0d4ba61cb7c8752af70d05dcb0af31394961e0585a73017988df92b88651d"
+checksum = "703b2cae0e922191ae5baea8bafde9d738a09e1e8f40847b9bae1880231a955f"
+dependencies = [
+ "fs2",
+ "jsonschema",
+ "libc",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+ "uuid",
+ "wait-timeout",
+ "which",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "onejudge"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c95a8421050c0d50a75df24fce139a14de23aaa971ec20806f2c8c2c3172ad4"
 dependencies = [
  "clap",
- "oneharness-core 0.6.13",
+ "oneharness-core 0.8.0",
  "rustix",
  "serde",
  "serde_json",
@@ -1131,9 +1131,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.4.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5074e7be108db6bb94b62047d9669ce2de6b67e049c46c2b1982eefaf06edb60"
+checksum = "49564835e48902a9cdd0725f76cba506a9542b554e82fc0336e8693b7e433789"
 dependencies = [
  "clap",
  "libc",
@@ -1156,6 +1156,7 @@ dependencies = [
  "futures-core",
  "libc",
  "oneagentgraph",
+ "oneharness-core 0.10.1",
  "onepipeline",
  "predicates",
  "serde",
@@ -1170,9 +1171,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.2.7"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d21d4992dace28b843a54cbd31a97b2b2d12f02220b4a4a5b14dabe3ead55e"
+checksum = "8580dc19066c568d99061b93a7eca14ba0b9d7281ff11be666f0c3d27844efca"
 dependencies = [
  "clap",
  "dunce",
@@ -1415,7 +1416,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1472,7 +1473,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1833,7 +1834,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2305,7 +2306,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -4,6 +4,8 @@
 //! reconciles the two, so a route added to one and not the other fails the gate.
 
 use std::fmt;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -123,6 +125,159 @@ pub mod routes {
 pub struct Health {
     /// The one state a served `/healthz` can be in.
     pub status: HealthStatus,
+    /// The `onepipeline` release this binary links, from that crate's own
+    /// `VERSION` and never from a literal here.
+    ///
+    /// A host that pins the engine writing a run store and separately pins this
+    /// reader of it has nothing else to prove the two are the same release, so
+    /// the reader says which one it is rather than leaving it assumed.
+    pub onepipeline_version: Release,
+}
+
+/// A validated release identifier: `MAJOR.MINOR.PATCH`, with the pre-release and
+/// build metadata cargo allows after it.
+///
+/// Constructed only through [`TryFrom<&str>`], so a `Health` a client parses
+/// cannot carry a release nobody could have published — the comparison a host
+/// makes against it is only worth making if both sides are releases.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Release(String);
+
+impl Release {
+    /// The `onepipeline` release this binary links.
+    ///
+    /// The SDK's own package version, which cargo will not build without, so the
+    /// check cannot fail — the same footing [`POLL_INTERVAL_MS`] is on.
+    ///
+    /// [`POLL_INTERVAL_MS`]: crate::store::POLL_INTERVAL_MS
+    #[must_use]
+    pub fn linked() -> Self {
+        Self::try_from(onepipeline::VERSION).expect("the SDK's own package version is a release")
+    }
+
+    /// The release as it is served.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for Release {
+    type Error = InvalidRelease;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match check_release(value) {
+            Ok(()) => Ok(Self(value.to_owned())),
+            Err(reason) => Err(InvalidRelease(reason)),
+        }
+    }
+}
+
+impl TryFrom<String> for Release {
+    type Error = InvalidRelease;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<Release> for String {
+    fn from(value: Release) -> Self {
+        value.0
+    }
+}
+
+/// What a string that is not a [`Release`] is refused with.
+///
+/// Its own type rather than an [`ApiError`] arm: no route parses one, so a
+/// refusal here is not a status a client is served.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("not a release: {0}")]
+pub struct InvalidRelease(String);
+
+/// The longest release identifier this crate accepts.
+const RELEASE_MAX_LEN: usize = 64;
+
+/// Whether a string is a release, by the semantic-version grammar cargo
+/// publishes under: `MAJOR.MINOR.PATCH`, each a number without a leading zero,
+/// then optional `-PRE` and `+BUILD` metadata of dot-separated identifiers.
+///
+/// Strict rather than permissive on purpose. The point of the type is that a
+/// host comparing two of these is comparing releases, and a validator that
+/// admitted `01.2.3` would have this crate assert an invariant its name claims
+/// and its values do not keep.
+fn check_release(value: &str) -> Result<(), String> {
+    if value.len() > RELEASE_MAX_LEN {
+        return Err(format!("must be at most {RELEASE_MAX_LEN} characters"));
+    }
+    // Build metadata comes off first: it is the last part and it may itself
+    // contain `-`, so a pre-release cannot be found until it is gone.
+    let (rest, build) = match value.split_once('+') {
+        Some((rest, build)) => (rest, Some(build)),
+        None => (value, None),
+    };
+    let (core, pre) = match rest.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (rest, None),
+    };
+    let components: Vec<&str> = core.split('.').collect();
+    if components.len() != 3 {
+        return Err("must be MAJOR.MINOR.PATCH".to_owned());
+    }
+    // Bounded to what cargo's own version components are, not merely to digits:
+    // a number no registry could have published is a release nobody could be
+    // running, and it must be refused at the parse rather than carried.
+    if !components
+        .iter()
+        .copied()
+        .all(|component| is_numeric_identifier(component) && component.parse::<u64>().is_ok())
+    {
+        return Err(
+            "every component of MAJOR.MINOR.PATCH must be a number without a leading zero, \
+             within the range cargo publishes"
+                .to_owned(),
+        );
+    }
+    if let Some(pre) = pre {
+        for identifier in pre.split('.') {
+            if !is_alphanumeric_identifier(identifier) {
+                return Err(
+                    "every pre-release identifier must be ASCII letters, digits or '-'".to_owned(),
+                );
+            }
+            if identifier.chars().all(|c| c.is_ascii_digit()) && !is_numeric_identifier(identifier)
+            {
+                return Err(
+                    "a numeric pre-release identifier must not have a leading zero".to_owned(),
+                );
+            }
+        }
+    }
+    if let Some(build) = build {
+        for identifier in build.split('.') {
+            if !is_alphanumeric_identifier(identifier) {
+                return Err(
+                    "every build identifier must be ASCII letters, digits or '-'".to_owned(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A semantic-version numeric identifier: digits, and no leading zero unless the
+/// whole of it is one.
+fn is_numeric_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|c| c.is_ascii_digit())
+        && (value.len() == 1 || !value.starts_with('0'))
+}
+
+/// A semantic-version metadata identifier: non-empty, ASCII letters, digits and
+/// `-`. A second `+` fails here, which is what keeps `1.2.3+one+two` out.
+fn is_alphanumeric_identifier(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// The only status `/healthz` reports: a process that could not answer serves
@@ -447,19 +602,271 @@ identifier!(
 identifier!(ArtifactId, "artifact identifier", InvalidArtifactId);
 identifier!(DispatchId, "dispatch identifier", InvalidDispatchId);
 
+/// The wire's closed reference vocabulary: what the record a reference sits on
+/// points at.
+///
+/// A closed set rather than the producing library's own string, because it
+/// decides two things that must never disagree — the word served beside the
+/// reference, and *where* `payload::artifact` reads that artifact's bytes from.
+/// The browser client declares the same set as `timelineReferenceKindSchema`,
+/// and `tests/contract.rs` reconciles the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceKind {
+    /// A recorded transcript, served by the conversation route.
+    Conversation,
+    /// A log the producing library stored beside the run.
+    GateLog,
+    /// The report a settled member left, which the run keeps its own copy of.
+    WorkerReport,
+    /// A session in the oneharness history store.
+    OneharnessSession,
+    /// A change request on the host.
+    Pr,
+}
+
+impl ReferenceKind {
+    /// Every word the vocabulary holds, in the order the contract lists them.
+    ///
+    /// The list is what the drift gate reads: a variant added here without being
+    /// added to the client's own copy fails that gate rather than reaching a
+    /// reader as a word their model rejects.
+    pub const ALL: [Self; 5] = [
+        Self::Conversation,
+        Self::GateLog,
+        Self::WorkerReport,
+        Self::OneharnessSession,
+        Self::Pr,
+    ];
+
+    /// The producing library's own word for an artifact, read onto this
+    /// vocabulary. Anything unrecognized is a log, which is what the producing
+    /// libraries store.
+    #[must_use]
+    pub fn of(kind: &str) -> Self {
+        match kind {
+            "conversation" => Self::Conversation,
+            "worker_report" | "report" => Self::WorkerReport,
+            "oneharness_session" | "session" => Self::OneharnessSession,
+            "pr" => Self::Pr,
+            _ => Self::GateLog,
+        }
+    }
+
+    /// The word the wire carries for it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Conversation => "conversation",
+            Self::GateLog => "gate_log",
+            Self::WorkerReport => "worker_report",
+            Self::OneharnessSession => "oneharness_session",
+            Self::Pr => "pr",
+        }
+    }
+}
+
+/// One directory or file name a producer's payload named, checked before
+/// anything joins it to a path.
+///
+/// The other trust boundary this crate has. An identifier above crosses it from
+/// a request; this one crosses it from a *record* — the `history_project` and
+/// `history_session` an `oneharness-session` event names, which together locate
+/// a transcript inside the oneharness history store on this host. A record is
+/// external input exactly as a URL is: the producing library promises a bare
+/// name, and a payload that carries anything else is refused rather than joined,
+/// because joining it is how a read surface is made to open a file nobody asked
+/// for.
+///
+/// Constructed only through [`TryFrom<&str>`], so a `String` read off a payload
+/// cannot reach a `Path::join` without having passed through here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathSegment(String);
+
+impl PathSegment {
+    /// The name, as the store holds it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for PathSegment {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        check_segment(value, SEGMENT_MAX_LEN)?;
+        Ok(Self(value.to_owned()))
+    }
+}
+
+/// The directory a producer's record *named* as its store, held to the shape the
+/// producer publishes one in.
+///
+/// The other half of the [`PathSegment`] boundary. `oneagentgraph` publishes a
+/// history pointer **only** for a file already in oneharness's own layout: an
+/// absolute path, with no component that climbs. Checked here rather than taken
+/// on the producer's word, because a relative store resolves against whatever
+/// directory this process happens to be serving from and a `..` inside one is
+/// the same traversal a bare name is checked for.
+///
+/// **It certifies how a record spelled a path and nothing about this host.** The
+/// name is still only what a record claimed: the directory may not exist, may
+/// hold no store, and every component of it may be a symlink onto somewhere
+/// else. Nothing may open a file on the strength of this type — a path earns
+/// that only from [`StoreRoot::confine`], which is why this one is named for the
+/// claim rather than for a root. It is deliberately the type that reads no
+/// filesystem: the store a record names *no* store for is oneharness's own
+/// default, which never passes through here, so a host-level check made here
+/// would be one the store most records resolve to never takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedStore(String);
+
+impl NamedStore {
+    /// The directory, as the record named it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for NamedStore {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let path = Path::new(value);
+        if !path.is_absolute() {
+            return Err("must be an absolute path".to_owned());
+        }
+        if path
+            .components()
+            .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
+        {
+            return Err("must have no component that climbs".to_owned());
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+/// A history store this process has read, as this host really holds it.
+///
+/// The trusted root, and the only thing in this crate that lets a file outside
+/// the runs root be opened. It exists only once [`fs::canonicalize`] has
+/// resolved the directory — the rule [`crate::cli::RunsRoot`] already follows for
+/// the runs root — so what it holds is where the kernel actually arrives, with
+/// every symlink, `.` and `..` along the way already resolved.
+///
+/// Canonical rather than lexical because of what stands between a pointer and a
+/// file: oneharness's own reader walks the store's layout, listing a project
+/// directory and matching a session file inside it, and either component can be
+/// a symlink planted by anything that can write into the store. A check on how a
+/// path is *spelled* says nothing about where opening it lands, so the proof is
+/// made against the resolved path on both sides or it is not a proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreRoot(PathBuf);
+
+impl StoreRoot {
+    /// The store at `dir`, or `None` when this host holds no directory there.
+    ///
+    /// Resolved and then *read*, so the type cannot be inhabited by a path that
+    /// is merely spelled well — a file, or a name nothing answers to, is not a
+    /// root anything may be confined to. A store that is not there is an
+    /// artifact with no readable bytes, which is the answer a pointer at a store
+    /// this host does not hold has always had.
+    #[must_use]
+    pub fn read(dir: &Path) -> Option<Self> {
+        let resolved = fs::canonicalize(dir).ok()?;
+        fs::read_dir(&resolved).ok()?;
+        Some(Self(resolved))
+    }
+
+    /// Where `path` — a path the store's own reader produced from this root —
+    /// really lands, which is what decides whether it may be opened.
+    #[must_use]
+    pub fn confine(&self, path: &Path) -> Confined {
+        match fs::canonicalize(path) {
+            Ok(resolved) if resolved.starts_with(&self.0) => {
+                Confined::Under(ConfinedPath(resolved))
+            }
+            Ok(_) => Confined::Escaped,
+            Err(_) => Confined::Missing,
+        }
+    }
+}
+
+/// A path [`StoreRoot::confine`] resolved and found beneath its store.
+///
+/// The proof, rather than a note that one was taken: the field is private, so
+/// `confine` is the only code in the crate that can fill it and no caller
+/// anywhere can hand a reader an unchecked path wearing this type. That is the
+/// whole reason it exists instead of a bare `PathBuf` — a guarantee a caller can
+/// forge is worse than none, because the next reader is entitled to trust it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfinedPath(PathBuf);
+
+impl ConfinedPath {
+    /// Where the path really lands, which is the one to open.
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// What a [`StoreRoot`] made of a path named beneath it.
+///
+/// Three answers and not two, because "there is nothing there" and "there is
+/// something there and it is not yours" are different facts about the host and
+/// only one of them is worth an operator's attention. Both are the same `404` to
+/// a reader — the contract answers an artifact whose bytes this server will not
+/// serve one way — so the distinction is kept here, where the caller can log the
+/// refusal it must never put on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Confined {
+    /// It lands beneath the store, and this is where. Opening *this* path rather
+    /// than the one it came from is the point: it holds no symlink left for the
+    /// open itself to follow back out.
+    Under(ConfinedPath),
+    /// It lands outside the store that named it. Nothing may open it, and
+    /// nothing may say on the wire where it went.
+    Escaped,
+    /// It lands nowhere this process can resolve — the name is a dangling link,
+    /// a loop, or a file that went away between being listed and being read.
+    /// Not a refusal: a refusal is a statement about a path that resolved, and
+    /// this one did not.
+    Missing,
+}
+
 /// The longest identifier any route accepts.
 ///
 /// A bound rather than a limit anyone will meet: it exists so an unbounded
 /// query string cannot become an unbounded allocation or log line.
 const IDENTIFIER_MAX_LEN: usize = 128;
 
+/// The longest name a checked path segment may carry.
+///
+/// Looser than an identifier because it bounds a *file name* rather than a URL
+/// segment: oneharness composes a session name out of a member's own name, a
+/// timestamp and a pid, and nothing upstream caps the first. 255 is what the
+/// file systems underneath this hold a single component to, so a longer name
+/// names no file anywhere and there is nothing to gain by joining it.
+const SEGMENT_MAX_LEN: usize = 255;
+
 /// Why `value` is not a usable identifier, or `Ok(())` when it is.
 fn check_identifier(value: &str) -> Result<(), String> {
+    check_segment(value, IDENTIFIER_MAX_LEN)
+}
+
+/// Why `value` is not a bare name, or `Ok(())` when it is.
+///
+/// One rule, two bounds. The character set is the whole of what makes a value
+/// safe to join: no separator on any platform, no drive letter, no wildcard, no
+/// NUL — and a leading `.` refused, which also refuses `.`, `..`, and the dot
+/// files a store keeps its own index in.
+fn check_segment(value: &str, max_len: usize) -> Result<(), String> {
     if value.is_empty() {
         return Err("must not be empty".to_owned());
     }
-    if value.len() > IDENTIFIER_MAX_LEN {
-        return Err(format!("must be at most {IDENTIFIER_MAX_LEN} characters"));
+    if value.len() > max_len {
+        return Err(format!("must be at most {max_len} characters"));
     }
     if !value
         .chars()
