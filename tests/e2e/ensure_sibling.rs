@@ -272,12 +272,18 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
     let dir = TempDir::new().expect("temp dir");
     let graph = dir.path().join("tasks.json");
 
-    let output = Command::new("just")
-        .args(["nx", "run-many", "-t", "test"])
+    // Through the workspace's own Nx entry point rather than `just nx`, for the
+    // same reason every script here calls it that way: it is a `.sh` file, which
+    // is not a program on every platform, and `just` pastes a recipe's arguments
+    // into a shell line, which eats the backslashes out of the path this asks Nx
+    // to write to. Spawned with `bash` and an argument vector, neither happens.
+    let output = Command::new("bash")
+        .arg(repo_root().join("scripts/nx.sh"))
+        .args(["run-many", "-t", "test"])
         .arg(format!("--graph={}", graph.display()))
         .current_dir(repo_root())
         .output()
-        .expect("just is on PATH");
+        .expect("bash is on PATH");
     assert!(
         output.status.success(),
         "Nx could not build the task graph for `test`:\n{}",
