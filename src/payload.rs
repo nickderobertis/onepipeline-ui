@@ -2192,7 +2192,7 @@ fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
         }
         Confined::Missing => return None,
     };
-    let record = history::read_session_display(&path)
+    let record = history::read_session_display(path.as_path())
         .ok()?
         .into_iter()
         .find(|record| record["history_id"] == json!(id.as_str()))?;

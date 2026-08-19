@@ -784,10 +784,30 @@ impl StoreRoot {
     #[must_use]
     pub fn confine(&self, path: &Path) -> Confined {
         match fs::canonicalize(path) {
-            Ok(resolved) if resolved.starts_with(&self.0) => Confined::Under(resolved),
+            Ok(resolved) if resolved.starts_with(&self.0) => {
+                Confined::Under(ConfinedPath(resolved))
+            }
             Ok(_) => Confined::Escaped,
             Err(_) => Confined::Missing,
         }
+    }
+}
+
+/// A path [`StoreRoot::confine`] resolved and found beneath its store.
+///
+/// The proof, rather than a note that one was taken: the field is private, so
+/// `confine` is the only code in the crate that can fill it and no caller
+/// anywhere can hand a reader an unchecked path wearing this type. That is the
+/// whole reason it exists instead of a bare `PathBuf` — a guarantee a caller can
+/// forge is worse than none, because the next reader is entitled to trust it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfinedPath(PathBuf);
+
+impl ConfinedPath {
+    /// Where the path really lands, which is the one to open.
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        &self.0
     }
 }
 
@@ -804,7 +824,7 @@ pub enum Confined {
     /// It lands beneath the store, and this is where. Opening *this* path rather
     /// than the one it came from is the point: it holds no symlink left for the
     /// open itself to follow back out.
-    Under(PathBuf),
+    Under(ConfinedPath),
     /// It lands outside the store that named it. Nothing may open it, and
     /// nothing may say on the wire where it went.
     Escaped,
