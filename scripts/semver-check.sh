@@ -108,9 +108,13 @@ unreadable_history() {
 # bodies are read apart so a body quoting a subject cannot answer for one.
 #
 # llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz publishes no parser to derive the grammar from, so it is Conventional Commits v1.0.0 read a second time — only ever to relax, and over exactly the commits release-plz itself versions from. Bounded both ways: reading fewer breaks leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop honouring the specification.
+# `--literal-pathspecs` because those paths are filenames, not a query: a
+# packaged file cargo names `:!src/lib.rs` — a directory called `:!src` is all
+# that takes — is pathspec magic that would drop the very commits it is here to
+# select, and read a release past a reading it needs.
 range="refs/tags/${baseline_ref}..HEAD"
-subjects="$(git log --format=%s "$range" -- "${packaged_paths[@]}")" || unreadable_history
-bodies="$(git log --format=%b "$range" -- "${packaged_paths[@]}")" || unreadable_history
+subjects="$(git --literal-pathspecs log --format=%s "$range" -- "${packaged_paths[@]}")" || unreadable_history
+bodies="$(git --literal-pathspecs log --format=%b "$range" -- "${packaged_paths[@]}")" || unreadable_history
 read_past=""
 if [ -z "$subjects" ]; then
   read_past="no commit since $baseline_ref touched a packaged file, so release-plz versions no release here for a reading to hold"

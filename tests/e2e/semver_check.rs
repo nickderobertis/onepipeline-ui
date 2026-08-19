@@ -53,6 +53,10 @@ const PENDING_REF: &str = "v-pending";
 const PACKAGED: &str = "src/lib.rs";
 const UNPACKAGED: &str = "scripts/tool.sh";
 const README: &str = "README.md";
+/// A packaged path git would read as pathspec magic if it were handed one: a
+/// directory named `:!src` puts `:!src/lib.rs` on the list, and `:!<path>`
+/// *excludes* that path — here, the very file a release is made of.
+const PATHSPEC_MAGIC: &str = ":!src/lib.rs";
 const FIXTURE_MANIFEST: &str = r#"[workspace]
 
 [package]
@@ -157,6 +161,16 @@ impl Fixture {
     /// baseline tag and then carried forward by `pending` — beside the worktree of
     /// that tag the workflow hands the reading.
     fn of(pending: &[Commit]) -> Self {
+        Self::built(pending, "")
+    }
+
+    /// The same, over a crate that also packages a file whose name git would read
+    /// as pathspec magic.
+    fn of_a_crate_packaging_pathspec_magic(pending: &[Commit]) -> Self {
+        Self::built(pending, PATHSPEC_MAGIC)
+    }
+
+    fn built(pending: &[Commit], magic: &str) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let repo = dir.path().join("history");
         fs::create_dir_all(repo.join("src")).expect("create the crate's sources");
@@ -165,6 +179,23 @@ impl Fixture {
         fs::write(repo.join(PACKAGED), "pub fn read() {}\n").expect("write the packaged file");
         fs::write(repo.join(UNPACKAGED), "echo tool\n").expect("write the unpackaged file");
         fs::write(repo.join(README), "# fixture-crate\n").expect("write the readme");
+        if !magic.is_empty() {
+            let path = repo.join(magic);
+            fs::create_dir_all(path.parent().expect("a directory to package"))
+                .expect("create the directory whose name is magic");
+            fs::write(path, "packaged\n").expect("write the file with the magic name");
+            let manifest = repo.join("Cargo.toml");
+            let widened = fs::read_to_string(&manifest)
+                .expect("read the manifest")
+                .replace(
+                    "include = [",
+                    &format!(
+                        "include = [\"/{}/**\", ",
+                        magic.split('/').next().expect("a root")
+                    ),
+                );
+            fs::write(&manifest, widened).expect("widen what the crate packages");
+        }
         // The script lists the packaged files with `--locked`, which is a lockfile
         // this crate has not got until one is resolved for it.
         let locked = Command::new(real_cargo())
@@ -1030,5 +1061,35 @@ fn an_ambient_repository_does_not_answer_for_which_release_the_baseline_is() {
         stdout(&output).contains("compatible"),
         "the reading was never reached:\n{}",
         stdout(&output)
+    );
+}
+
+/// A packaged path that reads as pathspec magic does not decide which commits the
+/// release is made of: the compatible release still needs its reading, and still
+/// fails without one.
+///
+/// The packaged file list is filenames, and `:!src/lib.rs` is a filename a
+/// directory called `:!src` produces. Handed to git as a query it would *exclude*
+/// `src/lib.rs` — the file this release's one commit touched — leaving a range
+/// that looks like it versions nothing and is read past.
+#[test]
+fn a_packaged_path_that_reads_as_pathspec_magic_does_not_select_the_release() {
+    let fixture = Fixture::of_a_crate_packaging_pathspec_magic(A_COMPATIBLE_RELEASE);
+    assert!(
+        fixture.repo.join(PATHSPEC_MAGIC).exists(),
+        "the crate does not package the path this is about"
+    );
+    let output = fixture.run(NO_VERDICT);
+
+    assert!(
+        !output.status.success(),
+        "a filename cargo listed selected the commits instead of naming one, and \
+         read a compatible release past the reading it needs:\n{}",
+        stdout(&output)
+    );
+    assert!(
+        stderr(&output).contains("::error::"),
+        "the failure does not say the check returned no verdict:\n{}",
+        stderr(&output)
     );
 }
