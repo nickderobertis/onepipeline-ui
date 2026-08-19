@@ -12,11 +12,12 @@
 //! stops a release claiming compatibility with it, and is read past by one
 //! claiming none.
 //!
-//! One thing is stood in for: `cargo` on PATH, because the real reading builds two
-//! rustdocs out of two dependency trees it downloads, which is neither offline nor
-//! deterministic and is the release path's job rather than the gate's. The recipe
-//! and the script are the real ones, and what they asked cargo for is readable
-//! here.
+//! One thing is stood in for: `cargo` on PATH — and the `cargo-semver-checks` the
+//! script probes for before asking cargo for it — because the real reading builds
+//! two rustdocs out of two dependency trees it downloads, which is neither offline
+//! nor deterministic and is the release path's job rather than the gate's. The
+//! recipe and the script are the real ones, run over a real git history, and what
+//! they asked cargo for is readable here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,8 +34,11 @@ const COMPATIBLE: &str = "0";
 const BROKE: &str = "100";
 const NO_VERDICT: &str = "101";
 
-/// The tag the baseline is a checkout of, in the history each fixture builds.
+/// The tag the baseline is a checkout of, in the history each fixture builds, and
+/// one naming the commit it is not — the pair whose correspondence the script
+/// refuses to take on trust.
 const BASELINE_REF: &str = "v-baseline";
+const PENDING_REF: &str = "v-pending";
 
 /// The subject of the one commit the pending release is made of, per claim it
 /// makes about compatibility. `feat!` and a `BREAKING CHANGE:` footer are the two
@@ -49,6 +53,7 @@ const A_BREAKING_RELEASE_BY_FOOTER: &[&str] = &[
 struct Fixture {
     dir: TempDir,
     baseline: String,
+    stub_dir: PathBuf,
     search_path: std::ffi::OsString,
     git_dir: PathBuf,
 }
@@ -92,14 +97,6 @@ impl Fixture {
     /// the range it reads, are git's own.
     fn of(pending: &[&str]) -> Self {
         let dir = TempDir::new().expect("temp dir");
-        let baseline = dir.path().join("release-baseline");
-        fs::create_dir_all(&baseline).expect("create the baseline");
-        fs::write(
-            baseline.join("Cargo.toml"),
-            "[package]\nname = \"onepipeline-ui\"\n",
-        )
-        .expect("write the baseline manifest");
-
         let repo = dir.path().join("history");
         fs::create_dir_all(&repo).expect("create the history");
         git(&repo, &["init", "--quiet", "--initial-branch=main"]);
@@ -108,11 +105,33 @@ impl Fixture {
             &["commit", "--allow-empty", "--quiet", "-m", "chore: release"],
         );
         git(&repo, &["tag", BASELINE_REF]);
+
+        // The worktree of the tag the workflow hands over, made the way the
+        // workflow makes it, so the script can ask the checkout which release it
+        // is rather than take the pair of arguments on trust.
+        let baseline = dir.path().join("release-baseline");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                baseline.to_str().expect("utf-8 path"),
+                BASELINE_REF,
+            ],
+        );
+        fs::write(
+            baseline.join("Cargo.toml"),
+            "[package]\nname = \"onepipeline-ui\"\n",
+        )
+        .expect("write the baseline manifest");
+
         let mut commit = vec!["commit", "--allow-empty", "--quiet"];
         for message in pending {
             commit.extend(["-m", message]);
         }
         git(&repo, &commit);
+        git(&repo, &["tag", PENDING_REF]);
 
         // Records every call, and answers the reading with the status the case
         // under test is about.
@@ -126,7 +145,7 @@ impl Fixture {
         // PATH is what makes the fetches and the offline resolve it asked for
         // readable. This call is the whole of that substitution.
         let stub_dir = dir.path().join("stub-bin");
-        let search_path = stub_bin::install(
+        stub_bin::install(
             &stub_dir,
             "cargo",
             "#!/usr/bin/env bash\n\
@@ -149,11 +168,20 @@ impl Fixture {
                  ;;\n\
              esac\n",
         );
+        // The script refuses to read anything when cargo-semver-checks is not
+        // installed, which is a probe of PATH rather than a call: what answers it
+        // never runs.
+        let search_path = stub_bin::install(
+            &stub_dir,
+            "cargo-semver-checks",
+            "#!/usr/bin/env bash\nexit 1\n",
+        );
         // llmlint: ignore-end[e2e_not_mocked]
 
         Self {
             baseline: baseline.to_str().expect("utf-8 path").to_owned(),
             git_dir: repo.join(".git"),
+            stub_dir,
             dir,
             search_path,
         }
@@ -172,18 +200,42 @@ impl Fixture {
 
     /// The same again, for a call whose arguments are the thing under test.
     fn run_arguments(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
+        self.run_arguments_on(arguments, environment, &self.search_path)
+    }
+
+    /// The same again, over a search path the case decides — which is how a run
+    /// that never provisioned the reading tool is driven.
+    fn run_arguments_on(
+        &self,
+        arguments: &[&str],
+        environment: &[(&str, &str)],
+        search_path: &std::ffi::OsStr,
+    ) -> Output {
         let mut command = Command::new("just");
         command
             .arg("semver-check")
             .args(arguments)
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
-            .env("PATH", &self.search_path)
+            .env("PATH", search_path)
             .env("GIT_DIR", &self.git_dir)
             .env("CARGO_CALLS", self.dir.path().join("cargo-calls"));
         for (name, value) in environment {
             command.env(name, value);
         }
         command.output().expect("just is on PATH")
+    }
+
+    /// The same search path with nothing on it called `cargo-semver-checks` —
+    /// the stand-in taken back out, and any directory a machine running the suite
+    /// really installed the tool into dropped, so the probe is answered the way a
+    /// runner that never provisioned it answers.
+    fn without_the_reading_tool(&self) -> std::ffi::OsString {
+        fs::remove_file(self.stub_dir.join("cargo-semver-checks")).expect("remove the stand-in");
+        std::env::join_paths(
+            std::env::split_paths(&self.search_path)
+                .filter(|directory| !directory.join("cargo-semver-checks").exists()),
+        )
+        .expect("join PATH")
     }
 
     /// Everything the script asked `cargo` for, in order.
@@ -472,6 +524,11 @@ fn a_reading_that_produced_no_verdict_is_read_past_by_a_breaking_release() {
             "the warning does not name the release the commits were read against, so \
              nobody can check the claim it rests on:\n{stderr}"
         );
+        assert!(
+            stderr.contains("ACTION:"),
+            "a release went past a reading with nowhere for its operator to go if \
+             they wanted it taken:\n{stderr}"
+        );
     }
 }
 
@@ -550,5 +607,65 @@ fn this_trees_dependencies_failing_to_fetch_fails_even_a_breaking_release() {
     assert!(
         stderr.contains("::error::") && stderr.contains("ACTION:"),
         "the failure does not say what happened, or what to do about it:\n{stderr}"
+    );
+}
+
+/// A baseline and a ref that name different releases is a usage error: the
+/// reading and the claim it is judged by would be about different tags, and one
+/// of the two would decide the release on history the other never produced.
+#[test]
+fn a_baseline_that_is_not_the_checkout_of_the_ref_is_a_usage_error() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    let output = fixture.run_arguments(
+        &[fixture.baseline.as_str(), PENDING_REF],
+        &[("SEMVER_STATUS", COMPATIBLE)],
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a baseline and a ref naming different releases were taken on trust:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains(PENDING_REF),
+        "the failure does not name the ref the checkout turned out not to be \
+         of:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        fixture.calls().is_empty(),
+        "a surface was read for a pair that describes no one release"
+    );
+}
+
+/// A missing cargo-semver-checks fails every release, breaking or not: it says
+/// nothing about the baseline, so there is nothing about it to read past.
+#[test]
+fn a_reading_tool_that_is_not_installed_fails_even_a_breaking_release() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    let output = fixture.run_arguments_on(
+        &[fixture.baseline.as_str(), BASELINE_REF],
+        &[("SEMVER_STATUS", COMPATIBLE)],
+        &fixture.without_the_reading_tool(),
+    );
+
+    assert!(
+        !output.status.success(),
+        "a release went ahead on a reading no installed tool could take:\n{}",
+        stdout(&output)
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("::error::") && stderr.contains("cargo-semver-checks"),
+        "the failure does not say the tool that takes the reading is missing:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("ACTION:") && stderr.contains("install"),
+        "the failure does not say how to install it:\n{stderr}"
+    );
+    assert!(
+        fixture.calls().is_empty(),
+        "the script fetched dependencies for a reading it could not take"
     );
 }

@@ -126,6 +126,8 @@ jobs:
       # since that tag claim is what decides it. See `scripts/semver-check.sh`.
       #
       # llmlint: ignore-block[changed_behavior_has_e2e] what these two lines add is a condition GitHub Actions evaluates and an environment it hands over, neither of which an offline gate can run; the work behind them is `scripts/semver-check.sh`, which `tests/e2e/semver_check.rs` drives through every answer it can get.
+      #
+      # llmlint: ignore[diagnostics_error_or_absent] a reading that did not happen is still an error for every release that claims compatibility, which is every release the check protects — a surface that broke inside a release the commit types version as compatible. What a warning buys is a release claiming none: `v0.4.0`'s baseline stopped compiling when a *transitive* requirement of the `onepipeline` it pins exactly drifted, no manifest writable here reaches that, and a verdict nobody can take again would only have agreed with a bump already taken. `scripts/semver-check.sh` holds the split and `tests/e2e/semver_check.rs` drives both sides of it.
       - name: Read the public surface against the baseline
         if: "${{ steps.baseline.outputs.root != '' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
         run: just semver-check "${{ steps.baseline.outputs.root }}" "${{ steps.baseline.outputs.ref }}"
