@@ -1508,12 +1508,20 @@ const UNRECORDED_HISTORY_ID: &str = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
 /// What the store beside the one the run named holds. No response may carry it.
 const HIDDEN_TRANSCRIPT: &str = "a conversation from a store this run never named";
 /// A bare name for a project, which is a link onto another store's project.
+///
+/// This and the three below are `unix` for the reason their journey is: planting
+/// a link needs a privilege Windows CI does not hold. Gated rather than deleted
+/// or allowed, so the file still says on every platform what is confined there.
+#[cfg(unix)]
 const ESCAPING_PROJECT: &str = "a-project-that-is-a-link";
 /// A bare name for a session, which is a link onto another store's transcript.
+#[cfg(unix)]
 const ESCAPING_SESSION: &str = "a-session-that-is-a-link";
 /// A bare name for a session whose file resolves to nothing at all.
+#[cfg(unix)]
 const VANISHED_SESSION: &str = "a-session-that-went-away";
 /// The id recorded for that vanished session. Well-formed and readable nowhere.
+#[cfg(unix)]
 const VANISHED_HISTORY_ID: &str = "01a00d0f-c094-7660-b26c-8a53baaf9c3c";
 
 /// Every file under a directory, in a stable order.
