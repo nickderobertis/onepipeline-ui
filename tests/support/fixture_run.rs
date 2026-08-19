@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use onepipeline::event::Envelope;
 use onepipeline::report;
 use onepipeline::views::RunPaths;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 /// The run every fixture is written for.
 pub const RUN_ID: &str = "run-20260807-a1b2c3";
@@ -26,9 +26,15 @@ pub const OTHER_RUN_ID: &str = "run-20260807-d4e5f6";
 /// The session the fixture run was launched from. Never served raw.
 pub const SESSION: &str = "claude-code-session-3f9a1c2e";
 /// The agent-graph session one node's dispatch ran under.
-pub const CONVERSATION_ID: &str = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
-/// The session the review node's judge member ran under.
-pub const REVIEW_CONVERSATION_ID: &str = "6b4d2a08-1e35-4c77-88ff-2a9c7b3e5d16";
+///
+/// Spelled the way `oneagentgraph` spells one: the emitting stream's id, a `.`,
+/// and the member id, sanitised to this crate's own identifier rule. It is not
+/// a uuid and nothing here may assume one — the label is a *pair*, which is what
+/// keeps two members of one dispatch two conversations.
+pub const CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker";
+/// The session the review node's judge member ran under, from that member's own
+/// stream.
+pub const REVIEW_CONVERSATION_ID: &str = "node-scope-1786925518102-3163741.judge";
 /// The artifact one relayed envelope recorded: the gate's own log.
 pub const ARTIFACT_ID: &str = "artifact-5c8f0a1b";
 /// The log the host's failing check stored, which is how a reader reads it.
@@ -289,7 +295,7 @@ fn journal(run: &str) -> String {
         .emit(
             "2026-08-07T12:00:03.000Z",
             "agentgraph",
-            "agent-turn",
+            "turn-started",
             json!({
                 "run_id": run,
                 "node": NODE_ID,
@@ -511,7 +517,7 @@ fn journal(run: &str) -> String {
         .emit(
             "2026-08-07T12:00:22.000Z",
             "agentgraph",
-            "agent-turn",
+            "turn-started",
             json!({
                 "run_id": run,
                 "node": REVIEW_NODE_ID,
@@ -692,6 +698,106 @@ pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
     let settlement: Envelope = serde_json::from_value(line.clone()).expect("the settled envelope");
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
     report::retain(&paths_of(dir), &settlement);
+}
+
+/// The pointer at one oneharness invocation's conversation, as `oneagentgraph`
+/// publishes one.
+///
+/// The three path fields are the three the producer publishes rather than one
+/// path, and they are `&str` on purpose: a journey has to be able to name a
+/// component the producer would never write, because refusing one rather than
+/// joining it is the whole of what stands between a read API and an arbitrary
+/// file on its host.
+pub struct HarnessSession<'a> {
+    /// The producing process's own stream id.
+    pub stream: &'a str,
+    /// The node whose dispatch made the invocation.
+    pub node: &'a str,
+    /// The member that made it.
+    pub member: &'a str,
+    /// The store the session file is in. `None` is a producer that named none,
+    /// which the reader answers with oneharness's own default store.
+    pub history_dir: Option<&'a Path>,
+    /// The project directory inside that store.
+    pub history_project: &'a str,
+    /// The session file inside that project, by stem.
+    pub history_session: &'a str,
+    /// The record inside that file, which is also the artifact's id.
+    pub history_id: &'a str,
+    /// The session file's size, which is what the producer records.
+    pub bytes: u64,
+}
+
+/// Relay one `oneharness-session` into a run exactly as `oneagentgraph`
+/// publishes one: the pointer as the payload, and one artifact naming the
+/// history record.
+///
+/// Nothing is copied into the run. The session's bytes stay in the store
+/// [`crate::harness_history`] wrote them into, which is what the resolution
+/// under test has to reach — and the envelope carries **no `session` label**,
+/// because the producer stamps that on the four turn kinds and on nothing else,
+/// including this one.
+pub fn relay_harness_session(dir: &Path, session: &HarnessSession) {
+    let mut payload = Map::new();
+    payload.insert("role".into(), json!("agent"));
+    payload.insert("turn".into(), json!(1));
+    payload.insert("identity".into(), json!("claude-code:alternate"));
+    payload.insert(
+        "session_id".into(),
+        json!("54e7ad34-ce6d-4979-8b4d-531b88026e15"),
+    );
+    payload.insert("history_id".into(), json!(session.history_id));
+    if let Some(store) = session.history_dir {
+        payload.insert("history_dir".into(), json!(store));
+    }
+    payload.insert("history_project".into(), json!(session.history_project));
+    payload.insert("history_session".into(), json!(session.history_session));
+    append_produced(
+        dir,
+        session.stream,
+        json!({
+            "v": 1,
+            "ts": "2026-08-07T12:01:10.000Z",
+            "stream": session.stream,
+            "seq": Value::Null,
+            "source": "agentgraph",
+            "kind": "oneharness-session",
+            "labels": {
+                "run_id": dir.file_name().and_then(|run| run.to_str()),
+                "node": session.node,
+                "member": session.member,
+                "persona": "worker",
+            },
+            "payload": Value::Object(payload),
+            "artifacts": [{
+                "id": session.history_id,
+                "kind": "oneharness_session",
+                "bytes": session.bytes,
+            }],
+        }),
+    );
+}
+
+/// Append one already-shaped record to a run's journal, numbering it as its own
+/// stream's next sequence.
+///
+/// Monotonic per stream, which is what the envelope promises and what a consumer
+/// detects loss through — not the file's line count, which counts every other
+/// producer's records too.
+fn append_produced(dir: &Path, stream: &str, mut line: Value) {
+    let journal = dir.join("events.jsonl");
+    let existing = fs::read_to_string(&journal).unwrap_or_default();
+    let seq = existing
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Envelope>(line).ok())
+        .filter(|event| event.stream == stream)
+        .count();
+    line["seq"] = json!(seq);
+    // Parsed back through the SDK's own envelope before it is written: a record
+    // this fixture shaped wrongly fails here rather than being served as one the
+    // producing library never wrote.
+    let _: Envelope = serde_json::from_value(line.clone()).expect("the relayed envelope");
+    fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
 /// The link `Produced::SymlinkToReport` leaves where the report should be.
@@ -938,7 +1044,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     emit(
         "2026-08-07T12:00:05.000Z",
         "agentgraph",
-        "agent-turn",
+        "turn-started",
         json!({
             "run_id": run,
             "persona": "orchestrator",
@@ -1070,7 +1176,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     emit(
         "2026-08-07T12:00:26.500Z",
         "agentgraph",
-        "agent-turn",
+        "turn-started",
         json!({
             "run_id": run,
             "persona": "orchestrator",
@@ -1088,7 +1194,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     emit(
         "2026-08-07T12:00:28.000Z",
         "agentgraph",
-        "agent-turn",
+        "turn-started",
         json!({
             "run_id": run,
             "node": SHIP_NODE_ID,
@@ -1148,7 +1254,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     emit(
         "2026-08-07T12:00:28.900Z",
         "agentgraph",
-        "agent-turn",
+        "turn-started",
         json!({
             "run_id": run,
             "node": SHIP_NODE_ID,

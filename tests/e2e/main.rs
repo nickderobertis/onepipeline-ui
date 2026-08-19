@@ -27,6 +27,8 @@ mod server;
 
 #[path = "../support/fixture_run.rs"]
 mod fixture_run;
+#[path = "../support/harness_history.rs"]
+mod harness_history;
 #[path = "../support/http.rs"]
 mod http;
 #[path = "../support/serving.rs"]

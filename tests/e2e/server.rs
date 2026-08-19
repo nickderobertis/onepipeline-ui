@@ -6,12 +6,15 @@
 //! compiled binary over a directory the SDK itself writes and reads the bytes
 //! that come back.
 
+use std::fs;
+
 use serde_json::{json, Value};
 
 use onepipeline_ui::contract::RunId;
 use onepipeline_ui::telemetry;
 
 use crate::fixture_run;
+use crate::harness_history;
 use crate::http;
 use crate::serving::Serving;
 #[cfg(unix)]
@@ -802,6 +805,613 @@ fn report_document(prose: &str) -> String {
             "usage": {},
         })
     )
+}
+
+/// The oneharness conversation behind a member's turns, read back through the
+/// API from the store oneharness itself wrote it into.
+///
+/// Nothing copies a session into a run: `oneagentgraph` publishes a *pointer*
+/// and the bytes stay in the history store, so this is the artifact whose
+/// resolution reaches outside the run directory entirely. The store here is
+/// written by `oneharness_core`'s own writer and read back by the same library
+/// linked into the server — no `oneharness` process is started on either side —
+/// and the journey follows the reader's own route in: the record's artifact id,
+/// taken off the timeline reference the event carries.
+#[test]
+fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it() {
+    let store = tempfile::tempdir().expect("the oneharness history store");
+    let recorded = harness_history::record(
+        store.path(),
+        "contract interface worker",
+        "land the wire contract",
+        "the route table is landed",
+    );
+    let verbose = harness_history::record(
+        store.path(),
+        "a very talkative worker",
+        "say more than one response can carry",
+        &"n".repeat(70_000),
+    );
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        for session in [&recorded, &verbose] {
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: HARNESS_STREAM,
+                    node: fixture_run::NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&session.dir),
+                    history_project: &session.project,
+                    history_session: &session.session,
+                    history_id: &session.history_id,
+                    bytes: session.bytes(),
+                },
+            );
+        }
+    });
+
+    // The reader's own way in: the timeline hangs the pointer on the record, and
+    // the artifact route is asked for exactly what it named.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json();
+    let reference = relayed(&timeline, "oneharness-session")
+        .into_iter()
+        .next()
+        .expect("the relayed pointer is on the node's timeline")["reference"]
+        .clone();
+    assert_eq!(reference["kind"], json!("oneharness_session"), "{timeline}");
+    assert_eq!(reference["value"], json!(recorded.history_id));
+
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            recorded.history_id
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_enveloped(&body);
+    assert_eq!(body["id"], json!(recorded.history_id));
+    assert_eq!(body["kind"], json!("oneharness_session"));
+    assert_eq!(body["truncated"], json!(false));
+    let content: Value =
+        serde_json::from_str(body["content"].as_str().expect("content")).expect("the record");
+    assert_eq!(
+        content["history_id"],
+        json!(recorded.history_id),
+        "the record served is the one the artifact named: {content}"
+    );
+    assert_eq!(
+        content["text"],
+        json!("the route table is landed"),
+        "what the agent actually said is what a reader came for: {content}"
+    );
+    assert_eq!(content["prompt"], json!("land the wire contract"));
+
+    // A conversation longer than one response may carry is bounded exactly as a
+    // log is: the end of it, and the flag that says so. A transcript has no size
+    // its harness promised, and this is the one artifact kind whose bytes this
+    // server never wrote and cannot bound at the source.
+    let long = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            verbose.history_id
+        ),
+    );
+    assert_eq!(long.status, 200, "{}", long.body);
+    let body = long.json();
+    assert_eq!(body["truncated"], json!(true));
+    let content = body["content"].as_str().expect("content");
+    assert!(
+        content.len() <= 64 * 1024,
+        "the body is bounded: {}",
+        content.len()
+    );
+    assert!(
+        content.ends_with("\"failure_kind\": null\n}"),
+        "the tail is the end of the record: {content}"
+    );
+}
+
+/// Reading one takes no lock and writes nothing under the store.
+///
+/// `oneharness_core` offers a lookup that reconciles the store's index under an
+/// exclusive `flock` and rewrites it; this crate must never call it, because a
+/// read surface serving a run would then be standing in the way of the single
+/// writer the engine runs. Proved twice over rather than asserted in prose: the
+/// whole store is made read-only for the read — a rewrite or a lock file would
+/// fail against it — and every file's bytes and modification time are compared
+/// across the read.
+#[cfg(unix)]
+#[test]
+fn resolving_a_oneharness_session_writes_nothing_under_the_history_store() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let store = tempfile::tempdir().expect("the oneharness history store");
+    let recorded = harness_history::record(
+        store.path(),
+        "read only worker",
+        "read the store and change nothing",
+        "the store is untouched",
+    );
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::relay_harness_session(
+            &dir,
+            &fixture_run::HarnessSession {
+                stream: HARNESS_STREAM,
+                node: fixture_run::NODE_ID,
+                member: "worker",
+                history_dir: Some(&recorded.dir),
+                history_project: &recorded.project,
+                history_session: &recorded.session,
+                history_id: &recorded.history_id,
+                bytes: recorded.bytes(),
+            },
+        );
+    });
+
+    // First against the store as it really is — writable, with the engine's own
+    // writer free to append to it. This is the reading that catches a lookup
+    // which reconciles: the index it rewrites and the lock file it creates are
+    // both in the comparison below.
+    let before = store_state(store.path());
+    let served = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            recorded.history_id
+        ),
+    );
+    assert_eq!(served.status, 200, "{}", served.body);
+    assert_eq!(
+        store_state(store.path()),
+        before,
+        "the read added, removed or rewrote a file under the store"
+    );
+
+    // Then with the store made read-only outright — every directory and every
+    // file, the store's own index and its lock among them, innermost first.
+    // This is a store on a read-only mount, and it is where an implementation
+    // that has to *write* in order to read stops being able to answer at all:
+    // the lookup that reconciles opens that lock for writing before it reads
+    // anything.
+    let entries: Vec<std::path::PathBuf> = std::iter::once(store.path().to_path_buf())
+        .chain(walk(store.path()))
+        .collect();
+    for entry in entries.iter().rev() {
+        let mode = if entry.is_dir() { 0o555 } else { 0o444 };
+        fs::set_permissions(entry, fs::Permissions::from_mode(mode))
+            .expect("make the store read-only");
+    }
+
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            recorded.history_id
+        ),
+    );
+
+    for entry in &entries {
+        let mode = if entry.is_dir() { 0o755 } else { 0o644 };
+        fs::set_permissions(entry, fs::Permissions::from_mode(mode)).expect("restore the store");
+    }
+    assert_eq!(
+        response.status, 200,
+        "a store nothing may write to is still readable: {}",
+        response.body
+    );
+    assert_eq!(
+        store_state(store.path()),
+        before,
+        "the store was written to"
+    );
+}
+
+/// A pointer this crate refuses to join, and an id the store does not hold.
+///
+/// The two path fields come off a *record*, which is external input exactly as a
+/// URL is, so each is checked as a bare name before anything joins it. The
+/// project is the one that is genuinely joined — the store's own layer — so it
+/// is proved against a real second store beside the first: without the check,
+/// `../<neighbour>` opens a transcript from a directory the run never named, and
+/// that is the arbitrary-file read this boundary exists to prevent. An absolute
+/// value is the same failure spelled differently, since joining one discards the
+/// store entirely. The session name is held to the rule beside it, and a history
+/// id the store does not hold is a `404` rather than a panic or an empty body.
+#[test]
+fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
+    let host = tempfile::tempdir().expect("the host's directories");
+    let store = host.path().join("store");
+    let neighbour = host.path().join("neighbour");
+    fs::create_dir_all(&store).expect("the store the run named");
+    fs::create_dir_all(&neighbour).expect("the store beside it");
+    let recorded = harness_history::record(
+        &store,
+        "refused pointer worker",
+        "point somewhere else",
+        "the transcript the run named",
+    );
+    // A whole second store, holding transcripts this run never pointed at. A
+    // reader that joined either value below would serve one of these — which is
+    // what makes these two cases a proof rather than an assertion.
+    let climbed = harness_history::record(
+        &neighbour,
+        "a climbed to worker",
+        "a conversation this run never had",
+        HIDDEN_TRANSCRIPT,
+    );
+    let rooted = harness_history::record(
+        &neighbour,
+        "an absolutely named worker",
+        "another conversation this run never had",
+        HIDDEN_TRANSCRIPT,
+    );
+    let traversed = format!("../neighbour/{}", climbed.project);
+    let absolute = neighbour
+        .join(&rooted.project)
+        .to_str()
+        .expect("utf-8 path")
+        .to_owned();
+
+    // Each case is recorded under the id of the record a *joined* pointer would
+    // have found, so the check being gone is the difference between a `404` and
+    // that record's own bytes.
+    let refused: Vec<(&str, &str, &str, &str)> = vec![
+        (
+            "a project that climbs out of the store",
+            &traversed,
+            &climbed.session,
+            &climbed.history_id,
+        ),
+        (
+            "a project that is an absolute path",
+            &absolute,
+            &rooted.session,
+            &rooted.history_id,
+        ),
+        (
+            "a project that is the store's own index",
+            ".index",
+            &recorded.session,
+            &recorded.history_id,
+        ),
+        (
+            "a session that is not a bare name",
+            &recorded.project,
+            "../elsewhere",
+            &recorded.history_id,
+        ),
+        (
+            "a session that is empty",
+            &recorded.project,
+            "",
+            &recorded.history_id,
+        ),
+    ];
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        for (_, project, session, artifact) in &refused {
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: HARNESS_STREAM,
+                    node: fixture_run::NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&store),
+                    history_project: project,
+                    history_session: session,
+                    history_id: artifact,
+                    bytes: 0,
+                },
+            );
+        }
+        // The same store, named as the producer names it, holding an id no
+        // record in it carries.
+        fixture_run::relay_harness_session(
+            &dir,
+            &fixture_run::HarnessSession {
+                stream: HARNESS_STREAM,
+                node: fixture_run::NODE_ID,
+                member: "worker",
+                history_dir: Some(&store),
+                history_project: &recorded.project,
+                history_session: &recorded.session,
+                history_id: UNRECORDED_HISTORY_ID,
+                bytes: 0,
+            },
+        );
+    });
+
+    for (what, _, _, artifact) in &refused {
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/artifacts/{artifact}", fixture_run::RUN_ID),
+        );
+        assert_eq!(response.status, 404, "{what}: {}", response.body);
+        assert_eq!(
+            response.json()["error"]["code"],
+            json!("artifact_not_found"),
+            "{what}"
+        );
+        assert!(
+            !response.body.contains(HIDDEN_TRANSCRIPT),
+            "{what} opened a transcript outside the store the run named: {}",
+            response.body
+        );
+    }
+
+    let unknown = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{UNRECORDED_HISTORY_ID}",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(unknown.status, 404, "{}", unknown.body);
+    assert_eq!(unknown.json()["error"]["code"], json!("artifact_not_found"));
+}
+
+/// A pointer that names no store at all resolves against oneharness's own
+/// default one.
+///
+/// The producer publishes `history_dir` only when the store is not the default,
+/// and this crate takes no flag and no config key of its own for that path: a
+/// second source for it is how a reader and a writer come to disagree about
+/// where the transcripts on a host are. What it resolves is what every
+/// oneharness process here resolves — the platform state directory — which is
+/// what this drives, by running the server with that directory named.
+#[cfg(unix)]
+#[test]
+fn a_pointer_naming_no_store_reads_the_one_every_oneharness_process_here_resolves() {
+    let state = tempfile::tempdir().expect("the platform state directory");
+    let store = state.path().join("oneharness").join("history");
+    fs::create_dir_all(&store).expect("the default store");
+    let recorded = harness_history::record(
+        &store,
+        "default store worker",
+        "write into the default store",
+        "the default store is where this landed",
+    );
+    let runs = tempfile::tempdir().expect("temp dir");
+    let dir = fixture_run::write(runs.path(), fixture_run::RUN_ID);
+    fixture_run::relay_harness_session(
+        &dir,
+        &fixture_run::HarnessSession {
+            stream: HARNESS_STREAM,
+            node: fixture_run::NODE_ID,
+            member: "worker",
+            history_dir: None,
+            history_project: &recorded.project,
+            history_session: &recorded.session,
+            history_id: &recorded.history_id,
+            bytes: recorded.bytes(),
+        },
+    );
+    let serving = Serving::start_in(
+        runs,
+        &[("XDG_STATE_HOME", state.path().to_str().expect("utf-8"))],
+    );
+
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            recorded.history_id
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let content: Value =
+        serde_json::from_str(response.json()["content"].as_str().expect("content"))
+            .expect("the record");
+    assert_eq!(
+        content["text"],
+        json!("the default store is where this landed")
+    );
+}
+
+/// The stream `oneagentgraph` relays a member's oneharness invocation on.
+const HARNESS_STREAM: &str = "node-scope-1786925518098-3163646";
+/// A history id well-formed enough to ask for and recorded by nothing.
+const UNRECORDED_HISTORY_ID: &str = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
+/// What the store beside the one the run named holds. No response may carry it.
+const HIDDEN_TRANSCRIPT: &str = "a conversation from a store this run never named";
+
+/// Every file under a directory, in a stable order.
+fn walk(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut entries: Vec<std::path::PathBuf> = fs::read_dir(root)
+        .expect("read the store")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+    entries.sort();
+    for entry in entries {
+        if entry.is_dir() {
+            found.push(entry.clone());
+            found.extend(walk(&entry));
+        } else {
+            found.push(entry);
+        }
+    }
+    found
+}
+
+/// Every file in a store, by name, bytes and modification time — the whole of
+/// what a read must leave alone.
+fn store_state(
+    root: &std::path::Path,
+) -> Vec<(
+    std::path::PathBuf,
+    Option<Vec<u8>>,
+    Option<std::time::SystemTime>,
+)> {
+    walk(root)
+        .into_iter()
+        .map(|path| {
+            let metadata = fs::metadata(&path).ok();
+            (
+                path.clone(),
+                fs::read(&path).ok(),
+                metadata.and_then(|metadata| metadata.modified().ok()),
+            )
+        })
+        .collect()
+}
+
+/// The conversation label is what makes a turn reachable, and nothing else is.
+///
+/// `oneagentgraph` stamps `session` into an envelope's labels on its four turn
+/// kinds and on no other, and this crate's whole conversation surface keys off
+/// it: the transcripts a run detail lists, the reference a timeline hangs on a
+/// relayed turn in *both* scopes, and the document the transcript route serves.
+/// A producer that stopped stamping it served every run an empty
+/// `conversations` here with nothing failing, which is what this journey exists
+/// to stop happening twice — so it asserts the reachable chain and, on the same
+/// store, that an agentgraph record carrying no label reaches none of it.
+#[test]
+fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
+    let serving = two_runs();
+    // A relayed record of the same kind, on the same node, that the producer
+    // stamped no session onto: the label is the difference, so the timeline must
+    // hang no transcript on it.
+    fixture_run::append_relayed(
+        &serving.runs.path().join(fixture_run::RUN_ID),
+        "agentgraph",
+        "turn-started",
+        json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+        }),
+        json!({ "turn": 9 }),
+    );
+
+    let detail = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?include_conversations=true",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    let listed: Vec<&str> = detail["conversations"]
+        .as_array()
+        .expect("conversations")
+        .iter()
+        .filter_map(|document| document["conversation"]["id"].as_str())
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            fixture_run::CONVERSATION_ID,
+            fixture_run::REVIEW_CONVERSATION_ID
+        ],
+        "one transcript per labelled session, and none for the unlabelled record: {detail}"
+    );
+
+    // Both scopes, because a reader arrives at a turn from either: the run's own
+    // timeline and the node's are two readings of the same records, and a
+    // reference on one alone is a transcript half the readers cannot open.
+    for (scope, expected) in [
+        (
+            "scope=run".to_owned(),
+            vec![
+                fixture_run::CONVERSATION_ID,
+                fixture_run::REVIEW_CONVERSATION_ID,
+            ],
+        ),
+        (
+            format!("scope=node&node={}", fixture_run::NODE_ID),
+            vec![fixture_run::CONVERSATION_ID],
+        ),
+    ] {
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?{scope}", fixture_run::RUN_ID),
+        )
+        .json();
+        let mut referenced: Vec<String> = Vec::new();
+        let mut unlabelled = 0;
+        for event in relayed(&timeline, "turn-started") {
+            match &event["reference"] {
+                Value::Null => unlabelled += 1,
+                reference => {
+                    assert_eq!(
+                        reference["kind"],
+                        json!("conversation"),
+                        "{scope}: a relayed turn points at its transcript: {event}"
+                    );
+                    let session = reference["value"].as_str().expect("a session").to_owned();
+                    if !referenced.contains(&session) {
+                        referenced.push(session);
+                    }
+                }
+            }
+        }
+        assert_eq!(referenced, expected, "{scope}: {timeline}");
+        assert_eq!(
+            unlabelled, 1,
+            "{scope}: the unlabelled record is served, with no transcript hung on it"
+        );
+
+        // Every reference is followed, because a reference a reader cannot open
+        // is the same failure as no reference at all.
+        for session in &referenced {
+            let served = http::get(
+                serving.address,
+                &format!(
+                    "/api/v2/runs/{}/conversations/{session}",
+                    fixture_run::RUN_ID
+                ),
+            );
+            assert_eq!(served.status, 200, "{session}: {}", served.body);
+            let body = served.json();
+            assert_eq!(body["conversation"]["id"], json!(session));
+            assert!(
+                !body["conversation"]["turns"]
+                    .as_array()
+                    .expect("turns")
+                    .is_empty(),
+                "{session} has the turns the timeline counted: {body}"
+            );
+        }
+    }
+}
+
+/// Every event of one kind a timeline served, whatever span it sits under.
+fn relayed(timeline: &Value, kind: &str) -> Vec<Value> {
+    fn under(span: &Value, kind: &str, found: &mut Vec<Value>) {
+        for event in span["events"].as_array().into_iter().flatten() {
+            if event["kind"] == json!(kind) {
+                found.push(event.clone());
+            }
+        }
+        for child in span["children"].as_array().into_iter().flatten() {
+            under(child, kind, found);
+        }
+    }
+    let mut found = Vec::new();
+    for span in timeline["spans"].as_array().into_iter().flatten() {
+        under(span, kind, &mut found);
+    }
+    found
 }
 
 #[test]

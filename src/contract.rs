@@ -655,19 +655,72 @@ impl ReferenceKind {
     }
 }
 
+/// One directory or file name a producer's payload named, checked before
+/// anything joins it to a path.
+///
+/// The other trust boundary this crate has. An identifier above crosses it from
+/// a request; this one crosses it from a *record* — the `history_project` and
+/// `history_session` an `oneharness-session` event names, which together locate
+/// a transcript inside the oneharness history store on this host. A record is
+/// external input exactly as a URL is: the producing library promises a bare
+/// name, and a payload that carries anything else is refused rather than joined,
+/// because joining it is how a read surface is made to open a file nobody asked
+/// for.
+///
+/// Constructed only through [`TryFrom<&str>`], so a `String` read off a payload
+/// cannot reach a `Path::join` without having passed through here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathSegment(String);
+
+impl PathSegment {
+    /// The name, as the store holds it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for PathSegment {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        check_segment(value, SEGMENT_MAX_LEN)?;
+        Ok(Self(value.to_owned()))
+    }
+}
+
 /// The longest identifier any route accepts.
 ///
 /// A bound rather than a limit anyone will meet: it exists so an unbounded
 /// query string cannot become an unbounded allocation or log line.
 const IDENTIFIER_MAX_LEN: usize = 128;
 
+/// The longest name a checked path segment may carry.
+///
+/// Looser than an identifier because it bounds a *file name* rather than a URL
+/// segment: oneharness composes a session name out of a member's own name, a
+/// timestamp and a pid, and nothing upstream caps the first. 255 is what the
+/// file systems underneath this hold a single component to, so a longer name
+/// names no file anywhere and there is nothing to gain by joining it.
+const SEGMENT_MAX_LEN: usize = 255;
+
 /// Why `value` is not a usable identifier, or `Ok(())` when it is.
 fn check_identifier(value: &str) -> Result<(), String> {
+    check_segment(value, IDENTIFIER_MAX_LEN)
+}
+
+/// Why `value` is not a bare name, or `Ok(())` when it is.
+///
+/// One rule, two bounds. The character set is the whole of what makes a value
+/// safe to join: no separator on any platform, no drive letter, no wildcard, no
+/// NUL — and a leading `.` refused, which also refuses `.`, `..`, and the dot
+/// files a store keeps its own index in.
+fn check_segment(value: &str, max_len: usize) -> Result<(), String> {
     if value.is_empty() {
         return Err("must not be empty".to_owned());
     }
-    if value.len() > IDENTIFIER_MAX_LEN {
-        return Err(format!("must be at most {IDENTIFIER_MAX_LEN} characters"));
+    if value.len() > max_len {
+        return Err(format!("must be at most {max_len} characters"));
     }
     if !value
         .chars()

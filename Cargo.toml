@@ -101,6 +101,20 @@ futures-core = "0.3"
 # reads the public surface through a generated manifest of its own. Bump it with
 # the sibling CLI, as one change — and with `tests/fixtures/healthz.json`, which
 # pins the release `/healthz` reports off `onepipeline::VERSION`.
+# The oneharness history store's own reader. A `oneharness_session` artifact's
+# bytes are never copied into a run — they stay where oneharness wrote them —
+# so this crate opens that store by linking the library that writes it rather
+# than by spawning its CLI or restating its layout. Read-only, and deliberately
+# so: `io::history::find_session_path` and `read_session_display` take no lock,
+# while `find_record_by_id` beside them reconciles the store's index under an
+# exclusive `flock` and rewrites it, which a read surface must never do.
+#
+# `0.10.1` is what `oneagentgraph` — the producer of the pointer this resolves —
+# links, so reader and writer are one release. The lock already carries other
+# 0.x lines of it under the SDK; cargo keeps them apart and nothing crosses
+# between them, because every value here is read from a file rather than
+# threaded through a sibling's signature.
+oneharness-core = "0.10.1"
 onepipeline = "=0.7.3"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets

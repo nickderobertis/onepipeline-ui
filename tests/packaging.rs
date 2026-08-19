@@ -437,6 +437,49 @@ fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
     );
 }
 
+/// The oneharness history store is read by linking its library, never by
+/// spawning its CLI.
+///
+/// Both halves matter and only one of them is visible in a manifest. A
+/// `oneharness_session` artifact's bytes live in a store this crate does not
+/// own, and the two ways to reach them are not equivalent: the library reads,
+/// while the CLI is a program on `PATH` whose version nothing here pins, whose
+/// arguments are a second contract, and whose lookups reconcile the store's own
+/// index. So the requirement is declared under `[dependencies]` — not
+/// `[dev-dependencies]`, which would leave the shipped binary unable to serve
+/// one — and no source or suite spawns a `oneharness` process.
+#[test]
+fn the_history_store_is_read_by_linking_its_library_and_never_by_spawning_its_cli() {
+    let requirement = dependency_requirement(&read("Cargo.toml"), "oneharness-core");
+    assert!(
+        !requirement.is_empty(),
+        "oneharness-core is declared with no version requirement"
+    );
+    for path in files_under("src")
+        .into_iter()
+        .chain(files_under("tests"))
+        .filter(|path| path.ends_with(".rs"))
+    {
+        let source = read(&path);
+        // Spelled in halves so this assertion is not itself a hit. What it looks
+        // for is the program being *run* — the spawn spellings — rather than the
+        // word, which is also a directory in the store's own default path.
+        let program = format!("{}{}", "onehar", "ness");
+        for spawned in [
+            format!("new(\"{program}"),
+            format!("arg(\"{program}"),
+            format!("args([\"{program}"),
+        ] {
+            assert!(
+                !source.contains(&spawned),
+                "{path} names the `{program}` program as a string: its history store is \
+                 read by linking that library, and a process is a second contract \
+                 nothing here pins"
+            );
+        }
+    }
+}
+
 /// Directories whose every file reaches a published artifact, so a file added to
 /// one has to be covered without anyone remembering this test exists.
 const ARTIFACT_TREES: &[&str] = &[

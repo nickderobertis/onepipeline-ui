@@ -15,8 +15,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use oneharness_core::io::history;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::plan::{Node, Plan};
 use onepipeline::views::{liveness_word, RunView};
@@ -26,7 +27,8 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::contract::{
-    ArtifactId, ConversationId, DispatchId, NodeId, ReferenceKind, TIMELINE_SCHEMA_VERSION,
+    ArtifactId, ConversationId, DispatchId, NodeId, PathSegment, ReferenceKind,
+    TIMELINE_SCHEMA_VERSION,
 };
 use crate::filter::EventFilter;
 // The sibling's spending party is imported under a name of its own: this module
@@ -2091,8 +2093,7 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
             .map(|artifact| (event, artifact))
     })?;
     let kind = ReferenceKind::of(&recorded.kind);
-    let path = artifact_path(view, event, id, kind);
-    let bytes = fs::read(&path).ok()?;
+    let bytes = artifact_bytes(view, event, id, kind)?;
     let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
     let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
     Some(json!({
@@ -2103,8 +2104,8 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
     }))
 }
 
-/// The file one recorded artifact's bytes are in, chosen by what the producing
-/// library said it stored.
+/// One recorded artifact's bytes, read from wherever the producing library said
+/// it stored them.
 ///
 /// A settled member's report is the one kind this run holds a copy of: the SDK
 /// copies it into the run's own storage as the settlement is ingested, and
@@ -2115,26 +2116,69 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
 /// never restated here: writer and reader share one implementation of it rather
 /// than two that happen to agree.
 ///
+/// A oneharness session is the kind whose bytes are *not* a file this crate
+/// picks: they are one record inside the history store oneharness itself keeps,
+/// read through that library — see [`harness_session`].
+///
 /// Everything else is a log the producing library stored beside the run, under
 /// its own id.
 ///
 /// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
-fn artifact_path(
+fn artifact_bytes(
     view: &RunView,
     event: &Envelope,
     id: &ArtifactId,
     kind: ReferenceKind,
-) -> PathBuf {
+) -> Option<Vec<u8>> {
     // Listed rather than defaulted: where a kind's bytes live is a decision, and
     // a kind added to the vocabulary must be made to answer it rather than
     // inheriting an answer that happens to compile.
-    match kind {
+    let path = match kind {
         ReferenceKind::WorkerReport => view.paths.report_for(&event.stream, event.seq),
-        ReferenceKind::Conversation
-        | ReferenceKind::GateLog
-        | ReferenceKind::OneharnessSession
-        | ReferenceKind::Pr => view.paths.dir.join("artifacts").join(id.as_str()),
-    }
+        ReferenceKind::OneharnessSession => return harness_session(event, id),
+        ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
+            view.paths.dir.join("artifacts").join(id.as_str())
+        }
+    };
+    fs::read(&path).ok()
+}
+
+/// The oneharness conversation one `oneharness_session` artifact names, rendered
+/// as the reader reads it.
+///
+/// The bytes stay where oneharness wrote them. `oneagentgraph` publishes a
+/// *pointer* — the store, the project inside it, the session file, and the
+/// history id of the record within that file — and nothing copies the session
+/// into the run, so this is the one artifact resolved outside the run directory
+/// entirely. The three path fields are the producer's own and are taken as
+/// three, never as one path: the two that name a directory and a file are
+/// checked as bare names before either is joined, so a record naming a
+/// traversal, a separator or an absolute path resolves to nothing rather than to
+/// a file on this host. A store the record does not name at all falls back to
+/// [`history::resolve_dir`]'s default, which is the same one every oneharness
+/// process here resolves — this crate takes no flag and no config key of its
+/// own for it, because a second source for that path is how a reader and a
+/// writer come to disagree about where the transcripts are.
+///
+/// It reads and never writes. [`history::find_session_path`] and
+/// [`history::read_session_display`] open files; `find_record_by_id` beside them
+/// reconciles the store's index under an exclusive `flock` and rewrites it,
+/// which would put this read surface in the way of the single writer the engine
+/// runs — so the id is matched against the records the session file holds
+/// instead, here, where no lock is involved.
+fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
+    let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
+    let dir = history::resolve_dir(field("history_dir"))?;
+    let project = PathSegment::try_from(field("history_project")?).ok()?;
+    let session = PathSegment::try_from(field("history_session")?).ok()?;
+    let path = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
+        .ok()
+        .flatten()?;
+    let record = history::read_session_display(&path)
+        .ok()?
+        .into_iter()
+        .find(|record| record["history_id"] == json!(id.as_str()))?;
+    serde_json::to_vec_pretty(&record).ok()
 }
 
 /// The scope a timeline request asks for.

@@ -1156,6 +1156,7 @@ dependencies = [
  "futures-core",
  "libc",
  "oneagentgraph",
+ "oneharness-core 0.10.1",
  "onepipeline",
  "predicates",
  "serde",

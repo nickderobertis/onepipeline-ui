@@ -27,23 +27,23 @@
           "node_id": "contract-interface"
         },
         {
-          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
-          "kind": "agent-turn",
+          "id": "node-scope-1786925518098-3163646.worker.0",
+          "kind": "turn-started",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
-            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+            "value": "node-scope-1786925518098-3163646.worker"
           }
         },
         {
-          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+          "id": "node-scope-1786925518098-3163646.worker.1",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
-            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+            "value": "node-scope-1786925518098-3163646.worker"
           }
         },
         {
@@ -168,9 +168,9 @@
       ]
     },
     {
-      "id": "dispatch.3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+      "id": "dispatch.node-scope-1786925518098-3163646.worker",
       "kind": "dispatch",
-      "label": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d",
+      "label": "node-scope-1786925518098-3163646.worker",
       "started_at": "2026-08-07T12:00:02.000Z",
       "ended_at": "2026-08-07T12:00:20.000Z",
       "parent_id": "node.contract-interface",
@@ -181,27 +181,27 @@
       "status": "done",
       "reference": {
         "kind": "conversation",
-        "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+        "value": "node-scope-1786925518098-3163646.worker"
       },
       "events": [
         {
-          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.0",
-          "kind": "agent-turn",
+          "id": "node-scope-1786925518098-3163646.worker.0",
+          "kind": "turn-started",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
-            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+            "value": "node-scope-1786925518098-3163646.worker"
           }
         },
         {
-          "id": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d.1",
+          "id": "node-scope-1786925518098-3163646.worker.1",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
-            "value": "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d"
+            "value": "node-scope-1786925518098-3163646.worker"
           }
         }
       ]
