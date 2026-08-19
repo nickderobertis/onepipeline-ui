@@ -15,7 +15,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::plan::{Node, Plan};
@@ -38,6 +38,13 @@ use crate::telemetry::{BucketName, Party as Spender, RunTelemetry};
 /// no size a producer promised, and a read surface that streams an unbounded one
 /// into a browser is a read surface that can be made to exhaust its own memory.
 pub const ARTIFACT_TAIL_BYTES: usize = 64 * 1024;
+
+/// The wire's word for a settled member's report.
+///
+/// Named rather than spelled twice: it is both what the reference vocabulary
+/// carries and what decides *where* an artifact's bytes are read from, and those
+/// two readings must never drift apart.
+const WORKER_REPORT: &str = "worker_report";
 
 /// The transport parties `transportRoleSchema` holds, and exactly those.
 ///
@@ -2081,22 +2088,47 @@ pub fn conversation(view: &RunView, id: &ConversationId) -> Option<Value> {
 /// reads nothing.
 #[must_use]
 pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
-    let recorded = view.events.iter().find_map(|event| {
+    let (event, recorded) = view.events.iter().find_map(|event| {
         event
             .artifacts
             .iter()
             .find(|artifact| artifact.id.0 == id.as_str())
+            .map(|artifact| (event, artifact))
     })?;
-    let path = view.paths.dir.join("artifacts").join(id.as_str());
+    let kind = reference_kind(&recorded.kind);
+    let path = artifact_path(view, event, id, kind);
     let bytes = fs::read(&path).ok()?;
     let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
     let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
     Some(json!({
         "id": id.as_str(),
-        "kind": reference_kind(&recorded.kind),
+        "kind": kind,
         "content": String::from_utf8_lossy(tail),
         "truncated": truncated,
     }))
+}
+
+/// The file one recorded artifact's bytes are in, chosen by what the producing
+/// library said it stored.
+///
+/// A settled member's report is the one kind this run holds a copy of: the SDK
+/// copies it into the run's own storage as the settlement is ingested, and
+/// [`RunPaths::report_for`] is the published name of that copy — derived from
+/// the envelope the artifact was recorded on, because **the artifact id names
+/// the stream and not the seq**, so nothing about the id alone locates the file.
+/// The sanitiser behind that name is private to `onepipeline` on purpose and is
+/// never restated here: writer and reader share one implementation of it rather
+/// than two that happen to agree.
+///
+/// Everything else is a log the producing library stored beside the run, under
+/// its own id.
+///
+/// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
+fn artifact_path(view: &RunView, event: &Envelope, id: &ArtifactId, kind: &str) -> PathBuf {
+    if kind == WORKER_REPORT {
+        return view.paths.report_for(&event.stream, event.seq);
+    }
+    view.paths.dir.join("artifacts").join(id.as_str())
 }
 
 /// The wire's closed reference vocabulary, from the producing library's own word
@@ -2105,7 +2137,7 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
 fn reference_kind(kind: &str) -> &'static str {
     match kind {
         "conversation" => "conversation",
-        "worker_report" | "report" => "worker_report",
+        "worker_report" | "report" => WORKER_REPORT,
         "oneharness_session" | "session" => "oneharness_session",
         "pr" => "pr",
         _ => "gate_log",

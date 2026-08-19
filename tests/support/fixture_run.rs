@@ -14,6 +14,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use onepipeline::event::Envelope;
+use onepipeline::report;
+use onepipeline::views::RunPaths;
 use serde_json::{json, Value};
 
 /// The run every fixture is written for.
@@ -596,6 +599,112 @@ pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, paylo
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
+/// One member's settlement, as the producing library relays it.
+///
+/// The stream is deliberately a parameter and deliberately unconstrained: it is
+/// the producing process's own id, the envelope promises nothing about its
+/// characters, and the name this run keeps the report under is what
+/// `RunPaths::report_for` makes of it. A journey that only ever settled a member
+/// on a stream that survives that name unchanged would prove the two sides agree
+/// on half the streams there are.
+pub struct SettledMember<'a> {
+    /// The producing process's own stream id.
+    pub stream: &'a str,
+    /// The node whose dispatch it settled.
+    pub node: &'a str,
+    /// The artifact id the producer recorded for the report it stored.
+    pub artifact: &'a str,
+    /// The report that library wrote.
+    pub report: &'a str,
+}
+
+/// What the producing library left at the path its settlement names.
+pub enum Produced {
+    /// The report itself: a plain file under that library's own report file
+    /// name, which is what [`report::retain`] accepts.
+    Report,
+    /// A symlink standing where the report should be. `retain` refuses it
+    /// without following — a path that names one file and delivers another — so
+    /// the run keeps no copy, and the settlement still names an artifact.
+    SymlinkToReport,
+}
+
+/// Relay a settled member into a run exactly as the engine ingests one: the
+/// envelope is appended to the journal, and the report it names is handed to
+/// `onepipeline::report::retain`.
+///
+/// `retain` is the published writer and `RunPaths::report_for` is the published
+/// name, so a store built this way is built by the same promise the server reads
+/// it back through — and nothing here spells a report file name.
+pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
+    // The producing library's own scratch, outside the run. Gone when this
+    // returns: what the run keeps is the copy `retain` makes below, and every
+    // reader opens only that.
+    let scratch = tempfile::tempdir().expect("the producing library's scratch");
+    let written = scratch.path().join(report::ACCEPTED_REPORT_FILE);
+    let named = match produced {
+        Produced::Report => {
+            fs::write(&written, member.report).expect("the member's own report");
+            written
+        }
+        Produced::SymlinkToReport => {
+            let elsewhere = scratch.path().join("elsewhere.json");
+            fs::write(&elsewhere, member.report).expect("the document behind the link");
+            symlink(&elsewhere, &written);
+            written
+        }
+    };
+    let journal = dir.join("events.jsonl");
+    let existing = fs::read_to_string(&journal).unwrap_or_default();
+    // Monotonic per stream, which is what the envelope promises and what a
+    // consumer detects loss through — not the file's line count, which counts
+    // every other producer's records too.
+    let seq = existing
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Envelope>(line).ok())
+        .filter(|event| event.stream == member.stream)
+        .count();
+    let line = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:01:00.000Z",
+        "stream": member.stream,
+        "seq": seq,
+        "source": "agentgraph",
+        "kind": report::MEMBER_SETTLED,
+        "labels": {
+            "run_id": dir.file_name().and_then(|run| run.to_str()),
+            "node": member.node,
+            "member": "worker",
+            "persona": "worker",
+        },
+        "payload": {
+            "completed": true,
+            "verdict": [],
+            "completion_reason": Value::Null,
+            "report_path": named,
+        },
+        "artifacts": [{
+            "id": member.artifact,
+            "kind": "report",
+            "bytes": member.report.len(),
+        }],
+    });
+    let settlement: Envelope = serde_json::from_value(line.clone()).expect("the settled envelope");
+    fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
+    report::retain(&paths_of(dir), &settlement);
+}
+
+/// The link `Produced::SymlinkToReport` leaves where the report should be.
+#[cfg(unix)]
+fn symlink(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).expect("the link the producer left");
+}
+
+#[cfg(windows)]
+fn symlink(target: &Path, link: &Path) {
+    std::os::windows::fs::symlink_file(target, link).expect("the link the producer left");
+}
+
 /// A run still being driven: a node that failed and was replaced, a lifecycle
 /// node with steps, a human action nobody has taken, a node gated by it, a
 /// decision that held a subtree back and was cleared, and a surface the planner
@@ -638,71 +747,94 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
     )
     .expect("the long artifact");
 
-    let journal = live_journal(run, &plan);
+    // Where the settled member left its report: the producing library's own
+    // scratch, outside this run, under that library's own report file name. It
+    // is what the settlement names and what the engine copies from, and it is
+    // gone by the time anything reads this run — the copy `retain` made below is
+    // the only file any reader opens.
+    let produced = tempfile::tempdir().expect("the producing library's scratch");
+    let report_path = produced.path().join(report::ACCEPTED_REPORT_FILE);
+    fs::write(&report_path, reported_control_report()).expect("the member's own report");
+
+    let journal = live_journal(run, &plan, &report_path);
     fs::write(dir.join("events.jsonl"), &journal).expect("the journal");
     retain_reported_control(&dir, &journal);
     dir
 }
 
-/// Where the run's own copy of the reported node's report is, derived the way
-/// `RunPaths::report_for` derives it.
+/// The run's paths, as the SDK's own nameable type.
 ///
-/// Exposed so a journey can put something else there — a symlink, a document too
-/// large, bytes that are not a report — and drive what this crate makes of a copy
-/// it cannot read.
-pub fn retained_report(dir: &Path) -> PathBuf {
-    let journal = fs::read_to_string(dir.join("events.jsonl")).expect("the journal");
-    let settlement = journal
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .find(|event| {
-            event["kind"] == json!("member-settled")
-                && event["labels"]["node"] == json!(REPORTED_NODE_ID)
-        })
-        .expect("the settlement that stored a report");
-    dir.join("reports").join(format!(
-        "{}-{}.json",
-        settlement["stream"].as_str().expect("a stream"),
-        settlement["seq"].as_u64().expect("a sequence")
-    ))
+/// A fixture directory is `<root>/<run>`, which is what `RunPaths::under` takes,
+/// so a journey holds the same handle the engine writes a run through and the
+/// server reads one back through.
+fn paths_of(dir: &Path) -> RunPaths {
+    RunPaths::under(
+        dir.parent()
+            .expect("a run directory sits under a runs root"),
+        dir.file_name()
+            .and_then(|run| run.to_str())
+            .expect("the run id names the directory"),
+    )
 }
 
-/// The run's own copy of the onejudge report one settlement stored.
+/// The settlement one node's member left behind, as the SDK's own envelope.
 ///
-/// `onepipeline` makes this copy as it ingests the envelope — the one moment the
-/// producer's path carries the producer's authority rather than the journal's —
-/// and derives the copy's name from the settlement's own stream and sequence.
-/// The name is read back off the journal here for the same reason: it is derived
-/// from the settlement, never taken from anything the payload says.
-fn retain_reported_control(dir: &Path, journal: &str) {
-    let settlement = journal
+/// Read back off the journal rather than kept beside it: the report's name is
+/// derived from the settlement — its stream and its sequence — so the settlement
+/// is the whole of what locates it, here as in the server.
+fn settlement_of(journal: &str, node: &str) -> Envelope {
+    journal
         .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| serde_json::from_str::<Envelope>(line).ok())
         .find(|event| {
-            event["kind"] == json!("member-settled")
-                && event["labels"]["node"] == json!(REPORTED_NODE_ID)
+            event.kind.0 == report::MEMBER_SETTLED && event.labels.node.as_deref() == Some(node)
         })
-        .expect("the settlement that stored a report");
-    let (stream, seq) = (
-        settlement["stream"].as_str().expect("a stream"),
-        settlement["seq"].as_u64().expect("a sequence"),
+        .expect("the settlement that stored a report")
+}
+
+/// Where the run's own copy of the reported node's report is, from the SDK's own
+/// `RunPaths::report_for` and from nothing else.
+///
+/// Exposed so a journey can put something else there — a document too large,
+/// bytes that are not a report — and drive what this crate makes of a copy it
+/// cannot read. Nothing in this repository spells that name: the sanitiser
+/// behind it is `onepipeline`'s, and one implementation of it is the point.
+pub fn retained_report(dir: &Path) -> PathBuf {
+    let journal = fs::read_to_string(dir.join("events.jsonl")).expect("the journal");
+    let settlement = settlement_of(&journal, REPORTED_NODE_ID);
+    paths_of(dir).report_for(&settlement.stream, settlement.seq)
+}
+
+/// The onejudge report that settlement named, copied into the run's own storage
+/// exactly as the engine copies one: through `onepipeline::report::retain`.
+///
+/// Retention and resolution are one published promise, so the fixture store is
+/// built by the writer the server reads back through rather than by a test
+/// author's belief about where the file goes. `retain` is called at the moment
+/// the engine calls it — as the envelope is ingested, when the path it names
+/// still carries the producing process's authority — and it derives the copy's
+/// name itself.
+fn retain_reported_control(dir: &Path, journal: &str) {
+    report::retain(&paths_of(dir), &settlement_of(journal, REPORTED_NODE_ID));
+    assert!(
+        retained_report(dir).is_file(),
+        "the published writer refused the fixture's own report, so no reader could serve it"
     );
-    let reports = dir.join("reports");
-    fs::create_dir_all(&reports).expect("the run's own report storage");
-    fs::write(
-        reports.join(format!("{stream}-{seq}.json")),
-        pretty(&json!({
-            "schema_version": 8,
-            // The whole of what this crate reads: `control: null` is the
-            // contract's no-controllable-turn case, and `control_unavailable`
-            // says why the ask could not be honoured.
-            "control": Value::Null,
-            "control_unavailable": REPORTED_NO_CONTROL,
-            "verdicts": [],
-            "usage": {},
-        })),
-    )
-    .expect("the retained report");
+}
+
+/// The onejudge report the reported node's member settled with.
+///
+/// The whole of what this crate reads out of one: `control: null` is the
+/// contract's no-controllable-turn case, and `control_unavailable` says why the
+/// ask could not be honoured.
+pub fn reported_control_report() -> String {
+    pretty(&json!({
+        "schema_version": 8,
+        "control": Value::Null,
+        "control_unavailable": REPORTED_NO_CONTROL,
+        "verdicts": [],
+        "usage": {},
+    }))
 }
 
 /// The graph the live run is converging toward, with its committed edits applied.
@@ -766,7 +898,7 @@ fn live_plan() -> Value {
 }
 
 /// One continuous stream of events, with work still in flight at the end of it.
-fn live_journal(run: &str, plan: &Value) -> String {
+fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut seq = 0;
     let mut emit = |at: &str, source: &str, kind: &str, labels: Value, payload: Value| {
@@ -781,7 +913,7 @@ fn live_journal(run: &str, plan: &Value) -> String {
                 "labels": labels,
                 "payload": payload,
                 "artifacts": if kind == "node-settled" && labels["node"] == json!(SHIP_NODE_ID) {
-                    json!([{ "id": "artifact-long-log", "kind": "report", "bytes": 70_005 }])
+                    json!([{ "id": "artifact-long-log", "kind": "log", "bytes": 70_005 }])
                 } else {
                     json!([])
                 },
@@ -843,7 +975,7 @@ fn live_journal(run: &str, plan: &Value) -> String {
             "completed": false,
             "verdict": [],
             "completion_reason": Value::Null,
-            "report_path": "/a/producing/librarys/scratch/report.json",
+            "report_path": report_path,
         }),
     );
     // The two texts a failure records are written by different parts of the

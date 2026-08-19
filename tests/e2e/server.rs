@@ -605,6 +605,205 @@ fn an_artifact_is_served_as_a_bounded_tail_and_an_unrecorded_one_is_not_found() 
     assert!(!missing.body.contains("secrets"));
 }
 
+/// A settled member's report, written by the published writer and read back
+/// through the API.
+///
+/// This is the round trip the retention contract exists for: `retain` copies the
+/// report into the run's own storage and `report_for` derives the name it went
+/// under, and the server resolves the same artifact through the same published
+/// pair. Nothing in this journey spells a report file name — a fixture that
+/// hand-wrote one would pass while the two sides disagreed, which is the failure
+/// the contract was published to make impossible.
+///
+/// Both streams are driven, because the name is *derived* from the producer's
+/// own stream id and the envelope promises nothing about its characters: one
+/// stream survives the SDK's sanitiser unchanged and one does not, and a reader
+/// that restated that sanitiser would serve the first and 404 the second.
+#[test]
+fn a_settled_members_report_is_served_from_the_copy_the_run_retained() {
+    let plain = report_document("the acceptance criteria were met");
+    let rewritten = report_document("the follow-ups the worker surfaced");
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: PLAIN_STREAM,
+                node: fixture_run::REPORTED_NODE_ID,
+                artifact: PLAIN_REPORT_ARTIFACT,
+                report: &plain,
+            },
+            fixture_run::Produced::Report,
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: REWRITTEN_STREAM,
+                node: fixture_run::REPORTED_NODE_ID,
+                artifact: REWRITTEN_REPORT_ARTIFACT,
+                report: &rewritten,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    for (artifact, written) in [
+        (PLAIN_REPORT_ARTIFACT, &plain),
+        (REWRITTEN_REPORT_ARTIFACT, &rewritten),
+    ] {
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/artifacts/{artifact}", fixture_run::RUN_ID),
+        );
+        assert_eq!(response.status, 200, "{artifact}: {}", response.body);
+        let body = response.json();
+        assert_eq!(body["id"], json!(artifact));
+        assert_eq!(
+            body["kind"],
+            json!("worker_report"),
+            "the producer recorded a report, and the wire's word for one is worker_report"
+        );
+        assert_eq!(
+            body["content"],
+            json!(written),
+            "{artifact} is served the bytes the member's own report carried"
+        );
+        assert_eq!(body["truncated"], json!(false));
+    }
+}
+
+/// A retained report longer than one response may carry is bounded exactly as a
+/// log is: the end of it, and the flag that says so.
+#[test]
+fn a_retained_report_bigger_than_one_response_is_served_as_its_tail() {
+    let report = report_document(&format!("{}the last thing it said", "n".repeat(70_000)));
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: PLAIN_STREAM,
+                node: fixture_run::REPORTED_NODE_ID,
+                artifact: PLAIN_REPORT_ARTIFACT,
+                report: &report,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+    let body = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{PLAIN_REPORT_ARTIFACT}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    assert_eq!(body["truncated"], json!(true));
+    assert_eq!(body["kind"], json!("worker_report"));
+    let content = body["content"].as_str().expect("content");
+    assert!(
+        content.ends_with(report.get(report.len() - 64..).expect("the report's end")),
+        "the tail is the end of the report"
+    );
+    assert!(content.len() <= 64 * 1024);
+}
+
+/// A settlement whose report the run never kept.
+///
+/// `retain` refuses a symlink standing where the report should be — a path that
+/// names one file and delivers another — so the settlement is relayed, the
+/// artifact is recorded, and no copy exists. That is a real state rather than a
+/// hypothetical one, and the route answers it as the contract's not-found rather
+/// than by panicking, by serving an empty body, or by following the link the run
+/// deliberately did not.
+#[test]
+fn an_artifact_naming_a_report_the_run_never_retained_is_not_found() {
+    let kept = report_document("the report the run did keep");
+    let refused = report_document("what the producer put behind the link");
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: PLAIN_STREAM,
+                node: fixture_run::REPORTED_NODE_ID,
+                artifact: PLAIN_REPORT_ARTIFACT,
+                report: &kept,
+            },
+            fixture_run::Produced::Report,
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: REWRITTEN_STREAM,
+                node: fixture_run::REPORTED_NODE_ID,
+                artifact: REWRITTEN_REPORT_ARTIFACT,
+                report: &refused,
+            },
+            fixture_run::Produced::SymlinkToReport,
+        );
+    });
+    // The other settlement of the same run, so the not-found below is this
+    // report having no copy rather than the route reaching no report at all.
+    let served = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{PLAIN_REPORT_ARTIFACT}",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(served.status, 200, "{}", served.body);
+    assert_eq!(served.json()["content"], json!(kept));
+
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{REWRITTEN_REPORT_ARTIFACT}",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(response.status, 404, "{}", response.body);
+    assert_eq!(
+        response.json()["error"]["code"],
+        json!("artifact_not_found")
+    );
+    assert!(
+        !response
+            .body
+            .contains("what the producer put behind the link"),
+        "the run kept no copy, so nothing followed the producer's link: {}",
+        response.body
+    );
+}
+
+/// The stream a `member-settled` was relayed on, as `oneagentgraph` mints one.
+const PLAIN_STREAM: &str = "node-scope-1786925518098-3163646";
+/// A stream the SDK's sanitiser rewrites: a producer's id is a producer's
+/// string, and nothing on the envelope constrains its characters.
+const REWRITTEN_STREAM: &str = "node scope/qwen@a recording host-3163646";
+/// The artifact ids those two settlements recorded for their reports.
+///
+/// An artifact id crosses this API's own trust boundary, so a producer mints one
+/// from its *sanitised* stream — and it therefore names the stream and not the
+/// sequence, which is why the file is derivable only from the envelope the
+/// artifact was recorded on.
+const PLAIN_REPORT_ARTIFACT: &str = "report-node-scope-1786925518098-3163646";
+const REWRITTEN_REPORT_ARTIFACT: &str = "report-node-scope-qwen-a-recording-host-3163646";
+
+/// A report shaped the way onejudge's own is, carrying `prose` where a reader
+/// looks for what the member said.
+fn report_document(prose: &str) -> String {
+    format!(
+        "{}\n",
+        json!({
+            "schema_version": 8,
+            "control": Value::Null,
+            "verdicts": [{ "criterion": "it works", "met": true, "reason": prose }],
+            "usage": {},
+        })
+    )
+}
+
 #[test]
 fn a_route_the_contract_does_not_define_still_answers_in_the_error_contract() {
     let serving = two_runs();
@@ -1871,7 +2070,7 @@ fn an_artifact_bigger_than_one_response_is_served_as_its_tail() {
     )
     .json();
     assert_eq!(body["truncated"], json!(true));
-    assert_eq!(body["kind"], json!("worker_report"));
+    assert_eq!(body["kind"], json!("gate_log"));
     let content = body["content"].as_str().expect("content");
     assert!(
         content.ends_with("TAIL\n"),
