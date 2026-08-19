@@ -740,6 +740,53 @@ test("shows the moment a planner redirected a running turn", async ({
   );
 });
 
+test("draws a node's journal records as the categories they belong to", async ({
+  page,
+}) => {
+  // The node whose record really is several different things: a workspace session
+  // opened, a branch pushed, a change opened and merged, a member settled, and the
+  // node dispatched and settled around all of it.
+  await openObservatory(page, `/?run=${runs().live}&node=foundation`);
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const markers = timeline(page).getByRole("button", { name: /, marker$/ });
+  await expect(markers.first()).toBeVisible();
+
+  // Not one glyph repeated: with a single pin on every record the plot says only
+  // that something happened, and the reader has to open each one to find the record
+  // that matters — which is the reading a timeline exists to save them.
+  const categories = await markers
+    .locator("svg[data-event-category]")
+    .evaluateAll((icons) =>
+      icons.map((icon) => icon.getAttribute("data-event-category")),
+    );
+  expect(categories).toHaveLength(await markers.count());
+  expect(new Set(categories).size).toBeGreaterThan(1);
+
+  // And the same record is drawn the same way in both places it is met. Reached
+  // from the keyboard, because a marker is a control and this is the only route to
+  // the moment it names for a reader who is not pointing at it.
+  const marked = markers.last();
+  const category = await marked
+    .locator("svg[data-event-category]")
+    .getAttribute("data-event-category");
+  expect(category).not.toBeNull();
+  await marked.focus();
+  await expect(marked).toBeFocused();
+  await page.keyboard.press("Enter");
+  const opened = transcript.locator('[data-selected="true"]');
+  await expect(opened).toHaveCount(1);
+  await expect(opened.locator("svg[data-event-category]")).toHaveAttribute(
+    "data-event-category",
+    category ?? "",
+  );
+  // The glyph is decoration beside a row that already names the record; it is not a
+  // second control the reader has to step through to reach the row itself.
+  await expect(opened.locator("svg[data-event-category]")).toHaveAttribute(
+    "aria-hidden",
+    "true",
+  );
+});
+
 test("scrolls the transcript to the journal record a marker names", async ({
   page,
 }) => {

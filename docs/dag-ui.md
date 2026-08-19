@@ -233,7 +233,14 @@ Escape key. It is a **timeline over a transcript**, both projected from
   reads a served identifier such as `rollup` or `pr-drafting`, and the span kinds
   that *hold* work rather than being work (the run, the node, a lifecycle step)
   occupy no lane at all. A journal record is a moment rather than an interval, so
-  it is a **marker** — an icon on a full-height line over every lane. The axis
+  it is a **marker** — an icon on a full-height line over every lane — and the icon
+  says which of eleven **categories** the record belongs to, so the plot can be
+  scanned rather than read record by record. The category is derived in the browser
+  (`features/timeline/event-category.tsx`) by rules over the wire kind, with an
+  exception table only for the kinds those rules would misfile; it is never served,
+  and a kind no rule names still draws, under a default category of its own. The
+  transcript row beside a marker carries the same glyph, so one record is
+  recognisable on both surfaces. The axis
   reads local wall-clock time and elapsed-from-start, and the compact line and the
   expanded lanes always span the same window, so a moment does not move when the
   view is collapsed. An aggregate is plotted at the total it carries, not across

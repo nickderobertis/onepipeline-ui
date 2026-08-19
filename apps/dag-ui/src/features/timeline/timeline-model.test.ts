@@ -257,6 +257,32 @@ describe("one node's slice of the run timeline", () => {
     expect(projected.items.some(({ id }) => id === "event-9")).toBe(false);
   });
 
+  test("draws each journal marker as the category its kind is read under", () => {
+    const projected = nodeTimelineV2(timeline, "dashboard");
+    const records = projected.rows.filter((row) => row.rowKind === "event");
+    // Three different things happened on this node, and the plot says so: a
+    // conversation took turns, a checkpoint this build has no rule for was
+    // recorded, and the planner redirected a turn that was already running.
+    expect(
+      records.map(({ event, category }) => [event.kind, category]),
+    ).toEqual([
+      ["conversation-turn", "session"],
+      ["conversation-turn", "session"],
+      ["conversation-turn", "session"],
+      ["checkpoint-recorded", "activity"],
+      ["turn-interrupted", "recovery"],
+      ["turn-interrupted", "recovery"],
+      ["conversation-turn", "session"],
+      ["conversation-turn", "session"],
+    ]);
+    // Every marker carries a glyph of its own. Left unset, the rail falls back to
+    // one pin for all of them — which is a plot that cannot be scanned, only read.
+    expect(projected.markers.length).toBe(records.length);
+    expect(projected.markers.every(({ icon }) => icon !== undefined)).toBe(
+      true,
+    );
+  });
+
   test("plots work the record never closed to the end of what the node recorded", () => {
     // A dispatch the run has not settled is served open-ended. Plotted at its own
     // start it would be an instant — the one thing on the node that is still
