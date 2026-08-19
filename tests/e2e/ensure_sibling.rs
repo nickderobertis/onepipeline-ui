@@ -272,13 +272,16 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
     let dir = TempDir::new().expect("temp dir");
     let graph = dir.path().join("tasks.json");
 
-    // Through the workspace's own Nx entry point rather than `just nx`, for the
-    // same reason every script here calls it that way: it is a `.sh` file, which
-    // is not a program on every platform, and `just` pastes a recipe's arguments
-    // into a shell line, which eats the backslashes out of the path this asks Nx
-    // to write to. Spawned with `bash` and an argument vector, neither happens.
+    // Through the workspace's own Nx entry point, spawned the way the justfile
+    // and every other suite here spawn a script: `bash`, because a `.sh` file is
+    // not a program on every platform, and the path relative to the root it is
+    // run from, because the script locates the workspace by taking `dirname` of
+    // its own `$BASH_SOURCE` — and `dirname` of a Windows absolute path, whose
+    // separators are backslashes, is `.`. Not `just nx`, because a recipe's
+    // arguments are pasted into its shell line, which would spend the separators
+    // in the graph path below as escapes before Nx ever saw them.
     let output = Command::new("bash")
-        .arg(repo_root().join("scripts/nx.sh"))
+        .arg("scripts/nx.sh")
         .args(["run-many", "-t", "test"])
         .arg(format!("--graph={}", graph.display()))
         .current_dir(repo_root())
