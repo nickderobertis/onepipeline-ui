@@ -765,14 +765,18 @@ impl TryFrom<&str> for NamedStore {
 pub struct StoreRoot(PathBuf);
 
 impl StoreRoot {
-    /// The store at `dir`, or `None` when this host has no directory there to
-    /// resolve.
+    /// The store at `dir`, or `None` when this host holds no directory there.
     ///
-    /// A store that is not there is an artifact with no readable bytes, which is
-    /// the answer a pointer at a store this host does not hold has always had.
+    /// Resolved and then *read*, so the type cannot be inhabited by a path that
+    /// is merely spelled well — a file, or a name nothing answers to, is not a
+    /// root anything may be confined to. A store that is not there is an
+    /// artifact with no readable bytes, which is the answer a pointer at a store
+    /// this host does not hold has always had.
     #[must_use]
     pub fn read(dir: &Path) -> Option<Self> {
-        fs::canonicalize(dir).ok().map(Self)
+        let resolved = fs::canonicalize(dir).ok()?;
+        fs::read_dir(&resolved).ok()?;
+        Some(Self(resolved))
     }
 
     /// Where `path` — a path the store's own reader produced from this root —

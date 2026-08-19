@@ -2135,6 +2135,7 @@ fn artifact_bytes(
     // inheriting an answer that happens to compile.
     let path = match kind {
         ReferenceKind::WorkerReport => view.paths.report_for(&event.stream, event.seq),
+        // llmlint: ignore[authorization_enforced_server_side] the reason is written where the read is, on `harness_session`.
         ReferenceKind::OneharnessSession => return harness_session(event, id),
         ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
             view.paths.dir.join("artifacts").join(id.as_str())
@@ -2187,6 +2188,8 @@ fn artifact_bytes(
 /// which would put this read surface in the way of the single writer the engine
 /// runs — so the id is matched against the records the session file holds
 /// instead, here, where no lock is involved.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes recorded, and the store, project and session are read off that envelope — and what the record names is confined below before it is opened.
+// llmlint: ignore-block[secrets_stay_server_side] the record *is* the artifact: `docs/contract.md` serves a `oneharness_session` as the whole record, pretty-printed and bounded like a log, because the conversation is what a reader opens this for. Which record is what bounds the surface, not which of its fields — one a run in the served root recorded, in the store that record named.
 fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
     // An empty value names no store, which is what oneharness itself reads
@@ -2219,12 +2222,16 @@ fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
         }
         Confined::Missing => return None,
     };
+    // The store's own reader, so what is served is the record `oneharness-core`
+    // parsed through its own types rather than the file's bytes.
     let record = history::read_session_display(&path)
         .ok()?
         .into_iter()
         .find(|record| record["history_id"] == json!(id.as_str()))?;
     serde_json::to_vec_pretty(&record).ok()
 }
+// llmlint: ignore-end[authorization_enforced_server_side]
+// llmlint: ignore-end[secrets_stay_server_side]
 
 /// The scope a timeline request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
