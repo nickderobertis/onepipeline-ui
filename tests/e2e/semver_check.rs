@@ -525,7 +525,7 @@ fn a_reading_that_produced_no_verdict_is_read_past_by_a_breaking_release() {
              nobody can check the claim it rests on:\n{stderr}"
         );
         assert!(
-            stderr.contains("ACTION:"),
+            stderr.contains("just semver-check"),
             "a release went past a reading with nowhere for its operator to go if \
              they wanted it taken:\n{stderr}"
         );

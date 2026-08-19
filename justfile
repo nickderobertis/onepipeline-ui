@@ -228,9 +228,11 @@ msrv:
 # Diff the crate's public API against a release checkout, as the release does.
 # The workflow interpolates a path and a tag it was handed into this call, so the
 # recipe passes them as arguments rather than pasting them into the command line.
+# llmlint: ignore-block[diagnostics_error_or_absent] the reading is still an error for every release that claims compatibility, which is every release it protects; the run that succeeds on a warning is one claiming none, whose bump the verdict could only have agreed with. `scripts/semver-check.sh` holds the split and `tests/e2e/semver_check.rs` drives both sides of it.
 [positional-arguments]
 semver-check baseline ref:
     @bash scripts/semver-check.sh "$1" "$2"
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Separate from `check`: `cargo deny` needs a network-fetched advisory DB.
 # Advisory + license audit and unused-dependency check.

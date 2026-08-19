@@ -42,8 +42,11 @@ usage() {
 baseline="$1"
 baseline_ref="$2"
 [ -f "$baseline/Cargo.toml" ] || usage "$baseline has no Cargo.toml, so it is not a checkout"
-git rev-parse --verify --quiet "${baseline_ref}^{commit}" >/dev/null \
-  || usage "$baseline_ref names no commit here, so what the pending release claims cannot be read"
+# A tag, not any revision: the workflow hands over one of `git tag --list 'v*'`,
+# and a revision expression reaching some other commit would choose which commits
+# the pending release is judged to be made of.
+git rev-parse --verify --quiet "refs/tags/${baseline_ref}^{commit}" >/dev/null \
+  || usage "$baseline_ref names no release tag here, so what the pending release claims cannot be read"
 
 # The two arguments describe one release between them, and a pair that does not
 # would read this tree's commits against a release that never produced the surface
@@ -53,7 +56,7 @@ git rev-parse --verify --quiet "${baseline_ref}^{commit}" >/dev/null \
 # repository the environment names instead.
 baseline_head="$(env -u GIT_DIR -u GIT_WORK_TREE git -C "$baseline" rev-parse HEAD 2>/dev/null)" \
   || usage "$baseline is not a git checkout, so it cannot be shown to be the one $baseline_ref names"
-[ "$baseline_head" = "$(git rev-parse "${baseline_ref}^{commit}")" ] \
+[ "$baseline_head" = "$(git rev-parse "refs/tags/${baseline_ref}^{commit}")" ] \
   || usage "$baseline is a checkout of $baseline_head rather than of $baseline_ref"
 
 # A tool this environment never installed says nothing about the baseline, so it
@@ -70,15 +73,16 @@ command -v cargo-semver-checks >/dev/null 2>&1 || {
 # a release that claims compatibility with nothing. Subjects and bodies are read
 # apart so a body quoting a subject cannot answer for one.
 #
-# llmlint: ignore[contracts_have_one_source_or_a_drift_gate] release-plz exposes no parser to derive this from, and no dry run that reports the bump without first taking the very reading this decides whether to demand — so the grammar is Conventional Commits v1.0.0 read a second time, deliberately, and only ever to relax. Both disagreements are bounded: reading fewer breaks than release-plz leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop treating `!` and `BREAKING CHANGE:` as breaking, which is the specification it and `release-plz.toml`'s documented mapping both name. The residue is a `!` on a commit touching no packaged file, which release-plz does not see: it relaxes a release whose own bump is smaller, and only while the baseline cannot be built at all.
-subjects="$(git log --format=%s "${baseline_ref}..HEAD")"
-bodies="$(git log --format=%b "${baseline_ref}..HEAD")"
+# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz exposes no parser to derive this from, and no dry run that reports the bump without first taking the very reading this decides whether to demand — so the grammar is Conventional Commits v1.0.0 read a second time, deliberately, and only ever to relax. Both disagreements are bounded: reading fewer breaks than release-plz leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop treating `!` and `BREAKING CHANGE:` as breaking, which is the specification it and `release-plz.toml`'s documented mapping both name. The residue is a `!` on a commit touching no packaged file, which release-plz does not see: it relaxes a release whose own bump is smaller, and only while the baseline cannot be built at all.
+subjects="$(git log --format=%s "refs/tags/${baseline_ref}..HEAD")"
+bodies="$(git log --format=%b "refs/tags/${baseline_ref}..HEAD")"
 if grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
   || grep -Eq '^BREAKING[ -]CHANGE:' <<<"$bodies"; then
   claims_compatibility=no
 else
   claims_compatibility=yes
 fi
+# llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 # What to do about a reading that was never taken — a baseline that will not
 # fetch, or one cargo-semver-checks could not build a surface out of.
@@ -98,8 +102,7 @@ fi
 reading_not_taken() {
   local what="$1" action="$2"
   if [ "$claims_compatibility" = no ]; then
-    echo "::warning::$what — read past: the commits since $baseline_ref break the API, so this release claims compatibility with nothing and the reading could only agree with a bump already taken" >&2
-    echo "ACTION: nothing is required of this release, which is versioned from its commits either way. To take the reading anyway: $action" >&2
+    echo "::warning::$what — read past: the commits since $baseline_ref break the API, so this release claims compatibility with nothing and the reading could only agree with a bump already taken. Nothing is required of it; to take the reading anyway, $action" >&2
     exit 0
   fi
   echo "::error::$what" >&2
