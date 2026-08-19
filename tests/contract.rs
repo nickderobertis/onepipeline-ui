@@ -257,11 +257,22 @@ fn normalized(document: Value) -> Value {
     }
 }
 
+/// The liveness body, and the release it names.
+///
+/// The version is the point of the second field: a golden carrying a release
+/// this crate no longer links would have a host prove its engine and its reader
+/// match against a number nothing kept true, so the SDK pin and this golden move
+/// in one change or this fails.
 #[test]
-fn the_health_body_round_trips() {
+fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
     let raw = read_fixture("healthz.json");
     let health: Health = serde_json::from_str(&raw).expect("parse healthz.json");
     assert_eq!(health.status, HealthStatus::Ok);
+    assert_eq!(
+        health.onepipeline_version,
+        onepipeline::VERSION,
+        "tests/fixtures/healthz.json pins an `onepipeline` release this crate does not link"
+    );
     assert_eq!(canonical(&health), raw);
 }
 
@@ -706,6 +717,7 @@ impl ReadApi for Unimplemented {
     fn health(&self) -> Health {
         Health {
             status: HealthStatus::Ok,
+            onepipeline_version: onepipeline::VERSION.to_owned(),
         }
     }
 
@@ -1266,19 +1278,19 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
 /// grammar fixes.
 ///
 /// The grammar is duplicated per repository by design — there is no shared util
-/// crate here, exactly as with the envelope. `oneagentgraph` *does* declare
-/// `EventFilter` and `Matcher` in a public module, which would make this a type
-/// gate like the event vocabulary above rather than a wire one; it cannot be
-/// today, and the reason is worth writing down. That declaration landed in
-/// `oneagentgraph` 0.2.13, which added a field to `run::Request` in the same
-/// patch release — so `onepipeline` 0.4.0, built against 0.2.12, does not compile
-/// against it, and this tree pins 0.2.12. The gate becomes a type gate the moment
-/// a published `onepipeline` compiles against a sibling that declares the filter.
+/// crate here, exactly as with the envelope — so this is the drift gate that
+/// stands in for the shared declaration. It is a **type** gate, like the event
+/// vocabulary above: `oneagentgraph` declares `EventFilter` and `Matcher` in a
+/// public module, and this crate's copy is held to that library's own
+/// serialization rather than to a second reading of the wire alone. It could not
+/// be until now — the declaration landed in `oneagentgraph` 0.2.13, which added a
+/// field to `run::Request` in the same patch release, so the `onepipeline` this
+/// crate depended on did not compile against it — and the SDK pin moving to a
+/// release built on a later sibling is what makes it one.
 ///
 /// One field is deliberately *not* shared: this grammar has no `round` matcher.
 /// Execution is continuous, the label is deprecated and stamped by nothing, and a
 /// matcher over it would be a filter that silently matched nothing.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the sibling's own declaration is unreachable from this tree for the reason above — the release that added it broke the `onepipeline` this crate depends on — so the wire the grammar fixes is the only declaration a consumer can compare against, which is the same footing `onevcs`'s vocabulary is read on.
 #[test]
 fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
     use onepipeline_ui::filter::{EventFilter, Matcher};
@@ -1309,10 +1321,34 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         "the shared grammar's matcher has drifted"
     );
 
+    // And the same document off the sibling's own type, filled the same way:
+    // this is what makes the gate read that library's declaration rather than a
+    // second transcription of what it happens to emit.
+    assert_eq!(
+        mine,
+        serde_json::to_value(oneagentgraph::event::Matcher {
+            source: Some(oneagentgraph::event::Source::Agentgraph),
+            kind: Some("turn-*".into()),
+            run_id: Some("run-1".into()),
+            node: Some("build".into()),
+            step: Some("compile".into()),
+            member: Some("worker".into()),
+            persona: Some("engineer".into()),
+        })
+        .expect("the sibling's matcher serializes"),
+        "this crate's matcher has drifted from the one `oneagentgraph` declares"
+    );
+
     // A matcher that names nothing serializes to nothing, so a spec round-trips
-    // as the file wrote it rather than gaining every key it left unasked.
+    // as the file wrote it rather than gaining every key it left unasked — which
+    // is the sibling's behaviour too, not a convention this crate chose.
     assert_eq!(
         serde_json::to_value(EventFilter::default()).expect("serializes"),
+        serde_json::json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(oneagentgraph::event::EventFilter::default())
+            .expect("the sibling's filter serializes"),
         serde_json::json!({})
     );
 

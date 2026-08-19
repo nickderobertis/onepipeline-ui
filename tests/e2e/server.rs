@@ -45,7 +45,13 @@ fn healthz_answers_without_reading_run_storage() {
     let serving = Serving::start(|_| {});
     let response = http::get(serving.address, "/healthz");
     assert_eq!(response.status, 200);
-    assert_eq!(response.json(), json!({ "status": "ok" }));
+    // The release is read off the SDK this test binary links, not restated: a
+    // pin move that left the served value behind fails here rather than telling
+    // a host its engine and its reader are the same release when they are not.
+    assert_eq!(
+        response.json(),
+        json!({ "status": "ok", "onepipeline_version": onepipeline::VERSION })
+    );
 }
 
 #[test]

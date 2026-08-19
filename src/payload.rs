@@ -442,7 +442,7 @@ fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
             // What the journal settled for this node, which is an account of the
             // node itself rather than of the graph around it.
             let settled = view.state.recorded.get(&node).map(|status| Recorded {
-                status: status.as_str().to_owned(),
+                status: status.status().as_str().to_owned(),
                 outcome: outcome(),
             });
             let recorded = settled
@@ -1440,11 +1440,9 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
     if let Some(status) = view.state.recorded.get(&node.id) {
-        item.insert("status".into(), json!(status_word(status.as_str())));
-        item.insert(
-            "completed".into(),
-            json!(status_word(status.as_str()) == "done"),
-        );
+        let word = status_word(status.status().as_str());
+        item.insert("status".into(), json!(word));
+        item.insert("completed".into(), json!(word == "done"));
         // The words the settlement itself carried. The SDK's fold keeps a node's
         // status, outcome and branch but not the prose beside them, and a node
         // that stopped without them is a card that says only "failed" — which

@@ -75,16 +75,22 @@ and because nothing else recovers *why* the tooling is what it is.
 pre-push bar.** `just bootstrap` also provisions the `onepipeline` CLI at the
 version the lock pins its library to, into `.tools/`: the read API asks it for
 each run's telemetry document, the two speak a versioned document, and a
-mismatched pair serves every run with no clock at all.
+mismatched pair serves every run with no clock at all. `/healthz` reports that
+release from `onepipeline::VERSION`, so a host pinning the engine that writes a
+run store and this reader of it separately can *prove* the two match rather than
+assume it; `tests/fixtures/healthz.json` carries the same version, and moving the
+pin without moving the golden fails.
 
-**`oneagentgraph` is pinned to 0.2.12 in the lockfile, and `cargo update` on it
-will break the build.** That library added a field to `run::Request` in 0.2.13 —
-a patch release — and `onepipeline` 0.4.0 is built against 0.2.12, so cargo's
-semver unification picks a version the SDK does not compile against. The pin
-comes off when a published `onepipeline` compiles against 0.2.13 or later; until
-then it is also what keeps `tests/contract.rs` from gating this crate's copy of
-the shared filter grammar against that library's own declaration of it, which
-landed in the same release. `just deps-check` is deliberately outside it: it needs a network
+**`oneagentgraph` is resolved by the SDK rather than pinned here, and it followed
+the SDK pin from 0.2.12 to 0.2.19.** The old pin was not a preference: that
+library added a field to `run::Request` in 0.2.13 — a patch release — and
+`onepipeline` 0.4.0 was built against 0.2.12, so cargo's semver unification
+picked a version that SDK did not compile against, and the lockfile held it back.
+An `onepipeline` built on a later sibling is what ends that, which is also what
+turns `tests/contract.rs`'s gate on this crate's copy of the shared filter
+grammar into a **type** gate against that library's own declaration of it — the
+declaration landed in the release the old pin could not reach. `just deps-check`
+is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx

@@ -123,6 +123,13 @@ pub mod routes {
 pub struct Health {
     /// The one state a served `/healthz` can be in.
     pub status: HealthStatus,
+    /// The `onepipeline` release this binary links, from that crate's own
+    /// `VERSION` and never from a literal here.
+    ///
+    /// A host that pins the engine writing a run store and separately pins this
+    /// reader of it has nothing else to prove the two are the same release, so
+    /// the reader says which one it is rather than leaving it assumed.
+    pub onepipeline_version: String,
 }
 
 /// The only status `/healthz` reports: a process that could not answer serves
