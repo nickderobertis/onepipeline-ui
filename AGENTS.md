@@ -158,10 +158,16 @@ fans one uniformly-named target across all of them.
   baseline tag: a `!` type or a `BREAKING CHANGE:` footer means the release
   claims compatibility with nothing, the reading could only have agreed with a
   bump already taken, and a baseline it could not read is a warning rather than a
-  failure. Everything else is unchanged — a release the commit types version as
-  compatible still fails on a reading that did not happen, which is the
-  accidental incompatibility the check exists for. That is the whole of the
-  exception; do not widen it to make a patch release go through.
+  failure. **It reads only the commits release-plz versions from** — the ones
+  touching a file `cargo package --list` names, which is the same set
+  `tests/packaging.rs` holds `[package] include` to. Read whole, the range would
+  let a `!` on a commit release-plz never sees excuse a reading the compatible
+  packaged release beside it still needs; a range with no packaged commit in it
+  authorizes no release at all, and is read past for that reason instead.
+  Everything else is unchanged — a release the commit types version as compatible
+  still fails on a reading that did not happen, which is the accidental
+  incompatibility the check exists for. That is the whole of the exception; do
+  not widen it to make a patch release go through.
 - **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
   `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
   workflow, so `release.yml` would never run and the release would ship nothing.

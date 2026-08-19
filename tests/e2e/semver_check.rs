@@ -1,6 +1,6 @@
-//! The release's reading of the public surface: `scripts/semver-check.sh`, driven
-//! the way `just semver-check` — and so `.github/workflows/release-plz.yml` —
-//! drives it.
+//! The release's reading of the public surface: `scripts/semver-check.sh`, the
+//! script `just semver-check` — and so `.github/workflows/release-plz.yml` —
+//! runs.
 //!
 //! What it guards is a release this repository was one merge away from: with the
 //! baseline resolved against today's registry rather than the tag's lockfile,
@@ -12,13 +12,21 @@
 //! stops a release claiming compatibility with it, and is read past by one
 //! claiming none.
 //!
-//! One thing is stood in for: `cargo` on PATH — and the `cargo-semver-checks` the
-//! script probes for before asking cargo for it — because the real reading builds
-//! two rustdocs out of two dependency trees it downloads, which is neither offline
-//! nor deterministic and is the release path's job rather than the gate's. The
-//! recipe and the script are the real ones, run over a real git history, and what
-//! they asked cargo for is readable here.
+//! What the release claims is read off the commits release-plz versions it from,
+//! which are the ones touching the crate's *packaged* files. So each case is a
+//! real crate with a real `include`, in a real git repository, whose commits touch
+//! a packaged file or an unpackaged one; the script runs there, the way the
+//! release runs it in the repository it is releasing. `the_release_this_branch_is`
+//! runs it through the recipe over this repository's own history instead.
+//!
+//! One thing is stood in for: the `cargo` that fetches two dependency trees and
+//! reads two rustdocs out of them, which is neither offline nor deterministic and
+//! is the release path's job rather than the gate's — and the `cargo-semver-checks`
+//! the script probes for before asking for that. The stand-in hands `cargo
+//! package --list` straight to the real cargo, because which files this crate
+//! packages is exactly what these cases are about.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -40,22 +48,72 @@ const NO_VERDICT: &str = "101";
 const BASELINE_REF: &str = "v-baseline";
 const PENDING_REF: &str = "v-pending";
 
-/// The subject of the one commit the pending release is made of, per claim it
-/// makes about compatibility. `feat!` and a `BREAKING CHANGE:` footer are the two
-/// ways a conventional commit says the surface broke, and release-plz reads both.
-const A_COMPATIBLE_RELEASE: &[&str] = &["fix: serve the empty timeline as an empty one"];
-const A_BREAKING_RELEASE: &[&str] = &["feat!: drop the round from every payload"];
-const A_BREAKING_RELEASE_BY_FOOTER: &[&str] = &[
-    "feat: drop the round from every payload",
-    "BREAKING CHANGE: a payload no longer carries a round",
+/// The fixture crate: one file its `include` selects and one it leaves out, which
+/// is the split release-plz versions a release from.
+const PACKAGED: &str = "src/lib.rs";
+const UNPACKAGED: &str = "scripts/tool.sh";
+const FIXTURE_MANIFEST: &str = r#"[workspace]
+
+[package]
+name = "fixture-crate"
+version = "0.1.0"
+edition = "2021"
+description = "The crate whose packaged files decide which commits a release is made of."
+license = "MIT"
+include = ["/src/**/*.rs", "/Cargo.toml"]
+"#;
+
+/// A commit the pending release is made of: the message lines it carries, and the
+/// file it touches.
+struct Commit {
+    messages: &'static [&'static str],
+    file: &'static str,
+}
+
+/// The pending releases the cases are about. `feat!` and a `BREAKING CHANGE:`
+/// footer are the two ways a conventional commit says the surface broke, and
+/// release-plz reads both — but only on a commit it sees at all, which is one
+/// that touched a packaged file.
+const A_COMPATIBLE_RELEASE: &[Commit] = &[Commit {
+    messages: &["fix: serve the empty timeline as an empty one"],
+    file: PACKAGED,
+}];
+const A_BREAKING_RELEASE: &[Commit] = &[Commit {
+    messages: &["feat!: drop the round from every payload"],
+    file: PACKAGED,
+}];
+const A_BREAKING_RELEASE_BY_FOOTER: &[Commit] = &[Commit {
+    messages: &[
+        "feat: drop the round from every payload",
+        "BREAKING CHANGE: a payload no longer carries a round",
+    ],
+    file: PACKAGED,
+}];
+/// A break announced by a commit release-plz never sees, beside the compatible
+/// packaged change that is the whole of the release it does see.
+const A_BREAK_OUTSIDE_THE_RELEASE: &[Commit] = &[
+    Commit {
+        messages: &["feat!: rewrite the gate's own runner"],
+        file: UNPACKAGED,
+    },
+    Commit {
+        messages: &["fix: serve the empty timeline as an empty one"],
+        file: PACKAGED,
+    },
 ];
+/// A release with nothing in it: every commit since the tag is one release-plz
+/// versions nothing from.
+const NO_RELEASE_AT_ALL: &[Commit] = &[Commit {
+    messages: &["ci: run the browser tier on the smaller runner"],
+    file: UNPACKAGED,
+}];
 
 struct Fixture {
     dir: TempDir,
+    repo: PathBuf,
     baseline: String,
     stub_dir: PathBuf,
-    search_path: std::ffi::OsString,
-    git_dir: PathBuf,
+    search_path: OsString,
 }
 
 /// Run `git` in `repo`, failing the test with what it said if it will not.
@@ -80,30 +138,46 @@ fn git(repo: &Path, arguments: &[&str]) {
     );
 }
 
+/// The cargo running this suite, which is the one the stand-in hands `cargo
+/// package --list` to. Taken from the environment rather than from PATH, where
+/// the stand-in itself is.
+fn real_cargo() -> String {
+    std::env::var("CARGO").expect("cargo sets CARGO for the test binaries it runs")
+}
+
 impl Fixture {
     /// A pending release that claims compatibility with the baseline.
     fn new() -> Self {
         Self::of(A_COMPATIBLE_RELEASE)
     }
 
-    /// A baseline that looks like a checkout of the previous release — the
-    /// worktree of the tag the workflow hands over — beside a real repository
-    /// whose one commit since that tag is `pending`.
-    ///
-    /// The history is a real git repository with real commits, reached through
-    /// `GIT_DIR` rather than through the working directory: the recipe runs from
-    /// the justfile's own directory, so naming the repository is the only way a
-    /// case can decide what the pending release says. What the script runs, and
-    /// the range it reads, are git's own.
-    fn of(pending: &[&str]) -> Self {
+    /// A crate whose `include` packages one of its two files, released once as the
+    /// baseline tag and then carried forward by `pending` — beside the worktree of
+    /// that tag the workflow hands the reading.
+    fn of(pending: &[Commit]) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let repo = dir.path().join("history");
-        fs::create_dir_all(&repo).expect("create the history");
-        git(&repo, &["init", "--quiet", "--initial-branch=main"]);
-        git(
-            &repo,
-            &["commit", "--allow-empty", "--quiet", "-m", "chore: release"],
+        fs::create_dir_all(repo.join("src")).expect("create the crate's sources");
+        fs::create_dir_all(repo.join("scripts")).expect("create what it does not package");
+        fs::write(repo.join("Cargo.toml"), FIXTURE_MANIFEST).expect("write the manifest");
+        fs::write(repo.join(PACKAGED), "pub fn read() {}\n").expect("write the packaged file");
+        fs::write(repo.join(UNPACKAGED), "echo tool\n").expect("write the unpackaged file");
+        // The script lists the packaged files with `--locked`, which is a lockfile
+        // this crate has not got until one is resolved for it.
+        let locked = Command::new(real_cargo())
+            .args(["generate-lockfile", "--offline", "--quiet"])
+            .current_dir(&repo)
+            .output()
+            .expect("cargo is on PATH");
+        assert!(
+            locked.status.success(),
+            "cargo generate-lockfile failed:\n{}",
+            String::from_utf8_lossy(&locked.stderr)
         );
+
+        git(&repo, &["init", "--quiet", "--initial-branch=main"]);
+        git(&repo, &["add", "--all"]);
+        git(&repo, &["commit", "--quiet", "-m", "chore: release"]);
         git(&repo, &["tag", BASELINE_REF]);
 
         // The worktree of the tag the workflow hands over, made the way the
@@ -120,30 +194,31 @@ impl Fixture {
                 BASELINE_REF,
             ],
         );
-        fs::write(
-            baseline.join("Cargo.toml"),
-            "[package]\nname = \"onepipeline-ui\"\n",
-        )
-        .expect("write the baseline manifest");
 
-        let mut commit = vec!["commit", "--allow-empty", "--quiet"];
-        for message in pending {
-            commit.extend(["-m", message]);
+        for commit in pending {
+            let touched = repo.join(commit.file);
+            let mut carried = fs::read_to_string(&touched).expect("read the file to carry forward");
+            carried.push_str("// carried forward\n");
+            fs::write(&touched, carried).expect("carry the file forward");
+            git(&repo, &["add", "--all"]);
+            let mut arguments = vec!["commit", "--quiet"];
+            for message in commit.messages {
+                arguments.extend(["-m", message]);
+            }
+            git(&repo, &arguments);
         }
-        git(&repo, &commit);
         git(&repo, &["tag", PENDING_REF]);
 
-        // Records every call, and answers the reading with the status the case
-        // under test is about.
+        // Records every call, answers the reading with the status the case under
+        // test is about, and hands the packaged-file list to the real cargo.
         //
         // llmlint: ignore-block[e2e_not_mocked] the real reading builds two
         // rustdocs from two downloaded dependency trees, so it is the one thing a
         // gate that is offline and deterministic cannot drive; the release
         // workflow runs the real one, and fails when it returns no verdict. The
         // script under test is the real script, run with the workflow's own
-        // arguments over a real git history, and standing in for the program on
-        // PATH is what makes the fetches and the offline resolve it asked for
-        // readable. This call is the whole of that substitution.
+        // arguments over a real git history and a real crate, whose packaged files
+        // the real cargo lists. This call is the whole of that substitution.
         let stub_dir = dir.path().join("stub-bin");
         stub_bin::install(
             &stub_dir,
@@ -157,6 +232,9 @@ impl Fixture {
                    *--manifest-path*) exit \"${BASELINE_FETCH_STATUS:-0}\" ;;\n\
                    *) exit \"${TREE_FETCH_STATUS:-0}\" ;;\n\
                  esac\n\
+                 ;;\n\
+               package)\n\
+                 exec \"$REAL_CARGO\" \"$@\"\n\
                  ;;\n\
                semver-checks)\n\
                  printf 'offline=%s\\n' \"${CARGO_NET_OFFLINE:-unset}\" >> \"$CARGO_CALLS\"\n\
@@ -180,15 +258,15 @@ impl Fixture {
 
         Self {
             baseline: baseline.to_str().expect("utf-8 path").to_owned(),
-            git_dir: repo.join(".git"),
+            repo,
             stub_dir,
             dir,
             search_path,
         }
     }
 
-    /// Run the recipe the way the workflow's step runs it, with the reading
-    /// answering `status`.
+    /// Run the script over this fixture's own repository, the way the release runs
+    /// it over the one it is releasing, with the reading answering `status`.
     fn run(&self, status: &str) -> Output {
         self.run_with(&self.baseline.clone(), &[("SEMVER_STATUS", status)])
     }
@@ -207,29 +285,48 @@ impl Fixture {
         &self,
         arguments: &[&str],
         environment: &[(&str, &str)],
-        search_path: &std::ffi::OsStr,
+        search_path: &OsStr,
     ) -> Output {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/semver-check.sh");
+        let mut command = Command::new("bash");
+        command.arg(script).args(arguments).current_dir(&self.repo);
+        self.finish(command, environment, search_path)
+    }
+
+    /// Run the recipe, which is how the workflow's step reaches the script, over
+    /// this repository — the one the justfile is in, and whose own history the
+    /// pending release is made of.
+    fn run_recipe(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
         let mut command = Command::new("just");
         command
             .arg("semver-check")
             .args(arguments)
-            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")));
+        self.finish(command, environment, &self.search_path)
+    }
+
+    fn finish(
+        &self,
+        mut command: Command,
+        environment: &[(&str, &str)],
+        search_path: &OsStr,
+    ) -> Output {
+        command
             .env("PATH", search_path)
-            .env("GIT_DIR", &self.git_dir)
+            .env("REAL_CARGO", real_cargo())
             .env("CARGO_CALLS", self.dir.path().join("cargo-calls"));
         for (name, value) in environment {
             command.env(name, value);
         }
-        command.output().expect("just is on PATH")
+        command.output().expect("the program is on PATH")
     }
 
     /// Leave the history with no commit on HEAD, so the range between the tag and
     /// it cannot be read at all — the shape a checkout given too little history
     /// arrives in.
     fn forget_head(&self) {
-        let repo = self.git_dir.parent().expect("the history repository");
         git(
-            repo,
+            &self.repo,
             &["checkout", "--quiet", "--orphan", "nothing-committed"],
         );
     }
@@ -238,7 +335,7 @@ impl Fixture {
     /// the stand-in taken back out, and any directory a machine running the suite
     /// really installed the tool into dropped, so the probe is answered the way a
     /// runner that never provisioned it answers.
-    fn without_the_reading_tool(&self) -> std::ffi::OsString {
+    fn without_the_reading_tool(&self) -> OsString {
         fs::remove_file(self.stub_dir.join("cargo-semver-checks")).expect("remove the stand-in");
         std::env::join_paths(
             std::env::split_paths(&self.search_path)
@@ -383,32 +480,18 @@ fn a_side_whose_dependencies_cannot_be_fetched_fails_a_release_claiming_compatib
     }
 }
 
-/// Any number of arguments but two is a usage error.
-///
-/// Driven as the script rather than as the recipe, because the recipe's parameters
-/// can only ever hand over two: this is the boundary for the caller the usage line
-/// itself addresses, someone running it by hand.
+/// Any number of arguments but two is a usage error — the boundary for the caller
+/// the usage line itself addresses, someone running the script by hand, since the
+/// recipe's parameters can only ever hand over two.
 #[test]
 fn a_call_that_names_anything_but_a_baseline_and_its_ref_is_a_usage_error() {
     let fixture = Fixture::new();
     for arguments in [
         vec![],
-        vec![fixture.baseline.clone()],
-        vec![
-            fixture.baseline.clone(),
-            BASELINE_REF.to_owned(),
-            "extra".to_owned(),
-        ],
+        vec![fixture.baseline.as_str()],
+        vec![fixture.baseline.as_str(), BASELINE_REF, "extra"],
     ] {
-        let output = Command::new("bash")
-            .arg("scripts/semver-check.sh")
-            .args(&arguments)
-            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
-            .env("PATH", &fixture.search_path)
-            .env("GIT_DIR", &fixture.git_dir)
-            .env("CARGO_CALLS", fixture.dir.path().join("cargo-calls"))
-            .output()
-            .expect("bash is on PATH");
+        let output = fixture.run_arguments(&arguments, &[]);
 
         assert_eq!(
             output.status.code(),
@@ -441,8 +524,8 @@ fn a_baseline_that_is_not_a_checkout_is_a_usage_error() {
         .dir
         .path()
         .join("no-such-baseline\" || touch injected || echo \"");
-    let output = fixture.run_with(
-        missing.to_str().expect("utf-8 path"),
+    let output = fixture.run_recipe(
+        &[missing.to_str().expect("utf-8 path"), BASELINE_REF],
         &[("SEMVER_STATUS", COMPATIBLE)],
     );
 
@@ -474,7 +557,7 @@ fn a_ref_that_names_no_commit_is_a_usage_error() {
     let fixture = Fixture::new();
     // Interpolated by the workflow just as the baseline path is, so it has to
     // reach the script as one argument rather than as more shell.
-    let output = fixture.run_arguments(
+    let output = fixture.run_recipe(
         &[
             fixture.baseline.as_str(),
             "v-no-such-tag\" || touch injected-ref || echo \"",
@@ -699,7 +782,115 @@ fn a_history_the_range_cannot_be_read_from_fails_even_a_breaking_release() {
          it:\n{stderr}"
     );
     assert!(
-        fixture.calls().is_empty(),
+        !fixture.calls().contains("semver-checks"),
         "a surface was read for a release whose claim was never established"
+    );
+}
+
+/// A break announced outside the release still fails a reading that produced no
+/// verdict: release-plz never sees that commit, so the release it *does* version
+/// is the compatible packaged one, and a compatible release is what the reading
+/// exists for.
+///
+/// This is the hole a range read whole leaves: any `!` anywhere between the tags
+/// would otherwise excuse a reading the packaged release still needs.
+#[test]
+fn a_break_outside_the_release_still_fails_a_reading_that_produced_no_verdict() {
+    let fixture = Fixture::of(A_BREAK_OUTSIDE_THE_RELEASE);
+    let output = fixture.run(NO_VERDICT);
+
+    assert!(
+        !output.status.success(),
+        "a commit release-plz never sees excused the reading a compatible release \
+         needs:\n{}",
+        stdout(&output)
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("::error::") && stderr.contains(NO_VERDICT),
+        "the failure does not say the check returned no verdict, or which status it \
+         returned:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("::warning::"),
+        "the release was read past as well as failed:\n{stderr}"
+    );
+}
+
+/// A range whose commits touched no packaged file is read past: release-plz opens
+/// no release PR for it at all, so there is no version for a verdict to hold.
+#[test]
+fn a_range_that_versions_no_release_is_read_past() {
+    let fixture = Fixture::of(NO_RELEASE_AT_ALL);
+    let output = fixture.run(NO_VERDICT);
+
+    assert!(
+        output.status.success(),
+        "a push that releases nothing was failed over a baseline nothing was \
+         released against:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("packaged"),
+        "the warning does not say why there was no release to hold:\n{}",
+        stderr(&output)
+    );
+}
+
+/// This repository's own pending release, through the recipe, against a real
+/// worktree of the tag it is being read against.
+///
+/// `4af0647` is a `feat!` that touched packaged files, so the release is breaking
+/// and a `v0.4.0` baseline that no longer compiles is read past — while every
+/// commit after it here touched nothing packaged, and so changes that not at all.
+/// The reading is the one thing stood in for; everything it is decided from is
+/// this repository.
+#[test]
+fn the_release_this_branch_is_reads_past_a_baseline_it_cannot_build() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture = Fixture::new();
+    let checkout = TempDir::new().expect("temp dir");
+    let baseline = checkout.path().join("release-baseline");
+    git(root, &["worktree", "prune"]);
+    git(
+        root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            baseline.to_str().expect("utf-8 path"),
+            "v0.4.0",
+        ],
+    );
+
+    let output = fixture.run_recipe(
+        &[baseline.to_str().expect("utf-8 path"), "v0.4.0"],
+        &[("SEMVER_STATUS", NO_VERDICT)],
+    );
+
+    git(
+        root,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            baseline.to_str().expect("utf-8 path"),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "the release this branch is stayed blocked behind a reading it does not \
+         need:\n{}",
+        stderr(&output)
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("::warning::") && stderr.contains("announce a break"),
+        "the run does not say the packaged commits announce a break:\n{stderr}"
+    );
+    assert!(
+        fixture.calls().contains("package --list"),
+        "the packaged files release-plz versions from were never listed:\n{}",
+        fixture.calls()
     );
 }

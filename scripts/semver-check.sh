@@ -19,6 +19,9 @@
 #   * Run the check for its exit code before release-plz does. 100 is a verdict
 #     (the surface broke, and release-plz raises the bump for it); 0 is a verdict;
 #     anything else is a check that did not happen.
+#   * Read what the pending release claims off the commits release-plz versions
+#     it from — the ones touching the crate's *packaged* files, which is the only
+#     thing release-plz sees — rather than off every commit in the range.
 #   * Fail on a check that did not happen *only while the pending release claims
 #     compatibility*. See `reading_not_taken` below for why, and for the release
 #     that stood still until it did.
@@ -68,27 +71,52 @@ command -v cargo-semver-checks >/dev/null 2>&1 || {
   exit 1
 }
 
-# Whether the commits since the baseline announce a break, in the grammar
-# release-plz reads them by: a `!` on the type, or a `BREAKING CHANGE:` footer.
-# Subjects and bodies are read apart so a body quoting a subject cannot answer for
-# one. Named for what it reads rather than for the release's bump, which it is not
-# quite: release-plz only sees commits touching the crate's packaged files, so a
-# `!` on one that touches none announces a break here and versions as nothing
-# there.
-#
-# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz publishes no parser to derive this from, so it is Conventional Commits v1.0.0 read a second time — only ever to relax, and bounded both ways: reading fewer breaks leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop honouring the specification.
+# This tree's own lockfile is this repository's problem whatever the release
+# announces, so it fails outright — and both readings below need what it fetched.
+if ! cargo fetch --locked --quiet; then
+  echo "::error::this tree's locked dependencies could not be fetched" >&2
+  echo "ACTION: run 'cargo fetch --locked' here and fix what it reports; nothing below can download anything itself" >&2
+  exit 1
+fi
+
+# The files `cargo package` would upload — which is exactly the set release-plz
+# diffs to decide a release is due, and so the only commits it versions from.
+# Taken from cargo rather than by reading `[package] include` a second time here;
+# `tests/packaging.rs` holds that set to what a published artifact carries.
+packaged="$(cargo package --list --offline --locked --allow-dirty)" || {
+  echo "::error::the files this crate packages could not be listed, so the commits release-plz versions from cannot be known" >&2
+  echo "ACTION: run 'cargo package --list' here and fix what it reports; until it answers, no release can be read" >&2
+  exit 1
+}
+# Read into the array a line at a time rather than with `mapfile`, which the bash
+# a macOS runner puts first on PATH does not have.
+packaged_paths=()
+while IFS= read -r listed; do
+  packaged_paths+=("$listed")
+done <<<"$packaged"
+
 unreadable_history() {
   echo "::error::the commits between $baseline_ref and HEAD could not be read, so what the pending release announces is unknown" >&2
   echo "ACTION: give this checkout the history the range needs ('git fetch --unshallow --tags', and a HEAD with a commit on it), then run 'just semver-check $baseline $baseline_ref' again" >&2
   exit 1
 }
-subjects="$(git log --format=%s "refs/tags/${baseline_ref}..HEAD")" || unreadable_history
-bodies="$(git log --format=%b "refs/tags/${baseline_ref}..HEAD")" || unreadable_history
-if grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
+
+# Why the reading below need not be taken, or empty while it must be. Only the
+# commits that touched a packaged file are read: release-plz sees no other, so a
+# `!` on one that touches none authorizes no release and answers for none. With
+# none of them at all there is no release being versioned to hold. Subjects and
+# bodies are read apart so a body quoting a subject cannot answer for one.
+#
+# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz publishes no parser to derive the grammar from, so it is Conventional Commits v1.0.0 read a second time — only ever to relax, and over exactly the commits release-plz itself versions from. Bounded both ways: reading fewer breaks leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop honouring the specification.
+range="refs/tags/${baseline_ref}..HEAD"
+subjects="$(git log --format=%s "$range" -- "${packaged_paths[@]}")" || unreadable_history
+bodies="$(git log --format=%b "$range" -- "${packaged_paths[@]}")" || unreadable_history
+read_past=""
+if [ -z "$subjects" ]; then
+  read_past="no commit since $baseline_ref touched a packaged file, so release-plz versions no release here for a reading to hold"
+elif grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
   || grep -Eq '^BREAKING[ -]CHANGE:' <<<"$bodies"; then
-  announces_a_break=yes
-else
-  announces_a_break=no
+  read_past="the packaged commits since $baseline_ref announce a break, so this release claims compatibility with nothing and the reading could only agree with a bump already taken"
 fi
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
@@ -109,8 +137,8 @@ fi
 # it lets through.
 reading_not_taken() {
   local what="$1" action="$2"
-  if [ "$announces_a_break" = yes ]; then
-    echo "::warning::$what — read past: the commits since $baseline_ref break the API, so this release claims compatibility with nothing and the reading could only agree with a bump already taken. Nothing is required of it; to take the reading anyway, $action" >&2
+  if [ -n "$read_past" ]; then
+    echo "::warning::$what — read past: $read_past. Nothing is required of this release; to take the reading anyway, $action" >&2
     exit 0
   fi
   echo "::error::$what" >&2
@@ -118,16 +146,11 @@ reading_not_taken() {
   exit 1
 }
 
-# Both sides, because the resolve below can reach neither.
+# The baseline's own, because the resolve below can reach neither side's.
 if ! cargo fetch --locked --quiet --manifest-path "$baseline/Cargo.toml"; then
   reading_not_taken \
     "the baseline at $baseline has dependencies that no longer resolve" \
     "run 'cargo fetch --locked' in that checkout and fix what it reports — until it resolves, that release has no surface to read"
-fi
-if ! cargo fetch --locked --quiet; then
-  echo "::error::this tree's locked dependencies could not be fetched" >&2
-  echo "ACTION: run 'cargo fetch --locked' here and fix what it reports; the reading below can download nothing itself" >&2
-  exit 1
 fi
 
 set +e
