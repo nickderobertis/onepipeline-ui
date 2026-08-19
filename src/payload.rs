@@ -39,13 +39,6 @@ use crate::telemetry::{BucketName, Party as Spender, RunTelemetry};
 /// into a browser is a read surface that can be made to exhaust its own memory.
 pub const ARTIFACT_TAIL_BYTES: usize = 64 * 1024;
 
-/// The wire's word for a settled member's report.
-///
-/// Named rather than spelled twice: it is both what the reference vocabulary
-/// carries and what decides *where* an artifact's bytes are read from, and those
-/// two readings must never drift apart.
-const WORKER_REPORT: &str = "worker_report";
-
 /// The transport parties `transportRoleSchema` holds, and exactly those.
 ///
 /// A session is served under a *pair*: the transport half is the side of the
@@ -2095,14 +2088,14 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
             .find(|artifact| artifact.id.0 == id.as_str())
             .map(|artifact| (event, artifact))
     })?;
-    let kind = reference_kind(&recorded.kind);
+    let kind = ReferenceKind::of(&recorded.kind);
     let path = artifact_path(view, event, id, kind);
     let bytes = fs::read(&path).ok()?;
     let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
     let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
     Some(json!({
         "id": id.as_str(),
-        "kind": kind,
+        "kind": kind.as_str(),
         "content": String::from_utf8_lossy(tail),
         "truncated": truncated,
     }))
@@ -2124,23 +2117,67 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
 /// its own id.
 ///
 /// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
-fn artifact_path(view: &RunView, event: &Envelope, id: &ArtifactId, kind: &str) -> PathBuf {
-    if kind == WORKER_REPORT {
-        return view.paths.report_for(&event.stream, event.seq);
+fn artifact_path(
+    view: &RunView,
+    event: &Envelope,
+    id: &ArtifactId,
+    kind: ReferenceKind,
+) -> PathBuf {
+    // Listed rather than defaulted: where a kind's bytes live is a decision, and
+    // a kind added to the vocabulary must be made to answer it rather than
+    // inheriting an answer that happens to compile.
+    match kind {
+        ReferenceKind::WorkerReport => view.paths.report_for(&event.stream, event.seq),
+        ReferenceKind::Conversation
+        | ReferenceKind::GateLog
+        | ReferenceKind::OneharnessSession
+        | ReferenceKind::Pr => view.paths.dir.join("artifacts").join(id.as_str()),
     }
-    view.paths.dir.join("artifacts").join(id.as_str())
 }
 
-/// The wire's closed reference vocabulary, from the producing library's own word
-/// for the artifact. Anything unrecognized is a log, which is what the producing
-/// libraries store.
-fn reference_kind(kind: &str) -> &'static str {
-    match kind {
-        "conversation" => "conversation",
-        "worker_report" | "report" => WORKER_REPORT,
-        "oneharness_session" | "session" => "oneharness_session",
-        "pr" => "pr",
-        _ => "gate_log",
+/// The wire's closed reference vocabulary: what the record a reference sits on
+/// points at.
+///
+/// A closed set rather than the producing library's own string, because it
+/// decides two things that must never disagree — the word served beside the
+/// reference, and *where* this crate reads that artifact's bytes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReferenceKind {
+    /// A recorded transcript, served by the conversation route.
+    Conversation,
+    /// A log the producing library stored beside the run.
+    GateLog,
+    /// The report a settled member left, which the run keeps its own copy of.
+    WorkerReport,
+    /// A session in the oneharness history store.
+    OneharnessSession,
+    /// A change request on the host.
+    Pr,
+}
+
+impl ReferenceKind {
+    /// The producing library's own word for an artifact, read onto this
+    /// vocabulary. Anything unrecognized is a log, which is what the producing
+    /// libraries store.
+    fn of(kind: &str) -> Self {
+        match kind {
+            "conversation" => Self::Conversation,
+            "worker_report" | "report" => Self::WorkerReport,
+            "oneharness_session" | "session" => Self::OneharnessSession,
+            "pr" => Self::Pr,
+            _ => Self::GateLog,
+        }
+    }
+
+    /// The word the wire carries for it.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Conversation => "conversation",
+            Self::GateLog => "gate_log",
+            Self::WorkerReport => "worker_report",
+            Self::OneharnessSession => "oneharness_session",
+            Self::Pr => "pr",
+        }
     }
 }
 
@@ -2417,7 +2454,7 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     } else if let Some(artifact) = event.artifacts.first() {
         item.insert(
             "reference".into(),
-            json!({ "kind": reference_kind(&artifact.kind), "value": artifact.id.0 }),
+            json!({ "kind": ReferenceKind::of(&artifact.kind).as_str(), "value": artifact.id.0 }),
         );
     }
     Value::Object(item)
