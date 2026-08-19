@@ -223,13 +223,16 @@ msrv:
 # sides' dependency trees, and needs a checkout of the previous release to read
 # against. `.github/workflows/release-plz.yml` runs this before release-plz makes
 # the same reading, so a check that cannot run fails the release instead of
-# passing as compatible. `git worktree add --detach <dir> <tag>` makes a baseline.
+# passing as compatible — while that release claims compatibility at all, which
+# is what the tag is for. `git worktree add --detach <dir> <tag>` makes a baseline.
 # Diff the crate's public API against a release checkout, as the release does.
-# The workflow interpolates a path it was handed into this call, so the recipe
-# passes it as an argument rather than pasting it into the command line.
+# The workflow interpolates a path and a tag it was handed into this call, so the
+# recipe passes them as arguments rather than pasting them into the command line.
+# llmlint: ignore-block[diagnostics_error_or_absent] the recipe exposes what the script decides; `scripts/semver-check.sh` holds why a release announcing a break succeeds on a warning.
 [positional-arguments]
-semver-check baseline:
-    @bash scripts/semver-check.sh "$1"
+semver-check baseline ref:
+    @bash scripts/semver-check.sh "$1" "$2"
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Separate from `check`: `cargo deny` needs a network-fetched advisory DB.
 # Advisory + license audit and unused-dependency check.
