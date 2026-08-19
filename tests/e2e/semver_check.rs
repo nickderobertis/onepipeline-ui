@@ -97,6 +97,43 @@ const A_BREAKING_RELEASE_BY_FOOTER: &[Commit] = &[Commit {
     ],
     file: PACKAGED,
 }];
+/// The same two, in the other spelling Conventional Commits gives each: a scope
+/// before the `!`, and the hyphenated footer token the specification makes
+/// synonymous with the spaced one. A release announced either way is as breaking
+/// as one announced the plain way, and the skip rests on that being read.
+const A_BREAKING_RELEASE_BY_SCOPED_SUBJECT: &[Commit] = &[Commit {
+    messages: &["feat(core)!: drop the round from every payload"],
+    file: PACKAGED,
+}];
+const A_BREAKING_RELEASE_BY_HYPHENATED_FOOTER: &[Commit] = &[Commit {
+    messages: &[
+        "feat: drop the round from every payload",
+        "BREAKING-CHANGE: a payload no longer carries a round",
+    ],
+    file: PACKAGED,
+}];
+/// Subjects that carry a `!` and are not a break: an empty `()` where the
+/// specification requires a noun for a scope, and a terminal colon with no space
+/// after it. release-plz's own parser announces no break from either, so a
+/// release made of one is versioned as a compatible one — and reading a break
+/// here would skip the reading exactly where it is still owed.
+const A_SUBJECT_WHOSE_SCOPE_IS_EMPTY: &[Commit] = &[Commit {
+    messages: &["feat()!: drop the round from every payload"],
+    file: PACKAGED,
+}];
+const A_SUBJECT_WITH_NO_SPACE_AFTER_ITS_COLON: &[Commit] = &[Commit {
+    messages: &["feat!:drop the round from every payload"],
+    file: PACKAGED,
+}];
+/// And the footer's counterpart: the token spelled right, with the colon the
+/// specification requires a space after left bare.
+const A_FOOTER_WITH_NO_SPACE_AFTER_ITS_COLON: &[Commit] = &[Commit {
+    messages: &[
+        "feat: drop the round from every payload",
+        "BREAKING-CHANGE:a payload no longer carries a round",
+    ],
+    file: PACKAGED,
+}];
 /// A break announced by a commit release-plz never sees, beside the compatible
 /// packaged change that is the whole of the release it does see.
 const A_BREAK_OUTSIDE_THE_RELEASE: &[Commit] = &[
@@ -643,13 +680,22 @@ fn a_ref_that_names_no_commit_is_a_usage_error() {
 /// the bump it was already taking.
 #[test]
 fn a_reading_that_produced_no_verdict_is_read_past_by_a_breaking_release() {
-    for pending in [A_BREAKING_RELEASE, A_BREAKING_RELEASE_BY_FOOTER] {
+    for (spelling, pending) in [
+        ("an unscoped subject", A_BREAKING_RELEASE),
+        ("a scoped subject", A_BREAKING_RELEASE_BY_SCOPED_SUBJECT),
+        ("a spaced footer", A_BREAKING_RELEASE_BY_FOOTER),
+        (
+            "a hyphenated footer",
+            A_BREAKING_RELEASE_BY_HYPHENATED_FOOTER,
+        ),
+    ] {
         let fixture = Fixture::of(pending);
         let output = fixture.run(NO_VERDICT);
 
         assert!(
             output.status.success(),
-            "a breaking release was held back by a reading it did not need:\n{}",
+            "a breaking release announced by {spelling} was held back by a reading \
+             it did not need:\n{}",
             stderr(&output)
         );
         let stderr = stderr(&output);
@@ -667,6 +713,42 @@ fn a_reading_that_produced_no_verdict_is_read_past_by_a_breaking_release() {
             stderr.contains("just semver-check"),
             "a release went past a reading with nowhere for its operator to go if \
              they wanted it taken:\n{stderr}"
+        );
+    }
+}
+
+/// A `!` in a subject that Conventional Commits does not name a break, and a
+/// footer token whose colon the specification requires a space after, buy no
+/// skip: release-plz parses none of them as breaking, so it versions the release
+/// as a compatible one and the reading is still owed. This is the direction that
+/// costs — read a break where release-plz reads none, and a surface that broke
+/// ships as compatible on a reading nobody took, silently.
+#[test]
+fn a_release_only_spelled_like_a_break_does_not_read_past_the_reading() {
+    for (spelling, pending) in [
+        ("an empty scope", A_SUBJECT_WHOSE_SCOPE_IS_EMPTY),
+        (
+            "no space after the subject's colon",
+            A_SUBJECT_WITH_NO_SPACE_AFTER_ITS_COLON,
+        ),
+        (
+            "no space after the footer's colon",
+            A_FOOTER_WITH_NO_SPACE_AFTER_ITS_COLON,
+        ),
+    ] {
+        let fixture = Fixture::of(pending);
+        let output = fixture.run(NO_VERDICT);
+
+        assert!(
+            !output.status.success(),
+            "{spelling} announced a break release-plz does not read, and skipped \
+             the reading the release it versions still needs:\n{}",
+            stdout(&output)
+        );
+        let stderr = stderr(&output);
+        assert!(
+            stderr.contains("::error::") && !stderr.contains("announce a break"),
+            "the run did not fail for the reading it could not take:\n{stderr}"
         );
     }
 }

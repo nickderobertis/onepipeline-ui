@@ -107,6 +107,17 @@ unreadable_history() {
 # none of them at all there is no release being versioned to hold. Subjects and
 # bodies are read apart so a body quoting a subject cannot answer for one.
 #
+# The two spellings are read exactly as Conventional Commits v1.0.0 names them
+# and no wider: a `!` immediately before the terminal colon-and-space, after an
+# optional parenthesised scope (`feat!:` and `feat(core)!:` alike); and a footer
+# whose token is `BREAKING CHANGE` or the synonym `BREAKING-CHANGE` the
+# specification makes of it, followed by a colon, a space and a description.
+# Wider is the direction that costs. A subject release-plz's own parser refuses
+# — `feat!:` with no space after the colon, `()` where a scope must be a noun —
+# announces no break *to it*, so reading a break here would skip the reading for
+# a release it versions as compatible, and that is the half of this that fails
+# silently. Narrower only leaves a release blocked, and says so.
+#
 # llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz publishes no parser to derive the grammar from, so it is Conventional Commits v1.0.0 read a second time — only ever to relax, and over exactly the commits release-plz itself versions from. Bounded both ways: reading fewer breaks leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop honouring the specification.
 # `--literal-pathspecs` because those paths are filenames, not a query: a
 # packaged file cargo names `:!src/lib.rs` — a directory called `:!src` is all
@@ -118,8 +129,8 @@ bodies="$(git --literal-pathspecs log --format=%b "$range" -- "${packaged_paths[
 read_past=""
 if [ -z "$subjects" ]; then
   read_past="no commit since $baseline_ref touched a packaged file, so release-plz versions no release here for a reading to hold"
-elif grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
-  || grep -Eq '^BREAKING[ -]CHANGE:' <<<"$bodies"; then
+elif grep -Eq '^[A-Za-z]+(\([^()]+\))?!: ' <<<"$subjects" \
+  || grep -Eq '^BREAKING[ -]CHANGE: ' <<<"$bodies"; then
   read_past="the packaged commits since $baseline_ref announce a break, so this release claims compatibility with nothing and the reading could only agree with a bump already taken"
 fi
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
