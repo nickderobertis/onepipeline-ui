@@ -1265,6 +1265,12 @@ const UNRECORDED_HISTORY_ID: &str = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
 const HIDDEN_TRANSCRIPT: &str = "a conversation from a store this run never named";
 
 /// Every file under a directory, in a stable order.
+///
+/// Scoped to `unix` because its only caller is: the read-only-store journey
+/// above proves itself by taking every mode down to read-only, which is a
+/// `unix` permission model. Gated rather than deleted or allowed, so the file
+/// still says on every platform which journey this exists for.
+#[cfg(unix)]
 fn walk(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut found = Vec::new();
     let mut entries: Vec<std::path::PathBuf> = fs::read_dir(root)
@@ -1285,6 +1291,10 @@ fn walk(root: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 /// Every file in a store, by name, bytes and modification time — the whole of
 /// what a read must leave alone.
+///
+/// `unix`-only for the same reason as `walk`, which it is built on: the one
+/// journey that compares a store across a read is.
+#[cfg(unix)]
 fn store_state(
     root: &std::path::Path,
 ) -> Vec<(
