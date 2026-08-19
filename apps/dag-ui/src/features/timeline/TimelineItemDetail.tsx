@@ -185,6 +185,24 @@ function Body({
         runId={runId}
       />
     );
+  // The oneharness conversation behind a member's turns: the surface an operator
+  // reads to see what an agent actually did. Its bytes are not the run's — they
+  // stay in oneharness's own history store and the API reaches them through the
+  // record's pointer — so this is asked for exactly like the report above, by the
+  // opaque id, and no path on the producing host reaches the browser either way.
+  if (
+    reference?.kind === "oneharness_session" &&
+    servableArtifact(reference.value) !== undefined
+  )
+    return (
+      <HarnessSession
+        artifactId={reference.value}
+        client={client}
+        reference={reference}
+        row={row}
+        runId={runId}
+      />
+    );
   if (isPublication(row, reference) && node !== undefined)
     return <Publication node={node} reference={reference} />;
   return <Recorded reference={reference} row={row} />;
@@ -377,6 +395,45 @@ function SettledReport({
         noun="report"
         runId={runId}
         unreadable="This run kept no readable copy of that report."
+      />
+      <Recorded reference={reference} row={row} />
+    </>
+  );
+}
+
+/**
+ * The conversation one oneharness invocation had, and the record that points at
+ * it.
+ *
+ * What a reader opens this for is what the agent actually did — the prompt it
+ * ran, the text it finished on, what the invocation cost — which is the reading
+ * that raw event kinds are a poor substitute for. The bytes are served by the
+ * same route the report above is: the id the record named, and never a store
+ * path, a project or a file name, none of which are the browser's business.
+ */
+function HarnessSession({
+  artifactId,
+  client,
+  reference,
+  row,
+  runId,
+}: {
+  readonly artifactId: string;
+  readonly client: TelemetryClient;
+  readonly reference: TimelineReference;
+  readonly row: TimelineRow;
+  readonly runId: string;
+}) {
+  return (
+    <>
+      <StoredArtifact
+        artifactId={artifactId}
+        client={client}
+        heading="Oneharness conversation"
+        missing="This record named no conversation."
+        noun="conversation"
+        runId={runId}
+        unreadable="The history store holds no readable copy of that conversation."
       />
       <Recorded reference={reference} row={row} />
     </>

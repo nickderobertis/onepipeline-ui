@@ -110,6 +110,84 @@ export const REPORT_ARTIFACT = "report-a-recording-host-dag-ui-live";
 export const UNRETAINED_REPORT = "report-missing-artifact-worker";
 
 /**
+ * The oneharness invocation the dashboard node's worker made, and the record it
+ * left in oneharness's own history store.
+ *
+ * The one artifact whose bytes are *not* under the run: `oneagentgraph` publishes
+ * a pointer at the store and nothing is copied, so serving it is the read API
+ * opening a file this fixture wrote somewhere else entirely. The id is the
+ * history record's own, which is what the pointer names it by.
+ */
+export const HARNESS_SESSION_ARTIFACT = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
+/** What that conversation ended on, which is what an operator opens it to read. */
+export const HARNESS_SESSION_TEXT =
+  "wired the dashboard to the read API and left the rail alone";
+/** The project layer of the store, as oneharness slugs a project directory. */
+const HARNESS_PROJECT = "tmp-dag-ui-e2e-project";
+/** The session file inside it, as oneharness names one: name, instant, pid. */
+const HARNESS_SESSION_FILE = "engineer-dashboard-20260817T001158Z-3163805";
+
+/**
+ * One oneharness history record, in the line format that library writes.
+ *
+ * This is the second place in the repository that spells another crate's file
+ * format, and for the same reason `retainReport` above spells the first: a
+ * `.mjs` fixture cannot link the crate that owns it. What holds the two together
+ * is the Rust side — `tests/support/harness_history.rs` writes this store through
+ * `oneharness_core`'s own `HistoryWriter` and `tests/e2e/server.rs` reads it back
+ * through the served route — plus the journey below, which stops finding this
+ * conversation the moment either side moves.
+ */
+function harnessSessionRecord() {
+  return `${JSON.stringify({
+    type: "run",
+    schema_version: "1.1",
+    history_id: HARNESS_SESSION_ARTIFACT,
+    session: HARNESS_SESSION_FILE,
+    name: "engineer-dashboard",
+    project: "/tmp/dag-ui-e2e/project",
+    timestamp: "2026-08-17T00:11:58Z",
+    harness: "claude-code",
+    variant: "alternate",
+    harness_id: "claude-code:alternate",
+    model: "a-model",
+    prompt: "wire the dashboard to the read API",
+    permission_mode: "default",
+    status: "ok",
+    exit_code: 0,
+    duration_ms: 4200,
+    finished_at: null,
+    text: HARNESS_SESSION_TEXT,
+    text_source: "json:result",
+    usage: {
+      input_tokens: 1200,
+      output_tokens: 340,
+      cache_read_tokens: 800,
+      cache_write_tokens: 120,
+      cost_usd: 0.42,
+    },
+    session_id: "54e7ad34-ce6d-4979-8b4d-531b88026e15",
+    failure_kind: null,
+  })}\n`;
+}
+
+/**
+ * Write that store beside the runs root rather than inside it.
+ *
+ * Beside, because that is where it really is: oneharness keeps its history under
+ * the operator's own state directory and no run owns it. Returning the directory
+ * is what lets the pointer name it — the reader takes the store from the record
+ * and has no configuration of its own for it.
+ */
+function writeHarnessHistory(root) {
+  const dir = join(root, "..", "oneharness-history");
+  mkdirSync(join(dir, HARNESS_PROJECT), { recursive: true });
+  const path = join(dir, HARNESS_PROJECT, `${HARNESS_SESSION_FILE}.jsonl`);
+  writeFileSync(path, harnessSessionRecord());
+  return { dir, bytes: readFileSync(path).length };
+}
+
+/**
  * That report, as onejudge writes one: a ruling per acceptance criterion, the
  * follow-ups the worker surfaced, and why the member stopped.
  *
@@ -352,7 +430,7 @@ const livePlan = () => ({
 function turn(journal, node, session, persona, message, model = "a-model") {
   journal.emit(
     "agentgraph",
-    "agent-turn",
+    "turn-started",
     {
       run_id: journal.runId,
       node,
@@ -366,6 +444,9 @@ function turn(journal, node, session, persona, message, model = "a-model") {
 function writeLiveRun(root) {
   const dir = runDir(root, LIVE_RUN);
   mkdirSync(join(dir, "artifacts"), { recursive: true });
+  // The oneharness store this run's worker wrote its conversation into. Outside
+  // the run, and named by the record rather than by any setting of this server's.
+  const harnessHistory = writeHarnessHistory(root);
   const plan = livePlan();
   writeJson(join(dir, "plan.json"), plan);
 
@@ -693,7 +774,7 @@ function writeLiveRun(root) {
   ]) {
     journal.emit(
       "agentgraph",
-      "agent-turn",
+      "turn-started",
       { ...run, node: "dashboard", member, persona, session },
       { message, model: "a-model" },
     );
@@ -784,6 +865,34 @@ function writeLiveRun(root) {
       detail: "npx playwright test --grep 'at 390x844'",
       truncated: false,
     },
+  );
+
+  // Where that worker's conversation was actually written down. Published once
+  // per oneharness invocation, carrying the pointer at the record and one
+  // artifact naming it — and carrying **no** `session` label, because the
+  // producer stamps that on its four turn kinds and on nothing else. The bytes
+  // stay in the store `writeHarnessHistory` wrote; nothing is copied here.
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "dashboard", member: "worker", persona: "worker" },
+    {
+      role: "agent",
+      turn: 4,
+      identity: "claude-code:alternate",
+      session_id: "54e7ad34-ce6d-4979-8b4d-531b88026e15",
+      history_id: HARNESS_SESSION_ARTIFACT,
+      history_dir: harnessHistory.dir,
+      history_project: HARNESS_PROJECT,
+      history_session: HARNESS_SESSION_FILE,
+    },
+    [
+      {
+        id: HARNESS_SESSION_ARTIFACT,
+        kind: "oneharness_session",
+        bytes: harnessHistory.bytes,
+      },
+    ],
   );
 
   journal.emit("pipeline", "node-dispatched", {
@@ -894,7 +1003,7 @@ function writeHistoryRun(root) {
   journal.advance(2);
   journal.emit(
     "agentgraph",
-    "agent-turn",
+    "turn-started",
     { ...run, node: "archive", persona: "worker", session: JUDGE_SESSION },
     { message: "Archived the release", model: "a-model" },
   );
@@ -1253,7 +1362,7 @@ function writeBusyRun(root) {
         .advance(1)
         .emit(
           "agentgraph",
-          "agent-turn",
+          "turn-started",
           { ...run, node: "sweep", persona: "worker", session },
           { message: `Swept batch ${index} (${step})`, model: "a-model" },
         );
@@ -1321,7 +1430,9 @@ export function facts() {
       check: CHECK_ARTIFACT,
       report: REPORT_ARTIFACT,
       unretained_report: UNRETAINED_REPORT,
+      harness_session: HARNESS_SESSION_ARTIFACT,
     },
+    harness_session_text: HARNESS_SESSION_TEXT,
   };
 }
 
@@ -1393,13 +1504,13 @@ export function growTranscript(root, turns) {
     .map((line) => JSON.parse(line))
     .filter(
       (event) =>
-        event.labels?.session === WORKER_SESSION && event.kind === "agent-turn",
+        event.labels?.session === WORKER_SESSION && event.kind === "turn-started",
     ).length;
   for (let index = recorded; index < turns; index += 1) {
     appendEvent(
       dir,
       "agentgraph",
-      "agent-turn",
+      "turn-started",
       {
         run_id: LIVE_RUN,
         node: "dashboard",

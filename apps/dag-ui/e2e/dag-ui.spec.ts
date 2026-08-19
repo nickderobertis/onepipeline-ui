@@ -530,7 +530,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
 
   // A span contains its events, and opening it discloses them: one turn here.
   const turn = timeline(page).getByRole("button", {
-    name: /agent-turn/,
+    name: /turn-started/,
   });
   await expect(turn.first()).toBeVisible();
   await turn.first().click();
@@ -552,7 +552,7 @@ test("restores a bookmarked moment inside a session from the address alone", asy
     .getByRole("button", { name: /engineer-dashboard/ })
     .click();
   const turn = timeline(page)
-    .getByRole("button", { name: /agent-turn/ })
+    .getByRole("button", { name: /turn-started/ })
     .first();
   await turn.click();
   const bookmarked = new URL(page.url());
@@ -570,7 +570,7 @@ test("restores a bookmarked moment inside a session from the address alone", asy
   // node's journal icons, and its item is the focused one in the transcript.
   await expect(
     timeline(page).locator('[data-selected="true"]'),
-  ).toHaveAccessibleName(/agent-turn, marker/);
+  ).toHaveAccessibleName(/turn-started, marker/);
   await expect(
     page
       .getByRole("region", { name: "Node transcript" })
@@ -967,6 +967,69 @@ test("reads the report a settled node's member left behind", async ({
     "This run kept no readable copy of that report.",
   );
   await refused;
+});
+
+/**
+ * The two readings of what an agent did, from one node's timeline: the turns the
+ * run relayed, and the oneharness conversation behind them.
+ *
+ * They are different documents and they come from different places. A turn is
+ * what `oneagentgraph` relayed into the run — reachable only because the producer
+ * stamps the conversation onto it — and the transcript route serves it out of the
+ * run's own journal. The oneharness conversation is what the harness itself wrote
+ * down, in a store no run owns: nothing copies it, the record only points at it,
+ * and the API opens that store to serve it. An operator who can read the first
+ * and not the second is left inferring what happened from event kinds, which is
+ * the state this journey exists to keep the app out of.
+ */
+test("reads a relayed turn and the oneharness conversation behind it", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+
+  // The relayed turn first, opened from the node's own timeline.
+  const turn = timeline(page).getByRole("button", { name: /turn-started/ });
+  await expect(turn.first()).toBeVisible();
+  await turn.first().click();
+  await expect(itemDetail(page)).toContainText("Implementing the dashboard now");
+  // Closed before the next reading is opened: on a narrow viewport the detail is
+  // a drawer over the timeline, so the second record is reached the way an
+  // operator reaches it — by putting the first one away.
+  await page.keyboard.press("Escape");
+
+  // Then the record that names where that member's conversation was written
+  // down. The read is proven to have gone to the API, and to have been asked for
+  // by the history id the record carries and nothing else.
+  const served = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .includes(`/artifacts/${fixture().artifacts.harness_session}`) &&
+      response.status() === 200,
+  );
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "oneharness-session" })
+    .getByRole("button")
+    .click();
+  // Asserted before the response is awaited, so a panel that renders nothing
+  // fails saying what is missing rather than as a wait that never ended.
+  await expect(itemDetail(page)).toContainText("Oneharness conversation");
+  await served;
+
+  // What the agent actually said, which is what an operator opens this for. The
+  // record's own fields are the document and are shown as written; what never
+  // reaches the browser is the *pointer* — the store this server opened to find
+  // it — because the panel asks by the history id and renders only the record.
+  await expect(itemDetail(page)).toContainText(fixture().harness_session_text);
+  await expect(itemDetail(page)).not.toContainText("oneharness-history");
+
+  // The record itself stays beside the conversation rather than being replaced
+  // by it, and it is reachable from the keyboard like every other control here.
+  await expect(itemDetail(page)).toContainText("Recorded at");
+  await expect(itemDetail(page)).toContainText(
+    fixture().artifacts.harness_session,
+  );
 });
 
 test("states when a verification artifact is unavailable", async ({ page }) => {
@@ -2473,16 +2536,19 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
   await expect(page.getByText("dashboard: Bash just gate")).toBeVisible();
 
   // Recorded the way the executor records one: an appended authoritative event.
-  changeServedRuns(["--grow-worker-session", "4"]);
+  // Grown past what the session already holds — the fixture opens four turns on
+  // this member, the last of them the one the planner redirected — so what this
+  // waits for is a record that did not exist when the page was opened.
+  changeServedRuns(["--grow-worker-session", "5"]);
   await expect(
-    page.getByText("Dashboard turn 3 arrived").first(),
+    page.getByText("Dashboard turn 4 arrived").first(),
   ).toBeVisible();
 
   // A newly opened run-scoped stream receives what is already recorded, rather than
   // waiting for the next change to it.
   await page.reload();
   await expect(
-    page.getByText("Dashboard turn 3 arrived").first(),
+    page.getByText("Dashboard turn 4 arrived").first(),
   ).toBeVisible();
 });
 
