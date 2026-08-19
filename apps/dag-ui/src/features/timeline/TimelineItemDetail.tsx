@@ -408,7 +408,6 @@ function StoredArtifact({
 }: {
   readonly artifactId?: string;
   readonly client: TelemetryClient;
-  /** The heading this reading sits under. */
   readonly heading: string;
   /** What to say when the record named no artifact this API can be asked for. */
   readonly missing: string;

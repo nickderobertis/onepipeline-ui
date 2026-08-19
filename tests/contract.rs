@@ -22,9 +22,9 @@ use onepipeline_ui::api::ReadApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
-    EventsQuery, Health, HealthStatus, NodeId, PageLimit, Release, RunId, RunQuery, RunsQuery,
-    SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
-    TIMELINE_SCHEMA_VERSION,
+    EventsQuery, Health, HealthStatus, NodeId, PageLimit, ReferenceKind, Release, RunId, RunQuery,
+    RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT,
+    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -386,6 +386,37 @@ fn the_browser_clients_copy_of_each_schema_version_matches_this_one() {
             path.display()
         );
     }
+}
+
+/// The reference vocabulary is declared twice — here and in the browser client's
+/// model — because a Rust enum cannot be read from TypeScript.
+///
+/// It is the one vocabulary that decides *behaviour* on both sides: this crate
+/// reads a `worker_report`'s bytes from the run's retained copy and every other
+/// kind from the run's artifact directory, and the client renders each kind as
+/// what it is. A word added on one side alone is a reference a reader's model
+/// rejects, so the two lists are reconciled here rather than by inspection.
+#[test]
+fn the_browser_clients_copy_of_the_reference_vocabulary_matches_this_one() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let words: String = ReferenceKind::ALL
+        .iter()
+        .map(|kind| format!("  \"{}\",\n", kind.as_str()))
+        .collect();
+    let declaration = format!("export const timelineReferenceKindSchema = z.enum([\n{words}]);");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's reference vocabulary has drifted \
+         from this crate's",
+        path.display()
+    );
 }
 
 #[test]

@@ -592,6 +592,69 @@ identifier!(
 identifier!(ArtifactId, "artifact identifier", InvalidArtifactId);
 identifier!(DispatchId, "dispatch identifier", InvalidDispatchId);
 
+/// The wire's closed reference vocabulary: what the record a reference sits on
+/// points at.
+///
+/// A closed set rather than the producing library's own string, because it
+/// decides two things that must never disagree — the word served beside the
+/// reference, and *where* `payload::artifact` reads that artifact's bytes from.
+/// The browser client declares the same set as `timelineReferenceKindSchema`,
+/// and `tests/contract.rs` reconciles the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceKind {
+    /// A recorded transcript, served by the conversation route.
+    Conversation,
+    /// A log the producing library stored beside the run.
+    GateLog,
+    /// The report a settled member left, which the run keeps its own copy of.
+    WorkerReport,
+    /// A session in the oneharness history store.
+    OneharnessSession,
+    /// A change request on the host.
+    Pr,
+}
+
+impl ReferenceKind {
+    /// Every word the vocabulary holds, in the order the contract lists them.
+    ///
+    /// The list is what the drift gate reads: a variant added here without being
+    /// added to the client's own copy fails that gate rather than reaching a
+    /// reader as a word their model rejects.
+    pub const ALL: [Self; 5] = [
+        Self::Conversation,
+        Self::GateLog,
+        Self::WorkerReport,
+        Self::OneharnessSession,
+        Self::Pr,
+    ];
+
+    /// The producing library's own word for an artifact, read onto this
+    /// vocabulary. Anything unrecognized is a log, which is what the producing
+    /// libraries store.
+    #[must_use]
+    pub fn of(kind: &str) -> Self {
+        match kind {
+            "conversation" => Self::Conversation,
+            "worker_report" | "report" => Self::WorkerReport,
+            "oneharness_session" | "session" => Self::OneharnessSession,
+            "pr" => Self::Pr,
+            _ => Self::GateLog,
+        }
+    }
+
+    /// The word the wire carries for it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Conversation => "conversation",
+            Self::GateLog => "gate_log",
+            Self::WorkerReport => "worker_report",
+            Self::OneharnessSession => "oneharness_session",
+            Self::Pr => "pr",
+        }
+    }
+}
+
 /// The longest identifier any route accepts.
 ///
 /// A bound rather than a limit anyone will meet: it exists so an unbounded
