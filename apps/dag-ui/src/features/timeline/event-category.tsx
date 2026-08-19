@@ -73,6 +73,19 @@ const CATEGORY_ICONS: Readonly<Record<EventCategory, LucideIcon>> = {
 };
 
 /**
+ * Every category there is, as a value rather than as a type.
+ *
+ * Read off the glyph table rather than written out a second time beside the union:
+ * that table is keyed by the union, so this *is* the vocabulary, and a category
+ * added to one is added to both. It is what lets a count of the scheme be derived
+ * — by the suite, and by the drift gate over the prose in `docs/dag-ui.md`, which
+ * would otherwise be a number somebody has to remember to change.
+ */
+export const EVENT_CATEGORIES = Object.keys(
+  CATEGORY_ICONS,
+) as readonly EventCategory[];
+
+/**
  * Which words of a wire kind decide its category, most specific reading first.
  *
  * Rules over the string rather than a lookup of every kind, because the four
@@ -104,7 +117,11 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // `lock-wait` alone is most of the records this store holds, so what a reader sees
     // most is this category — kept apart from the sessions for exactly that reason.
     ["contention", ["lock", "concurrent", "quiet"]],
-    ["verification", ["verification", "gate", "checks", "coverage"]],
+    // `check` and `checks` are both here because the producers spell the same act
+    // both ways — `onevcs` writes one `change-check` per check it observed, the
+    // older unattributed records a single `pr-checks-observed` — and a word is
+    // matched whole, so one spelling does not reach the other.
+    ["verification", ["verification", "gate", "check", "checks", "coverage"]],
     [
       "publication",
       [
@@ -121,6 +138,9 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // Both an agent's conversation and a workspace session: each is a unit of work
     // that was opened, ran, and closed, and the reader meets them the same way.
     ["session", ["turn", "member", "session", "heartbeat", "conversation"]],
+    // `cross` and `upstream` are the cross-DAG edges: a dependency on another run
+    // resolving, or that run moving on afterwards. Both are facts about the shape
+    // of the graph rather than about work, which is what the rest of this line is.
     [
       "lifecycle",
       [
@@ -133,6 +153,8 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
         "setup",
         "cleanup",
         "driver",
+        "cross",
+        "upstream",
       ],
     ],
   ];
@@ -177,8 +199,12 @@ export function eventCategory(kind: string): EventCategory {
  * Presentational on purpose: the marker it sits in is a button that already carries
  * the record's own name, and the transcript row beside it is an article with the
  * same name, so an accessible name here would announce the same record twice and say
- * nothing the label does not. The category travels in a data attribute instead,
- * which is how the journeys hold the plot and the transcript to one reading.
+ * nothing the label does not.
+ *
+ * It carries no attribute naming its category either. There would be nothing for a
+ * reader in one, and a journey that read it would be asserting the label rather than
+ * the drawing — passing on a glyph swapped for the wrong one. So the journeys compare
+ * the shapes drawn inside the `svg`, which is what the reader is actually looking at.
  */
 export function EventCategoryIcon({
   category,
@@ -188,11 +214,5 @@ export function EventCategoryIcon({
   readonly className?: string;
 }) {
   const Icon = CATEGORY_ICONS[category];
-  return (
-    <Icon
-      aria-hidden="true"
-      className={className}
-      data-event-category={category}
-    />
-  );
+  return <Icon aria-hidden="true" className={className} />;
 }

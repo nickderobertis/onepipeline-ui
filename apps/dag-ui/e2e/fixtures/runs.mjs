@@ -46,6 +46,16 @@ export const FOUNDATION_PR = "https://example.invalid/changes/12";
 export const FOUNDATION_COMMIT = "5f3c8a1204e7b96d3fa8c05e17d2b649a08c7e31";
 /** The change request the node behind the host's checks left open. */
 export const REMOTE_OPEN_PR = "https://example.invalid/changes/13";
+/**
+ * A kind written by a producer newer than the app reading it.
+ *
+ * A store of only recognised kinds can never put a reader in the state a real one
+ * routinely does, so this is the record that does: `onevcs` reclaiming a worktree,
+ * spelled with words no category rule names. Published in the facts below because a
+ * journey asserts what the app draws for it.
+ */
+export const UNFILED_KIND = "worktree-pruned";
+
 /** The identity every publication of this fixture queues on. */
 const IDENTITY = "github.com/example/repo";
 /** The command `onevcs` records for the gate that is git's own hook. */
@@ -540,6 +550,15 @@ function writeLiveRun(root) {
     { ...run, node: "foundation" },
     { identity: IDENTITY, sha: FOUNDATION_COMMIT, base: "main" },
   );
+  // The record whose kind this build has never seen; see {@link UNFILED_KIND}.
+  journal
+    .advance(2)
+    .emit(
+      "vcs",
+      UNFILED_KIND,
+      { ...run, node: "foundation" },
+      { worktree: "/a/recorded/worktree", reclaimed_bytes: 4096 },
+    );
   // The member behind this node, settling with the report it wrote. Its sequence
   // is taken before the line is written because that is half of what names the
   // run's own copy of the report — see `retainReport`.
@@ -565,7 +584,17 @@ function writeLiveRun(root) {
       },
     ],
   );
-  journal.advance(14).emit(
+  // The plan gives this node a `hand-over` step of kind `human`, and this is what
+  // that step records when a person does it.
+  journal
+    .advance(2)
+    .emit(
+      "pipeline",
+      "human-attested",
+      { ...run, node: "foundation", step: "hand-over" },
+      { action: "handed the work over", actor: "a-recording-host" },
+    );
+  journal.advance(12).emit(
     "pipeline",
     "node-settled",
     { ...run, node: "foundation" },
@@ -954,7 +983,17 @@ function writeLiveRun(root) {
     node: "publish",
     persona: "pr-author",
   });
-  journal.advance(4).emit(
+  // What the dispatch below failed *of*: the member behind it stopped, so the node
+  // settles with no settlement of its own to read.
+  journal
+    .advance(3)
+    .emit(
+      "agentgraph",
+      "member-died",
+      { ...run, node: "publish", member: "pr-author", persona: "pr-author" },
+      { signal: "SIGKILL", detail: "the publication process stopped" },
+    );
+  journal.advance(1).emit(
     "pipeline",
     "node-settled",
     { ...run, node: "publish" },
@@ -969,14 +1008,22 @@ function writeLiveRun(root) {
   );
   // Waiting on a person: real recorded time, which the node timeline draws as its
   // own span rather than as silence.
+  // The surface a person has to answer, and the subtree it is holding back until
+  // they do — which is what `queued` below is waiting on.
   journal
     .advance(1)
     .emit(
       "pipeline",
-      "node-settled",
+      "decision-pending",
       { ...run, node: "approval" },
-      { status: "waiting" },
+      { question: "Approve the release?", holding: ["queued"] },
     );
+  journal.emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "approval" },
+    { status: "waiting" },
+  );
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
     node: "obsolete",
@@ -1460,6 +1507,7 @@ export function facts() {
       busy: BUSY_RUN,
     },
     foundation_pr: FOUNDATION_PR,
+    unfiled_kind: UNFILED_KIND,
     sessions: {
       worker: WORKER_SESSION,
       lint: LINT_SESSION,

@@ -1,17 +1,20 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { VIEWPORTS } from "../../e2e/viewports";
+import { EVENT_CATEGORIES } from "../features/timeline/event-category";
+import { repoFile } from "./repo-file";
 
 /**
  * The drift gate `docs/dag-ui.md` names.
  *
  * That document tabulates two lists it does not own — the viewport matrix, declared
  * in `e2e/viewports.ts`, and the captured surfaces, declared as `SURFACES` in
- * `e2e/gallery.screens.spec.ts`. A table is how an operator finds a capture and how a
- * reader learns which widths are held, so a width that reaches the gallery without
- * reaching the table is a promise the document quietly stops keeping. Prose cannot be
- * derived from either declaration at runtime, so this is what ties the three together.
+ * `e2e/gallery.screens.spec.ts` — and states one count it does not own either, the
+ * number of categories a journal record's marker can be drawn as. A table is how an
+ * operator finds a capture and how a reader learns which widths are held, so a width
+ * that reaches the gallery without reaching the table is a promise the document
+ * quietly stops keeping; a count written by hand is the same promise with nothing at
+ * all watching it. Prose cannot be derived from a declaration at runtime, so this is
+ * what ties them together.
  *
  * `SURFACES` is read as text rather than imported: it is declared inside a Playwright
  * spec, and importing that under vitest would pull a browser test runner into a unit
@@ -19,26 +22,37 @@ import { VIEWPORTS } from "../../e2e/viewports";
  */
 
 /**
- * The repository root, found by the manifest that only sits there.
+ * How this document spells a small number, which is how a count in its prose can be
+ * held to a declaration at all.
  *
- * Walked for rather than counted in `../`s: this app is one project of a workspace
- * and vitest is started from more than one directory in it, so a fixed depth is a
- * path that works until someone runs the suite the other way.
+ * The document writes its counts as words — "one plot", "three levels", "the four it
+ * knows" — so a gate over one has to spell it the same way. Indexed by the number
+ * itself, and short on purpose: a count this document states in prose past twenty is
+ * a count no reader is holding in their head, and should be a table instead.
  */
-function repoRoot(): string {
-  let directory = process.cwd();
-  while (!existsSync(resolve(directory, "Cargo.toml"))) {
-    const parent = dirname(directory);
-    if (parent === directory)
-      throw new Error(`no Cargo.toml above ${process.cwd()}`);
-    directory = parent;
-  }
-  return directory;
-}
-
-/** A file of this repository, by its path from the root. */
-const repoFile = (path: string): string =>
-  readFileSync(resolve(repoRoot(), path), "utf8");
+const SPELLED = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+  "twenty",
+];
 
 /**
  * The first column of every row of the Markdown table `heading` opens.
@@ -64,6 +78,15 @@ describe("docs/dag-ui.md", () => {
     expect(
       tableKeys(documentation, "| Viewport | What it stands for |"),
     ).toEqual(VIEWPORTS.map(({ name }) => name));
+  });
+
+  it("states the number of categories a journal marker is drawn as", () => {
+    const spelled = SPELLED[EVENT_CATEGORIES.length];
+    expect(
+      spelled,
+      `a scheme of ${EVENT_CATEGORIES.length} belongs in a table rather than in a sentence`,
+    ).toBeDefined();
+    expect(documentation).toContain(`which of ${spelled} **categories**`);
   });
 
   it("tabulates exactly the surfaces the gallery photographs", () => {

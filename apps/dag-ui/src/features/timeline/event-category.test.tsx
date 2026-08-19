@@ -1,25 +1,30 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
+import { repoFile } from "../../test/repo-file";
 import {
   DEFAULT_EVENT_CATEGORY,
+  EVENT_CATEGORIES,
   type EventCategory,
   EventCategoryIcon,
   eventCategory,
 } from "./event-category";
 
 /**
- * The wire vocabulary the run store actually holds, and what each kind is read as.
+ * The wire vocabulary a run store holds, and what each kind is read as.
  *
- * Enumerated rather than sampled, and counted out of every `runs/*​/events.jsonl`
- * under a real run root rather than written from memory: four separately versioned
- * producers write into one journal, and a scheme that files most of their kinds is a
- * scheme whose gaps are invisible. Regenerate it the same way — walk that directory
- * — rather than trusting this list to have stayed current; `body-not-drafted` was
- * already in the store by the time this was written and absent from the reading it
- * was planned from.
+ * A copy, because nothing a browser can read declares it; `apps/dag-ui/AGENTS.md`
+ * has why, and which side each gate sits on. Two of them hold these keys:
+ * `tests/contract.rs` fails when `onepipeline` or `oneagentgraph` declares a kind
+ * they do not have, and the second test below fails when the served store writes
+ * one.
  *
- * These are the *whole* corpus, so this list failing to compile or to match is the
- * signal that a producer shipped a kind nobody has decided a category for.
+ * The *category* is not gated and cannot be — which of the eleven a kind reads
+ * under is a decision rather than a fact about the producer — so a kind reaching
+ * either gate is one nobody has decided yet, not a defect. An unrecognized kind
+ * draws under an explicit default and always did.
+ *
+ * Kinds no current producer declares stay: a run store is append-only, and one
+ * written by last year's engine is still one a reader opens.
  */
 const CORPUS: Readonly<Record<string, EventCategory>> = {
   // `pipeline` — the orchestrator's own record of a run.
@@ -39,6 +44,8 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "completion-requested": "lifecycle",
   "concurrent-acknowledged": "contention",
   "quiet-worker": "contention",
+  "cross-dag-satisfied": "lifecycle",
+  "upstream-modified": "lifecycle",
   "round-started": "lifecycle",
   "round-finished": "lifecycle",
   "round-budget-exceeded": "failure",
@@ -71,6 +78,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "merge-queued": "publication",
   "merge-completed": "publication",
   "change-opened": "publication",
+  "change-check": "verification",
   "change-merged": "publication",
   "sync-conflict": "failure",
   // Records written before any producer stamped a `source` on them.
@@ -101,11 +109,6 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "edit-rejected": "failure",
 };
 
-/** Every category the corpus reaches, plus the default, which it need not. */
-const CATEGORIES: readonly EventCategory[] = [
-  ...new Set<EventCategory>([...Object.values(CORPUS), DEFAULT_EVENT_CATEGORY]),
-];
-
 /**
  * A kind no rule and no exception names — invented here, and deliberately not one
  * the corpus holds, because the whole point is what happens to a word this build has
@@ -113,6 +116,55 @@ const CATEGORIES: readonly EventCategory[] = [
  * spell it about like this.
  */
 const FUTURE_KIND = "capacity-throttled";
+
+/**
+ * The shapes inside one category's glyph — the whole of what a reader sees of it.
+ *
+ * The drawing rather than the element: an `svg`'s own attributes carry the class the
+ * icon set names it with, so comparing elements would report two categories as drawn
+ * apart whatever was actually drawn in them.
+ */
+function drawing(category: EventCategory): string {
+  const { container, unmount } = render(
+    <EventCategoryIcon category={category} />,
+  );
+  const shapes = container.querySelector("svg")?.innerHTML ?? "";
+  unmount();
+  return shapes;
+}
+
+/**
+ * Every kind the run store the browser journeys are served holds, and the one it
+ * writes on purpose for the app not to recognise.
+ *
+ * Read out of the fixture as text rather than by importing it: that module writes a
+ * run directory when it is evaluated, and building one per run of this suite to read
+ * a couple of dozen strings is not what a unit test is for. It is the same reading
+ * `src/test/dag-ui-doc.test.ts` takes of the gallery's surface list.
+ */
+function servedStore(): { kinds: readonly string[]; unknown: string } {
+  const source = repoFile("apps/dag-ui/e2e/fixtures/runs.mjs");
+  // A kind is written either as the literal it is or as a constant that module
+  // declares, and both reach the store, so both are read here.
+  const declared = new Map(
+    [...source.matchAll(/^export const ([A-Z_]+) = "([a-z0-9-]+)";$/gm)].map(
+      ([, name, value]) => [name, value],
+    ),
+  );
+  const emitted = [
+    ...source.matchAll(/\bemit\(\s*"[a-z]+",\s*(?:"([a-z0-9-]+)"|([A-Z_]+))/gs),
+  ].map(([, literal, named]) => literal ?? declared.get(named ?? ""));
+  const unknown = declared.get("UNFILED_KIND");
+  // Every reading here is of a call or a declaration shape, so a fixture rewritten
+  // in another shape would otherwise gate nothing at all.
+  expect(emitted.length).toBeGreaterThan(0);
+  expect(emitted).not.toContain(undefined);
+  expect(unknown).toBeDefined();
+  return {
+    kinds: [...new Set(emitted.filter((kind) => kind !== undefined))],
+    unknown: unknown ?? "",
+  };
+}
 
 describe("the category one journal record is read under", () => {
   test("files every kind the run store holds", () => {
@@ -123,41 +175,43 @@ describe("the category one journal record is read under", () => {
     ).toEqual(CORPUS);
   });
 
+  test("files every kind the served store writes bar the unknown one", () => {
+    // What the two producers that declare nothing a reader can reach are gated
+    // against: a record reaching the app for real with no category decided for it.
+    // The one exception is named rather than counted, so a producer shipping a kind
+    // cannot be absorbed by the fixture's own unrecognized record going missing.
+    const store = servedStore();
+    expect(store.kinds.filter((kind) => !(kind in CORPUS))).toEqual([
+      store.unknown,
+    ]);
+  });
+
   test("stays small enough to be scanned, and draws each category apart", () => {
     // Between eight and twelve: fewer and the scheme says little more than one pin
     // did; more and it is a legend the reader has to learn rather than recognise.
-    expect(CATEGORIES.length).toBeGreaterThanOrEqual(8);
-    expect(CATEGORIES.length).toBeLessThanOrEqual(12);
+    expect(EVENT_CATEGORIES.length).toBeGreaterThanOrEqual(8);
+    expect(EVENT_CATEGORIES.length).toBeLessThanOrEqual(12);
     // Distinct *glyphs*, not merely distinct names: two categories drawn the same
-    // way are one category as far as a reader scanning the plot is concerned. So
-    // what is compared is the drawing itself — the shapes inside the `svg` — and
-    // never its attributes, which carry the category name and so differ whatever
-    // was drawn.
-    const drawn = CATEGORIES.map((category) => {
-      const { container, unmount } = render(
-        <EventCategoryIcon category={category} />,
-      );
-      const shapes = container.querySelector("svg")?.innerHTML ?? "";
-      unmount();
-      return shapes;
-    });
+    // way are one category as far as a reader scanning the plot is concerned.
+    const drawn = EVENT_CATEGORIES.map(drawing);
     expect(drawn.every((shapes) => shapes.length > 0)).toBe(true);
-    expect(new Set(drawn).size).toBe(CATEGORIES.length);
+    expect(new Set(drawn).size).toBe(EVENT_CATEGORIES.length);
   });
 
   test("still draws a kind that no rule and no exception names", () => {
     // The four producers release on their own schedules, so this is the ordinary
     // case rather than a defect: it reaches the default category by name...
     expect(eventCategory(FUTURE_KIND)).toBe(DEFAULT_EVENT_CATEGORY);
-    // ...and the default is one of the categories, with a glyph of its own — never
-    // a blank, and never quietly borrowed from whichever neighbour a rule reached.
-    expect(CATEGORIES).toContain(DEFAULT_EVENT_CATEGORY);
-    const { container } = render(
-      <EventCategoryIcon category={eventCategory(FUTURE_KIND)} />,
-    );
-    const icon = container.querySelector("svg");
-    expect(icon).not.toBeNull();
-    expect(icon).toHaveAttribute("data-event-category", DEFAULT_EVENT_CATEGORY);
+    // ...and the default is one of the categories, drawn with shapes of its own —
+    // never a blank, and never quietly borrowed from a neighbour a rule reached.
+    expect(EVENT_CATEGORIES).toContain(DEFAULT_EVENT_CATEGORY);
+    const fallback = drawing(eventCategory(FUTURE_KIND));
+    expect(fallback.length).toBeGreaterThan(0);
+    expect(
+      EVENT_CATEGORIES.filter(
+        (category) => category !== DEFAULT_EVENT_CATEGORY,
+      ).map(drawing),
+    ).not.toContain(fallback);
   });
 
   test("draws the glyph as decoration rather than as something to operate", () => {

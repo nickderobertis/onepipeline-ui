@@ -25,6 +25,7 @@ import {
   OFFLINE_UI_URL,
   STALLED_UI_URL,
 } from "../playwright.config";
+import { EVENT_CATEGORIES } from "../src/features/timeline/event-category";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -740,51 +741,133 @@ test("shows the moment a planner redirected a running turn", async ({
   );
 });
 
+/**
+ * The name the icon set gives the glyph a record is drawn with.
+ *
+ * Read off what was rendered rather than off any attribute this app added for a
+ * test: `lucide-git-branch` is the drawing's own identity, so a category swapped
+ * onto the wrong icon changes it, and a wrong icon behind a right label — the one
+ * failure these journeys exist to catch — cannot pass. Compared as identity rather
+ * than pixel for pixel, because a marker is tinted by the status beside it and two
+ * transcript rows sit at different sub-pixel offsets, so the *same* glyph paints
+ * differently in both places.
+ */
+async function glyphName(drawn: Locator): Promise<string> {
+  const rendered = await drawn.locator("svg").getAttribute("class");
+  const named = /\blucide-[a-z-]+\b/.exec(rendered ?? "")?.[0];
+  // The identity is the icon set's, so a release of it that stopped naming its
+  // drawings has to fail here rather than compare two empty strings as equal.
+  expect(
+    named,
+    `no glyph was drawn: the icon carries "${rendered}"`,
+  ).toBeDefined();
+  return named ?? "";
+}
+
 test("draws a node's journal records as the categories they belong to", async ({
   page,
 }) => {
   // The node whose record really is several different things: a workspace session
-  // opened, a branch pushed, a change opened and merged, a member settled, and the
-  // node dispatched and settled around all of it.
+  // opened, a branch pushed, a change opened and merged, a person handing the work
+  // over — and one record whose kind this build has never seen, which is the
+  // ordinary state of a store four separately released producers write into.
   await openObservatory(page, `/?run=${runs().live}&node=foundation`);
   const transcript = page.getByRole("region", { name: "Node transcript" });
-  const markers = timeline(page).getByRole("button", { name: /, marker$/ });
-  await expect(markers.first()).toBeVisible();
+  const marker = (named: string): Locator =>
+    timeline(page).getByRole("button", {
+      name: `${named}, marker`,
+      exact: true,
+    });
 
-  // Not one glyph repeated: with a single pin on every record the plot says only
-  // that something happened, and the reader has to open each one to find the record
-  // that matters — which is the reading a timeline exists to save them.
-  const categories = await markers
-    .locator("svg[data-event-category]")
-    .evaluateAll((icons) =>
-      icons.map((icon) => icon.getAttribute("data-event-category")),
-    );
-  expect(categories).toHaveLength(await markers.count());
-  expect(new Set(categories).size).toBeGreaterThan(1);
+  await expect(marker("node-dispatched")).toBeVisible();
+  const unfiled = fixture().unfiled_kind;
+  const drawn = new Map<string, string>();
+  for (const named of [
+    "node-dispatched",
+    "node-settled",
+    "session-opened",
+    "turn-started",
+    "change-opened",
+    "change-merged",
+    unfiled,
+  ]) {
+    drawn.set(named, await glyphName(marker(named)));
+  }
 
-  // And the same record is drawn the same way in both places it is met. Reached
-  // from the keyboard, because a marker is a control and this is the only route to
-  // the moment it names for a reader who is not pointing at it.
-  const marked = markers.last();
-  const category = await marked
-    .locator("svg[data-event-category]")
-    .getAttribute("data-event-category");
-  expect(category).not.toBeNull();
-  await marked.focus();
-  await expect(marked).toBeFocused();
+  // Records read the same way are drawn the same way: two agent turns and a
+  // workspace session are all one unit of work opened and closed, a change opened
+  // and merged are two moments of one publication, and the node's own dispatch and
+  // settlement are both the graph moving.
+  expect(drawn.get("session-opened")).toBe(drawn.get("turn-started"));
+  expect(drawn.get("change-opened")).toBe(drawn.get("change-merged"));
+  expect(drawn.get("node-dispatched")).toBe(drawn.get("node-settled"));
+
+  // Reached the way a reader without a pointer reaches it: from the top of the
+  // document, by Tab, which is the whole of what makes a marker a control. The walk
+  // goes to the unrecognized record so one record proves both halves — that a kind
+  // nobody filed is drawn at all, and that it can be got to. The budget crosses the
+  // run navigation and the graph ahead of it, a walk of some seventy stops, rather
+  // than being tight around a count that moves with any new control.
+  expect(await tabTo(page, marker(unfiled), 120)).toBe(true);
   await page.keyboard.press("Enter");
-  const opened = transcript.locator('[data-selected="true"]');
-  await expect(opened).toHaveCount(1);
-  await expect(opened.locator("svg[data-event-category]")).toHaveAttribute(
-    "data-event-category",
-    category ?? "",
-  );
+  // Enter opens the moment it names, which is a reading the address carries.
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("event"))
+    .not.toBeNull();
+  // And the record it opened is drawn the same way in the transcript as on the plot,
+  // which is what makes one scanned on one surface recognisable on the other.
+  const row = transcript.getByRole("button", { name: `Open ${unfiled}` });
+  await expect(row).toHaveCount(1);
+  expect(await glyphName(row)).toBe(drawn.get(unfiled));
   // The glyph is decoration beside a row that already names the record; it is not a
   // second control the reader has to step through to reach the row itself.
-  await expect(opened.locator("svg[data-event-category]")).toHaveAttribute(
-    "aria-hidden",
-    "true",
-  );
+  await expect(row.locator("svg")).toHaveAttribute("aria-hidden", "true");
+});
+
+test("draws every category a record can be as a glyph of its own", async ({
+  page,
+}) => {
+  // One record of each category the scheme has, and the node a reader meets it on.
+  // Named by what its marker calls itself rather than by the wire kind, because that
+  // is how a reader picks it out: a redirection and a human hand-over are both drawn
+  // under words of their own rather than under the kind that produced them.
+  const records: readonly (readonly [string, string])[] = [
+    ["foundation", "node-dispatched"], // lifecycle
+    ["foundation", "session-opened"], // session
+    ["foundation", "push"], // repository
+    ["foundation", "change-opened"], // publication
+    ["foundation", "hand-over"], // human
+    ["foundation", fixture().unfiled_kind], // the default, for a kind no rule names
+    ["remote-open", "gate-verdict"], // verification
+    ["remote-open", "lock-wait"], // contention
+    ["dashboard", "Redirected into the running turn"], // recovery
+    ["publish", "member-died"], // failure
+    ["approval", "decision-pending"], // planning
+  ];
+  // One per category, held to the scheme rather than counted here: a category added
+  // to it fails this until a record of it is driven in a browser rather than only in
+  // a unit test.
+  expect(records).toHaveLength(EVENT_CATEGORIES.length);
+
+  const drawn: string[] = [];
+  let showing = "";
+  for (const [node, named] of records) {
+    if (node !== showing) {
+      await openObservatory(page, `/?run=${runs().live}&node=${node}`);
+      showing = node;
+    }
+    // The first of them: a node waits on its lock and observes its checks more than
+    // once, and every record of one category is drawn the same way by construction.
+    const found = timeline(page)
+      .getByRole("button", { name: `${named}, marker`, exact: true })
+      .first();
+    await expect(found).toBeVisible();
+    drawn.push(await glyphName(found));
+  }
+  // Every one of them a different drawing: a plot where two categories share a glyph
+  // is a plot with one fewer category in it, and a reader scanning it cannot tell
+  // which of the two they are looking at.
+  expect(new Set(drawn).size).toBe(records.length);
 });
 
 test("scrolls the transcript to the journal record a marker names", async ({
