@@ -149,6 +149,16 @@ fans one uniformly-named target across all of them.
   offline, and runs the check itself first for its exit code alone: a run that
   returns no verdict fails the release rather than passing as compatible. A
   surprisingly compatible verdict is the first thing to disbelieve.
+- **A baseline nobody can build stops only a release that claims compatibility
+  with it.** Tightening this crate's own requirements does not always reach it:
+  v0.4.0 pins `onepipeline` exactly, and it is *that* crate's caret on
+  `oneagentgraph` that drifted, which no manifest writable here can bind. So
+  `scripts/semver-check.sh` reads the commits release-plz versions from — the
+  ones touching a file `cargo package --list` names — and when they announce a
+  break, or there are none, a baseline it could not read is a warning rather than
+  a failure. Every other release still fails on a reading that did not happen,
+  which is the accidental incompatibility the check exists for. That is the whole
+  of the exception; do not widen it to make a patch release go through.
 - **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
   `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
   workflow, so `release.yml` would never run and the release would ship nothing.
