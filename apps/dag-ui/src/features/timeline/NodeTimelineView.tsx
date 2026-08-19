@@ -43,6 +43,7 @@ import {
   type NodeTab,
 } from "../../lib/useUrlSelection";
 import { ControlBadge } from "./ControlBadge";
+import { EventCategoryIcon } from "./event-category";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
   compactTimelineItems,
@@ -475,7 +476,15 @@ function TranscriptItem({
         onClick={() => onOpen(row.id)}
         type="button"
       >
-        <span className="eyebrow">{row.displayKind}</span>
+        <span className="eyebrow">
+          {/* The same glyph the plot draws this record's marker as, so a record
+              scanned on one surface is recognised on the other rather than having
+              to be read again. */}
+          {row.rowKind === "event" && (
+            <EventCategoryIcon category={row.category} />
+          )}
+          {row.displayKind}
+        </span>
         <strong>{row.displayLabel}</strong>
         <span className="transcript-facts">
           <Timestamp at={row.startedAt} />

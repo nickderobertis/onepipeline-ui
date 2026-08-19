@@ -68,3 +68,16 @@ those fields is fed nothing rather than an invented record: it states the
 absence, and the journey asserts that statement. Trim a journey only against what
 the producing library actually emits, never against a belief about what it does
 not.
+
+## A vocabulary this app copies is gated from the other side
+
+Nothing a browser can read declares which kinds a run store holds: the producers
+that write one are separately released Rust libraries. So a copy of one of their
+vocabularies here is gated from the crate's suite, which *can* read the
+declaration — never by a comment saying somebody checked it. Where a producer
+publishes nothing a consumer can reach, hold the copy to the run store the
+journeys are served instead: it is the only place this repository sees a kind of
+that producer's arrive.
+
+A count stated in prose is the same problem one step further out. Derive it from
+the declaration.
