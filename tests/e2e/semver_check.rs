@@ -56,6 +56,8 @@ const README: &str = "README.md";
 /// A packaged path git would read as pathspec magic if it were handed one: a
 /// directory named `:!src` puts `:!src/lib.rs` on the list, and `:!<path>`
 /// *excludes* that path — here, the very file a release is made of.
+/// Unix-only with the journey that plants it: Windows reserves `:` in a filename.
+#[cfg(unix)]
 const PATHSPEC_MAGIC: &str = ":!src/lib.rs";
 const FIXTURE_MANIFEST: &str = r#"[workspace]
 
@@ -165,7 +167,8 @@ impl Fixture {
     }
 
     /// The same, over a crate that also packages a file whose name git would read
-    /// as pathspec magic.
+    /// as pathspec magic. Unix-only, with [`PATHSPEC_MAGIC`] it plants.
+    #[cfg(unix)]
     fn of_a_crate_packaging_pathspec_magic(pending: &[Commit]) -> Self {
         Self::built(pending, PATHSPEC_MAGIC)
     }
@@ -1072,6 +1075,16 @@ fn an_ambient_repository_does_not_answer_for_which_release_the_baseline_is() {
 /// directory called `:!src` produces. Handed to git as a query it would *exclude*
 /// `src/lib.rs` — the file this release's one commit touched — leaving a range
 /// that looks like it versions nothing and is read past.
+///
+/// Unix-only because the premise cannot be *built* on Windows, not because the
+/// answer differs there: `:` is reserved in a Windows filename, so `:!src` fails
+/// to be created before any assertion, and by that same rule no Windows checkout
+/// can hold such a path for cargo to package. The hardening is not scoped with
+/// it — `scripts/semver-check.sh` passes `--literal-pathspecs` on both reads on
+/// every platform. Were Windows to permit the name, drop the `#[cfg]` and expect
+/// this to pass; a failure past the setup would be a real difference in what
+/// `cargo package --list` names or what git for Windows makes of it.
+#[cfg(unix)]
 #[test]
 fn a_packaged_path_that_reads_as_pathspec_magic_does_not_select_the_release() {
     let fixture = Fixture::of_a_crate_packaging_pathspec_magic(A_COMPATIBLE_RELEASE);
