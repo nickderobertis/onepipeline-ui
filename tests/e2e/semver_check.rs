@@ -16,8 +16,9 @@
 //! which are the ones touching the crate's *packaged* files. So each case is a
 //! real crate with a real `include`, in a real git repository, whose commits touch
 //! a packaged file or an unpackaged one; the script runs there, the way the
-//! release runs it in the repository it is releasing. `the_release_this_branch_is`
-//! runs it through the recipe over this repository's own history instead.
+//! release runs it in the repository it is releasing. `a_release_of_this_crate`
+//! runs it through the recipe over a repository of *this* crate instead — its
+//! real manifest and sources, with a history of its own built beside them.
 //!
 //! One thing is stood in for: the `cargo` that fetches two dependency trees and
 //! reads two rustdocs out of them, which is neither offline nor deterministic and
@@ -52,6 +53,9 @@ const PENDING_REF: &str = "v-pending";
 /// is the split release-plz versions a release from.
 const PACKAGED: &str = "src/lib.rs";
 const UNPACKAGED: &str = "scripts/tool.sh";
+/// A file *this* crate's own `include` selects, through `/src/**/*.rs`: a commit
+/// touching it is one release-plz versions this repository's release from.
+const PACKAGED_BY_THIS_CRATE: &str = "src/lib.rs";
 const README: &str = "README.md";
 /// A packaged path git would read as pathspec magic if it were handed one: a
 /// directory named `:!src` puts `:!src/lib.rs` on the list, and `:!<path>`
@@ -371,14 +375,30 @@ impl Fixture {
     }
 
     /// Run the recipe, which is how the workflow's step reaches the script, over
-    /// this repository — the one the justfile is in, and whose own history the
-    /// pending release is made of.
+    /// this repository — the one the justfile is in, and the one whose arguments
+    /// the workflow interpolates into that step.
     fn run_recipe(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
+        self.run_recipe_in(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            arguments,
+            environment,
+        )
+    }
+
+    /// The same recipe over `root`, which is the root of the repository being
+    /// released: where the workflow runs it, where `just` finds the justfile, and
+    /// whose history says what the pending release announces.
+    fn run_recipe_in(
+        &self,
+        root: &Path,
+        arguments: &[&str],
+        environment: &[(&str, &str)],
+    ) -> Output {
         let mut command = Command::new("just");
         command
             .arg("semver-check")
             .args(arguments)
-            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")));
+            .current_dir(root);
         self.finish(command, environment, &self.search_path)
     }
 
@@ -432,6 +452,97 @@ impl Fixture {
     fn calls(&self) -> String {
         fs::read_to_string(self.dir.path().join("cargo-calls")).unwrap_or_default()
     }
+}
+
+/// This crate itself, in a repository of its own, with a breaking release
+/// pending in it — the tag the baseline is a checkout of and the commit that
+/// carries it forward both made here.
+///
+/// The crate is the real one: the manifest whose `include` decides which files a
+/// release is versioned from, the sources it selects, and the justfile the
+/// recipe is a recipe of. Only the *history* is built rather than found, and
+/// that is the point. A journey reaching for a published tag instead rests on
+/// how whichever checkout runs it was configured: `actions/checkout` fetches no
+/// tags, so `v0.4.0` names nothing on the `cross` runners, on a shallow clone,
+/// or on a fork — none of which is a defect in what this guards.
+struct ThisCrate {
+    /// The repository being released: where the recipe is run, and whose commits
+    /// since [`BASELINE_REF`] say what that release announces.
+    root: PathBuf,
+    /// The worktree of that tag the workflow hands the reading.
+    baseline: PathBuf,
+}
+
+impl ThisCrate {
+    /// This crate's tracked tree, committed once as the release [`BASELINE_REF`]
+    /// names and then carried forward by a `feat!` on a file its `include`
+    /// packages — so release-plz versions a breaking release from it.
+    fn with_a_breaking_release(dir: &Path) -> Self {
+        let root = dir.join("history");
+        copy_tracked_files(Path::new(env!("CARGO_MANIFEST_DIR")), &root);
+
+        git(&root, &["init", "--quiet", "--initial-branch=main"]);
+        git(&root, &["add", "--all"]);
+        git(&root, &["commit", "--quiet", "-m", "chore: release"]);
+        git(&root, &["tag", BASELINE_REF]);
+
+        let baseline = dir.join("release-baseline");
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                baseline.to_str().expect("utf-8 path"),
+                BASELINE_REF,
+            ],
+        );
+
+        let touched = root.join(PACKAGED_BY_THIS_CRATE);
+        let mut carried = fs::read_to_string(&touched).expect("read the file to carry forward");
+        carried.push_str("\n// carried forward\n");
+        fs::write(&touched, carried).expect("carry the file forward");
+        git(&root, &["add", "--all"]);
+        git(
+            &root,
+            &[
+                "commit",
+                "--quiet",
+                "-m",
+                "feat!: drop the round from every payload",
+            ],
+        );
+
+        Self { root, baseline }
+    }
+}
+
+/// Copy every file the checkout at `from` tracks into `into`, directories and
+/// all. A tracked tree is the one thing every checkout of this repository has —
+/// shallow or deep, tagless or not, a fork's or a runner's — so it is the only
+/// thing [`ThisCrate`] takes from the one running the suite.
+fn copy_tracked_files(from: &Path, into: &Path) {
+    let listed = Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(from)
+        .output()
+        .expect("git is on PATH");
+    assert!(
+        listed.status.success(),
+        "git ls-files failed:\n{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let listed = String::from_utf8(listed.stdout).expect("the tracked paths are utf-8");
+    let mut copied = 0_usize;
+    for tracked in listed.split('\0').filter(|path| !path.is_empty()) {
+        let destination = into.join(tracked);
+        fs::create_dir_all(destination.parent().expect("a directory to copy into"))
+            .expect("create the directory the tracked file is in");
+        fs::copy(from.join(tracked), &destination)
+            .unwrap_or_else(|error| panic!("copy the tracked file {tracked}: {error}"));
+        copied += 1;
+    }
+    assert!(copied > 0, "this checkout tracks no files to copy");
 }
 
 fn stdout(output: &Output) -> String {
@@ -966,50 +1077,40 @@ fn a_range_that_versions_no_release_is_read_past() {
     );
 }
 
-/// This repository's own pending release, through the recipe, against a real
-/// worktree of the tag it is being read against.
+/// A release of this crate itself, through the recipe, against a real worktree
+/// of the tag it is being read against.
 ///
-/// `4af0647` is a `feat!` that touched packaged files, so the release is breaking
-/// and a `v0.4.0` baseline that no longer compiles is read past — while every
-/// commit after it here touched nothing packaged, and so changes that not at all.
-/// The reading is the one thing stood in for; everything it is decided from is
-/// this repository.
+/// This is the release the branch exists for, over the thing it has to release:
+/// a `feat!` touching a packaged file is a breaking release, so a baseline that
+/// returns no verdict at all is read past. Everything it is decided from is this
+/// crate — the recipe the workflow's step runs, the manifest whose `include`
+/// says which commits release-plz versions from, and the real `cargo package
+/// --list` of it. The reading is the one thing stood in for.
+///
+/// The history is built by [`ThisCrate`] rather than found in the checkout
+/// running the suite: this journey used to read the published `v0.4.0`, which
+/// the `cross` runners' checkout does not fetch, and a premise a runner's
+/// configuration can withdraw is one that goes red for reasons that are not the
+/// thing under test.
 #[test]
-fn the_release_this_branch_is_reads_past_a_baseline_it_cannot_build() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+fn a_release_of_this_crate_reads_past_a_baseline_it_cannot_build() {
     let fixture = Fixture::new();
     let checkout = TempDir::new().expect("temp dir");
-    let baseline = checkout.path().join("release-baseline");
-    git(root, &["worktree", "prune"]);
-    git(
-        root,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            baseline.to_str().expect("utf-8 path"),
-            "v0.4.0",
-        ],
-    );
+    let released = ThisCrate::with_a_breaking_release(checkout.path());
 
-    let output = fixture.run_recipe(
-        &[baseline.to_str().expect("utf-8 path"), "v0.4.0"],
+    let output = fixture.run_recipe_in(
+        &released.root,
+        &[
+            released.baseline.to_str().expect("utf-8 path"),
+            BASELINE_REF,
+        ],
         &[("SEMVER_STATUS", NO_VERDICT)],
     );
 
-    git(
-        root,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            baseline.to_str().expect("utf-8 path"),
-        ],
-    );
     assert!(
         output.status.success(),
-        "the release this branch is stayed blocked behind a reading it does not \
-         need:\n{}",
+        "a breaking release of this crate stayed blocked behind a reading it does \
+         not need:\n{}",
         stderr(&output)
     );
     let stderr = stderr(&output);
