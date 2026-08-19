@@ -193,12 +193,10 @@ impl Fixture {
         self.run_with(&self.baseline.clone(), &[("SEMVER_STATUS", status)])
     }
 
-    /// The same, with `environment` deciding what the stand-in answers.
     fn run_with(&self, baseline: &str, environment: &[(&str, &str)]) -> Output {
         self.run_arguments(&[baseline, BASELINE_REF], environment)
     }
 
-    /// The same again, for a call whose arguments are the thing under test.
     fn run_arguments(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
         self.run_arguments_on(arguments, environment, &self.search_path)
     }

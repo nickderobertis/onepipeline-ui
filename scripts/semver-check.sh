@@ -68,19 +68,22 @@ command -v cargo-semver-checks >/dev/null 2>&1 || {
   exit 1
 }
 
-# What the pending release claims, read off the same conventional commits
-# release-plz versions from: a `!` on the type, or a `BREAKING CHANGE:` footer, is
-# a release that claims compatibility with nothing. Subjects and bodies are read
-# apart so a body quoting a subject cannot answer for one.
+# Whether the commits since the baseline announce a break, in the grammar
+# release-plz reads them by: a `!` on the type, or a `BREAKING CHANGE:` footer.
+# Subjects and bodies are read apart so a body quoting a subject cannot answer for
+# one. Named for what it reads rather than for the release's bump, which it is not
+# quite: release-plz only sees commits touching the crate's packaged files, so a
+# `!` on one that touches none announces a break here and versions as nothing
+# there.
 #
-# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz exposes no parser to derive this from, and no dry run that reports the bump without first taking the very reading this decides whether to demand — so the grammar is Conventional Commits v1.0.0 read a second time, deliberately, and only ever to relax. Both disagreements are bounded: reading fewer breaks than release-plz leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop treating `!` and `BREAKING CHANGE:` as breaking, which is the specification it and `release-plz.toml`'s documented mapping both name. The residue is a `!` on a commit touching no packaged file, which release-plz does not see: it relaxes a release whose own bump is smaller, and only while the baseline cannot be built at all.
+# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz publishes no parser to derive this from, so it is Conventional Commits v1.0.0 read a second time — only ever to relax, and bounded both ways: reading fewer breaks leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop honouring the specification.
 subjects="$(git log --format=%s "refs/tags/${baseline_ref}..HEAD")"
 bodies="$(git log --format=%b "refs/tags/${baseline_ref}..HEAD")"
 if grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
   || grep -Eq '^BREAKING[ -]CHANGE:' <<<"$bodies"; then
-  claims_compatibility=no
+  announces_a_break=yes
 else
-  claims_compatibility=yes
+  announces_a_break=no
 fi
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
@@ -101,7 +104,7 @@ fi
 # it lets through.
 reading_not_taken() {
   local what="$1" action="$2"
-  if [ "$claims_compatibility" = no ]; then
+  if [ "$announces_a_break" = yes ]; then
     echo "::warning::$what — read past: the commits since $baseline_ref break the API, so this release claims compatibility with nothing and the reading could only agree with a bump already taken. Nothing is required of it; to take the reading anyway, $action" >&2
     exit 0
   fi
