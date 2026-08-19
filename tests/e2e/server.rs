@@ -1198,6 +1198,250 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
     assert_eq!(unknown.json()["error"]["code"], json!("artifact_not_found"));
 }
 
+/// A pointer whose components *resolve* out of the store, which no check on how
+/// they are spelled can catch.
+///
+/// The two names are held to bare names, and a bare name still reaches anywhere
+/// on this host if what it names is a symlink: the store's project layer and the
+/// session files inside it are written by processes this one does not run, and
+/// the pointer at them comes off a *journal* — records written by dispatched
+/// agents, which is exactly the input a reader is tempted to trust because it is
+/// "ours". So the resolved path is proved to be under the resolved store before
+/// it is opened, and this plants both escapes a store offers: a project
+/// component that is a link to another store's project, and a session file that
+/// is a link to another store's transcript. Each is recorded under the id of the
+/// record it would have served, so the confinement being gone is the difference
+/// between a `404` and that conversation's own bytes.
+///
+/// Three more cases hold the answer to what it must *not* break or blur. A store
+/// named through a symlink of its own still serves — canonicalizing both sides
+/// is what makes a real store reachable by a real name, and a check that
+/// compared spellings would refuse this one. A session file that is a dangling
+/// link is `Missing` and not a refusal: nothing resolved, so there is nothing to
+/// refuse, and the operator's log must not fill with alarms about transcripts
+/// that were merely rotated away. And the wire says the same `404
+/// artifact_not_found` to all of them — where a refused path *went* is the
+/// host's business and is said to the operator's log alone, which is why this
+/// journey reads that log rather than asserting the distinction in prose.
+#[cfg(unix)]
+#[test]
+fn a_history_pointer_that_resolves_out_of_the_store_is_refused_rather_than_opened() {
+    use std::os::unix::fs::symlink;
+
+    let host = tempfile::tempdir().expect("the host's directories");
+    let store = host.path().join("store");
+    let elsewhere = host.path().join("elsewhere");
+    fs::create_dir_all(&store).expect("the store the run named");
+    fs::create_dir_all(&elsewhere).expect("the store beside it");
+
+    let recorded = harness_history::record(
+        &store,
+        "confined worker",
+        "stay in the store",
+        "the transcript the run named",
+    );
+    let by_another_name = harness_history::record(
+        &store,
+        "a worker named through a link",
+        "reach a real store by a real name",
+        "the store was reached through a link",
+    );
+    // The transcripts nothing on this run's pointer may reach. One per escape,
+    // because the route serves the *first* event carrying an id and two cases
+    // sharing one would prove only whichever came first.
+    let through_project = harness_history::record(
+        &elsewhere,
+        "a linked to project worker",
+        "a conversation this run never had",
+        HIDDEN_TRANSCRIPT,
+    );
+    let through_session = harness_history::record(
+        &elsewhere,
+        "a linked to session worker",
+        "another conversation this run never had",
+        HIDDEN_TRANSCRIPT,
+    );
+
+    // A bare name for a project, which is a link onto the other store's own
+    // project directory.
+    symlink(
+        elsewhere.join(&through_project.project),
+        store.join(ESCAPING_PROJECT),
+    )
+    .expect("the project that leaves the store");
+    // A bare name for a session, which is a link onto the other store's
+    // transcript file. Listed by the store's own reader exactly as a real
+    // session is, because to that reader it is one.
+    symlink(
+        &through_session.path,
+        store
+            .join(&recorded.project)
+            .join(format!("{ESCAPING_SESSION}.jsonl")),
+    )
+    .expect("the session that leaves the store");
+    // A session that resolves nowhere: listed, and then gone.
+    symlink(
+        store.join(&recorded.project).join("rotated-away.jsonl"),
+        store
+            .join(&recorded.project)
+            .join(format!("{VANISHED_SESSION}.jsonl")),
+    )
+    .expect("the session that resolves nowhere");
+    // The store, reached by a name of its own that is a link.
+    let linked_store = host.path().join("store-by-another-name");
+    symlink(&store, &linked_store).expect("the store under another name");
+
+    let serving = Serving::start_with_log(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        for session in [
+            // The run's own transcript, named as the producer names it.
+            (
+                store.clone(),
+                recorded.project.clone(),
+                recorded.session.clone(),
+                recorded.history_id.clone(),
+            ),
+            // The same store, named through a link to it.
+            (
+                linked_store.clone(),
+                by_another_name.project.clone(),
+                by_another_name.session.clone(),
+                by_another_name.history_id.clone(),
+            ),
+            (
+                store.clone(),
+                ESCAPING_PROJECT.to_owned(),
+                through_project.session.clone(),
+                through_project.history_id.clone(),
+            ),
+            (
+                store.clone(),
+                recorded.project.clone(),
+                ESCAPING_SESSION.to_owned(),
+                through_session.history_id.clone(),
+            ),
+            (
+                store.clone(),
+                recorded.project.clone(),
+                VANISHED_SESSION.to_owned(),
+                VANISHED_HISTORY_ID.to_owned(),
+            ),
+        ] {
+            let (named, project, file, artifact) = session;
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: HARNESS_STREAM,
+                    node: fixture_run::NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&named),
+                    history_project: &project,
+                    history_session: &file,
+                    history_id: &artifact,
+                    bytes: 0,
+                },
+            );
+        }
+    });
+
+    let artifact = |id: &str| {
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/artifacts/{id}", fixture_run::RUN_ID),
+        )
+    };
+
+    // Asked for first, so that by the time the refusals below have been read off
+    // the log a line about this one would already be on it.
+    let vanished = artifact(VANISHED_HISTORY_ID);
+    assert_eq!(vanished.status, 404, "{}", vanished.body);
+    assert_eq!(
+        vanished.json()["error"]["code"],
+        json!("artifact_not_found")
+    );
+
+    for (what, escaped) in [
+        (
+            "a project that is a link out of the store",
+            &through_project,
+        ),
+        (
+            "a session that is a link out of the store",
+            &through_session,
+        ),
+    ] {
+        let response = artifact(&escaped.history_id);
+        assert_eq!(response.status, 404, "{what}: {}", response.body);
+        assert_eq!(
+            response.json()["error"]["code"],
+            json!("artifact_not_found"),
+            "{what}"
+        );
+        assert!(
+            !response.body.contains(HIDDEN_TRANSCRIPT),
+            "{what} opened a transcript outside the store the run named: {}",
+            response.body
+        );
+        assert!(
+            !response
+                .body
+                .contains(elsewhere.to_str().expect("utf-8 path")),
+            "{what} told a reader where the path it refused went: {}",
+            response.body
+        );
+    }
+
+    // The store the pointer really named is still read, whichever name it was
+    // reached by.
+    for (what, expected, id) in [
+        (
+            "the store as the producer names it",
+            "the transcript the run named",
+            &recorded.history_id,
+        ),
+        (
+            "the same store through a link",
+            "the store was reached through a link",
+            &by_another_name.history_id,
+        ),
+    ] {
+        let served = artifact(id);
+        assert_eq!(served.status, 200, "{what}: {}", served.body);
+        let content: Value =
+            serde_json::from_str(served.json()["content"].as_str().expect("content"))
+                .expect("the record");
+        assert_eq!(content["text"], json!(expected), "{what}");
+    }
+
+    // What the operator is told, and what they are not. A refusal names the
+    // artifact — an id that crossed the identifier boundary — and never where
+    // the path it refused resolved to.
+    let said = serving.wait_until_said(&through_session.history_id);
+    for escaped in [&through_project, &through_session] {
+        assert!(
+            said.contains(&format!(
+                "artifact {}: refusing a oneharness session",
+                escaped.history_id
+            )),
+            "the operator was not told their journal carries a pointer that escapes: {said}"
+        );
+    }
+    assert!(
+        !said.contains(elsewhere.to_str().expect("utf-8 path")),
+        "the refusal put the resolved location on the log: {said}"
+    );
+    assert!(
+        !said.contains(VANISHED_HISTORY_ID),
+        "a transcript that is merely gone was reported as a refusal: {said}"
+    );
+    for served in [&recorded, &by_another_name] {
+        assert!(
+            !said.contains(&served.history_id),
+            "a transcript that was served was reported as a refusal: {said}"
+        );
+    }
+}
+
 /// A pointer that names no store at all resolves against oneharness's own
 /// default one.
 ///
@@ -1263,6 +1507,14 @@ const HARNESS_STREAM: &str = "node-scope-1786925518098-3163646";
 const UNRECORDED_HISTORY_ID: &str = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
 /// What the store beside the one the run named holds. No response may carry it.
 const HIDDEN_TRANSCRIPT: &str = "a conversation from a store this run never named";
+/// A bare name for a project, which is a link onto another store's project.
+const ESCAPING_PROJECT: &str = "a-project-that-is-a-link";
+/// A bare name for a session, which is a link onto another store's transcript.
+const ESCAPING_SESSION: &str = "a-session-that-is-a-link";
+/// A bare name for a session whose file resolves to nothing at all.
+const VANISHED_SESSION: &str = "a-session-that-went-away";
+/// The id recorded for that vanished session. Well-formed and readable nowhere.
+const VANISHED_HISTORY_ID: &str = "01a00d0f-c094-7660-b26c-8a53baaf9c3c";
 
 /// Every file under a directory, in a stable order.
 ///

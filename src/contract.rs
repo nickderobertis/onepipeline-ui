@@ -4,7 +4,8 @@
 //! reconciles the two, so a route added to one and not the other fails the gate.
 
 use std::fmt;
-use std::path::{Component, Path};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -698,7 +699,7 @@ impl TryFrom<&str> for PathSegment {
     }
 }
 
-/// The directory a producer's record named as its store, held to the shape the
+/// The directory a producer's record *named* as its store, held to the shape the
 /// producer publishes one in.
 ///
 /// The other half of the [`PathSegment`] boundary. `oneagentgraph` publishes a
@@ -708,14 +709,19 @@ impl TryFrom<&str> for PathSegment {
 /// directory this process happens to be serving from and a `..` inside one is
 /// the same traversal a bare name is checked for.
 ///
-/// Existence is deliberately not part of it: a store that is not there is an
-/// artifact with no readable bytes, which is the same answer as a store this
-/// refuses, and reading the filesystem to construct a value would make the type
-/// a claim it cannot keep.
+/// **It certifies how a record spelled a path and nothing about this host.** The
+/// name is still only what a record claimed: the directory may not exist, may
+/// hold no store, and every component of it may be a symlink onto somewhere
+/// else. Nothing may open a file on the strength of this type — a path earns
+/// that only from [`StoreRoot::confine`], which is why this one is named for the
+/// claim rather than for a root. It is deliberately the type that reads no
+/// filesystem: the store a record names *no* store for is oneharness's own
+/// default, which never passes through here, so a host-level check made here
+/// would be one the store most records resolve to never takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoreRoot(String);
+pub struct NamedStore(String);
 
-impl StoreRoot {
+impl NamedStore {
     /// The directory, as the record named it.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -723,7 +729,7 @@ impl StoreRoot {
     }
 }
 
-impl TryFrom<&str> for StoreRoot {
+impl TryFrom<&str> for NamedStore {
     type Error = String;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
@@ -739,6 +745,70 @@ impl TryFrom<&str> for StoreRoot {
         }
         Ok(Self(value.to_owned()))
     }
+}
+
+/// A history store this process has read, as this host really holds it.
+///
+/// The trusted root, and the only thing in this crate that lets a file outside
+/// the runs root be opened. It exists only once [`fs::canonicalize`] has
+/// resolved the directory — the rule [`crate::cli::RunsRoot`] already follows for
+/// the runs root — so what it holds is where the kernel actually arrives, with
+/// every symlink, `.` and `..` along the way already resolved.
+///
+/// Canonical rather than lexical because of what stands between a pointer and a
+/// file: oneharness's own reader walks the store's layout, listing a project
+/// directory and matching a session file inside it, and either component can be
+/// a symlink planted by anything that can write into the store. A check on how a
+/// path is *spelled* says nothing about where opening it lands, so the proof is
+/// made against the resolved path on both sides or it is not a proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreRoot(PathBuf);
+
+impl StoreRoot {
+    /// The store at `dir`, or `None` when this host has no directory there to
+    /// resolve.
+    ///
+    /// A store that is not there is an artifact with no readable bytes, which is
+    /// the answer a pointer at a store this host does not hold has always had.
+    #[must_use]
+    pub fn read(dir: &Path) -> Option<Self> {
+        fs::canonicalize(dir).ok().map(Self)
+    }
+
+    /// Where `path` — a path the store's own reader produced from this root —
+    /// really lands, which is what decides whether it may be opened.
+    #[must_use]
+    pub fn confine(&self, path: &Path) -> Confined {
+        match fs::canonicalize(path) {
+            Ok(resolved) if resolved.starts_with(&self.0) => Confined::Under(resolved),
+            Ok(_) => Confined::Escaped,
+            Err(_) => Confined::Missing,
+        }
+    }
+}
+
+/// What a [`StoreRoot`] made of a path named beneath it.
+///
+/// Three answers and not two, because "there is nothing there" and "there is
+/// something there and it is not yours" are different facts about the host and
+/// only one of them is worth an operator's attention. Both are the same `404` to
+/// a reader — the contract answers an artifact whose bytes this server will not
+/// serve one way — so the distinction is kept here, where the caller can log the
+/// refusal it must never put on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Confined {
+    /// It lands beneath the store, and this is where. Opening *this* path rather
+    /// than the one it came from is the point: it holds no symlink left for the
+    /// open itself to follow back out.
+    Under(PathBuf),
+    /// It lands outside the store that named it. Nothing may open it, and
+    /// nothing may say on the wire where it went.
+    Escaped,
+    /// It lands nowhere this process can resolve — the name is a dangling link,
+    /// a loop, or a file that went away between being listed and being read.
+    /// Not a refusal: a refusal is a statement about a path that resolved, and
+    /// this one did not.
+    Missing,
 }
 
 /// The longest identifier any route accepts.

@@ -210,9 +210,22 @@ it, each because the obvious alternative is worse:
   second source for that path is how a reader and a writer come to disagree about
   where the transcripts are.
 - **Every component of the pointer is checked before it is used** — the two names
-  as `contract::PathSegment`, the store as absolute and non-climbing. A record is
-  external input exactly as a URL is, and joining one unchecked is the
-  arbitrary-file read the retention contract exists to prevent.
+  as `contract::PathSegment`, the store as a `contract::NamedStore`, which is
+  absolute and non-climbing. A record is external input exactly as a URL is, and
+  joining one unchecked is the arbitrary-file read the retention contract exists
+  to prevent.
+- **And checking how a path is spelled is not confining where it lands.** Those
+  checks are lexical, and every component they clear is still a name in somebody
+  else's directory: a bare name that climbs nowhere reaches anywhere on the host
+  if what it names is a symlink, which the store's project layer and its session
+  files both can be. So the resolved path is proved to sit under a
+  `contract::StoreRoot` — the store canonicalized, which exists only once the
+  directory has been read, on `cli::RunsRoot`'s own terms — and only what
+  `Confined::Under` returns is opened. `Confined` is three-valued because a path
+  that resolved *outside* and a path that resolved *nowhere* are different facts
+  about the host: the first is said to the operator's log, naming the artifact
+  and never where it went, and the second is a transcript that was rotated away
+  and is a plain `404`. The wire cannot tell them apart on purpose.
 
 ## What the wire asks for and no record fills
 

@@ -27,8 +27,8 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::contract::{
-    ArtifactId, ConversationId, DispatchId, NodeId, PathSegment, ReferenceKind, StoreRoot,
-    TIMELINE_SCHEMA_VERSION,
+    ArtifactId, Confined, ConversationId, DispatchId, NamedStore, NodeId, PathSegment,
+    ReferenceKind, StoreRoot, TIMELINE_SCHEMA_VERSION,
 };
 use crate::filter::EventFilter;
 // The sibling's spending party is imported under a name of its own: this module
@@ -2154,12 +2154,32 @@ fn artifact_bytes(
 /// three, never as one path, and each is checked before it is used: the two that
 /// name a directory and a file as a [`PathSegment`], so a record naming a
 /// traversal, a separator or an absolute path resolves to nothing rather than to
-/// a file on this host, and the store itself as a [`StoreRoot`]. A store the
+/// a file on this host, and the store itself as a [`NamedStore`]. A store the
 /// record does not name at all falls back to [`history::resolve_dir`]'s default,
 /// which is the same one every oneharness process here resolves — this crate
 /// takes no flag and no config key of its own for it, because a second source
 /// for that path is how a reader and a writer come to disagree about where the
 /// transcripts are.
+///
+/// **Those checks are on how a record spelled a path, and the file is opened on
+/// where the path lands.** Both fields name components of somebody else's
+/// directory, and a bare name that climbs nowhere still reaches anywhere if the
+/// component it names is a symlink — the store's project layer and the session
+/// file inside it are both written by processes this one does not run. So the
+/// resolved path is confined against a [`StoreRoot`], which exists only once the
+/// store itself has been canonicalized, and only [`Confined::Under`] is opened:
+/// a session that lands outside the store the record named is refused with
+/// nothing said on the wire about where it went, and is the one case said to the
+/// operator's log, because a pointer that escapes is a fact about the host
+/// rather than about this request. A path that resolves nowhere at all is
+/// [`Confined::Missing`] and is *not* that: a transcript rotated away between
+/// being listed and being read is an artifact with no bytes, which the reader
+/// has always answered as a plain `404`, and reporting it as a refusal would
+/// bury the ones that are.
+///
+/// Confining resolves the path once and then opens what it resolved to, rather
+/// than re-walking the name — the check and the open therefore agree about every
+/// component but the last instant, which is as close as a portable `open` gets.
 ///
 /// It reads and never writes. [`history::find_session_path`] and
 /// [`history::read_session_display`] open files; `find_record_by_id` beside them
@@ -2167,21 +2187,38 @@ fn artifact_bytes(
 /// which would put this read surface in the way of the single writer the engine
 /// runs — so the id is matched against the records the session file holds
 /// instead, here, where no lock is involved.
-// llmlint: ignore[authorization_enforced_server_side] this API has no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server over one runs root, and every route serves whatever that root holds. Nothing a reader sends reaches this path — the id must be one the run's own envelopes recorded, and the store, project and session are read off that same envelope rather than off the request — and each of them is confined below to the shape the producer publishes.
 fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
     // An empty value names no store, which is what oneharness itself reads
     // `history_dir = ""` as, so it falls back rather than being refused.
-    let store = match field("history_dir").filter(|value| !value.is_empty()) {
-        Some(named) => Some(StoreRoot::try_from(named).ok()?),
+    let named = match field("history_dir").filter(|value| !value.is_empty()) {
+        Some(named) => Some(NamedStore::try_from(named).ok()?),
         None => None,
     };
-    let dir = history::resolve_dir(store.as_ref().map(StoreRoot::as_str))?;
+    let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
+    let store = StoreRoot::read(&dir)?;
     let project = PathSegment::try_from(field("history_project")?).ok()?;
     let session = PathSegment::try_from(field("history_session")?).ok()?;
-    let path = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
+    let listed = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
         .ok()
         .flatten()?;
+    let path = match store.confine(&listed) {
+        Confined::Under(path) => path,
+        // The artifact id and not the pointer: an id has crossed the identifier
+        // boundary and is safe to print, where every field of the pointer is a
+        // record's own bytes and one of them could otherwise write a line of
+        // this log itself. Where it landed is deliberately absent — an operator
+        // needs to know their journal carries a pointer that escapes, and a
+        // reader must not be told what is on the host by reading the answer.
+        Confined::Escaped => {
+            eprintln!(
+                "onepipeline-api: artifact {}: refusing a oneharness session that resolves outside the store its record named",
+                id.as_str()
+            );
+            return None;
+        }
+        Confined::Missing => return None,
+    };
     let record = history::read_session_display(&path)
         .ok()?
         .into_iter()
