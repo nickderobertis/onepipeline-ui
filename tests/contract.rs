@@ -22,8 +22,8 @@ use onepipeline_ui::api::ReadApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
-    EventsQuery, Health, HealthStatus, NodeId, PageLimit, RunId, RunQuery, RunsQuery, SseEvent,
-    TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    EventsQuery, Health, HealthStatus, NodeId, PageLimit, Release, RunId, RunQuery, RunsQuery,
+    SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
     TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
@@ -269,11 +269,67 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
     let health: Health = serde_json::from_str(&raw).expect("parse healthz.json");
     assert_eq!(health.status, HealthStatus::Ok);
     assert_eq!(
-        health.onepipeline_version,
+        health.onepipeline_version.as_str(),
         onepipeline::VERSION,
         "tests/fixtures/healthz.json pins an `onepipeline` release this crate does not link"
     );
     assert_eq!(canonical(&health), raw);
+
+    // The field is a validated release, not a string: a liveness body claiming a
+    // release nobody could have published is refused at the parse rather than
+    // compared against.
+    for refused in [
+        r#"{"status":"ok","onepipeline_version":"0.7"}"#,
+        r#"{"status":"ok","onepipeline_version":"latest"}"#,
+        r#"{"status":"ok","onepipeline_version":"0.7.x"}"#,
+        r#"{"status":"ok","onepipeline_version":""}"#,
+        r#"{"status":"ok","onepipeline_version":"0.7.3-"}"#,
+        // Bounded, so a body nobody published cannot become an unbounded string
+        // a host then repeats in whatever it renders the comparison into.
+        r#"{"status":"ok","onepipeline_version":"0.7.3-000000000000000000000000000000000000000000000000000000000000000"}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<Health>(refused).is_err(),
+            "{refused} parsed as a liveness body"
+        );
+    }
+
+    // The grammar is cargo's, not a shape that merely looks like it: a string no
+    // registry could have served must not become a `Release` that a host then
+    // compares its engine against as if it had.
+    for refused in [
+        "0.7",
+        "0.7.3.1",
+        "0.7.x",
+        "",
+        "01.2.3",
+        "0.07.3",
+        "1.2.3-",
+        "1.2.3-alpha..1",
+        "1.2.3-01",
+        "1.2.3+",
+        "1.2.3+one+two",
+        "1.2.3+build..5",
+        "1.2.3-alpha_1",
+        " 1.2.3",
+    ] {
+        assert!(
+            Release::try_from(refused).is_err(),
+            "`{refused}` was accepted as a release"
+        );
+    }
+    // And what cargo does publish is one, metadata and all.
+    for accepted in [
+        "0.7.3",
+        "0.0.0",
+        "1.0.0-rc.1",
+        "0.7.3+build.5",
+        "1.0.0-alpha-1+build-9.2",
+        "1.2.3-0.3.7",
+    ] {
+        Release::try_from(accepted).unwrap_or_else(|err| panic!("{accepted}: {err}"));
+    }
+    assert_eq!(Release::linked().as_str(), onepipeline::VERSION);
 }
 
 #[test]
@@ -717,7 +773,7 @@ impl ReadApi for Unimplemented {
     fn health(&self) -> Health {
         Health {
             status: HealthStatus::Ok,
-            onepipeline_version: onepipeline::VERSION.to_owned(),
+            onepipeline_version: Release::linked(),
         }
     }
 
@@ -1282,11 +1338,9 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
 /// stands in for the shared declaration. It is a **type** gate, like the event
 /// vocabulary above: `oneagentgraph` declares `EventFilter` and `Matcher` in a
 /// public module, and this crate's copy is held to that library's own
-/// serialization rather than to a second reading of the wire alone. It could not
-/// be until now — the declaration landed in `oneagentgraph` 0.2.13, which added a
-/// field to `run::Request` in the same patch release, so the `onepipeline` this
-/// crate depended on did not compile against it — and the SDK pin moving to a
-/// release built on a later sibling is what makes it one.
+/// serialization rather than to a second reading of the wire alone. Which is why
+/// the sibling's resolution is the SDK's to decide: a tree that cannot reach that
+/// declaration has only the wire to compare against.
 ///
 /// One field is deliberately *not* shared: this grammar has no `round` matcher.
 /// Execution is continuous, the label is deprecated and stamped by nothing, and a

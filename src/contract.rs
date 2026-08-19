@@ -129,7 +129,145 @@ pub struct Health {
     /// A host that pins the engine writing a run store and separately pins this
     /// reader of it has nothing else to prove the two are the same release, so
     /// the reader says which one it is rather than leaving it assumed.
-    pub onepipeline_version: String,
+    pub onepipeline_version: Release,
+}
+
+/// A validated release identifier: `MAJOR.MINOR.PATCH`, with the pre-release and
+/// build metadata cargo allows after it.
+///
+/// Constructed only through [`TryFrom<&str>`], so a `Health` a client parses
+/// cannot carry a release nobody could have published — the comparison a host
+/// makes against it is only worth making if both sides are releases.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Release(String);
+
+impl Release {
+    /// The `onepipeline` release this binary links.
+    ///
+    /// The SDK's own package version, which cargo will not build without, so the
+    /// check cannot fail — the same footing [`POLL_INTERVAL_MS`] is on.
+    ///
+    /// [`POLL_INTERVAL_MS`]: crate::store::POLL_INTERVAL_MS
+    #[must_use]
+    pub fn linked() -> Self {
+        Self::try_from(onepipeline::VERSION).expect("the SDK's own package version is a release")
+    }
+
+    /// The release as it is served.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for Release {
+    type Error = InvalidRelease;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match check_release(value) {
+            Ok(()) => Ok(Self(value.to_owned())),
+            Err(reason) => Err(InvalidRelease(reason)),
+        }
+    }
+}
+
+impl TryFrom<String> for Release {
+    type Error = InvalidRelease;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<Release> for String {
+    fn from(value: Release) -> Self {
+        value.0
+    }
+}
+
+/// What a string that is not a [`Release`] is refused with.
+///
+/// Its own type rather than an [`ApiError`] arm: no route parses one, so a
+/// refusal here is not a status a client is served.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("not a release: {0}")]
+pub struct InvalidRelease(String);
+
+/// The longest release identifier this crate accepts.
+const RELEASE_MAX_LEN: usize = 64;
+
+/// Whether a string is a release, by the semantic-version grammar cargo
+/// publishes under: `MAJOR.MINOR.PATCH`, each a number without a leading zero,
+/// then optional `-PRE` and `+BUILD` metadata of dot-separated identifiers.
+///
+/// Strict rather than permissive on purpose. The point of the type is that a
+/// host comparing two of these is comparing releases, and a validator that
+/// admitted `01.2.3` would have this crate assert an invariant its name claims
+/// and its values do not keep.
+fn check_release(value: &str) -> Result<(), String> {
+    if value.len() > RELEASE_MAX_LEN {
+        return Err(format!("must be at most {RELEASE_MAX_LEN} characters"));
+    }
+    // Build metadata comes off first: it is the last part and it may itself
+    // contain `-`, so a pre-release cannot be found until it is gone.
+    let (rest, build) = match value.split_once('+') {
+        Some((rest, build)) => (rest, Some(build)),
+        None => (value, None),
+    };
+    let (core, pre) = match rest.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (rest, None),
+    };
+    let components: Vec<&str> = core.split('.').collect();
+    if components.len() != 3 {
+        return Err("must be MAJOR.MINOR.PATCH".to_owned());
+    }
+    if !components.iter().copied().all(is_numeric_identifier) {
+        return Err(
+            "every component of MAJOR.MINOR.PATCH must be a number without a leading zero"
+                .to_owned(),
+        );
+    }
+    if let Some(pre) = pre {
+        for identifier in pre.split('.') {
+            if !is_alphanumeric_identifier(identifier) {
+                return Err(
+                    "every pre-release identifier must be ASCII letters, digits or '-'".to_owned(),
+                );
+            }
+            if identifier.chars().all(|c| c.is_ascii_digit()) && !is_numeric_identifier(identifier)
+            {
+                return Err(
+                    "a numeric pre-release identifier must not have a leading zero".to_owned(),
+                );
+            }
+        }
+    }
+    if let Some(build) = build {
+        for identifier in build.split('.') {
+            if !is_alphanumeric_identifier(identifier) {
+                return Err(
+                    "every build identifier must be ASCII letters, digits or '-'".to_owned(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A semantic-version numeric identifier: digits, and no leading zero unless the
+/// whole of it is one.
+fn is_numeric_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|c| c.is_ascii_digit())
+        && (value.len() == 1 || !value.starts_with('0'))
+}
+
+/// A semantic-version metadata identifier: non-empty, ASCII letters, digits and
+/// `-`. A second `+` fails here, which is what keeps `1.2.3+one+two` out.
+fn is_alphanumeric_identifier(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// The only status `/healthz` reports: a process that could not answer serves

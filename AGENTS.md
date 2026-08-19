@@ -78,19 +78,16 @@ each run's telemetry document, the two speak a versioned document, and a
 mismatched pair serves every run with no clock at all. `/healthz` reports that
 release from `onepipeline::VERSION`, so a host pinning the engine that writes a
 run store and this reader of it separately can *prove* the two match rather than
-assume it; `tests/fixtures/healthz.json` carries the same version, and moving the
-pin without moving the golden fails.
+assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
 
-**`oneagentgraph` is resolved by the SDK rather than pinned here, and it followed
-the SDK pin from 0.2.12 to 0.2.19.** The old pin was not a preference: that
-library added a field to `run::Request` in 0.2.13 — a patch release — and
-`onepipeline` 0.4.0 was built against 0.2.12, so cargo's semver unification
-picked a version that SDK did not compile against, and the lockfile held it back.
-An `onepipeline` built on a later sibling is what ends that, which is also what
-turns `tests/contract.rs`'s gate on this crate's copy of the shared filter
-grammar into a **type** gate against that library's own declaration of it — the
-declaration landed in the release the old pin could not reach. `just deps-check`
-is deliberately outside the gate: it needs a network
+**`oneagentgraph` is not pinned here: the SDK's requirement decides it and the
+lock follows.** Cargo unifies one version of it across this crate and
+`onepipeline`, and that library has shipped a breaking field in a *patch*
+release, so `cargo update` on it can hand the pinned SDK a sibling it does not
+compile against. Move it only by moving the SDK. Sharing one resolution is also
+what lets `tests/contract.rs` hold this crate's copy of the shared filter grammar
+to `oneagentgraph`'s own declaration of it rather than to a second reading of the
+wire. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx

@@ -28,8 +28,8 @@ use serde_json::{json, Value};
 use crate::api::ReadApi;
 use crate::cli::RunsRoot;
 use crate::contract::{
-    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, RunId,
-    RunQuery, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
+    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, Release,
+    RunId, RunQuery, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
     TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
@@ -258,7 +258,7 @@ impl ReadApi for RunStore {
     fn health(&self) -> Health {
         Health {
             status: HealthStatus::Ok,
-            onepipeline_version: onepipeline::VERSION.to_owned(),
+            onepipeline_version: Release::linked(),
         }
     }
 
