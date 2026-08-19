@@ -150,24 +150,15 @@ fans one uniformly-named target across all of them.
   returns no verdict fails the release rather than passing as compatible. A
   surprisingly compatible verdict is the first thing to disbelieve.
 - **A baseline nobody can build stops only a release that claims compatibility
-  with it.** Tightening this crate's own requirements does not always reach the
-  problem: v0.4.0 pins `onepipeline` exactly, but *that* crate requires
-  `oneagentgraph ^0.2.12`, 0.2.13 added a required field to a struct it builds,
-  and no manifest writable here reaches a dependency of a dependency of a
-  published tag. So `scripts/semver-check.sh` also reads the commits since the
-  baseline tag: a `!` type or a `BREAKING CHANGE:` footer means the release
-  claims compatibility with nothing, the reading could only have agreed with a
-  bump already taken, and a baseline it could not read is a warning rather than a
-  failure. **It reads only the commits release-plz versions from** — the ones
-  touching a file `cargo package --list` names, which is the same set
-  `tests/packaging.rs` holds `[package] include` to. Read whole, the range would
-  let a `!` on a commit release-plz never sees excuse a reading the compatible
-  packaged release beside it still needs; a range with no packaged commit in it
-  authorizes no release at all, and is read past for that reason instead.
-  Everything else is unchanged — a release the commit types version as compatible
-  still fails on a reading that did not happen, which is the accidental
-  incompatibility the check exists for. That is the whole of the exception; do
-  not widen it to make a patch release go through.
+  with it.** Tightening this crate's own requirements does not always reach it:
+  v0.4.0 pins `onepipeline` exactly, and it is *that* crate's caret on
+  `oneagentgraph` that drifted, which no manifest writable here can bind. So
+  `scripts/semver-check.sh` reads the commits release-plz versions from — the
+  ones touching a file `cargo package --list` names — and when they announce a
+  break, or there are none, a baseline it could not read is a warning rather than
+  a failure. Every other release still fails on a reading that did not happen,
+  which is the accidental incompatibility the check exists for. That is the whole
+  of the exception; do not widen it to make a patch release go through.
 - **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
   `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
   workflow, so `release.yml` would never run and the release would ship nothing.

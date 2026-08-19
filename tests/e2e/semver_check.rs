@@ -52,6 +52,7 @@ const PENDING_REF: &str = "v-pending";
 /// is the split release-plz versions a release from.
 const PACKAGED: &str = "src/lib.rs";
 const UNPACKAGED: &str = "scripts/tool.sh";
+const README: &str = "README.md";
 const FIXTURE_MANIFEST: &str = r#"[workspace]
 
 [package]
@@ -60,6 +61,7 @@ version = "0.1.0"
 edition = "2021"
 description = "The crate whose packaged files decide which commits a release is made of."
 license = "MIT"
+readme = "README.md"
 include = ["/src/**/*.rs", "/Cargo.toml"]
 "#;
 
@@ -162,6 +164,7 @@ impl Fixture {
         fs::write(repo.join("Cargo.toml"), FIXTURE_MANIFEST).expect("write the manifest");
         fs::write(repo.join(PACKAGED), "pub fn read() {}\n").expect("write the packaged file");
         fs::write(repo.join(UNPACKAGED), "echo tool\n").expect("write the unpackaged file");
+        fs::write(repo.join(README), "# fixture-crate\n").expect("write the readme");
         // The script lists the packaged files with `--locked`, which is a lockfile
         // this crate has not got until one is resolved for it.
         let locked = Command::new(real_cargo())
@@ -229,7 +232,10 @@ impl Fixture {
              case \"${1:-}\" in\n\
                fetch)\n\
                  case \"$*\" in\n\
-                   *--manifest-path*) exit \"${BASELINE_FETCH_STATUS:-0}\" ;;\n\
+                   *--manifest-path*)\n\
+                     [ \"${BASELINE_FETCH_STATUS:-0}\" = 0 ] || echo \"$BASELINE_FETCH_SAID\" >&2\n\
+                     exit \"${BASELINE_FETCH_STATUS:-0}\"\n\
+                     ;;\n\
                    *) exit \"${TREE_FETCH_STATUS:-0}\" ;;\n\
                  esac\n\
                  ;;\n\
@@ -329,6 +335,13 @@ impl Fixture {
             &self.repo,
             &["checkout", "--quiet", "--orphan", "nothing-committed"],
         );
+    }
+
+    /// Take away the readme the manifest declares, which `cargo package --list`
+    /// refuses to list a package without — so the files this release is decided
+    /// from cannot be known, while everything asked of cargo before it still can.
+    fn forget_the_readme(&self) {
+        fs::remove_file(self.repo.join(README)).expect("remove the readme");
     }
 
     /// The same search path with nothing on it called `cargo-semver-checks` —
@@ -892,5 +905,96 @@ fn the_release_this_branch_is_reads_past_a_baseline_it_cannot_build() {
         fixture.calls().contains("package --list"),
         "the packaged files release-plz versions from were never listed:\n{}",
         fixture.calls()
+    );
+}
+
+/// What the baseline's fetch said lands on the run that failed, and not on the
+/// one that read past it: a release nothing is being claimed against succeeds,
+/// and cargo's account of a baseline it never needed is not that run's news.
+#[test]
+fn what_the_baselines_fetch_said_reaches_the_run_that_needed_it() {
+    const SAID: &str = "the stand-in could not resolve the baseline";
+    for (pending, needed) in [(A_COMPATIBLE_RELEASE, true), (A_BREAKING_RELEASE, false)] {
+        let fixture = Fixture::of(pending);
+        let output = fixture.run_with(
+            &fixture.baseline.clone(),
+            &[
+                ("BASELINE_FETCH_STATUS", "1"),
+                ("BASELINE_FETCH_SAID", SAID),
+                ("SEMVER_STATUS", COMPATIBLE),
+            ],
+        );
+
+        assert_eq!(
+            output.status.success(),
+            !needed,
+            "the run ended the wrong way for a release that {} the baseline:\n{}",
+            if needed { "needed" } else { "did not need" },
+            stderr(&output)
+        );
+        assert_eq!(
+            stderr(&output).contains(SAID),
+            needed,
+            "what cargo said about the baseline landed on the wrong run:\n{}",
+            stderr(&output)
+        );
+    }
+}
+
+/// A directory with a manifest but no repository behind it cannot be shown to be
+/// the release it is passed as, so it is a usage error rather than a baseline
+/// taken on trust.
+#[test]
+fn a_baseline_directory_that_is_no_repository_is_a_usage_error() {
+    let fixture = Fixture::new();
+    let loose = fixture.dir.path().join("loose-checkout");
+    fs::create_dir_all(&loose).expect("create the directory");
+    fs::write(loose.join("Cargo.toml"), FIXTURE_MANIFEST).expect("write a manifest");
+
+    let output = fixture.run_arguments(
+        &[loose.to_str().expect("utf-8 path"), BASELINE_REF],
+        &[("SEMVER_STATUS", COMPATIBLE)],
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a directory that is no checkout was read as one:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("not a git checkout"),
+        "the failure does not say what is wrong with it:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        fixture.calls().is_empty(),
+        "a surface was read against a directory that is no release"
+    );
+}
+
+/// Packaged files that cannot be listed fail every release: which commits
+/// release-plz versions from is then unknown, and an unknown release is not one
+/// to read past.
+#[test]
+fn packaged_files_that_cannot_be_listed_fail_even_a_breaking_release() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    fixture.forget_the_readme();
+    let output = fixture.run(NO_VERDICT);
+
+    assert!(
+        !output.status.success(),
+        "a release went ahead without knowing which commits it is made of:\n{}",
+        stdout(&output)
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("::error::") && stderr.contains("ACTION:"),
+        "the failure does not say the packaged files could not be listed, or what \
+         to do about it:\n{stderr}"
+    );
+    assert!(
+        !fixture.calls().contains("semver-checks"),
+        "a surface was read for a release whose commits were never established"
     );
 }

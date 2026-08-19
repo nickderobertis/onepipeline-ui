@@ -11,7 +11,7 @@
 # nothing. A release then ships a breaking change as a compatible one on the
 # strength of a check nobody ran.
 #
-# Three things follow, and this script is all three:
+# Four things follow, and this script is all four:
 #
 #   * Fetch what each side's lockfile pins and resolve offline, so the comparison
 #     is the tag's own dependencies rather than today's registry — and so no
@@ -136,21 +136,26 @@ fi
 # taken again. That is the shape this branch exists for, and it is the *only* one
 # it lets through.
 reading_not_taken() {
-  local what="$1" action="$2"
+  local what="$1" action="$2" evidence="${3:-}"
   if [ -n "$read_past" ]; then
     echo "::warning::$what — read past: $read_past. Nothing is required of this release; to take the reading anyway, $action" >&2
     exit 0
   fi
+  [ -z "$evidence" ] || echo "$evidence" >&2
   echo "::error::$what" >&2
   echo "ACTION: $action" >&2
   exit 1
 }
 
-# The baseline's own, because the resolve below can reach neither side's.
-if ! cargo fetch --locked --quiet --manifest-path "$baseline/Cargo.toml"; then
+# The baseline's own, because the resolve below can reach neither side's. Held
+# rather than printed as it happens: a run that reads past this one succeeds, and
+# what cargo said about a baseline nothing is being released against is not that
+# run's news. The failing run prints it, because there it is the whole of it.
+if ! baseline_fetch="$(cargo fetch --locked --quiet --manifest-path "$baseline/Cargo.toml" 2>&1)"; then
   reading_not_taken \
     "the baseline at $baseline has dependencies that no longer resolve" \
-    "run 'cargo fetch --locked' in that checkout and fix what it reports — until it resolves, that release has no surface to read"
+    "run 'cargo fetch --locked' in that checkout and fix what it reports — until it resolves, that release has no surface to read" \
+    "$baseline_fetch"
 fi
 
 set +e
