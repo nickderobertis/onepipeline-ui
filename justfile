@@ -59,6 +59,15 @@ _crate-bootstrap:
 # The sibling CLI, at the exact version the lock pins its library to. Unlike the
 # test runners above this *is* a rule: it produces the telemetry document this
 # server serves, and a different version of it is a different document.
+#
+# It is `bootstrap`'s, but not only `bootstrap`'s. `.tools/` is the one thing the
+# gate needs that lives inside the clone rather than in a user-wide cache, so a
+# tree nobody bootstrapped by hand is a tree where every journey that starts the
+# read API fails on a missing binary — which is what a publication clone is. The
+# `onepipeline-ui:ensure-sibling` Nx target runs this recipe, and both suites that
+# start that server depend on it (`onepipeline-ui:test` and `dag-ui:test`), so the
+# tier that needs it provisions it. Nx runs the one task once however many
+# dependents ask, which is also what keeps two of them out of `.tools` at once.
 _ensure-sibling:
     @[ "$({{ONEPIPELINE_UI_ONEPIPELINE_BIN}} --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
       || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
@@ -95,7 +104,7 @@ check-affected:
 # OS. Naming that subset once is what keeps CI from re-listing tiers inline and
 # drifting away from this file.
 # The gate's platform-sensitive tiers, without the Linux-only coverage floor.
-check-cross: fmt-check lint test-quick
+check-cross: fmt-check lint _ensure-sibling test-quick
     @echo "check-cross: ok"
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier

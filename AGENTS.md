@@ -80,6 +80,14 @@ release from `onepipeline::VERSION`, so a host pinning the engine that writes a
 run store and this reader of it separately can *prove* the two match rather than
 assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
 
+**The tier that needs that CLI provisions it; `bootstrap` is not the only path to
+it.** Everything else a tier needs lands in a user-wide cache that outlives any
+one clone, so `.tools/` is the one thing a fresh clone lacks — and a fresh clone
+is where the gate is asked to rule, because `onevcs publish-branch` cuts one.
+A new project whose tests start the read API joins that dependency. Reaching the
+recipe from more places must never soften it: falling back to a build on PATH is
+the failure the pin exists to prevent.
+
 **`oneagentgraph` is not pinned here: the SDK's requirement decides it and the
 lock follows.** Cargo unifies one version of it across this crate and
 `onepipeline`, and that library has shipped a breaking field in a *patch*
