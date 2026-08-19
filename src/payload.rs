@@ -2146,65 +2146,18 @@ fn artifact_bytes(
 /// The oneharness conversation one `oneharness_session` artifact names, rendered
 /// as the reader reads it.
 ///
-/// The bytes stay where oneharness wrote them. `oneagentgraph` publishes a
-/// *pointer* — the store, the project inside it, the session file, and the
-/// history id of the record within that file — and nothing copies the session
-/// into the run, so this is the one artifact resolved outside the run directory
-/// entirely. The three path fields are the producer's own and are taken as
-/// three, never as one path, and each is checked before it is used: the two that
-/// name a directory and a file as a [`PathSegment`], so a record naming a
-/// traversal, a separator or an absolute path resolves to nothing rather than to
-/// a file on this host, and the store itself as a [`NamedStore`]. A store the
-/// record does not name at all falls back to [`history::resolve_dir`]'s default,
-/// which is the same one every oneharness process here resolves — this crate
-/// takes no flag and no config key of its own for it, because a second source
-/// for that path is how a reader and a writer come to disagree about where the
-/// transcripts are.
+/// The one artifact resolved outside the run directory: `oneagentgraph` publishes
+/// a pointer and nothing is copied. `src/AGENTS.md` holds why the record alone
+/// names the store, why this reads without locking, and why every component is
+/// checked; [`Confined`] holds what each outcome of the check means.
 ///
-/// **Those checks are on how a record spelled a path, and the file is opened on
-/// where the path lands.** Both fields name components of somebody else's
-/// directory, and a bare name that climbs nowhere still reaches anywhere if the
-/// component it names is a symlink — the store's project layer and the session
-/// file inside it are both written by processes this one does not run. So the
-/// resolved path is confined against a [`StoreRoot`], which exists only once the
-/// store itself has been canonicalized, and only [`Confined::Under`] is opened:
-/// a session that lands outside the store the record named is refused with
-/// nothing said on the wire about where it went, and is the one case said to the
-/// operator's log, because a pointer that escapes is a fact about the host
-/// rather than about this request. A path that resolves nowhere at all is
-/// [`Confined::Missing`] and is *not* that: a transcript rotated away between
-/// being listed and being read is an artifact with no bytes, which the reader
-/// has always answered as a plain `404`, and reporting it as a refusal would
-/// bury the ones that are.
+/// **The one thing that must not be relaxed here:** those checks are on how a
+/// record *spelled* a path, and a bare name that climbs nowhere still lands
+/// anywhere if a component of it is a symlink, so the resolved path is proved
+/// under a [`StoreRoot`] before it is opened.
 ///
-/// Confining resolves the path once and then opens what it resolved to, rather
-/// than re-walking the name — the check and the open therefore agree about every
-/// component but the last instant, which is as close as a portable `open` gets.
-///
-/// **What it serves is `oneharness-core`'s own display record, not the file.**
-/// [`history::read_session_display`] parses each line of the session into that
-/// library's `HistoryRecord` and hands back what it made of them, so the
-/// projection onto what an invocation may be *shown* as is the producing
-/// library's and is made before this crate sees it: that record carries the
-/// prompt, the final text, the timings and the token usage, and carries no
-/// `stdout`, no `stderr`, no command line and no environment — the run result
-/// behind it has all four and none of them survive into the record. The single
-/// place it quotes the process's own bytes is a failed run's `error`, which that
-/// library trims and bounds itself. So there is no narrower projection for this
-/// crate to make: a subset chosen here would be this reader deciding what a
-/// transcript may say, which is the producer's call, and `docs/contract.md`
-/// names that record — pretty-printed, bounded exactly as a log is — as what
-/// this artifact *is*. What bounds the surface is which record, not which of its
-/// fields: one a run in the served root recorded, in the store that record
-/// named. The store's path is used to open the file and is never served, in the
-/// answer or in a refusal.
-///
-/// It reads and never writes. [`history::find_session_path`] and
-/// [`history::read_session_display`] open files; `find_record_by_id` beside them
-/// reconciles the store's index under an exclusive `flock` and rewrites it,
-/// which would put this read surface in the way of the single writer the engine
-/// runs — so the id is matched against the records the session file holds
-/// instead, here, where no lock is involved.
+/// What is served is [`history::read_session_display`]'s record rather than the
+/// file's bytes, which is what `docs/contract.md` names this artifact as.
 // llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes recorded, and the store, project and session are read off that envelope — and what the record names is confined below before it is opened.
 fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);

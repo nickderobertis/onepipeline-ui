@@ -89,50 +89,33 @@ export const MISSING_ARTIFACT = "artifact-swept-gate";
 /** The pre-push hook's own log, and the log the host's failing check stored. */
 export const HOOK_ARTIFACT = "artifact-remote-open-hook";
 export const CHECK_ARTIFACT = "artifact-published-smoke";
-/**
- * The report the foundation node's member settled with.
- *
- * `oneagentgraph` records exactly one artifact on a `member-settled`, named for
- * its own stream — and the id is all it names: the file the run keeps is derived
- * from the settlement's stream *and* its sequence, which is why the reader
- * derives it from the envelope rather than from this.
- */
+/** The report the foundation node's member settled with. */
 export const REPORT_ARTIFACT = "report-a-recording-host-dag-ui-live";
 /**
- * A settlement whose report this run kept no copy of.
+ * A settlement naming a report this run kept no copy of.
  *
- * `retain` refuses a report that is a symlink, is not a plain file, is misnamed,
- * or is past its size bound, and it refuses it as the settlement is ingested — so
- * the record still names an artifact and there is no file behind it. Named for
- * the member rather than for a stream, because this fixture writes one merged
- * stream where a real run has one per producing process.
+ * Named for the member rather than for a stream, because this fixture writes one
+ * merged stream where a real run has one per producing process.
  */
 export const UNRETAINED_REPORT = "report-missing-artifact-worker";
 
 /**
- * The oneharness invocation the dashboard node's worker made, and the record it
- * left in oneharness's own history store.
+ * The oneharness invocation the dashboard node's worker made.
  *
- * The one artifact whose bytes are *not* under the run: `oneagentgraph` publishes
- * a pointer at the store and nothing is copied, so serving it is the read API
- * opening a file this fixture wrote somewhere else entirely. The id is the
+ * Its bytes are the one thing not under the run (`src/AGENTS.md`), so this
+ * fixture writes them somewhere else entirely and points at that. The id is the
  * history record's own, which is what the pointer names it by.
  */
 export const HARNESS_SESSION_ARTIFACT = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
 /**
- * An invocation whose record the store no longer holds.
- *
- * The pointer names the store the fixture wrote and a history id no record in it
- * carries — a conversation swept out from under the run, which is the ordinary
- * end of a store this stack neither owns nor retains.
+ * An invocation the store no longer holds: the pointer names the store this
+ * fixture wrote and a history id no record in it carries.
  */
 export const SWEPT_HARNESS_SESSION = "01a00d0f-c094-7660-b26c-000000000000";
 /**
- * Two artifact ids no route can be asked for.
- *
- * An artifact id is the producing library's own string and the envelope
- * constrains none of its characters, so one carrying a separator is a reference
- * a reader is still shown and a request nothing may be turned into.
+ * Two ids no route can be asked for. The envelope constrains none of an id's
+ * characters, so one carrying a separator is a reference a reader is still shown
+ * and a request nothing may be turned into.
  */
 export const UNASKABLE_REPORT = "report/local-direct/worker";
 export const UNASKABLE_HARNESS_SESSION = "01a00d0f/c094/7660/b26c/1";

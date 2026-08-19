@@ -33,15 +33,11 @@ use serde_json::json;
 /// session stem carries the writer's own clock and pid, and the project slug is
 /// its own sanitiser's answer.
 pub struct Recorded {
-    /// The record's id, which is also the artifact id the event carries.
+    /// Also the artifact id the event carries.
     pub history_id: String,
-    /// The store the writer wrote into.
     pub dir: PathBuf,
-    /// The project directory inside it, by name.
     pub project: String,
-    /// The session file inside that, by stem.
     pub session: String,
-    /// The session file itself.
     pub path: PathBuf,
 }
 

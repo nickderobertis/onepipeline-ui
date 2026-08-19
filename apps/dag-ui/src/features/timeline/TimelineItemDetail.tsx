@@ -167,11 +167,10 @@ function Body({
         row={row}
       />
     );
-  // A settled member's report, which the run keeps a copy of and serves under the
-  // opaque id the settlement recorded. Only where that id is one this API can be
-  // asked for: a reference the server cannot serve is still a reference, and the
-  // recorded rendering below states it rather than reporting a read that never
-  // happened.
+  // Both branches below are guarded on the id being one this API can be asked
+  // for: a reference the server cannot serve is still a reference, and the
+  // recorded rendering at the end states it rather than reporting a read that
+  // never happened.
   if (
     reference?.kind === "worker_report" &&
     servableArtifact(reference.value) !== undefined
@@ -185,11 +184,6 @@ function Body({
         runId={runId}
       />
     );
-  // The oneharness conversation behind a member's turns: the surface an operator
-  // reads to see what an agent actually did. Its bytes are not the run's — they
-  // stay in oneharness's own history store and the API reaches them through the
-  // record's pointer — so this is asked for exactly like the report above, by the
-  // opaque id, and no path on the producing host reaches the browser either way.
   if (
     reference?.kind === "oneharness_session" &&
     servableArtifact(reference.value) !== undefined
@@ -363,14 +357,8 @@ function Verification({
 }
 
 /**
- * The report a settled member left behind, and the stamps the timeline recorded
- * beside it.
- *
- * This is what a reader opens a settlement for: the judge's ruling against each
+ * The report a settled member left behind: the judge's ruling against each
  * acceptance criterion, the follow-ups the worker surfaced, and why it stopped.
- * The bytes are the copy the *run* kept — asked for by the opaque artifact id the
- * settlement recorded, so no path on the producing host ever reaches the browser
- * — and the row's own record stays beneath it rather than being replaced by it.
  */
 function SettledReport({
   artifactId,
@@ -402,14 +390,9 @@ function SettledReport({
 }
 
 /**
- * The conversation one oneharness invocation had, and the record that points at
- * it.
- *
- * What a reader opens this for is what the agent actually did — the prompt it
- * ran, the text it finished on, what the invocation cost — which is the reading
- * that raw event kinds are a poor substitute for. The bytes are served by the
- * same route the report above is: the id the record named, and never a store
- * path, a project or a file name, none of which are the browser's business.
+ * The conversation one oneharness invocation had: the prompt it ran, the text it
+ * finished on, what it cost — what the agent actually did, which raw event kinds
+ * are a poor substitute for.
  */
 function HarnessSession({
   artifactId,
@@ -442,6 +425,11 @@ function HarnessSession({
 
 /**
  * One recorded artifact's bytes, read through the API's artifact route.
+ *
+ * Every caller asks by the opaque id its record stored and never by a path, so no
+ * location on the producing host reaches the browser — including a oneharness
+ * conversation, whose bytes are the one thing served from outside the runs root
+ * (`src/AGENTS.md`).
  *
  * The route serves the *end* of a file rather than all of it, and this shows the
  * end of that again until the reader asks for the rest — a stored log or report

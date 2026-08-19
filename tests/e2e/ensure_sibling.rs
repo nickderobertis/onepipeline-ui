@@ -35,7 +35,6 @@ use crate::stub_bin;
 /// journeys drive a real server over a fixture runs root.
 const SUITES_THAT_START_THE_READ_API: [&str; 2] = ["onepipeline-ui:test", "dag-ui:test"];
 
-/// The task those two depend on.
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 
 fn repo_root() -> PathBuf {
