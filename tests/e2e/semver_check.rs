@@ -998,3 +998,37 @@ fn packaged_files_that_cannot_be_listed_fail_even_a_breaking_release() {
         "a surface was read for a release whose commits were never established"
     );
 }
+
+/// The baseline is read as the release its own directory is a checkout of, even
+/// when the environment names a repository — which is how git itself runs a hook,
+/// and how anything driven from one reaches this script.
+///
+/// `GIT_DIR` here names the very repository the release is being made in, whose
+/// HEAD is the pending commit rather than the tag. Answered from the environment,
+/// the baseline would look like a checkout of something it is not.
+#[test]
+fn an_ambient_repository_does_not_answer_for_which_release_the_baseline_is() {
+    let fixture = Fixture::new();
+    let output = fixture.run_with(
+        &fixture.baseline.clone(),
+        &[
+            ("SEMVER_STATUS", COMPATIBLE),
+            (
+                "GIT_DIR",
+                fixture.repo.join(".git").to_str().expect("utf-8 path"),
+            ),
+            ("GIT_WORK_TREE", fixture.repo.to_str().expect("utf-8 path")),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "the environment answered for which release the baseline is:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stdout(&output).contains("compatible"),
+        "the reading was never reached:\n{}",
+        stdout(&output)
+    );
+}
