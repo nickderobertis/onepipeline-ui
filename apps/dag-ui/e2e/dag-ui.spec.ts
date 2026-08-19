@@ -764,6 +764,58 @@ async function glyphName(drawn: Locator): Promise<string> {
   return named ?? "";
 }
 
+/**
+ * The glyph a reader should find on a record, by the name its marker carries.
+ *
+ * Written out rather than derived from the mapping under test, and that is the whole
+ * point of it: an expectation computed from that table would agree with any
+ * permutation of it — every category still drawn apart from the others, every kind
+ * still drawn consistently, and every one of them wrong. So this is a second,
+ * independent statement of what the reader is owed, and the two have to agree.
+ *
+ * A record is keyed by the words its marker names it with rather than by the wire
+ * kind, because that is how a reader picks it out: a redirection and a human
+ * hand-over are both drawn under words of their own.
+ */
+const EXPECTED_GLYPH: Readonly<Record<string, string>> = {
+  "node-dispatched": "lucide-milestone", // lifecycle
+  "node-settled": "lucide-milestone",
+  "session-opened": "lucide-messages-square", // session
+  "turn-started": "lucide-messages-square",
+  push: "lucide-git-branch", // repository
+  "change-opened": "lucide-git-pull-request", // publication
+  "change-merged": "lucide-git-pull-request",
+  "hand-over": "lucide-user-round-check", // human
+  "gate-verdict": "lucide-shield-check", // verification
+  "lock-wait": "lucide-hourglass", // contention
+  "Redirected into the running turn": "lucide-rotate-ccw", // recovery
+  "member-died": "lucide-triangle-alert", // failure
+  "decision-pending": "lucide-clipboard-list", // planning
+};
+
+/**
+ * The glyph a kind no rule and no exception names is drawn with.
+ *
+ * The default is a category like any other — the eleventh, with a glyph of its own —
+ * and that is why it is named here rather than left to fall out of the eleven being
+ * different from each other. What it must never be drawn as is one of the *other
+ * ten*: swap its icon with a neighbour's and all eleven are still drawn apart, while
+ * an unrecognized record stops saying this build has no reading for it and starts
+ * claiming to be a session, or a failure, or whatever it borrowed.
+ */
+const DEFAULT_GLYPH = "lucide-circle";
+
+/** What a marker named `named` should be carrying, the fixture's unknown included. */
+function expectedGlyph(named: string): string {
+  const glyph =
+    named === fixture().unfiled_kind ? DEFAULT_GLYPH : EXPECTED_GLYPH[named];
+  expect(
+    glyph,
+    `no glyph is stated for a record named "${named}"`,
+  ).toBeDefined();
+  return glyph ?? "";
+}
+
 test("draws a node's journal records as the categories they belong to", async ({
   page,
 }) => {
@@ -794,10 +846,21 @@ test("draws a node's journal records as the categories they belong to", async ({
     drawn.set(named, await glyphName(marker(named)));
   }
 
-  // Records read the same way are drawn the same way: two agent turns and a
-  // workspace session are all one unit of work opened and closed, a change opened
-  // and merged are two moments of one publication, and the node's own dispatch and
-  // settlement are both the graph moving.
+  // Each of them drawn as the glyph that record is owed — including the one no rule
+  // names, which is owed the default's own and not whichever neighbour a permuted
+  // mapping would have handed it.
+  expect(Object.fromEntries(drawn)).toEqual(
+    Object.fromEntries(
+      [...drawn.keys()].map((named) => [named, expectedGlyph(named)]),
+    ),
+  );
+  // And read the same way, drawn the same way: two agent turns and a workspace
+  // session are all one unit of work opened and closed, a change opened and merged
+  // are two moments of one publication, and the node's own dispatch and settlement
+  // are both the graph moving. Stated beside the identities above rather than
+  // derived from them, because this is the claim a reader actually makes of the
+  // plot — that these belong together — and it would survive the pair moving to
+  // some other glyph together.
   expect(drawn.get("session-opened")).toBe(drawn.get("turn-started"));
   expect(drawn.get("change-opened")).toBe(drawn.get("change-merged"));
   expect(drawn.get("node-dispatched")).toBe(drawn.get("node-settled"));
@@ -864,9 +927,14 @@ test("draws every category a record can be as a glyph of its own", async ({
     await expect(found).toBeVisible();
     drawn.push(await glyphName(found));
   }
-  // Every one of them a different drawing: a plot where two categories share a glyph
-  // is a plot with one fewer category in it, and a reader scanning it cannot tell
-  // which of the two they are looking at.
+  // Every category drawn as the glyph it is owed. Named one by one rather than only
+  // held apart from each other: eleven categories can be permuted onto each other's
+  // icons and stay eleven distinct drawings, and the reader would be told the wrong
+  // thing about every record on every plot.
+  expect(drawn).toEqual(records.map(([, named]) => expectedGlyph(named)));
+  // And a different drawing each: a plot where two categories share a glyph is a
+  // plot with one fewer category in it, and a reader scanning it cannot tell which
+  // of the two they are looking at.
   expect(new Set(drawn).size).toBe(records.length);
 });
 
