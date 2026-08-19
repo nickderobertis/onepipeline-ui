@@ -269,24 +269,22 @@ fn provisioning_that_fails_says_which_release_could_not_be_installed() {
 /// clone with the configuration still looking correct.
 #[test]
 fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
-    let dir = TempDir::new().expect("temp dir");
-    let graph = dir.path().join("tasks.json");
-
-    // Through the workspace's own Nx entry point, spawned the way the justfile
-    // and every other suite here spawn a script: `bash`, because a `.sh` file is
-    // not a program on every platform, and the path relative to the root it is
-    // run from, because the script locates the workspace by taking `dirname` of
-    // its own `$BASH_SOURCE` — and `dirname` of a Windows absolute path, whose
-    // separators are backslashes, is `.`. Not `just nx`, because a recipe's
-    // arguments are pasted into its shell line, which would spend the separators
-    // in the graph path below as escapes before Nx ever saw them.
-    let output = Command::new("bash")
-        .arg("scripts/nx.sh")
-        .args(["run-many", "-t", "test"])
-        .arg(format!("--graph={}", graph.display()))
+    // Through `just nx`, this workspace's one way in to Nx, rather than either
+    // hand-rolled equivalent: `scripts/nx.sh` is a `.sh` file, which is not a
+    // program on Windows, and a bare `bash` is not the shell there either — the
+    // system directory outranks PATH, and the `bash` in it is a Windows
+    // Subsystem for Linux launcher with nothing installed behind it.
+    //
+    // Answered onto stdout rather than into a file the journey names: a recipe
+    // pastes its arguments into a shell line, and a Windows temporary directory
+    // is separated by backslashes, which that line would spend as escapes — so
+    // Nx would write the graph somewhere nobody is reading and exit happily.
+    // `--graph=stdout` is the same document with no path to lose.
+    let output = Command::new("just")
+        .args(["nx", "run-many", "-t", "test", "--graph=stdout"])
         .current_dir(repo_root())
         .output()
-        .expect("bash is on PATH");
+        .expect("just is on PATH");
     assert!(
         output.status.success(),
         "Nx could not build the task graph for `test` ({}):\n{}{}",
@@ -295,7 +293,7 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
         String::from_utf8_lossy(&output.stdout)
     );
 
-    let dependencies = task_dependencies(&graph);
+    let dependencies = task_dependencies(&output.stdout);
     for suite in SUITES_THAT_START_THE_READ_API {
         assert!(
             dependencies.contains_key(suite),
@@ -319,11 +317,10 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
     );
 }
 
-/// The graph's `task -> its dependencies` edges, as Nx wrote them.
-fn task_dependencies(graph: &Path) -> BTreeMap<String, Vec<String>> {
+/// The graph's `task -> its dependencies` edges, as Nx answered them.
+fn task_dependencies(graph: &[u8]) -> BTreeMap<String, Vec<String>> {
     let document: Value =
-        serde_json::from_str(&fs::read_to_string(graph).expect("Nx wrote the graph"))
-            .expect("the graph is JSON");
+        serde_json::from_slice(graph).expect("Nx answered with the graph as JSON");
     document["tasks"]["dependencies"]
         .as_object()
         .expect("the graph names each task's dependencies")
