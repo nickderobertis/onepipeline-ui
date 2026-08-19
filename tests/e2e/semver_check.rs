@@ -223,6 +223,17 @@ impl Fixture {
         command.output().expect("just is on PATH")
     }
 
+    /// Leave the history with no commit on HEAD, so the range between the tag and
+    /// it cannot be read at all — the shape a checkout given too little history
+    /// arrives in.
+    fn forget_head(&self) {
+        let repo = self.git_dir.parent().expect("the history repository");
+        git(
+            repo,
+            &["checkout", "--quiet", "--orphan", "nothing-committed"],
+        );
+    }
+
     /// The same search path with nothing on it called `cargo-semver-checks` —
     /// the stand-in taken back out, and any directory a machine running the suite
     /// really installed the tool into dropped, so the probe is answered the way a
@@ -665,5 +676,30 @@ fn a_reading_tool_that_is_not_installed_fails_even_a_breaking_release() {
     assert!(
         fixture.calls().is_empty(),
         "the script fetched dependencies for a reading it could not take"
+    );
+}
+
+/// A range that cannot be read fails every release, breaking or not: what the
+/// commits announce is unknown, and an unknown claim is not one to read past.
+#[test]
+fn a_history_the_range_cannot_be_read_from_fails_even_a_breaking_release() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    fixture.forget_head();
+    let output = fixture.run(NO_VERDICT);
+
+    assert!(
+        !output.status.success(),
+        "a release went ahead on a claim nothing could be read from:\n{}",
+        stdout(&output)
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("::error::") && stderr.contains("ACTION:"),
+        "the failure does not say the range could not be read, or what to do about \
+         it:\n{stderr}"
+    );
+    assert!(
+        fixture.calls().is_empty(),
+        "a surface was read for a release whose claim was never established"
     );
 }

@@ -77,8 +77,13 @@ command -v cargo-semver-checks >/dev/null 2>&1 || {
 # there.
 #
 # llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] release-plz publishes no parser to derive this from, so it is Conventional Commits v1.0.0 read a second time — only ever to relax, and bounded both ways: reading fewer breaks leaves the release blocked exactly as it is without this, and reading more would need release-plz to stop honouring the specification.
-subjects="$(git log --format=%s "refs/tags/${baseline_ref}..HEAD")"
-bodies="$(git log --format=%b "refs/tags/${baseline_ref}..HEAD")"
+unreadable_history() {
+  echo "::error::the commits between $baseline_ref and HEAD could not be read, so what the pending release announces is unknown" >&2
+  echo "ACTION: give this checkout the history the range needs ('git fetch --unshallow --tags', and a HEAD with a commit on it), then run 'just semver-check $baseline $baseline_ref' again" >&2
+  exit 1
+}
+subjects="$(git log --format=%s "refs/tags/${baseline_ref}..HEAD")" || unreadable_history
+bodies="$(git log --format=%b "refs/tags/${baseline_ref}..HEAD")" || unreadable_history
 if grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
   || grep -Eq '^BREAKING[ -]CHANGE:' <<<"$bodies"; then
   announces_a_break=yes
