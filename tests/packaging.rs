@@ -437,17 +437,29 @@ fn the_release_workflow_provisions_the_semver_check_it_enables() {
 /// The release takes the reading, and release-plz versions from the same resolve.
 ///
 /// `scripts/semver-check.sh` is the reading itself and `tests/e2e/semver_check.rs`
-/// drives it; what is left to hold here is that the release still runs it, and
-/// that release-plz's own check resolves off what it fetched rather than today's
-/// registry — which is the resolve that fails and is reported as compatible.
+/// drives it; what is left to hold here is that the release still runs it, over
+/// both the baseline the worktree step made *and* the tag it made it of — the tag
+/// is what says whether the pending release claims compatibility, and so whether
+/// a baseline nobody can build stops it — and that release-plz's own check
+/// resolves off what it fetched rather than today's registry, which is the resolve
+/// that fails and is reported as compatible.
 #[test]
 fn the_release_workflow_reads_the_surface_before_release_plz_versions_from_it() {
     let workflow = read(".github/workflows/release-plz.yml");
-    assert!(
-        workflow.contains("just semver-check"),
-        "no step reads the public surface, leaving release-plz's silent \
-         \"API compatible\" as the only reading a release gets"
-    );
+    let reading = workflow
+        .lines()
+        .find(|line| line.trim_start().starts_with("run: just semver-check"))
+        .expect(
+            "no step reads the public surface, leaving release-plz's silent \
+             \"API compatible\" as the only reading a release gets",
+        );
+    for output in ["steps.baseline.outputs.root", "steps.baseline.outputs.ref"] {
+        assert!(
+            reading.contains(output),
+            "the reading is not given `{output}`, so it reads a surface without \
+             the release it is being compared to: {reading}"
+        );
+    }
     assert!(
         workflow.contains("CARGO_NET_OFFLINE"),
         "release-plz resolves its own check against today's registry, so the bump \

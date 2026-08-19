@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Read this crate's public surface against the previous release, and answer only
-# when a reading actually happened.
+# when a reading actually happened — or when nothing is being claimed compatible.
 #
 # The failure this exists for: cargo-semver-checks builds both surfaces through a
 # generated manifest of its own, which reads no `Cargo.lock` on either side. So a
@@ -11,38 +11,83 @@
 # nothing. A release then ships a breaking change as a compatible one on the
 # strength of a check nobody ran.
 #
-# Two things follow, and this script is both:
+# Three things follow, and this script is all three:
 #
 #   * Fetch what each side's lockfile pins and resolve offline, so the comparison
 #     is the tag's own dependencies rather than today's registry — and so no
 #     third-party publish can decide the verdict.
 #   * Run the check for its exit code before release-plz does. 100 is a verdict
 #     (the surface broke, and release-plz raises the bump for it); 0 is a verdict;
-#     anything else is a check that did not happen, and fails the release rather
-#     than passing as compatible.
+#     anything else is a check that did not happen.
+#   * Fail on a check that did not happen *only while the pending release claims
+#     compatibility*. See `unreadable_baseline` below for why, and for the release
+#     that stood still until it did.
 #
-# Usage: bash scripts/semver-check.sh <baseline-root>
+# Usage: bash scripts/semver-check.sh <baseline-root> <baseline-ref>
 #
 # <baseline-root> is a checkout of the previous release — the workflow hands over
-# the worktree it made of the tag. `cargo-semver-checks` must be on PATH.
+# the worktree it made of the tag — and <baseline-ref> is the tag it is a checkout
+# of, which is what says which commits the pending release is made of.
+# `cargo-semver-checks` must be on PATH.
 set -euo pipefail
 
 usage() {
   echo "semver-check: $1" >&2
-  echo "usage: bash scripts/semver-check.sh <baseline-root>" >&2
-  echo "  <baseline-root> is a checkout of the previous release, and the only argument" >&2
+  echo "usage: bash scripts/semver-check.sh <baseline-root> <baseline-ref>" >&2
+  echo "  <baseline-root> is a checkout of the previous release, and <baseline-ref> the tag it is of" >&2
   exit 2
 }
 
-[ "$#" -eq 1 ] || usage "expected exactly one argument, got $#"
+[ "$#" -eq 2 ] || usage "expected exactly two arguments, got $#"
 baseline="$1"
+baseline_ref="$2"
 [ -f "$baseline/Cargo.toml" ] || usage "$baseline has no Cargo.toml, so it is not a checkout"
+git rev-parse --verify --quiet "${baseline_ref}^{commit}" >/dev/null \
+  || usage "$baseline_ref names no commit here, so what the pending release claims cannot be read"
+
+# What the pending release claims, read off the same conventional commits
+# release-plz versions from: a `!` on the type, or a `BREAKING CHANGE:` footer, is
+# a release that claims compatibility with nothing. Subjects and bodies are read
+# apart so a body quoting a subject cannot answer for one.
+subjects="$(git log --format=%s "${baseline_ref}..HEAD")"
+bodies="$(git log --format=%b "${baseline_ref}..HEAD")"
+if grep -Eq '^[A-Za-z]+(\([^)]*\))?!:' <<<"$subjects" \
+  || grep -Eq '^BREAKING[ -]CHANGE:' <<<"$bodies"; then
+  claims_compatibility=no
+else
+  claims_compatibility=yes
+fi
+
+# What to do about a baseline this repository cannot read.
+#
+# The reading catches an *accidental* incompatibility: a surface that broke inside
+# a release the commit types version as compatible. It therefore has something to
+# protect exactly while a release claims compatibility. A breaking release claims
+# none — cargo-semver-checks could only agree with a bump already taken, and a
+# verdict it never returned changes no version — so refusing that release buys
+# nothing and costs everything: v0.4.0's own `onepipeline` requires
+# `oneagentgraph ^0.2.12`, 0.2.13 added a required field to a struct it builds, and
+# the baseline has not compiled since. No requirement writable here reaches a
+# dependency of a dependency of a published tag, and the tag is not ours to edit,
+# so a breaking release sat unreleasable behind a reading that could never be
+# taken again. That is the shape this branch exists for, and it is the *only* one
+# it lets through.
+unreadable_baseline() {
+  local what="$1" action="$2"
+  if [ "$claims_compatibility" = no ]; then
+    echo "::warning::$what — read past: the commits since $baseline_ref break the API, so this release claims compatibility with nothing and the reading could only agree with a bump already taken" >&2
+    exit 0
+  fi
+  echo "::error::$what" >&2
+  echo "ACTION: $action" >&2
+  exit 1
+}
 
 # Both sides, because the resolve below can reach neither.
 if ! cargo fetch --locked --quiet --manifest-path "$baseline/Cargo.toml"; then
-  echo "::error::the baseline at $baseline has dependencies that no longer resolve" >&2
-  echo "ACTION: run 'cargo fetch --locked' in that checkout and fix what it reports — until it resolves, that release has no surface to read" >&2
-  exit 1
+  unreadable_baseline \
+    "the baseline at $baseline has dependencies that no longer resolve" \
+    "run 'cargo fetch --locked' in that checkout and fix what it reports — until it resolves, that release has no surface to read"
 fi
 if ! cargo fetch --locked --quiet; then
   echo "::error::this tree's locked dependencies could not be fetched" >&2
@@ -64,8 +109,8 @@ case "$status" in
     echo "semver-check: the public surface broke; release-plz raises the bump for it"
     ;;
   *)
-    echo "::error::the reading exited $status without a verdict; the release would otherwise be versioned as API compatible with nothing read" >&2
-    echo "ACTION: check that cargo-semver-checks is installed ('cargo install cargo-semver-checks --locked'), then read the failure above and take the reading again with 'just semver-check $baseline'. A baseline whose requirements no longer resolve to something that compiles is fixed by a new release carrying tighter ones, never by editing that tag" >&2
-    exit 1
+    unreadable_baseline \
+      "the reading exited $status without a verdict; the release would otherwise be versioned as API compatible with nothing read" \
+      "check that cargo-semver-checks is installed ('cargo install cargo-semver-checks --locked'), then read the failure above and take the reading again with 'just semver-check $baseline $baseline_ref'. A baseline whose *own* requirements no longer resolve to something that compiles is fixed by a new release carrying tighter ones; one whose transitive requirements drifted is reachable from no manifest here, and only a release that claims no compatibility — a breaking one — is let past it"
     ;;
 esac

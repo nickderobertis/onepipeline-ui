@@ -7,7 +7,10 @@
 //! cargo-semver-checks dies building v0.3.3 and release-plz reports that as "✓ API
 //! compatible changes" — so a breaking change would have been versioned as a
 //! compatible one on a reading nobody took. The journeys below are every answer
-//! the reading can come back with, and what the release does about each.
+//! the reading can come back with, and what the release does about each — which
+//! is decided by what the pending release claims: a baseline nobody can build
+//! stops a release claiming compatibility with it, and is read past by one
+//! claiming none.
 //!
 //! One thing is stood in for: `cargo` on PATH, because the real reading builds two
 //! rustdocs out of two dependency trees it downloads, which is neither offline nor
@@ -16,7 +19,7 @@
 //! here.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use tempfile::TempDir;
@@ -30,16 +33,64 @@ const COMPATIBLE: &str = "0";
 const BROKE: &str = "100";
 const NO_VERDICT: &str = "101";
 
+/// The tag the baseline is a checkout of, in the history each fixture builds.
+const BASELINE_REF: &str = "v-baseline";
+
+/// The subject of the one commit the pending release is made of, per claim it
+/// makes about compatibility. `feat!` and a `BREAKING CHANGE:` footer are the two
+/// ways a conventional commit says the surface broke, and release-plz reads both.
+const A_COMPATIBLE_RELEASE: &[&str] = &["fix: serve the empty timeline as an empty one"];
+const A_BREAKING_RELEASE: &[&str] = &["feat!: drop the round from every payload"];
+const A_BREAKING_RELEASE_BY_FOOTER: &[&str] = &[
+    "feat: drop the round from every payload",
+    "BREAKING CHANGE: a payload no longer carries a round",
+];
+
 struct Fixture {
     dir: TempDir,
     baseline: String,
     search_path: std::ffi::OsString,
+    git_dir: PathBuf,
+}
+
+/// Run `git` in `repo`, failing the test with what it said if it will not.
+fn git(repo: &Path, arguments: &[&str]) {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=semver-check suite",
+            "-c",
+            "user.email=suite@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(arguments)
+        .current_dir(repo)
+        .output()
+        .expect("git is on PATH");
+    assert!(
+        output.status.success(),
+        "git {arguments:?} failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 impl Fixture {
-    /// A baseline that looks like a checkout of the previous release — the
-    /// worktree of the tag the workflow hands over.
+    /// A pending release that claims compatibility with the baseline.
     fn new() -> Self {
+        Self::of(A_COMPATIBLE_RELEASE)
+    }
+
+    /// A baseline that looks like a checkout of the previous release — the
+    /// worktree of the tag the workflow hands over — beside a real repository
+    /// whose one commit since that tag is `pending`.
+    ///
+    /// The history is a real git repository with real commits, reached through
+    /// `GIT_DIR` rather than through the working directory: the recipe runs from
+    /// the justfile's own directory, so naming the repository is the only way a
+    /// case can decide what the pending release says. What the script runs, and
+    /// the range it reads, are git's own.
+    fn of(pending: &[&str]) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let baseline = dir.path().join("release-baseline");
         fs::create_dir_all(&baseline).expect("create the baseline");
@@ -49,6 +100,20 @@ impl Fixture {
         )
         .expect("write the baseline manifest");
 
+        let repo = dir.path().join("history");
+        fs::create_dir_all(&repo).expect("create the history");
+        git(&repo, &["init", "--quiet", "--initial-branch=main"]);
+        git(
+            &repo,
+            &["commit", "--allow-empty", "--quiet", "-m", "chore: release"],
+        );
+        git(&repo, &["tag", BASELINE_REF]);
+        let mut commit = vec!["commit", "--allow-empty", "--quiet"];
+        for message in pending {
+            commit.extend(["-m", message]);
+        }
+        git(&repo, &commit);
+
         // Records every call, and answers the reading with the status the case
         // under test is about.
         //
@@ -57,9 +122,9 @@ impl Fixture {
         // gate that is offline and deterministic cannot drive; the release
         // workflow runs the real one, and fails when it returns no verdict. The
         // script under test is the real script, run with the workflow's own
-        // argument, and standing in for the program on PATH is what makes the
-        // fetches and the offline resolve it asked for readable. This call is the
-        // whole of that substitution.
+        // arguments over a real git history, and standing in for the program on
+        // PATH is what makes the fetches and the offline resolve it asked for
+        // readable. This call is the whole of that substitution.
         let stub_dir = dir.path().join("stub-bin");
         let search_path = stub_bin::install(
             &stub_dir,
@@ -88,6 +153,7 @@ impl Fixture {
 
         Self {
             baseline: baseline.to_str().expect("utf-8 path").to_owned(),
+            git_dir: repo.join(".git"),
             dir,
             search_path,
         }
@@ -101,12 +167,18 @@ impl Fixture {
 
     /// The same, with `environment` deciding what the stand-in answers.
     fn run_with(&self, baseline: &str, environment: &[(&str, &str)]) -> Output {
+        self.run_arguments(&[baseline, BASELINE_REF], environment)
+    }
+
+    /// The same again, for a call whose arguments are the thing under test.
+    fn run_arguments(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
         let mut command = Command::new("just");
         command
             .arg("semver-check")
-            .arg(baseline)
+            .args(arguments)
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
             .env("PATH", &self.search_path)
+            .env("GIT_DIR", &self.git_dir)
             .env("CARGO_CALLS", self.dir.path().join("cargo-calls"));
         for (name, value) in environment {
             command.env(name, value);
@@ -188,10 +260,10 @@ fn a_broken_surface_is_handed_on_to_release_plz_rather_than_failing_the_run() {
     );
 }
 
-/// A reading that did not happen fails the release, because the alternative is
-/// release-plz calling it compatible.
+/// A reading that did not happen fails a release that claims compatibility,
+/// because the alternative is release-plz calling it compatible.
 #[test]
-fn a_reading_that_produced_no_verdict_fails_the_release() {
+fn a_reading_that_produced_no_verdict_fails_a_release_claiming_compatibility() {
     let fixture = Fixture::new();
     let output = fixture.run(NO_VERDICT);
 
@@ -208,14 +280,14 @@ fn a_reading_that_produced_no_verdict_fails_the_release() {
     );
 }
 
-/// Dependencies that no longer resolve stop the release and say which side could
-/// not be fetched.
+/// Dependencies that no longer resolve stop a release that claims compatibility,
+/// and say which side could not be fetched.
 ///
 /// This is the shape the whole arrangement exists for: it is exactly what an
 /// unfetched baseline does inside cargo-semver-checks, where it reads as a clean
 /// surface. Out here it is a failed release with somewhere to go.
 #[test]
-fn a_side_whose_dependencies_cannot_be_fetched_fails_the_release() {
+fn a_side_whose_dependencies_cannot_be_fetched_fails_a_release_claiming_compatibility() {
     for (side, variable, named) in [
         ("the baseline", "BASELINE_FETCH_STATUS", true),
         ("this tree", "TREE_FETCH_STATUS", false),
@@ -250,20 +322,29 @@ fn a_side_whose_dependencies_cannot_be_fetched_fails_the_release() {
     }
 }
 
-/// Any number of arguments but one is a usage error.
+/// Any number of arguments but two is a usage error.
 ///
-/// Driven as the script rather than as the recipe, because the recipe's parameter
-/// can only ever hand over one: this is the boundary for the caller the usage line
+/// Driven as the script rather than as the recipe, because the recipe's parameters
+/// can only ever hand over two: this is the boundary for the caller the usage line
 /// itself addresses, someone running it by hand.
 #[test]
-fn a_call_that_names_anything_but_one_baseline_is_a_usage_error() {
+fn a_call_that_names_anything_but_a_baseline_and_its_ref_is_a_usage_error() {
     let fixture = Fixture::new();
-    for arguments in [vec![], vec![fixture.baseline.clone(), "extra".to_owned()]] {
+    for arguments in [
+        vec![],
+        vec![fixture.baseline.clone()],
+        vec![
+            fixture.baseline.clone(),
+            BASELINE_REF.to_owned(),
+            "extra".to_owned(),
+        ],
+    ] {
         let output = Command::new("bash")
             .arg("scripts/semver-check.sh")
             .args(&arguments)
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
             .env("PATH", &fixture.search_path)
+            .env("GIT_DIR", &fixture.git_dir)
             .env("CARGO_CALLS", fixture.dir.path().join("cargo-calls"))
             .output()
             .expect("bash is on PATH");
@@ -320,5 +401,154 @@ fn a_baseline_that_is_not_a_checkout_is_a_usage_error() {
     assert!(
         fixture.calls().is_empty(),
         "the script read a surface against a baseline that does not exist"
+    );
+}
+
+/// A ref that names no commit is a usage error, for the same reason a baseline
+/// that is not a checkout is: the workflow interpolates it, and a tag it could
+/// not resolve would otherwise decide what the pending release claims by
+/// default — the answer that reads past an unbuildable baseline.
+#[test]
+fn a_ref_that_names_no_commit_is_a_usage_error() {
+    let fixture = Fixture::new();
+    // Interpolated by the workflow just as the baseline path is, so it has to
+    // reach the script as one argument rather than as more shell.
+    let output = fixture.run_arguments(
+        &[
+            fixture.baseline.as_str(),
+            "v-no-such-tag\" || touch injected-ref || echo \"",
+        ],
+        &[("SEMVER_STATUS", COMPATIBLE)],
+    );
+
+    assert!(
+        !Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("injected-ref")
+            .exists(),
+        "the ref was pasted into a command line rather than passed as an argument, \
+         so a tag can carry shell of its own"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a ref naming no commit did not fail as a usage error:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        fixture.calls().is_empty(),
+        "the script read a surface without knowing what the release claims"
+    );
+}
+
+/// A release that claims compatibility with nothing is released on a reading that
+/// could not be taken — the one thing this branch lets through.
+///
+/// The reading catches an *accidental* incompatibility, so it has something to
+/// protect only while a release claims compatibility. `v0.4.0`'s baseline stopped
+/// compiling because the `onepipeline` it pins requires `oneagentgraph ^0.2.12`
+/// and 0.2.13 added a required field to a struct it builds; no requirement
+/// writable here reaches it, and the tag is not ours to edit. Without this, a
+/// breaking release waits forever on a verdict that could only have agreed with
+/// the bump it was already taking.
+#[test]
+fn a_reading_that_produced_no_verdict_is_read_past_by_a_breaking_release() {
+    for pending in [A_BREAKING_RELEASE, A_BREAKING_RELEASE_BY_FOOTER] {
+        let fixture = Fixture::of(pending);
+        let output = fixture.run(NO_VERDICT);
+
+        assert!(
+            output.status.success(),
+            "a breaking release was held back by a reading it did not need:\n{}",
+            stderr(&output)
+        );
+        let stderr = stderr(&output);
+        assert!(
+            stderr.contains("::warning::") && !stderr.contains("::error::"),
+            "reading past the baseline was not reported as a warning, or was \
+             reported as a failure anyway:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(BASELINE_REF),
+            "the warning does not name the release the commits were read against, so \
+             nobody can check the claim it rests on:\n{stderr}"
+        );
+    }
+}
+
+/// The same for a baseline that cannot even be fetched: nothing about a release
+/// claiming no compatibility turns on it.
+#[test]
+fn a_baseline_that_cannot_be_fetched_is_read_past_by_a_breaking_release() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    let output = fixture.run_with(
+        &fixture.baseline.clone(),
+        &[
+            ("BASELINE_FETCH_STATUS", "1"),
+            ("SEMVER_STATUS", COMPATIBLE),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "a breaking release was held back by a baseline it claims nothing \
+         against:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("::warning::"),
+        "reading past the baseline was not reported at all:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        !fixture.calls().contains("semver-checks"),
+        "a surface was read against dependencies that were never fetched"
+    );
+}
+
+/// A breaking release does not stop the reading being taken: a surface that broke
+/// is still reported, and a compatible one still passes.
+#[test]
+fn a_breaking_release_still_takes_the_reading_when_the_baseline_builds() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    for (status, said) in [(COMPATIBLE, "compatible"), (BROKE, "broke")] {
+        let output = fixture.run(status);
+
+        assert!(
+            output.status.success(),
+            "a reading that returned a verdict failed the release:\n{}",
+            stderr(&output)
+        );
+        assert!(
+            stdout(&output).contains(said),
+            "the run does not report the verdict it was given:\n{}",
+            stdout(&output)
+        );
+    }
+    assert!(
+        fixture.calls().contains("semver-checks"),
+        "the reading was skipped for a breaking release rather than taken:\n{}",
+        fixture.calls()
+    );
+}
+
+/// This tree's own lockfile is this repository's problem whatever the release
+/// claims, so a fetch it cannot do stays fatal.
+#[test]
+fn this_trees_dependencies_failing_to_fetch_fails_even_a_breaking_release() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    let output = fixture.run_with(
+        &fixture.baseline.clone(),
+        &[("TREE_FETCH_STATUS", "1"), ("SEMVER_STATUS", COMPATIBLE)],
+    );
+
+    assert!(
+        !output.status.success(),
+        "a lockfile this repository cannot fetch released anyway:\n{}",
+        stdout(&output)
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("::error::") && stderr.contains("ACTION:"),
+        "the failure does not say what happened, or what to do about it:\n{stderr}"
     );
 }
