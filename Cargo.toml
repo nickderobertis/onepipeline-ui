@@ -109,11 +109,13 @@ futures-core = "0.3"
 # while `find_record_by_id` beside them reconciles the store's index under an
 # exclusive `flock` and rewrites it, which a read surface must never do.
 #
-# `0.10.1` is what `oneagentgraph` — the producer of the pointer this resolves —
-# links, so reader and writer are one release. The lock already carries other
-# 0.x lines of it under the SDK; cargo keeps them apart and nothing crosses
-# between them, because every value here is read from a file rather than
-# threaded through a sibling's signature.
+# The reader and the producer of the pointer it resolves must be one release of
+# this library, and a requirement string cannot say so on its own — so
+# `tests/packaging.rs` reconciles the two edges the lockfile records, this
+# crate's and `oneagentgraph`'s, rather than leaving the claim in this comment.
+# The lock also carries other 0.x lines of it under the SDK; cargo keeps them
+# apart and nothing crosses between them, because every value here is read from
+# a file rather than threaded through a sibling's signature.
 oneharness-core = "0.10.1"
 onepipeline = "=0.7.3"
 serde = { version = "1", features = ["derive"] }

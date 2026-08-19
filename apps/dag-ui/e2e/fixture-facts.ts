@@ -44,19 +44,15 @@ const fixtureSchema = z.object({
     missing: z.string().min(1),
     hook: z.string().min(1),
     check: z.string().min(1),
-    /** The report a settled node's member left, served from the run's own copy. */
     report: z.string().min(1),
-    /** A settlement naming a report this run kept no copy of. */
     unretained_report: z.string().min(1),
-    /**
-     * The oneharness conversation one member's invocation was written down as,
-     * by its history id. Its bytes are in oneharness's own store, not the run's.
-     */
+    /** By its history id: its bytes are in oneharness's store, not the run's. */
     harness_session: z.string().min(1),
-    /** A pointer at a conversation the history store no longer holds. */
     swept_harness_session: z.string().min(1),
+    /** These two carry a separator, so no route can be asked for them. */
+    unaskable_report: z.string().min(1),
+    unaskable_harness_session: z.string().min(1),
   }),
-  /** What that conversation ended on, which is what reading it must show. */
   harness_session_text: z.string().min(1),
 });
 

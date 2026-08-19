@@ -127,6 +127,15 @@ export const HARNESS_SESSION_ARTIFACT = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
  * end of a store this stack neither owns nor retains.
  */
 export const SWEPT_HARNESS_SESSION = "01a00d0f-c094-7660-b26c-000000000000";
+/**
+ * Two artifact ids no route can be asked for.
+ *
+ * An artifact id is the producing library's own string and the envelope
+ * constrains none of its characters, so one carrying a separator is a reference
+ * a reader is still shown and a request nothing may be turned into.
+ */
+export const UNASKABLE_REPORT = "report/local-direct/worker";
+export const UNASKABLE_HARNESS_SESSION = "01a00d0f/c094/7660/b26c/1";
 /** What that conversation ended on, which is what an operator opens it to read. */
 export const HARNESS_SESSION_TEXT =
   "wired the dashboard to the read API and left the rail alone";
@@ -594,6 +603,39 @@ function writeLiveRun(root) {
     node: "local-direct",
     persona: "worker",
   });
+  // Two records whose artifact ids no route can be asked for. An artifact id is
+  // the producing library's own string and nothing on the envelope constrains
+  // its characters, so one carrying a separator reaches a reader as the
+  // reference it is — and the panel has to *state* it rather than turn it into a
+  // request for some other route. Both kinds that fetch are driven, because a
+  // guard that only one of them keeps is a guard the other has already lost.
+  journal.advance(1).emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "local-direct", member: "worker", persona: "worker" },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: null,
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [{ id: UNASKABLE_REPORT, kind: "report", bytes: 24 }],
+  );
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "local-direct", member: "worker", persona: "worker" },
+    {
+      role: "agent",
+      turn: 1,
+      identity: "claude-code:alternate",
+      history_id: UNASKABLE_HARNESS_SESSION,
+      history_dir: harnessHistory.dir,
+      history_project: HARNESS_PROJECT,
+      history_session: HARNESS_SESSION_FILE,
+    },
+    [{ id: UNASKABLE_HARNESS_SESSION, kind: "oneharness_session", bytes: 0 }],
+  );
   journal
     .advance(3)
     .emit(
@@ -1461,6 +1503,8 @@ export function facts() {
       unretained_report: UNRETAINED_REPORT,
       harness_session: HARNESS_SESSION_ARTIFACT,
       swept_harness_session: SWEPT_HARNESS_SESSION,
+      unaskable_report: UNASKABLE_REPORT,
+      unaskable_harness_session: UNASKABLE_HARNESS_SESSION,
     },
     harness_session_text: HARNESS_SESSION_TEXT,
   };

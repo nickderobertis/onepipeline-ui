@@ -315,6 +315,54 @@ fn dependency_requirement(cargo: &str, name: &str) -> String {
     panic!("Cargo.toml declares no dependency on {name}");
 }
 
+/// The version of `dependency` that `package` resolved to, as `Cargo.lock`
+/// records the edge.
+///
+/// The lock disambiguates an edge by version only when more than one of that
+/// package is in the graph, so an entry with no version is the single resolution
+/// — read back off that package's own block.
+fn locked_dependency(lock: &str, package: &str, dependency: &str) -> String {
+    let block = lock
+        .split("\n[[package]]\n")
+        .find(|block| {
+            block
+                .lines()
+                .any(|line| line == format!("name = \"{package}\""))
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock does not resolve {package}"));
+    let edge = block
+        .lines()
+        .map(str::trim)
+        .find_map(|line| {
+            line.trim_matches(|c| c == '"' || c == ',')
+                .strip_prefix(dependency)
+                .map(|rest| rest.trim().to_owned())
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock records no {dependency} under {package}"));
+    if edge.is_empty() {
+        return locked_version(lock, dependency);
+    }
+    edge
+}
+
+/// The one version of `package` the lock resolved, for an edge that named none.
+fn locked_version(lock: &str, package: &str) -> String {
+    let block = lock
+        .split("\n[[package]]\n")
+        .find(|block| {
+            block
+                .lines()
+                .any(|line| line == format!("name = \"{package}\""))
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock does not resolve {package}"));
+    block
+        .lines()
+        .find_map(|line| line.strip_prefix("version = "))
+        .unwrap_or_else(|| panic!("Cargo.lock resolves {package} to no version"))
+        .trim_matches('"')
+        .to_owned()
+}
+
 /// The tools the workflow's `taiki-e/install-action` step provisions, read out of
 /// its `tool:` block.
 ///
@@ -454,6 +502,19 @@ fn the_history_store_is_read_by_linking_its_library_and_never_by_spawning_its_cl
     assert!(
         !requirement.is_empty(),
         "oneharness-core is declared with no version requirement"
+    );
+    // The reader and the producer of the pointer it resolves must be the same
+    // release of that library, and the requirement string alone cannot say so:
+    // a caret admits a whole 0.x line and nothing reconciles the two ends. The
+    // lockfile does — it records what each side resolved — so this reads both
+    // edges rather than restating one of them in prose.
+    let lock = read("Cargo.lock");
+    let resolved = |package: &str| locked_dependency(&lock, package, "oneharness-core");
+    assert_eq!(
+        resolved("onepipeline-ui"),
+        resolved("oneagentgraph"),
+        "this crate reads the oneharness history store through a different release of \
+         oneharness-core than `oneagentgraph`, which writes the pointer into it"
     );
     for path in files_under("src")
         .into_iter()

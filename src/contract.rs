@@ -4,6 +4,7 @@
 //! reconciles the two, so a route added to one and not the other fails the gate.
 
 use std::fmt;
+use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -223,9 +224,17 @@ fn check_release(value: &str) -> Result<(), String> {
     if components.len() != 3 {
         return Err("must be MAJOR.MINOR.PATCH".to_owned());
     }
-    if !components.iter().copied().all(is_numeric_identifier) {
+    // Bounded to what cargo's own version components are, not merely to digits:
+    // a number no registry could have published is a release nobody could be
+    // running, and it must be refused at the parse rather than carried.
+    if !components
+        .iter()
+        .copied()
+        .all(|component| is_numeric_identifier(component) && component.parse::<u64>().is_ok())
+    {
         return Err(
-            "every component of MAJOR.MINOR.PATCH must be a number without a leading zero"
+            "every component of MAJOR.MINOR.PATCH must be a number without a leading zero, \
+             within the range cargo publishes"
                 .to_owned(),
         );
     }
@@ -685,6 +694,49 @@ impl TryFrom<&str> for PathSegment {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         check_segment(value, SEGMENT_MAX_LEN)?;
+        Ok(Self(value.to_owned()))
+    }
+}
+
+/// The directory a producer's record named as its store, held to the shape the
+/// producer publishes one in.
+///
+/// The other half of the [`PathSegment`] boundary. `oneagentgraph` publishes a
+/// history pointer **only** for a file already in oneharness's own layout: an
+/// absolute path, with no component that climbs. Checked here rather than taken
+/// on the producer's word, because a relative store resolves against whatever
+/// directory this process happens to be serving from and a `..` inside one is
+/// the same traversal a bare name is checked for.
+///
+/// Existence is deliberately not part of it: a store that is not there is an
+/// artifact with no readable bytes, which is the same answer as a store this
+/// refuses, and reading the filesystem to construct a value would make the type
+/// a claim it cannot keep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreRoot(String);
+
+impl StoreRoot {
+    /// The directory, as the record named it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for StoreRoot {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let path = Path::new(value);
+        if !path.is_absolute() {
+            return Err("must be an absolute path".to_owned());
+        }
+        if path
+            .components()
+            .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
+        {
+            return Err("must have no component that climbs".to_owned());
+        }
         Ok(Self(value.to_owned()))
     }
 }

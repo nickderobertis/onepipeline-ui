@@ -15,7 +15,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Component, Path};
+use std::path::Path;
 
 use oneharness_core::io::history;
 use onepipeline::event::{Envelope, PipelineKind, Source};
@@ -27,7 +27,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::contract::{
-    ArtifactId, ConversationId, DispatchId, NodeId, PathSegment, ReferenceKind,
+    ArtifactId, ConversationId, DispatchId, NodeId, PathSegment, ReferenceKind, StoreRoot,
     TIMELINE_SCHEMA_VERSION,
 };
 use crate::filter::EventFilter;
@@ -2152,9 +2152,9 @@ fn artifact_bytes(
 /// into the run, so this is the one artifact resolved outside the run directory
 /// entirely. The three path fields are the producer's own and are taken as
 /// three, never as one path, and each is checked before it is used: the two that
-/// name a directory and a file as bare names, so a record naming a traversal, a
-/// separator or an absolute path resolves to nothing rather than to a file on
-/// this host, and the store itself as [`history_store`] describes. A store the
+/// name a directory and a file as a [`PathSegment`], so a record naming a
+/// traversal, a separator or an absolute path resolves to nothing rather than to
+/// a file on this host, and the store itself as a [`StoreRoot`]. A store the
 /// record does not name at all falls back to [`history::resolve_dir`]'s default,
 /// which is the same one every oneharness process here resolves — this crate
 /// takes no flag and no config key of its own for it, because a second source
@@ -2172,11 +2172,11 @@ fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
     // An empty value names no store, which is what oneharness itself reads
     // `history_dir = ""` as, so it falls back rather than being refused.
-    let named = match field("history_dir").filter(|value| !value.is_empty()) {
-        Some(named) => Some(history_store(named)?),
+    let store = match field("history_dir").filter(|value| !value.is_empty()) {
+        Some(named) => Some(StoreRoot::try_from(named).ok()?),
         None => None,
     };
-    let dir = history::resolve_dir(named)?;
+    let dir = history::resolve_dir(store.as_ref().map(StoreRoot::as_str))?;
     let project = PathSegment::try_from(field("history_project")?).ok()?;
     let session = PathSegment::try_from(field("history_session")?).ok()?;
     let path = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
@@ -2187,24 +2187,6 @@ fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
         .into_iter()
         .find(|record| record["history_id"] == json!(id.as_str()))?;
     serde_json::to_vec_pretty(&record).ok()
-}
-
-/// The store a record named, held to the shape the producer publishes one in.
-///
-/// `oneagentgraph` publishes these three fields **only** for a history file
-/// already in oneharness's own layout: an absolute path to a session file,
-/// inside a project directory, inside a store, with no component that climbs.
-/// This checks the half of that promise that decides where a read lands, at this
-/// crate's own boundary rather than on the producer's word — a relative store
-/// would resolve against whatever directory this process happens to be serving
-/// from, and a `..` inside one is the same traversal the project name is checked
-/// for. Anything else names no store, and the artifact has no readable bytes.
-fn history_store(named: &str) -> Option<&str> {
-    let path = Path::new(named);
-    let climbs = path
-        .components()
-        .any(|part| matches!(part, Component::ParentDir | Component::CurDir));
-    (path.is_absolute() && !climbs).then_some(named)
 }
 
 /// The scope a timeline request asks for.

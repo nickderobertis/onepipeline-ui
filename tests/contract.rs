@@ -312,6 +312,10 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
         "1.2.3+build..5",
         "1.2.3-alpha_1",
         " 1.2.3",
+        // Digits, and a number no registry could have served: cargo's version
+        // components are `u64`, so this one names a release nobody is running.
+        "18446744073709551616.0.0",
+        "1.18446744073709551616.0",
     ] {
         assert!(
             Release::try_from(refused).is_err(),

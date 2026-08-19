@@ -1050,10 +1050,64 @@ test("reads a relayed turn and the oneharness conversation behind it", async ({
     .getByRole("article", { name: "oneharness-session" })
     .getByRole("button")
     .click();
-  await expect(itemDetail(page)).toContainText(
+  // Announced, not merely painted: the reader asked for a document and the panel
+  // answers in a live region, so a screen reader is told the read did not land
+  // rather than being left on a pane that silently stopped changing.
+  await expect(itemDetail(page).locator('[aria-live="polite"]')).toContainText(
     "The history store holds no readable copy of that conversation.",
   );
   await swept;
+});
+
+/**
+ * A reference this API cannot be asked for is stated, never turned into a
+ * request for some other route.
+ *
+ * An artifact id is the producing library's own string and nothing on the
+ * envelope constrains its characters, so one carrying a separator really does
+ * reach a reader. Both kinds that fetch have to decline it the same way — as the
+ * recorded reference, with the id visible — because a panel that pasted it into
+ * a URL would be asking for a path the operator never named.
+ */
+test("states a reference whose id no route can be asked for", async ({
+  page,
+}) => {
+  await openObservatory(page, `/?run=${runs().live}&node=local-direct`);
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+
+  // The third value is the heading that reading would have carried: a document
+  // this API cannot be asked for is not a document that failed to load, so the
+  // panel must not head one and then explain its absence underneath.
+  const declined: readonly (readonly [string, string, string])[] = [
+    ["member-settled", fixture().artifacts.unaskable_report, "Worker report"],
+    [
+      "oneharness-session",
+      fixture().artifacts.unaskable_harness_session,
+      "Oneharness conversation",
+    ],
+  ];
+  for (const [record, artifact, heading] of declined) {
+    // Nothing is asked for on the reader's behalf: a request naming this id is
+    // the failure, so it is watched for rather than waited on.
+    const asked: string[] = [];
+    const listen = (response: { url(): string }) => {
+      if (response.url().includes("/artifacts/")) asked.push(response.url());
+    };
+    page.on("response", listen);
+    await transcript
+      .getByRole("article", { name: record })
+      .getByRole("button")
+      .click();
+    // The record itself, with the reference on it — not a read that failed and
+    // not a blank pane.
+    await expect(itemDetail(page)).toContainText("Recorded at");
+    await expect(itemDetail(page)).toContainText(artifact);
+    await expect(itemDetail(page)).not.toContainText(heading);
+    await expect(itemDetail(page)).not.toContainText("Loading");
+    expect(asked).toEqual([]);
+    page.off("response", listen);
+    await page.keyboard.press("Escape");
+  }
 });
 
 test("states when a verification artifact is unavailable", async ({ page }) => {
