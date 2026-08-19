@@ -21,6 +21,8 @@ const fixtureSchema = z.object({
     busy: z.string().min(1),
   }),
   foundation_pr: z.string().min(1),
+  /** The one kind the store holds that this build has no category rule for. */
+  unfiled_kind: z.string().min(1),
   remote_open_pr: z.string().min(1),
   foundation_commit: z.string().min(1),
   sessions: z.object({

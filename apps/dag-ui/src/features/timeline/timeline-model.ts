@@ -10,6 +10,12 @@ import type {
   TimelineSpan,
   TimelineSpanKind,
 } from "@onepipeline-ui/dag-model";
+import { createElement } from "react";
+import {
+  type EventCategory,
+  EventCategoryIcon,
+  eventCategory,
+} from "./event-category";
 
 /**
  * One node's slice of the served run timeline, as rows a rail can render.
@@ -64,7 +70,17 @@ interface RowBase {
 
 export type TimelineRow =
   | (RowBase & { readonly rowKind: "span"; readonly span: TimelineSpan })
-  | (RowBase & { readonly rowKind: "event"; readonly event: TimelineEvent })
+  | (RowBase & {
+      readonly rowKind: "event";
+      readonly event: TimelineEvent;
+      /**
+       * What this record is, coarsely enough for one glyph to carry it. Carried by a
+       * journal record and by nothing else: a span is already told apart by the lane
+       * it is plotted in and by the words its eyebrow names it with, and a marker is
+       * the one thing this view draws that had no distinction at all.
+       */
+      readonly category: EventCategory;
+    })
   | (RowBase & { readonly rowKind: "group"; readonly count: number });
 
 export interface NodeTimeline {
@@ -352,6 +368,10 @@ export function nodeTimelineV2(
             at: Date.parse(row.startedAt),
             payload: row,
             status: row.status,
+            // The one place the plot could say what a record *is*. Left unset, the
+            // rail draws every marker as the same pin, and a reader scanning for the
+            // one record that matters has to open each of them to find it.
+            icon: createElement(EventCategoryIcon, { category: row.category }),
           },
         ]
       : [],
@@ -602,6 +622,7 @@ function eventRow(event: TimelineEvent): TimelineRow {
         ? "Retry requested"
         : (event.step_id ?? event.kind)),
     displayKind: redirected === undefined ? "Event" : REDIRECTION_KIND,
+    category: eventCategory(event.kind),
   };
 }
 

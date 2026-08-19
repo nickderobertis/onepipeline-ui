@@ -1098,6 +1098,119 @@ fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
     );
 }
 
+/// The browser files a journal record under every kind the two producers that
+/// publish a vocabulary declare.
+///
+/// The gate sits on this side because TypeScript cannot read a Rust declaration and
+/// both declarations are Rust; `apps/dag-ui/AGENTS.md` has the rest.
+/// `onepipeline::event::PIPELINE_KINDS` is that library's own complete list, and
+/// what makes the `oneagentgraph` list below complete is that the match over it has
+/// no wildcard: a variant added there stops this file compiling.
+///
+/// A kind this names is a category nobody has decided yet rather than a defect — the
+/// app draws an unrecognized kind under an explicit default.
+#[test]
+fn the_browser_files_every_kind_those_libraries_declare() {
+    use oneagentgraph::event::EventKind;
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("apps/dag-ui/src/features/timeline/event-category.test.tsx");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the suite that carries the corpus has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+
+    // Iterating an enum means listing it, and the match is what keeps the list
+    // honest. The spellings themselves are each library's own `as_str`, never a
+    // third copy of the wire.
+    let agentgraph = [
+        EventKind::GraphStarted,
+        EventKind::MemberStarted,
+        EventKind::TurnStarted,
+        EventKind::TurnActivity,
+        EventKind::TurnCompleted,
+        EventKind::TurnInterrupted,
+        EventKind::MemberHeartbeat,
+        EventKind::FallbackAdvanced,
+        EventKind::MemberDied,
+        EventKind::CronFired,
+        EventKind::CronReset,
+        EventKind::MemberSettled,
+        EventKind::GraphSettled,
+    ]
+    .into_iter()
+    .map(|kind| match kind {
+        EventKind::GraphStarted
+        | EventKind::MemberStarted
+        | EventKind::TurnStarted
+        | EventKind::TurnActivity
+        | EventKind::TurnCompleted
+        | EventKind::TurnInterrupted
+        | EventKind::MemberHeartbeat
+        | EventKind::FallbackAdvanced
+        | EventKind::MemberDied
+        | EventKind::CronFired
+        | EventKind::CronReset
+        | EventKind::MemberSettled
+        | EventKind::GraphSettled => kind.as_str(),
+    });
+    let declared: Vec<&str> = onepipeline::event::PIPELINE_KINDS
+        .iter()
+        .map(|kind| kind.as_str())
+        .chain(agentgraph)
+        .collect();
+    assert!(
+        declared.len() > 20,
+        "{} kinds is fewer than either producer has ever declared; this gate is reading the \
+         wrong thing",
+        declared.len()
+    );
+
+    let filed = corpus_keys(&source);
+    let unfiled: Vec<&str> = declared
+        .iter()
+        .copied()
+        .filter(|kind| !filed.iter().any(|key| key == kind))
+        .collect();
+    assert!(
+        unfiled.is_empty(),
+        "{} files no category for {unfiled:?}, which onepipeline and oneagentgraph declare; \
+         decide one for each and add it to CORPUS",
+        path.display()
+    );
+}
+
+/// Every key of the `CORPUS` map in the browser suite's category tests.
+///
+/// Parsed rather than matched as substrings so a kind named in that file's prose,
+/// or filed under some other table, cannot be mistaken for one the corpus holds.
+/// A key is quoted unless it is a bare identifier — which is the formatter's
+/// choice rather than the author's, so both spellings are read.
+fn corpus_keys(source: &str) -> Vec<String> {
+    let start = source
+        .find("const CORPUS")
+        .unwrap_or_else(|| panic!("the browser suite declares no CORPUS to gate"));
+    source[start..]
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.starts_with("};"))
+        .filter_map(|line| {
+            let key = line.trim().split(':').next()?.trim();
+            let key = key
+                .strip_prefix('"')
+                .map_or(key, |rest| rest.strip_suffix('"').unwrap_or(rest));
+            (!key.is_empty()
+                && key.chars().all(|character| {
+                    character.is_ascii_lowercase() || "-0123456789".contains(character)
+                }))
+            .then(|| key.to_owned())
+        })
+        .collect()
+}
+
 /// A telemetry document as `onepipeline` writes one, for the tests below to
 /// break one property of at a time.
 fn telemetry_document() -> Value {

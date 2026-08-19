@@ -700,6 +700,16 @@ p {
   font-size: 11px;
 }
 
+/* The category glyph sits on the eyebrow's own baseline rather than above it: it is
+   the same drawing the plot puts on this record's marker, and a reader recognises
+   the pair only if both read as one mark beside the words that name it. Scoped to
+   the transcript because every other eyebrow in the app is words alone. */
+.transcript-item .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 /* The other half of the column above: a column that cannot grow makes the token
    overflow the item instead unless the token is allowed to break. Branch names, run
    ids and session names are all written this way. */
