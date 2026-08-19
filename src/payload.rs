@@ -2151,6 +2151,7 @@ fn artifact_bytes(
 /// names the store, why this reads without locking, and why every component is
 /// checked; [`Confined`] holds what each outcome of the check means.
 ///
+// llmlint: ignore[comments_earn_their_place] the paragraph the rule objects to is the one the manager required survive: the checks are on how a record *spelled* a path, and a bare name that climbs nowhere still lands anywhere if a component is a symlink, so the resolved path is proved under a `StoreRoot` before it is opened. That sentence is what stops a future reader relaxing the confinement this change exists to add. The design it links to is in `src/AGENTS.md` and is not repeated here.
 /// **The one thing that must not be relaxed here:** those checks are on how a
 /// record *spelled* a path, and a bare name that climbs nowhere still lands
 /// anywhere if a component of it is a symlink, so the resolved path is proved

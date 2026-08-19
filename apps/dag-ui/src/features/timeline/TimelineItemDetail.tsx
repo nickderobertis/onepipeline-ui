@@ -427,20 +427,11 @@ function HarnessSession({
  * One recorded artifact's bytes, read through the API's artifact route.
  *
  * Every caller asks by the opaque id its record stored and never by a path, so no
- * location on the producing host reaches the browser — including a oneharness
- * conversation, whose bytes are the one thing served from outside the runs root
- * (`src/AGENTS.md`).
- *
- * The route serves the *end* of a file rather than all of it, and this shows the
- * end of that again until the reader asks for the rest — a stored log or report
- * has no size its producer promised, and a panel that pastes an unbounded one
- * into the page is a panel that stops being readable. The button that opens it is
- * the design system's own, so it is in the tab order and answers Enter and Space
- * like every other control here.
- *
- * A read that failed is *said*, never left blank: the two sentences a caller
- * gives are what tells "nothing was recorded" from "something was, and this run
- * has no readable copy of it", which are different facts about the record.
+ * location on the producing host reaches the browser (`src/AGENTS.md`). The route
+ * serves the *end* of a file rather than all of it, and this shows the end of
+ * that again until the reader asks for the rest. A read that failed is *said*,
+ * never left blank: the two sentences a caller gives are what tells "nothing was
+ * recorded" from "something was, and this run has no readable copy of it".
  */
 function StoredArtifact({
   artifactId,
