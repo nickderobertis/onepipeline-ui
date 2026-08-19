@@ -7,6 +7,7 @@
 //! that come back.
 
 use std::fs;
+use std::path::Path;
 
 use serde_json::{json, Value};
 
@@ -1063,6 +1064,16 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
         HIDDEN_TRANSCRIPT,
     );
     let traversed = format!("../neighbour/{}", climbed.project);
+    // The same climb one layer up: a store that reaches the neighbour instead.
+    // `oneagentgraph` publishes these three fields only for a file already in
+    // oneharness's layout — an absolute path with no component that climbs — and
+    // this is that promise checked here rather than taken on the producer's word.
+    let climbing_store = store
+        .join("..")
+        .join("neighbour")
+        .to_str()
+        .expect("utf-8 path")
+        .to_owned();
     let absolute = neighbour
         .join(&rooted.project)
         .to_str()
@@ -1072,33 +1083,53 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
     // Each case is recorded under the id of the record a *joined* pointer would
     // have found, so the check being gone is the difference between a `404` and
     // that record's own bytes.
-    let refused: Vec<(&str, &str, &str, &str)> = vec![
+    // Each case is `(what, store, project, session, artifact)`.
+    let refused: Vec<(&str, Option<&str>, &str, &str, &str)> = vec![
+        (
+            "a store that climbs into another one",
+            Some(&climbing_store),
+            &climbed.project,
+            &climbed.session,
+            &climbed.history_id,
+        ),
+        (
+            "a store that is a relative path",
+            Some("oneharness-history"),
+            &recorded.project,
+            &recorded.session,
+            &recorded.history_id,
+        ),
         (
             "a project that climbs out of the store",
+            None,
             &traversed,
             &climbed.session,
             &climbed.history_id,
         ),
         (
             "a project that is an absolute path",
+            None,
             &absolute,
             &rooted.session,
             &rooted.history_id,
         ),
         (
             "a project that is the store's own index",
+            None,
             ".index",
             &recorded.session,
             &recorded.history_id,
         ),
         (
             "a session that is not a bare name",
+            None,
             &recorded.project,
             "../elsewhere",
             &recorded.history_id,
         ),
         (
             "a session that is empty",
+            None,
             &recorded.project,
             "",
             &recorded.history_id,
@@ -1106,14 +1137,14 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
     ];
     let serving = Serving::start(|root| {
         let dir = fixture_run::write(root, fixture_run::RUN_ID);
-        for (_, project, session, artifact) in &refused {
+        for (_, named, project, session, artifact) in &refused {
             fixture_run::relay_harness_session(
                 &dir,
                 &fixture_run::HarnessSession {
                     stream: HARNESS_STREAM,
                     node: fixture_run::NODE_ID,
                     member: "worker",
-                    history_dir: Some(&store),
+                    history_dir: Some(named.map_or(store.as_path(), Path::new)),
                     history_project: project,
                     history_session: session,
                     history_id: artifact,
@@ -1138,7 +1169,7 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
         );
     });
 
-    for (what, _, _, artifact) in &refused {
+    for (what, _, _, _, artifact) in &refused {
         let response = http::get(
             serving.address,
             &format!("/api/v2/runs/{}/artifacts/{artifact}", fixture_run::RUN_ID),

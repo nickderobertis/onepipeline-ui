@@ -991,7 +991,9 @@ test("reads a relayed turn and the oneharness conversation behind it", async ({
   const turn = timeline(page).getByRole("button", { name: /turn-started/ });
   await expect(turn.first()).toBeVisible();
   await turn.first().click();
-  await expect(itemDetail(page)).toContainText("Implementing the dashboard now");
+  await expect(itemDetail(page)).toContainText(
+    "Implementing the dashboard now",
+  );
   // Closed before the next reading is opened: on a narrow viewport the detail is
   // a drawer over the timeline, so the second record is reached the way an
   // operator reaches it — by putting the first one away.
@@ -1030,6 +1032,28 @@ test("reads a relayed turn and the oneharness conversation behind it", async ({
   await expect(itemDetail(page)).toContainText(
     fixture().artifacts.harness_session,
   );
+
+  // The other half: a pointer at a conversation the store no longer holds. The
+  // record is still in the run, the route answers 404, and the panel says which
+  // of the two it is rather than leaving a blank pane — "nothing was written
+  // down" and "something was, and it is gone" send a reader to different places.
+  await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
+  const swept = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .includes(`/artifacts/${fixture().artifacts.swept_harness_session}`) &&
+      response.status() === 404,
+  );
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "oneharness-session" })
+    .getByRole("button")
+    .click();
+  await expect(itemDetail(page)).toContainText(
+    "The history store holds no readable copy of that conversation.",
+  );
+  await swept;
 });
 
 test("states when a verification artifact is unavailable", async ({ page }) => {

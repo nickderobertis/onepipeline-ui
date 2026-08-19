@@ -119,6 +119,14 @@ export const UNRETAINED_REPORT = "report-missing-artifact-worker";
  * history record's own, which is what the pointer names it by.
  */
 export const HARNESS_SESSION_ARTIFACT = "01a00d0f-c094-7660-b26c-8a53baaf9c3b";
+/**
+ * An invocation whose record the store no longer holds.
+ *
+ * The pointer names the store the fixture wrote and a history id no record in it
+ * carries — a conversation swept out from under the run, which is the ordinary
+ * end of a store this stack neither owns nor retains.
+ */
+export const SWEPT_HARNESS_SESSION = "01a00d0f-c094-7660-b26c-000000000000";
 /** What that conversation ended on, which is what an operator opens it to read. */
 export const HARNESS_SESSION_TEXT =
   "wired the dashboard to the read API and left the rail alone";
@@ -737,6 +745,27 @@ function writeLiveRun(root) {
       report_path: "/a/producing/librarys/scratch/report.json",
     },
     [{ id: UNRETAINED_REPORT, kind: "report", bytes: 24 }],
+  );
+  // And an invocation whose conversation the history store no longer holds: the
+  // pointer is in the journal and the record it names has been swept, which is
+  // the ordinary end of a store nothing here owns or retains. Reading it has to
+  // *say* so — the difference between "nothing was written down" and "something
+  // was, and it is not there now" is what an operator decides where to look
+  // next by.
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "missing-artifact", member: "worker", persona: "worker" },
+    {
+      role: "agent",
+      turn: 1,
+      identity: "claude-code:alternate",
+      history_id: SWEPT_HARNESS_SESSION,
+      history_dir: harnessHistory.dir,
+      history_project: HARNESS_PROJECT,
+      history_session: HARNESS_SESSION_FILE,
+    },
+    [{ id: SWEPT_HARNESS_SESSION, kind: "oneharness_session", bytes: 0 }],
   );
   journal
     .advance(3)
@@ -1431,6 +1460,7 @@ export function facts() {
       report: REPORT_ARTIFACT,
       unretained_report: UNRETAINED_REPORT,
       harness_session: HARNESS_SESSION_ARTIFACT,
+      swept_harness_session: SWEPT_HARNESS_SESSION,
     },
     harness_session_text: HARNESS_SESSION_TEXT,
   };
@@ -1504,7 +1534,8 @@ export function growTranscript(root, turns) {
     .map((line) => JSON.parse(line))
     .filter(
       (event) =>
-        event.labels?.session === WORKER_SESSION && event.kind === "turn-started",
+        event.labels?.session === WORKER_SESSION &&
+        event.kind === "turn-started",
     ).length;
   for (let index = recorded; index < turns; index += 1) {
     appendEvent(

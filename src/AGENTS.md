@@ -196,37 +196,23 @@ a plotted moment pointing at the wrong turn.
 
 ## The one store this crate opens that no run owns
 
-Every other byte this API serves is under the runs root. A `oneharness_session`
-artifact is not: `oneagentgraph` publishes a *pointer* at the oneharness history
-store and nothing is copied, so `payload::harness_session` opens a directory on
-the host that belongs to a different tool. Three rules govern it, and each exists
-because the obvious alternative is worse.
+A `oneharness_session` artifact's bytes are the only ones this API serves from
+outside the runs root: `oneagentgraph` publishes a pointer and nothing is copied,
+so `payload::harness_session` opens another tool's directory. Four constraints on
+it, each because the obvious alternative is worse:
 
-- **It links `oneharness-core` rather than spawning the `oneharness` CLI.** A
-  process is a second contract — its arguments, its output shape, its version,
-  none of which anything here pins — and a library call is the same read with
-  none of that. `tests/packaging.rs` holds it: the requirement is under
-  `[dependencies]`, and no source or suite names that program.
-- **It reads and never writes, and it takes no lock.** `find_session_path` and
-  `read_session_display` open files; `find_record_by_id` beside them reconciles
-  the store's index under an exclusive `flock` and rewrites it. Serving a run
-  must not put this process in the way of the single writer the engine runs, so
-  the artifact's id is matched against the records the session file holds rather
-  than looked up through the index. `tests/e2e/server.rs` proves it against a
-  store made read-only outright and by comparing the store's own bytes and
-  modification times across a read.
-- **The record names the store, and nothing here does.** There is no flag and no
-  config key for the history directory; a record that names none falls back to
-  `io::history::resolve_dir(None)`, which is the same default every oneharness
-  process on the host resolves. A second source for that path is how a reader and
-  a writer come to disagree about where the transcripts are.
-
-The two components the pointer names are joined, so both cross a trust boundary
-as a `contract::PathSegment` — the same discipline the route identifiers keep,
-applied to a *record* rather than to a URL. Without it, `../<neighbour>` serves a
-transcript from a store the run never named, which is the arbitrary-file read the
-retention contract above exists to prevent; the refusal journey proves that by
-standing a second store beside the first.
+- **Link `oneharness-core`; never spawn the `oneharness` CLI.** A process is a
+  second contract — arguments, output shape, version — that nothing here pins.
+- **Read, never write, never lock.** `find_record_by_id` reconciles the store's
+  index under an exclusive `flock`; a read surface must not stand in the way of
+  the single writer the engine runs.
+- **The record names the store; nothing here does.** No flag, no config key. A
+  second source for that path is how a reader and a writer come to disagree about
+  where the transcripts are.
+- **Every component of the pointer is checked before it is used** — the two names
+  as `contract::PathSegment`, the store as absolute and non-climbing. A record is
+  external input exactly as a URL is, and joining one unchecked is the
+  arbitrary-file read the retention contract exists to prevent.
 
 ## What the wire asks for and no record fills
 
@@ -250,25 +236,16 @@ record it before anything here can serve it.
   was never measured — which is the wire's own way of telling an unmeasured zero
   from a measured one, and is why nothing here is hardcoded to it.
 - **Any artifact that is neither a settled member's report nor a oneharness
-  session.** `payload::artifact` serves a `worker_report` from the copy the run
-  itself keeps — `onepipeline` retains it as the settlement is ingested, and this
-  crate resolves it by calling that SDK's own `RunPaths::report_for` on the
-  envelope the artifact was recorded on, so writer and reader are one published
-  promise and neither restates the other's sanitiser. It serves an
-  `oneharness_session` from the oneharness history store, which no run owns and
-  nothing copies into one; that resolution is the section below. Every other
-  recorded artifact — the `log` `onevcs` stores on a `gate-verdict` or a
-  `change-check`, ids like `a-e3bd2fe52826` — is resolved under
-  `runs/<run>/artifacts/`, and **no library in this stack creates that
-  directory**: `onepipeline` retains member reports and nothing else, so there is
-  no file here to find and the route answers `404`. The check's own record still
-  reaches a reader, with the id the producer stored; only its bytes do not. The
-  upstream change that fills it, and the only one that will: `onepipeline`
-  retains what the other producers store on the same terms it retains a report,
-  at which point this crate resolves it through a published `paths` accessor
-  exactly as it resolves a report today. Nothing here may copy or follow a
-  producer's own path — that is the arbitrary-file read the retention contract
-  exists to prevent.
+  session.** Those two resolve — a `worker_report` through `onepipeline`'s own
+  `RunPaths::report_for`, a `oneharness_session` through the store above. Every
+  other recorded artifact — the `log` `onevcs` stores on a `gate-verdict` or a
+  `change-check` — resolves under `runs/<run>/artifacts/`, and **no library in
+  this stack creates that directory**, so the route answers `404` and only the
+  bytes are missing: the record still reaches a reader with the id the producer
+  stored. The upstream change that fills it: `onepipeline` retains what the other
+  producers store on the same terms it retains a report. Nothing here may copy or
+  follow a producer's own path — that is the arbitrary-file read the retention
+  contract exists to prevent.
 - **A provider refusal's own evidence** (`providerFailureSchema`). A member that
   died records a classified cause, but the identity, the chain and the reset time
   a planner would act on are `oneagentgraph`'s to relay and are not on the

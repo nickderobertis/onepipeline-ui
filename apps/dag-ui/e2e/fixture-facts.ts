@@ -53,6 +53,8 @@ const fixtureSchema = z.object({
      * by its history id. Its bytes are in oneharness's own store, not the run's.
      */
     harness_session: z.string().min(1),
+    /** A pointer at a conversation the history store no longer holds. */
+    swept_harness_session: z.string().min(1),
   }),
   /** What that conversation ended on, which is what reading it must show. */
   harness_session_text: z.string().min(1),
