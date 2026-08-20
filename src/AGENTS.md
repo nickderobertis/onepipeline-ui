@@ -204,24 +204,21 @@ Two readings of a record are the producer's and not this crate's. A verdict is
 read in the words the library that wrote it uses — `onevcs` rules a gate `pass`,
 says whether a push was `accepted`, and treats three check conclusions as not
 blocking a merge — because reading a check's `completed` as a pipeline status is
-what would make every passing check look like a failure. And a tool summary is
-carried on the turn it was published from, never as a turn of its own:
-`turn-activity` is streamed *during* a turn, so counting one as a turn would
-report a turn that had not happened. A `turn-interrupted` is excluded on exactly
-those terms: it is published from inside a turn too, and it is the moment a
-planner changed what the turn already running was doing rather than a turn of its
-own. Both `payload::is_turn_record` and `payload::conversation_document` have to
-exclude it, because a turn's id is its position in the transcript and the timeline
-numbers the same session by the same rule — excluding it in one alone would leave
-a plotted moment pointing at the wrong turn.
+what would make every passing check look like a failure.
+
+**A turn record is a `turn-started` or a `turn-completed`, and nothing else.**
+`oneagentgraph` stamps a `session` label on the `turn-*` kinds and on no other,
+so a `member-settled` or a `member-died` can never *be* a transcript turn, and
+the count beside a node has to agree with the transcript opened from it. A
+`turn-activity` and a `turn-interrupted` are published from *inside* a turn and
+are not turns either. `payload::is_turn_record` and
+`payload::conversation_document` must agree on all of this: a turn's id is its
+position in the transcript and the timeline numbers the same session by the same
+rule, so a kind admitted by one alone leaves a plotted moment pointing at the
+wrong turn.
 
 **A summary belongs to the turn record before it, not the one after it.**
 `oneagentgraph` opens a turn and *then* streams its activities.
-
-**A turn record is a `turn-started` or a `turn-completed`, and nothing else.**
-That library stamps a `session` label on the `turn-*` kinds and on no other, so a
-`member-settled` or a `member-died` can never *be* a transcript turn — and the
-count beside a node has to agree with the transcript opened from it.
 
 ## The report a settled member left, which is what a transcript is
 

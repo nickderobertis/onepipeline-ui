@@ -713,11 +713,11 @@ fn measured<'a>(view: &RunView, events: impl IntoIterator<Item = &'a Envelope>) 
 /// document rather than folding the clock again, so the two readings of where a
 /// run's time went cannot come apart.
 ///
-/// What it adds is the one thing that document does not carry: the time inside a
-/// model, which each turn reports for itself. And what it never adds is a zero —
-/// an unmeasured lane is served `null`, here and in the fractions, because a
-/// zero is a measurement and reading one for an absence is how a run comes to
-/// look cheaper than it was.
+/// What it adds is the one thing that document does not carry: how long each
+/// party's own harness invocations ran, which only an invocation reports. And
+/// what it never adds is a zero — an unmeasured lane is served `null`, here and
+/// in the fractions, because a zero is a measurement and reading one for an
+/// absence is how a run comes to look cheaper than it was.
 fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
     let wall = document.map(|document| document.wall_ms);
     let bucket = |name| document.and_then(|document| document.bucket(name));
@@ -733,45 +733,72 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
         }),
         _ => None,
     };
-    json!({
-        "agent_seconds": seconds(bucket(BucketName::Agent)),
-        "judge_seconds": seconds(bucket(BucketName::Judge)),
-        "llmlint_seconds": seconds(bucket(BucketName::Llmlint)),
-        "gate_seconds": seconds(bucket(BucketName::Gate)),
-        "publication_wait_seconds": seconds(bucket(BucketName::PublicationWait)),
-        "lock_wait_seconds": seconds(bucket(BucketName::LockWait)),
-        "setup_seconds": seconds(bucket(BucketName::Setup)),
-        "scheduling_seconds": seconds(bucket(BucketName::Scheduling)),
-        "wall_seconds": seconds(wall),
-        // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
-        "agent_model_ms": measured.agent_invocation_ms,
-        "judge_model_ms": measured.judge_invocation_ms,
-        "llmlint_model_ms": measured.llmlint_invocation_ms,
-        "tool_ms": measured.tool_ms,
-        // The wire keeps a lane for the run waiting on a planner or a person,
-        // and the sibling's vocabulary folds both into `scheduling`. Nothing
-        // measures the two apart, so this is absent rather than a share of a
-        // bucket that is not it.
-        "idle_orchestration_ms": Value::Null,
-        // What the wall clock has no measured home for. Computed from the
-        // document's own invariant — its measured buckets sum exactly to the
-        // whole — so an unmeasured bucket grows this rather than reading as a
-        // measured nothing.
-        "unattributed_ms": document
-            .map(|document| document.wall_ms.saturating_sub(document.measured_ms())),
-        "wall_ms": wall,
-        "fractions": {
-            // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
-            "agent_model": fraction(measured.agent_invocation_ms),
-            "judge_model": fraction(measured.judge_invocation_ms),
-            "llmlint_model": fraction(measured.llmlint_invocation_ms),
-            "tool": fraction(measured.tool_ms),
-            "idle_orchestration": Value::Null,
-            "lock_wait": fraction(bucket(BucketName::LockWait)),
-            "setup": fraction(bucket(BucketName::Setup)),
-            "scheduling": fraction(bucket(BucketName::Scheduling)),
-        },
-    })
+    let mut timing = Map::new();
+    for (lane, name) in [
+        ("agent_seconds", BucketName::Agent),
+        ("judge_seconds", BucketName::Judge),
+        ("llmlint_seconds", BucketName::Llmlint),
+        ("gate_seconds", BucketName::Gate),
+        ("publication_wait_seconds", BucketName::PublicationWait),
+        ("lock_wait_seconds", BucketName::LockWait),
+        ("setup_seconds", BucketName::Setup),
+        ("scheduling_seconds", BucketName::Scheduling),
+    ] {
+        timing.insert(lane.into(), json!(seconds(bucket(name))));
+    }
+    timing.insert("wall_seconds".into(), json!(seconds(wall)));
+    timing.extend(per_party(measured, "_ms", &|ms| json!(ms)));
+    timing.insert("tool_ms".into(), json!(measured.tool_ms));
+    // The wire keeps a lane for the run waiting on a planner or a person, and the
+    // sibling's vocabulary folds both into `scheduling`. Nothing measures the two
+    // apart, so this is absent rather than a share of a bucket that is not it.
+    timing.insert("idle_orchestration_ms".into(), Value::Null);
+    // What the wall clock has no measured home for. Computed from the document's
+    // own invariant — its measured buckets sum exactly to the whole — so an
+    // unmeasured bucket grows this rather than reading as a measured nothing.
+    timing.insert(
+        "unattributed_ms".into(),
+        json!(document.map(|document| document.wall_ms.saturating_sub(document.measured_ms()))),
+    );
+    timing.insert("wall_ms".into(), json!(wall));
+
+    let mut fractions = Map::new();
+    fractions.extend(per_party(measured, "", &|ms| json!(fraction(ms))));
+    fractions.insert("tool".into(), json!(fraction(measured.tool_ms)));
+    fractions.insert("idle_orchestration".into(), Value::Null);
+    for (lane, name) in [
+        ("lock_wait", BucketName::LockWait),
+        ("setup", BucketName::Setup),
+        ("scheduling", BucketName::Scheduling),
+    ] {
+        fractions.insert(lane.into(), json!(fraction(bucket(name))));
+    }
+    timing.insert("fractions".into(), Value::Object(fractions));
+    Value::Object(timing)
+}
+
+/// The wire's three per-party lanes, under the key it pins for each.
+///
+/// One function because the same three lanes are served four times — the timings,
+/// their fractions, the presence flags beside them, and the node-level rollup —
+/// and four copies of the mapping are four chances for two of them to disagree
+/// about a party. `suffix` is what the wire appends to the lane: `_ms` for a
+/// measurement, nothing for a fraction of the clock.
+///
+// llmlint: ignore[names_match_behavior] the `*_model` keys are the client's pinned contract — `timingSchema` requires them — and what this stack can measure per party is a report's invocation `duration_ms`. `Measured` names the value for what it is; `src/AGENTS.md` holds why the key does not move with it, and the upstream change that reconciles them.
+fn per_party(
+    measured: &Measured,
+    suffix: &str,
+    render: &dyn Fn(Option<u64>) -> Value,
+) -> Vec<(String, Value)> {
+    [
+        ("agent", measured.agent_invocation_ms),
+        ("judge", measured.judge_invocation_ms),
+        ("llmlint", measured.llmlint_invocation_ms),
+    ]
+    .into_iter()
+    .map(|(party, ms)| (format!("{party}_model{suffix}"), render(ms)))
+    .collect()
 }
 
 /// What each party spent, as the sibling's document reports it.
@@ -808,13 +835,11 @@ fn usage(document: Option<&RunTelemetry>) -> Value {
 /// conforming client reads either, and a producer that measures a real zero says
 /// so here rather than being indistinguishable from one that measured nothing.
 fn timing_presence(measured: &Measured) -> Value {
-    json!({
-        // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
-        "agent_model_ms": measured.agent_invocation_ms.is_some(),
-        "judge_model_ms": measured.judge_invocation_ms.is_some(),
-        "llmlint_model_ms": measured.llmlint_invocation_ms.is_some(),
-        "tool_ms": measured.tool_ms.is_some(),
-    })
+    let mut presence: Map<String, Value> = per_party(measured, "_ms", &|ms| json!(ms.is_some()))
+        .into_iter()
+        .collect();
+    presence.insert("tool_ms".into(), json!(measured.tool_ms.is_some()));
+    Value::Object(presence)
 }
 
 /// The sessions the merged event store shows doing one node's work.
@@ -1016,17 +1041,15 @@ fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     run.insert("sources".into(), json!(["events.jsonl", "launch.json"]));
     // The same discipline one level down: a party that reported no turn at a
     // node has no time there, which is not zero of it.
-    run.insert(
-        "node_work_ms".into(),
-        json!({
-            // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
-            "agent_model_ms": at_nodes.agent_invocation_ms,
-            "judge_model_ms": at_nodes.judge_invocation_ms,
-            "llmlint_model_ms": at_nodes.llmlint_invocation_ms,
-            "tool_ms": at_nodes.tool_ms,
-            "wall_ms": telemetry.map(|document| document.wall_ms),
-        }),
+    let mut work: Map<String, Value> = per_party(&at_nodes, "_ms", &|ms| json!(ms))
+        .into_iter()
+        .collect();
+    work.insert("tool_ms".into(), json!(at_nodes.tool_ms));
+    work.insert(
+        "wall_ms".into(),
+        json!(telemetry.map(|document| document.wall_ms)),
     );
+    run.insert("node_work_ms".into(), Value::Object(work));
     run.insert("turns".into(), json!(turns_of(view, None)));
     run.insert("lint".into(), json!(measurements.lint_records));
     Value::Object(run)
