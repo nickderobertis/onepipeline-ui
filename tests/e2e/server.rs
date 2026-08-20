@@ -4750,3 +4750,209 @@ fn unanswered_report(prompt: &str) -> String {
         serde_json::to_string(&report).expect("the report serializes")
     )
 }
+
+/// A report written under an *older* contract than this binary links is still
+/// read.
+///
+/// The refusal beside it is one-sided on purpose: onejudge bumps its version for
+/// an added field, so every report stored before the running binary was built is
+/// older than it, and a reader that demanded equality would blank the transcript
+/// of every dispatch that had already finished.
+#[test]
+fn a_report_written_under_an_older_contract_is_still_read() {
+    const SESSION: &str = "node-scope-1786925518888-3163444.worker";
+    let mut document: Value =
+        serde_json::from_str(&unanswered_report("Now run the gate.")).expect("the report parses");
+    let linked = document["schema_version"].as_u64().expect("a version");
+    assert!(linked > 0, "there is an older contract to be written under");
+    document["schema_version"] = json!(linked - 1);
+
+    let turns = transcript_of(
+        SESSION,
+        "node-scope-1786925518888-3163444",
+        &format!("{document}\n"),
+    );
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["user"], json!("Land the wire contract."));
+    assert_eq!(turns[0]["assistant"], json!("The route table is landed."));
+}
+
+/// A reply with no prompt before it is still the agent's turn.
+///
+/// A transcript alternates, and a report that does not is a report about a
+/// dispatch that did not — the reply is served as the turn it is, with an empty
+/// prompt, rather than joining the turn before it or vanishing.
+#[test]
+fn a_reply_with_no_prompt_before_it_opens_a_turn_of_its_own() {
+    const SESSION: &str = "node-scope-1786925518999-3163555.worker";
+    let turns = transcript_of(
+        SESSION,
+        "node-scope-1786925518999-3163555",
+        &report_of(&[("assistant", "Picking up where the last dispatch left off.")]),
+    );
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["user"], json!(""), "no prompt was recorded");
+    assert_eq!(
+        turns[0]["assistant"],
+        json!("Picking up where the last dispatch left off.")
+    );
+}
+
+/// A summary relayed before the session relayed any turn joins the first turn it
+/// does relay.
+///
+/// It was published from inside a turn whose start never reached the journal, and
+/// dropping it would lose the only record that the turn happened at all.
+#[test]
+fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
+    const SESSION: &str = "node-scope-1786925519111-3163666.worker";
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let labels = json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::SHIP_NODE_ID,
+            "member": "worker",
+            "persona": "pr-author",
+            "session": SESSION,
+        });
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-activity",
+            labels.clone(),
+            json!({
+                "kind": "tool_use",
+                "name": "Read",
+                "detail": "AGENTS.md",
+                "truncated": false,
+            }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            labels.clone(),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-activity",
+            labels,
+            json!({
+                "kind": "tool_use",
+                "name": "Edit",
+                "detail": "src/payload.rs",
+                "truncated": false,
+            }),
+        );
+    });
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    let tools = turns[0]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(tools.len(), 2, "neither summary was dropped: {tools:?}");
+    assert_eq!(tools[0]["name"], json!("Read"), "in the order relayed");
+    assert_eq!(tools[0]["index"], json!(0));
+    assert_eq!(tools[1]["name"], json!("Edit"));
+    assert_eq!(tools[1]["index"], json!(1));
+}
+
+/// A settled member's transcript, from one relayed turn and the report it stored.
+fn transcript_of(session: &str, stream: &str, report: &str) -> Vec<Value> {
+    let stream = stream.to_owned();
+    let labelled = session.to_owned();
+    let report = report.to_owned();
+    let serving = Serving::start(move |root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": labelled,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: &stream,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:05.000Z",
+                artifact: &format!("report-{stream}"),
+                report: &report,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{session}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone()
+}
+
+/// A report carrying exactly the messages named, in onejudge's own types.
+fn report_of(messages: &[(&str, &str)]) -> String {
+    use onejudge::{Message, PartyTelemetry, Report, Role, Telemetry, Transcript};
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: messages
+                .iter()
+                .map(|(role, content)| Message {
+                    role: match *role {
+                        "user" => Role::User,
+                        "assistant" => Role::Assistant,
+                        other => panic!("{other} is not a message role onejudge declares"),
+                    },
+                    content: (*content).to_owned(),
+                    events: Vec::new(),
+                })
+                .collect(),
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: None,
+        usage: None,
+        telemetry: Some(Telemetry {
+            wall_ms: 1_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 0,
+            sessions: Vec::new(),
+            attribution: Vec::new(),
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
