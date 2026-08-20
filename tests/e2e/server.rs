@@ -2039,15 +2039,13 @@ fn a_live_run_reports_what_it_is_doing_and_what_it_is_waiting_on() {
         json!(2),
         "the sibling attributed the block: {timing}"
     );
-    assert!(
-        ms("llmlint_model_ms") > 0,
-        "the lint member reported a turn: {timing}"
-    );
     assert_eq!(
-        timing["judge_model_ms"],
+        timing["llmlint_model_ms"],
         json!(null),
-        "no judge chain reported one, which is not zero of it: {timing}"
+        "nothing reports time inside a model, for any party: {timing}"
     );
+    assert_eq!(timing["judge_model_ms"], json!(null), "{timing}");
+    assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
     assert_eq!(timing["tool_ms"], json!(null), "nothing times a tool call");
     // The run waited on a planner and on a person, and the sibling's vocabulary
     // folds both into `scheduling` — which is where that time is, and why the
@@ -3239,25 +3237,26 @@ fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
     assert_eq!(usage["llmlint"]["input_tokens"], json!(null));
     assert_eq!(usage["llmlint"]["cost_usd"], json!(null));
 
-    // The same distinction on the clock: the two parties that settled a member
-    // carry a number, and the one that did not carries no number at all.
+    // The clock is where that split stops: what each party spent is a document
+    // the sibling folds, and how long each spent *inside a model* is a thing no
+    // producer in this stack reports. Every one of those lanes says so — absent
+    // on the wire, `false` on the presence flag beside it — so a reader cannot
+    // take one for a party that used no model time.
     let presence = &body["run"]["timing_presence"];
-    assert_eq!(presence["agent_model_ms"], json!(true));
-    assert_eq!(presence["judge_model_ms"], json!(true));
-    assert_eq!(presence["llmlint_model_ms"], json!(false));
-    assert_eq!(presence["tool_ms"], json!(false));
     let timing = &body["run"]["timing"];
-    assert_eq!(timing["gate_seconds"], json!(2), "{timing}");
-    assert_eq!(timing["judge_model_ms"], json!(2_800), "{timing}");
-    assert_eq!(timing["llmlint_model_ms"], json!(null), "{timing}");
-    assert_eq!(timing["tool_ms"], json!(null), "{timing}");
-
-    // The same discipline one level down: a party that reported no turn at a
-    // node has no time there, which is not zero of it.
     let work = &body["run"]["node_work_ms"];
-    assert_eq!(work["judge_model_ms"], json!(2_800), "{work}");
-    assert_eq!(work["llmlint_model_ms"], json!(null), "{work}");
+    for party in ["agent", "judge", "llmlint"] {
+        let lane = format!("{party}_model_ms");
+        assert_eq!(presence[&lane], json!(false), "{party}: {presence}");
+        assert_eq!(timing[&lane], json!(null), "{party}: {timing}");
+        assert_eq!(work[&lane], json!(null), "{party}: {work}");
+    }
+    assert_eq!(presence["tool_ms"], json!(false));
+    assert_eq!(timing["gate_seconds"], json!(2), "{timing}");
+    assert_eq!(timing["tool_ms"], json!(null), "{timing}");
     assert_eq!(work["tool_ms"], json!(null), "{work}");
+    // The one lane a node-level rollup still carries, which is the run's own.
+    assert_eq!(work["wall_ms"], timing["wall_ms"], "{work}");
 }
 
 #[test]
@@ -3502,15 +3501,23 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     // what a measured nothing looks like.
     assert!(document.bucket(telemetry::BucketName::Judge).is_none());
     assert_eq!(timing["judge_seconds"], json!(null), "{timing}");
-    // Derived from the document's own wall clock rather than restated, so a
-    // fixture whose timings move does not need this number rewritten with it.
-    #[allow(clippy::cast_precision_loss)]
-    let judge_share = timing["judge_model_ms"]
-        .as_f64()
-        .expect("the judge chain reported turns")
-        / document.wall_ms as f64;
-    assert_eq!(timing["fractions"]["judge_model"], json!(judge_share));
-    assert_eq!(timing["fractions"]["llmlint_model"], json!(null));
+    // And the three lanes for time inside a model, which no producer in this
+    // stack reports: absent on the wire and absent in the fractions beside it,
+    // for every party, however much of the run's clock each one used. What *is*
+    // recorded is one invocation's elapsed time, which is a turn's rather than a
+    // party's and is served on the turn as `durationMs`.
+    for party in ["agent", "judge", "llmlint"] {
+        assert_eq!(
+            timing[format!("{party}_model_ms")],
+            json!(null),
+            "{party}: {timing}"
+        );
+        assert_eq!(
+            timing["fractions"][format!("{party}_model")],
+            json!(null),
+            "{party}: {timing}"
+        );
+    }
 
     // And what each party spent is the sibling's split, not a second reading of
     // the records it already read.
@@ -3557,10 +3564,9 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
     ] {
         assert_eq!(timing[lane], json!(null), "{lane} is not absent: {timing}");
     }
-    // What this server measures for itself is unaffected: each settled member's
-    // report says how long the invocations it made took, and that is not the
-    // sibling's clock to answer for.
-    assert_eq!(timing["agent_model_ms"], json!(1_130));
+    // Including the three lanes this server would have folded for itself, which
+    // nothing measures either way.
+    assert_eq!(timing["agent_model_ms"], json!(null));
     assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
 
     // The row the operator arrives on says the same thing as the detail they open
@@ -4581,21 +4587,6 @@ fn a_retained_report_this_crate_cannot_read_leaves_the_transcript_and_the_clock_
     assert_eq!(turns[0]["user"], json!(""));
     assert_eq!(turns[0]["assistant"], json!(null));
     assert_eq!(turns[0]["durationMs"], json!(null));
-
-    // And the timing reading beside it. The lint member of this run settled with
-    // a report that *is* readable, so the lane that stays absent is the one whose
-    // only report could not be read — rather than the whole reading being off.
-    let timing = http::get(
-        serving.address,
-        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
-    )
-    .json()["run"]["timing"]
-        .clone();
-    assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
-    assert!(
-        timing["llmlint_model_ms"].as_u64().is_some_and(|ms| ms > 0),
-        "the member whose report reads is still measured: {timing}"
-    );
 }
 
 /// A report written under a contract newer than the one this binary links is

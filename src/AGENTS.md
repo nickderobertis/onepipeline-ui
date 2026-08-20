@@ -46,24 +46,6 @@ anything new here is a proposal to make upstream first.
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
   writes where it writes one, else the graph `member`, else the persona — and
   falls back to the agent side, which is the one side every dispatch has.
-- **How long each party's own invocations ran.** The SDK's buckets are wall
-  clock — where the *run's* time went — and no fold of that clock can say how
-  much of it a party spent inside a harness it started. `payload::measured` sums
-  it off each settled member's stored report: every candidate in
-  `telemetry.attribution` whose `ran` is true, by its own `duration_ms`, over both
-  of the report's roles, attributed to the party the *member* is. It is absent for
-  a party that settled no member rather than zero.
-
-  **The wire calls these `agent_model_ms`, `judge_model_ms` and `llmlint_model_ms`
-  and they are not a model's own clock.** Nothing published in this stack carries
-  one per party; what a report records per invocation is `duration_ms`, the
-  elapsed time of the harness process, and that is what these carry. The wire
-  keys are a client-pinned contract — `timingSchema` requires them and
-  `docs/contract.md` names them — and do not move with the measurement, so the
-  four sites that serve them carry a narrow `names_match_behavior` suppression
-  pointing here. The upstream change that makes the name true: a producer that
-  reports model time per party, at which point this becomes a read of it and both
-  suppressions go.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
@@ -307,6 +289,20 @@ record it before anything here can serve it.
   required, its transition and its conclusion, and its log as an artifact. No
   link to the host's own page for it, so `checks[].url` is absent and a reader
   opens the stored log instead.
+- **Time inside a model, per party** (`timing.*_model_ms`, their fractions, and
+  `node_work_ms`). No producer in this stack reports it: `onepipeline`'s buckets
+  are wall clock, and the usage record a `turn-completed` carries is
+  `onejudge::Usage`, which has no interval in it at all. So `payload::model_lanes`
+  serves all three lanes absent, and the presence flags beside them say `false`.
+
+  **Do not fold a turn's elapsed time into them.** A settled member's report does
+  record how long one invocation ran, as its ran candidate's `duration_ms` — but
+  that is an invocation's wall clock, not a model's, and it belongs to a *turn*
+  rather than to a party. It is served where it is measured, on the turn, as
+  `durationMs`. A reading before this one summed it into these lanes, which
+  answered a question no producer has answered under a name that says it did.
+  The upstream change that fills them: a producer that reports model time per
+  party.
 - **Time inside a tool call** (`timing.tool_ms`). `turn-activity` reports *what* a
   turn did and carries no interval, so the presence flag beside that zero says it
   was never measured — which is the wire's own way of telling an unmeasured zero

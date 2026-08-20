@@ -18,16 +18,16 @@
       "setup_seconds": 1,
       "scheduling_seconds": 3,
       "wall_seconds": 30,
-      "agent_model_ms": 1130,
-      "judge_model_ms": 2800,
+      "agent_model_ms": null,
+      "judge_model_ms": null,
       "llmlint_model_ms": null,
       "tool_ms": null,
       "idle_orchestration_ms": null,
       "unattributed_ms": 0,
       "wall_ms": 30000,
       "fractions": {
-        "agent_model": 0.03766666666666667,
-        "judge_model": 0.09333333333333334,
+        "agent_model": null,
+        "judge_model": null,
         "llmlint_model": null,
         "tool": null,
         "idle_orchestration": null,
@@ -55,7 +55,7 @@
         "timing_quality": "complete",
         "linkage_quality": "labelled",
         "timing_presence": {
-          "agent_model_ms": true,
+          "agent_model_ms": false,
           "judge_model_ms": false,
           "llmlint_model_ms": false,
           "tool_ms": false
@@ -79,7 +79,7 @@
         "linkage_quality": "labelled",
         "timing_presence": {
           "agent_model_ms": false,
-          "judge_model_ms": true,
+          "judge_model_ms": false,
           "llmlint_model_ms": false,
           "tool_ms": false
         }
@@ -118,8 +118,8 @@
     "timing_quality": "complete",
     "linkage_quality": "labelled",
     "timing_presence": {
-      "agent_model_ms": true,
-      "judge_model_ms": true,
+      "agent_model_ms": false,
+      "judge_model_ms": false,
       "llmlint_model_ms": false,
       "tool_ms": false
     },
@@ -128,8 +128,8 @@
       "launch.json"
     ],
     "node_work_ms": {
-      "agent_model_ms": 1130,
-      "judge_model_ms": 2800,
+      "agent_model_ms": null,
+      "judge_model_ms": null,
       "llmlint_model_ms": null,
       "tool_ms": null,
       "wall_ms": 30000

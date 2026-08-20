@@ -424,10 +424,7 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     }
     summary.insert("timing_quality".into(), json!(timing_quality(view)));
     summary.insert("linkage_quality".into(), json!("labelled"));
-    summary.insert(
-        "timing".into(),
-        timing(telemetry, &measured(view, &view.events)),
-    );
+    summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
     Value::Object(summary)
@@ -613,37 +610,18 @@ fn graph_complete(view: &RunView) -> bool {
 /// What one node's own records *measured*, as against what the run's clock shows.
 ///
 /// The wall clock is the sibling's to attribute — [`crate::telemetry`] reads the
-/// document it aggregates — and these are the measurements no fold of that clock
-/// can produce: how long each party's own harness invocations ran, which only the
-/// invocation reports, and how much of a node's work each party did. Every field
-/// is `None` until a record fills it, and `None` is not zero: a run whose judge
-/// never settled a member has no judge time, where one whose judge answered
-/// instantly has zero of it. Only the second is a measurement.
+/// document it aggregates — and this is what no fold of that clock can produce.
+/// Every field is `None` until a record fills it, and `None` is not zero: a lane
+/// nothing measured is a different fact from one measured at zero, and only the
+/// second is a measurement.
 #[derive(Debug, Default, Clone, Copy)]
 struct Measured {
-    /// How long a party's own harness invocations ran, summed from every candidate
-    /// that *ran* in a settled member's stored report.
-    ///
-    /// Named for what it holds: a report records `duration_ms` per invocation,
-    /// which is the elapsed time of the harness process that ran the turn, and
-    /// nothing on this wire carries a model's own clock. The wire calls these
-    /// `*_model_ms` — a client-pinned key that does not move with the
-    /// measurement, spelled once where they are served.
-    agent_invocation_ms: Option<u64>,
-    judge_invocation_ms: Option<u64>,
-    llmlint_invocation_ms: Option<u64>,
     /// Time inside a tool call. `turn-activity` reports *what* a turn did and
     /// carries no interval, so nothing measures this yet.
     tool_ms: Option<u64>,
     /// How many relayed records the lint party produced, so a party that
     /// recorded work with no timing on it is still visible as having run.
     lint_records: u64,
-}
-
-/// Add one measured span to a slot, which is what turns it from unmeasured into
-/// a measurement of zero or more.
-fn measure(slot: &mut Option<u64>, ms: u64) {
-    *slot = Some(slot.unwrap_or(0) + ms);
 }
 
 /// Seconds a record wrote as a float, as whole milliseconds.
@@ -658,48 +636,15 @@ fn seconds_as_ms(value: Option<&Value>) -> Option<u64> {
     }
 }
 
-/// How long the invocations one report's run really made took, summed.
-///
-/// Both of the report's roles count: both are invocations the member itself made,
-/// and the party this is attributed to is the *member's* role in the pipeline.
-fn invocation_ms(report: &judge::Report) -> Option<u64> {
-    let mut total = None;
-    for attribution in &report.telemetry.as_ref()?.attribution {
-        for candidate in attribution.candidates.iter().filter(|c| c.ran) {
-            if let Some(ms) = candidate.duration_ms {
-                measure(&mut total, ms);
-            }
-        }
-    }
-    total
-}
-
 /// Everything the given records measured about their own turns, walked once.
-///
-/// The timing comes off each settled member's stored report rather than off a
-/// record: a `turn-completed` carries the whole dispatch's usage and no interval
-/// at all, and the one place an invocation's elapsed time is recorded is the
-/// report's own attribution.
-fn measured<'a>(view: &RunView, events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
+fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
     let mut totals = Measured::default();
     for event in events {
         if event.source != Source::Agentgraph || event.kind.0 == graph::TURN_ACTIVITY {
             continue;
         }
-        let party = transport_role(event);
-        if party == Party::Llmlint {
+        if transport_role(event) == Party::Llmlint {
             totals.lint_records += 1;
-        }
-        if event.kind.0 != graph::MEMBER_SETTLED {
-            continue;
-        }
-        let Some(ms) = read_report(view, event).as_ref().and_then(invocation_ms) else {
-            continue;
-        };
-        match party {
-            Party::Judge => measure(&mut totals.judge_invocation_ms, ms),
-            Party::Llmlint => measure(&mut totals.llmlint_invocation_ms, ms),
-            Party::Agent => measure(&mut totals.agent_invocation_ms, ms),
         }
     }
     totals
@@ -747,7 +692,7 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
         timing.insert(lane.into(), json!(seconds(bucket(name))));
     }
     timing.insert("wall_seconds".into(), json!(seconds(wall)));
-    timing.extend(per_party(measured, "_ms", &|ms| json!(ms)));
+    timing.extend(model_lanes("_ms", &Value::Null));
     timing.insert("tool_ms".into(), json!(measured.tool_ms));
     // The wire keeps a lane for the run waiting on a planner or a person, and the
     // sibling's vocabulary folds both into `scheduling`. Nothing measures the two
@@ -763,7 +708,7 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
     timing.insert("wall_ms".into(), json!(wall));
 
     let mut fractions = Map::new();
-    fractions.extend(per_party(measured, "", &|ms| json!(fraction(ms))));
+    fractions.extend(model_lanes("", &Value::Null));
     fractions.insert("tool".into(), json!(fraction(measured.tool_ms)));
     fractions.insert("idle_orchestration".into(), Value::Null);
     for (lane, name) in [
@@ -777,28 +722,27 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
     Value::Object(timing)
 }
 
-/// The wire's three per-party lanes, under the key it pins for each.
+/// The wire's three per-party model-time lanes, each served as unmeasured.
 ///
-/// One function because the same three lanes are served four times — the timings,
+/// **Nothing in this stack measures how long a party spent inside a model.**
+/// `onepipeline`'s buckets are wall clock, and the usage record a `turn-completed`
+/// carries is `onejudge::Usage`, which has no interval in it at all — so each of
+/// these lanes is served as the wire's own absence, which is what tells a lane
+/// nobody measured from one measured at zero. What *is* recorded is how long one
+/// invocation ran, and that is a turn's, not a party's: it is served on the turn
+/// it belongs to, as `durationMs`, and folding it into a lane named for a model's
+/// clock would answer a question no producer has answered.
+///
+/// One function because the same three lanes are named four times — the timings,
 /// their fractions, the presence flags beside them, and the node-level rollup —
-/// and four copies of the mapping are four chances for two of them to disagree
-/// about a party. `suffix` is what the wire appends to the lane: `_ms` for a
-/// measurement, nothing for a fraction of the clock.
-///
-// llmlint: ignore[names_match_behavior] the `*_model` keys are the client's pinned contract — `timingSchema` requires them — and what this stack can measure per party is a report's invocation `duration_ms`. `Measured` names the value for what it is; `src/AGENTS.md` holds why the key does not move with it, and the upstream change that reconciles them.
-fn per_party(
-    measured: &Measured,
-    suffix: &str,
-    render: &dyn Fn(Option<u64>) -> Value,
-) -> Vec<(String, Value)> {
-    [
-        ("agent", measured.agent_invocation_ms),
-        ("judge", measured.judge_invocation_ms),
-        ("llmlint", measured.llmlint_invocation_ms),
-    ]
-    .into_iter()
-    .map(|(party, ms)| (format!("{party}_model{suffix}"), render(ms)))
-    .collect()
+/// and four copies of that naming are four chances for two of them to disagree.
+/// `suffix` is what the wire appends to the lane: `_ms` for a measurement,
+/// nothing for a fraction of the clock.
+fn model_lanes(suffix: &str, unmeasured: &Value) -> Vec<(String, Value)> {
+    ["agent", "judge", "llmlint"]
+        .into_iter()
+        .map(|party| (format!("{party}_model{suffix}"), unmeasured.clone()))
+        .collect()
 }
 
 /// What each party spent, as the sibling's document reports it.
@@ -835,9 +779,7 @@ fn usage(document: Option<&RunTelemetry>) -> Value {
 /// conforming client reads either, and a producer that measures a real zero says
 /// so here rather than being indistinguishable from one that measured nothing.
 fn timing_presence(measured: &Measured) -> Value {
-    let mut presence: Map<String, Value> = per_party(measured, "_ms", &|ms| json!(ms.is_some()))
-        .into_iter()
-        .collect();
+    let mut presence: Map<String, Value> = model_lanes("_ms", &json!(false)).into_iter().collect();
     presence.insert("tool_ms".into(), json!(measured.tool_ms.is_some()));
     Value::Object(presence)
 }
@@ -977,7 +919,7 @@ fn events_of<'a>(view: &'a RunView, node: &str) -> Vec<&'a Envelope> {
 
 /// One node's telemetry row.
 fn node_telemetry(view: &RunView, node: &str, recorded: &Recorded) -> Value {
-    let measurements = measured(view, events_of(view, node));
+    let measurements = measured(events_of(view, node));
     let mut row = Map::new();
     row.insert("node".into(), json!(node));
     row.insert("status".into(), json!(status_word(&recorded.status)));
@@ -1015,11 +957,10 @@ fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
         .iter()
         .map(|(node, recorded)| node_telemetry(view, node, recorded))
         .collect();
-    let measurements = measured(view, &view.events);
+    let measurements = measured(&view.events);
     // What the run measured at a node, rather than across its whole clock: the
     // same records, filtered to the ones a node's own work produced.
     let at_nodes = measured(
-        view,
         view.events
             .iter()
             .filter(|event| event.labels.node.is_some()),
@@ -1041,9 +982,7 @@ fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     run.insert("sources".into(), json!(["events.jsonl", "launch.json"]));
     // The same discipline one level down: a party that reported no turn at a
     // node has no time there, which is not zero of it.
-    let mut work: Map<String, Value> = per_party(&at_nodes, "_ms", &|ms| json!(ms))
-        .into_iter()
-        .collect();
+    let mut work: Map<String, Value> = model_lanes("_ms", &Value::Null).into_iter().collect();
     work.insert("tool_ms".into(), json!(at_nodes.tool_ms));
     work.insert(
         "wall_ms".into(),

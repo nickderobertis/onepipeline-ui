@@ -861,21 +861,20 @@ function writeLiveRun(root) {
       { ...run, node: "dashboard", member, persona, session },
       { message, model: "a-model" },
     );
-    // What the *dispatch* consumed, spelled the way the wire spells it:
-    // `oneagentgraph` copies a settling member's usage verbatim out of its
-    // onejudge report, so a `turn-completed` carries that document's own keys and
-    // no interval at all.
+    // What the turn consumed, which is the only measurement of model time and
+    // cost anything in the stack records.
     journal.advance(2).emit(
       "agentgraph",
       "turn-completed",
       { ...run, node: "dashboard", member, persona, session },
       {
         usage: {
-          input_tokens: 1200,
-          output_tokens: 340,
-          cache_read_tokens: 800,
-          cache_write_tokens: 120,
-          cost_usd: 0.42,
+          tokens_in: 1200,
+          tokens_out: 340,
+          cache_read: 800,
+          cache_write: 120,
+          cost: 0.42,
+          duration: 1.5,
         },
       },
     );

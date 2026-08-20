@@ -81,7 +81,7 @@ test("a package consumer validates an API response through the public export", (
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 14,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }).runs,
@@ -262,7 +262,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(() =>
     parseRunList({
       api_version: 3,
-      telemetry_schema_version: 14,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }),
@@ -270,7 +270,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(
     runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 14,
+      telemetry_schema_version: 13,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       graph: { node_states: { build: "paused" } },
@@ -337,7 +337,7 @@ function completeDetail(conversations: unknown[]) {
   };
   return {
     api_version: 2,
-    telemetry_schema_version: 14,
+    telemetry_schema_version: 13,
     observed_at: "2026-07-26T12:00:00Z",
     run: {
       run_id: "run-1",
@@ -706,11 +706,9 @@ test("this repository's own served goldens parse through the public parsers", as
   expect(timeline.spans.map((span) => span.kind)).toEqual([
     "node",
     "dispatch",
-    // One per piece of evidence the node's own records kept — its settled
-    // member's report, its gate's log, and each settled check's — then the change
-    // it published and the contention that publication met, summarized rather
-    // than listed.
-    "verification",
+    // One per log the node's own records kept — its gate's, and each settled
+    // check's — then the change it published and the contention that publication
+    // met, summarized rather than listed.
     "verification",
     "verification",
     "verification",
