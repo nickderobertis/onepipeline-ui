@@ -56,15 +56,11 @@ anything new here is a proposal to make upstream first.
 
   **The wire calls these `agent_model_ms`, `judge_model_ms` and `llmlint_model_ms`
   and they are not a model's own clock.** Nothing published in this stack carries
-  one per party: the reading these replace was taken from a `turn-completed`'s
-  `usage.duration`, and no producer has ever written that field — `oneagentgraph`
-  relays a settling member's `usage` copied verbatim out of its onejudge report,
-  which is `onejudge::Usage` and has no duration in it. So the old reading
-  measured nothing and served every party `null`. What a report does record per
-  invocation is `duration_ms`, the elapsed time of the harness process, which is
-  what is summed now. The keys keep their names because a client already reads
-  them; the upstream change that would make the name true is a producer that
-  reports model time per party, at which point this becomes a read of it.
+  one per party; what a report records per invocation is `duration_ms`, the
+  elapsed time of the harness process, and that is what these carry. The wire
+  keys are a client-pinned contract and do not move with the measurement. The
+  upstream change that makes the name true: a producer that reports model time
+  per party, at which point this becomes a read of it.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
@@ -192,10 +188,9 @@ Two names in `payload::graph` are exceptions and each says so where it is
 declared. **`turn`**, the producer's own 1-based number on a `turn-started`, is
 built inline from no declared struct, so it is read on the `onevcs` terms above.
 And the **usage keys** are `onejudge::Usage`'s, not `oneagentgraph::event::Usage`'s:
-that library relays a settling member's `usage` copied verbatim out of the
-onejudge report, so `event::Usage` — `tokens_in`, `cost`, `duration` — is declared
-and never written. Gating the copy against it is what let six keys drift until
-every served cost read `null`; the gate is against the type that writes them.
+that library relays a settling member's `usage` copied verbatim out of the onejudge
+report, so `event::Usage` is declared and never written. Gate the copy against the
+type that writes them, never against the one that merely declares them.
 
 Deliberately not read: `fetch`, `lock-acquired`, `merge-queued`,
 `session-closed`, `recovery-attested`. Each is a real record and none of them
@@ -217,15 +212,13 @@ exclude it, because a turn's id is its position in the transcript and the timeli
 numbers the same session by the same rule — excluding it in one alone would leave
 a plotted moment pointing at the wrong turn.
 
-**Which turn a summary is published from is the record before it, not the record
-after it.** `oneagentgraph` opens a turn and *then* streams its activities, so
-carrying an accumulated batch onto the next turn record put every journal-derived
-turn's tools one turn late. And what a turn record can be at all is narrower than
-"an agent-graph record that is not an activity": that library stamps a `session`
-label on the `turn-*` kinds and on no other, so a `member-settled` or a
-`member-died` can never *be* a transcript turn, and counting one made the turn
-count beside a node disagree with the transcript opened from it by one per settled
-member.
+**A summary belongs to the turn record before it, not the one after it.**
+`oneagentgraph` opens a turn and *then* streams its activities.
+
+**A turn record is a `turn-started` or a `turn-completed`, and nothing else.**
+That library stamps a `session` label on the `turn-*` kinds and on no other, so a
+`member-settled` or a `member-died` can never *be* a transcript turn — and the
+count beside a node has to agree with the transcript opened from it.
 
 ## The report a settled member left, which is what a transcript is
 
@@ -259,16 +252,13 @@ Five things about the reading, each because the obvious alternative is wrong:
   vocabularies in a report are different closed sets — `transcript::Role` is who
   wrote a message, `TelemetryRole` is which side ran — and a row is recorded only
   for an invocation that reported both a session id and a provider-measured start,
-  which this host's judge side does and its agent side does not. Measured: across
-  147 stored reports here, all 1,048 rows are the judge's. Matching a turn by its
-  index alone would put the judge's clock on the agent's turn.
+  which the judge side of a claude-code/codex pair reports and the agent side does
+  not — so in practice every row a report holds is the judge's. Matching a turn by
+  its index alone puts the judge's clock on the agent's turn.
 - **A report that is absent, uncopied or unreadable leaves the transcript as the
   journal relayed it** rather than emptying it. All three are "the report says
   nothing", and none of them is "the session recorded nothing".
 
-What this does not read, and could: `CandidateAttempt.model` is a real source for
-a turn's `model`, which is served today off a `turn-started` payload field no
-current producer writes. Sourcing it is the follow-up.
 
 ## The one store this crate opens that no run owns
 

@@ -4512,6 +4512,93 @@ fn a_settlement_whose_report_the_run_never_kept_still_serves_its_relayed_turns()
     assert_eq!(turns[0]["startedAt"], json!(null));
 }
 
+/// A retained report this crate cannot read as one leaves both readings of it
+/// where a missing report leaves them.
+///
+/// The run *does* hold the copy — the artifact route serves its bytes — so this
+/// is a parse that failed rather than a file that is not there, which are two
+/// different facts about the host and must not become two different answers on
+/// the wire. The transcript stays the turns the journal relayed, and the time the
+/// party's invocations took stays absent rather than becoming a zero.
+#[test]
+fn a_retained_report_this_crate_cannot_read_leaves_the_transcript_and_the_clock_alone() {
+    const STREAM: &str = "node-scope-1786925518666-3163222";
+    const SESSION: &str = "node-scope-1786925518666-3163222.worker";
+    const ARTIFACT: &str = "report-node-scope-1786925518666-3163222";
+    // Valid JSON, and not a report: no `transcript`, which is the one field a
+    // reader of one cannot do without.
+    let unreadable = report_document("the acceptance criteria were met");
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:03.000Z",
+                artifact: ARTIFACT,
+                report: &unreadable,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    // The run holds the copy: this is a document that is not a report, not a
+    // report that is not there.
+    let stored = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/artifacts/{ARTIFACT}", fixture_run::RUN_ID),
+    );
+    assert_eq!(stored.status, 200, "{}", stored.body);
+    assert_eq!(stored.json()["content"], json!(unreadable));
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "the relayed turn, not an empty transcript");
+    assert_eq!(turns[0]["user"], json!(""));
+    assert_eq!(turns[0]["assistant"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+
+    // And the timing reading beside it. The lint member of this run settled with
+    // a report that *is* readable, so the lane that stays absent is the one whose
+    // only report could not be read — rather than the whole reading being off.
+    let timing = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json()["run"]["timing"]
+        .clone();
+    assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
+    assert!(
+        timing["llmlint_model_ms"].as_u64().is_some_and(|ms| ms > 0),
+        "the member whose report reads is still measured: {timing}"
+    );
+}
+
 /// A report whose last turn was never answered, in onejudge's own types.
 fn unanswered_report(prompt: &str) -> String {
     use onejudge::{

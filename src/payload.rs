@@ -626,18 +626,17 @@ fn graph_complete(view: &RunView) -> bool {
 /// instantly has zero of it. Only the second is a measurement.
 #[derive(Debug, Default, Clone, Copy)]
 struct Measured {
-    /// Invocation time, per party, summed from every candidate that *ran* in a
-    /// settled member's stored report.
+    /// How long a party's own harness invocations ran, summed from every candidate
+    /// that *ran* in a settled member's stored report.
     ///
-    /// The wire calls these `*_model_ms` and they are not a model's own clock:
-    /// nothing on this wire carries one. What a report records per invocation is
-    /// `duration_ms`, the elapsed time of the harness process that ran the turn,
-    /// so that is what is summed and what `src/AGENTS.md` says it is. The reading
-    /// this replaces was taken from a `usage.duration` no producer has ever
-    /// written, so it measured nothing and every party read `null`.
-    agent_model_ms: Option<u64>,
-    judge_model_ms: Option<u64>,
-    llmlint_model_ms: Option<u64>,
+    /// Named for what it holds: a report records `duration_ms` per invocation,
+    /// which is the elapsed time of the harness process that ran the turn, and
+    /// nothing on this wire carries a model's own clock. The wire calls these
+    /// `*_model_ms` — a client-pinned key that does not move with the
+    /// measurement, spelled once where they are served.
+    agent_invocation_ms: Option<u64>,
+    judge_invocation_ms: Option<u64>,
+    llmlint_invocation_ms: Option<u64>,
     /// Time inside a tool call. `turn-activity` reports *what* a turn did and
     /// carries no interval, so nothing measures this yet.
     tool_ms: Option<u64>,
@@ -711,9 +710,9 @@ fn measured<'a>(view: &RunView, events: impl IntoIterator<Item = &'a Envelope>) 
             continue;
         };
         match party {
-            Party::Judge => measure(&mut totals.judge_model_ms, ms),
-            Party::Llmlint => measure(&mut totals.llmlint_model_ms, ms),
-            Party::Agent => measure(&mut totals.agent_model_ms, ms),
+            Party::Judge => measure(&mut totals.judge_invocation_ms, ms),
+            Party::Llmlint => measure(&mut totals.llmlint_invocation_ms, ms),
+            Party::Agent => measure(&mut totals.agent_invocation_ms, ms),
         }
     }
     totals
@@ -757,9 +756,12 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
         "setup_seconds": seconds(bucket(BucketName::Setup)),
         "scheduling_seconds": seconds(bucket(BucketName::Scheduling)),
         "wall_seconds": seconds(wall),
-        "agent_model_ms": measured.agent_model_ms,
-        "judge_model_ms": measured.judge_model_ms,
-        "llmlint_model_ms": measured.llmlint_model_ms,
+        // The one place the wire's `*_model_ms` names are spelled against what
+        // they carry, which is invocation time — see [`Measured`]. The keys are
+        // the client's pinned contract and do not move with the measurement.
+        "agent_model_ms": measured.agent_invocation_ms,
+        "judge_model_ms": measured.judge_invocation_ms,
+        "llmlint_model_ms": measured.llmlint_invocation_ms,
         "tool_ms": measured.tool_ms,
         // The wire keeps a lane for the run waiting on a planner or a person,
         // and the sibling's vocabulary folds both into `scheduling`. Nothing
@@ -774,9 +776,9 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
             .map(|document| document.wall_ms.saturating_sub(document.measured_ms())),
         "wall_ms": wall,
         "fractions": {
-            "agent_model": fraction(measured.agent_model_ms),
-            "judge_model": fraction(measured.judge_model_ms),
-            "llmlint_model": fraction(measured.llmlint_model_ms),
+            "agent_model": fraction(measured.agent_invocation_ms),
+            "judge_model": fraction(measured.judge_invocation_ms),
+            "llmlint_model": fraction(measured.llmlint_invocation_ms),
             "tool": fraction(measured.tool_ms),
             "idle_orchestration": Value::Null,
             "lock_wait": fraction(bucket(BucketName::LockWait)),
@@ -821,9 +823,9 @@ fn usage(document: Option<&RunTelemetry>) -> Value {
 /// so here rather than being indistinguishable from one that measured nothing.
 fn timing_presence(measured: &Measured) -> Value {
     json!({
-        "agent_model_ms": measured.agent_model_ms.is_some(),
-        "judge_model_ms": measured.judge_model_ms.is_some(),
-        "llmlint_model_ms": measured.llmlint_model_ms.is_some(),
+        "agent_model_ms": measured.agent_invocation_ms.is_some(),
+        "judge_model_ms": measured.judge_invocation_ms.is_some(),
+        "llmlint_model_ms": measured.llmlint_invocation_ms.is_some(),
         "tool_ms": measured.tool_ms.is_some(),
     })
 }
@@ -1030,9 +1032,9 @@ fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     run.insert(
         "node_work_ms".into(),
         json!({
-            "agent_model_ms": at_nodes.agent_model_ms,
-            "judge_model_ms": at_nodes.judge_model_ms,
-            "llmlint_model_ms": at_nodes.llmlint_model_ms,
+            "agent_model_ms": at_nodes.agent_invocation_ms,
+            "judge_model_ms": at_nodes.judge_invocation_ms,
+            "llmlint_model_ms": at_nodes.llmlint_invocation_ms,
             "tool_ms": at_nodes.tool_ms,
             "wall_ms": telemetry.map(|document| document.wall_ms),
         }),
