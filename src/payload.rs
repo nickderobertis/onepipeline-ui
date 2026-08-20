@@ -701,12 +701,7 @@ fn measured<'a>(view: &RunView, events: impl IntoIterator<Item = &'a Envelope>) 
         if event.kind.0 != graph::MEMBER_SETTLED {
             continue;
         }
-        let Some(ms) = fs::read(report_path(view, event))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<judge::Report>(&bytes).ok())
-            .as_ref()
-            .and_then(invocation_ms)
-        else {
+        let Some(ms) = read_report(view, event).as_ref().and_then(invocation_ms) else {
             continue;
         };
         match party {
@@ -2045,8 +2040,30 @@ fn stored_report(view: &RunView, session: &str) -> Option<judge::Report> {
                 .and_then(Value::as_str)
                 .is_some_and(|member| format!("{}.{member}", event.stream) == session)
     })?;
+    read_report(view, settlement)
+}
+
+/// The report one settlement stored, refused unless the contract it was written
+/// under is one this binary links.
+///
+/// A report is a **versioned document**, and the version is the field that says
+/// whether the rest of it means what this reader thinks it does — so it is
+/// checked before anything else is read, at the boundary, against
+/// `onejudge::SCHEMA_VERSION` and never against a number restated here.
+///
+/// The bound is one-sided on purpose. A document written under a contract *newer*
+/// than the one linked here may mean something else by the fields the two share,
+/// and reading it would serve a transcript that is wrong rather than absent. An
+/// older one is exactly what that library's additive discipline promises a reader
+/// can still read — every field it added is defaulted and no reader denies an
+/// unknown one — so refusing it would blank transcripts this crate reads
+/// perfectly well. Do not tighten this to equality: onejudge bumps the version
+/// for an added field, and every stored report older than the running binary
+/// would lose its transcript the day it did.
+fn read_report(view: &RunView, settlement: &Envelope) -> Option<judge::Report> {
     let bytes = fs::read(report_path(view, settlement)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    let report: judge::Report = serde_json::from_slice(&bytes).ok()?;
+    (report.schema_version <= judge::SCHEMA_VERSION).then_some(report)
 }
 
 /// The turns one report's transcript recorded, in the producer's own order.

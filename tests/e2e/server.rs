@@ -4599,6 +4599,80 @@ fn a_retained_report_this_crate_cannot_read_leaves_the_transcript_and_the_clock_
     );
 }
 
+/// A report written under a contract newer than the one this binary links is
+/// refused, rather than read as though the fields it shares still mean the same.
+///
+/// The version is what says whether the rest of the document means what a reader
+/// thinks it does, so a transcript it cannot vouch for is served as the journal
+/// relayed it — the same answer a missing report gets, because "this reader
+/// cannot read it" is one fact however it came about.
+#[test]
+fn a_report_written_under_a_newer_contract_than_this_binary_links_is_refused() {
+    const STREAM: &str = "node-scope-1786925518777-3163333";
+    const SESSION: &str = "node-scope-1786925518777-3163333.worker";
+    // The same report the readable journeys use, restamped: one field moved, so
+    // what this asserts is the version check and not a shape this crate dislikes.
+    let mut document: Value =
+        serde_json::from_str(&unanswered_report("Now run the gate.")).expect("the report parses");
+    let linked = document["schema_version"].as_u64().expect("a version");
+    document["schema_version"] = json!(linked + 1);
+    let ahead = format!("{document}\n");
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:04.000Z",
+                artifact: "report-node-scope-1786925518777-3163333",
+                report: &ahead,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "the relayed turn, not the report's");
+    assert_eq!(turns[0]["user"], json!(""), "{turns:?}");
+    assert_eq!(turns[0]["assistant"], json!(null), "{turns:?}");
+    assert_eq!(turns[0]["durationMs"], json!(null), "{turns:?}");
+    // And the timing beside it, which reads the same document through the same
+    // check: the party whose only report is ahead of this reader stays unmeasured.
+    let timing = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json()["run"]["timing"]
+        .clone();
+    assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
+}
+
 /// A report whose last turn was never answered, in onejudge's own types.
 fn unanswered_report(prompt: &str) -> String {
     use onejudge::{
