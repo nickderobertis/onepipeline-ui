@@ -299,10 +299,8 @@ record it before anything here can serve it.
   record how long one invocation ran, as its ran candidate's `duration_ms` — but
   that is an invocation's wall clock, not a model's, and it belongs to a *turn*
   rather than to a party. It is served where it is measured, on the turn, as
-  `durationMs`. A reading before this one summed it into these lanes, which
-  answered a question no producer has answered under a name that says it did.
-  The upstream change that fills them: a producer that reports model time per
-  party.
+  `durationMs`. The upstream change that fills them: a producer that reports
+  model time per party.
 - **Time inside a tool call** (`timing.tool_ms`). `turn-activity` reports *what* a
   turn did and carries no interval, so the presence flag beside that zero says it
   was never measured — which is the wire's own way of telling an unmeasured zero
