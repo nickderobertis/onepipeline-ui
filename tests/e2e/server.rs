@@ -4955,3 +4955,68 @@ fn report_of(messages: &[(&str, &str)]) -> String {
         serde_json::to_string(&report).expect("the report serializes")
     )
 }
+
+/// A filter narrows the turns a transcript *lists* and never what each listed
+/// turn was.
+///
+/// The invariant one level down from `a_filter_shapes_the_response_and_never_the
+/// _run`: the events a transcript carries are a listing and are the filter's to
+/// narrow, but a turn's own prompt, reply, tool observations, cost and clock come
+/// from the settled member's stored report — which describes the dispatch, not
+/// the reading of it. A reader who narrowed their attention sees fewer turns, and
+/// every turn they do see says exactly what it said to a reader who asked for
+/// everything.
+#[test]
+fn a_filter_narrows_the_turns_a_transcript_lists_and_never_what_each_one_was() {
+    let serving = two_runs();
+    let detail = |filter: &str| -> Value {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=true&filter={}",
+                fixture_run::RUN_ID,
+                urlencode(filter)
+            ),
+        )
+        .json()
+    };
+    let transcript = |body: &Value| -> Vec<Value> {
+        body["conversations"]
+            .as_array()
+            .expect("the transcripts")
+            .iter()
+            .find(|document| document["conversation"]["id"] == json!(fixture_run::CONVERSATION_ID))
+            .expect("the dispatch's own transcript")["conversation"]["turns"]
+            .as_array()
+            .expect("its turns")
+            .clone()
+    };
+
+    let wide = detail("monitor");
+    // The settlement record excluded: it is one of the session's relayed
+    // envelopes, so a reader who excluded its kind is not shown it.
+    let narrow = detail(r#"{"exclude":[{"kind":"turn-completed"}]}"#);
+    let all = transcript(&wide);
+    let listed = transcript(&narrow);
+    assert_eq!(all.len(), 3, "{all:?}");
+    assert_eq!(listed.len(), 2, "the listing narrowed: {listed:?}");
+
+    // And every turn still listed is the same turn, down to the fields only the
+    // report can fill.
+    assert_eq!(listed, all[..2].to_vec());
+    assert_eq!(listed[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(listed[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(listed[0]["usage"]["costUsd"], json!(29.71));
+    assert_eq!(listed[0]["durationMs"], json!(900));
+    assert_eq!(
+        listed[0]["tools"][1]["output"],
+        json!(fixture_run::TOOL_OBSERVATION)
+    );
+    assert_eq!(listed[1]["usage"]["costUsd"], json!(1.51));
+
+    // The fold beside them is the run's, not the reading's — including the one
+    // this step re-sourced from the same reports the transcripts are filled from.
+    assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+    assert_eq!(narrow["run"]["usage"], wide["run"]["usage"]);
+    assert_eq!(narrow["run"]["node_work_ms"], wide["run"]["node_work_ms"]);
+}
