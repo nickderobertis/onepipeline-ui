@@ -18,12 +18,10 @@ use std::fs;
 use std::path::Path;
 
 use oneharness_core::io::history;
-// The stored report's own declarations, under the name of the library that
-// writes them: this crate reads a settled member's report as the document
-// `onejudge` declares rather than as a second reading of its wire, on the same
-// terms `payload::harness_session` links `oneharness-core` for another tool's
-// store. Its `TelemetryRole` — which *side* ran — is a different vocabulary from
-// this module's own `Party` and from `judge::Role`, which is who wrote a message.
+// Under the name of the library that writes them. Three vocabularies here are
+// spelled alike and mean different things: `judge::Role` is who wrote a message,
+// `judge::TelemetryRole` is which side ran, and this module's `Party` is what a
+// member is to the pipeline.
 use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::plan::{Node, Plan};
@@ -161,12 +159,9 @@ pub mod graph {
     pub const USAGE: &str = "usage";
     /// Input tokens.
     ///
-    /// The five keys here are `onejudge::Usage`'s and not `oneagentgraph`'s own
-    /// `event::Usage`, which nothing writes: that library relays a settling
-    /// member's `usage` **copied verbatim out of the onejudge report**, so the
-    /// document's spelling is the one that reaches this crate. `tests/contract.rs`
-    /// holds them to the type that really writes them, which is what stops the
-    /// drift that made every served cost read `null`.
+    /// The five keys here are `onejudge::Usage`'s, not `oneagentgraph`'s own
+    /// `event::Usage`, which nothing writes — see `src/AGENTS.md`.
+    /// `tests/contract.rs` holds them to the type that writes them.
     pub const INPUT_TOKENS: &str = "input_tokens";
     /// Output tokens.
     pub const OUTPUT_TOKENS: &str = "output_tokens";
@@ -665,11 +660,8 @@ fn seconds_as_ms(value: Option<&Value>) -> Option<u64> {
 
 /// How long the invocations one report's run really made took, summed.
 ///
-/// Every candidate the chain fell through is skipped: it did not run, and its
-/// `duration_ms` is how long finding that out took. Both of the report's roles
-/// count, because both are invocations the member itself made — the party this
-/// total is attributed to is the *member's* role in the pipeline, which is a
-/// different question from which side of its own conversation ran.
+/// Both of the report's roles count: both are invocations the member itself made,
+/// and the party this is attributed to is the *member's* role in the pipeline.
 fn invocation_ms(report: &judge::Report) -> Option<u64> {
     let mut total = None;
     for attribution in &report.telemetry.as_ref()?.attribution {
@@ -751,9 +743,7 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
         "setup_seconds": seconds(bucket(BucketName::Setup)),
         "scheduling_seconds": seconds(bucket(BucketName::Scheduling)),
         "wall_seconds": seconds(wall),
-        // The one place the wire's `*_model_ms` names are spelled against what
-        // they carry, which is invocation time — see [`Measured`]. The keys are
-        // the client's pinned contract and do not move with the measurement.
+        // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
         "agent_model_ms": measured.agent_invocation_ms,
         "judge_model_ms": measured.judge_invocation_ms,
         "llmlint_model_ms": measured.llmlint_invocation_ms,
@@ -771,6 +761,7 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
             .map(|document| document.wall_ms.saturating_sub(document.measured_ms())),
         "wall_ms": wall,
         "fractions": {
+            // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
             "agent_model": fraction(measured.agent_invocation_ms),
             "judge_model": fraction(measured.judge_invocation_ms),
             "llmlint_model": fraction(measured.llmlint_invocation_ms),
@@ -818,6 +809,7 @@ fn usage(document: Option<&RunTelemetry>) -> Value {
 /// so here rather than being indistinguishable from one that measured nothing.
 fn timing_presence(measured: &Measured) -> Value {
     json!({
+        // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
         "agent_model_ms": measured.agent_invocation_ms.is_some(),
         "judge_model_ms": measured.judge_invocation_ms.is_some(),
         "llmlint_model_ms": measured.llmlint_invocation_ms.is_some(),
@@ -1027,6 +1019,7 @@ fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     run.insert(
         "node_work_ms".into(),
         json!({
+            // llmlint: ignore[names_match_behavior] the `*_model_ms` keys are the client's pinned contract — `timingSchema` requires them and `docs/contract.md` names them — and what this crate can measure per party is a report's `duration_ms`, the invocation's elapsed time, because nothing published in this stack carries a model's own clock per party. `Measured` names the value for what it is; renaming the wire would be a cross-cutting client change, and the upstream fix that makes the key true is recorded in `src/AGENTS.md`.
             "agent_model_ms": at_nodes.agent_invocation_ms,
             "judge_model_ms": at_nodes.judge_invocation_ms,
             "llmlint_model_ms": at_nodes.llmlint_invocation_ms,
@@ -2046,20 +2039,10 @@ fn stored_report(view: &RunView, session: &str) -> Option<judge::Report> {
 /// The report one settlement stored, refused unless the contract it was written
 /// under is one this binary links.
 ///
-/// A report is a **versioned document**, and the version is the field that says
-/// whether the rest of it means what this reader thinks it does — so it is
-/// checked before anything else is read, at the boundary, against
-/// `onejudge::SCHEMA_VERSION` and never against a number restated here.
-///
-/// The bound is one-sided on purpose. A document written under a contract *newer*
-/// than the one linked here may mean something else by the fields the two share,
-/// and reading it would serve a transcript that is wrong rather than absent. An
-/// older one is exactly what that library's additive discipline promises a reader
-/// can still read — every field it added is defaulted and no reader denies an
-/// unknown one — so refusing it would blank transcripts this crate reads
-/// perfectly well. Do not tighten this to equality: onejudge bumps the version
-/// for an added field, and every stored report older than the running binary
-/// would lose its transcript the day it did.
+/// **Do not tighten this to equality.** onejudge bumps its version for an added
+/// field, so every report stored before this binary was built is older than it
+/// and reads perfectly well; only a document *ahead* of the linked contract may
+/// mean something else by the fields the two share.
 fn read_report(view: &RunView, settlement: &Envelope) -> Option<judge::Report> {
     let bytes = fs::read(report_path(view, settlement)).ok()?;
     let report: judge::Report = serde_json::from_slice(&bytes).ok()?;

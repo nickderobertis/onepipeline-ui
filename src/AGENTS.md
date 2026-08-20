@@ -58,9 +58,12 @@ anything new here is a proposal to make upstream first.
   and they are not a model's own clock.** Nothing published in this stack carries
   one per party; what a report records per invocation is `duration_ms`, the
   elapsed time of the harness process, and that is what these carry. The wire
-  keys are a client-pinned contract and do not move with the measurement. The
-  upstream change that makes the name true: a producer that reports model time
-  per party, at which point this becomes a read of it.
+  keys are a client-pinned contract — `timingSchema` requires them and
+  `docs/contract.md` names them — and do not move with the measurement, so the
+  four sites that serve them carry a narrow `names_match_behavior` suppression
+  pointing here. The upstream change that makes the name true: a producer that
+  reports model time per party, at which point this becomes a read of it and both
+  suppressions go.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,

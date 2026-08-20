@@ -106,15 +106,8 @@ futures-core = "0.3"
 # `tests/packaging.rs` reconciles the two edges the lockfile records instead.
 # Why the store is linked at all, and read without a lock: `src/AGENTS.md`.
 oneharness-core = "0.10.1"
-# The report a settled member stored, read as the document that library declares
-# rather than as a second reading of its wire. It is what a transcript *is* — the
-# prose, the tool results, and the per-turn measurements the journal never
-# carried — and unlike an envelope payload it is a whole versioned document, so
-# the same reasoning that links `oneharness-core` for another tool's store links
-# this: a copy of the shape here would be a second source of truth for a contract
-# this repository does not own. Not pinned here, for the reason `oneagentgraph`
-# is not: `onepipeline` resolves it and the lock follows, so the declaration this
-# crate reads reports by is the one they were written by.
+# The document a settled member's report *is*, linked rather than copied — why,
+# and why it is unpinned, is in `src/AGENTS.md`.
 onejudge = "0.4"
 onepipeline = "=0.7.3"
 serde = { version = "1", features = ["derive"] }
