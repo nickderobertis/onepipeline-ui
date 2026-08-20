@@ -1990,12 +1990,10 @@ pub const WORKER_REPORT_ARTIFACT: &str = "report-node-scope-1786925518098-316364
 /// The prompt the simulated user opened the dispatch with — the dispatch's own
 /// task prose, which is what a turn's `user` is and what its persona name is not.
 pub const FIRST_PROMPT: &str = "## What\nLand the wire contract.";
-/// What it said back.
 pub const FIRST_REPLY: &str = "Landed the route table; every route answers.";
 /// The second thing it was asked, so a transcript has more than one turn to
 /// attribute a cost to.
 pub const SECOND_PROMPT: &str = "Run the repository's gate once, end to end.";
-/// And what it said about that.
 pub const SECOND_REPLY: &str = "The gate ran green over the finished tree.";
 /// What the tool the first turn called gave back. Nothing in the journal records
 /// this: `turn-activity` reports the call and never the observation.

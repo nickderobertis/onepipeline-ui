@@ -792,7 +792,6 @@ fn an_artifact_naming_a_report_the_run_never_retained_is_not_found() {
 
 /// The stream a `member-settled` was relayed on, as `oneagentgraph` mints one.
 const PLAIN_STREAM: &str = "node-scope-1786925518098-3163646";
-/// When those settlements were relayed.
 const SETTLED_AT: &str = "2026-08-07T12:01:00.000Z";
 /// A stream the SDK's sanitiser rewrites: a producer's id is a producer's
 /// string, and nothing on the envelope constrains its characters.
