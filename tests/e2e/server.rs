@@ -4224,3 +4224,368 @@ fn a_stream_watching_a_run_with_no_such_profile_is_served_rather_than_broken() {
         json!("unknown_filter_profile")
     );
 }
+
+/// The transcript a settled dispatch really had, served from the report it left.
+///
+/// This is the whole of what the view exists for: a manager supervising hours of
+/// work they cannot watch reads the prompt each turn was given, the reply it
+/// wrote, what its tool calls came back with, and what that turn alone cost. The
+/// journal carries none of those, and the report carries all of them — so every
+/// assertion here is against a run directory the SDK itself writes, holding a
+/// report `onejudge`'s own types serialized.
+#[test]
+fn a_settled_dispatchs_transcript_is_the_conversation_it_really_had() {
+    let serving = two_runs();
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_enveloped(&body);
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    let persona = body["attribution"]["persona"]
+        .as_str()
+        .expect("the dispatch's persona");
+    assert_eq!(persona, "worker");
+
+    // The prompt the simulated user gave, on the turn that answered it. Who was
+    // asked is not what they were asked, and a persona name here is the bug that
+    // made this view unable to answer the question it exists for.
+    assert_eq!(turns[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(turns[1]["user"], json!(fixture_run::SECOND_PROMPT));
+    for turn in &turns {
+        assert_ne!(turn["user"], json!(persona), "a persona name for a prompt");
+    }
+
+    // The prose it wrote back, which no envelope carries.
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(turns[1]["assistant"], json!(fixture_run::SECOND_REPLY));
+
+    // The call, and what it came back with. A `tool_call` carries no observation
+    // and the `tool_result` beside it is where the observation is — that is the
+    // producing library's own pairing, and the client pairs them by it.
+    let tools = turns[0]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(tools.len(), 2, "{tools:?}");
+    assert_eq!(tools[0]["kind"], json!("tool_call"));
+    assert_eq!(tools[0]["name"], json!("Read"));
+    assert_eq!(tools[0]["input"], json!({ "file_path": "src/api.rs" }));
+    assert_eq!(tools[0]["output"], json!(null), "a call returns nothing");
+    assert_eq!(tools[1]["kind"], json!("tool_result"));
+    assert_eq!(tools[1]["name"], json!(null), "a result carries no name");
+    assert_eq!(tools[1]["index"], json!(1));
+    assert_eq!(tools[1]["output"], json!(fixture_run::TOOL_OBSERVATION));
+    // And an absence where the trace exposed none, which is a different fact
+    // from a call that returned an empty string.
+    let second = turns[1]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(second[0]["name"], json!("Bash"));
+    assert_eq!(second[1]["kind"], json!("tool_result"));
+    assert_eq!(second[1]["output"], json!(null), "{second:?}");
+
+    // What *that turn* spent, from the candidate that ran in its own agent
+    // attribution — not the report's total over both sides, which is neither
+    // turn's, and not the judge's, which is the other role's.
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(29.71));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(1.51));
+    assert_eq!(turns[0]["usage"]["inputTokens"], json!(376));
+    assert_eq!(turns[0]["usage"]["cacheReadTokens"], json!(44_051));
+    assert_eq!(turns[0]["usage"]["cacheWriteTokens"], json!(356));
+    assert_eq!(turns[0]["usage"]["outputTokens"], json!(164));
+    for turn in turns.iter().take(2) {
+        assert_ne!(
+            turn["usage"]["costUsd"],
+            json!(50.72),
+            "the run total repeated on a turn: {turn}"
+        );
+        assert_ne!(
+            turn["usage"]["inputTokens"],
+            json!(79_341),
+            "the judge's tokens on an agent turn: {turn}"
+        );
+        assert_ne!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
+    }
+
+    // What that turn took, from the same candidate. Not `4364` — the identity the
+    // chain fell through before it, whose duration is how long finding that out
+    // took — and not `2800`, which is the judge's.
+    assert_eq!(turns[0]["durationMs"], json!(900));
+    assert_eq!(turns[1]["durationMs"], json!(100));
+
+    // The bounds the report observed for the *agent* side of turn 1. It holds a
+    // `role: judge` row for turn 2 as well and none for the agent, so turn 2 is
+    // served both bounds absent rather than the judge's clock.
+    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:00:03.000Z"));
+    assert_eq!(turns[0]["finishedAt"], json!("2026-08-07T12:00:03.900Z"));
+    assert_eq!(turns[1]["startedAt"], json!(null));
+    assert_eq!(turns[1]["finishedAt"], json!(null));
+    // Named exactly: the four instants the report recorded against the *judge*,
+    // one pair per turn. None of them may appear on any turn served here.
+    for judged in [
+        "2026-08-07T12:00:03.910Z",
+        "2026-08-07T12:00:03.980Z",
+        "2026-08-07T12:00:04.800Z",
+        "2026-08-07T12:00:04.900Z",
+    ] {
+        for turn in &turns {
+            for bound in ["startedAt", "finishedAt"] {
+                assert_ne!(
+                    turn[bound],
+                    json!(judged),
+                    "a judge row's clock reached an agent turn: {turn}"
+                );
+            }
+        }
+    }
+
+    // The settlement the report came with is not one of the conversation's turns
+    // and does not pretend to be: no prompt, no reply, and the dispatch's own
+    // total where a turn's usage would be.
+    assert_eq!(turns.len(), 3, "{turns:?}");
+    assert_eq!(turns[2]["status"], json!("turn-completed"));
+    assert_eq!(turns[2]["user"], json!(""));
+    assert_eq!(turns[2]["assistant"], json!(null));
+    assert_eq!(turns[2]["durationMs"], json!(null));
+    assert_eq!(turns[2]["usage"]["costUsd"], json!(50.72));
+}
+
+/// A turn whose reply never came reads as having captured none.
+///
+/// The prompt is still the turn's, and so are the tokens and the time its own
+/// invocation spent on it — a turn that produced no prose is not a turn that
+/// produced nothing.
+#[test]
+fn a_turn_whose_report_recorded_no_reply_is_served_as_having_recorded_none() {
+    const STREAM: &str = "node-scope-1786925518444-3163999";
+    const SESSION: &str = "node-scope-1786925518444-3163999.worker";
+    const PROMPT: &str = "Now run the gate.";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for turn in [1, 2] {
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-started",
+                json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": "worker",
+                    "persona": "pr-author",
+                    "session": SESSION,
+                }),
+                json!({ "turn": turn }),
+            );
+        }
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:01.000Z",
+                artifact: "report-node-scope-1786925518444-3163999",
+                report: &unanswered_report(PROMPT),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 2, "{turns:?}");
+    assert_eq!(turns[0]["assistant"], json!("The route table is landed."));
+    // The turn that recorded no reply: the prompt it was given, an explicit
+    // absence where the prose would be, and the measurements it still made.
+    assert_eq!(turns[1]["user"], json!(PROMPT));
+    assert_eq!(turns[1]["assistant"], json!(null));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(2.5));
+    assert_eq!(turns[1]["durationMs"], json!(4_200));
+}
+
+/// A session whose member has not settled is served exactly as the journal
+/// relayed it, which is not the same as being served empty.
+#[test]
+fn a_session_with_no_stored_report_is_served_as_the_journal_relayed_it() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    )
+    .json();
+    let turns = body["conversation"]["turns"].as_array().expect("the turns");
+    assert!(!turns.is_empty(), "an unsettled session still has turns");
+    // What the journal did relay: the record's own prose and the summaries it
+    // published. What it never carried: a prompt, a tool's observation, a
+    // per-turn cost, or a clock.
+    assert_eq!(turns[0]["assistant"], json!("opened the change request"));
+    assert_eq!(turns[0]["tools"][0]["name"], json!("Bash"));
+    assert_eq!(turns[0]["tools"][0]["output"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+    // And never the persona in place of a prompt nobody recorded.
+    let persona = body["attribution"]["persona"]
+        .as_str()
+        .expect("the dispatch's persona");
+    for turn in turns {
+        assert_eq!(turn["user"], json!(""), "{turn}");
+        assert_ne!(turn["user"], json!(persona), "{turn}");
+    }
+}
+
+/// A settlement whose report the run never kept leaves the transcript as the
+/// journal relayed it, rather than emptying it.
+///
+/// `retain` refuses a symlink standing where the report should be, so the member
+/// settled, the artifact was recorded, and no copy exists to read. That is a real
+/// state and it is not "the session recorded nothing" — the turns the journal did
+/// relay are still the turns a reader opens.
+#[test]
+fn a_settlement_whose_report_the_run_never_kept_still_serves_its_relayed_turns() {
+    const STREAM: &str = "node-scope-1786925518555-3163111";
+    const SESSION: &str = "node-scope-1786925518555-3163111.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:02.000Z",
+                artifact: "report-node-scope-1786925518555-3163111",
+                report: &unanswered_report("Now run the gate."),
+            },
+            fixture_run::Produced::SymlinkToReport,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["status"], json!("turn-started"));
+    // Nothing the report would have filled, and nothing borrowed from it either.
+    assert_eq!(turns[0]["user"], json!(""));
+    assert_eq!(turns[0]["assistant"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+    assert_eq!(turns[0]["startedAt"], json!(null));
+}
+
+/// A report whose last turn was never answered, in onejudge's own types.
+fn unanswered_report(prompt: &str) -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, Telemetry,
+        TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(11),
+        output_tokens: Some(22),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        cost_usd: Some(2.5),
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            // A system preamble opens no turn and answers none: it is neither
+            // party's, so the turn after it is still turn 1 and the numbering the
+            // attribution joins on is unmoved.
+            messages: vec![
+                Message {
+                    role: onejudge::Role::System,
+                    content: "You are reviewing a wire contract.".into(),
+                    events: Vec::new(),
+                },
+                Message::user("Land the wire contract."),
+                Message::assistant("The route table is landed."),
+                Message::user(prompt),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: Some("the supervisor named no next instruction".into()),
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 9_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 10,
+            sessions: Vec::new(),
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Agent,
+                turn_index: 2,
+                ran: Some("claude-code:default".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "claude-code".into(),
+                    harness_id: "claude-code:default".into(),
+                    variant: None,
+                    model: None,
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(4_200),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(usage),
+                }],
+                history_file: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
