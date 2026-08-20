@@ -49,7 +49,22 @@ pub const API_VERSION: u32 = 2;
 /// anywhere in a response, and `phase` names a continuous phase rather than
 /// `driving-round`. A client reading 12 must not read a 13 payload: the array it
 /// indexed is gone, not renamed.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 13;
+///
+/// **Schema 14 is the transcript a dispatch really had.** A conversation turn is
+/// assembled from the settled member's stored onejudge report rather than from
+/// the journal envelopes alone, which carry almost none of what a transcript is:
+/// `user` is the prompt the simulated user gave and never the dispatch's persona
+/// name, `assistant` is the reply that turn wrote, a tool call carries the
+/// observation it returned, and `usage` and `durationMs` are what *that turn's*
+/// own invocation spent and took rather than the run's total or nothing at all.
+/// `startedAt` and `finishedAt` are that turn's agent-side bounds where the
+/// report holds them, and both `null` where it does not — never a bound recorded
+/// against the judge. The same removal fixes every recorded usage figure the
+/// payload carries: the six keys this crate read a usage record by were spelled
+/// the way a type nothing writes declares them, so every served cost and token
+/// count was `null`. A client reading 13 sees the same fields it always did and
+/// reads a persona name where a prompt now is.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 14;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///

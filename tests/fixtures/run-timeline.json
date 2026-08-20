@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 13,
+  "telemetry_schema_version": 14,
   "observed_at": "2026-08-07T12:00:00Z",
   "timeline_schema_version": 5,
   "run_id": "run-20260807-a1b2c3",
@@ -37,7 +37,29 @@
           }
         },
         {
+          "id": "e4",
+          "kind": "turn-activity",
+          "at": "2026-08-07T12:00:03.500Z",
+          "node_id": "contract-interface"
+        },
+        {
           "id": "node-scope-1786925518098-3163646.worker.1",
+          "kind": "turn-started",
+          "at": "2026-08-07T12:00:04.000Z",
+          "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          }
+        },
+        {
+          "id": "e6",
+          "kind": "turn-activity",
+          "at": "2026-08-07T12:00:04.500Z",
+          "node_id": "contract-interface"
+        },
+        {
+          "id": "node-scope-1786925518098-3163646.worker.2",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
@@ -47,19 +69,29 @@
           }
         },
         {
-          "id": "e5",
+          "id": "e8",
+          "kind": "member-settled",
+          "at": "2026-08-07T12:00:05.500Z",
+          "node_id": "contract-interface",
+          "reference": {
+            "kind": "worker_report",
+            "value": "report-node-scope-1786925518098-3163646"
+          }
+        },
+        {
+          "id": "e9",
           "kind": "session-opened",
           "at": "2026-08-07T12:00:06.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e6",
+          "id": "e10",
           "kind": "gate-started",
           "at": "2026-08-07T12:00:07.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e7",
+          "id": "e11",
           "kind": "gate-verdict",
           "at": "2026-08-07T12:00:09.000Z",
           "node_id": "contract-interface",
@@ -69,13 +101,13 @@
           }
         },
         {
-          "id": "e8",
+          "id": "e12",
           "kind": "push",
           "at": "2026-08-07T12:00:10.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e9",
+          "id": "e13",
           "kind": "change-opened",
           "at": "2026-08-07T12:00:11.000Z",
           "node_id": "contract-interface",
@@ -86,14 +118,14 @@
           }
         },
         {
-          "id": "e10",
+          "id": "e14",
           "kind": "change-check",
           "at": "2026-08-07T12:00:12.000Z",
           "node_id": "contract-interface",
           "status": "queued"
         },
         {
-          "id": "e11",
+          "id": "e15",
           "kind": "change-check",
           "at": "2026-08-07T12:00:13.000Z",
           "node_id": "contract-interface",
@@ -104,7 +136,7 @@
           }
         },
         {
-          "id": "e12",
+          "id": "e16",
           "kind": "change-check",
           "at": "2026-08-07T12:00:14.000Z",
           "node_id": "contract-interface",
@@ -115,19 +147,19 @@
           }
         },
         {
-          "id": "e13",
+          "id": "e17",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:15.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e14",
+          "id": "e18",
           "kind": "lock-acquired",
           "at": "2026-08-07T12:00:15.100Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e15",
+          "id": "e19",
           "kind": "merge-queued",
           "at": "2026-08-07T12:00:16.000Z",
           "node_id": "contract-interface",
@@ -137,13 +169,13 @@
           }
         },
         {
-          "id": "e16",
+          "id": "e20",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:17.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e17",
+          "id": "e21",
           "kind": "change-merged",
           "at": "2026-08-07T12:00:18.000Z",
           "node_id": "contract-interface",
@@ -153,13 +185,13 @@
           }
         },
         {
-          "id": "e18",
+          "id": "e22",
           "kind": "merge-completed",
           "at": "2026-08-07T12:00:19.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e19",
+          "id": "e23",
           "kind": "node-settled",
           "at": "2026-08-07T12:00:20.000Z",
           "node_id": "contract-interface",
@@ -195,7 +227,29 @@
           }
         },
         {
+          "id": "e4",
+          "kind": "turn-activity",
+          "at": "2026-08-07T12:00:03.500Z",
+          "node_id": "contract-interface"
+        },
+        {
           "id": "node-scope-1786925518098-3163646.worker.1",
+          "kind": "turn-started",
+          "at": "2026-08-07T12:00:04.000Z",
+          "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          }
+        },
+        {
+          "id": "e6",
+          "kind": "turn-activity",
+          "at": "2026-08-07T12:00:04.500Z",
+          "node_id": "contract-interface"
+        },
+        {
+          "id": "node-scope-1786925518098-3163646.worker.2",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface",
@@ -205,6 +259,22 @@
           }
         }
       ]
+    },
+    {
+      "id": "verification.contract-interface.report-node-scope-1786925518098-3163646",
+      "kind": "verification",
+      "label": "report-node-scope-1786925518098-3163646",
+      "started_at": "2026-08-07T12:00:05.000Z",
+      "ended_at": "2026-08-07T12:00:05.500Z",
+      "parent_id": "node.contract-interface",
+      "node_id": "contract-interface",
+      "status": "ok",
+      "detail": {
+        "ok": true,
+        "output_tail": "",
+        "artifact_id": "report-node-scope-1786925518098-3163646"
+      },
+      "events": []
     },
     {
       "id": "verification.contract-interface.artifact-5c8f0a1b",

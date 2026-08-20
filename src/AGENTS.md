@@ -46,11 +46,25 @@ anything new here is a proposal to make upstream first.
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
   writes where it writes one, else the graph `member`, else the persona — and
   falls back to the agent side, which is the one side every dispatch has.
-- **Time inside a model.** The SDK's buckets are wall clock — where the *run's*
-  time went — and the wire also carries how long each party spent in a model,
-  which no fold of a clock can answer. `payload::measured` reads it off each
-  `turn-completed`'s own `usage.duration`, and it is absent for a party that
-  reported no turn rather than zero.
+- **How long each party's own invocations ran.** The SDK's buckets are wall
+  clock — where the *run's* time went — and no fold of that clock can say how
+  much of it a party spent inside a harness it started. `payload::measured` sums
+  it off each settled member's stored report: every candidate in
+  `telemetry.attribution` whose `ran` is true, by its own `duration_ms`, over both
+  of the report's roles, attributed to the party the *member* is. It is absent for
+  a party that settled no member rather than zero.
+
+  **The wire calls these `agent_model_ms`, `judge_model_ms` and `llmlint_model_ms`
+  and they are not a model's own clock.** Nothing published in this stack carries
+  one per party: the reading these replace was taken from a `turn-completed`'s
+  `usage.duration`, and no producer has ever written that field — `oneagentgraph`
+  relays a settling member's `usage` copied verbatim out of its onejudge report,
+  which is `onejudge::Usage` and has no duration in it. So the old reading
+  measured nothing and served every party `null`. What a report does record per
+  invocation is `duration_ms`, the elapsed time of the harness process, which is
+  what is summed now. The keys keep their names because a client already reads
+  them; the upstream change that would make the name true is a producer that
+  reports model time per party, at which point this becomes a read of it.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
@@ -174,6 +188,15 @@ gates this crate's reading against it.
 consumer can reach and the fixture — written in the records that library emits —
 is the whole of the gate there.
 
+Two names in `payload::graph` are exceptions and each says so where it is
+declared. **`turn`**, the producer's own 1-based number on a `turn-started`, is
+built inline from no declared struct, so it is read on the `onevcs` terms above.
+And the **usage keys** are `onejudge::Usage`'s, not `oneagentgraph::event::Usage`'s:
+that library relays a settling member's `usage` copied verbatim out of the
+onejudge report, so `event::Usage` — `tokens_in`, `cost`, `duration` — is declared
+and never written. Gating the copy against it is what let six keys drift until
+every served cost read `null`; the gate is against the type that writes them.
+
 Deliberately not read: `fetch`, `lock-acquired`, `merge-queued`,
 `session-closed`, `recovery-attested`. Each is a real record and none of them
 answers a field the wire asks for; they still reach a reader, as the node's own
@@ -193,6 +216,59 @@ own. Both `payload::is_turn_record` and `payload::conversation_document` have to
 exclude it, because a turn's id is its position in the transcript and the timeline
 numbers the same session by the same rule — excluding it in one alone would leave
 a plotted moment pointing at the wrong turn.
+
+**Which turn a summary is published from is the record before it, not the record
+after it.** `oneagentgraph` opens a turn and *then* streams its activities, so
+carrying an accumulated batch onto the next turn record put every journal-derived
+turn's tools one turn late. And what a turn record can be at all is narrower than
+"an agent-graph record that is not an activity": that library stamps a `session`
+label on the `turn-*` kinds and on no other, so a `member-settled` or a
+`member-died` can never *be* a transcript turn, and counting one made the turn
+count beside a node disagree with the transcript opened from it by one per settled
+member.
+
+## The report a settled member left, which is what a transcript is
+
+The journal records that a session reported and what tools it called. It records
+none of the prose, none of what a tool returned, and no per-turn cost or clock —
+so `payload::conversation_document` reads the **stored onejudge report** for those
+and leaves the rest of the turn as the journal relayed it.
+
+`onejudge` is *linked* for it, not copied. The same reasoning as `oneharness-core`
+below: this is a whole versioned document rather than a payload fragment, and a
+copy of its shape here would be a second source of truth for a contract this
+repository does not own. It is unpinned for the reason `oneagentgraph` is —
+`onepipeline` resolves it and the lock follows.
+
+Five things about the reading, each because the obvious alternative is wrong:
+
+- **A session is joined to its report by `{stream}.{member}`.** A `member-settled`
+  carries no `session` label and needs none: that pair is exactly how a session id
+  is minted. Do not add a label upstream for it.
+- **A turn is joined to its measurements by the producer's own number**, off
+  `turn-started`'s `turn` — not by its position among the records a session
+  relayed, because a turn that called no tool relays no `turn-started` at all.
+  That number is the counter the report shares between `telemetry.sessions` and
+  `telemetry.attribution`.
+- **A turn's own usage and elapsed time are on the attribution candidate that
+  `ran`,** never on the report's top-level `usage`, which is the whole dispatch's
+  total over both sides — served per turn it would repeat one total on every one.
+  The candidates beside it are identities the chain fell through, and their
+  `duration_ms` is how long finding that out took.
+- **`telemetry.sessions` is read only at `role: agent`.** The two `role`
+  vocabularies in a report are different closed sets — `transcript::Role` is who
+  wrote a message, `TelemetryRole` is which side ran — and a row is recorded only
+  for an invocation that reported both a session id and a provider-measured start,
+  which this host's judge side does and its agent side does not. Measured: across
+  147 stored reports here, all 1,048 rows are the judge's. Matching a turn by its
+  index alone would put the judge's clock on the agent's turn.
+- **A report that is absent, uncopied or unreadable leaves the transcript as the
+  journal relayed it** rather than emptying it. All three are "the report says
+  nothing", and none of them is "the session recorded nothing".
+
+What this does not read, and could: `CandidateAttempt.model` is a real source for
+a turn's `model`, which is served today off a `turn-started` payload field no
+current producer writes. Sourcing it is the follow-up.
 
 ## The one store this crate opens that no run owns
 
@@ -241,9 +317,6 @@ record it before anything here can serve it.
   required, its transition and its conclusion, and its log as an artifact. No
   link to the host's own page for it, so `checks[].url` is absent and a reader
   opens the stored log instead.
-- **Turn bodies and reasoning.** The journal records that a session reported and
-  what tools it called, not the prose it wrote, so a served turn carries the tool
-  calls `turn-activity` published and no assistant text of its own.
 - **Time inside a tool call** (`timing.tool_ms`). `turn-activity` reports *what* a
   turn did and carries no interval, so the presence flag beside that zero says it
   was never measured — which is the wire's own way of telling an unmeasured zero

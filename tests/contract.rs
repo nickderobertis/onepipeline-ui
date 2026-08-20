@@ -357,7 +357,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 13);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 14);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
@@ -980,33 +980,8 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         "a delivered redirection has no reason it did not land: {delivered}"
     );
 
-    // The payload a `turn-completed` carries, as that library writes it: every
-    // key this crate reads is one of its fields, and none of its fields is one
-    // this crate has no reading for.
-    let usage = serde_json::to_value(oneagentgraph::event::Usage {
-        tokens_in: 1,
-        tokens_out: 2,
-        cache_read: 3,
-        cache_write: 4,
-        cost: 0.5,
-        duration: 1.5,
-    })
-    .expect("the usage record serializes");
-    let read = [
-        graph::TOKENS_IN,
-        graph::TOKENS_OUT,
-        graph::CACHE_READ,
-        graph::CACHE_WRITE,
-        graph::COST,
-        graph::DURATION,
-    ];
-    let declared: Vec<&str> = usage
-        .as_object()
-        .expect("a mapping")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(declared, read.to_vec());
+    // Where the usage a `turn-completed` carries sits, as that library declares
+    // it. What is *in* it is asserted below, against the type that writes it.
     assert_eq!(
         serde_json::to_value(oneagentgraph::event::TurnCompleted {
             usage: oneagentgraph::event::Usage {
@@ -1023,6 +998,125 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         .and_then(|payload| payload.keys().next().cloned()),
         Some(graph::USAGE.to_owned()),
         "the usage sits where this crate looks for it"
+    );
+}
+
+/// The usage keys this crate reads off a `turn-completed`, against the type that
+/// really writes them.
+///
+/// Not `oneagentgraph::event::Usage`, which declares `tokens_in`, `cost` and a
+/// `duration` and which **nothing on this wire writes**: that library relays a
+/// settling member's usage copied verbatim out of the onejudge report, so what
+/// reaches this crate is `onejudge::Usage`. Gating the copy against the declared-
+/// but-unwritten type is what let six keys drift, and every served cost and token
+/// count read `null` for it. There is no `duration` here to read because the
+/// document has never carried one — a turn's own elapsed time is its attribution
+/// candidate's `duration_ms`, which is asserted beside it.
+#[test]
+fn the_usage_keys_this_crate_reads_are_the_ones_the_wire_carries() {
+    use onepipeline_ui::payload::graph;
+
+    let usage = serde_json::to_value(onejudge::Usage {
+        input_tokens: Some(1),
+        output_tokens: Some(2),
+        cache_read_tokens: Some(3),
+        cache_write_tokens: Some(4),
+        cost_usd: Some(0.5),
+    })
+    .expect("the usage record serializes");
+    let read = [
+        graph::INPUT_TOKENS,
+        graph::OUTPUT_TOKENS,
+        graph::CACHE_READ_TOKENS,
+        graph::CACHE_WRITE_TOKENS,
+        graph::COST_USD,
+    ];
+    let declared: Vec<&str> = usage
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(declared, read.to_vec());
+    assert!(
+        !declared.contains(&"duration"),
+        "a usage record carrying a duration would make this crate's per-turn \
+         elapsed time a second reading of it: {usage}"
+    );
+
+    // And the per-turn measurements, which are on the report's attribution and
+    // nowhere else. Named through the library's own type so a rename fails here.
+    let candidate = serde_json::to_value(onejudge::CandidateAttempt {
+        harness: "claude-code".into(),
+        harness_id: "claude-code:alternate".into(),
+        variant: None,
+        model: None,
+        status: "ok".into(),
+        available: true,
+        ran: true,
+        failure_kind: None,
+        failure_kind_source: None,
+        exit_code: Some(0),
+        duration_ms: Some(135_190),
+        error: None,
+        session_id: None,
+        history_id: None,
+        usage: Some(onejudge::Usage {
+            input_tokens: Some(38),
+            output_tokens: Some(8_256),
+            cache_read_tokens: Some(1_273_766),
+            cache_write_tokens: Some(66_561),
+            cost_usd: Some(1.509_083),
+        }),
+    })
+    .expect("the candidate serializes");
+    for key in ["ran", "duration_ms", "usage"] {
+        assert!(
+            candidate.get(key).is_some(),
+            "a turn's own measurements are read off `{key}`: {candidate}"
+        );
+    }
+}
+
+/// The two role vocabularies a stored report carries, which this crate must never
+/// conflate.
+///
+/// `transcript::Role` says who *wrote a message* and `TelemetryRole` says which
+/// *side ran an invocation*, and they are two different closed sets that share no
+/// word. Reading a turn's bounds off a `role: judge` row would put the judge's
+/// clock on the agent's turn, which is the whole reason both are asserted here as
+/// the words the wire carries.
+#[test]
+fn the_report_spells_its_two_role_vocabularies_the_way_this_crate_reads_them() {
+    let message = |role| serde_json::to_value(role).expect("a message role serializes");
+    assert_eq!(message(onejudge::Role::User), serde_json::json!("user"));
+    assert_eq!(
+        message(onejudge::Role::Assistant),
+        serde_json::json!("assistant")
+    );
+    assert_eq!(message(onejudge::Role::System), serde_json::json!("system"));
+
+    let side = |role| serde_json::to_value(role).expect("a telemetry role serializes");
+    assert_eq!(
+        side(onejudge::TelemetryRole::Agent),
+        serde_json::json!("agent")
+    );
+    assert_eq!(
+        side(onejudge::TelemetryRole::Judge),
+        serde_json::json!("judge")
+    );
+
+    // The two sets are disjoint, so no reading of one can be a reading of the
+    // other by accident.
+    assert!(
+        ![
+            message(onejudge::Role::User),
+            message(onejudge::Role::Assistant),
+            message(onejudge::Role::System),
+        ]
+        .contains(&side(onejudge::TelemetryRole::Agent)),
+        "a message role that spells itself like a telemetry role would let one \
+         be read as the other"
     );
 }
 

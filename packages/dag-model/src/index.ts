@@ -107,8 +107,17 @@ export const API_V2_FILTER_PROFILES = {
  * describing the run's whole state, and no `round` survives anywhere in a
  * payload. A server on `12` serves the array this client no longer has a shape
  * for, which is why the literal is pinned rather than ranged.
+ *
+ * `14` is the transcript a dispatch really had. A conversation turn is assembled
+ * from the settled member's stored onejudge report rather than from journal
+ * envelopes alone: `user` is the prompt the simulated user gave rather than the
+ * dispatch's persona name, `assistant` is the reply that turn wrote, a tool call
+ * carries what it returned, and `usage`/`durationMs` are that turn's own rather
+ * than the run's total. Every field was already declared here and is already
+ * rendered — a server on `13` fills none of them and puts a persona name where
+ * the prompt belongs, which is why the literal moves with the server.
  */
-export const TELEMETRY_SCHEMA_VERSION = 13;
+export const TELEMETRY_SCHEMA_VERSION = 14;
 
 /**
  * The timeline payload's own version, which moves independently.

@@ -1157,6 +1157,7 @@ dependencies = [
  "libc",
  "oneagentgraph",
  "oneharness-core 0.10.1",
+ "onejudge",
  "onepipeline",
  "predicates",
  "serde",
