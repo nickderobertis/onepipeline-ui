@@ -8,6 +8,10 @@
 // over whole and its implementation is the spec (see apps/dag-ui/AGENTS.md), and these
 // are the journeys that would have to catch the regression.
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  EVENT_CATEGORIES,
+  eventCategoryLabel,
+} from "../src/features/timeline/event-category";
 import { fixture, runs } from "./fixture-facts";
 import { graphNodes } from "./observatory-locators";
 import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";
@@ -409,6 +413,104 @@ for (const size of VIEWPORTS) {
     await expectThePageItselfDoesNotScroll(page);
   });
 }
+
+/**
+ * A hovered marker's reading, whole, at every width in the matrix.
+ *
+ * The plot draws one marker per journal record precisely so a reader can scan it, and
+ * a marker that has to be opened before it can be identified makes scanning no faster
+ * than reading every record in turn. The package gives a marker an `aria-label` and
+ * this app's category glyph and no description element at all, so the layer that
+ * reads a segment read nothing over one.
+ *
+ * Held at all five widths for the reason the segment above is: a marker's button sits
+ * at the *top* of the same `overflow-hidden` plot, inside the same pinned region, and
+ * the reading it opens is the same 20rem box that was cut off at every one of them.
+ */
+for (const size of VIEWPORTS) {
+  test(`reads a hovered event marker whole at ${size.name}`, async ({
+    page,
+  }) => {
+    await open(page, size, `/?run=${runs().live}&node=foundation`);
+    // The marker the plot painted last, which is the one on top of any it overlaps.
+    // Neighbouring markers do overlap once the plot is narrow enough — they are
+    // 20px buttons kept a share of the *range* apart — and a covered one is not a
+    // marker a reader could hover either, so the journey drives the one they can.
+    const marker = timeline(page)
+      .getByRole("button", { name: /, marker$/ })
+      .last();
+    const named = ((await marker.getAttribute("aria-label")) ?? "").replace(
+      ", marker",
+      "",
+    );
+    expect(named.length).toBeGreaterThan(0);
+    await marker.hover();
+
+    const reading = page.getByTestId("timeline-popover");
+    await expect(reading).toBeInViewport({ ratio: 1 });
+    const box = await reading.boundingBox();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect(box?.y).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.width);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(size.height);
+    expect(
+      await reading.evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    ).toBeLessThanOrEqual(1);
+
+    // What the record is, when it happened, and the category its glyph drew it as —
+    // the last of which is the one thing the plot said only as a picture.
+    await expect(reading).toContainText(named);
+    await expect(reading).toContainText(/\d\d:\d\d:\d\d/);
+    const line = (await reading.textContent()) ?? "";
+    expect(
+      EVENT_CATEGORIES.map(eventCategoryLabel).filter((word) =>
+        line.includes(` · ${word}`),
+      ),
+    ).toHaveLength(1);
+    // And said once: the marker's own button already names the record to a screen
+    // reader, so this is a second painting of it rather than a second thing to hear.
+    await expect(reading).toHaveAttribute("aria-hidden", "true");
+
+    // The pointer moving off it ends it, rather than leaving a reading pinned over a
+    // plot the reader has moved on from.
+    await transcript(page).hover();
+    await expect(reading).toHaveCount(0);
+    await expectThePageItselfDoesNotScroll(page);
+  });
+}
+
+test("opens a marker's record under the reading its hover gave", async ({
+  page,
+}) => {
+  // The two surfaces a record is identified on, against each other. Selecting a marker
+  // still opens its detail panel, and the panel heads it with what the hover said —
+  // every part of it, because the two are one composition rather than two accounts
+  // that agree until somebody edits one of them.
+  await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
+  const marker = timeline(page).getByRole("button", {
+    name: "node-dispatched, marker",
+    exact: true,
+  });
+  await marker.hover();
+  const line = (await page.getByTestId("timeline-popover").textContent()) ?? "";
+  // A node being dispatched is the graph moving, which is what its glyph drew it as.
+  expect(line).toContain(" · Lifecycle");
+
+  await marker.click();
+  const headed = itemDetail(page).locator(".detail-title");
+  await expect(headed.getByRole("heading", { level: 2 })).toHaveText(
+    "node-dispatched",
+  );
+  for (const part of [
+    // What kind of thing it is, what it is called, and when it happened.
+    await headed.getByText("Event", { exact: true }).innerText(),
+    await headed.getByRole("heading", { level: 2 }).innerText(),
+    await headed.locator("time").innerText(),
+  ])
+    expect(line).toContain(part);
+});
 
 test("ends the reading when the pointer leaves the document", async ({
   page,

@@ -7,6 +7,7 @@ import {
   type EventCategory,
   EventCategoryIcon,
   eventCategory,
+  eventCategoryLabel,
 } from "./event-category";
 
 /**
@@ -166,6 +167,29 @@ function servedStore(): { kinds: readonly string[]; unknown: string } {
   };
 }
 
+/**
+ * The word each category reads as where there is no room to draw its glyph.
+ *
+ * Written out rather than derived from the function under test, for the reason the
+ * glyph expectations in `dag-ui.spec.ts` are: an expectation computed the way the
+ * implementation computes it agrees with any rule at all, including one that stopped
+ * capitalizing or started abbreviating. Keyed by the closed vocabulary, so a category
+ * added to the scheme fails to compile until it has been given a word here too.
+ */
+const EXPECTED_CATEGORY_WORD: Readonly<Record<EventCategory, string>> = {
+  recovery: "Recovery",
+  failure: "Failure",
+  human: "Human",
+  planning: "Planning",
+  contention: "Contention",
+  verification: "Verification",
+  publication: "Publication",
+  repository: "Repository",
+  session: "Session",
+  lifecycle: "Lifecycle",
+  activity: "Activity",
+};
+
 describe("the category one journal record is read under", () => {
   test("files every kind the run store holds", () => {
     expect(
@@ -212,6 +236,24 @@ describe("the category one journal record is read under", () => {
         (category) => category !== DEFAULT_EVENT_CATEGORY,
       ).map(drawing),
     ).not.toContain(fallback);
+  });
+
+  test("names every category for the readings that cannot draw it", () => {
+    // A marker's hover reading says which category the glyph beside it came from,
+    // which is the one thing the plot itself says only as a picture.
+    expect(
+      Object.fromEntries(
+        EVENT_CATEGORIES.map((category) => [
+          category,
+          eventCategoryLabel(category),
+        ]),
+      ),
+    ).toEqual(EXPECTED_CATEGORY_WORD);
+    // Told apart in words as well as in drawings: two categories that read the same
+    // are one category to a reader the glyph told nothing.
+    expect(new Set(Object.values(EXPECTED_CATEGORY_WORD)).size).toBe(
+      EVENT_CATEGORIES.length,
+    );
   });
 
   test("draws the glyph as decoration rather than as something to operate", () => {
