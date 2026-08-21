@@ -600,7 +600,7 @@ fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
 }
 
 #[test]
-fn a_lifecycle_nodes_lanes_are_served_one_after_another_as_the_run_ran_them() {
+fn a_lifecycle_nodes_lanes_are_each_served_over_the_attempt_that_ran_them() {
     let serving = lanes();
     let spans = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
 
@@ -617,11 +617,15 @@ fn a_lifecycle_nodes_lanes_are_served_one_after_another_as_the_run_ran_them() {
         &format!("publication.{}", fixture_run::DRAFTED_NODE_ID),
     );
 
-    // Eighteen minutes of work, forty seconds of drafting, a minute of
-    // publishing — and not three spans over the node's twenty minutes.
+    // The attempt is the unit a session is bracketed by, and this node had one:
+    // both of the members it ran in sequence open at the `node-dispatched` that
+    // asked for them, and each closes where the run said that member was over.
+    // A session is never opened from its own first word — the run's own boundary
+    // is what brackets it, and between two members of one attempt the run
+    // recorded no boundary at all.
     assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
-    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
     // The publication opens at the gate rather than at 12:02:01, where `onevcs`
     // cut the worktree the worker then spent eighteen minutes on.
@@ -629,10 +633,14 @@ fn a_lifecycle_nodes_lanes_are_served_one_after_another_as_the_run_ran_them() {
     assert_eq!(published["ended_at"], json!("2026-08-07T12:21:35.000Z"));
     assert_eq!(published["status"], json!("merged"));
 
-    for (before, after) in [(worked, drafted), (drafted, published)] {
+    // And the node's own window is still wider than any lane under it, which is
+    // what says the bounds served are the attempt's rather than the node's.
+    let node = span_named(&spans, &format!("node.{}", fixture_run::DRAFTED_NODE_ID));
+    assert_eq!(node["ended_at"], json!("2026-08-07T12:21:37.000Z"));
+    for lane in [worked, drafted, published] {
         assert!(
-            before["ended_at"].as_str() <= after["started_at"].as_str(),
-            "two lanes of one node overlap: {before} then {after}"
+            lane["ended_at"].as_str() < node["ended_at"].as_str(),
+            "a lane was given the node's own end: {lane}"
         );
     }
 }
@@ -709,7 +717,8 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         .clone();
 
     // The graph-level reading of the same node: one lane per category, each over
-    // the interval its own sessions ran, rather than two lanes over one window.
+    // the attempt its own sessions ran under and closing where they closed,
+    // rather than two lanes over the node's own window.
     let worked = span_named(
         &spans,
         &format!("rollup.{}.agent.worker", fixture_run::DRAFTED_NODE_ID),
@@ -720,7 +729,7 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
     );
     assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
-    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
 
     // The re-asked node's two attempts are one category, and it covers both.

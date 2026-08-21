@@ -3097,36 +3097,6 @@ fn attempt_of<'a>(dispatched: &'a [Moment], appeared: Option<&Moment>) -> Option
         .or_else(|| dispatched.first())
 }
 
-/// Which of an attempt's sessions is served from the `node-dispatched` that
-/// opened it.
-///
-/// The seconds between a run dispatching a node and its first session speaking
-/// are the worktree being cut and the agent being started: that is the session's
-/// own head start rather than a gap between lanes, so the session wears it. An
-/// attempt that ran several sessions hands the head to the first of them alone.
-/// Handing it to each would draw every one of them from the same dispatch, which
-/// is the node's window under another name and the very reading this bracketing
-/// replaces — a lifecycle node's drafting turn would cover the hours its worker
-/// spent before it.
-fn attempt_head<'a>(
-    events: &[(usize, &'a Envelope)],
-    dispatched: &[Moment],
-    attempt: &Moment,
-) -> Option<&'a str> {
-    let mut under: Vec<(&str, i128)> = relayed_sessions(events)
-        .into_iter()
-        .filter_map(|(session, relayed)| {
-            let appeared = session_appeared(events, session, &relayed)?;
-            let its = attempt_of(dispatched, Some(&appeared))?;
-            (its.at == attempt.at).then_some((session, appeared.at))
-        })
-        .collect();
-    // Stable, so two sessions the run recorded as beginning together are ordered
-    // by whichever of them it relayed from first.
-    under.sort_by_key(|(_, appeared)| *appeared);
-    under.first().map(|(session, _)| *session)
-}
-
 /// When one dispatched session ran, inside the attempt of its node that ran it.
 ///
 /// A node's own window is the window of *everything* it ran, and so is nobody's
@@ -3134,11 +3104,11 @@ fn attempt_head<'a>(
 /// that produced nothing, and a lifecycle node runs several members in sequence
 /// on one worktree.
 ///
-/// - **It opens at the attempt that ran it** — the latest `node-dispatched` at or
-///   before the session first appeared — for the session that attempt ran first,
-///   and where the run recorded it beginning for a session that joined an attempt
-///   already under way. See [`attempt_head`] for why the head belongs to one of
-///   them rather than to all.
+/// - **It opens at the attempt that ran it**: the latest `node-dispatched` at or
+///   before the session first appeared. Every session of one attempt opens there,
+///   including one the attempt reached only later — an attempt is the unit a
+///   session is bracketed by, and the run records no other boundary between the
+///   members it ran.
 /// - **It closes at the earliest of** the next `node-dispatched`, the
 ///   `node-settled` that followed it, the `session-closed` that took the worktree
 ///   away, and the `member-settled` or `member-died` that ended the session
@@ -3163,7 +3133,6 @@ fn session_interval(
                 .as_ref()
                 .is_none_or(|appeared| dispatch.at <= appeared.at)
         })
-        .filter(|dispatch| attempt_head(events, &dispatched, dispatch) == Some(session))
         .or(appeared.as_ref())
         .cloned()
         .or_else(|| relayed.first().and_then(|(_, event)| Moment::of(event)))

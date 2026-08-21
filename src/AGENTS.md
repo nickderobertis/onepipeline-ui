@@ -46,13 +46,12 @@ anything new here is a proposal to make upstream first.
   that ran it — the `node-dispatched` it appeared after, closed by the next
   dispatch, the settlement, the `session-closed` or the session's own
   `member-settled`, joined by the `{stream}.{member}` rule schema 14 already
-  resolves a report by. An attempt's opening dispatch goes to the one session it
-  ran first (`payload::attempt_head`), because the seconds after it are the
-  worktree being cut; a session that joined an attempt already under way opens
-  where the run recorded it beginning, since giving the dispatch to each of them
-  is the node's window again. A node re-asked in place and a lifecycle node's
-  steps otherwise all read as having run over that window, which cannot say what
-  was running at a given moment.
+  resolves a report by. Every session of one attempt opens at that attempt's
+  dispatch, including one the attempt reached only later: the run records no
+  boundary between the members inside an attempt, and a session opened from its
+  own first word is not bracketed by anything the run said. A node re-asked in
+  place otherwise reads as having run its attempts over one window, which cannot
+  say what was running at a given moment.
 - **The party a record's session ran under.** `transportRoleSchema` is a pair
   with `agentRoleSchema`, and nothing stamps the transport half as such;
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
