@@ -268,8 +268,8 @@ Three constraints on that reading, each because the obvious alternative is worse
   empty conversation instead would say the judge recorded nothing, which is a
   different fact.
 - **A judge turn is bounded, not transcribed.** The report keys no text to one,
-  and this crate invents no pairing: judge turns outnumber the agent's by one or
-  two in every report on this host and nothing records the correspondence. The
+  and this crate invents no pairing: the two sides number their turns
+  independently and nothing records which judge turn wrote which instruction. The
   judge's authored prose already reaches the wire as each agent turn's `user`
   message. `user` is served empty only because `conversationTurnSchema` types it
   a non-nullable string, which is the one place here an absence cannot be spelled

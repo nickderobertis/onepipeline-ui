@@ -2611,11 +2611,11 @@ fn judge_session(session: &str) -> String {
 ///
 /// **A report keys no text to a judge turn and this crate invents no pairing for
 /// one.** The judge's authored prose already reaches the wire — it is each agent
-/// turn's `user` message — and judge turns outnumber the agent's by one or two in
-/// every report here, with nothing recording the correspondence. So `assistant`
-/// is absent, and `user` is empty only because `conversationTurnSchema` types it
-/// a non-nullable string, which is the one place here an absence cannot be
-/// spelled as one.
+/// turn's `user` message — and the two sides number their turns independently,
+/// with nothing recording which judge turn wrote which instruction. So
+/// `assistant` is absent, and `user` is empty only because
+/// `conversationTurnSchema` types it a non-nullable string, which is the one
+/// place here an absence cannot be spelled as one.
 fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::SessionLink) -> Value {
     let entry = attributed(report, judge::TelemetryRole::Judge, link.turn_index);
     let ran = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index);
