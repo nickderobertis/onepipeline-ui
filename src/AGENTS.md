@@ -173,16 +173,12 @@ gates this crate's reading against it.
 
 `oneagentgraph` declares its own vocabulary in a public module, so
 `tests/contract.rs` holds this crate's copy of it to that library's types. So
-does `onevcs`: its `event` module is private, but it re-exports `EventKind` from
-its crate root, so its kinds are reachable and are gated the same way. **A
-private module is not the same as an unreachable type — read the crate root
-before concluding a gate is unavailable.** What genuinely has none is a payload
-*value* neither library declares to a consumer: `onevcs`'s pre-push command, its
-gate verdict word and its non-blocking check conclusions, and
-`oneagentgraph`'s turn number — that last one reconciled instead against the
-public `render::line` that reads it. Where nothing at all is reachable, the
-fixture — written in the records that library emits — is the whole of the gate,
-and the constant says so where it is declared.
+does `onevcs`, whose `event` module is private but whose crate root re-exports
+`EventKind`. **A private module is not the same as an unreachable type — read the
+crate root before concluding a gate is unavailable.** Where a payload *value* is
+genuinely undeclared to any consumer, the fixture — written in the records that
+library emits — is the whole of the gate, and the constant says so where it is
+declared.
 
 **Gate a copied vocabulary against the type that writes it, never against one
 that merely declares it.** `oneagentgraph` declares an `event::Usage` it never
@@ -230,57 +226,42 @@ lock follows.
 
 Four joins, each the one the obvious alternative gets wrong:
 
-- **A session to its report, by `{stream}.{member}`** — that pair is how a session
-  id is minted, so a `member-settled` needs no `session` label. Do not add one
-  upstream for it.
-- **A turn to its measurements, by the producer's own `turn` number** — not by
-  position among the records relayed, because a turn that called no tool relays no
-  `turn-started`.
-- **A figure to the turn that spent it, off the attribution candidate that `ran`**
-  — never off the report's top-level `usage`, which is the dispatch's total over
-  both sides and would repeat on every turn.
-- **A clock to the side that reported it: `telemetry.sessions` at `role: agent`
-  alone.** A report's two `role` vocabularies are different closed sets — who
-  wrote a message, and which side ran — and in practice every row a report holds
-  is the judge's, so matching by index puts the judge's clock on the agent's turn.
+- **A session to its report, by `{stream}.{member}`**, which is how a session id
+  is minted — so do not add a `session` label upstream for it.
+- **A turn to its measurements, by the producer's own `turn` number**, not by
+  position: a turn that called no tool relays no `turn-started`.
+- **A figure to the turn that spent it, off the attribution candidate that
+  `ran`**, never off the report's top-level `usage` — that is the dispatch's
+  total over both sides, and would repeat on every turn.
+- **A clock to the side that reported it, `telemetry.sessions` at `role: agent`
+  alone.** The report's two `role` vocabularies are different closed sets, and in
+  practice every row one holds is the judge's, so matching by index puts the
+  judge's clock on the agent's turn.
 
-A report that is absent, uncopied or unreadable leaves the transcript as the
-journal relayed it. All three are "the report says nothing", and none is "the
+A report absent, uncopied or unreadable is "the report says nothing", never "the
 session recorded nothing".
 
 **And it is the whole of what any run holds about the judge that supervised the
 dispatch.** A plan node dispatches one graph member — `worker`, in
-`graphs/node-scope.yaml` — and the judge runs *inside* onejudge, so no judge
-session is ever relayed: `payload::conversations_under` groups on the `session`
-label a relayed envelope carries and `payload::node_spans` brackets exactly those
-records, and neither can produce anything for a side that relays none. No
-producer change here reaches it; the report does, and only once the member
-settles. So `payload::judge_conversation` serves a second conversation per
-settled session — the worker's id with `.judge` after it, which `check_segment`
-admits as a bare identifier — and `payload::judge_span` serves the lane it is
-reachable through, as a sibling of the dispatch rather than a row beside it.
+`graphs/node-scope.yaml` — and the judge runs *inside* onejudge, so nothing
+relays a judge session and no producer change here can. The report does, and only
+once the member settles, which is why `payload::judge_conversation` and
+`payload::judge_span` exist at all.
 
 Three constraints on that reading, each because the obvious alternative is worse:
 
-- **The gate is the report's `role: judge` `SessionLink` rows.** They are the only
-  per-turn bounds any report here holds for that side, and they are what the lane
-  is drawn over — so a report holding none has no judge turn to serve. Serving an
-  empty conversation instead would say the judge recorded nothing, which is a
-  different fact.
-- **A judge turn is bounded, not transcribed.** The report keys no text to one,
-  and this crate invents no pairing: the two sides number their turns
-  independently and nothing records which judge turn wrote which instruction. The
-  judge's authored prose already reaches the wire as each agent turn's `user`
-  message. `user` is served empty only because `conversationTurnSchema` types it
-  a non-nullable string, which is the one place here an absence cannot be spelled
-  as one.
+- **The report's `role: judge` `SessionLink` rows are the gate.** They are the
+  only per-turn bounds any report here holds for that side, so a report holding
+  none has no judge turn to serve — an empty conversation would say the judge
+  recorded nothing, which is a different fact.
+- **A judge turn is bounded, not transcribed.** The report keys no text to one and
+  this crate invents no pairing: the two sides number their turns independently,
+  and the judge's authored prose already reaches the wire as each agent turn's
+  `user` message.
 - **Its conclusion is keyed to the dispatch, not to a turn**, so it is one closing
-  turn rather than smeared over them: `verdicts`, `assessment`,
-  `completion_reason` and `stopped_early`, with bounds and usage absent because
-  the report records none for it. The structure lands in the turn's `unknown`,
-  which is the field this wire already carries a producer's own record on — no
-  field is added and neither closed role vocabulary moves, because both already
-  carry `judge`.
+  turn rather than smeared over them, and it lands in the turn's `unknown` — the
+  field this wire already carries a producer's own record on. No field is added
+  and neither closed role vocabulary moves, because both already carry `judge`.
 
 ## The one store this crate opens that no run owns
 
