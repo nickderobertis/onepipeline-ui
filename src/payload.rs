@@ -2199,8 +2199,13 @@ fn reported_tools(message: &judge::Message) -> Vec<Value> {
         .collect()
 }
 
-/// What one turn consumed, in the wire's own spelling of the record's fields.
-fn turn_usage(event: &Envelope) -> Value {
+/// The usage figures one relayed record carries, in the wire's own spelling.
+///
+/// `oneagentgraph` copies a settling member's usage verbatim out of its report,
+/// so what a `turn-completed` carries is the whole dispatch's total over both
+/// sides rather than the turn's own. Served only where the report's attribution
+/// says nothing about the turn: the journal's account is then all the run holds.
+fn relayed_usage(event: &Envelope) -> Value {
     let Some(usage) = event
         .payload
         .get(graph::USAGE)
@@ -2220,10 +2225,10 @@ fn turn_usage(event: &Envelope) -> Value {
 
 /// What one *turn* consumed, as the invocation that ran it reported it.
 ///
-/// The same five figures [`turn_usage`] serves off a record, from the one place
-/// they are recorded per turn rather than per run: a report's `usage` is the
-/// whole dispatch's total over both sides, and serving it on a turn would repeat
-/// one total on every one of them.
+/// The same five figures [`relayed_usage`] reads off a record, from the one place
+/// they are recorded per turn rather than per dispatch: a report's own `usage` is
+/// that dispatch's total, and serving it on a turn would repeat one total on
+/// every one of them.
 fn candidate_usage(usage: Option<&judge::Usage>) -> Value {
     let Some(usage) = usage else {
         return Value::Object(Map::new());
@@ -2330,7 +2335,7 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
                 "unknown": Map::new(),
                 "usage": match ran {
                     Some(candidate) => candidate_usage(candidate.usage.as_ref()),
-                    None => turn_usage(event),
+                    None => relayed_usage(event),
                 },
                 // The prompt the simulated user gave, which is what the turn
                 // answered. Never the dispatch's persona name, which is who was
