@@ -96,6 +96,38 @@ pub const MONITOR_NOTE: &str = "the benchmark node has been quiet for a while";
 /// dispatched since still carries one.
 pub const CARRIED_NOTE: &str = "the reviewer asked for a changelog entry";
 
+/// What the live run's dispatch was asked, which is what its one turn answers.
+pub const LIVE_INSTRUCTION: &str = "Open the change request for this node's work.";
+
+/// What the node still working was asked, what it has said back, and what its
+/// tools returned — the reading a dispatch in flight has and a stored report
+/// cannot supply, because nothing has settled to write one.
+pub const WORKING_INSTRUCTION: &str = "Keep the docs in step with the read API.";
+/// What it said back on the turn that finished.
+pub const WORKING_REPLY: &str = "read the contract; its transcript section is the one to move";
+/// The observation its first call came back with.
+pub const WORKING_OBSERVATION: &str = "docs/contract.md: 49 lines";
+/// The identity that harness minted for that call, which is what joins the two.
+pub const WORKING_TOOL_CALL_ID: &str = "toolu_01WkQ2";
+/// What the supervisor said next, which is what the turn now running answers.
+pub const WORKING_NEXT_INSTRUCTION: &str = "Now write the paragraph, and keep it to the wire.";
+/// The reply the turn in flight has produced so far, cut to the producer's bound.
+pub const WORKING_CUT_REPLY: &str = "wrote the first half of it and then";
+/// The observation its second call returned, cut to that bound as well.
+pub const WORKING_CUT_OBSERVATION: &str = "…docs/contract.md | 12 +++++++-----";
+/// What the node whose member died was asked, said, and saw before it went.
+pub const DIED_INSTRUCTION: &str = "Run the gate and report what it says.";
+/// The words it managed to publish.
+pub const DIED_REPLY: &str = "the gate is running";
+/// The observation its one call returned before the process went away.
+pub const DIED_OBSERVATION: &str = "error: could not compile `onepipeline-ui`";
+/// The identity that call was published under.
+pub const DIED_TOOL_CALL_ID: &str = "toolu_01Rm7f";
+/// What the node whose worktree was reclaimed was asked. Its own words are
+/// nowhere: a single-sided member publishes none until it settles, and it never
+/// did.
+pub const RECLAIMED_INSTRUCTION: &str = "Draft the release note.";
+
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
 
@@ -1403,8 +1435,109 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             at_node(WORKING_NODE_ID),
             json!({ "identity": IDENTITY }),
         );
+    // Everything a dispatch still in flight publishes about itself, in the shape
+    // the corrected producer publishes it: one turn that finished, the
+    // supervisor's own turn answering it — numbered `1` as well, because the two
+    // sides count their turns apart — and the turn that is running now, which no
+    // report anywhere holds and never will unless this member settles.
     still_working.started(&mut members, "2026-08-07T12:04:02.000Z");
-    still_working.turn(&mut members, "2026-08-07T12:04:03.000Z");
+    still_working.opened(
+        &mut members,
+        "2026-08-07T12:04:03.000Z",
+        (1, "assistant"),
+        (WORKING_INSTRUCTION, false),
+    );
+    still_working.called(
+        &mut members,
+        "2026-08-07T12:04:04.000Z",
+        0,
+        ("Read", "docs/contract.md"),
+        Some(WORKING_TOOL_CALL_ID),
+    );
+    still_working.observed(
+        &mut members,
+        "2026-08-07T12:04:05.000Z",
+        1,
+        (WORKING_OBSERVATION, false),
+        Some(WORKING_TOOL_CALL_ID),
+    );
+    still_working.said(
+        &mut members,
+        "2026-08-07T12:04:06.000Z",
+        (1, "assistant"),
+        (WORKING_REPLY, false),
+    );
+    still_working.closed(
+        &mut members,
+        "2026-08-07T12:04:07.000Z",
+        (1, "assistant"),
+        json!({
+            "input_tokens": 4_210,
+            "output_tokens": 320,
+            "cache_read_tokens": 1_100,
+            "cache_write_tokens": 90,
+            "cost_usd": 0.42,
+        }),
+        "2026-08-07T12:04:03.000Z",
+    );
+    // The supervisor's own turn: what it was asked is the reply it is answering,
+    // and what it said is the next instruction rather than this transcript's
+    // reply. Its accounting is its own and must never land on the agent's turn 1.
+    still_working.opened(
+        &mut members,
+        "2026-08-07T12:04:07.500Z",
+        (1, "user"),
+        (WORKING_REPLY, false),
+    );
+    still_working.said(
+        &mut members,
+        "2026-08-07T12:04:08.000Z",
+        (1, "user"),
+        (WORKING_NEXT_INSTRUCTION, false),
+    );
+    still_working.closed(
+        &mut members,
+        "2026-08-07T12:04:08.500Z",
+        (1, "user"),
+        json!({
+            "input_tokens": 51,
+            "output_tokens": 12,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_usd": 0.01,
+        }),
+        "2026-08-07T12:04:07.500Z",
+    );
+    // The turn in flight: opened, answered in part, and closed by nothing. Both
+    // of its texts were cut to the producer's bound and both say so, and its
+    // observation is joined to its call by the recorded ordering index because
+    // this harness exposed no identity for either.
+    still_working.opened(
+        &mut members,
+        "2026-08-07T12:04:09.000Z",
+        (2, "assistant"),
+        (WORKING_NEXT_INSTRUCTION, true),
+    );
+    still_working.called(
+        &mut members,
+        "2026-08-07T12:04:10.000Z",
+        0,
+        ("Edit", "docs/contract.md"),
+        None,
+    );
+    still_working.observed(
+        &mut members,
+        "2026-08-07T12:04:11.000Z",
+        1,
+        (WORKING_CUT_OBSERVATION, true),
+        None,
+    );
+    still_working.said(
+        &mut members,
+        "2026-08-07T12:04:12.000Z",
+        (2, "assistant"),
+        (WORKING_CUT_REPLY, true),
+    );
 
     // The node whose member died mid-turn. Three records could end its session
     // and the graph's own is the earliest of them, which is the ranking a span
@@ -1439,8 +1572,35 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
                 "worktree": "/a/recorded/worktree",
             }),
         );
+    // What it managed to say before it went. A member that dies writes no report,
+    // so these records are the only account of this dispatch there will ever be.
     lost.started(&mut members, "2026-08-07T12:05:01.000Z");
-    lost.turn(&mut members, "2026-08-07T12:05:02.000Z");
+    lost.opened(
+        &mut members,
+        "2026-08-07T12:05:02.000Z",
+        (1, "assistant"),
+        (DIED_INSTRUCTION, false),
+    );
+    lost.called(
+        &mut members,
+        "2026-08-07T12:05:03.000Z",
+        0,
+        ("Bash", "just gate"),
+        Some(DIED_TOOL_CALL_ID),
+    );
+    lost.observed(
+        &mut members,
+        "2026-08-07T12:05:04.000Z",
+        1,
+        (DIED_OBSERVATION, false),
+        Some(DIED_TOOL_CALL_ID),
+    );
+    lost.said(
+        &mut members,
+        "2026-08-07T12:05:05.000Z",
+        (1, "assistant"),
+        (DIED_REPLY, false),
+    );
     lost.died(&mut members, "2026-08-07T12:05:30.000Z");
     driver
         .emit(
@@ -1491,8 +1651,16 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
                 "worktree": "/a/recorded/worktree",
             }),
         );
+    // A single-sided member, which is the one kind that publishes no
+    // `turn-message` at all: what it was asked and when it began, and its own
+    // words only in the report it never got to write.
     reclaimed.started(&mut members, "2026-08-07T12:06:02.000Z");
-    reclaimed.turn(&mut members, "2026-08-07T12:06:03.000Z");
+    reclaimed.opened(
+        &mut members,
+        "2026-08-07T12:06:03.000Z",
+        (1, "assistant"),
+        (RECLAIMED_INSTRUCTION, false),
+    );
     driver
         .emit(
             "2026-08-07T12:06:30.000Z",
@@ -1623,6 +1791,13 @@ impl Lane<'_> {
         );
     }
 
+    /// `turn-started`, as the producer that predates the corrected turn contract
+    /// publishes one: a number and nothing else.
+    ///
+    /// Kept, and kept in use, because it is what every run recorded before that
+    /// correction holds and those runs are still read — a lane written this way
+    /// is the reading with no instruction, no party and no clock to join by, and
+    /// it has to keep serving what it always did.
     fn turn(&self, members: &mut [Journal], at: &str) {
         self.journal(members).emit(
             at,
@@ -1630,6 +1805,131 @@ impl Lane<'_> {
             "turn-started",
             self.labels(true),
             json!({ "turn": 1 }),
+        );
+    }
+
+    /// `turn-started`, as the corrected producer publishes one: the turn's own
+    /// number, the party taking it, the message it is answering and when it
+    /// began.
+    ///
+    /// `instruction_truncated` says the producer cut the message to its own
+    /// bound, and is omitted rather than written `false` — which is what that
+    /// library's own payload does with it.
+    fn opened(
+        &self,
+        members: &mut [Journal],
+        at: &str,
+        turn: (u64, &str),
+        instruction: (&str, bool),
+    ) {
+        let mut payload = json!({
+            "turn": turn.0,
+            "role": turn.1,
+            "instruction": instruction.0,
+            "started_at": at,
+        });
+        if instruction.1 {
+            payload["instruction_truncated"] = json!(true);
+        }
+        self.journal(members)
+            .emit(at, "agentgraph", "turn-started", self.labels(true), payload);
+    }
+
+    /// `turn-message`: one party's own words for one turn, published as the turn
+    /// happens rather than kept until the member settles.
+    fn said(&self, members: &mut [Journal], at: &str, turn: (u64, &str), text: (&str, bool)) {
+        let mut payload = json!({ "turn": turn.0, "role": turn.1, "text": text.0 });
+        if text.1 {
+            payload["truncated"] = json!(true);
+        }
+        self.journal(members)
+            .emit(at, "agentgraph", "turn-message", self.labels(true), payload);
+    }
+
+    /// `turn-activity`: one tool call, with the harness's own identity for it
+    /// where the harness exposed one.
+    fn called(
+        &self,
+        members: &mut [Journal],
+        at: &str,
+        index: u64,
+        tool: (&str, &str),
+        identity: Option<&str>,
+    ) {
+        let mut payload = json!({
+            "kind": "tool_call",
+            "name": tool.0,
+            "detail": tool.1,
+            "index": index,
+        });
+        if let Some(identity) = identity {
+            payload["tool_call_id"] = json!(identity);
+        }
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "turn-activity",
+            self.labels(true),
+            payload,
+        );
+    }
+
+    /// `turn-activity`: the observation that answered a call. It names no tool —
+    /// it answers one already named — and carries the output, tail-bounded, with
+    /// the flag beside it saying whether that bound cut anything off.
+    fn observed(
+        &self,
+        members: &mut [Journal],
+        at: &str,
+        index: u64,
+        output: (&str, bool),
+        identity: Option<&str>,
+    ) {
+        let mut payload = json!({
+            "kind": "tool_result",
+            "name": Value::Null,
+            "detail": "",
+            "output": output.0,
+            "index": index,
+        });
+        if output.1 {
+            payload["output_truncated"] = json!(true);
+        }
+        if let Some(identity) = identity {
+            payload["tool_call_id"] = json!(identity);
+        }
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "turn-activity",
+            self.labels(true),
+            payload,
+        );
+    }
+
+    /// `turn-completed`, as the corrected producer publishes one: **that one
+    /// turn's** own accounting and the interval it ran over, keyed by the same
+    /// pair the record that opened it carried.
+    fn closed(
+        &self,
+        members: &mut [Journal],
+        at: &str,
+        turn: (u64, &str),
+        usage: Value,
+        started_at: &str,
+    ) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "turn-completed",
+            self.labels(true),
+            json!({
+                "turn": turn.0,
+                "role": turn.1,
+                "usage": usage,
+                "started_at": started_at,
+                "finished_at": at,
+            }),
         );
     }
 
@@ -1863,7 +2163,24 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "persona": "orchestrator",
             "session": DRIVING_CONVERSATION_ID,
         }),
-        json!({ "message": "driving the run", "model": "a-model" }),
+        json!({
+            "turn": 1,
+            "role": "assistant",
+            "instruction": "Drive the run.",
+            "started_at": "2026-08-07T12:00:05.000Z",
+            "model": "a-model",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:05.500Z",
+        "agentgraph",
+        "turn-message",
+        json!({
+            "run_id": run,
+            "persona": "orchestrator",
+            "session": DRIVING_CONVERSATION_ID,
+        }),
+        json!({ "turn": 1, "role": "assistant", "text": "driving the run" }),
     );
     // The node that is re-dispatched further down. Its member settled here, and
     // the onejudge report that settlement stored is the authoritative answer
@@ -1995,7 +2312,24 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "persona": "orchestrator",
             "session": DRIVING_CONVERSATION_ID,
         }),
-        json!({ "message": "reconciling the frontier", "model": "a-model" }),
+        json!({
+            "turn": 2,
+            "role": "assistant",
+            "instruction": "Reconcile the frontier.",
+            "started_at": "2026-08-07T12:00:26.500Z",
+            "model": "a-model",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:26.700Z",
+        "agentgraph",
+        "turn-message",
+        json!({
+            "run_id": run,
+            "persona": "orchestrator",
+            "session": DRIVING_CONVERSATION_ID,
+        }),
+        json!({ "turn": 2, "role": "assistant", "text": "reconciling the frontier" }),
     );
     emit(
         "2026-08-07T12:00:27.000Z",
@@ -2015,7 +2349,30 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "persona": "pr-author",
             "session": LIVE_CONVERSATION_ID,
         }),
-        json!({ "message": "opened the change request" }),
+        json!({
+            "turn": 1,
+            "role": "assistant",
+            "instruction": LIVE_INSTRUCTION,
+            "started_at": "2026-08-07T12:00:28.000Z",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:28.200Z",
+        "agentgraph",
+        "turn-message",
+        json!({
+            "run_id": run,
+            "node": SHIP_NODE_ID,
+            "step": "build",
+            "member": "worker",
+            "persona": "pr-author",
+            "session": LIVE_CONVERSATION_ID,
+        }),
+        json!({
+            "turn": 1,
+            "role": "assistant",
+            "text": "opened the change request",
+        }),
     );
     // What the dispatch reported from *inside* that turn: `oneagentgraph`
     // publishes a bounded tool summary as the turn runs rather than when it is
@@ -2052,6 +2409,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "session": LIVE_CONVERSATION_ID,
         }),
         json!({
+            "turn": 1,
+            "role": "assistant",
             "usage": {
                 "input_tokens": 900,
                 "output_tokens": 210,
@@ -2059,6 +2418,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
                 "cache_write_tokens": 60,
                 "cost_usd": 0.19,
             },
+            "started_at": "2026-08-07T12:00:28.000Z",
+            "finished_at": "2026-08-07T12:00:28.800Z",
         }),
     );
     // The lint tier the graph runs as a member of its own: the same semantic
@@ -2074,7 +2435,26 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "persona": "pr-author",
             "session": LINT_CONVERSATION_ID,
         }),
-        json!({ "message": "the diff reads", "model": "a-model" }),
+        json!({
+            "turn": 1,
+            "role": "assistant",
+            "instruction": "Read the diff for what it says.",
+            "started_at": "2026-08-07T12:00:28.900Z",
+            "model": "a-model",
+        }),
+    );
+    emit(
+        "2026-08-07T12:00:28.920Z",
+        "agentgraph",
+        "turn-message",
+        json!({
+            "run_id": run,
+            "node": SHIP_NODE_ID,
+            "member": "llmlint",
+            "persona": "pr-author",
+            "session": LINT_CONVERSATION_ID,
+        }),
+        json!({ "turn": 1, "role": "assistant", "text": "the diff reads" }),
     );
     emit(
         "2026-08-07T12:00:28.950Z",
@@ -2088,6 +2468,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "session": LINT_CONVERSATION_ID,
         }),
         json!({
+            "turn": 1,
+            "role": "assistant",
             "usage": {
                 "input_tokens": 120,
                 "output_tokens": 40,
@@ -2095,6 +2477,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
                 "cache_write_tokens": 0,
                 "cost_usd": 0.03,
             },
+            "started_at": "2026-08-07T12:00:28.900Z",
+            "finished_at": "2026-08-07T12:00:28.950Z",
         }),
     );
     // The branch `onevcs` opened for this node and what it did with it, relayed

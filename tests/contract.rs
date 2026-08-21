@@ -1160,6 +1160,61 @@ fn the_usage_keys_this_crate_reads_are_the_ones_the_wire_carries() {
     }
 }
 
+/// The tool-event names this crate reads off a live `turn-activity`, against the
+/// type that mints them.
+///
+/// `oneagentgraph` builds that payload from the six fields "both member kinds
+/// carry under the same names" — onejudge's `ToolEvent` and oneharness's
+/// `ActionEvent` — and forwards them unrenamed, which is why four of the names a
+/// live tool event is read by are reachable here at all. The same type the
+/// *settled* reading takes a report's tool events from, so the two readings of one
+/// call cannot come to spell it differently.
+///
+/// The four beside them — `detail`, `truncated`, `output_truncated` and
+/// `tool_call_id` — are `oneagentgraph`'s own, and the version this crate links is
+/// the one the pinned `onepipeline` resolves, which predates all four. There is
+/// therefore nothing to reconcile them against here; `src/AGENTS.md` records the
+/// SDK move that would make them gateable, and until it lands
+/// `tests/support/fixture_run.rs` writing the producer's records is the gate.
+#[test]
+fn the_tool_event_names_a_live_turn_is_read_by_are_the_ones_that_type_declares() {
+    use onepipeline_ui::payload::graph;
+
+    let event = serde_json::to_value(onejudge::ToolEvent {
+        kind: "tool_result".into(),
+        name: None,
+        input: None,
+        output: Some("2 passed; 0 failed".into()),
+        index: 4,
+    })
+    .expect("the tool event serializes");
+    for key in [graph::KIND, graph::OUTPUT, graph::INDEX] {
+        assert!(
+            event.get(key).is_some(),
+            "a live tool event is read by `{key}`: {event}"
+        );
+    }
+    // `name` is skipped where a producer has none — which is exactly a
+    // `tool_result`, the record whose whole job is to answer a call already named.
+    assert!(
+        event.get(graph::NAME).is_none(),
+        "an observation names no tool: {event}"
+    );
+    let call = serde_json::to_value(onejudge::ToolEvent {
+        kind: "tool_call".into(),
+        name: Some("bash".into()),
+        input: None,
+        output: None,
+        index: 3,
+    })
+    .expect("the call serializes");
+    assert_eq!(
+        call.get(graph::NAME),
+        Some(&serde_json::json!("bash")),
+        "a call names the tool it invoked: {call}"
+    );
+}
+
 /// The two role vocabularies a stored report carries, which this crate must never
 /// conflate.
 ///

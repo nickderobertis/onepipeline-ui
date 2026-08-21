@@ -263,6 +263,39 @@ Three constraints on that reading, each because the obvious alternative is worse
   field this wire already carries a producer's own record on. No field is added
   and neither closed role vocabulary moves, because both already carry `judge`.
 
+## The live half, which is the only half a running dispatch has
+
+A report exists once a member settles and a member that dies never writes one, so
+a session's own records are the whole of what a reader of a dispatch still in
+flight can be shown. `payload::live_transcript` fills those turns from them, into
+the fields the report fills.
+
+**Where a session has both, the report wins and the live records are not read at
+all.** A merge of the two can disagree with itself about one turn — a text the
+journal bounds against the whole of it — so `payload::conversation_document`
+builds the live reading only where no readable report was found, which makes the
+precedence a property of that function rather than a habit of its callers.
+
+**Two records describe one turn, and one turn is one row.** Everything that lists,
+counts or numbers a turn goes through `payload::relayed_turns`, so the count beside
+a node, the transcript opened from it and the id the timeline addresses it under
+cannot disagree. The grouping join is the producer's `{turn, role}` and nothing
+else: `oneagentgraph` 0.2 emits one `turn-completed` per *dispatch*, from
+`settle_report`, carrying the member's whole total rather than any turn's, so
+closing a turn by proximity would bill one turn for all of them.
+
+**This vocabulary stands where the `onevcs` one does: the wire is the only
+declaration a consumer can reach.** The `oneagentgraph` linked here is whichever
+one the pinned `onepipeline` resolves, and until that pin moves it declares no
+type any of these names can be reconciled against — which is what the suppression
+above `graph::TURN_MESSAGE` says, and the only reason a suppression is allowed to
+stand there. Moving the SDK pin is the one thing that retires it.
+
+**A fixture keeps writing the older shape on purpose.** A `turn-started` carrying
+a number and nothing else is what every run recorded before that correction holds,
+and those runs are still read: a record with no party on it joins nothing and its
+turn is served as it always was. Both shapes are in `write_lanes`.
+
 ## The one store this crate opens that no run owns
 
 A `oneharness_session` artifact's bytes are the only ones this API serves from
