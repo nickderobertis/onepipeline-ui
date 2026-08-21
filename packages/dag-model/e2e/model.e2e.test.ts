@@ -706,6 +706,10 @@ test("this repository's own served goldens parse through the public parsers", as
   expect(timeline.spans.map((span) => span.kind)).toEqual([
     "node",
     "dispatch",
+    // The judge that supervised that dispatch, served as its sibling: a settled
+    // member's report is the whole record of a side that relays no session, and
+    // the client gathers the two into one dispatch from this adjacency.
+    "dispatch",
     // One per piece of evidence the node's own records kept — its settled
     // member's report, its gate's log, and each settled check's — then the change
     // it published and the contention that publication met, summarized rather
