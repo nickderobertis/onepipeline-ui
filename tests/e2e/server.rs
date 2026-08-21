@@ -4945,7 +4945,7 @@ fn a_turn_the_journal_never_opened_is_served_from_the_report_that_kept_it() {
     assert_eq!(unrelayed["finishedAt"], json!(null));
 
     // The count beside the node is the same reading: a node that reads `2 turns`
-    // above a transcript of four is the disagreement one fold exists to prevent.
+    // above a transcript of three is the disagreement one fold exists to prevent.
     let detail = http::get(
         serving.address,
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
