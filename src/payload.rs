@@ -119,8 +119,14 @@ const ROLE_MEMBERS: [(&str, &str); 5] = [
 /// the strings the sibling emits rather than folded into an enum here — the same
 /// reason the SDK keeps a relayed `EventKind` a wire string. What each payload
 /// carries is `onevcs`'s own declaration, quoted where it is read.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onevcs` declares this vocabulary in a private module in every published version, so there is no type to generate from and nothing to compare against: the wire is the only declaration a consumer can reach. `tests/support/fixture_run.rs` writes these records as that library emits them and the goldens pin what this crate makes of them, which is the whole of the gate available. The sibling that *does* publish its own — `oneagentgraph` — is gated in `tests/contract.rs`.
-mod vcs {
+///
+/// That library's `event` module is private, but it re-exports `EventKind` from
+/// its crate root, so the kinds below *are* reachable as a declaration and
+/// `tests/contract.rs` holds this copy of them to it — a rename there fails
+/// there, as it does for the `oneagentgraph` vocabulary beside this one. The
+/// three payload *values* at the end of the module are the exception, and each
+/// says so where it is declared.
+pub mod vcs {
     /// `{token, identity, branch, base, worktree, clone, …}`.
     pub const SESSION_OPENED: &str = "session-opened";
     /// `{identity, elapsed, queue_position}` — one wait on one identity's lock.
@@ -175,12 +181,15 @@ mod vcs {
     /// A `pre-push` gate's verdict arrives as push output and nowhere else, so
     /// that library writes it under this exact command rather than a path; it is
     /// the only record of the hook having run at all.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] unlike the kinds above, this is a payload *value* that library builds inline in a private `publish` module and re-exports nothing of, so there is no declaration a consumer can reach and nothing to reconcile a copy against. `tests/support/fixture_run.rs` writes the record as that library emits it and the goldens pin what this crate makes of it, which is the whole of the gate available.
     pub const PRE_PUSH_COMMAND: &str = "the repository's pre-push hook";
 
     /// The verdict word a gate that passed is recorded with.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason as the command above: `onevcs` renders this word from a private `gate::Ruling` it re-exports nothing of, so the wire is the only declaration reachable and the goldens are the gate available.
     pub const GATE_PASSED: &str = "pass";
 
     /// The conclusions `onevcs` reads as not blocking a merge, in its own words.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason again: this is a match arm in that library's private `host` module rather than a type, so nothing declares it to a consumer and the goldens are the gate available.
     pub const GREEN_CONCLUSIONS: [&str; 3] = ["success", "skipped", "neutral"];
 }
 

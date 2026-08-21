@@ -1159,6 +1159,7 @@ dependencies = [
  "oneharness-core 0.10.1",
  "onejudge",
  "onepipeline",
+ "onevcs",
  "predicates",
  "serde",
  "serde_json",

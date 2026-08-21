@@ -172,10 +172,17 @@ public beside them is the submitted `channel::Command`, and `tests/contract.rs`
 gates this crate's reading against it.
 
 `oneagentgraph` declares its own vocabulary in a public module, so
-`tests/contract.rs` holds this crate's copy of it to that library's types.
-`onevcs` declares its in a private one, so the wire is the only declaration a
-consumer can reach and the fixture — written in the records that library emits —
-is the whole of the gate there.
+`tests/contract.rs` holds this crate's copy of it to that library's types. So
+does `onevcs`, which is easy to miss and was: its `event` module is private, but
+it re-exports `EventKind` from its crate root, so its kinds are reachable and are
+gated the same way. **A private module is not the same as an unreachable type —
+read the crate root before concluding a gate is unavailable.** What genuinely
+has none is a payload *value* neither library declares to a consumer: `onevcs`'s
+pre-push command, its gate verdict word and its non-blocking check conclusions,
+and `oneagentgraph`'s turn number — that last one reconciled instead against the
+public `render::line` that reads it. Where nothing at all is reachable, the
+fixture — written in the records that library emits — is the whole of the gate,
+and the constant says so where it is declared.
 
 **Gate a copied vocabulary against the type that writes it, never against one
 that merely declares it.** `oneagentgraph` declares an `event::Usage` it never

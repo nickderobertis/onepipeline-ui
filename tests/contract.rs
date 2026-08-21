@@ -892,6 +892,60 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
     );
 }
 
+/// The `onevcs` vocabulary this crate reads, against that library's own
+/// declaration of it.
+///
+/// That library's `event` module is private, which is why this gate was long
+/// thought unavailable — but it re-exports `EventKind` from its crate root, so
+/// the kinds are reachable as a type and the copy in `payload::vcs` is held to
+/// them here. A kind renamed there fails on this line rather than in a served
+/// timeline that quietly stops finding the record it reads a publication, a
+/// worktree or a gate from.
+///
+/// The three payload *values* in that module have no equivalent to offer: each
+/// is built inline in a private module that re-exports nothing, and each says so
+/// where it is declared.
+#[test]
+fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
+    use onepipeline_ui::payload::vcs;
+
+    let wire = |kind: onevcs::EventKind| {
+        serde_json::to_value(kind)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .expect("a kind serializes as its wire string")
+    };
+    for (declared, copied) in [
+        (onevcs::EventKind::SessionOpened, vcs::SESSION_OPENED),
+        (onevcs::EventKind::LockWait, vcs::LOCK_WAIT),
+        (onevcs::EventKind::GateVerdict, vcs::GATE_VERDICT),
+        (onevcs::EventKind::Push, vcs::PUSH),
+        (onevcs::EventKind::ChangeOpened, vcs::CHANGE_OPENED),
+        (onevcs::EventKind::ChangeCheck, vcs::CHANGE_CHECK),
+        (onevcs::EventKind::ChangeMerged, vcs::CHANGE_MERGED),
+        (onevcs::EventKind::MergeCompleted, vcs::MERGE_COMPLETED),
+        (onevcs::EventKind::CommitPreserved, vcs::COMMIT_PRESERVED),
+        (onevcs::EventKind::SyncConflict, vcs::SYNC_CONFLICT),
+        (onevcs::EventKind::SessionClosed, vcs::SESSION_CLOSED),
+        (onevcs::EventKind::Fetch, vcs::FETCH),
+    ] {
+        assert_eq!(wire(declared), copied, "{declared:?}");
+    }
+
+    // And the reading a publication's own bounds rest on: the three kinds a
+    // dispatch relays whether or not it ever published. A kind that left this
+    // list would open a publication over every node the run dispatched, which is
+    // the defect timeline schema 6 exists to have fixed.
+    assert_eq!(
+        vcs::SILENT_ON_PUBLICATION.to_vec(),
+        vec![
+            wire(onevcs::EventKind::SessionOpened),
+            wire(onevcs::EventKind::Fetch),
+            wire(onevcs::EventKind::SessionClosed)
+        ]
+    );
+}
+
 /// The `oneagentgraph` vocabulary this crate reads, against that library's own
 /// declaration of it.
 ///

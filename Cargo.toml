@@ -131,6 +131,12 @@ libc = "0.2"
 # so the gate reads the same declaration the records reaching this crate were
 # written by, and the tree carries one version of it rather than two.
 oneagentgraph = "0.2"
+# The same gate on the other sibling `src/payload.rs` reads. That library's
+# `event` module is private, but it re-exports `EventKind` from its crate root,
+# so its kinds are a declaration a consumer can reach and the copy is held to it
+# rather than to a second reading of the wire. Held at the major `onepipeline`
+# resolves, for the same reason as the line above it.
+onevcs = "0.4"
 predicates = "3"
 tempfile = "3"
 
