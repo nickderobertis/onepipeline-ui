@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.1...v0.6.2) - 2026-08-21
+
+### Fixed
+
+- *(api)* serve a settled dispatch from the report that holds its transcript ([#33](https://github.com/nickderobertis/onepipeline-ui/pull/33))
+
 ## [0.6.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.0...v0.6.1) - 2026-08-21
 
 ### Added
