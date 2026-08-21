@@ -33,10 +33,7 @@ pub const SESSION: &str = "claude-code-session-3f9a1c2e";
 /// keeps two members of one dispatch two conversations.
 pub const CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker";
 /// The judge that supervised that dispatch, served under the worker session's own
-/// id with `.judge` after it.
-///
-/// No session relays it and none can: the judge runs inside onejudge, and the
-/// settled member's stored report is the whole record any run holds of it.
+/// id with `.judge` after it. No session relays it; the stored report holds it.
 pub const JUDGE_CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker.judge";
 /// The session the review node's judge member ran under, from that member's own
 /// stream.
@@ -2731,9 +2728,7 @@ pub const SECOND_REPLY: &str = "The gate ran green over the finished tree.";
 /// this: `turn-activity` reports the call and never the observation.
 pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
 
-/// What the judge ruled, and the words it ruled it in. The report keys these to
-/// the *dispatch* rather than to any turn of it, which is why the transcript's
-/// last turn is the one that carries them.
+/// What the judge ruled, and the words it ruled it in.
 pub const JUDGE_CRITERIA: [(&str, &str); 2] = [
     (
         "every route the contract lists is served",
@@ -2744,20 +2739,17 @@ pub const JUDGE_CRITERIA: [(&str, &str); 2] = [
         "the run recorded one green gate and no rerun after it",
     ),
 ];
-/// The numeric criterion beside them, so the served kind is read off the report
-/// rather than assumed boolean.
+/// The numeric criterion beside them, so the kind is read rather than assumed.
 pub const JUDGE_SCORED: (&str, f64, &str) = (
     "how completely the acceptance criteria were met",
     4.5,
     "one follow-up was surfaced rather than done",
 );
-/// The judge's closing assessment: prose it wrote about the dispatch as a whole,
-/// which is the half of a failed node an operator otherwise reads by hand.
+/// The judge's closing assessment, which the report keys to the dispatch.
 pub const JUDGE_ASSESSMENT: &str = "The dispatch met its bar. The route table is \
 landed, the gate ran green over the finished tree, and the one follow-up it \
 surfaced is recorded rather than silently dropped.";
-/// The model the judge side ran on, which the agent side of this report never
-/// names — so a reading that crossed the two would serve it on an agent turn.
+/// The model the judge side ran on; the agent side of this report names none.
 pub const JUDGE_MODEL: &str = "gpt-5-codex";
 
 /// The onejudge report the settled run's worker member stored, built from that
@@ -2857,17 +2849,13 @@ pub fn worker_report() -> String {
         usage: None,
         ..ran("claude-code", 0, agent_usage(0.0))
     };
-    // The judge's own identity, which reports the model it ran with where the
-    // agent side of this report reports none: a reading that crossed the two
-    // vocabularies would put this word on an agent turn.
+    // The judge's own identity, naming the model the agent side does not.
     let judged = |ms| CandidateAttempt {
         model: Some(JUDGE_MODEL.to_owned()),
         ..ran("codex", ms, judge_usage.clone())
     };
-    // `ran` is the composed id of the candidate that ran, so it is read off that
-    // candidate rather than named twice: a report that spelled the judge's
-    // attribution with the agent's identity is a report no reading can tell the
-    // two sides apart from.
+    // Read off the candidate rather than named twice, or the judge's attribution
+    // would carry the agent's identity and no reading could tell them apart.
     let attributed = |role, turn_index, candidates: Vec<CandidateAttempt>| HarnessAttribution {
         role,
         turn_index,

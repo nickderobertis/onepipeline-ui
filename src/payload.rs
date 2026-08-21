@@ -966,11 +966,9 @@ fn is_turn_record(event: &Envelope) -> bool {
 /// as a transcript turn, so the count beside a node and the transcript a reader
 /// opens from it cannot disagree.
 ///
-/// It counts what was *relayed*, which is why a judge conversation adds nothing
-/// to it: the judge relays no envelope, and its turns are bounded by a settled
-/// member's report rather than recorded by the run. A count that folded them in
-/// would disagree with the transcript a reader opens from the node by however
-/// many dispatches had settled.
+/// It counts what was *relayed*, so a judge conversation adds nothing: folding
+/// its report-bounded turns in would put the count one dispatch ahead of every
+/// transcript a reader opens from the node.
 fn turns_of(view: &RunView, node: Option<&str>) -> usize {
     view.events
         .iter()
@@ -2023,9 +2021,8 @@ fn conversations_under(view: &RunView, filter: &EventFilter) -> Vec<Value> {
             let Some(events) = grouped.get(&session) else {
                 return Vec::new();
             };
-            // Read once and used twice: the stored report is what the journal
-            // cannot answer for the agent's transcript, and it is the *whole* of
-            // what any run holds about the judge that supervised it.
+            // Read once, used twice: the report fills the agent's transcript and
+            // is the whole of the judge's.
             let settlement = settlement_of(view, &session);
             let reported = settlement.and_then(|settlement| read_report(view, settlement));
             let mut served = vec![conversation_document(
@@ -2072,10 +2069,8 @@ fn stored_report(view: &RunView, session: &str) -> Option<judge::Report> {
 /// The settlement one session's member left, by the `{stream}.{member}` id that
 /// spells the session.
 ///
-/// Returned rather than consumed on the spot because it is two things at once:
-/// the record that locates the run's copy of the report, and the moment the
-/// report was written — which is the only stamp a judge's own conversation can
-/// be dated by, since no judge record ever reached the journal.
+/// Returned rather than consumed here because it is also the moment the report
+/// was written, which is the only stamp [`judge_conclusion`] can carry.
 fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
     view.events.iter().find(|event| {
         event.source == Source::Agentgraph
@@ -2325,10 +2320,8 @@ fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<(&'a Envelope, Vec<&'a Enve
 /// One relayed session's transcript, with what the settled member's report says
 /// about each turn folded onto it.
 ///
-/// `reported` is what the journal cannot answer: the prompt each turn was given,
-/// the prose it wrote back, what its tool calls returned, and what that turn
-/// alone spent and took. A session whose member has not settled has no report
-/// yet and is served as the journal relayed it.
+/// `None` where the run holds no readable report, which leaves the transcript as
+/// the journal relayed it.
 fn conversation_document(
     view: &RunView,
     session: &str,
@@ -2444,21 +2437,16 @@ fn conversation_document(
     })
 }
 
-/// The member word onejudge's supervising side is served under, in both closed
-/// vocabularies at once: `agentRoleSchema`'s `judge` is what the lane is *for*
-/// and `transportRoleSchema`'s is which side ran, and for this one party the two
-/// spell it the same. It is resolved through [`agent_role`] and [`Party::named`]
-/// rather than written straight onto the wire, so a vocabulary that stopped
-/// carrying it fails to resolve here instead of serving a word no client
-/// switches on.
+/// The member word both closed role vocabularies spell the judge with.
+///
+/// Resolved through [`agent_role`] and [`Party::named`] rather than written onto
+/// the wire, so a vocabulary that stopped carrying it fails to resolve here
+/// instead of serving a word no client switches on.
 const JUDGE_MEMBER: &str = "judge";
 
-/// The report's own rows for the side that supervised a dispatch, in the
-/// producer's own turn order.
-///
-/// Sorted by that 1-based counter rather than by position, which is the join
-/// [`agent_session`] makes on the other side: the two sides number their turns
-/// independently and a report lists them interleaved.
+/// The report's own rows for the side that supervised a dispatch, ordered by the
+/// producer's 1-based turn counter — the join [`agent_session`] makes on the
+/// other side, and not position, because a report lists the two interleaved.
 fn judge_links(report: &judge::Report) -> Vec<&judge::SessionLink> {
     let Some(telemetry) = report.telemetry.as_ref() else {
         return Vec::new();
@@ -2472,13 +2460,10 @@ fn judge_links(report: &judge::Report) -> Vec<&judge::SessionLink> {
     links
 }
 
-/// The interval a settled dispatch's judge ran over, or `None` where the report
-/// records no judge turn it can be drawn from.
+/// The interval a settled dispatch's judge ran over, from [`judge_links`] and
+/// nothing else — no record brackets it. `None` where the report holds no row.
 ///
-/// Bounded by those rows and by nothing else: the judge relays no envelope, so
-/// there is no `node-dispatched` to open the lane at and no `member-settled` to
-/// close it by. A row whose end was never observed leaves it open, which is the
-/// rule every other unclosed span here is served under — and the same rule
+/// A row whose end was never observed leaves the lane open, which is the rule
 /// [`Category`] folds a category of sessions by.
 fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
     let links = judge_links(report);
@@ -2500,23 +2485,10 @@ fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
 }
 
 /// The judge's own conversation for one settled dispatch, or `None` where the
-/// run holds no judge turn for it.
+/// report holds no `role: judge` row to serve one from.
 ///
-/// **Nothing relays a judge session, and no producer change can put one in the
-/// journal.** A plan node dispatches one graph member and the judge runs *inside*
-/// onejudge; [`conversations_under`] groups on the `session` label a relayed
-/// agent-graph envelope carries and [`node_spans`] brackets exactly those
-/// records, so neither can produce anything for a side that relays none. The
-/// stored report can, and does — but only once the member settles, which is why
-/// this is a settled-path reading and why a dispatch still running serves one
-/// lane.
-///
-/// The gate is the report's `role: judge` [`SessionLink`] rows. They are the only
-/// per-turn bounds any report here holds for that side and they are what the lane
-/// beside this conversation is drawn over, so a report with none of them has no
-/// judge turn to serve — which is a different fact from an empty transcript.
-///
-/// [`SessionLink`]: onejudge::SessionLink
+/// Why the report is the only source, and why that gate rather than another:
+/// `src/AGENTS.md`, under the report a settled member left.
 fn judge_conversation(
     view: &RunView,
     session: &str,
@@ -2598,24 +2570,15 @@ fn judge_conversation(
     }))
 }
 
-/// The id one settled dispatch's judge conversation is served under.
-///
-/// The worker session's own id with `.judge` after it, which `check_segment`
-/// admits as a bare identifier — so the conversation route resolves it through
-/// the same lookup as any other rather than needing a shape of its own.
+/// The id one settled dispatch's judge conversation is served under: the worker
+/// session's own with `.judge` after it, which `check_segment` admits as a bare
+/// identifier, so the route resolves it through the same lookup as any other.
 fn judge_session(session: &str) -> String {
     format!("{session}.{JUDGE_MEMBER}")
 }
 
-/// One judge turn: bounded, measured, and not transcribed.
-///
-/// **A report keys no text to a judge turn and this crate invents no pairing for
-/// one.** The judge's authored prose already reaches the wire — it is each agent
-/// turn's `user` message — and the two sides number their turns independently,
-/// with nothing recording which judge turn wrote which instruction. So
-/// `assistant` is absent, and `user` is empty only because
-/// `conversationTurnSchema` types it a non-nullable string, which is the one
-/// place here an absence cannot be spelled as one.
+/// One judge turn: bounded and measured, and not transcribed — see
+/// `src/AGENTS.md` for why no text may be keyed to one.
 fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::SessionLink) -> Value {
     let entry = attributed(report, judge::TelemetryRole::Judge, link.turn_index);
     let ran = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index);
@@ -2650,14 +2613,9 @@ fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::Sess
 /// The turn a judge conversation closes on: what the report keys to the
 /// *dispatch* rather than to any turn of it.
 ///
-/// The verdict is what fails a node, so this is usually the missing half of why a
-/// dispatch ended as it did. It is served whole — a report-backed read is not cut
-/// short — with the closing assessment as the prose the judge wrote and the rest
-/// as the structured record `unknown` already carries a producer's own data in.
-///
-/// Bounds and usage are absent because the report records none for it: a verdict
-/// call is not one of the invocations its telemetry attributes to a turn, and
-/// serving a zero for either would claim a measurement nobody took.
+/// Served whole — a report-backed read is not bounded the way an artifact's bytes
+/// are — with bounds and usage absent, because a verdict call is not one of the
+/// invocations the telemetry attributes to a turn.
 fn judge_conclusion(
     id: &str,
     index: usize,
@@ -3338,10 +3296,8 @@ impl Moment {
 
 /// One stamp as a moment, or `None` where it cannot be ordered.
 ///
-/// Taken from a string rather than from an envelope because a settled member's
-/// report carries bounds no envelope does: its `SessionLink` rows are the only
-/// account of when the judge ran, and a span is drawn over them the same way one
-/// is drawn over records.
+/// From a string rather than an envelope, because a report's `SessionLink` rows
+/// are bounds no record carries and a span is drawn over them all the same.
 fn moment_at(ts: &str) -> Option<Moment> {
     millis_of(ts).map(|at| Moment {
         at,
@@ -3975,18 +3931,12 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     spans
 }
 
-/// The judge's lane beside one dispatch, or `None` where the run holds no judge
-/// turn for it.
+/// The judge's lane beside one dispatch, or `None` where the report holds no
+/// judge turn to draw it over.
 ///
-/// Everything but the interval and the party is the worker's own span: the two
-/// ran under one dispatch, at one node, in one step, and a judge lane that
-/// disagreed with its sibling about any of those would be an unrelated row that
-/// happened to sit beside it. What it does not take is the interval — the judge's
-/// is the report's own, drawn over [`judge_interval`] — and it carries no events,
-/// because no envelope of the judge's was ever relayed to carry.
-///
-/// A member that has not settled has no report and so no lane, which is what
-/// keeps a running dispatch showing the one side the run can see.
+/// Everything but the interval, the party and the events is the worker's span:
+/// the two ran under one dispatch, at one node, in one step, and a lane that
+/// disagreed about any of those would be an unrelated row beside it.
 fn judge_span(view: &RunView, session: &str, dispatch: &Map<String, Value>) -> Option<Value> {
     let report = stored_report(view, session)?;
     let (opened, closed) = judge_interval(&report)?;
