@@ -852,11 +852,11 @@ function count(rows: readonly TimelineRow[]): number {
 function byStart(first: TimelineRow, next: TimelineRow): number {
   const instant = first.startedAt.localeCompare(next.startedAt);
   if (instant !== 0) return instant;
-  return moments(first) - moments(next);
+  return rowKindOrder(first) - rowKindOrder(next);
 }
 
-/** Whether a row is a moment the run recorded rather than a stretch it ran over. */
-function moments(row: TimelineRow): number {
+/** Where a row sorts against one sharing its instant: a moment before a stretch. */
+function rowKindOrder(row: TimelineRow): number {
   return row.rowKind === "event" ? 0 : 1;
 }
 
