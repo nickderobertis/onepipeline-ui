@@ -409,6 +409,14 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   const worker = timeline(page).getByRole("button", {
     name: /engineer-dashboard/,
   });
+  // The lint run this dispatch made of its own work opened inside the worker and
+  // is still going, so drawn beside it in the one compact line it would be painted
+  // straight across the worker's middle — the pixel this hover lands on. The
+  // compact line drops it and the worker underneath stays reachable; the reader
+  // gets it back by expanding, below.
+  await expect(
+    timeline(page).getByRole("button", { name: /^Lint/ }),
+  ).toHaveCount(0);
   await worker.hover();
   await expect(page.getByRole("tooltip")).toContainText("Duration:");
   await expect(page.getByRole("tooltip")).toContainText("Status: running");
@@ -427,6 +435,11 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   ).toBeVisible();
   await expect(
     timeline(page).getByRole("button", { name: /^Check-in/ }),
+  ).toBeVisible();
+  // And the lint run the compact line dropped, in the lane of its own that is
+  // where a reader was told to look for it.
+  await expect(
+    timeline(page).getByRole("button", { name: /^Lint/ }),
   ).toBeVisible();
   const plot = timeline(page).getByLabel(/Timeline plot/);
   // The categories the reader was promised, and no served identifier among them.
