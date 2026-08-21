@@ -300,9 +300,11 @@ fn a_run_detail_serves_its_graph_plan_and_transcripts() {
     );
 
     // One transcript per session the run relayed, and the pair each was run
-    // under: the worker's own side, and the judge member that reviewed it.
+    // under: the worker's own side, and the judge member that reviewed it. Beside
+    // the first sits the judge that supervised it, which no session relayed and
+    // the settled member's report is the whole record of.
     let conversations = body["conversations"].as_array().expect("conversations");
-    assert_eq!(conversations.len(), 2);
+    assert_eq!(conversations.len(), 3);
     assert_eq!(
         conversations[0]["conversation"]["id"],
         json!(fixture_run::CONVERSATION_ID)
@@ -317,10 +319,18 @@ fn a_run_detail_serves_its_graph_plan_and_transcripts() {
     );
     assert_eq!(
         conversations[1]["conversation"]["id"],
+        json!(fixture_run::JUDGE_CONVERSATION_ID)
+    );
+    assert_eq!(
+        conversations[1]["attribution"]["parentConversationId"],
+        json!(fixture_run::CONVERSATION_ID)
+    );
+    assert_eq!(
+        conversations[2]["conversation"]["id"],
         json!(fixture_run::REVIEW_CONVERSATION_ID)
     );
     assert_eq!(
-        conversations[1]["attribution"]["transportRole"],
+        conversations[2]["attribution"]["transportRole"],
         json!("judge")
     );
 }
@@ -2059,9 +2069,11 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
         listed,
         vec![
             fixture_run::CONVERSATION_ID,
+            fixture_run::JUDGE_CONVERSATION_ID,
             fixture_run::REVIEW_CONVERSATION_ID
         ],
-        "one transcript per labelled session, and none for the unlabelled record: {detail}"
+        "one transcript per labelled session — plus the judge the first one's report \
+         holds — and none for the unlabelled record: {detail}"
     );
 
     // Both scopes, because a reader arrives at a turn from either: the run's own
@@ -4809,6 +4821,502 @@ fn a_settled_dispatchs_transcript_is_the_conversation_it_really_had() {
     assert_eq!(turns[2]["assistant"], json!(null));
     assert_eq!(turns[2]["durationMs"], json!(null));
     assert_eq!(turns[2]["usage"]["costUsd"], json!(50.72));
+}
+
+/// A settled dispatch serves the judge that supervised it as a conversation of
+/// its own, named for the dispatch it ruled on.
+///
+/// The judge's verdict is what fails a node, so it is usually the missing half of
+/// why a dispatch ended as it did — and nothing relays it: a plan node dispatches
+/// one graph member and the judge runs inside onejudge, so the settled member's
+/// stored report is the whole record any run holds of it.
+#[test]
+fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversation() {
+    let serving = two_runs();
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::JUDGE_CONVERSATION_ID
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_enveloped(&body);
+
+    // The dispatch it supervised, at the node it supervised it under: the two
+    // sides are one dispatch, not two rows of equal weight.
+    let attribution = &body["attribution"];
+    assert_eq!(attribution["agentRole"], json!("judge"));
+    assert_eq!(attribution["transportRole"], json!("judge"));
+    assert_eq!(
+        attribution["parentConversationId"],
+        json!(fixture_run::CONVERSATION_ID)
+    );
+    assert_eq!(attribution["nodeId"], json!(fixture_run::NODE_ID));
+    assert_eq!(attribution["runId"], json!(fixture_run::RUN_ID));
+
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the judge's turns")
+        .clone();
+    assert_eq!(
+        turns.len(),
+        3,
+        "two judge turns and the conclusion: {turns:?}"
+    );
+
+    // Turn by turn: the bounds the report observed, the elapsed time and model of
+    // the candidate that ran it, and what that invocation alone consumed.
+    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:00:03.910Z"));
+    assert_eq!(turns[0]["finishedAt"], json!("2026-08-07T12:00:03.980Z"));
+    assert_eq!(turns[0]["durationMs"], json!(70));
+    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:00:04.800Z"));
+    assert_eq!(turns[1]["finishedAt"], json!("2026-08-07T12:00:04.900Z"));
+    assert_eq!(turns[1]["durationMs"], json!(60));
+    for turn in turns.iter().take(2) {
+        assert_eq!(turn["model"], json!(fixture_run::JUDGE_MODEL), "{turn}");
+        assert_eq!(turn["harness"], json!("codex:default"), "{turn}");
+        assert_eq!(turn["usage"]["inputTokens"], json!(79_341), "{turn}");
+        assert_eq!(turn["usage"]["outputTokens"], json!(618), "{turn}");
+        assert_eq!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
+        // A figure the provider never reported is an explicit absence, never a
+        // zero: this host's judge side reports no cache write at all, and a `0`
+        // here would read as a measurement somebody took.
+        assert_eq!(turn["usage"]["cacheWriteTokens"], json!(null), "{turn}");
+        assert_ne!(turn["usage"]["cacheWriteTokens"], json!(0), "{turn}");
+        // And nothing the report keys to the *agent* reaches a judge turn.
+        assert_ne!(turn["durationMs"], json!(900), "{turn}");
+        assert_ne!(turn["usage"]["costUsd"], json!(29.71), "{turn}");
+    }
+
+    // No text against a judge turn, because the report keys none to one: judge
+    // turns outnumber the agent's and nothing records which turn wrote which
+    // instruction, so a pairing here would be invented rather than read.
+    for turn in turns.iter().take(2) {
+        assert_eq!(turn["assistant"], json!(null), "{turn}");
+        assert_eq!(turn["user"], json!(""), "{turn}");
+        assert_eq!(turn["tools"], json!([]), "{turn}");
+        for prose in [
+            fixture_run::FIRST_PROMPT,
+            fixture_run::FIRST_REPLY,
+            fixture_run::SECOND_PROMPT,
+            fixture_run::SECOND_REPLY,
+        ] {
+            assert_ne!(turn["user"], json!(prose), "{turn}");
+            assert_ne!(turn["assistant"], json!(prose), "{turn}");
+        }
+    }
+
+    // The conclusion, which the report keys to the dispatch rather than to a
+    // turn: every criterion, the verdict and reason it returned for each, the
+    // closing assessment, why it completed, and whether it stopped early.
+    let closing = &turns[2];
+    assert_eq!(closing["assistant"], json!(fixture_run::JUDGE_ASSESSMENT));
+    let verdicts = closing["unknown"]["verdicts"]
+        .as_array()
+        .expect("the judge's verdicts");
+    assert_eq!(verdicts.len(), 3, "{verdicts:?}");
+    for (index, (criterion, reason)) in fixture_run::JUDGE_CRITERIA.into_iter().enumerate() {
+        assert_eq!(verdicts[index]["criterion"], json!(criterion));
+        assert_eq!(verdicts[index]["kind"], json!("boolean"));
+        assert_eq!(verdicts[index]["value"], json!(true));
+        assert_eq!(verdicts[index]["reason"], json!(reason));
+    }
+    let (criterion, score, reason) = fixture_run::JUDGE_SCORED;
+    assert_eq!(verdicts[2]["criterion"], json!(criterion));
+    assert_eq!(verdicts[2]["kind"], json!("numeric"));
+    assert_eq!(verdicts[2]["value"], json!(score));
+    assert_eq!(verdicts[2]["reason"], json!(reason));
+    assert_eq!(
+        closing["unknown"]["completionReason"],
+        json!("the acceptance criteria were met")
+    );
+    assert_eq!(closing["unknown"]["stoppedEarly"], json!(false));
+    // The report records no invocation for it, so it claims no clock and no
+    // spend rather than serving a zero for either.
+    assert_eq!(closing["startedAt"], json!(null));
+    assert_eq!(closing["finishedAt"], json!(null));
+    assert_eq!(closing["durationMs"], json!(null));
+    assert_eq!(closing["usage"], json!({}));
+}
+
+/// The agent's own transcript is left as the earlier steps made it, and carries
+/// nothing of the judge's.
+#[test]
+fn the_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
+    let serving = two_runs();
+    let body = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    )
+    .json();
+    assert_eq!(
+        body["attribution"]["agentRole"],
+        json!("worker"),
+        "the dispatch is still read as the worker's"
+    );
+    assert_eq!(
+        body["attribution"]["parentConversationId"],
+        json!(null),
+        "a dispatch supervises nothing"
+    );
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 3, "{turns:?}");
+    // What the earlier steps of this node made it serve, unmoved: the prompts,
+    // the replies, and each turn's own agent-side measurements.
+    assert_eq!(turns[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(turns[0]["durationMs"], json!(900));
+    // And no figure the report recorded against the judge: not its model, not
+    // its clock, not its elapsed time.
+    for turn in &turns {
+        assert_ne!(turn["model"], json!(fixture_run::JUDGE_MODEL), "{turn}");
+        assert_ne!(turn["durationMs"], json!(70), "{turn}");
+        assert_ne!(turn["durationMs"], json!(60), "{turn}");
+        assert_eq!(turn["unknown"], json!({}), "{turn}");
+    }
+}
+
+/// The judge's turns are reachable from the node's own timeline, through a lane
+/// that sits with the dispatch it supervised.
+#[test]
+fn the_judges_lane_sits_with_the_dispatch_it_supervised_on_the_nodes_timeline() {
+    let serving = two_runs();
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+
+    let worker = format!("dispatch.{}", fixture_run::CONVERSATION_ID);
+    let judge = format!("dispatch.{}", fixture_run::JUDGE_CONVERSATION_ID);
+    let at = |id: &str| {
+        spans
+            .iter()
+            .position(|span| span["id"] == json!(id))
+            .unwrap_or_else(|| panic!("no span `{id}` among {spans:?}"))
+    };
+    // A sibling of the dispatch, served straight after it in the same scope,
+    // under the same dispatch id: that adjacency is what a client gathers the
+    // two into one dispatch by.
+    assert_eq!(at(&judge), at(&worker) + 1, "{spans:?}");
+    let lane = &spans[at(&judge)];
+    let dispatch = &spans[at(&worker)];
+    assert_eq!(lane["agent_role"], json!("judge"));
+    assert_eq!(lane["transport_role"], json!("judge"));
+    assert_eq!(lane["kind"], dispatch["kind"]);
+    assert_eq!(lane["parent_id"], dispatch["parent_id"]);
+    assert_eq!(lane["node_id"], json!(fixture_run::NODE_ID));
+    assert_eq!(lane["dispatch_id"], dispatch["dispatch_id"]);
+    // And it opens the judge's own conversation rather than the worker's.
+    assert_eq!(
+        lane["reference"],
+        json!({
+            "kind": "conversation",
+            "value": fixture_run::JUDGE_CONVERSATION_ID,
+        })
+    );
+    // Drawn over what the report observed, not over the node's window: the judge
+    // ran between the agent's two turns and finished before the node settled.
+    assert_eq!(lane["started_at"], json!("2026-08-07T12:00:03.910Z"));
+    assert_eq!(lane["ended_at"], json!("2026-08-07T12:00:04.900Z"));
+    assert_eq!(lane["events"], json!([]), "the judge relays none");
+
+    // The lane is what makes the conversation reachable: the id it references
+    // resolves through the same route as any other.
+    let opened = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            lane["reference"]["value"].as_str().expect("a conversation")
+        ),
+    );
+    assert_eq!(opened.status, 200, "{}", opened.body);
+}
+
+/// A member that has not settled serves no judge lane and no judge conversation,
+/// rather than an empty one.
+///
+/// The report is the only record of a judge turn and a member writes one when it
+/// settles, so a dispatch still running has one lane — which is the whole reason
+/// this is a settled-path reading.
+#[test]
+fn a_member_that_has_not_settled_serves_no_judge_lane_and_no_judge_conversation() {
+    let serving = live_run();
+    let asked = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}.judge",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    );
+    assert_eq!(asked.status, 404, "{}", asked.body);
+    assert_eq!(
+        asked.json()["error"]["code"],
+        json!("conversation_not_found")
+    );
+
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::REDIRECTED_NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+    assert!(
+        spans.iter().any(
+            |span| span["reference"]["value"] == json!(fixture_run::REDIRECTED_CONVERSATION_ID)
+        ),
+        "the dispatch itself is still drawn: {spans:?}"
+    );
+    assert!(
+        !spans
+            .iter()
+            .any(|span| span["agent_role"] == json!("judge")),
+        "a running dispatch has no judge lane to draw: {spans:?}"
+    );
+}
+
+/// A judge lane the run never closed is served with an absent end, and the
+/// conclusion beside it is served whole however long it is.
+#[test]
+fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
+    const STREAM: &str = "node-scope-1786925519777-3163777";
+    const SESSION: &str = "node-scope-1786925519777-3163777.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:09.000Z",
+                artifact: "report-node-scope-1786925519777-3163777",
+                report: &unclosed_judge_report(),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let lane = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::SHIP_NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["id"] == json!(format!("dispatch.{SESSION}.judge")))
+        .expect("the judge's lane")
+        .clone();
+    assert_eq!(lane["started_at"], json!("2026-08-07T12:01:00.000Z"));
+    // The run observed no end for the judge's second turn, so the lane is open —
+    // never given an invented end, and never closed at the turn before it.
+    assert_eq!(lane["ended_at"], json!(null), "{lane}");
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}.judge",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the judge's turns")
+        .clone();
+    assert_eq!(turns.len(), 3, "{turns:?}");
+    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:01:05.000Z"));
+    assert_eq!(turns[1]["finishedAt"], json!(null), "never observed");
+
+    // And the conclusion is served whole. A report-backed read is not bounded
+    // the way an artifact's bytes are, so a long assessment reaches the reader
+    // as long as it was written and every criterion is listed.
+    let closing = &turns[2];
+    let assessment = closing["assistant"].as_str().expect("the assessment");
+    assert!(
+        assessment.len() > VERBOSE_ASSESSMENT_BYTES,
+        "cut short at {} bytes",
+        assessment.len()
+    );
+    assert!(
+        assessment.ends_with("and that is the whole of it."),
+        "{closing}"
+    );
+    assert_eq!(
+        closing["unknown"]["verdicts"]
+            .as_array()
+            .map(Vec::len)
+            .expect("the verdicts"),
+        VERBOSE_CRITERIA
+    );
+    assert_eq!(closing["unknown"]["stoppedEarly"], json!(true));
+}
+
+/// How many criteria the verbose report rules on, and how long an assessment it
+/// closes with: past 64 KiB, which is the bound this API puts on an *artifact's*
+/// bytes and puts on nothing a report keys to a dispatch.
+const VERBOSE_CRITERIA: usize = 40;
+const VERBOSE_ASSESSMENT_BYTES: usize = 64 * 1024;
+
+/// A report whose judge ran twice, whose second turn was never observed to
+/// finish, and whose conclusion is longer than one screen — in onejudge's own
+/// types, so a release that renamed a field fails here rather than in production.
+fn unclosed_judge_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, JudgeKind, JudgeValue, JudgeVerdict, Message,
+        NamedVerdict, PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, Transcript,
+        Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(64),
+        output_tokens: Some(12),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        // The absence this host really records: codex reports no cost, and a
+        // zero here would read as a dispatch that spent nothing.
+        cost_usd: None,
+    };
+    let candidate = |ms| CandidateAttempt {
+        harness: "codex".into(),
+        harness_id: "codex:default".into(),
+        variant: None,
+        model: Some("gpt-5-codex".into()),
+        status: "ok".into(),
+        available: true,
+        ran: true,
+        failure_kind: None,
+        failure_kind_source: None,
+        exit_code: Some(0),
+        duration_ms: Some(ms),
+        error: None,
+        session_id: None,
+        history_id: None,
+        usage: Some(usage.clone()),
+    };
+    let attributed = |turn_index, ms| HarnessAttribution {
+        role: TelemetryRole::Judge,
+        turn_index,
+        ran: Some("codex:default".into()),
+        fell_through: Vec::new(),
+        candidates: vec![candidate(ms)],
+        history_file: None,
+    };
+    let mut assessment = String::new();
+    while assessment.len() <= VERBOSE_ASSESSMENT_BYTES {
+        assessment.push_str(
+            "The dispatch was read against every criterion it was given, and the \
+             reading is recorded here in full rather than summarised. ",
+        );
+    }
+    assessment.push_str("and that is the whole of it.");
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Land the wire contract."),
+                Message::assistant("The route table is landed."),
+            ],
+        },
+        verdicts: (0..VERBOSE_CRITERIA)
+            .map(|index| {
+                NamedVerdict::new(
+                    format!("the route table answers request {index}"),
+                    JudgeKind::Boolean,
+                    JudgeVerdict {
+                        value: JudgeValue::Bool(index % 2 == 0),
+                        reason: format!("request {index} was read end to end"),
+                        usage: None,
+                    },
+                )
+            })
+            .collect(),
+        assessment: Some(assessment),
+        completion_reason: None,
+        settled_reason: Some("a streaming sink asked to stop".into()),
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 12_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry {
+                usage: Some(usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            orchestration_ms: 40,
+            sessions: vec![
+                SessionLink {
+                    session_id: "01a02f4c-685b-75e2-8281-e8937fd20d47".into(),
+                    role: TelemetryRole::Judge,
+                    turn_index: 1,
+                    started_at: "2026-08-07T12:01:00.000Z".into(),
+                    finished_at: Some("2026-08-07T12:01:02.000Z".into()),
+                    history_id: None,
+                },
+                // The end nobody observed, which leaves the lane open.
+                SessionLink {
+                    session_id: "01a02f4f-6168-72d1-b946-2251794e2fce".into(),
+                    role: TelemetryRole::Judge,
+                    turn_index: 2,
+                    started_at: "2026-08-07T12:01:05.000Z".into(),
+                    finished_at: None,
+                    history_id: None,
+                },
+            ],
+            attribution: vec![attributed(1, 2_000), attributed(2, 1_000)],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: true,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
 }
 
 /// A turn whose reply never came reads as having captured none.

@@ -32,6 +32,12 @@ pub const SESSION: &str = "claude-code-session-3f9a1c2e";
 /// a uuid and nothing here may assume one — the label is a *pair*, which is what
 /// keeps two members of one dispatch two conversations.
 pub const CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker";
+/// The judge that supervised that dispatch, served under the worker session's own
+/// id with `.judge` after it.
+///
+/// No session relays it and none can: the judge runs inside onejudge, and the
+/// settled member's stored report is the whole record any run holds of it.
+pub const JUDGE_CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker.judge";
 /// The session the review node's judge member ran under, from that member's own
 /// stream.
 pub const REVIEW_CONVERSATION_ID: &str = "node-scope-1786925518102-3163741.judge";
