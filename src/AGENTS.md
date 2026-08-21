@@ -265,44 +265,24 @@ Three constraints on that reading, each because the obvious alternative is worse
 
 ## The live half, which is the only half a running dispatch has
 
-A report exists once a member settles, and a member that dies never writes one —
-so on the run this reading was measured against, half the sessions have none and
-never will. `payload::live_transcript` fills those turns from the session's own
-records instead: `turn-started` for what the turn was asked, `turn-message` for
-what it said, `turn-activity` for what its calls returned, `turn-completed` for
-what it spent and the interval it ran over. No field is added by it — these are
-the fields the report fills, from the other source.
+A report exists once a member settles and a member that dies never writes one, so
+a session's own records are the whole of what a reader of a dispatch still in
+flight can be shown. `payload::live_transcript` fills those turns from them, into
+the fields the report fills.
 
 **Where a session has both, the report wins and the live records are not read at
-all.** `payload::conversation_document` builds the live transcript only when there
-is no readable report, so the precedence is a property of the function rather than
-a habit of its callers. A merge of the two can disagree with itself: the journal
-bounds a text and the report does not, and a turn the report says produced no
-reply would be filled with words the journal happened to carry.
+all.** A merge of the two can disagree with itself about one turn — a text the
+journal bounds against the whole of it — so `payload::conversation_document`
+builds the live reading only where no readable report was found, which makes the
+precedence a property of that function rather than a habit of its callers.
 
-Four things about that reading that the code says once and this file does not
-repeat: it joins a turn by the **pair** of number and party, it pairs an
-observation to its call by the producer's identity and then by the recorded index,
-it serves a bound only when the stamp parses as an instant, and it carries the
-producer's own cut flags on the turn's `unknown` map — the same field the judge's
-conclusion lands in, for the same reason.
-
-**Two records describe one turn, and one turn is one row.** `payload::relayed_turns`
-groups a `turn-completed` onto the turn its `turn-started` opened, by that same
-pair, and everything that counts or numbers a turn goes through it — the
-transcript, the `turns` beside a node, and `payload::turn_ids`, so the timeline
-addresses one turn under one id whichever of its records a reader opened. Reading
-each record as a turn of its own served one turn twice, with one instruction and
-one interval on both, and a plot drew them as two spans lying over each other that
-nothing could be hovered or clicked through. A turn nothing has closed is served
-with its usage and its end bound **absent**, which is a different fact from a
-second row.
-
-The join is the producer's and only the producer's: a `turn-completed` carrying no
-`{turn, role}` closes nothing. `oneagentgraph` 0.2 emits exactly one of those, from
-`settle_report`, carrying the member's whole total rather than any turn's — so
-attaching it by proximity would bill one turn for the dispatch. It is served as the
-record it is, which is what those runs have always shown.
+**Two records describe one turn, and one turn is one row.** Everything that lists,
+counts or numbers a turn goes through `payload::relayed_turns`, so the count beside
+a node, the transcript opened from it and the id the timeline addresses it under
+cannot disagree. The grouping join is the producer's `{turn, role}` and nothing
+else: `oneagentgraph` 0.2 emits one `turn-completed` per *dispatch*, from
+`settle_report`, carrying the member's whole total rather than any turn's, so
+closing a turn by proximity would bill one turn for all of them.
 
 **The names it reads are not gateable against a type at this pin, and that is the
 one thing to fix upstream.** The linked `oneagentgraph` is the one the pinned

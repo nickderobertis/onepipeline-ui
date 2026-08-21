@@ -255,7 +255,7 @@ pub mod graph {
     /// a consumer can reach — and `tests/support/fixture_run.rs` writes the
     /// records as that library emits them, which is the gate available. Moving
     /// the SDK is what makes them gateable; `src/AGENTS.md` records that.
-    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the linked `oneagentgraph` is the one the pinned `onepipeline` resolves, and it declares none of the names below — 0.2 publishes `turn-started` and `turn-completed` inline and has no `turn-message`, no per-turn bounds and no observation on an activity. There is therefore no type to reconcile this copy against, exactly as for the `onevcs` vocabulary above; the gate available is `tests/support/fixture_run.rs` writing the corrected producer's records and the journeys over them. Moving the SDK pin is the proposal recorded in `src/AGENTS.md`.
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the linked `oneagentgraph` is the one the pinned `onepipeline` resolves, and it declares none of the names from here to the end of this module — 0.2 publishes `turn-started` and `turn-completed` inline and has no `turn-message`, no role, no per-turn bounds and no observation on an activity. There is therefore no type to reconcile any of this copy against, exactly as for the `onevcs` vocabulary above; the gate available is `tests/support/fixture_run.rs` writing the corrected producer's records and the journeys over them. Moving the SDK pin is the proposal recorded in `src/AGENTS.md`, and the four names 0.2 *does* declare are held to it by `tests/contract.rs` rather than covered here.
     pub const TURN_MESSAGE: &str = "turn-message";
     /// Which party a turn record is about: `assistant`, `user` or `system`.
     ///
@@ -296,6 +296,7 @@ pub mod graph {
     /// A tool event's position within its turn, which is what an observation is
     /// joined by where no identity was published.
     pub const INDEX: &str = "index";
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 }
 
 /// What one accepted live edit compiled to, as `onepipeline` writes it on an
@@ -2369,6 +2370,16 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
         let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
         let recorded = event.payload.get(graph::INDEX).and_then(Value::as_u64);
         let identity = field(graph::TOOL_CALL_ID);
+        // `tool_result` is the one word the producer closes: it declares the
+        // observation and leaves a *call's* kind open, because that word is the
+        // harness's own (`tool_use` on one, `tool_call` on the next) and this
+        // crate serves it through to a reader verbatim. So the test is for the
+        // observation and everything else is the call it is — holding calls to a
+        // closed set here would drop every call from a harness nobody enumerated,
+        // and enumerating them would be this crate declaring a record vocabulary
+        // it does not own.
+        // llmlint: ignore[boundary_inputs_validated] `oneagentgraph::event::TurnActivity::kind` is a `String` and not an enum, so there is no closed vocabulary to validate a call's kind against; the one closed word, the observation's, is what this branches on.
+        // llmlint: ignore[invalid_states_unrepresentable] same reason: a call's kind is the producing harness's own word, served through verbatim, and a closed enum here would be a second declaration of a vocabulary this crate does not own — see the module note above `TURN_MESSAGE`.
         if field(graph::KIND) == Some(graph::TOOL_RESULT) {
             if let Some(at) = answered(&open, identity, recorded) {
                 let entry = open.remove(at).0;
@@ -2787,6 +2798,15 @@ fn assistant_turn(event: &Envelope) -> bool {
 /// nothing about who is taking it — joins nothing: half a key cannot be matched
 /// to the other side's records without guessing which side wrote it, and a
 /// transcript that guessed would put one party's words on the other's turn.
+///
+/// The party is carried as the producer's own word rather than as a vocabulary
+/// this crate declares. It is only ever compared to another record's — two
+/// records of one turn, or a turn's own words against it — and a word this crate
+/// did not expect groups those records with each other exactly as one it did.
+/// Holding it to a closed set instead would ungroup a party the producer added,
+/// which is a worse answer than the same turn under an unfamiliar name.
+// llmlint: ignore[boundary_inputs_validated] this is not a value that reaches storage, a path or a client: it is half a grouping key, compared only against another record's, and there is no type at this pin to validate it against — `oneagentgraph` 0.2 publishes no role at all (see the module note above `TURN_MESSAGE`).
+// llmlint: ignore[invalid_states_unrepresentable] the closed vocabulary belongs to the producer, and declaring it here would be this crate owning a record's fields, which `AGENTS.md` forbids in as many words; an unrecognised party groups a turn with itself rather than becoming an invalid state.
 fn turn_key(event: &Envelope) -> Option<(u64, String)> {
     if event.source != Source::Agentgraph {
         return None;
