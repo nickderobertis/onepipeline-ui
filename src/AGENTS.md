@@ -41,6 +41,14 @@ anything new here is a proposal to make upstream first.
   a reading rather than a download: a node that dispatched two hundred of them is
   two hundred spans at `scope=node` and one per category at `scope=run`. The SDK
   counts neither.
+- **The interval one dispatched session ran over.** The journal brackets a
+  *node*, not a session: `payload::session_interval` reads one from the attempt
+  that ran it — the `node-dispatched` it appeared after, closed by the next
+  dispatch, the settlement or the `session-closed` — narrowed by the session's own
+  `member-started` and `member-settled`, joined by the `{stream}.{member}` rule
+  schema 14 already resolves a report by. A node re-asked in place and a lifecycle
+  node's steps otherwise all read as having run over the node's whole window,
+  which cannot say what was running at a given moment.
 - **The party a record's session ran under.** `transportRoleSchema` is a pair
   with `agentRoleSchema`, and nothing stamps the transport half as such;
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
@@ -152,9 +160,10 @@ only — neither knows this stack exists — so what they record is read as the 
 strings they write, quoted in `payload::vcs` and `payload::graph` beside the
 payload each one carries. Read today: `session-opened`, `lock-wait`,
 `gate-started`, `gate-verdict`, `push`, `change-opened`, `change-check`,
-`change-merged`, `merge-completed`, `commit-preserved` and `sync-conflict` from
-`onevcs`; `turn-activity`, `turn-started`, `turn-completed`, `turn-interrupted`,
-`member-died` and `member-settled` from `oneagentgraph`.
+`change-merged`, `merge-completed`, `commit-preserved`, `sync-conflict` and
+`session-closed` from `onevcs`; `turn-activity`, `turn-started`,
+`turn-completed`, `turn-interrupted`, `member-started`, `member-died` and
+`member-settled` from `oneagentgraph`.
 
 `onepipeline`'s own vocabulary is an enum this crate imports, with one exception:
 the compiled operations an `edit-committed` carries. That library declares
@@ -177,10 +186,15 @@ that library relays a settling member's `usage` copied verbatim out of the oneju
 report, so `event::Usage` is declared and never written. Gate the copy against the
 type that writes them, never against the one that merely declares them.
 
-Deliberately not read: `fetch`, `lock-acquired`, `merge-queued`,
-`session-closed`, `recovery-attested`. Each is a real record and none of them
+Deliberately not read for a field of their own: `fetch`, `lock-acquired`,
+`merge-queued`, `recovery-attested`. Each is a real record and none of them
 answers a field the wire asks for; they still reach a reader, as the node's own
-timeline events.
+timeline events. `fetch` is nonetheless *consulted*, as one of the three kinds
+`payload::vcs::WORKTREE_LIFECYCLE` names — the worktree being cut, filled and
+taken away — because a publication span opens at the first relayed record that
+is **not** one of them. That set is a negative list on purpose: `onevcs` adds to
+its vocabulary, and a positive list of publication steps would silently open the
+span later than the truth every time it did.
 
 Two readings of a record are the producer's and not this crate's. A verdict is
 read in the words the library that wrote it uses — `onevcs` rules a gate `pass`,

@@ -97,6 +97,22 @@ impl Party {
 // llmlint: ignore[invalid_states_unrepresentable] this is a *filter* over what a run recorded, not a domain the crate reasons in: a persona the wire's vocabulary has no member for must be dropped rather than parsed, and an enum would have to be turned straight back into these strings to serve them.
 const AGENT_ROLES: [&str; 5] = ["orchestrator", "worker", "judge", "check-in", "pr-author"];
 
+/// Which of those roles each member a run declares is read as.
+///
+/// The observing member is `monitor` and is served in the `orchestrator` lane
+/// deliberately: it is the same lane a reader watches the run's own driving from,
+/// and `agentRoleSchema` is a closed vocabulary a client switches on
+/// exhaustively — so a word that means a lane the client already has is mapped
+/// onto it rather than added beside it.
+// llmlint: ignore[invalid_states_unrepresentable] the same reason as the array above: this maps one wire vocabulary onto another, and both halves are strings this crate reads off a record and writes back onto the wire.
+const ROLE_MEMBERS: [(&str, &str); 5] = [
+    ("worker", "worker"),
+    ("judge", "judge"),
+    ("pr-author", "pr-author"),
+    ("check-in", "check-in"),
+    ("monitor", "orchestrator"),
+];
+
 /// The kinds `onevcs` relays, as the wire strings that library writes.
 ///
 /// The vocabulary is the sibling's rather than this crate's, so it is matched as
@@ -126,6 +142,22 @@ mod vcs {
     pub const COMMIT_PRESERVED: &str = "commit-preserved";
     /// `{branch, base, attempts}` — the bounded resolve-and-requeue gave up.
     pub const SYNC_CONFLICT: &str = "sync-conflict";
+    /// The worktree a dispatch was given has been taken away again, which is the
+    /// last thing that can be said about what it was doing on it.
+    pub const SESSION_CLOSED: &str = "session-closed";
+    /// `{identity, …}` — the clone this library keeps was brought up to date,
+    /// which it does both to cut a worktree and to publish from one.
+    pub const FETCH: &str = "fetch";
+
+    /// The relayed kinds that are the dispatch's worktree rather than its
+    /// publication: cutting one, filling it, and taking it away again.
+    ///
+    /// Read as what a publication is *not*. `onevcs` declares its vocabulary
+    /// privately and adds to it, so a positive list of publication work would
+    /// silently open a span later than the truth every time that library named a
+    /// new step; these three are the setup every dispatch has whether or not it
+    /// ever published, and a node that relayed nothing else published nothing.
+    pub const WORKTREE_LIFECYCLE: [&str; 3] = [SESSION_OPENED, FETCH, SESSION_CLOSED];
 
     /// The command `onevcs` records for the gate that is git's own hook.
     ///
@@ -191,6 +223,9 @@ pub mod graph {
     /// delivered or not, which is what makes "the lever was pulled and nothing
     /// happened" a thing a reader of the run can see.
     pub const TURN_INTERRUPTED: &str = "turn-interrupted";
+    /// A member began: the first record of the session it is about to run, and
+    /// the one moment a session has that its own messages cannot supply.
+    pub const MEMBER_STARTED: &str = "member-started";
     /// A member's process died: whatever it was doing, it is not doing it now.
     pub const MEMBER_DIED: &str = "member-died";
     /// A member settled, which ends its turns.
@@ -819,8 +854,7 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
                 "role".into(),
                 json!(relayed_transport_role(events.iter().copied()).as_str()),
             );
-            if let Some(role) = agent_role(first.and_then(|event| event.labels.persona.as_deref()))
-            {
+            if let Some(role) = first.and_then(event_agent_role) {
                 link.insert("agent_role".into(), json!(role));
             }
             if let Some(event) = first {
@@ -831,10 +865,37 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
         .collect()
 }
 
-/// The semantic role a persona names, when it names one the client knows.
-fn agent_role(persona: Option<&str>) -> Option<&'static str> {
-    let persona = persona?;
-    AGENT_ROLES.into_iter().find(|role| *role == persona)
+/// The semantic role one record's session ran under.
+fn event_agent_role(event: &Envelope) -> Option<&'static str> {
+    agent_role(
+        event
+            .labels
+            .extra
+            .get(graph::MEMBER)
+            .and_then(Value::as_str),
+        event.labels.persona.as_deref(),
+    )
+}
+
+/// The semantic role a run recorded for a session, from the member it named it
+/// and — only where it named none — from the persona it ran under.
+///
+/// The member is the reading that survives a host naming its personas: a persona
+/// is a *style* a host invented, so `engineer` and `docs-writer` are the ordinary
+/// worker under two names, and reading a role off one drops every session a host
+/// did not happen to name after a role. The member is the run's own word for what
+/// the session *was*.
+fn agent_role(member: Option<&str>, persona: Option<&str>) -> Option<&'static str> {
+    member
+        .and_then(|member| {
+            ROLE_MEMBERS
+                .into_iter()
+                .find_map(|(named, role)| (named == member).then_some(role))
+        })
+        .or_else(|| {
+            let persona = persona?;
+            AGENT_ROLES.into_iter().find(|role| *role == persona)
+        })
 }
 
 /// The statuses that mean this node's own work ran, or was cut short, without
@@ -2301,9 +2362,7 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
     );
     attribution.insert(
         "agentRole".into(),
-        json!(
-            agent_role(first.and_then(|event| event.labels.persona.as_deref())).unwrap_or("worker")
-        ),
+        json!(first.and_then(event_agent_role).unwrap_or("worker")),
     );
     if let Some(persona) = first.and_then(|event| event.labels.persona.clone()) {
         attribution.insert("persona".into(), json!(persona));
@@ -2832,11 +2891,10 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
             "transport_role".into(),
             json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
         );
-        if let Some(role) = agent_role(
-            relayed
-                .first()
-                .and_then(|(_, event)| event.labels.persona.as_deref()),
-        ) {
+        if let Some(role) = relayed
+            .first()
+            .and_then(|(_, event)| event_agent_role(event))
+        {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert(
@@ -2947,14 +3005,144 @@ fn relayed_sessions<'a>(
     sessions
 }
 
+/// One recorded moment: the epoch milliseconds a reading orders by, and the stamp
+/// the wire is served.
+#[derive(Clone)]
+struct Moment {
+    at: i128,
+    ts: String,
+}
+
+impl Moment {
+    /// The moment one record was written, or `None` for a stamp this crate cannot
+    /// order — which is a record it must not draw a span from.
+    fn of(event: &Envelope) -> Option<Self> {
+        millis_of(&event.ts).map(|at| Self {
+            at,
+            ts: event.ts.clone(),
+        })
+    }
+}
+
+/// When one dispatched session ran, inside the attempt of its node that ran it.
+///
+/// A node's own window is the window of *everything* it ran, and so is nobody's
+/// answer to what it was doing at a given moment: the engine re-asks a dispatch
+/// that produced nothing, and a lifecycle node runs several members in sequence
+/// on one worktree. Two readings bound one session and the tighter of each is
+/// taken, so a span is never wider than either.
+///
+/// - **The attempt that ran it** opened at the latest `node-dispatched` at or
+///   before the session first appeared, and it is over at the earliest of the
+///   next `node-dispatched`, the `node-settled` that followed it, and the
+///   `session-closed` that took its worktree away.
+/// - **The session's own life**, where `oneagentgraph` recorded one: the
+///   `member-started` that opened it and the `member-settled` or `member-died`
+///   that ended it, joined to the session the one way this contract allows — a
+///   session id is `{stream}.{member}`, so the records that spell it are its own.
+///
+/// A session nothing has ended yet is returned open, and is served that way: a
+/// run that has not said when something stopped has not stopped it.
+fn session_interval(
+    events: &[(usize, &Envelope)],
+    session: &str,
+    relayed: &[(usize, &Envelope)],
+) -> (Moment, Option<Moment>) {
+    // The session's own records, which carry no `session` label and need none.
+    let its_own = |event: &Envelope| {
+        event
+            .labels
+            .extra
+            .get(graph::MEMBER)
+            .and_then(Value::as_str)
+            .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+    };
+    let moments = |matching: &dyn Fn(&Envelope) -> bool| -> Vec<Moment> {
+        let mut found: Vec<Moment> = events
+            .iter()
+            .filter(|(_, event)| matching(event))
+            .filter_map(|(_, event)| Moment::of(event))
+            .collect();
+        found.sort_by_key(|moment| moment.at);
+        found
+    };
+    let pipeline = |kind: PipelineKind| {
+        move |event: &Envelope| {
+            event.source == Source::Pipeline && PipelineKind::from_wire(&event.kind) == Some(kind)
+        }
+    };
+    let dispatched = moments(&pipeline(PipelineKind::NodeDispatched));
+    let began = moments(&|event| {
+        event.source == Source::Agentgraph
+            && event.kind.0 == graph::MEMBER_STARTED
+            && its_own(event)
+    });
+    // Where the run said the session began, and where it said nothing, where the
+    // session first spoke.
+    let appeared = began.first().map(|moment| moment.at).or_else(|| {
+        relayed
+            .iter()
+            .filter_map(|(_, event)| millis_of(&event.ts))
+            .min()
+    });
+    let attempt = appeared
+        .and_then(|appeared| dispatched.iter().rev().find(|moment| moment.at <= appeared))
+        .or_else(|| dispatched.first());
+    let started = [attempt.cloned(), began.first().cloned()]
+        .into_iter()
+        .flatten()
+        .max_by_key(|moment| moment.at)
+        .or_else(|| relayed.first().and_then(|(_, event)| Moment::of(event)))
+        .unwrap_or_else(|| Moment {
+            at: 0,
+            ts: now_rfc3339(),
+        });
+    // The last thing the session said, which nothing may close it before: a
+    // session that spoke again after a record that would have ended it outlived
+    // that record, and a span that does not contain its own events is one no
+    // pointer into it can reach.
+    let last_said = relayed
+        .iter()
+        .filter_map(|(_, event)| millis_of(&event.ts))
+        .max()
+        .unwrap_or(started.at);
+    let after = |moments: Vec<Moment>| {
+        moments
+            .into_iter()
+            .find(|moment| moment.at > started.at && moment.at >= last_said)
+    };
+    let ended = [
+        after(dispatched),
+        after(moments(&pipeline(PipelineKind::NodeSettled))),
+        after(moments(&|event| {
+            event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
+        })),
+        after(moments(&|event| {
+            event.source == Source::Agentgraph
+                && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
+                && its_own(event)
+        })),
+    ]
+    .into_iter()
+    .flatten()
+    .min_by_key(|moment| moment.at);
+    (started, ended)
+}
+
 /// The branch a node opened and what became of it, from the records `onevcs`
 /// relayed for it.
 ///
-/// This is the publication interval the journal actually holds: the session open
-/// and whatever closed it are separate relayed records, so the span between them
-/// is recorded rather than derived. A node that opened no session contributes
-/// none, and one that opened a session nothing closed is served open-ended,
-/// which is what an in-flight publication is.
+/// This is the publication interval the journal actually holds: the record that
+/// opens it and whatever closed it are separate relayed records, so the span
+/// between them is recorded rather than derived. A node that did no publication
+/// work contributes none, and one whose publication nothing closed is served
+/// open-ended, which is what an in-flight publication is.
+///
+/// **It opens at publication work and not at the worktree the dispatch was given.**
+/// A worktree is cut when the node is dispatched and is where the *worker* then
+/// spends its hours; a span drawn from there covers the work it published rather
+/// than the publishing, and a node that never published at all would be drawn
+/// publishing for its whole life.
 fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Option<Value> {
     let relayed = |kinds: &[&str]| {
         events
@@ -2973,15 +3161,26 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
             })
             .map(|(_, event)| *event)
     };
-    let opened = relayed(&[vcs::SESSION_OPENED])?;
+    let opened = events
+        .iter()
+        .find(|(_, event)| {
+            event.source == Source::Vcs && !vcs::WORKTREE_LIFECYCLE.contains(&event.kind.0.as_str())
+        })
+        .map(|(_, event)| *event)?;
     let merged = last_relayed(&[vcs::CHANGE_MERGED, vcs::MERGE_COMPLETED]);
     let conflicted = last_relayed(&[vcs::SYNC_CONFLICT]);
     let change = last_relayed(&[vcs::CHANGE_MERGED, vcs::CHANGE_OPENED]);
     // What closed the publication, in the order those records mean: a merge ends
-    // it, a conflict ends it without one, and a change left open ends the run's
-    // part in it. Nothing closing it is an in-flight publication, not an error.
-    let closed = merged.or(conflicted).or(change);
-    let branch = opened
+    // it, a conflict ends it without one, a change left open ends the run's part
+    // in it, and the worktree going away ends it whatever became of the branch —
+    // last, because it says only that nothing more can happen on it. Nothing
+    // closing it is an in-flight publication, not an error.
+    let closed = merged
+        .or(conflicted)
+        .or(change)
+        .or_else(|| last_relayed(&[vcs::SESSION_CLOSED]));
+    let branch = relayed(&[vcs::SESSION_OPENED])
+        .unwrap_or(opened)
         .payload
         .get("branch")
         .and_then(Value::as_str)
@@ -2997,17 +3196,16 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
     );
     span.insert("parent_id".into(), json!(parent));
     span.insert("node_id".into(), json!(node));
-    if closed.is_some() {
-        span.insert(
-            "status".into(),
-            json!(if merged.is_some() {
-                "merged"
-            } else if conflicted.is_some() {
-                "conflict"
-            } else {
-                "open"
-            }),
-        );
+    // What became of the branch, and served only where a record said: a
+    // publication whose worktree simply went away is over without the run having
+    // ruled on it, and a status invented for that would be this crate answering
+    // a question nothing asked.
+    if let Some(status) = merged
+        .map(|_| "merged")
+        .or_else(|| conflicted.map(|_| "conflict"))
+        .or_else(|| change.map(|_| "open"))
+    {
+        span.insert("status".into(), json!(status));
     }
     if let Some(url) = change
         .and_then(|event| event.payload.get("url"))
@@ -3143,44 +3341,63 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
     let Some((_, start)) = dispatched else {
         return Vec::new();
     };
-    let settled = events.iter().find(|(_, event)| {
+    // The *last* settlement, for the same reason [`node_span`] takes it: a node
+    // the planner retried settles more than once, and a category still running
+    // under the attempt in flight is not closed by the record that closed the
+    // attempt it superseded.
+    let settled = events.iter().rev().find(|(_, event)| {
         event.source == Source::Pipeline
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
-    let mut counted: Vec<((Party, &'static str), usize)> = Vec::new();
-    for (_, relayed) in relayed_sessions(events) {
-        let persona = relayed
+    let mut counted: Vec<Category> = Vec::new();
+    for (session, relayed) in relayed_sessions(events) {
+        let Some(role) = relayed
             .first()
-            .and_then(|(_, event)| event.labels.persona.as_deref())
-            .or(start.labels.persona.as_deref());
-        let Some(role) = agent_role(persona) else {
+            .and_then(|(_, event)| event_agent_role(event))
+            .or_else(|| event_agent_role(start))
+        else {
             continue;
         };
         let pair = (
             relayed_transport_role(relayed.iter().map(|(_, e)| *e)),
             role,
         );
-        match counted.iter_mut().find(|(named, _)| *named == pair) {
-            Some((_, count)) => *count += 1,
-            None => counted.push((pair, 1)),
+        // A category runs for as long as the sessions in it did, and not for as
+        // long as the node that ran them: a drafting turn inside a node that
+        // worked for four hours took a minute, and a lane drawn over the node's
+        // window says the drafting was what the node was doing all along.
+        let (began, over) = session_interval(events, session, &relayed);
+        match counted.iter_mut().find(|category| category.pair == pair) {
+            Some(category) => category.fold(began, over),
+            None => counted.push(Category::of(pair, began, over)),
         }
     }
     if counted.is_empty() {
         // Dispatched and nothing relayed: still one category, because the node
-        // was dispatched and the row has to say so.
-        if let Some(role) = agent_role(start.labels.persona.as_deref()) {
-            counted.push(((transport_role(start), role), 1));
+        // was dispatched and the row has to say so. Nothing bounds it but the
+        // node's own window, which is all the run said about it.
+        if let Some(role) = event_agent_role(start) {
+            counted.extend(Moment::of(start).map(|began| {
+                Category::of(
+                    (transport_role(start), role),
+                    began,
+                    settled.and_then(|(_, event)| Moment::of(event)),
+                )
+            }));
         }
     }
     counted
         .into_iter()
-        .map(|((transport, role), count)| {
+        .map(|category| {
+            let (transport, role) = category.pair;
+            let (started, count) = (category.started.ts.clone(), category.count);
+            let ended = category.ended();
             json!({
                 "id": format!("rollup.{node}.{}.{role}", transport.as_str()),
                 "kind": "rollup",
                 "label": "dispatch",
-                "started_at": start.ts,
-                "ended_at": settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
+                "started_at": started,
+                "ended_at": ended.map_or(Value::Null, |moment| json!(moment.ts)),
                 "parent_id": parent,
                 "node_id": node,
                 "count": count,
@@ -3190,6 +3407,60 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
             })
         })
         .collect()
+}
+
+/// One category of a node's sessions, and the interval they ran over between
+/// them.
+struct Category {
+    /// The transport-and-semantic pair that names it.
+    pair: (Party, &'static str),
+    /// How many sessions it stands for.
+    count: usize,
+    /// The earliest of their starts.
+    started: Moment,
+    /// The latest of their ends.
+    latest: Option<Moment>,
+    /// Whether one of them is a session the run has not ended, which is what
+    /// leaves the category itself unended however the sessions beside it fared.
+    running: bool,
+}
+
+impl Category {
+    /// The category one session opens.
+    fn of(pair: (Party, &'static str), started: Moment, ended: Option<Moment>) -> Self {
+        Self {
+            pair,
+            count: 1,
+            started,
+            running: ended.is_none(),
+            latest: ended,
+        }
+    }
+
+    /// Widen it to cover one more session of the same pair.
+    fn fold(&mut self, started: Moment, ended: Option<Moment>) {
+        self.count += 1;
+        if started.at < self.started.at {
+            self.started = started;
+        }
+        match ended {
+            None => self.running = true,
+            Some(moment) => {
+                if self
+                    .latest
+                    .as_ref()
+                    .is_none_or(|latest| moment.at > latest.at)
+                {
+                    self.latest = Some(moment);
+                }
+            }
+        }
+    }
+
+    /// When it was over, or `None` while anything in it is still running.
+    fn ended(self) -> Option<Moment> {
+        self.latest.filter(|_| !self.running)
+    }
 }
 
 /// One node's own work: the node span, then a dispatch span per session.
@@ -3280,20 +3551,30 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
             "label".into(),
             json!(named.clone().unwrap_or_else(|| session.to_owned())),
         );
-        // The dispatch, and the settlement that closed it. A session's own
-        // first and last envelopes are the first and last things it *said*,
-        // not its ends: a session says nothing while it works, so bracketing
-        // it by its own messages would draw a dispatch that ran for minutes
-        // as the instant between two of them — and would put the node's own
-        // dispatch record outside the window drawn for it.
-        span.insert("started_at".into(), json!(start.ts));
+        // What this session ran over, and not what the node did: a node dispatched
+        // three times ran three of these and a lifecycle node runs several in
+        // sequence, so the node's window is the window of all of them and answers
+        // nothing about any one. A dispatch that relayed no session is the one
+        // exception — there is nothing to bracket, so the node's own window is
+        // all the run said about it.
+        let (began, over) = if named.is_some() {
+            (
+                Moment::of(start),
+                (!redispatched)
+                    .then(|| settled.and_then(|(_, event)| Moment::of(event)))
+                    .flatten(),
+            )
+        } else {
+            let (began, over) = session_interval(&events, session, &relayed);
+            (Some(began), over)
+        };
+        span.insert(
+            "started_at".into(),
+            began.map_or_else(|| json!(start.ts), |moment| json!(moment.ts)),
+        );
         span.insert(
             "ended_at".into(),
-            if redispatched {
-                Value::Null
-            } else {
-                settled.map_or(Value::Null, |(_, event)| json!(event.ts))
-            },
+            over.map_or(Value::Null, |moment| json!(moment.ts)),
         );
         span.insert("parent_id".into(), json!(node_id));
         span.insert("node_id".into(), json!(node));
@@ -3321,11 +3602,11 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
             }),
         );
-        let persona = relayed
+        if let Some(role) = relayed
             .first()
-            .and_then(|(_, event)| event.labels.persona.as_deref())
-            .or(start.labels.persona.as_deref());
-        if let Some(role) = agent_role(persona) {
+            .and_then(|(_, event)| event_agent_role(event))
+            .or_else(|| event_agent_role(start))
+        {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert("status".into(), json!(status));

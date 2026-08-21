@@ -440,7 +440,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(5));
+    assert_eq!(body["timeline_schema_version"], json!(6));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -519,6 +519,261 @@ fn the_run_timeline_covers_the_run_and_the_nodes_under_it() {
             ))
         );
     }
+}
+
+/// A server over the run whose lanes ran one after another.
+fn lanes() -> Serving {
+    Serving::start(|root| {
+        fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+    })
+}
+
+/// One node's spans, as an operator opening that node reads them.
+fn node_spans(serving: &Serving, node: &str) -> Vec<Value> {
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={node}",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone()
+}
+
+/// The span with one id, from a list of them.
+fn span_named<'a>(spans: &'a [Value], id: &str) -> &'a Value {
+    spans
+        .iter()
+        .find(|span| span["id"] == json!(id))
+        .unwrap_or_else(|| panic!("no span `{id}` among {spans:?}"))
+}
+
+#[test]
+fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
+    let serving = lanes();
+    let spans = node_spans(&serving, fixture_run::RETRIED_NODE_ID);
+
+    // The abandoned attempt: it began where its member did and it is over where
+    // the dispatch that superseded it began, because nothing else ever ended it.
+    let abandoned = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::RETRIED_FIRST_CONVERSATION_ID),
+    );
+    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:02.000Z"));
+    assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:01:00.000Z"));
+
+    // And the attempt that did the work, which the run ended itself.
+    let ran = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::RETRIED_SECOND_CONVERSATION_ID),
+    );
+    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:01.000Z"));
+    assert_eq!(ran["ended_at"], json!("2026-08-07T12:01:30.000Z"));
+
+    // The two attempts of one node no longer read as having run over one window,
+    // which is the whole of what a reader opens a node's timeline to see.
+    assert_ne!(abandoned["started_at"], ran["started_at"]);
+    assert!(
+        abandoned["ended_at"].as_str() <= ran["started_at"].as_str(),
+        "the attempts overlap: {abandoned} then {ran}"
+    );
+    // The node above them still spans all of them: it is the node's window, and
+    // it is the only span that is.
+    let node = span_named(&spans, &format!("node.{}", fixture_run::RETRIED_NODE_ID));
+    assert_eq!(node["started_at"], json!("2026-08-07T12:00:01.000Z"));
+    assert_eq!(node["ended_at"], json!("2026-08-07T12:01:31.000Z"));
+}
+
+#[test]
+fn a_lifecycle_nodes_lanes_are_served_one_after_another_as_the_run_ran_them() {
+    let serving = lanes();
+    let spans = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+
+    let worked = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::DRAFTED_WORK_CONVERSATION_ID),
+    );
+    let drafted = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID),
+    );
+    let published = span_named(
+        &spans,
+        &format!("publication.{}", fixture_run::DRAFTED_NODE_ID),
+    );
+
+    // Eighteen minutes of work, forty seconds of drafting, a minute of
+    // publishing — and not three spans over the node's twenty minutes.
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
+    assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
+    assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
+    // The publication opens at the gate rather than at 12:02:01, where `onevcs`
+    // cut the worktree the worker then spent eighteen minutes on.
+    assert_eq!(published["started_at"], json!("2026-08-07T12:20:41.000Z"));
+    assert_eq!(published["ended_at"], json!("2026-08-07T12:21:35.000Z"));
+    assert_eq!(published["status"], json!("merged"));
+
+    for (before, after) in [(worked, drafted), (drafted, published)] {
+        assert!(
+            before["ended_at"].as_str() <= after["started_at"].as_str(),
+            "two lanes of one node overlap: {before} then {after}"
+        );
+    }
+}
+
+#[test]
+fn a_session_is_read_in_the_category_the_run_named_its_member() {
+    let serving = lanes();
+    // A persona this host invented and `agentRoleSchema` has no word for. The
+    // member beside it is what says the session was ordinary worker work.
+    for (node, session) in [
+        (
+            fixture_run::RETRIED_NODE_ID,
+            fixture_run::RETRIED_SECOND_CONVERSATION_ID,
+        ),
+        (
+            fixture_run::REFUSED_NODE_ID,
+            fixture_run::REFUSED_CONVERSATION_ID,
+        ),
+    ] {
+        let spans = node_spans(&serving, node);
+        let dispatch = span_named(&spans, &format!("dispatch.{session}"));
+        assert_eq!(dispatch["agent_role"], json!("worker"), "{dispatch}");
+    }
+    let drafting = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+    assert_eq!(
+        span_named(
+            &drafting,
+            &format!("dispatch.{}", fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID)
+        )["agent_role"],
+        json!("pr-author")
+    );
+
+    // The run's own observer, at no node: `monitor` is the watching member and is
+    // served in the `orchestrator` lane it shares, because the vocabulary a
+    // client switches on is closed and a lane it already has is not widened.
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json();
+    let spans = run["spans"].as_array().expect("spans").clone();
+    let watching = span_named(
+        &spans,
+        &format!("run-session.{}", fixture_run::WATCHING_CONVERSATION_ID),
+    );
+    assert_eq!(watching["agent_role"], json!("orchestrator"));
+    // And no word outside that vocabulary reached the wire.
+    for span in &spans {
+        if let Some(role) = span.get("agent_role").and_then(Value::as_str) {
+            assert!(
+                ["orchestrator", "worker", "judge", "check-in", "pr-author"].contains(&role),
+                "`{role}` is not a member of `agentRoleSchema`: {span}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
+    let serving = lanes();
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+
+    // The graph-level reading of the same node: one lane per category, each over
+    // the interval its own sessions ran, rather than two lanes over one window.
+    let worked = span_named(
+        &spans,
+        &format!("rollup.{}.agent.worker", fixture_run::DRAFTED_NODE_ID),
+    );
+    let drafted = span_named(
+        &spans,
+        &format!("rollup.{}.agent.pr-author", fixture_run::DRAFTED_NODE_ID),
+    );
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
+    assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
+    assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
+
+    // The re-asked node's two attempts are one category, and it covers both.
+    let retried = span_named(
+        &spans,
+        &format!("rollup.{}.agent.worker", fixture_run::RETRIED_NODE_ID),
+    );
+    assert_eq!(retried["count"], json!(2));
+    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:02.000Z"));
+    assert_eq!(retried["ended_at"], json!("2026-08-07T12:01:30.000Z"));
+
+    // Every node of this run dispatched a worker, and every one of them is in the
+    // reading: under a role read off the persona this whole lane was empty.
+    let workers: Vec<&str> = spans
+        .iter()
+        .filter(|span| span["agent_role"] == json!("worker"))
+        .filter_map(|span| span["node_id"].as_str())
+        .collect();
+    assert_eq!(
+        workers,
+        vec![
+            fixture_run::RETRIED_NODE_ID,
+            fixture_run::DRAFTED_NODE_ID,
+            fixture_run::REFUSED_NODE_ID,
+            fixture_run::WORKING_NODE_ID,
+        ],
+        "{spans:?}"
+    );
+}
+
+#[test]
+fn a_publication_the_run_never_did_is_absent_and_one_it_never_ruled_on_has_no_status() {
+    let serving = lanes();
+
+    // A node still working, on a worktree nothing has published from: no
+    // publication span at all, rather than one drawn from the worktree to the end
+    // of everything the node recorded.
+    let working = node_spans(&serving, fixture_run::WORKING_NODE_ID);
+    assert!(
+        !working.iter().any(|span| span["kind"] == "publication"),
+        "a node that published nothing was served a publication: {working:?}"
+    );
+    // And its dispatch is open, because nothing in the run has ended it.
+    let session = span_named(
+        &working,
+        &format!("dispatch.{}", fixture_run::WORKING_CONVERSATION_ID),
+    );
+    assert_eq!(session["started_at"], json!("2026-08-07T12:04:02.000Z"));
+    assert_eq!(session["ended_at"], Value::Null, "{session}");
+
+    // The failure a user can cause: the gate refused the branch, so publication
+    // work happened and nothing became of it. The span closes where the worktree
+    // was taken away and carries no verdict, because the run recorded none.
+    let refused = node_spans(&serving, fixture_run::REFUSED_NODE_ID);
+    let published = span_named(
+        &refused,
+        &format!("publication.{}", fixture_run::REFUSED_NODE_ID),
+    );
+    assert_eq!(published["label"], json!("feature/refused"));
+    assert_eq!(published["started_at"], json!("2026-08-07T12:09:01.000Z"));
+    assert_eq!(published["ended_at"], json!("2026-08-07T12:09:51.000Z"));
+    assert!(
+        published.get("status").is_none(),
+        "a publication nothing ruled on was given a verdict: {published}"
+    );
 }
 
 #[test]
@@ -2772,13 +3027,16 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
         json!(format!("node.{}", fixture_run::SHIP_NODE_ID))
     );
 
-    // The publication is the interval between the two ends `onevcs` recorded.
+    // The publication is the interval between the two ends `onevcs` recorded —
+    // and it opens where *publishing* began, at the first wait on the identity's
+    // lock, not at the worktree this dispatch was cut into at 12:00:29, where the
+    // work being published began.
     let publication = spans
         .iter()
         .find(|span| span["kind"] == "publication")
         .expect("the branch the node published");
     assert_eq!(publication["label"], json!("feature/ship"));
-    assert_eq!(publication["started_at"], json!("2026-08-07T12:00:29.000Z"));
+    assert_eq!(publication["started_at"], json!("2026-08-07T12:00:33.000Z"));
     assert_eq!(publication["ended_at"], json!("2026-08-07T12:00:38.000Z"));
     // A change the host has not landed: open, and still running as far as the
     // run is concerned, which is what its own records say.

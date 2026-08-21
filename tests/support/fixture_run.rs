@@ -99,6 +99,62 @@ pub const CARRIED_NOTE: &str = "the reviewer asked for a changelog entry";
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
 
+/// A third run, whose lanes ran one after another and whose nodes were re-asked.
+///
+/// The other two fixtures each dispatch a node once, under a persona that is
+/// also a role — so neither can say what a *second* attempt is served as, nor
+/// what a session dispatched under a persona a host invented is read as. This
+/// one is written the way the host that runs this stack really records: personas
+/// are `engineer` and `docs-writer`, the role is the `member` beside them, and a
+/// lifecycle node hands its branch from a worker to a drafting member before
+/// `onevcs` publishes it.
+pub const LANES_RUN_ID: &str = "run-20260807-7a8b9c";
+/// That run's node the engine re-asked: its first attempt was abandoned mid-turn
+/// and its second settled.
+pub const RETRIED_NODE_ID: &str = "retried";
+/// That run's node that worked, drafted a change, and published it.
+pub const DRAFTED_NODE_ID: &str = "drafted";
+/// That run's node whose gate refused it, so its branch was never published and
+/// its worktree was simply taken away.
+pub const REFUSED_NODE_ID: &str = "refused";
+/// That run's node still working: dispatched, talking, and settled by nothing.
+pub const WORKING_NODE_ID: &str = "working";
+
+/// The streams that run's members ran on, one per member.
+///
+/// A stream is the producing *process*, so a second attempt of one node is a
+/// second stream and a lifecycle node's drafting member is a stream of its own.
+/// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
+/// mints one — the pair has to agree or nothing joins a session to the records
+/// that opened and closed it.
+const LANE_STREAMS: [&str; 6] = [
+    "node-scope-1786925520001-4311",
+    "node-scope-1786925520002-4311",
+    "node-scope-1786925520003-4311",
+    "pr-author-1786925520004-4311",
+    "node-scope-1786925520005-4311",
+    "node-scope-1786925520006-4311",
+];
+/// The session the re-asked node's abandoned first attempt ran under.
+pub const RETRIED_FIRST_CONVERSATION_ID: &str = "node-scope-1786925520001-4311.worker";
+/// The session its second attempt ran under.
+pub const RETRIED_SECOND_CONVERSATION_ID: &str = "node-scope-1786925520002-4311.worker";
+/// The session the published node's worker ran under.
+pub const DRAFTED_WORK_CONVERSATION_ID: &str = "node-scope-1786925520003-4311.worker";
+/// The session its drafting turn ran under — a member of its own, on a stream of
+/// its own, after the worker it drafted for had settled.
+pub const DRAFTED_DRAFTING_CONVERSATION_ID: &str = "pr-author-1786925520004-4311.pr-author";
+/// The session the refused node ran under.
+pub const REFUSED_CONVERSATION_ID: &str = "node-scope-1786925520005-4311.worker";
+/// The session the node still working is talking in.
+pub const WORKING_CONVERSATION_ID: &str = "node-scope-1786925520006-4311.worker";
+/// The run's own observer, recorded at no node and under no role word: the
+/// `monitor` member is the run's watching side, and it is served in the
+/// `orchestrator` lane it shares rather than as a member of its own.
+pub const WATCHING_CONVERSATION_ID: &str = "dag-scope-1786925520007-4311.monitor";
+/// The stream that observer runs on.
+const WATCHING_STREAM: &str = "dag-scope-1786925520007-4311";
+
 /// One recorded run under `root`, complete and settled.
 ///
 /// Returns the run's directory, so a test can append to its journal and watch
@@ -953,6 +1009,457 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
         Produced::Report,
     );
     dir
+}
+
+/// One recorded run whose work ran in sequence, still being driven.
+///
+/// Written to be read as a *timeline*: every lane in it is a lane that was the
+/// only thing happening while it ran, so a reading that widens any of them to
+/// the node's own window shows up as two lanes overlapping where the run says
+/// they could not have. It carries the four shapes the other fixtures have none
+/// of — a node the engine re-asked, a lifecycle node handing its branch to a
+/// drafting member, a publication the gate refused, and a node still working.
+pub fn write_lanes(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "claude-code",
+            "session": "claude-code-session-7a8b9c0d",
+            "pid": 4311,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = lanes_plan();
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    // Deliberately no `result.json`: a node of this run is still working, and the
+    // SDK rewrites that document only when a driver closes out.
+    fs::write(dir.join("events.jsonl"), lanes_journal(run, &plan)).expect("the journal");
+    dir
+}
+
+/// The plan that run is converging toward.
+fn lanes_plan() -> Value {
+    json!({
+        "schema_version": 2,
+        "goal": { "text": "land the workstream" },
+        "name": "lanes",
+        "concurrency": 4,
+        "tasks": [
+            { "id": RETRIED_NODE_ID, "persona": "engineer", "task": "## What\nRe-ask me." },
+            {
+                "id": DRAFTED_NODE_ID,
+                "persona": "engineer",
+                "task": "## What\nWork, draft, publish.",
+                "branch": "feature/drafted",
+                "base_branch": "main",
+            },
+            { "id": REFUSED_NODE_ID, "persona": "docs-writer", "task": "## What\nFail the gate." },
+            { "id": WORKING_NODE_ID, "persona": "docs-writer", "task": "## What\nKeep working." },
+        ],
+    })
+}
+
+/// That run's merged event store, in merge order.
+///
+/// The personas are the ones this host really dispatches under — `engineer` and
+/// `docs-writer` — and the role beside each is the `member` `oneagentgraph`
+/// stamps, which is the only thing in the record that says what a session *was*.
+///
+/// Each member's records go on the member's own stream, because that is where
+/// the producing process writes them and because `{stream}.{member}` is the
+/// session id they belong to. The streams are merged on `(ts, stream, seq)`, the
+/// way the SDK's own reader merges them.
+fn lanes_journal(run: &str, plan: &Value) -> String {
+    let mut driver = Journal::new("a-recording-host-4311");
+    let mut members: Vec<Journal> = LANE_STREAMS
+        .into_iter()
+        .chain([WATCHING_STREAM])
+        .map(Journal::new)
+        .collect();
+    let at_node = |node: &str| json!({ "run_id": run, "node": node });
+
+    driver.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        json!({ "plan": plan }),
+    );
+
+    // The run's own observer, at no node: a `monitor` member, which is neither a
+    // node's work nor a word `agentRoleSchema` has.
+    let watching = Lane {
+        run,
+        stream: WATCHING_STREAM,
+        session: WATCHING_CONVERSATION_ID,
+        node: None,
+        member: "monitor",
+        persona: "monitor",
+    };
+    watching.turn(&mut members, "2026-08-07T12:00:00.500Z");
+
+    // The node the engine re-asked. `oneagentgraph` opens a member before the
+    // session says anything, which is the one record that says when a session
+    // began — and the first attempt's member never settles, because that attempt
+    // was abandoned where the dispatch superseding it began.
+    let abandoned = Lane {
+        run,
+        stream: LANE_STREAMS[0],
+        session: RETRIED_FIRST_CONVERSATION_ID,
+        node: Some(RETRIED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    let reasked = Lane {
+        run,
+        stream: LANE_STREAMS[1],
+        session: RETRIED_SECOND_CONVERSATION_ID,
+        node: Some(RETRIED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver.emit(
+        "2026-08-07T12:00:01.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": RETRIED_NODE_ID, "persona": "engineer" }),
+        json!({ "persona": "engineer" }),
+    );
+    abandoned.started(&mut members, "2026-08-07T12:00:02.000Z");
+    abandoned.turn(&mut members, "2026-08-07T12:00:03.000Z");
+    driver.emit(
+        "2026-08-07T12:01:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": RETRIED_NODE_ID, "persona": "engineer" }),
+        json!({ "persona": "engineer" }),
+    );
+    reasked.started(&mut members, "2026-08-07T12:01:01.000Z");
+    reasked.turn(&mut members, "2026-08-07T12:01:02.000Z");
+    reasked.settled(&mut members, "2026-08-07T12:01:30.000Z", true);
+    driver.emit(
+        "2026-08-07T12:01:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(RETRIED_NODE_ID),
+        json!({ "status": "done", "outcome": "shipped" }),
+    );
+
+    // The lifecycle node: a worker on the worktree, then a drafting member on the
+    // same branch once it had settled, then `onevcs` publishing what they left.
+    // The three ran one after another and nothing about them overlaps.
+    let working_on_it = Lane {
+        run,
+        stream: LANE_STREAMS[2],
+        session: DRAFTED_WORK_CONVERSATION_ID,
+        node: Some(DRAFTED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    let drafting = Lane {
+        run,
+        stream: LANE_STREAMS[3],
+        session: DRAFTED_DRAFTING_CONVERSATION_ID,
+        node: Some(DRAFTED_NODE_ID),
+        member: "pr-author",
+        persona: "pr-author",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:02:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": DRAFTED_NODE_ID, "persona": "engineer" }),
+            json!({ "persona": "engineer" }),
+        )
+        // The worktree the dispatch was given, which is where the *work* begins
+        // and not where publishing does.
+        .emit(
+            "2026-08-07T12:02:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(DRAFTED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/drafted",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    working_on_it.started(&mut members, "2026-08-07T12:02:02.000Z");
+    working_on_it.turn(&mut members, "2026-08-07T12:02:03.000Z");
+    working_on_it.settled(&mut members, "2026-08-07T12:20:00.000Z", true);
+    drafting.started(&mut members, "2026-08-07T12:20:01.000Z");
+    drafting.turn(&mut members, "2026-08-07T12:20:02.000Z");
+    drafting.settled(&mut members, "2026-08-07T12:20:40.000Z", true);
+    // And only now the publication: the gate this repository's own pre-push hook
+    // is, the push, and the merge.
+    driver
+        .emit(
+            "2026-08-07T12:20:41.000Z",
+            "vcs",
+            "gate-started",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "command": "just gate", "comparison_remote": "origin" }),
+        )
+        .emit(
+            "2026-08-07T12:21:30.000Z",
+            "vcs",
+            "gate-verdict",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "verdict": "pass", "command": "just gate", "output": "the gate passed" }),
+        )
+        .emit(
+            "2026-08-07T12:21:31.000Z",
+            "vcs",
+            "push",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "branch": "feature/drafted", "remote": "origin", "accepted": true }),
+        )
+        .emit(
+            "2026-08-07T12:21:35.000Z",
+            "vcs",
+            "change-merged",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "url": "https://example.invalid/changes/3", "sha": MERGE_SHA }),
+        )
+        .emit(
+            "2026-08-07T12:21:36.000Z",
+            "vcs",
+            "session-closed",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:21:37.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(DRAFTED_NODE_ID),
+            json!({
+                "status": "done",
+                "outcome": "shipped",
+                "branch": "feature/drafted",
+                "change_url": "https://example.invalid/changes/3",
+            }),
+        );
+
+    // The node whose gate refused it: publication work happened and nothing came
+    // of it, so the branch's span ends where the worktree was taken away and the
+    // run never ruled on what became of the branch.
+    let refused = Lane {
+        run,
+        stream: LANE_STREAMS[4],
+        session: REFUSED_CONVERSATION_ID,
+        node: Some(REFUSED_NODE_ID),
+        member: "worker",
+        persona: "docs-writer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:03:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": REFUSED_NODE_ID, "persona": "docs-writer" }),
+            json!({ "persona": "docs-writer" }),
+        )
+        .emit(
+            "2026-08-07T12:03:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(REFUSED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/refused",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    refused.started(&mut members, "2026-08-07T12:03:02.000Z");
+    refused.turn(&mut members, "2026-08-07T12:03:03.000Z");
+    refused.settled(&mut members, "2026-08-07T12:09:00.000Z", false);
+    driver
+        .emit(
+            "2026-08-07T12:09:01.000Z",
+            "vcs",
+            "gate-started",
+            at_node(REFUSED_NODE_ID),
+            json!({ "command": "just gate", "comparison_remote": "origin" }),
+        )
+        .emit(
+            "2026-08-07T12:09:50.000Z",
+            "vcs",
+            "gate-verdict",
+            at_node(REFUSED_NODE_ID),
+            json!({ "verdict": "fail", "command": "just gate", "output": "the gate refused it" }),
+        )
+        .emit(
+            "2026-08-07T12:09:51.000Z",
+            "vcs",
+            "session-closed",
+            at_node(REFUSED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:09:52.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(REFUSED_NODE_ID),
+            json!({ "status": "failed", "outcome": "gate-failed" }),
+        );
+
+    // The node still working, on a worktree nothing has published from: the run
+    // has said when it began and nothing at all about when it ends.
+    let still_working = Lane {
+        run,
+        stream: LANE_STREAMS[5],
+        session: WORKING_CONVERSATION_ID,
+        node: Some(WORKING_NODE_ID),
+        member: "worker",
+        persona: "docs-writer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:04:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": WORKING_NODE_ID, "persona": "docs-writer" }),
+            json!({ "persona": "docs-writer" }),
+        )
+        .emit(
+            "2026-08-07T12:04:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(WORKING_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/working",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    still_working.started(&mut members, "2026-08-07T12:04:02.000Z");
+    still_working.turn(&mut members, "2026-08-07T12:04:03.000Z");
+
+    merged(std::iter::once(driver).chain(members))
+}
+
+/// The repository every session of the lanes run publishes to.
+const IDENTITY: &str = "github.com/nickderobertis/onepipeline-ui";
+
+/// One member of the lanes run, and the records `oneagentgraph` writes for it.
+///
+/// It exists so a lane is written as the three things a lane *is* — it began, it
+/// spoke, it settled — rather than as nine near-identical `emit` calls whose
+/// stream and labels a reader has to check against each other by eye.
+struct Lane<'a> {
+    /// The run it belongs to, which every record in the merged store carries.
+    run: &'a str,
+    /// The producing process's own stream, which the session id is spelled from.
+    stream: &'a str,
+    /// That session id: `{stream}.{member}`, and nothing else.
+    session: &'a str,
+    /// The node it ran for, or `None` for the run's own observer.
+    node: Option<&'a str>,
+    /// The member the graph declared, which is what says what the session was.
+    member: &'a str,
+    /// The persona it ran under, which on this host names a style and not a role.
+    persona: &'a str,
+}
+
+impl Lane<'_> {
+    /// The labels every record of it carries. `session` is stamped on the turn
+    /// kinds and on no other, exactly as that library stamps it.
+    fn labels(&self, session: bool) -> Value {
+        let mut labels = json!({
+            "run_id": self.run,
+            "member": self.member,
+            "persona": self.persona,
+        });
+        if let Some(node) = self.node {
+            labels["node"] = json!(node);
+        }
+        if session {
+            labels["session"] = json!(self.session);
+        }
+        labels
+    }
+
+    /// Its own journal, by the stream that names it.
+    fn journal<'j>(&self, members: &'j mut [Journal]) -> &'j mut Journal {
+        members
+            .iter_mut()
+            .find(|journal| journal.stream == self.stream)
+            .expect("a lane writes on the stream its session is spelled from")
+    }
+
+    /// `member-started`: the one record that says when a session began, and the
+    /// one a session with a single turn in it could not otherwise supply.
+    fn started(&self, members: &mut [Journal], at: &str) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "member-started",
+            self.labels(false),
+            json!({}),
+        );
+    }
+
+    /// One turn it took.
+    fn turn(&self, members: &mut [Journal], at: &str) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "turn-started",
+            self.labels(true),
+            json!({ "turn": 1 }),
+        );
+    }
+
+    /// `member-settled`: what ends a session, whatever the node it ran for does.
+    fn settled(&self, members: &mut [Journal], at: &str, completed: bool) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "member-settled",
+            self.labels(false),
+            json!({
+                "completed": completed,
+                "verdict": [],
+                "completion_reason": Value::Null,
+            }),
+        );
+    }
+}
+
+/// Several streams as one store, in the order the SDK's own reader merges them.
+fn merged(streams: impl IntoIterator<Item = Journal>) -> String {
+    let mut lines: Vec<(String, String, usize, String)> = Vec::new();
+    for journal in streams {
+        for (seq, line) in journal.lines.iter().enumerate() {
+            let record: Value = serde_json::from_str(line).expect("a record this module wrote");
+            lines.push((
+                record["ts"].as_str().expect("a stamp").to_owned(),
+                journal.stream.clone(),
+                seq,
+                line.clone(),
+            ));
+        }
+    }
+    lines.sort_by(|left, right| (&left.0, &left.1, left.2).cmp(&(&right.0, &right.1, right.2)));
+    let text: Vec<&str> = lines.iter().map(|(_, _, _, line)| line.as_str()).collect();
+    format!("{}\n", text.join("\n"))
 }
 
 /// The run's paths, as the SDK's own nameable type.
