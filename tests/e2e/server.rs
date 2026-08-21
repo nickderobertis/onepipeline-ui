@@ -6669,13 +6669,116 @@ fn a_live_turn_answers_for_the_records_a_recorded_run_has_none_of() {
 
     // And a bound that is not an instant is served as no bound, exactly as a
     // report's unreadable bounds are: absent beats a value no client can order.
+    // The end is the only bound this close alone stamps, so it is the one that
+    // goes — the start falls back to the readable copy the open record carried,
+    // and with only one end of it there is no elapsed time to serve.
     assert_eq!(turns[0]["status"], json!("turn-completed"));
-    assert_eq!(turns[0]["startedAt"], json!(null));
+    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(turns[0]["finishedAt"], json!(null));
     assert_eq!(turns[0]["durationMs"], json!(null));
     // The accounting beside it is still that turn's own: one unreadable stamp is
     // not a reason to drop what the producer did measure.
     assert_eq!(turns[0]["usage"]["costUsd"], json!(0.05));
+}
+
+/// A turn the journal holds only half of is still the turn it was.
+///
+/// Two halves, because the journal is a live stream and either record can be the
+/// one that is missing or unreadable. A close whose open never reached the
+/// journal is a turn the run had and the only account of it anything holds, so it
+/// opens a turn of its own rather than closing somebody else's. And a close whose
+/// own start stamp cannot be ordered still has the one the open record stamped —
+/// the producer writes it on both — so the turn keeps the bound it was measured
+/// with instead of losing it to the worse of two copies.
+#[test]
+fn a_turn_the_journal_holds_only_half_of_is_still_the_turn_it_was() {
+    const SESSION: &str = "node-scope-1786925518777-3163111.worker";
+    const OPENED: &str = "2026-08-07T12:03:00.000Z";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let relay = |kind: &str, payload: Value| {
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                kind,
+                json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": "worker",
+                    "persona": "pr-author",
+                    "session": SESSION,
+                }),
+                payload,
+            );
+        };
+        relay(
+            "turn-started",
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "instruction": "Finish the sweep.",
+                "started_at": OPENED,
+            }),
+        );
+        // The close that carries a start stamp nothing can order, beside the
+        // readable one its own open record carried.
+        relay(
+            "turn-completed",
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "usage": { "cost_usd": 0.07 },
+                "started_at": "whenever it was",
+                "finished_at": "2026-08-07T12:03:02.500Z",
+            }),
+        );
+        // And a close whose open never reached the journal at all: the producer
+        // keyed it, and there is nothing here for it to close.
+        relay(
+            "turn-completed",
+            json!({
+                "turn": 2,
+                "role": "assistant",
+                "usage": { "cost_usd": 0.09 },
+                "started_at": "2026-08-07T12:03:03.000Z",
+                "finished_at": "2026-08-07T12:03:04.000Z",
+            }),
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 2, "{turns:?}");
+
+    // The bound the open record stamped, and the elapsed time measured against
+    // it: one unreadable copy of a stamp does not lose the readable one.
+    assert_eq!(turns[0]["status"], json!("turn-completed"));
+    assert_eq!(turns[0]["startedAt"], json!(OPENED));
+    assert_eq!(turns[0]["finishedAt"], json!("2026-08-07T12:03:02.500Z"));
+    assert_eq!(turns[0]["durationMs"], json!(2_500));
+    assert_eq!(turns[0]["user"], json!("Finish the sweep."));
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(0.07));
+
+    // The turn whose open the journal never received: served as the turn it is,
+    // with what it spent and the interval it ran over, and with no instruction
+    // rather than one borrowed off the turn before it.
+    assert_eq!(turns[1]["status"], json!("turn-completed"));
+    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:03:03.000Z"));
+    assert_eq!(turns[1]["finishedAt"], json!("2026-08-07T12:03:04.000Z"));
+    assert_eq!(turns[1]["durationMs"], json!(1_000));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(0.09));
+    assert_eq!(turns[1]["user"], json!(""));
+    assert_eq!(turns[1]["assistant"], json!(null));
 }
 
 /// A filter narrows which turns a live transcript lists and never what one of

@@ -2701,9 +2701,14 @@ impl LiveTurn<'_> {
     }
 
     /// When this turn began: the instant the producer stamped, from whichever of
-    /// its two records reached the journal.
+    /// its two records carries one this crate can order.
+    ///
+    /// Both records stamp it, so one unreadable stamp is not a reason to serve a
+    /// turn with no start when the other record stamped a readable one.
     fn started_at(&self) -> Option<&str> {
-        instant(self.completed.or(self.started)?, graph::STARTED_AT)
+        self.completed
+            .and_then(|event| instant(event, graph::STARTED_AT))
+            .or_else(|| instant(self.started?, graph::STARTED_AT))
     }
 
     /// When this turn ended, or `None` for one still running.
