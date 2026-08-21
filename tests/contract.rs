@@ -948,6 +948,28 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         graph::MEMBER_SETTLED
     );
 
+    // The number a `turn-started` carries, which that library builds inline
+    // rather than from a struct. Its own renderer is the declaration reachable
+    // instead: `render::line` is public, is a pure function of one envelope, and
+    // reads this key — so a rename there empties this line rather than silently
+    // unnumbering every turn a transcript joins to its own measurements.
+    let started = serde_json::from_value::<oneagentgraph::event::Envelope>(serde_json::json!({
+        "v": 1,
+        "ts": "2026-08-07T12:00:00.000Z",
+        "stream": "stream-a",
+        "seq": 1,
+        "source": "agentgraph",
+        "kind": graph::TURN_STARTED,
+        "payload": { graph::TURN: 7 },
+    }))
+    .expect("a turn-started envelope deserializes");
+    assert!(
+        oneagentgraph::render::line(&started).ends_with("turn 7"),
+        "`{}` is not the key that library numbers a turn by: {}",
+        graph::TURN,
+        oneagentgraph::render::line(&started)
+    );
+
     // The `turn-interrupted` payload, as that library writes it: every key this
     // crate reads is one of its fields, and none of its fields is one this crate
     // has no reading for. The refusal carries a reason and the delivery does not,

@@ -209,9 +209,11 @@ pub mod graph {
     /// The producer's own 1-based number for the turn a [`TURN_STARTED`] opens.
     ///
     /// The one name in this module with no type behind it: `oneagentgraph` builds
-    /// this payload inline rather than from a declared struct, so — like the
-    /// `onevcs` vocabulary — the wire is the only declaration a consumer can
-    /// reach. It is read rather than counted because a turn that called no tool
+    /// this payload inline rather than from a declared struct. Its own reader of
+    /// it is public, though — `render::line` is a pure function of one envelope
+    /// and renders a `turn-started` by this key — so `tests/contract.rs` holds
+    /// the copy to that reading, which moves with a rename exactly as a type
+    /// would. It is read rather than counted because a turn that called no tool
     /// relays no `turn-started` at all, so the position of one among the records
     /// a session relayed is not the number the producer gave it. That number is
     /// the counter the stored report shares between its `telemetry.sessions` and
