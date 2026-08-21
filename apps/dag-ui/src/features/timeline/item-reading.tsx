@@ -109,9 +109,29 @@ export function MarkerReading({ row }: { readonly row: EventRow }) {
   );
 }
 
-/** How the reading above is found again, and read back, and nowhere else. */
-export const MARKER_READING = "[data-timeline-reading]";
-export const markerReading = (element: HTMLElement): string | undefined => {
-  const detail = element.getAttribute("data-timeline-reading")?.trim();
-  return detail === undefined || detail.length === 0 ? undefined : detail;
-};
+/** Where the reading above is hung, and the only place it is looked for. */
+const HUNG = "data-timeline-reading";
+
+/**
+ * The marker reading an event landed on, and the element it is hung on.
+ *
+ * Looked for in both directions, because the two ways of arriving at a marker land on
+ * different elements: a pointer enters the glyph the reading is hung on, while focus
+ * lands on the package's button *around* it — and that button is the package's to
+ * render, so nothing here can be hung on it. The search downwards is bounded to that
+ * button rather than run from wherever the event landed, because a pointer also
+ * enters the plot holding every marker, and the first reading inside *that* is some
+ * other record's.
+ */
+export function markerReadingAt(
+  target: Element,
+): { readonly element: HTMLElement; readonly detail: string } | undefined {
+  const entered = target.closest(`[${HUNG}]`);
+  const element =
+    entered ?? target.closest("button")?.querySelector(`[${HUNG}]`);
+  if (!(element instanceof HTMLElement)) return undefined;
+  const detail = element.getAttribute(HUNG)?.trim();
+  return detail === undefined || detail.length === 0
+    ? undefined
+    : { element, detail };
+}

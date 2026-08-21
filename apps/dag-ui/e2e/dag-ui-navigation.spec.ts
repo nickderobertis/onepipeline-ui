@@ -512,6 +512,38 @@ test("opens a marker's record under the reading its hover gave", async ({
     expect(line).toContain(part);
 });
 
+test("reads a marker the keyboard reached", async ({ page }) => {
+  // Tabbed to from the top of the document with no pointer involved at all. Pointed
+  // at and focused are tracked apart in the layer, so a marker answering the pointer
+  // says nothing about it answering the keyboard — and a marker is a button on the tab
+  // path, which is the whole of what makes it something a reader can reach.
+  await open(page, DESKTOP, `/?run=${runs().live}&node=foundation`);
+  const marker = timeline(page).getByRole("button", {
+    name: "node-dispatched, marker",
+    exact: true,
+  });
+  await tabTo(page, marker);
+
+  const reading = page.getByTestId("timeline-popover");
+  await expect(reading).toBeInViewport({ ratio: 1 });
+  await expect(reading).toContainText("node-dispatched");
+  await expect(reading).toContainText(" · Lifecycle");
+  const first = (await reading.textContent()) ?? "";
+
+  // Tabbing on takes the reading with them: the next stop is the next marker of the
+  // same plot, and the reading is that record's rather than the one left behind.
+  await page.keyboard.press("Tab");
+  await expect(marker).not.toBeFocused();
+  await expect(reading).toBeVisible();
+  await expect(reading).not.toHaveText(first);
+  await expect(reading).toBeInViewport({ ratio: 1 });
+
+  // Tabbing out of the plot ends it, with no pointer involved in that either.
+  for (let stop = 0; stop < TAB_STOPS && (await reading.count()) > 0; stop += 1)
+    await page.keyboard.press("Tab");
+  await expect(reading).toHaveCount(0);
+});
+
 test("ends the reading when the pointer leaves the document", async ({
   page,
 }) => {

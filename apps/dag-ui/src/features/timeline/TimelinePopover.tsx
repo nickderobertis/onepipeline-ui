@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { MARKER_READING, markerReading } from "./item-reading";
+import { markerReadingAt } from "./item-reading";
 
 /**
  * The reading a timeline segment or marker carries, where it can actually be read.
@@ -66,11 +66,8 @@ interface Anchored {
  */
 const anchoredAt = (target: EventTarget | null): Anchored | undefined => {
   if (!(target instanceof Element)) return undefined;
-  const marker = target.closest(MARKER_READING);
-  if (marker instanceof HTMLElement) {
-    const detail = markerReading(marker);
-    return detail === undefined ? undefined : { element: marker, detail };
-  }
+  const marker = markerReadingAt(target);
+  if (marker !== undefined) return marker;
   const element = target.closest(DESCRIBED);
   if (!(element instanceof HTMLElement)) return undefined;
   const described = document.getElementById(

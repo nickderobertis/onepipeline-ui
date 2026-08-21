@@ -230,7 +230,10 @@ rather than two that agree until somebody edits one. Adding the description elem
 `@oneharness/ui` instead would have taken on a sixth repository and its release chain
 for content that package does not have: the categories are this app's. The visible
 reading is `aria-hidden` and travels as an attribute rather than as text inside the
-button, so the record a marker's own label already names is not announced twice.
+button, so the record a marker's own label already names is not announced twice. The
+reading is looked for both at and inside whatever an event landed on, because the two
+ways of reaching a marker land on different elements: a pointer enters the glyph, and
+focus lands on the package's button around it.
 
 ## The node timeline view
 
