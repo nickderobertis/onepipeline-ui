@@ -263,6 +263,46 @@ Three constraints on that reading, each because the obvious alternative is worse
   field this wire already carries a producer's own record on. No field is added
   and neither closed role vocabulary moves, because both already carry `judge`.
 
+## The live half, which is the only half a running dispatch has
+
+A report exists once a member settles, and a member that dies never writes one —
+so on the run this reading was measured against, half the sessions have none and
+never will. `payload::live_transcript` fills those turns from the session's own
+records instead: `turn-started` for what the turn was asked, `turn-message` for
+what it said, `turn-activity` for what its calls returned, `turn-completed` for
+what it spent and the interval it ran over. No field is added by it — these are
+the fields the report fills, from the other source.
+
+**Where a session has both, the report wins and the live records are not read at
+all.** `payload::conversation_document` builds the live transcript only when there
+is no readable report, so the precedence is a property of the function rather than
+a habit of its callers. A merge of the two can disagree with itself: the journal
+bounds a text and the report does not, and a turn the report says produced no
+reply would be filled with words the journal happened to carry.
+
+Four things about that reading that the code says once and this file does not
+repeat: it joins a turn by the **pair** of number and party, it pairs an
+observation to its call by the producer's identity and then by the recorded index,
+it serves a bound only when the stamp parses as an instant, and it carries the
+producer's own cut flags on the turn's `unknown` map — the same field the judge's
+conclusion lands in, for the same reason.
+
+**The names it reads are not gateable against a type at this pin, and that is the
+one thing to fix upstream.** The linked `oneagentgraph` is the one the pinned
+`onepipeline` resolves — 0.2, which publishes its two turn payloads inline, has no
+`turn-message`, no per-turn bounds and no observation on an activity. So this
+vocabulary stands where the `onevcs` one does: the wire is the only declaration a
+consumer can reach, and `tests/support/fixture_run.rs` writing the corrected
+producer's records is the gate available. Moving the SDK pin — which is what moves
+`oneagentgraph` — makes `tests/contract.rs` able to hold every one of them to that
+library's own `event::TurnStarted`, `TurnMessage`, `TurnActivity` and
+`TurnCompleted`. Do not move `oneagentgraph` alone to get there.
+
+**A fixture keeps writing the older shape on purpose.** A `turn-started` carrying
+a number and nothing else is what every run recorded before that correction holds,
+and those runs are still read: a record with no party on it joins nothing and its
+turn is served as it always was. Both shapes are in `write_lanes`.
+
 ## The one store this crate opens that no run owns
 
 A `oneharness_session` artifact's bytes are the only ones this API serves from

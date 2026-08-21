@@ -273,12 +273,26 @@ class Journal {
     this.stream = stream;
     this.at = startMillis;
     this.lines = [];
+    this.turns = new Map();
   }
 
   /** Move the clock on before the next event, in seconds. */
   advance(seconds) {
     this.at += seconds * 1000;
     return this;
+  }
+
+  /**
+   * The next turn number for one session, which the producer counts per session
+   * and 1-based.
+   *
+   * The number is what joins a turn's records to each other — its instruction, its
+   * words, its cost — so two turns of one session must never share one.
+   */
+  nextTurn(session) {
+    const next = (this.turns.get(session) ?? 0) + 1;
+    this.turns.set(session, next);
+    return next;
   }
 
   emit(source, kind, labels, payload = {}, artifacts = []) {
@@ -436,19 +450,60 @@ const livePlan = () => ({
   tasks: LIVE_TASKS,
 });
 
-/** One agent-graph turn, as the merged store relays one. */
-function turn(journal, node, session, persona, message, model = "a-model") {
-  journal.emit(
-    "agentgraph",
-    "turn-started",
-    {
-      run_id: journal.runId,
-      node,
-      persona,
-      session,
-    },
-    { message, model },
+/**
+ * One agent-graph turn, as the merged store relays one.
+ *
+ * Two records, because that is what `oneagentgraph` publishes: the turn opening
+ * with the message it is answering, and the party's own words for it as they
+ * arrive. A live dispatch has no report to read, so these are the whole of what
+ * the app can show of one.
+ */
+function turn(
+  journal,
+  node,
+  session,
+  persona,
+  message,
+  model = "a-model",
+  instruction = "Carry on with the plan.",
+) {
+  relayTurn(
+    journal,
+    { run_id: journal.runId, node, persona, session },
+    session,
+    instruction,
+    message,
+    model,
   );
+}
+
+/**
+ * The two records one turn publishes, under labels the caller owns.
+ *
+ * The turn number is the join between them and is counted per session, which is
+ * how the producer counts one.
+ */
+function relayTurn(
+  journal,
+  labels,
+  session,
+  instruction,
+  message,
+  model = "a-model",
+) {
+  const numbered = journal.nextTurn(session);
+  journal.emit("agentgraph", "turn-started", labels, {
+    turn: numbered,
+    role: "assistant",
+    instruction,
+    started_at: stamp(journal.at),
+    model,
+  });
+  journal.emit("agentgraph", "turn-message", labels, {
+    turn: numbered,
+    role: "assistant",
+    text: message,
+  });
 }
 
 function writeLiveRun(root) {
@@ -845,40 +900,96 @@ function writeLiveRun(root) {
   // One session per party the dispatch ran under. The lint member is the case the
   // pair exists for: the same semantic role as the work it is reading, told apart
   // from it only by the transport `oneagentgraph` ran it as.
-  for (const [session, member, persona, message] of [
-    [WORKER_SESSION, "worker", "worker", "Implementing the dashboard now"],
-    [JUDGE_SESSION, "judge", "judge", "The transcript is accessible"],
-    [WORKER_SESSION, "worker", "worker", "Wiring the run list to the read API"],
-    [CHECK_IN_SESSION, "check-in", "check-in", "Progress update sent"],
-    [LINT_SESSION, "llmlint", "worker", "The diff reads as written"],
-    [WORKER_SESSION, "worker", "worker", "Rendering the node view"],
-    [JUDGE_SESSION, "judge", "judge", "The graph and the rail agree"],
-    [CHECK_IN_SESSION, "check-in", "check-in", "Second progress update sent"],
+  for (const [session, member, persona, message, instruction] of [
+    [
+      WORKER_SESSION,
+      "worker",
+      "worker",
+      "Implementing the dashboard now",
+      "Build the dashboard view.",
+    ],
+    [
+      JUDGE_SESSION,
+      "judge",
+      "judge",
+      "The transcript is accessible",
+      "Read the transcript panel as a keyboard user would.",
+    ],
+    [
+      WORKER_SESSION,
+      "worker",
+      "worker",
+      "Wiring the run list to the read API",
+      "Now wire the run list.",
+    ],
+    [
+      CHECK_IN_SESSION,
+      "check-in",
+      "check-in",
+      "Progress update sent",
+      "Report where the node has got to.",
+    ],
+    [
+      LINT_SESSION,
+      "llmlint",
+      "worker",
+      "The diff reads as written",
+      "Read the diff for what it says rather than what it does.",
+    ],
+    [
+      WORKER_SESSION,
+      "worker",
+      "worker",
+      "Rendering the node view",
+      "Draw the node view next.",
+    ],
+    [
+      JUDGE_SESSION,
+      "judge",
+      "judge",
+      "The graph and the rail agree",
+      "Check the graph against the rail.",
+    ],
+    [
+      CHECK_IN_SESSION,
+      "check-in",
+      "check-in",
+      "Second progress update sent",
+      "Report again.",
+    ],
   ]) {
-    journal.emit(
-      "agentgraph",
-      "turn-started",
-      { ...run, node: "dashboard", member, persona, session },
-      { message, model: "a-model" },
-    );
-    // What the *dispatch* consumed, spelled the way the wire spells it:
-    // `oneagentgraph` copies a settling member's usage verbatim out of its
-    // onejudge report, so a `turn-completed` carries that document's own keys and
-    // no interval at all.
-    journal.advance(2).emit(
-      "agentgraph",
-      "turn-completed",
-      { ...run, node: "dashboard", member, persona, session },
-      {
-        usage: {
-          input_tokens: 1200,
-          output_tokens: 340,
-          cache_read_tokens: 800,
-          cache_write_tokens: 120,
-          cost_usd: 0.42,
-        },
+    const numbered = journal.nextTurn(session);
+    const labels = { ...run, node: "dashboard", member, persona, session };
+    const startedAt = stamp(journal.at);
+    journal.emit("agentgraph", "turn-started", labels, {
+      turn: numbered,
+      role: "assistant",
+      instruction,
+      started_at: startedAt,
+      model: "a-model",
+    });
+    // What the party said while the turn ran, which is the only account of it any
+    // reader has until the member settles and stores its report.
+    journal.advance(1).emit("agentgraph", "turn-message", labels, {
+      turn: numbered,
+      role: "assistant",
+      text: message,
+    });
+    // What that one turn consumed and the interval it ran over, keyed by the pair
+    // the record that opened it carried.
+    journal.advance(1).emit("agentgraph", "turn-completed", labels, {
+      turn: numbered,
+      role: "assistant",
+      usage: {
+        input_tokens: 1200,
+        output_tokens: 340,
+        cache_read_tokens: 800,
+        cache_write_tokens: 120,
+        cost_usd: 0.42,
       },
-    );
+      started_at: startedAt,
+      finished_at: stamp(journal.at),
+    });
     journal.advance(8);
   }
 
@@ -1103,11 +1214,12 @@ function writeHistoryRun(root) {
     persona: "worker",
   });
   journal.advance(2);
-  journal.emit(
-    "agentgraph",
-    "turn-started",
+  relayTurn(
+    journal,
     { ...run, node: "archive", persona: "worker", session: JUDGE_SESSION },
-    { message: "Archived the release", model: "a-model" },
+    JUDGE_SESSION,
+    "Archive the release.",
+    "Archived the release",
   );
   journal
     .advance(4)
@@ -1460,14 +1572,14 @@ function writeBusyRun(root) {
     const session = `engineer-sweep-${index}`;
     const turns = session === BUSY_LONG_SESSION ? BUSY_LONG_TURNS : 1;
     for (let step = 0; step < turns; step += 1) {
-      journal
-        .advance(1)
-        .emit(
-          "agentgraph",
-          "turn-started",
-          { ...run, node: "sweep", persona: "worker", session },
-          { message: `Swept batch ${index} (${step})`, model: "a-model" },
-        );
+      journal.advance(1);
+      relayTurn(
+        journal,
+        { ...run, node: "sweep", persona: "worker", session },
+        session,
+        `Sweep batch ${index}.`,
+        `Swept batch ${index} (${step})`,
+      );
     }
   }
   journal.write();
@@ -1614,18 +1726,27 @@ export function growTranscript(root, turns) {
         event.kind === "turn-started",
     ).length;
   for (let index = recorded; index < turns; index += 1) {
-    appendEvent(
-      dir,
-      "agentgraph",
-      "turn-started",
-      {
-        run_id: LIVE_RUN,
-        node: "dashboard",
-        persona: "worker",
-        session: WORKER_SESSION,
-      },
-      { message: `Dashboard turn ${index} arrived`, model: "a-model" },
-    );
+    const labels = {
+      run_id: LIVE_RUN,
+      node: "dashboard",
+      persona: "worker",
+      session: WORKER_SESSION,
+    };
+    // Numbered on from what the session has already recorded, because the number
+    // is what joins a turn's own records to each other.
+    const numbered = index + 1;
+    appendEvent(dir, "agentgraph", "turn-started", labels, {
+      turn: numbered,
+      role: "assistant",
+      instruction: "Keep going.",
+      started_at: new Date().toISOString(),
+      model: "a-model",
+    });
+    appendEvent(dir, "agentgraph", "turn-message", labels, {
+      turn: numbered,
+      role: "assistant",
+      text: `Dashboard turn ${index} arrived`,
+    });
   }
 }
 

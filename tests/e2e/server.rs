@@ -3806,12 +3806,12 @@ fn a_tool_summary_is_carried_on_its_turn_rather_than_served_as_one() {
         "the journal records the call and never what it returned: {tools:?}"
     );
     assert_eq!(turns[1]["usage"]["inputTokens"], json!(900));
-    // This member has not settled, so no report holds what its turn took. An
-    // interval nothing measured is absent, and never the zero a reader would
-    // take for a measurement.
-    assert_eq!(turns[1]["durationMs"], json!(null));
-    assert_eq!(turns[1]["startedAt"], json!(null));
-    assert_eq!(turns[1]["finishedAt"], json!(null));
+    // This member has not settled, so no report holds what its turn took — and
+    // the producer stamps the turn's own bounds as it runs, which is what a
+    // dispatch nobody will ever have a report for is read from.
+    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:00:28.000Z"));
+    assert_eq!(turns[1]["finishedAt"], json!("2026-08-07T12:00:28.800Z"));
+    assert_eq!(turns[1]["durationMs"], json!(800));
 }
 
 #[test]
@@ -3837,7 +3837,10 @@ fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
     // Two sessions of one dispatch, under one semantic role and two transports:
     // a failure on either is a different failure, and the pair says which.
     assert_eq!(parties, vec!["llmlint", "agent"], "{node}");
-    assert_eq!(node["lint"], json!(3), "what the lint transport recorded");
+    // Its member-started, the turn it opened, what it said in that turn, and the
+    // turn's own close: every relayed record of that party bar the summaries it
+    // published from inside a turn.
+    assert_eq!(node["lint"], json!(4), "what the lint transport recorded");
 
     let lint = http::get(
         serving.address,
@@ -5577,8 +5580,8 @@ fn a_turn_whose_report_recorded_no_reply_is_served_as_having_recorded_none() {
     assert_eq!(turns[1]["durationMs"], json!(4_200));
 }
 
-/// A session whose member has not settled is served exactly as the journal
-/// relayed it, which is not the same as being served empty.
+/// A session whose member has not settled is served from what its own records
+/// published, which is not the same as being served empty.
 #[test]
 fn a_session_with_no_stored_report_is_served_as_the_journal_relayed_it() {
     let serving = live_run();
@@ -5593,19 +5596,21 @@ fn a_session_with_no_stored_report_is_served_as_the_journal_relayed_it() {
     .json();
     let turns = body["conversation"]["turns"].as_array().expect("the turns");
     assert!(!turns.is_empty(), "an unsettled session still has turns");
-    // What the journal did relay: the record's own prose and the summaries it
-    // published. What it never carried: a prompt, a tool's observation, a
-    // per-turn cost, or a clock.
+    // What the journal relayed while the turn ran: the instruction it is
+    // answering, the words it published for it, and the summary of the call it
+    // made. The observation that call returned is not here because this harness
+    // published none — a `tool_use` with no `tool_result` after it.
+    assert_eq!(turns[0]["user"], json!(fixture_run::LIVE_INSTRUCTION));
     assert_eq!(turns[0]["assistant"], json!("opened the change request"));
     assert_eq!(turns[0]["tools"][0]["name"], json!("Bash"));
     assert_eq!(turns[0]["tools"][0]["output"], json!(null));
-    assert_eq!(turns[0]["durationMs"], json!(null));
-    // And never the persona in place of a prompt nobody recorded.
+    assert_eq!(turns[0]["durationMs"], json!(800));
+    // And never the persona in place of the prompt: who was asked is not what
+    // they were asked.
     let persona = body["attribution"]["persona"]
         .as_str()
         .expect("the dispatch's persona");
     for turn in turns {
-        assert_eq!(turn["user"], json!(""), "{turn}");
         assert_ne!(turn["user"], json!(persona), "{turn}");
     }
 }
@@ -6164,4 +6169,476 @@ fn a_filter_narrows_the_turns_a_transcript_lists_and_never_what_each_one_was() {
     assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
     assert_eq!(narrow["run"]["usage"], wide["run"]["usage"]);
     assert_eq!(narrow["run"]["node_work_ms"], wide["run"]["node_work_ms"]);
+}
+
+/// The transcript one session of the lanes run serves, as a reader opens it.
+fn lane_transcript(serving: &Serving, session: &str) -> Vec<Value> {
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{session}",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone()
+}
+
+/// A dispatch still in flight is read from its own records, because nothing else
+/// holds it: a report exists only once a member settles.
+///
+/// The turn that finished carries what it was asked, what it said, what its call
+/// came back with, and that one turn's own cost and interval. The turn running
+/// now carries everything but an end — which is the reading an operator
+/// supervising hours of work they cannot watch actually needs.
+#[test]
+fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
+    let serving = lanes();
+    let served = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::LANES_RUN_ID,
+            fixture_run::WORKING_CONVERSATION_ID
+        ),
+    )
+    .json();
+    // No field is added by this reading and no vocabulary moves for it, so the
+    // envelope carrying it declares the version it already declared.
+    assert_eq!(served["telemetry_schema_version"], json!(14));
+    let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
+
+    let finished = &turns[0];
+    assert_eq!(finished["user"], json!(fixture_run::WORKING_INSTRUCTION));
+    assert_eq!(finished["assistant"], json!(fixture_run::WORKING_REPLY));
+    assert_eq!(
+        finished["tools"][0]["output"],
+        json!(fixture_run::WORKING_OBSERVATION)
+    );
+    // That one turn's own accounting, not the dispatch's total over both sides.
+    assert_eq!(finished["usage"]["costUsd"], json!(0.42));
+    assert_eq!(finished["usage"]["inputTokens"], json!(4_210));
+    assert_eq!(finished["startedAt"], json!("2026-08-07T12:04:03.000Z"));
+    assert_eq!(finished["finishedAt"], json!("2026-08-07T12:04:07.000Z"));
+    assert_eq!(finished["durationMs"], json!(4_000));
+
+    // The turn nothing has closed: opened, answered in part, and measured by
+    // nothing yet. An unmeasured cost is absent rather than a zero a reader would
+    // take for a measurement, and an end nobody observed is `null`.
+    let running = turns.last().expect("the turn in flight");
+    assert_eq!(running["status"], json!("turn-started"));
+    assert_eq!(
+        running["user"],
+        json!(fixture_run::WORKING_NEXT_INSTRUCTION)
+    );
+    assert_eq!(running["assistant"], json!(fixture_run::WORKING_CUT_REPLY));
+    assert_eq!(running["startedAt"], json!("2026-08-07T12:04:09.000Z"));
+    assert_eq!(running["finishedAt"], json!(null));
+    assert_eq!(running["durationMs"], json!(null));
+    assert_eq!(running["usage"], json!({}), "{running}");
+}
+
+/// A turn is joined to its own records by the **pair** the producer numbers it
+/// with, and never by the number alone.
+///
+/// The two sides of a two-party member count their turns independently, so both
+/// of these are turn 1: the agent's, and the supervisor's answering it. A reading
+/// that joined on the number would put the supervisor's instruction and the
+/// supervisor's cost on the agent's turn, which is the one figure an operator
+/// deciding whether to let a dispatch keep running would act on.
+#[test]
+fn a_turn_is_joined_by_the_pair_the_producer_numbers_it_with() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
+    let supervising = turns
+        .iter()
+        .find(|turn| turn["usage"]["costUsd"] == json!(0.01))
+        .expect("the supervisor's own turn");
+
+    // What it was asked is the reply it is answering, and what it said is the
+    // next instruction rather than this transcript's reply: the agent's words are
+    // the transcript's, and the supervisor's reach a reader as the prompt of the
+    // turn they opened.
+    assert_eq!(supervising["user"], json!(fixture_run::WORKING_REPLY));
+    assert_eq!(supervising["assistant"], json!(null));
+    assert_eq!(supervising["usage"]["inputTokens"], json!(51));
+    // And nothing of it landed on the agent's turn of the same number.
+    assert_eq!(turns[0]["usage"]["inputTokens"], json!(4_210));
+    assert_ne!(turns[0]["user"], supervising["user"]);
+}
+
+/// An observation is paired with the call the producer says it answers.
+///
+/// Two joins, because a harness may or may not mint an identity for a call: the
+/// identity where both records carry one, and the recorded ordering index where
+/// neither does. Never the position in the served array — a turn that made three
+/// calls and got two answers back would then hand a reader the wrong tool's
+/// output, which reads as a tool having done something it never did.
+#[test]
+fn an_observation_is_paired_with_the_call_the_producer_says_it_answers() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
+
+    // Joined by the identity that harness minted for the call.
+    let by_identity = turns[0]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(by_identity.len(), 1, "{by_identity:?}");
+    assert_eq!(by_identity[0]["name"], json!("Read"));
+    assert_eq!(by_identity[0]["input"], json!("docs/contract.md"));
+    assert_eq!(
+        by_identity[0]["output"],
+        json!(fixture_run::WORKING_OBSERVATION)
+    );
+
+    // And joined by the recorded ordering index, for the harness that published
+    // no identity at all. One entry either way: the observation is folded onto
+    // the call it answers rather than served as a second tool nobody invoked.
+    let by_index = turns.last().expect("the turn in flight")["tools"]
+        .as_array()
+        .expect("its tools")
+        .clone();
+    assert_eq!(by_index.len(), 1, "{by_index:?}");
+    assert_eq!(by_index[0]["name"], json!("Edit"));
+    assert_eq!(
+        by_index[0]["output"],
+        json!(fixture_run::WORKING_CUT_OBSERVATION)
+    );
+    // The producer's own numbering for the call, which is what the pairing rested
+    // on — not where either record landed in this array.
+    assert_eq!(by_index[0]["index"], json!(0));
+}
+
+/// A dispatch whose member died without settling serves everything its journal
+/// recorded.
+///
+/// It will never have a report — a member that dies writes none — so an empty
+/// transcript here would be the read API saying a dispatch that talked for
+/// minutes said nothing at all. Half the sessions of the run this reading was
+/// measured against are in exactly this state.
+#[test]
+fn a_dispatch_whose_member_died_serves_what_it_managed_to_record() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::DIED_CONVERSATION_ID);
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["user"], json!(fixture_run::DIED_INSTRUCTION));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::DIED_REPLY));
+    assert_eq!(turns[0]["tools"][0]["name"], json!("Bash"));
+    assert_eq!(
+        turns[0]["tools"][0]["output"],
+        json!(fixture_run::DIED_OBSERVATION)
+    );
+    // Nothing closed the turn, so nothing measured it: absent, never zero.
+    assert_eq!(turns[0]["finishedAt"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+    assert_eq!(turns[0]["usage"], json!({}));
+
+    // And the run really does hold no report for it: the member died, so the
+    // artifact route has nothing to serve either.
+    let settled = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/report-{}",
+            fixture_run::LANES_RUN_ID,
+            fixture_run::DIED_CONVERSATION_ID
+        ),
+    );
+    assert_eq!(settled.status, 404, "{}", settled.body);
+}
+
+/// A text the producer flagged as cut is served as cut.
+///
+/// The journal bounds what a live turn carries and the settled report does not,
+/// so a live reply can be the head of one — and a reader told nothing would take
+/// the head for the whole of it. The flags are the producer's own, carried on the
+/// `unknown` map the turn shape has always had for what it declares no field for:
+/// this step adds no field and moves no schema version.
+#[test]
+fn a_text_the_producer_cut_is_served_as_cut() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
+    let running = turns.last().expect("the turn in flight");
+
+    assert_eq!(
+        running["unknown"],
+        json!({ "instruction_truncated": true, "truncated": true }),
+        "{running}"
+    );
+    assert_eq!(running["tools"][0]["output_truncated"], json!(true));
+    // The text itself is what the producer wrote and nothing more: served cut,
+    // never completed from somewhere else and never padded.
+    assert_eq!(running["assistant"], json!(fixture_run::WORKING_CUT_REPLY));
+
+    // A turn nothing was cut on says nothing at all, rather than saying `false`
+    // on three fields a reader would have to check.
+    assert_eq!(turns[0]["unknown"], json!({}), "{}", turns[0]);
+    assert_eq!(turns[0]["tools"][0].get("output_truncated"), None);
+}
+
+/// A session that published no words of its own reads as having published none.
+///
+/// A single-sided member is the case: it publishes no `turn-message` at all — its
+/// prose is in the report it writes when it settles, and this one never settled.
+/// So the honest answer is an explicit absence, and this reading must not invent
+/// a turn or borrow prose from anywhere to fill it.
+#[test]
+fn a_session_that_published_no_words_reads_as_having_published_none() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::RECLAIMED_CONVERSATION_ID);
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["assistant"], json!(null));
+    // What it *was* asked is recorded, and is served: an absent reply is not an
+    // absent turn.
+    assert_eq!(turns[0]["user"], json!(fixture_run::RECLAIMED_INSTRUCTION));
+    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:06:03.000Z"));
+}
+
+/// A session holding both a stored report and live records is served from the
+/// report alone.
+///
+/// The report is complete and unbounded where the journal is bounded, so where
+/// the two disagree about a turn the report is the answer — and a reading that
+/// merged them could disagree with itself, serving a cut reply beside the whole
+/// one for the same turn, or filling a turn the report says produced nothing with
+/// words from the journal. `docs/contract.md` states the same precedence for a
+/// reader of the wire.
+#[test]
+fn a_session_with_both_a_report_and_live_records_is_served_from_the_report() {
+    const STREAM: &str = "node-scope-1786925518777-3163333";
+    const SESSION: &str = "node-scope-1786925518777-3163333.worker";
+    const PROMPT: &str = "Now run the gate.";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let labels = || {
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            })
+        };
+        // Both turns as the corrected producer published them while they ran, so
+        // the live reading has everything it would need to fill either.
+        for (turn, instruction) in [(1, "Land the wire contract."), (2, PROMPT)] {
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-started",
+                labels(),
+                json!({
+                    "turn": turn,
+                    "role": "assistant",
+                    "instruction": instruction,
+                    "started_at": "2026-08-07T12:01:00.000Z",
+                }),
+            );
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-message",
+                labels(),
+                json!({
+                    "turn": turn,
+                    "role": "assistant",
+                    "text": format!("the head of turn {turn}'s reply"),
+                    "truncated": true,
+                }),
+            );
+        }
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:01.000Z",
+                artifact: "report-node-scope-1786925518777-3163333",
+                report: &unanswered_report(PROMPT),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 2, "{turns:?}");
+
+    // The whole reply the report stored, and not the head the journal carried.
+    assert_eq!(turns[0]["assistant"], json!("The route table is landed."));
+    // And the turn the report says produced no reply stays an explicit absence,
+    // rather than being filled from the words the journal did carry for it.
+    assert_eq!(turns[1]["user"], json!(PROMPT));
+    assert_eq!(turns[1]["assistant"], json!(null));
+    // Nothing of the live reading beside either of them: no flag saying a text
+    // the report holds whole was cut.
+    for turn in &turns {
+        assert_eq!(turn["unknown"], json!({}), "{turn}");
+    }
+}
+
+/// The three shapes a live turn can arrive in that the recorded runs above have
+/// none of, driven through the route that serves them.
+///
+/// Each is a producer's record this reading has to answer for: an observation
+/// that answers no call this turn published, a reply published in more than one
+/// part, and a bound that is not an instant at all.
+#[test]
+fn a_live_turn_answers_for_the_records_a_recorded_run_has_none_of() {
+    const SESSION: &str = "node-scope-1786925518888-3163444.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let labels = || {
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            })
+        };
+        let relay = |kind: &str, payload: Value| {
+            fixture_run::append_relayed(&dir, "agentgraph", kind, labels(), payload);
+        };
+        relay(
+            "turn-started",
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "instruction": "Finish the sweep.",
+                "started_at": "2026-08-07T12:02:00.000Z",
+            }),
+        );
+        // An observation whose call this turn never published: the call it names
+        // was made in the turn before it, which is a different turn's tools.
+        relay(
+            "turn-activity",
+            json!({
+                "kind": "tool_result",
+                "name": Value::Null,
+                "detail": "",
+                "output": "8 files changed",
+                "tool_call_id": "toolu_from_a_turn_ago",
+                "index": 0,
+            }),
+        );
+        // One reply in two parts, which is what a producer that published its
+        // words as they arrived would leave behind.
+        relay(
+            "turn-message",
+            json!({ "turn": 1, "role": "assistant", "text": "swept the first half" }),
+        );
+        relay(
+            "turn-message",
+            json!({ "turn": 1, "role": "assistant", "text": "and the second" }),
+        );
+        // A close whose bounds are not instants: the turn is over and this crate
+        // can order neither end of it.
+        relay(
+            "turn-completed",
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "usage": { "cost_usd": 0.05 },
+                "started_at": "whenever it was",
+                "finished_at": "later",
+            }),
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+
+    // Served as a record of its own rather than dropped or folded onto a call it
+    // does not answer: the run recorded it, and a live reading is the only thing
+    // that will ever hold it.
+    let tools = turns[0]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(tools.len(), 1, "{tools:?}");
+    assert_eq!(tools[0]["kind"], json!("tool_result"));
+    assert_eq!(tools[0]["name"], json!(null));
+    assert_eq!(tools[0]["output"], json!("8 files changed"));
+
+    // Both parts, in the order the producer published them: serving one would
+    // drop the rest of a reply that was written whole.
+    assert_eq!(
+        turns[0]["assistant"],
+        json!("swept the first half\n\nand the second")
+    );
+
+    // And a bound that is not an instant is served as no bound, exactly as a
+    // report's unreadable bounds are: absent beats a value no client can order.
+    assert_eq!(turns[1]["status"], json!("turn-completed"));
+    assert_eq!(turns[1]["startedAt"], json!(null));
+    assert_eq!(turns[1]["finishedAt"], json!(null));
+    assert_eq!(turns[1]["durationMs"], json!(null));
+    // The accounting beside them is still that turn's own: one unreadable stamp
+    // is not a reason to drop what the producer did measure.
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(0.05));
+}
+
+/// A filter narrows which turns a live transcript lists and never what one of
+/// them said.
+///
+/// The invariant every reading here keeps, on the half of the transcript that
+/// comes from journal records rather than from a report: a reader who excluded a
+/// kind is shown fewer records, and the turns they are still shown say exactly
+/// what they say to a reader who asked for everything. A turn's reply vanishing
+/// because its `turn-message` was filtered out would be this API answering one
+/// question two ways.
+#[test]
+fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
+    let serving = lanes();
+    let transcript = |filter: &str| -> Vec<Value> {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=true&filter={}",
+                fixture_run::LANES_RUN_ID,
+                urlencode(filter)
+            ),
+        )
+        .json()["conversations"]
+            .as_array()
+            .expect("the transcripts")
+            .iter()
+            .find(|document| {
+                document["conversation"]["id"] == json!(fixture_run::WORKING_CONVERSATION_ID)
+            })
+            .expect("the working session's transcript")["conversation"]["turns"]
+            .as_array()
+            .expect("its turns")
+            .clone()
+    };
+
+    let all = transcript("monitor");
+    let listed = transcript(r#"{"exclude":[{"kind":"turn-completed"},{"kind":"turn-message"}]}"#);
+    assert!(listed.len() < all.len(), "the listing narrowed: {listed:?}");
+    assert_eq!(
+        listed[0]["assistant"],
+        json!(fixture_run::WORKING_REPLY),
+        "the reply is what the turn said, not what this reader asked to list"
+    );
+    assert_eq!(listed[0]["usage"], all[0]["usage"]);
+    assert_eq!(listed[0]["durationMs"], all[0]["durationMs"]);
+    assert_eq!(listed[0]["tools"], all[0]["tools"]);
 }

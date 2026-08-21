@@ -59,6 +59,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "member-died": "failure",
   "member-heartbeat": "session",
   "turn-started": "session",
+  "turn-message": "session",
   "turn-completed": "session",
   "turn-activity": "session",
   "turn-interrupted": "recovery",
