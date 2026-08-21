@@ -73,7 +73,7 @@
             "started_at": "2026-08-07T12:00:22.000Z"
           }
         ],
-        "turns": 2,
+        "turns": 1,
         "lint": 0,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
@@ -108,11 +108,11 @@
         "cost_usd": null
       },
       "total": {
-        "input_tokens": 159834,
-        "output_tokens": 1654,
-        "cache_read_tokens": 187430,
-        "cache_write_tokens": 712,
-        "cost_usd": 50.83
+        "input_tokens": 160210,
+        "output_tokens": 1818,
+        "cache_read_tokens": 231481,
+        "cache_write_tokens": 1068,
+        "cost_usd": 53.9
       }
     },
     "timing_quality": "complete",
@@ -134,7 +134,7 @@
       "tool_ms": null,
       "wall_ms": 30000
     },
-    "turns": 5,
+    "turns": 4,
     "lint": 0
   },
   "graph": {
@@ -297,27 +297,44 @@
             "user": "Run the repository's gate once, end to end."
           },
           {
-            "assistant": null,
-            "durationMs": null,
+            "assistant": "It serves the transcript the dispatch really had.",
+            "durationMs": 2600,
             "failureKind": null,
             "finishedAt": null,
             "harness": "oneagentgraph",
             "id": "node-scope-1786925518098-3163646.worker.2",
-            "model": null,
+            "model": "claude-opus-5",
             "reasoning": null,
             "startedAt": null,
-            "status": "turn-completed",
-            "timestamp": "2026-08-07T12:00:05.000Z",
-            "tools": [],
+            "status": "ok",
+            "timestamp": "2026-08-07T12:00:05.500Z",
+            "tools": [
+              {
+                "index": 0,
+                "kind": "tool_call",
+                "name": "Read",
+                "input": {
+                  "file_path": "docs/contract.md"
+                },
+                "output": null
+              },
+              {
+                "index": 1,
+                "kind": "tool_result",
+                "name": null,
+                "input": null,
+                "output": "docs/contract.md: schema 14"
+              }
+            ],
             "unknown": {},
             "usage": {
-              "inputTokens": 159434,
-              "outputTokens": 1564,
-              "cacheReadTokens": 187430,
-              "cacheWriteTokens": 712,
-              "costUsd": 50.72
+              "inputTokens": 376,
+              "outputTokens": 164,
+              "cacheReadTokens": 44051,
+              "cacheWriteTokens": 356,
+              "costUsd": 3.07
             },
-            "user": ""
+            "user": "One more: say what the contract now serves."
           }
         ]
       },
@@ -366,29 +383,6 @@
               "costUsd": 0.11
             },
             "user": "## What\nReview it."
-          },
-          {
-            "assistant": null,
-            "durationMs": null,
-            "failureKind": null,
-            "finishedAt": null,
-            "harness": "oneagentgraph",
-            "id": "node-scope-1786925518102-3163741.judge.1",
-            "model": null,
-            "reasoning": null,
-            "startedAt": null,
-            "status": "turn-completed",
-            "timestamp": "2026-08-07T12:00:25.000Z",
-            "tools": [],
-            "unknown": {},
-            "usage": {
-              "inputTokens": 400,
-              "outputTokens": 90,
-              "cacheReadTokens": 0,
-              "cacheWriteTokens": 0,
-              "costUsd": 0.11
-            },
-            "user": ""
           }
         ]
       },

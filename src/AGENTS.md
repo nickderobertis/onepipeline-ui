@@ -224,6 +224,26 @@ repository does not own is exactly what a second source of truth is made of. It 
 unpinned for the reason `oneagentgraph` is — `onepipeline` resolves it and the
 lock follows.
 
+**The report is the set of turns, not only their content.** `payload::transcript_turns`
+serves a row for every turn the report recorded, whether or not any envelope named
+it: a producer relays a `turn-started` for the turns it brackets and none at all
+for a member whose turns it never bracketed, so a dispatch the journal knows one
+turn of is regularly one the report holds fifty of. Reading the report only where a
+relayed record already stood served all fifty as one empty row — the settled
+dispatch that opens as an empty transcript, which is the whole of what an operator
+sees.
+
+**And where the run holds a report, a relayed record that numbers no turn is not
+one.** `oneagentgraph` 0.2 publishes one `turn-completed` per *dispatch*, beside
+the settlement, carrying the member's whole total; served beside the report's turns
+it is a turn the report does not have, with no prompt, no reply and the dispatch's
+aggregate cost on it — a phantom final turn billed for all of them, which is the
+same complaint in a new place. What it spent is the *run's* usage and is served
+there. Where the run holds **no** report it is the only account of that dispatch
+anything holds, and it is served as the row it always was: that is the whole of the
+exception, and the two readings are chosen by the same precedence everything else
+here is.
+
 Four joins, each the one the obvious alternative gets wrong:
 
 - **A session to its report, by `{stream}.{member}`**, which is how a session id
@@ -277,9 +297,13 @@ builds the live reading only where no readable report was found, which makes the
 precedence a property of that function rather than a habit of its callers.
 
 **Two records describe one turn, and one turn is one row.** Everything that lists,
-counts or numbers a turn goes through `payload::relayed_turns`, so the count beside
-a node, the transcript opened from it and the id the timeline addresses it under
-cannot disagree. The grouping join is the producer's `{turn, role}` and nothing
+counts or numbers a turn goes through one fold — `payload::Transcripts`, built once
+per read and read by the transcript listing, by `payload::turns_of` and by
+`payload::turn_ids` — so the count beside a node, the transcript opened from it and
+the id the timeline addresses it under cannot disagree. It is also the one place a
+stored report is read, because all three of those readings need what is in it. A
+row the report alone holds is addressed by nothing on the timeline: no record
+produced it, and the dispatch span beside it is what opens the transcript. The grouping join is the producer's `{turn, role}` and nothing
 else: `oneagentgraph` 0.2 emits one `turn-completed` per *dispatch*, from
 `settle_report`, carrying the member's whole total rather than any turn's, so
 closing a turn by proximity would bill one turn for all of them.

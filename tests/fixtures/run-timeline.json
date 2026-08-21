@@ -59,14 +59,10 @@
           "node_id": "contract-interface"
         },
         {
-          "id": "node-scope-1786925518098-3163646.worker.2",
+          "id": "e7",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
-          "node_id": "contract-interface",
-          "reference": {
-            "kind": "conversation",
-            "value": "node-scope-1786925518098-3163646.worker"
-          }
+          "node_id": "contract-interface"
         },
         {
           "id": "e8",
@@ -249,14 +245,10 @@
           "node_id": "contract-interface"
         },
         {
-          "id": "node-scope-1786925518098-3163646.worker.2",
+          "id": "e7",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
-          "node_id": "contract-interface",
-          "reference": {
-            "kind": "conversation",
-            "value": "node-scope-1786925518098-3163646.worker"
-          }
+          "node_id": "contract-interface"
         }
       ]
     },
