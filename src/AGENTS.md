@@ -173,13 +173,13 @@ gates this crate's reading against it.
 
 `oneagentgraph` declares its own vocabulary in a public module, so
 `tests/contract.rs` holds this crate's copy of it to that library's types. So
-does `onevcs`, which is easy to miss and was: its `event` module is private, but
-it re-exports `EventKind` from its crate root, so its kinds are reachable and are
-gated the same way. **A private module is not the same as an unreachable type —
-read the crate root before concluding a gate is unavailable.** What genuinely
-has none is a payload *value* neither library declares to a consumer: `onevcs`'s
-pre-push command, its gate verdict word and its non-blocking check conclusions,
-and `oneagentgraph`'s turn number — that last one reconciled instead against the
+does `onevcs`: its `event` module is private, but it re-exports `EventKind` from
+its crate root, so its kinds are reachable and are gated the same way. **A
+private module is not the same as an unreachable type — read the crate root
+before concluding a gate is unavailable.** What genuinely has none is a payload
+*value* neither library declares to a consumer: `onevcs`'s pre-push command, its
+gate verdict word and its non-blocking check conclusions, and
+`oneagentgraph`'s turn number — that last one reconciled instead against the
 public `render::line` that reads it. Where nothing at all is reachable, the
 fixture — written in the records that library emits — is the whole of the gate,
 and the constant says so where it is declared.
