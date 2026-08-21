@@ -2050,7 +2050,6 @@ struct ReportedTurn {
     user: String,
     /// The reply the agent wrote, or `None` for a turn that recorded none.
     assistant: Option<String>,
-    /// The calls it made and what they returned.
     tools: Vec<Value>,
 }
 
@@ -3491,15 +3490,12 @@ enum Reach {
 }
 
 /// One category of a node's sessions, and the interval they ran over between
-/// them.
+/// them: the transport-and-semantic pair that names it, the earliest start
+/// among them, and how far their ends have got.
 struct Category {
-    /// The transport-and-semantic pair that names it.
     pair: (Party, &'static str),
-    /// How many sessions it stands for.
     count: usize,
-    /// The earliest of their starts.
     started: Moment,
-    /// Where their ends have got to.
     reach: Reach,
 }
 

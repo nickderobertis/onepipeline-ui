@@ -543,7 +543,6 @@ fn node_spans(serving: &Serving, node: &str) -> Vec<Value> {
         .clone()
 }
 
-/// The span with one id, from a list of them.
 fn span_named<'a>(spans: &'a [Value], id: &str) -> &'a Value {
     spans
         .iter()

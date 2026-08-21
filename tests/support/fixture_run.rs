@@ -1058,7 +1058,6 @@ pub fn write_lanes(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
-/// The plan that run is converging toward.
 fn lanes_plan() -> Value {
     json!({
         "schema_version": 2,
