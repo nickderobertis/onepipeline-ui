@@ -556,22 +556,34 @@ fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
     let serving = lanes();
     let spans = node_spans(&serving, fixture_run::RETRIED_NODE_ID);
 
-    // The abandoned attempt: it began where its member did and it is over where
-    // the dispatch that superseded it began, because nothing else ever ended it.
+    // The abandoned attempt: it began where the run dispatched it, a second
+    // before its member came up, and it is over where the dispatch that
+    // superseded it began, because nothing else ever ended it.
     let abandoned = span_named(
         &spans,
         &format!("dispatch.{}", fixture_run::RETRIED_FIRST_CONVERSATION_ID),
     );
-    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:02.000Z"));
+    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:01.000Z"));
     assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:01:00.000Z"));
 
-    // And the attempt that did the work, which the run ended itself.
+    // And the attempt that did the work, from the `node-dispatched` that asked
+    // for it, which the run ended itself.
     let ran = span_named(
         &spans,
         &format!("dispatch.{}", fixture_run::RETRIED_SECOND_CONVERSATION_ID),
     );
-    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:01.000Z"));
+    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:00.000Z"));
     assert_eq!(ran["ended_at"], json!("2026-08-07T12:01:30.000Z"));
+
+    // Each is the moment the run asked for that attempt, and not the moment the
+    // session it ran first spoke: two attempts of one node are told apart by the
+    // dispatches that bracket them.
+    for (span, dispatched) in [
+        (abandoned, "2026-08-07T12:00:01.000Z"),
+        (ran, "2026-08-07T12:01:00.000Z"),
+    ] {
+        assert_eq!(span["started_at"], json!(dispatched), "{span}");
+    }
 
     // The two attempts of one node no longer read as having run over one window,
     // which is the whole of what a reader opens a node's timeline to see.
@@ -607,7 +619,7 @@ fn a_lifecycle_nodes_lanes_are_served_one_after_another_as_the_run_ran_them() {
 
     // Eighteen minutes of work, forty seconds of drafting, a minute of
     // publishing — and not three spans over the node's twenty minutes.
-    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
     assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
@@ -706,7 +718,7 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         &spans,
         &format!("rollup.{}.agent.pr-author", fixture_run::DRAFTED_NODE_ID),
     );
-    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
     assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
@@ -717,7 +729,7 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         &format!("rollup.{}.agent.worker", fixture_run::RETRIED_NODE_ID),
     );
     assert_eq!(retried["count"], json!(2));
-    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:02.000Z"));
+    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:01.000Z"));
     assert_eq!(retried["ended_at"], json!("2026-08-07T12:01:30.000Z"));
 
     // Every node of this run dispatched a worker, and every one of them is in the
@@ -756,7 +768,7 @@ fn a_publication_the_run_never_did_is_absent_and_one_it_never_ruled_on_has_no_st
         &working,
         &format!("dispatch.{}", fixture_run::WORKING_CONVERSATION_ID),
     );
-    assert_eq!(session["started_at"], json!("2026-08-07T12:04:02.000Z"));
+    assert_eq!(session["started_at"], json!("2026-08-07T12:04:00.000Z"));
     assert_eq!(session["ended_at"], Value::Null, "{session}");
 
     // The failure a user can cause: the gate refused the branch, so publication

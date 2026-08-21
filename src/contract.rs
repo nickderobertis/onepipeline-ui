@@ -101,7 +101,11 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 14;
 /// dispatch and settlement, so a node dispatched three times served three spans
 /// over one identical interval and a drafting turn that took a minute was drawn
 /// across the four hours of work it drafted for. Each is now bounded by the
-/// attempt that ran it and by the session's own life inside it. A `publication`
+/// attempt that ran it: it opens at that attempt's `node-dispatched` for the
+/// session the attempt ran first and where the run recorded it beginning for one
+/// that joined an attempt already under way, and it closes at the earliest of
+/// the next dispatch, the settlement, the `session-closed` and the session's own
+/// end. A `publication`
 /// opens where publication work begins rather than where the dispatch's worktree
 /// was cut — under 5 it began at the worktree and a node that never published
 /// was drawn publishing for its whole life — and the worktree going away closes

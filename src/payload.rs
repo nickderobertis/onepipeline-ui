@@ -3024,22 +3024,121 @@ impl Moment {
     }
 }
 
+/// Whether one record is a session's own.
+///
+/// A session id is `{stream}.{member}`, so the records that spell it are its own
+/// — which is the one join this contract allows, because `oneagentgraph` stamps
+/// no `session` label on the records that open and close a member.
+fn belongs_to(event: &Envelope, session: &str) -> bool {
+    event
+        .labels
+        .extra
+        .get(graph::MEMBER)
+        .and_then(Value::as_str)
+        .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+}
+
+/// The moments the records matching one test were written, in time order.
+fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) -> Vec<Moment> {
+    let mut found: Vec<Moment> = events
+        .iter()
+        .filter(|(_, event)| matching(event))
+        .filter_map(|(_, event)| Moment::of(event))
+        .collect();
+    found.sort_by_key(|moment| moment.at);
+    found
+}
+
+/// Every `node-dispatched` a node recorded, in time order: one per attempt at it.
+fn dispatches(events: &[(usize, &Envelope)]) -> Vec<Moment> {
+    ordered(events, &|event| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
+    })
+}
+
+/// Where the run said one session began, and where it said nothing, where the
+/// session first spoke.
+fn session_appeared(
+    events: &[(usize, &Envelope)],
+    session: &str,
+    relayed: &[(usize, &Envelope)],
+) -> Option<Moment> {
+    ordered(events, &|event| {
+        event.source == Source::Agentgraph
+            && event.kind.0 == graph::MEMBER_STARTED
+            && belongs_to(event, session)
+    })
+    .into_iter()
+    .next()
+    .or_else(|| {
+        relayed
+            .iter()
+            .filter_map(|(_, event)| Moment::of(event))
+            .min_by_key(|moment| moment.at)
+    })
+}
+
+/// The attempt at a node that ran a session appearing at one moment: the latest
+/// `node-dispatched` at or before it, or the node's first where the session
+/// appeared before any of them.
+fn attempt_of<'a>(dispatched: &'a [Moment], appeared: Option<&Moment>) -> Option<&'a Moment> {
+    appeared
+        .and_then(|appeared| {
+            dispatched
+                .iter()
+                .rev()
+                .find(|moment| moment.at <= appeared.at)
+        })
+        .or_else(|| dispatched.first())
+}
+
+/// Which of an attempt's sessions is served from the `node-dispatched` that
+/// opened it.
+///
+/// The seconds between a run dispatching a node and its first session speaking
+/// are the worktree being cut and the agent being started: that is the session's
+/// own head start rather than a gap between lanes, so the session wears it. An
+/// attempt that ran several sessions hands the head to the first of them alone.
+/// Handing it to each would draw every one of them from the same dispatch, which
+/// is the node's window under another name and the very reading this bracketing
+/// replaces — a lifecycle node's drafting turn would cover the hours its worker
+/// spent before it.
+fn attempt_head<'a>(
+    events: &[(usize, &'a Envelope)],
+    dispatched: &[Moment],
+    attempt: &Moment,
+) -> Option<&'a str> {
+    let mut under: Vec<(&str, i128)> = relayed_sessions(events)
+        .into_iter()
+        .filter_map(|(session, relayed)| {
+            let appeared = session_appeared(events, session, &relayed)?;
+            let its = attempt_of(dispatched, Some(&appeared))?;
+            (its.at == attempt.at).then_some((session, appeared.at))
+        })
+        .collect();
+    // Stable, so two sessions the run recorded as beginning together are ordered
+    // by whichever of them it relayed from first.
+    under.sort_by_key(|(_, appeared)| *appeared);
+    under.first().map(|(session, _)| *session)
+}
+
 /// When one dispatched session ran, inside the attempt of its node that ran it.
 ///
 /// A node's own window is the window of *everything* it ran, and so is nobody's
 /// answer to what it was doing at a given moment: the engine re-asks a dispatch
 /// that produced nothing, and a lifecycle node runs several members in sequence
-/// on one worktree. Two readings bound one session and the tighter of each is
-/// taken, so a span is never wider than either.
+/// on one worktree.
 ///
-/// - **The attempt that ran it** opened at the latest `node-dispatched` at or
-///   before the session first appeared, and it is over at the earliest of the
-///   next `node-dispatched`, the `node-settled` that followed it, and the
-///   `session-closed` that took its worktree away.
-/// - **The session's own life**, where `oneagentgraph` recorded one: the
-///   `member-started` that opened it and the `member-settled` or `member-died`
-///   that ended it, joined to the session the one way this contract allows — a
-///   session id is `{stream}.{member}`, so the records that spell it are its own.
+/// - **It opens at the attempt that ran it** — the latest `node-dispatched` at or
+///   before the session first appeared — for the session that attempt ran first,
+///   and where the run recorded it beginning for a session that joined an attempt
+///   already under way. See [`attempt_head`] for why the head belongs to one of
+///   them rather than to all.
+/// - **It closes at the earliest of** the next `node-dispatched`, the
+///   `node-settled` that followed it, the `session-closed` that took the worktree
+///   away, and the `member-settled` or `member-died` that ended the session
+///   itself, none of which may close it before the last thing it said.
 ///
 /// A session nothing has ended yet is returned open, and is served that way: a
 /// run that has not said when something stopped has not stopped it.
@@ -3048,50 +3147,21 @@ fn session_interval(
     session: &str,
     relayed: &[(usize, &Envelope)],
 ) -> (Moment, Option<Moment>) {
-    // The session's own records, which carry no `session` label and need none.
-    let its_own = |event: &Envelope| {
-        event
-            .labels
-            .extra
-            .get(graph::MEMBER)
-            .and_then(Value::as_str)
-            .is_some_and(|member| format!("{}.{member}", event.stream) == session)
-    };
-    let moments = |matching: &dyn Fn(&Envelope) -> bool| -> Vec<Moment> {
-        let mut found: Vec<Moment> = events
-            .iter()
-            .filter(|(_, event)| matching(event))
-            .filter_map(|(_, event)| Moment::of(event))
-            .collect();
-        found.sort_by_key(|moment| moment.at);
-        found
-    };
-    let pipeline = |kind: PipelineKind| {
-        move |event: &Envelope| {
-            event.source == Source::Pipeline && PipelineKind::from_wire(&event.kind) == Some(kind)
-        }
-    };
-    let dispatched = moments(&pipeline(PipelineKind::NodeDispatched));
-    let began = moments(&|event| {
-        event.source == Source::Agentgraph
-            && event.kind.0 == graph::MEMBER_STARTED
-            && its_own(event)
-    });
-    // Where the run said the session began, and where it said nothing, where the
-    // session first spoke.
-    let appeared = began.first().map(|moment| moment.at).or_else(|| {
-        relayed
-            .iter()
-            .filter_map(|(_, event)| millis_of(&event.ts))
-            .min()
-    });
-    let attempt = appeared
-        .and_then(|appeared| dispatched.iter().rev().find(|moment| moment.at <= appeared))
-        .or_else(|| dispatched.first());
-    let started = [attempt.cloned(), began.first().cloned()]
-        .into_iter()
-        .flatten()
-        .max_by_key(|moment| moment.at)
+    let dispatched = dispatches(events);
+    let appeared = session_appeared(events, session, relayed);
+    let started = attempt_of(&dispatched, appeared.as_ref())
+        // Never after the session's own first word: a node that relayed
+        // something before it was ever dispatched has no attempt to hand this
+        // one, and a span that does not contain its own events is one no pointer
+        // into it can reach.
+        .filter(|dispatch| {
+            appeared
+                .as_ref()
+                .is_none_or(|appeared| dispatch.at <= appeared.at)
+        })
+        .filter(|dispatch| attempt_head(events, &dispatched, dispatch) == Some(session))
+        .or(appeared.as_ref())
+        .cloned()
         .or_else(|| relayed.first().and_then(|(_, event)| Moment::of(event)))
         .unwrap_or_else(|| Moment {
             at: 0,
@@ -3113,14 +3183,17 @@ fn session_interval(
     };
     let ended = [
         after(dispatched),
-        after(moments(&pipeline(PipelineKind::NodeSettled))),
-        after(moments(&|event| {
+        after(ordered(events, &|event| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+        })),
+        after(ordered(events, &|event| {
             event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
         })),
-        after(moments(&|event| {
+        after(ordered(events, &|event| {
             event.source == Source::Agentgraph
                 && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
-                && its_own(event)
+                && belongs_to(event, session)
         })),
     ]
     .into_iter()
