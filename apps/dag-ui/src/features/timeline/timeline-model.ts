@@ -11,11 +11,8 @@ import type {
   TimelineSpanKind,
 } from "@onepipeline-ui/dag-model";
 import { createElement } from "react";
-import {
-  type EventCategory,
-  EventCategoryIcon,
-  eventCategory,
-} from "./event-category";
+import { type EventCategory, eventCategory } from "./event-category";
+import { MarkerReading } from "./item-reading";
 
 /**
  * One node's slice of the served run timeline, as rows a rail can render.
@@ -370,8 +367,10 @@ export function nodeTimelineV2(
             status: row.status,
             // The one place the plot could say what a record *is*. Left unset, the
             // rail draws every marker as the same pin, and a reader scanning for the
-            // one record that matters has to open each of them to find it.
-            icon: createElement(EventCategoryIcon, { category: row.category }),
+            // one record that matters has to open each of them to find it — and a
+            // glyph alone says only which of eleven kinds of thing it was, so it
+            // carries the record's own reading for a hover to answer with.
+            icon: createElement(MarkerReading, { row }),
           },
         ]
       : [],

@@ -18,6 +18,11 @@ use std::fs;
 use std::path::Path;
 
 use oneharness_core::io::history;
+// Under the name of the library that writes them. Three vocabularies here are
+// spelled alike and mean different things: `judge::Role` is who wrote a message,
+// `judge::TelemetryRole` is which side ran, and this module's `Party` is what a
+// member is to the pipeline.
+use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::plan::{Node, Plan};
 use onepipeline::views::{liveness_word, RunView};
@@ -92,14 +97,36 @@ impl Party {
 // llmlint: ignore[invalid_states_unrepresentable] this is a *filter* over what a run recorded, not a domain the crate reasons in: a persona the wire's vocabulary has no member for must be dropped rather than parsed, and an enum would have to be turned straight back into these strings to serve them.
 const AGENT_ROLES: [&str; 5] = ["orchestrator", "worker", "judge", "check-in", "pr-author"];
 
+/// Which of those roles each member a run declares is read as.
+///
+/// The observing member is `monitor` and is served in the `orchestrator` lane
+/// deliberately: it is the same lane a reader watches the run's own driving from,
+/// and `agentRoleSchema` is a closed vocabulary a client switches on
+/// exhaustively — so a word that means a lane the client already has is mapped
+/// onto it rather than added beside it.
+// llmlint: ignore[invalid_states_unrepresentable] the same reason as the array above: this maps one wire vocabulary onto another, and both halves are strings this crate reads off a record and writes back onto the wire.
+const ROLE_MEMBERS: [(&str, &str); 5] = [
+    ("worker", "worker"),
+    ("judge", "judge"),
+    ("pr-author", "pr-author"),
+    ("check-in", "check-in"),
+    ("monitor", "orchestrator"),
+];
+
 /// The kinds `onevcs` relays, as the wire strings that library writes.
 ///
 /// The vocabulary is the sibling's rather than this crate's, so it is matched as
 /// the strings the sibling emits rather than folded into an enum here — the same
 /// reason the SDK keeps a relayed `EventKind` a wire string. What each payload
 /// carries is `onevcs`'s own declaration, quoted where it is read.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onevcs` declares this vocabulary in a private module in every published version, so there is no type to generate from and nothing to compare against: the wire is the only declaration a consumer can reach. `tests/support/fixture_run.rs` writes these records as that library emits them and the goldens pin what this crate makes of them, which is the whole of the gate available. The sibling that *does* publish its own — `oneagentgraph` — is gated in `tests/contract.rs`.
-mod vcs {
+///
+/// That library's `event` module is private, but it re-exports `EventKind` from
+/// its crate root, so the kinds below *are* reachable as a declaration and
+/// `tests/contract.rs` holds this copy of them to it — a rename there fails
+/// there, as it does for the `oneagentgraph` vocabulary beside this one. The
+/// three payload *values* at the end of the module are the exception, and each
+/// says so where it is declared.
+pub mod vcs {
     /// `{token, identity, branch, base, worktree, clone, …}`.
     pub const SESSION_OPENED: &str = "session-opened";
     /// `{identity, elapsed, queue_position}` — one wait on one identity's lock.
@@ -121,28 +148,44 @@ mod vcs {
     pub const COMMIT_PRESERVED: &str = "commit-preserved";
     /// `{branch, base, attempts}` — the bounded resolve-and-requeue gave up.
     pub const SYNC_CONFLICT: &str = "sync-conflict";
+    /// The worktree a dispatch was given has been taken away again, which is the
+    /// last thing that can be said about what it was doing on it.
+    pub const SESSION_CLOSED: &str = "session-closed";
+    /// `{identity, …}` — the clone this library keeps was brought up to date,
+    /// which it does both to cut a worktree and to publish from one.
+    pub const FETCH: &str = "fetch";
+
+    /// The relayed kinds that do not, on their own, say a publication began.
+    ///
+    /// A node that relayed nothing but these published nothing. Why the list is
+    /// negative, and why a [`FETCH`] is on it, is in `src/AGENTS.md`.
+    pub const SILENT_ON_PUBLICATION: [&str; 3] = [SESSION_OPENED, FETCH, SESSION_CLOSED];
 
     /// The command `onevcs` records for the gate that is git's own hook.
     ///
     /// A `pre-push` gate's verdict arrives as push output and nowhere else, so
     /// that library writes it under this exact command rather than a path; it is
     /// the only record of the hook having run at all.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] unlike the kinds above, this is a payload *value* that library builds inline in a private `publish` module and re-exports nothing of, so there is no declaration a consumer can reach and nothing to reconcile a copy against. `tests/support/fixture_run.rs` writes the record as that library emits it and the goldens pin what this crate makes of it, which is the whole of the gate available.
     pub const PRE_PUSH_COMMAND: &str = "the repository's pre-push hook";
 
     /// The verdict word a gate that passed is recorded with.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason as the command above: `onevcs` renders this word from a private `gate::Ruling` it re-exports nothing of, so the wire is the only declaration reachable and the goldens are the gate available.
     pub const GATE_PASSED: &str = "pass";
 
     /// The conclusions `onevcs` reads as not blocking a merge, in its own words.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason again: this is a match arm in that library's private `host` module rather than a type, so nothing declares it to a consumer and the goldens are the gate available.
     pub const GREEN_CONCLUSIONS: [&str; 3] = ["success", "skipped", "neutral"];
 }
 
-/// The kinds `oneagentgraph` relays, and the keys its own `Usage` is written
+/// The kinds `oneagentgraph` relays, and the keys the usage it relays is written
 /// with, on the same terms as the `onevcs` vocabulary beside it: matched as the
 /// wire strings that library writes, because the vocabulary is the sibling's.
 ///
-/// Unlike `onevcs`, that library declares this vocabulary in a public module, so
-/// `tests/contract.rs` holds every name here to the sibling's own type rather
-/// than to a second reading of the wire.
+/// Unlike `onevcs`, that library declares most of this vocabulary in a public
+/// module, so `tests/contract.rs` holds those names here to the sibling's own
+/// type rather than to a second reading of the wire. Two of them it does not,
+/// and each says so where it is declared.
 pub mod graph {
     /// `{kind, name, detail, truncated}` — one bounded tool summary, published
     /// from inside a turn rather than after it.
@@ -152,25 +195,37 @@ pub mod graph {
     /// Where that usage sits on the payload.
     pub const USAGE: &str = "usage";
     /// Input tokens.
-    pub const TOKENS_IN: &str = "tokens_in";
+    ///
+    /// The five keys here are `onejudge::Usage`'s, not `oneagentgraph`'s own
+    /// `event::Usage`, which nothing writes — see `src/AGENTS.md`.
+    /// `tests/contract.rs` holds them to the type that writes them.
+    pub const INPUT_TOKENS: &str = "input_tokens";
     /// Output tokens.
-    pub const TOKENS_OUT: &str = "tokens_out";
+    pub const OUTPUT_TOKENS: &str = "output_tokens";
     /// Tokens read from the prompt cache.
-    pub const CACHE_READ: &str = "cache_read";
+    pub const CACHE_READ_TOKENS: &str = "cache_read_tokens";
     /// Tokens written to the prompt cache.
-    pub const CACHE_WRITE: &str = "cache_write";
+    pub const CACHE_WRITE_TOKENS: &str = "cache_write_tokens";
     /// What the turn cost.
-    pub const COST: &str = "cost";
-    /// How long the turn took, in seconds.
-    pub const DURATION: &str = "duration";
+    pub const COST_USD: &str = "cost_usd";
 
     /// A turn began on one side of a member's conversation.
     pub const TURN_STARTED: &str = "turn-started";
+    /// The producer's own 1-based number for the turn a [`TURN_STARTED`] opens.
+    ///
+    /// The one name in this module with no type behind it: `oneagentgraph` builds
+    /// this payload inline, so `tests/contract.rs` holds the copy to the public
+    /// `render::line` that reads it instead. Why a turn is joined by this number
+    /// rather than by position is in `src/AGENTS.md`.
+    pub const TURN: &str = "turn";
     /// `{member, delivered, input_bytes, reason}` — an operator asked a member's
     /// in-flight turn to do something else. Published for every interrupt,
     /// delivered or not, which is what makes "the lever was pulled and nothing
     /// happened" a thing a reader of the run can see.
     pub const TURN_INTERRUPTED: &str = "turn-interrupted";
+    /// A member began: the first record of the session it is about to run, and
+    /// the one moment a session has that its own messages cannot supply.
+    pub const MEMBER_STARTED: &str = "member-started";
     /// A member's process died: whatever it was doing, it is not doing it now.
     pub const MEMBER_DIED: &str = "member-died";
     /// A member settled, which ends its turns.
@@ -590,30 +645,18 @@ fn graph_complete(view: &RunView) -> bool {
 /// What one node's own records *measured*, as against what the run's clock shows.
 ///
 /// The wall clock is the sibling's to attribute — [`crate::telemetry`] reads the
-/// document it aggregates — and these are the measurements no fold of that clock
-/// can produce: the time inside a model, which each turn reports for itself, and
-/// how much of a node's work each party did. Every field is `None` until a record
-/// fills it, and `None` is not zero: a run whose judge never reported a turn has
-/// no judge time, where one whose judge answered instantly has zero of it. Only
-/// the second is a measurement.
+/// document it aggregates — and this is what no fold of that clock can produce.
+/// Every field is `None` until a record fills it, and `None` is not zero: a lane
+/// nothing measured is a different fact from one measured at zero, and only the
+/// second is a measurement.
 #[derive(Debug, Default, Clone, Copy)]
 struct Measured {
-    /// Turn time, per party, from `turn-completed`'s own `usage.duration`.
-    agent_model_ms: Option<u64>,
-    judge_model_ms: Option<u64>,
-    llmlint_model_ms: Option<u64>,
     /// Time inside a tool call. `turn-activity` reports *what* a turn did and
     /// carries no interval, so nothing measures this yet.
     tool_ms: Option<u64>,
     /// How many relayed records the lint party produced, so a party that
     /// recorded work with no timing on it is still visible as having run.
     lint_records: u64,
-}
-
-/// Add one measured span to a slot, which is what turns it from unmeasured into
-/// a measurement of zero or more.
-fn measure(slot: &mut Option<u64>, ms: u64) {
-    *slot = Some(slot.unwrap_or(0) + ms);
 }
 
 /// Seconds a record wrote as a float, as whole milliseconds.
@@ -635,25 +678,8 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
         if event.source != Source::Agentgraph || event.kind.0 == graph::TURN_ACTIVITY {
             continue;
         }
-        let party = transport_role(event);
-        if party == Party::Llmlint {
+        if transport_role(event) == Party::Llmlint {
             totals.lint_records += 1;
-        }
-        if event.kind.0 != graph::TURN_COMPLETED {
-            continue;
-        }
-        let Some(ms) = seconds_as_ms(
-            event
-                .payload
-                .get(graph::USAGE)
-                .and_then(|usage| usage.get(graph::DURATION)),
-        ) else {
-            continue;
-        };
-        match party {
-            Party::Judge => measure(&mut totals.judge_model_ms, ms),
-            Party::Llmlint => measure(&mut totals.llmlint_model_ms, ms),
-            Party::Agent => measure(&mut totals.agent_model_ms, ms),
         }
     }
     totals
@@ -667,11 +693,12 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
 /// document rather than folding the clock again, so the two readings of where a
 /// run's time went cannot come apart.
 ///
-/// What it adds is the one thing that document does not carry: the time inside a
-/// model, which each turn reports for itself. And what it never adds is a zero —
-/// an unmeasured lane is served `null`, here and in the fractions, because a
-/// zero is a measurement and reading one for an absence is how a run comes to
-/// look cheaper than it was.
+/// The rest of the lanes the wire carries are ones no producer in this stack
+/// measures — the per-party model clocks [`model_lanes`] names, the time inside
+/// a tool call, the run's idle orchestration — and every one of them is served
+/// `null`, here and in the fractions, rather than as a zero. A zero is a
+/// measurement, and reading one for an absence is how a run comes to look
+/// cheaper than it was.
 fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
     let wall = document.map(|document| document.wall_ms);
     let bucket = |name| document.and_then(|document| document.bucket(name));
@@ -687,43 +714,66 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
         }),
         _ => None,
     };
-    json!({
-        "agent_seconds": seconds(bucket(BucketName::Agent)),
-        "judge_seconds": seconds(bucket(BucketName::Judge)),
-        "llmlint_seconds": seconds(bucket(BucketName::Llmlint)),
-        "gate_seconds": seconds(bucket(BucketName::Gate)),
-        "publication_wait_seconds": seconds(bucket(BucketName::PublicationWait)),
-        "lock_wait_seconds": seconds(bucket(BucketName::LockWait)),
-        "setup_seconds": seconds(bucket(BucketName::Setup)),
-        "scheduling_seconds": seconds(bucket(BucketName::Scheduling)),
-        "wall_seconds": seconds(wall),
-        "agent_model_ms": measured.agent_model_ms,
-        "judge_model_ms": measured.judge_model_ms,
-        "llmlint_model_ms": measured.llmlint_model_ms,
-        "tool_ms": measured.tool_ms,
-        // The wire keeps a lane for the run waiting on a planner or a person,
-        // and the sibling's vocabulary folds both into `scheduling`. Nothing
-        // measures the two apart, so this is absent rather than a share of a
-        // bucket that is not it.
-        "idle_orchestration_ms": Value::Null,
-        // What the wall clock has no measured home for. Computed from the
-        // document's own invariant — its measured buckets sum exactly to the
-        // whole — so an unmeasured bucket grows this rather than reading as a
-        // measured nothing.
-        "unattributed_ms": document
-            .map(|document| document.wall_ms.saturating_sub(document.measured_ms())),
-        "wall_ms": wall,
-        "fractions": {
-            "agent_model": fraction(measured.agent_model_ms),
-            "judge_model": fraction(measured.judge_model_ms),
-            "llmlint_model": fraction(measured.llmlint_model_ms),
-            "tool": fraction(measured.tool_ms),
-            "idle_orchestration": Value::Null,
-            "lock_wait": fraction(bucket(BucketName::LockWait)),
-            "setup": fraction(bucket(BucketName::Setup)),
-            "scheduling": fraction(bucket(BucketName::Scheduling)),
-        },
-    })
+    let mut timing = Map::new();
+    for (lane, name) in [
+        ("agent_seconds", BucketName::Agent),
+        ("judge_seconds", BucketName::Judge),
+        ("llmlint_seconds", BucketName::Llmlint),
+        ("gate_seconds", BucketName::Gate),
+        ("publication_wait_seconds", BucketName::PublicationWait),
+        ("lock_wait_seconds", BucketName::LockWait),
+        ("setup_seconds", BucketName::Setup),
+        ("scheduling_seconds", BucketName::Scheduling),
+    ] {
+        timing.insert(lane.into(), json!(seconds(bucket(name))));
+    }
+    timing.insert("wall_seconds".into(), json!(seconds(wall)));
+    timing.extend(model_lanes("_ms", &Value::Null));
+    timing.insert("tool_ms".into(), json!(measured.tool_ms));
+    // The wire keeps a lane for the run waiting on a planner or a person, and the
+    // sibling's vocabulary folds both into `scheduling`. Nothing measures the two
+    // apart, so this is absent rather than a share of a bucket that is not it.
+    timing.insert("idle_orchestration_ms".into(), Value::Null);
+    // What the wall clock has no measured home for. Computed from the document's
+    // own invariant — its measured buckets sum exactly to the whole — so an
+    // unmeasured bucket grows this rather than reading as a measured nothing.
+    timing.insert(
+        "unattributed_ms".into(),
+        json!(document.map(|document| document.wall_ms.saturating_sub(document.measured_ms()))),
+    );
+    timing.insert("wall_ms".into(), json!(wall));
+
+    let mut fractions = Map::new();
+    fractions.extend(model_lanes("", &Value::Null));
+    fractions.insert("tool".into(), json!(fraction(measured.tool_ms)));
+    fractions.insert("idle_orchestration".into(), Value::Null);
+    for (lane, name) in [
+        ("lock_wait", BucketName::LockWait),
+        ("setup", BucketName::Setup),
+        ("scheduling", BucketName::Scheduling),
+    ] {
+        fractions.insert(lane.into(), json!(fraction(bucket(name))));
+    }
+    timing.insert("fractions".into(), Value::Object(fractions));
+    Value::Object(timing)
+}
+
+/// The wire's three per-party model-time lanes, each served as unmeasured.
+///
+/// Nothing in this stack measures how long a party spent inside a model, and
+/// `src/AGENTS.md` lists that gap with the upstream change that would fill it —
+/// including why a turn's own elapsed time may not be folded into these.
+///
+/// One function because the same three lanes are named four times — the timings,
+/// their fractions, the presence flags beside them, and the node-level rollup —
+/// and four copies of that naming are four chances for two of them to disagree.
+/// `suffix` is what the wire appends to the lane: `_ms` for a measurement,
+/// nothing for a fraction of the clock.
+fn model_lanes(suffix: &str, unmeasured: &Value) -> Vec<(String, Value)> {
+    ["agent", "judge", "llmlint"]
+        .into_iter()
+        .map(|party| (format!("{party}_model{suffix}"), unmeasured.clone()))
+        .collect()
 }
 
 /// What each party spent, as the sibling's document reports it.
@@ -760,12 +810,9 @@ fn usage(document: Option<&RunTelemetry>) -> Value {
 /// conforming client reads either, and a producer that measures a real zero says
 /// so here rather than being indistinguishable from one that measured nothing.
 fn timing_presence(measured: &Measured) -> Value {
-    json!({
-        "agent_model_ms": measured.agent_model_ms.is_some(),
-        "judge_model_ms": measured.judge_model_ms.is_some(),
-        "llmlint_model_ms": measured.llmlint_model_ms.is_some(),
-        "tool_ms": measured.tool_ms.is_some(),
-    })
+    let mut presence: Map<String, Value> = model_lanes("_ms", &json!(false)).into_iter().collect();
+    presence.insert("tool_ms".into(), json!(measured.tool_ms.is_some()));
+    Value::Object(presence)
 }
 
 /// The sessions the merged event store shows doing one node's work.
@@ -802,8 +849,7 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
                 "role".into(),
                 json!(relayed_transport_role(events.iter().copied()).as_str()),
             );
-            if let Some(role) = agent_role(first.and_then(|event| event.labels.persona.as_deref()))
-            {
+            if let Some(role) = first.and_then(event_agent_role) {
                 link.insert("agent_role".into(), json!(role));
             }
             if let Some(event) = first {
@@ -814,10 +860,44 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
         .collect()
 }
 
-/// The semantic role a persona names, when it names one the client knows.
-fn agent_role(persona: Option<&str>) -> Option<&'static str> {
-    let persona = persona?;
-    AGENT_ROLES.into_iter().find(|role| *role == persona)
+/// The semantic role one record's session ran under.
+fn event_agent_role(event: &Envelope) -> Option<&'static str> {
+    agent_role(
+        event
+            .labels
+            .extra
+            .get(graph::MEMBER)
+            .and_then(Value::as_str),
+        event.labels.persona.as_deref(),
+    )
+}
+
+/// The semantic role a run recorded for a session, from the member it named it
+/// and — only where it named none — from the persona it ran under.
+///
+/// The member is the reading that survives a host naming its personas: a persona
+/// is a *style* a host invented, so `engineer` and `docs-writer` are the ordinary
+/// worker under two names, and reading a role off one drops every session a host
+/// did not happen to name after a role. The member is the run's own word for what
+/// the session *was*.
+///
+/// So a stamped member decides the reading whether or not this crate has a word
+/// for it, and the persona beside it is never consulted: a record naming a member
+/// outside [`ROLE_MEMBERS`] has said what the session was and said something this
+/// vocabulary cannot carry, while a persona that happens to read like a role — the
+/// literal word `pr-author` — would answer with a *style* over the run's own word
+/// for it. The persona is the reading for a record that stamped no member at all,
+/// which is what a `node-dispatched` is.
+fn agent_role(member: Option<&str>, persona: Option<&str>) -> Option<&'static str> {
+    match member {
+        Some(member) => ROLE_MEMBERS
+            .into_iter()
+            .find_map(|(named, role)| (named == member).then_some(role)),
+        None => {
+            let persona = persona?;
+            AGENT_ROLES.into_iter().find(|role| *role == persona)
+        }
+    }
 }
 
 /// The statuses that mean this node's own work ran, or was cut short, without
@@ -866,10 +946,18 @@ fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'st
 /// would put a phantom turn in the transcript of every node anybody corrected.
 /// It reaches a reader as the node's own timeline record instead, carrying the
 /// redirection — see [`redirection`].
+///
+/// And a member's own lifecycle — its settlement, its death — is not a turn
+/// either, which is a fact about the wire rather than a judgement: `oneagentgraph`
+/// stamps a `session` label on the `turn-*` kinds and on no other, so a record
+/// that is not one of those can never *be* a transcript turn. Admitting one here
+/// counted a turn no transcript could show, and the count beside a node then
+/// disagreed with the transcript a reader opens from it by one per settled
+/// member. A settlement still reaches a reader — as the node's own evidence, and
+/// as the report the transcript beside it is assembled from.
 fn is_turn_record(event: &Envelope) -> bool {
     event.source == Source::Agentgraph
-        && event.kind.0 != graph::TURN_ACTIVITY
-        && event.kind.0 != graph::TURN_INTERRUPTED
+        && (event.kind.0 == graph::TURN_STARTED || event.kind.0 == graph::TURN_COMPLETED)
 }
 
 /// How many turns a node — or the whole run — has had relayed to it.
@@ -877,6 +965,10 @@ fn is_turn_record(event: &Envelope) -> bool {
 /// One relayed turn envelope is one turn: that is what [`conversations`] serves
 /// as a transcript turn, so the count beside a node and the transcript a reader
 /// opens from it cannot disagree.
+///
+/// It counts what was *relayed*, so a judge conversation adds nothing: folding
+/// its report-bounded turns in would put the count one dispatch ahead of every
+/// transcript a reader opens from the node.
 fn turns_of(view: &RunView, node: Option<&str>) -> usize {
     view.events
         .iter()
@@ -958,16 +1050,13 @@ fn run_telemetry(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     run.insert("sources".into(), json!(["events.jsonl", "launch.json"]));
     // The same discipline one level down: a party that reported no turn at a
     // node has no time there, which is not zero of it.
-    run.insert(
-        "node_work_ms".into(),
-        json!({
-            "agent_model_ms": at_nodes.agent_model_ms,
-            "judge_model_ms": at_nodes.judge_model_ms,
-            "llmlint_model_ms": at_nodes.llmlint_model_ms,
-            "tool_ms": at_nodes.tool_ms,
-            "wall_ms": telemetry.map(|document| document.wall_ms),
-        }),
+    let mut work: Map<String, Value> = model_lanes("_ms", &Value::Null).into_iter().collect();
+    work.insert("tool_ms".into(), json!(at_nodes.tool_ms));
+    work.insert(
+        "wall_ms".into(),
+        json!(telemetry.map(|document| document.wall_ms)),
     );
+    run.insert("node_work_ms".into(), Value::Object(work));
     run.insert("turns".into(), json!(turns_of(view, None)));
     run.insert("lint".into(), json!(measurements.lint_records));
     Value::Object(run)
@@ -1928,18 +2017,229 @@ fn conversations_under(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     }
     order
         .into_iter()
-        .filter_map(|session| {
-            let events = grouped.get(&session)?;
-            Some(conversation_document(view, &session, events))
+        .flat_map(|session| {
+            let Some(events) = grouped.get(&session) else {
+                return Vec::new();
+            };
+            // Read once, used twice: the report fills the agent's transcript and
+            // is the whole of the judge's.
+            let settlement = settlement_of(view, &session);
+            let reported = settlement.and_then(|settlement| read_report(view, settlement));
+            let mut served = vec![conversation_document(
+                view,
+                &session,
+                events,
+                reported.as_ref(),
+            )];
+            served.extend(
+                settlement
+                    .zip(reported.as_ref())
+                    .and_then(|(settlement, report)| {
+                        judge_conversation(view, &session, events, settlement, report)
+                    }),
+            );
+            served
         })
         .collect()
+}
+
+/// One turn as the settled member's stored report recorded it.
+///
+/// A turn is a prompt and the reply to it: the report's transcript alternates a
+/// simulated user's message with the agent's, and its 1-based position is the
+/// counter `telemetry.sessions` and `telemetry.attribution` both key on.
+struct ReportedTurn {
+    user: String,
+    assistant: Option<String>,
+    tools: Vec<Value>,
+}
+
+/// The report one settled member stored, read from the copy the run keeps.
+///
+/// Joined by `{stream}.{member}` and located through the SDK's own
+/// [`RunPaths::report_for`], which is the one way `docs/contract.md` allows.
+/// `None` where the report says nothing — see `src/AGENTS.md` for that join and
+/// for what an absent report leaves a transcript as.
+///
+/// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
+fn stored_report(view: &RunView, session: &str) -> Option<judge::Report> {
+    read_report(view, settlement_of(view, session)?)
+}
+
+/// The settlement one session's member left, by the `{stream}.{member}` id that
+/// spells the session.
+///
+/// Returned rather than consumed here because it is also the moment the report
+/// was written, which is the only stamp [`judge_conclusion`] can carry.
+fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
+    view.events.iter().find(|event| {
+        event.source == Source::Agentgraph
+            && event.kind.0 == graph::MEMBER_SETTLED
+            && event
+                .labels
+                .extra
+                .get(graph::MEMBER)
+                .and_then(Value::as_str)
+                .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+    })
+}
+
+/// The report one settlement stored, refused unless the contract it was written
+/// under is one this binary links and the bounds it carries are ones this crate
+/// can order.
+///
+/// **Do not tighten this to equality.** onejudge bumps its version for an added
+/// field, so every report stored before this binary was built is older than it
+/// and reads perfectly well; only a document *ahead* of the linked contract may
+/// mean something else by the fields the two share.
+///
+/// This is the trust boundary for a report: another process wrote it, and every
+/// reading below takes what it says as fact. So the values are checked here and
+/// nowhere else — a caller holding a `judge::Report` is holding one whose stamps
+/// parse.
+fn read_report(view: &RunView, settlement: &Envelope) -> Option<judge::Report> {
+    let bytes = fs::read(report_path(view, settlement)).ok()?;
+    let report: judge::Report = serde_json::from_slice(&bytes).ok()?;
+    (report.schema_version <= judge::SCHEMA_VERSION && well_stamped(&report)).then_some(report)
+}
+
+/// Whether every bound a report's session rows carry is a stamp this crate can
+/// order.
+///
+/// The version above vouches for the document's *shape* and for nothing in it: a
+/// `SessionLink`'s bounds are `String`s in onejudge's contract, so a report that
+/// deserializes and versions cleanly can still spell an instant as anything at
+/// all. This crate serves them as a turn's `startedAt`, `finishedAt` and
+/// `timestamp`, and folds them into the interval the judge's lane is drawn over
+/// — so a value that is not a timestamp becomes a duration no client can compute
+/// and an ordering it renders wrong, which is worse than the absence the wire
+/// already has a spelling for.
+///
+/// Refused whole rather than row by row, and for both sides' rows rather than the
+/// ones a given reading happens to join: the rows are one document written by one
+/// process, and a report half of whose clock is unreadable is not a clock. An
+/// unobserved finish is `null` here and stays a readable report — that is the
+/// contract's own way of saying a bound was never seen, and not a malformed one.
+fn well_stamped(report: &judge::Report) -> bool {
+    let Some(telemetry) = report.telemetry.as_ref() else {
+        return true;
+    };
+    telemetry.sessions.iter().all(|link| {
+        millis_of(&link.started_at).is_some()
+            && link
+                .finished_at
+                .as_deref()
+                .is_none_or(|finished| millis_of(finished).is_some())
+    })
+}
+
+/// The turns one report's transcript recorded, in the producer's own order.
+///
+/// Keyed on the user's messages rather than the agent's, so a prompt whose reply
+/// never came is still a turn — with the prompt it gave and no reply — instead of
+/// vanishing from the transcript. A `system` message is neither party's turn and
+/// opens none.
+fn reported_turns(report: &judge::Report) -> Vec<ReportedTurn> {
+    let mut turns: Vec<ReportedTurn> = Vec::new();
+    for message in &report.transcript.messages {
+        match message.role {
+            judge::Role::User => turns.push(ReportedTurn {
+                user: message.content.clone(),
+                assistant: None,
+                tools: reported_tools(message),
+            }),
+            judge::Role::Assistant => {
+                // A reply with no prompt before it is still the agent's turn; it
+                // opens one rather than joining the turn before it, which was
+                // answered already.
+                let open = match turns.last_mut() {
+                    Some(open) if open.assistant.is_none() => open,
+                    _ => {
+                        turns.push(ReportedTurn {
+                            user: String::new(),
+                            assistant: None,
+                            tools: Vec::new(),
+                        });
+                        turns.last_mut().expect("the turn just pushed")
+                    }
+                };
+                open.assistant = Some(message.content.clone());
+                open.tools.extend(reported_tools(message));
+            }
+            judge::Role::System => {}
+        }
+    }
+    turns
+}
+
+fn turn_of(turns: &[ReportedTurn], turn: u64) -> Option<&ReportedTurn> {
+    turns.get(usize::try_from(turn).ok()?.checked_sub(1)?)
+}
+
+/// The invocation one turn actually ran, out of the chain of identities its
+/// attribution records.
+///
+/// This is where a turn's own usage and a turn's own elapsed time are, for either
+/// side — the report's top-level `usage` is the whole dispatch's total over both
+/// of them. The candidates beside the one that ran are identities the chain fell
+/// through, and none of them happened.
+fn ran_candidate(
+    report: &judge::Report,
+    role: judge::TelemetryRole,
+    turn: u32,
+) -> Option<&judge::CandidateAttempt> {
+    attributed(report, role, turn)?
+        .candidates
+        .iter()
+        .find(|candidate| candidate.ran)
+}
+
+/// The chain of identities one side's `turn` invocation recorded, or `None` where
+/// the report attributes none to it.
+///
+/// The role is asked for rather than assumed: a report's `telemetry` keys both
+/// its sessions and its attribution on the *pair* of a side and a turn number,
+/// and the two sides number their turns independently — so a lookup by index
+/// alone reads one side's invocation as the other's.
+fn attributed(
+    report: &judge::Report,
+    role: judge::TelemetryRole,
+    turn: u32,
+) -> Option<&judge::HarnessAttribution> {
+    report
+        .telemetry
+        .as_ref()?
+        .attribution
+        .iter()
+        .find(|attribution| attribution.role == role && attribution.turn_index == turn)
+}
+
+/// The wall-clock bounds one **agent** turn's invocation was observed between.
+///
+/// Held to `role: agent` deliberately and not as a formality: a `SessionLink` is
+/// recorded only for an invocation that reported both a session id and a start,
+/// and a start comes from a provider-measured telemetry the judge side of this
+/// host reports and the agent side does not. So the rows a report really holds
+/// are the judge's, and matching an agent turn by its index alone would put the
+/// judge's clock on the agent's turn. A turn with no row of its own is served
+/// both bounds absent, which is what the report says about it.
+fn agent_session(report: &judge::Report, turn: u64) -> Option<&judge::SessionLink> {
+    let turn = u32::try_from(turn).ok()?;
+    report
+        .telemetry
+        .as_ref()?
+        .sessions
+        .iter()
+        .find(|link| link.role == judge::TelemetryRole::Agent && link.turn_index == turn)
 }
 
 /// One tool call a turn reported while it was still running.
 ///
 /// `turn-activity` carries the tool's kind and name and a summary of what it was
 /// given, bounded by the producing library; that summary is the call's input as
-/// far as the journal is concerned, and nothing records what it returned.
+/// far as the journal is concerned, and nothing records what it returned. A
+/// session whose member settled is served [`reported_tools`] instead, which is
+/// the same calls with the observations they returned.
 fn tool_call(index: usize, event: &Envelope) -> Value {
     json!({
         "index": index,
@@ -1950,8 +2250,37 @@ fn tool_call(index: usize, event: &Envelope) -> Value {
     })
 }
 
-/// What one turn consumed, in the wire's own spelling of the record's fields.
-fn turn_usage(event: &Envelope) -> Value {
+/// The tool calls and results one reported turn recorded, in the report's own
+/// numbering.
+///
+/// `output` is `null` for a call rather than empty: the trace exposed no
+/// observation for it, and a `tool_result` beside it is where the observation
+/// is. `name` is `null` on a result for the same reason — that is what the
+/// producing library records, and a result renamed after its call would claim a
+/// pairing this crate did not read.
+fn reported_tools(message: &judge::Message) -> Vec<Value> {
+    message
+        .events
+        .iter()
+        .map(|event| {
+            json!({
+                "index": event.index,
+                "kind": event.kind,
+                "name": event.name,
+                "input": event.input,
+                "output": event.output,
+            })
+        })
+        .collect()
+}
+
+/// The usage figures one relayed record carries, in the wire's own spelling.
+///
+/// `oneagentgraph` copies a settling member's usage verbatim out of its report,
+/// so what a `turn-completed` carries is the whole dispatch's total over both
+/// sides rather than the turn's own. Served only where the report's attribution
+/// says nothing about the turn: the journal's account is then all the run holds.
+fn relayed_usage(event: &Envelope) -> Value {
     let Some(usage) = event
         .payload
         .get(graph::USAGE)
@@ -1961,66 +2290,143 @@ fn turn_usage(event: &Envelope) -> Value {
     };
     let count = |key: &str| usage.get(key).and_then(Value::as_u64);
     json!({
-        "inputTokens": count(graph::TOKENS_IN),
-        "outputTokens": count(graph::TOKENS_OUT),
-        "cacheReadTokens": count(graph::CACHE_READ),
-        "cacheWriteTokens": count(graph::CACHE_WRITE),
-        "costUsd": usage.get(graph::COST).and_then(Value::as_f64),
+        "inputTokens": count(graph::INPUT_TOKENS),
+        "outputTokens": count(graph::OUTPUT_TOKENS),
+        "cacheReadTokens": count(graph::CACHE_READ_TOKENS),
+        "cacheWriteTokens": count(graph::CACHE_WRITE_TOKENS),
+        "costUsd": usage.get(graph::COST_USD).and_then(Value::as_f64),
     })
 }
 
-/// One conversation and its attribution.
-fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) -> Value {
+/// What one *turn* consumed, as the invocation that ran it reported it.
+///
+/// The same five figures [`relayed_usage`] reads off a record, from the one place
+/// they are recorded per turn rather than per dispatch: a report's own `usage` is
+/// that dispatch's total, and serving it on a turn would repeat one total on
+/// every one of them.
+fn candidate_usage(usage: Option<&judge::Usage>) -> Value {
+    let Some(usage) = usage else {
+        return Value::Object(Map::new());
+    };
+    json!({
+        "inputTokens": usage.input_tokens,
+        "outputTokens": usage.output_tokens,
+        "cacheReadTokens": usage.cache_read_tokens,
+        "cacheWriteTokens": usage.cache_write_tokens,
+        "costUsd": usage.cost_usd,
+    })
+}
+
+/// The turn records one session relayed, each with the tool summaries published
+/// from inside it.
+///
+/// `oneagentgraph` opens a turn *before* its activities and streams each summary
+/// live, so a summary belongs to the turn record that precedes it — carrying one
+/// on the next record instead put every journal-derived turn's tools one turn
+/// late. A redirection is published from inside a turn too and is skipped for the
+/// reason [`is_turn_record`] skips it, and it must be skipped in *both*, because
+/// a turn's id is its position in this list and the timeline numbers the same
+/// session by the same rule.
+///
+/// Summaries relayed before the session relayed any turn join the first turn it
+/// does relay: they were published from inside a turn whose start never reached
+/// the journal, and dropping them would lose the only record of it.
+fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<(&'a Envelope, Vec<&'a Envelope>)> {
+    let mut turns: Vec<(&Envelope, Vec<&Envelope>)> = Vec::new();
+    let mut open: Vec<&Envelope> = Vec::new();
+    for event in events {
+        if event.kind.0 == graph::TURN_ACTIVITY {
+            open.push(event);
+            continue;
+        }
+        if !is_turn_record(event) {
+            continue;
+        }
+        if let Some((_, running)) = turns.last_mut() {
+            running.append(&mut open);
+        }
+        turns.push((event, std::mem::take(&mut open)));
+    }
+    if let Some((_, running)) = turns.last_mut() {
+        running.append(&mut open);
+    }
+    turns
+}
+
+/// One relayed session's transcript, with what the settled member's report says
+/// about each turn folded onto it.
+///
+/// `None` where the run holds no readable report, which leaves the transcript as
+/// the journal relayed it.
+fn conversation_document(
+    view: &RunView,
+    session: &str,
+    events: &[&Envelope],
+    reported: Option<&judge::Report>,
+) -> Value {
     let first = events.first().copied();
     let last = events.last().copied();
     let started_at = first.map_or_else(now_rfc3339, |event| event.ts.clone());
     let node = first.and_then(|event| event.labels.node.clone());
-    // A tool summary is published from inside a turn, so it is carried on the
-    // turn it belongs to — the next one relayed — rather than served as a turn of
-    // its own. Summaries with no turn behind them yet are the turn in flight, and
-    // they join the last turn the session did relay rather than being dropped.
-    let mut turns: Vec<Value> = Vec::new();
-    let mut tools: Vec<Value> = Vec::new();
-    for event in events {
-        if event.kind.0 == graph::TURN_ACTIVITY {
-            tools.push(tool_call(tools.len(), event));
-            continue;
-        }
-        // A redirection is published from inside a turn too, and is not one: it is
-        // the moment the planner changed what the turn already running was doing.
-        // Skipped here for the reason [`is_turn_record`] skips it — and it must be
-        // skipped in *both*, because a turn's id is its position in this list and
-        // the timeline numbers the same session by the same rule.
-        if !is_turn_record(event) {
-            continue;
-        }
-        let index = turns.len();
-        turns.push(json!({
-            "assistant": event.payload.get("message").and_then(Value::as_str),
-            "durationMs": seconds_as_ms(
-                event
-                    .payload
-                    .get(graph::USAGE)
-                    .and_then(|usage| usage.get(graph::DURATION)),
-            ),
-            "failureKind": Value::Null,
-            "harness": "oneagentgraph",
-            "id": format!("{session}.{index}"),
-            "model": event.payload.get("model").and_then(Value::as_str),
-            "reasoning": Value::Null,
-            "status": event.kind.0,
-            "timestamp": event.ts,
-            "tools": std::mem::take(&mut tools),
-            "unknown": Map::new(),
-            "usage": turn_usage(event),
-            "user": event.labels.persona.clone().unwrap_or_default(),
-        }));
-    }
-    if !tools.is_empty() {
-        if let Some(open) = turns.last_mut() {
-            open["tools"] = Value::Array(tools);
-        }
-    }
+    let transcript = reported.map(reported_turns).unwrap_or_default();
+    let turns: Vec<Value> = relayed_turns(events)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (event, summaries))| {
+            // The producer's own number for this turn, which is the counter the
+            // report shares between its sessions and its attribution. A record
+            // that names no turn — a settlement, a death — is not one of the
+            // conversation's turns and takes nothing from the report.
+            let numbered = event.payload.get(graph::TURN).and_then(Value::as_u64);
+            let recorded = numbered.and_then(|turn| turn_of(&transcript, turn));
+            let ran = numbered
+                .and_then(|turn| u32::try_from(turn).ok())
+                .zip(reported)
+                .and_then(|(turn, report)| {
+                    ran_candidate(report, judge::TelemetryRole::Agent, turn)
+                });
+            let bounds = numbered
+                .zip(reported)
+                .and_then(|(turn, report)| agent_session(report, turn));
+            json!({
+                "assistant": match recorded {
+                    // Explicitly absent rather than empty: the report holds this
+                    // turn and it recorded no reply.
+                    Some(turn) => json!(turn.assistant),
+                    None => json!(event.payload.get("message").and_then(Value::as_str)),
+                },
+                "durationMs": ran.and_then(|candidate| candidate.duration_ms),
+                "failureKind": Value::Null,
+                "finishedAt": bounds.and_then(|link| link.finished_at.clone()),
+                "harness": "oneagentgraph",
+                "id": format!("{session}.{index}"),
+                "model": event.payload.get("model").and_then(Value::as_str),
+                "reasoning": Value::Null,
+                "startedAt": bounds.map(|link| link.started_at.clone()),
+                "status": event.kind.0,
+                "timestamp": event.ts,
+                "tools": match recorded {
+                    Some(turn) => Value::Array(turn.tools.clone()),
+                    None => Value::Array(
+                        summaries
+                            .iter()
+                            .enumerate()
+                            .map(|(index, summary)| tool_call(index, summary))
+                            .collect(),
+                    ),
+                },
+                "unknown": Map::new(),
+                "usage": match ran {
+                    Some(candidate) => candidate_usage(candidate.usage.as_ref()),
+                    None => relayed_usage(event),
+                },
+                // The prompt the simulated user gave, which is what the turn
+                // answered. Never the dispatch's persona name, which is who was
+                // asked and not what they were asked.
+                "user": recorded.map(|turn| turn.user.clone()).unwrap_or_default(),
+            })
+        })
+        .collect();
     let mut attribution = Map::new();
     attribution.insert("runId".into(), json!(view.paths.run));
     if let Some(step) = first.and_then(|event| event.labels.step.clone()) {
@@ -2043,9 +2449,7 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
     );
     attribution.insert(
         "agentRole".into(),
-        json!(
-            agent_role(first.and_then(|event| event.labels.persona.as_deref())).unwrap_or("worker")
-        ),
+        json!(first.and_then(event_agent_role).unwrap_or("worker")),
     );
     if let Some(persona) = first.and_then(|event| event.labels.persona.clone()) {
         attribution.insert("persona".into(), json!(persona));
@@ -2066,6 +2470,228 @@ fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) ->
             "turns": turns,
         },
         "attribution": Value::Object(attribution),
+    })
+}
+
+/// The member word both closed role vocabularies spell the judge with.
+///
+/// Resolved through [`agent_role`] and [`Party::named`] rather than written onto
+/// the wire, so a vocabulary that stopped carrying it fails to resolve here
+/// instead of serving a word no client switches on.
+const JUDGE_MEMBER: &str = "judge";
+
+/// The report's own rows for the side that supervised a dispatch, ordered by the
+/// producer's 1-based turn counter — the join [`agent_session`] makes on the
+/// other side, and not position, because a report lists the two interleaved.
+fn judge_links(report: &judge::Report) -> Vec<&judge::SessionLink> {
+    let Some(telemetry) = report.telemetry.as_ref() else {
+        return Vec::new();
+    };
+    let mut links: Vec<&judge::SessionLink> = telemetry
+        .sessions
+        .iter()
+        .filter(|link| link.role == judge::TelemetryRole::Judge)
+        .collect();
+    links.sort_by_key(|link| link.turn_index);
+    links
+}
+
+/// The interval a settled dispatch's judge ran over, from [`judge_links`] and
+/// nothing else — no record brackets it. `None` where the report holds no row.
+///
+/// A row whose end was never observed leaves the lane open, which is the rule
+/// [`Category`] folds a category of sessions by.
+fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
+    let links = judge_links(report);
+    let opened = links
+        .iter()
+        .filter_map(|link| moment_at(&link.started_at))
+        .min_by_key(|moment| moment.at)?;
+    let mut ends: Vec<Moment> = Vec::with_capacity(links.len());
+    for link in &links {
+        let Some(ended) = link.finished_at.as_deref().and_then(moment_at) else {
+            // One row the run never saw finish leaves the whole lane open,
+            // whatever the rows beside it did.
+            ends.clear();
+            break;
+        };
+        ends.push(ended);
+    }
+    Some((opened, ends.into_iter().max_by_key(|moment| moment.at)))
+}
+
+/// The judge's own conversation for one settled dispatch, or `None` where the
+/// report holds no `role: judge` row to serve one from.
+///
+/// Why the report is the only source, and why that gate rather than another:
+/// `src/AGENTS.md`, under the report a settled member left.
+fn judge_conversation(
+    view: &RunView,
+    session: &str,
+    events: &[&Envelope],
+    settlement: &Envelope,
+    report: &judge::Report,
+) -> Option<Value> {
+    let links = judge_links(report);
+    let (opened, closed) = judge_interval(report)?;
+    let agent_role = agent_role(Some(JUDGE_MEMBER), None)?;
+    let transport = Party::named(JUDGE_MEMBER)?;
+    let id = judge_session(session);
+    let first = events.first().copied();
+    let node = first.and_then(|event| event.labels.node.clone());
+
+    let mut turns: Vec<Value> = links
+        .iter()
+        .enumerate()
+        .map(|(index, link)| judge_turn(&id, index, report, link))
+        .collect();
+    turns.push(judge_conclusion(&id, links.len(), settlement, report));
+
+    // The harnesses the judge's turns ran on, in the order it ran them. The
+    // relayed side of a dispatch can only name the library that relayed it; a
+    // report names the canonical harness each invocation actually ran, which is
+    // what this field is for.
+    let mut harnesses: Vec<Value> = Vec::new();
+    for link in &links {
+        let Some(ran) = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index) else {
+            continue;
+        };
+        let named = json!(ran.harness);
+        if !harnesses.contains(&named) {
+            harnesses.push(named);
+        }
+    }
+
+    let mut attribution = Map::new();
+    attribution.insert("runId".into(), json!(view.paths.run));
+    if let Some(step) = first.and_then(|event| event.labels.step.clone()) {
+        attribution.insert("stepId".into(), json!(step));
+    }
+    if let Some(node) = &node {
+        attribution.insert("nodeId".into(), json!(node));
+    }
+    attribution.insert("launchId".into(), json!(view.paths.run));
+    attribution.insert(
+        "launcher".into(),
+        json!(launcher_word(&view.launch.launcher)),
+    );
+    attribution.insert("transportRole".into(), json!(transport.as_str()));
+    attribution.insert("agentRole".into(), json!(agent_role));
+    // The dispatch this conversation supervised. It is what names the two sides
+    // one dispatch rather than two rows of equal weight, and a reader who opened
+    // the judge has to be able to see which work it ruled on.
+    attribution.insert("parentConversationId".into(), json!(session));
+    attribution.insert(
+        "finishedAt".into(),
+        closed
+            .as_ref()
+            .map_or(Value::Null, |moment| json!(moment.ts)),
+    );
+    // No persona: a persona is the style the *dispatched member* was asked in,
+    // and the judge was not dispatched.
+    Some(json!({
+        "conversation": {
+            "canContinue": false,
+            "harnesses": harnesses,
+            "id": id,
+            "name": node.unwrap_or_else(|| view.paths.run.clone()),
+            "project": view.paths.run,
+            "startedAt": opened.ts,
+            // The record that makes this conversation readable at all: the
+            // settlement stored the report every turn of it is read from.
+            "state": graph::MEMBER_SETTLED,
+            "turns": turns,
+        },
+        "attribution": Value::Object(attribution),
+    }))
+}
+
+/// The id one settled dispatch's judge conversation is served under: the worker
+/// session's own with `.judge` after it, which `check_segment` admits as a bare
+/// identifier, so the route resolves it through the same lookup as any other.
+fn judge_session(session: &str) -> String {
+    format!("{session}.{JUDGE_MEMBER}")
+}
+
+/// One judge turn: bounded and measured, and not transcribed — see
+/// `src/AGENTS.md` for why no text may be keyed to one.
+fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::SessionLink) -> Value {
+    let entry = attributed(report, judge::TelemetryRole::Judge, link.turn_index);
+    let ran = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index);
+    json!({
+        "assistant": Value::Null,
+        "durationMs": ran.and_then(|candidate| candidate.duration_ms),
+        "failureKind": ran.and_then(|candidate| candidate.failure_kind.clone()),
+        "finishedAt": link.finished_at,
+        // The identity that ran this turn, as the report's own attribution
+        // composed it. Empty where no candidate ran, which the report says by
+        // recording none.
+        "harness": entry.and_then(|entry| entry.ran.clone()).unwrap_or_default(),
+        "id": format!("{id}.{index}"),
+        "model": ran.and_then(|candidate| candidate.model.clone()),
+        "reasoning": Value::Null,
+        "startedAt": link.started_at,
+        // oneharness's own status token for the invocation, which is the only
+        // account of how this turn ended that any record holds. `unknown` where
+        // the report attributes no candidate to it — the same word this crate
+        // serves for a state nothing recorded.
+        "status": ran.map_or("unknown", |candidate| candidate.status.as_str()),
+        "timestamp": link.finished_at.clone().unwrap_or_else(|| link.started_at.clone()),
+        // Nothing: `turn-activity` is relayed per *relayed* session and the judge
+        // relays none, so no run holds a tool call of the judge's.
+        "tools": Vec::<Value>::new(),
+        "unknown": Map::new(),
+        "usage": candidate_usage(ran.and_then(|candidate| candidate.usage.as_ref())),
+        "user": "",
+    })
+}
+
+/// The turn a judge conversation closes on: what the report keys to the
+/// *dispatch* rather than to any turn of it.
+///
+/// Served whole — a report-backed read is not bounded the way an artifact's bytes
+/// are — with bounds and usage absent, because a verdict call is not one of the
+/// invocations the telemetry attributes to a turn.
+fn judge_conclusion(
+    id: &str,
+    index: usize,
+    settlement: &Envelope,
+    report: &judge::Report,
+) -> Value {
+    let verdicts: Vec<Value> = report
+        .verdicts
+        .iter()
+        .map(|named| {
+            json!({
+                "criterion": named.criterion,
+                "kind": named.kind.as_str(),
+                "value": named.verdict.value,
+                "reason": named.verdict.reason,
+            })
+        })
+        .collect();
+    json!({
+        "assistant": report.assessment,
+        "durationMs": Value::Null,
+        "failureKind": Value::Null,
+        "finishedAt": Value::Null,
+        "harness": "onejudge",
+        "id": format!("{id}.{index}"),
+        "model": Value::Null,
+        "reasoning": Value::Null,
+        "startedAt": Value::Null,
+        "status": graph::MEMBER_SETTLED,
+        // The moment the report was written, which is the settlement's own: the
+        // conclusion is stamped by nothing else, and the field is required.
+        "timestamp": settlement.ts,
+        "tools": Vec::<Value>::new(),
+        "unknown": json!({
+            "verdicts": verdicts,
+            "completionReason": report.completion_reason,
+            "stoppedEarly": report.stopped_early,
+        }),
+        "usage": Map::new(),
+        "user": "",
     })
 }
 
@@ -2134,13 +2760,25 @@ fn artifact_bytes(
     // a kind added to the vocabulary must be made to answer it rather than
     // inheriting an answer that happens to compile.
     let path = match kind {
-        ReferenceKind::WorkerReport => view.paths.report_for(&event.stream, event.seq),
+        ReferenceKind::WorkerReport => report_path(view, event),
         ReferenceKind::OneharnessSession => return harness_session(event, id),
         ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
             view.paths.dir.join("artifacts").join(id.as_str())
         }
     };
     fs::read(&path).ok()
+}
+
+/// Where the run keeps its copy of the report one settlement stored.
+///
+/// The SDK's own published name for that copy, called on the envelope the report
+/// was recorded on and never restated: **the artifact id names the stream and not
+/// the seq**, so nothing about the id alone locates the file, and the sanitiser
+/// behind the name is private to `onepipeline` on purpose. One function because
+/// two readers want it — the artifact route serves its bytes, and a transcript
+/// reads the document inside it.
+fn report_path(view: &RunView, settlement: &Envelope) -> std::path::PathBuf {
+    view.paths.report_for(&settlement.stream, settlement.seq)
 }
 
 /// The oneharness conversation one `oneharness_session` artifact names, rendered
@@ -2562,11 +3200,10 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
             "transport_role".into(),
             json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
         );
-        if let Some(role) = agent_role(
-            relayed
-                .first()
-                .and_then(|(_, event)| event.labels.persona.as_deref()),
-        ) {
+        if let Some(role) = relayed
+            .first()
+            .and_then(|(_, event)| event_agent_role(event))
+        {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert(
@@ -2677,14 +3314,172 @@ fn relayed_sessions<'a>(
     sessions
 }
 
+/// One recorded moment: the epoch milliseconds a reading orders by, and the stamp
+/// the wire is served.
+#[derive(Clone)]
+struct Moment {
+    at: i128,
+    ts: String,
+}
+
+impl Moment {
+    /// The moment one record was written, or `None` for a stamp this crate cannot
+    /// order — which is a record it must not draw a span from.
+    fn of(event: &Envelope) -> Option<Self> {
+        moment_at(&event.ts)
+    }
+}
+
+/// One stamp as a moment, or `None` where it cannot be ordered.
+///
+/// From a string rather than an envelope, because a report's `SessionLink` rows
+/// are bounds no record carries and a span is drawn over them all the same.
+fn moment_at(ts: &str) -> Option<Moment> {
+    millis_of(ts).map(|at| Moment {
+        at,
+        ts: ts.to_owned(),
+    })
+}
+
+/// Whether one record is a session's own.
+///
+/// A session id is `{stream}.{member}`, so the records that spell it are its own
+/// — which is the one join this contract allows, because `oneagentgraph` stamps
+/// no `session` label on the records that open and close a member.
+fn belongs_to(event: &Envelope, session: &str) -> bool {
+    event
+        .labels
+        .extra
+        .get(graph::MEMBER)
+        .and_then(Value::as_str)
+        .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+}
+
+fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) -> Vec<Moment> {
+    let mut found: Vec<Moment> = events
+        .iter()
+        .filter(|(_, event)| matching(event))
+        .filter_map(|(_, event)| Moment::of(event))
+        .collect();
+    found.sort_by_key(|moment| moment.at);
+    found
+}
+
+fn dispatches(events: &[(usize, &Envelope)]) -> Vec<Moment> {
+    ordered(events, &|event| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
+    })
+}
+
+/// Where the run said one session began, and where it said nothing, where the
+/// session first spoke.
+fn session_appeared(
+    events: &[(usize, &Envelope)],
+    session: &str,
+    relayed: &[(usize, &Envelope)],
+) -> Option<Moment> {
+    ordered(events, &|event| {
+        event.source == Source::Agentgraph
+            && event.kind.0 == graph::MEMBER_STARTED
+            && belongs_to(event, session)
+    })
+    .into_iter()
+    .next()
+    .or_else(|| {
+        relayed
+            .iter()
+            .filter_map(|(_, event)| Moment::of(event))
+            .min_by_key(|moment| moment.at)
+    })
+}
+
+/// The attempt at a node that ran a session appearing at one moment: the latest
+/// `node-dispatched` at or before it, or the node's first where the session
+/// appeared before any of them.
+fn attempt_of<'a>(dispatched: &'a [Moment], appeared: Option<&Moment>) -> Option<&'a Moment> {
+    appeared
+        .and_then(|appeared| {
+            dispatched
+                .iter()
+                .rev()
+                .find(|moment| moment.at <= appeared.at)
+        })
+        .or_else(|| dispatched.first())
+}
+
+/// When one dispatched session ran, inside the attempt of its node that ran it.
+///
+/// `src/AGENTS.md` states the bracketing rule and why a node's own window cannot
+/// stand in for it. Nothing here may close a session before the last thing it
+/// said, and one nothing has ended yet is returned open.
+fn session_interval(
+    events: &[(usize, &Envelope)],
+    session: &str,
+    relayed: &[(usize, &Envelope)],
+) -> (Moment, Option<Moment>) {
+    let dispatched = dispatches(events);
+    let appeared = session_appeared(events, session, relayed);
+    let started = attempt_of(&dispatched, appeared.as_ref())
+        // Never after the session's own first word: a node that relayed
+        // something before it was ever dispatched has no attempt to hand this
+        // one, and a span that does not contain its own events is one no pointer
+        // into it can reach.
+        .filter(|dispatch| {
+            appeared
+                .as_ref()
+                .is_none_or(|appeared| dispatch.at <= appeared.at)
+        })
+        .or(appeared.as_ref())
+        .cloned()
+        .or_else(|| relayed.first().and_then(|(_, event)| Moment::of(event)))
+        .unwrap_or_else(|| Moment {
+            at: 0,
+            ts: now_rfc3339(),
+        });
+    // The last thing the session said, which nothing may close it before: a
+    // session that spoke again after a record that would have ended it outlived
+    // that record, and a span that does not contain its own events is one no
+    // pointer into it can reach.
+    let last_said = relayed
+        .iter()
+        .filter_map(|(_, event)| millis_of(&event.ts))
+        .max()
+        .unwrap_or(started.at);
+    let after = |moments: Vec<Moment>| {
+        moments
+            .into_iter()
+            .find(|moment| moment.at > started.at && moment.at >= last_said)
+    };
+    let ended = [
+        after(dispatched),
+        after(ordered(events, &|event| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+        })),
+        after(ordered(events, &|event| {
+            event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
+        })),
+        after(ordered(events, &|event| {
+            event.source == Source::Agentgraph
+                && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
+                && belongs_to(event, session)
+        })),
+    ]
+    .into_iter()
+    .flatten()
+    .min_by_key(|moment| moment.at);
+    (started, ended)
+}
+
 /// The branch a node opened and what became of it, from the records `onevcs`
 /// relayed for it.
 ///
-/// This is the publication interval the journal actually holds: the session open
-/// and whatever closed it are separate relayed records, so the span between them
-/// is recorded rather than derived. A node that opened no session contributes
-/// none, and one that opened a session nothing closed is served open-ended,
-/// which is what an in-flight publication is.
+/// Both ends are relayed records, so the interval is recorded rather than
+/// derived. A node that did no publication work contributes none, and one
+/// nothing closed is served open-ended. It opens at publication work rather than
+/// at the worktree the dispatch was cut into — see [`vcs::SILENT_ON_PUBLICATION`]
+/// and `src/AGENTS.md`.
 fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Option<Value> {
     let relayed = |kinds: &[&str]| {
         events
@@ -2703,15 +3498,27 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
             })
             .map(|(_, event)| *event)
     };
-    let opened = relayed(&[vcs::SESSION_OPENED])?;
+    let opened = events
+        .iter()
+        .find(|(_, event)| {
+            event.source == Source::Vcs
+                && !vcs::SILENT_ON_PUBLICATION.contains(&event.kind.0.as_str())
+        })
+        .map(|(_, event)| *event)?;
     let merged = last_relayed(&[vcs::CHANGE_MERGED, vcs::MERGE_COMPLETED]);
     let conflicted = last_relayed(&[vcs::SYNC_CONFLICT]);
     let change = last_relayed(&[vcs::CHANGE_MERGED, vcs::CHANGE_OPENED]);
     // What closed the publication, in the order those records mean: a merge ends
-    // it, a conflict ends it without one, and a change left open ends the run's
-    // part in it. Nothing closing it is an in-flight publication, not an error.
-    let closed = merged.or(conflicted).or(change);
-    let branch = opened
+    // it, a conflict ends it without one, a change left open ends the run's part
+    // in it, and the worktree going away ends it whatever became of the branch —
+    // last, because it says only that nothing more can happen on it. Nothing
+    // closing it is an in-flight publication, not an error.
+    let closed = merged
+        .or(conflicted)
+        .or(change)
+        .or_else(|| last_relayed(&[vcs::SESSION_CLOSED]));
+    let branch = relayed(&[vcs::SESSION_OPENED])
+        .unwrap_or(opened)
         .payload
         .get("branch")
         .and_then(Value::as_str)
@@ -2727,17 +3534,16 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
     );
     span.insert("parent_id".into(), json!(parent));
     span.insert("node_id".into(), json!(node));
-    if closed.is_some() {
-        span.insert(
-            "status".into(),
-            json!(if merged.is_some() {
-                "merged"
-            } else if conflicted.is_some() {
-                "conflict"
-            } else {
-                "open"
-            }),
-        );
+    // What became of the branch, and served only where a record said: a
+    // publication whose worktree simply went away is over without the run having
+    // ruled on it, and a status invented for that would be this crate answering
+    // a question nothing asked.
+    if let Some(status) = merged
+        .map(|_| "merged")
+        .or_else(|| conflicted.map(|_| "conflict"))
+        .or_else(|| change.map(|_| "open"))
+    {
+        span.insert("status".into(), json!(status));
     }
     if let Some(url) = change
         .and_then(|event| event.payload.get("url"))
@@ -2873,44 +3679,63 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
     let Some((_, start)) = dispatched else {
         return Vec::new();
     };
-    let settled = events.iter().find(|(_, event)| {
+    // The *last* settlement, for the same reason [`node_span`] takes it: a node
+    // the planner retried settles more than once, and a category still running
+    // under the attempt in flight is not closed by the record that closed the
+    // attempt it superseded.
+    let settled = events.iter().rev().find(|(_, event)| {
         event.source == Source::Pipeline
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
-    let mut counted: Vec<((Party, &'static str), usize)> = Vec::new();
-    for (_, relayed) in relayed_sessions(events) {
-        let persona = relayed
+    let mut counted: Vec<Category> = Vec::new();
+    for (session, relayed) in relayed_sessions(events) {
+        let Some(role) = relayed
             .first()
-            .and_then(|(_, event)| event.labels.persona.as_deref())
-            .or(start.labels.persona.as_deref());
-        let Some(role) = agent_role(persona) else {
+            .and_then(|(_, event)| event_agent_role(event))
+            .or_else(|| event_agent_role(start))
+        else {
             continue;
         };
         let pair = (
             relayed_transport_role(relayed.iter().map(|(_, e)| *e)),
             role,
         );
-        match counted.iter_mut().find(|(named, _)| *named == pair) {
-            Some((_, count)) => *count += 1,
-            None => counted.push((pair, 1)),
+        // A category runs for as long as the sessions in it did, and not for as
+        // long as the node that ran them: a drafting turn inside a node that
+        // worked for four hours took a minute, and a lane drawn over the node's
+        // window says the drafting was what the node was doing all along.
+        let (began, over) = session_interval(events, session, &relayed);
+        match counted.iter_mut().find(|category| category.pair == pair) {
+            Some(category) => category.fold(began, over),
+            None => counted.push(Category::of(pair, began, over)),
         }
     }
     if counted.is_empty() {
         // Dispatched and nothing relayed: still one category, because the node
-        // was dispatched and the row has to say so.
-        if let Some(role) = agent_role(start.labels.persona.as_deref()) {
-            counted.push(((transport_role(start), role), 1));
+        // was dispatched and the row has to say so. Nothing bounds it but the
+        // node's own window, which is all the run said about it.
+        if let Some(role) = event_agent_role(start) {
+            counted.extend(Moment::of(start).map(|began| {
+                Category::of(
+                    (transport_role(start), role),
+                    began,
+                    settled.and_then(|(_, event)| Moment::of(event)),
+                )
+            }));
         }
     }
     counted
         .into_iter()
-        .map(|((transport, role), count)| {
+        .map(|category| {
+            let (transport, role) = category.pair;
+            let (started, count) = (category.started.ts.clone(), category.count);
+            let ended = category.ended();
             json!({
                 "id": format!("rollup.{node}.{}.{role}", transport.as_str()),
                 "kind": "rollup",
                 "label": "dispatch",
-                "started_at": start.ts,
-                "ended_at": settled.map_or(Value::Null, |(_, event)| json!(event.ts)),
+                "started_at": started,
+                "ended_at": ended.map_or(Value::Null, |moment| json!(moment.ts)),
                 "parent_id": parent,
                 "node_id": node,
                 "count": count,
@@ -2920,6 +3745,60 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
             })
         })
         .collect()
+}
+
+/// How far a category of sessions has got.
+///
+/// The two states are exclusive by construction rather than by agreement between
+/// a flag and a moment: a category holding a session the run has not ended has no
+/// latest end to serve, whatever the sessions beside it did. Where every session
+/// ended, what [`Reach::Ended`] carries is the latest of their ends.
+enum Reach {
+    Ended(Moment),
+    Running,
+}
+
+/// One category of a node's sessions, and the interval they ran over between
+/// them: the transport-and-semantic pair that names it, the earliest start
+/// among them, and how far their ends have got.
+struct Category {
+    pair: (Party, &'static str),
+    count: usize,
+    started: Moment,
+    reach: Reach,
+}
+
+impl Category {
+    fn of(pair: (Party, &'static str), started: Moment, ended: Option<Moment>) -> Self {
+        Self {
+            pair,
+            count: 1,
+            started,
+            reach: ended.map_or(Reach::Running, Reach::Ended),
+        }
+    }
+
+    fn fold(&mut self, started: Moment, ended: Option<Moment>) {
+        self.count += 1;
+        if started.at < self.started.at {
+            self.started = started;
+        }
+        self.reach = match (std::mem::replace(&mut self.reach, Reach::Running), ended) {
+            (Reach::Running, _) | (Reach::Ended(_), None) => Reach::Running,
+            (Reach::Ended(latest), Some(moment)) => Reach::Ended(if moment.at > latest.at {
+                moment
+            } else {
+                latest
+            }),
+        };
+    }
+
+    fn ended(self) -> Option<Moment> {
+        match self.reach {
+            Reach::Ended(moment) => Some(moment),
+            Reach::Running => None,
+        }
+    }
 }
 
 /// One node's own work: the node span, then a dispatch span per session.
@@ -3010,20 +3889,30 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
             "label".into(),
             json!(named.clone().unwrap_or_else(|| session.to_owned())),
         );
-        // The dispatch, and the settlement that closed it. A session's own
-        // first and last envelopes are the first and last things it *said*,
-        // not its ends: a session says nothing while it works, so bracketing
-        // it by its own messages would draw a dispatch that ran for minutes
-        // as the instant between two of them — and would put the node's own
-        // dispatch record outside the window drawn for it.
-        span.insert("started_at".into(), json!(start.ts));
+        // What this session ran over, and not what the node did: a node dispatched
+        // three times ran three of these and a lifecycle node runs several in
+        // sequence, so the node's window is the window of all of them and answers
+        // nothing about any one. A dispatch that relayed no session is the one
+        // exception — there is nothing to bracket, so the node's own window is
+        // all the run said about it.
+        let (began, over) = if named.is_some() {
+            (
+                Moment::of(start),
+                (!redispatched)
+                    .then(|| settled.and_then(|(_, event)| Moment::of(event)))
+                    .flatten(),
+            )
+        } else {
+            let (began, over) = session_interval(&events, session, &relayed);
+            (Some(began), over)
+        };
+        span.insert(
+            "started_at".into(),
+            began.map_or_else(|| json!(start.ts), |moment| json!(moment.ts)),
+        );
         span.insert(
             "ended_at".into(),
-            if redispatched {
-                Value::Null
-            } else {
-                settled.map_or(Value::Null, |(_, event)| json!(event.ts))
-            },
+            over.map_or(Value::Null, |moment| json!(moment.ts)),
         );
         span.insert("parent_id".into(), json!(node_id));
         span.insert("node_id".into(), json!(node));
@@ -3051,11 +3940,11 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
             }),
         );
-        let persona = relayed
+        if let Some(role) = relayed
             .first()
-            .and_then(|(_, event)| event.labels.persona.as_deref())
-            .or(start.labels.persona.as_deref());
-        if let Some(role) = agent_role(persona) {
+            .and_then(|(_, event)| event_agent_role(event))
+            .or_else(|| event_agent_role(start))
+        {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert("status".into(), json!(status));
@@ -3066,10 +3955,46 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
             );
         }
         span.insert("events".into(), json!(lens.items(&relayed)));
+        let sibling = judge_span(view, session, &span);
         spans.push(Value::Object(span));
+        // Pushed straight after the dispatch it supervised, and as its sibling
+        // rather than its child: a client gathers a judge lane under the most
+        // recent agent session opened in the same scope, which is exactly this
+        // pairing.
+        spans.extend(sibling);
     }
     spans.append(&mut inside);
     spans
+}
+
+/// The judge's lane beside one dispatch, or `None` where the report holds no
+/// judge turn to draw it over.
+///
+/// Everything but the interval, the party and the events is the worker's span:
+/// the two ran under one dispatch, at one node, in one step, and a lane that
+/// disagreed about any of those would be an unrelated row beside it.
+fn judge_span(view: &RunView, session: &str, dispatch: &Map<String, Value>) -> Option<Value> {
+    let report = stored_report(view, session)?;
+    let (opened, closed) = judge_interval(&report)?;
+    let agent_role = agent_role(Some(JUDGE_MEMBER), None)?;
+    let transport = Party::named(JUDGE_MEMBER)?;
+    let id = judge_session(session);
+    let mut span = dispatch.clone();
+    span.insert("id".into(), json!(format!("dispatch.{id}")));
+    span.insert("label".into(), json!(id));
+    span.insert("started_at".into(), json!(opened.ts));
+    span.insert(
+        "ended_at".into(),
+        closed.map_or(Value::Null, |moment| json!(moment.ts)),
+    );
+    span.insert("transport_role".into(), json!(transport.as_str()));
+    span.insert("agent_role".into(), json!(agent_role));
+    span.insert(
+        "reference".into(),
+        json!({ "kind": "conversation", "value": id }),
+    );
+    span.insert("events".into(), json!(Vec::<Value>::new()));
+    Some(Value::Object(span))
 }
 
 /// What each of a run's nodes was last seen doing from inside a turn.

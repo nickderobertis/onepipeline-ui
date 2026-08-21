@@ -106,6 +106,9 @@ futures-core = "0.3"
 # `tests/packaging.rs` reconciles the two edges the lockfile records instead.
 # Why the store is linked at all, and read without a lock: `src/AGENTS.md`.
 oneharness-core = "0.10.1"
+# The document a settled member's report *is*, linked rather than copied — why,
+# and why it is unpinned, is in `src/AGENTS.md`.
+onejudge = "0.4"
 onepipeline = "=0.7.3"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -128,6 +131,12 @@ libc = "0.2"
 # so the gate reads the same declaration the records reaching this crate were
 # written by, and the tree carries one version of it rather than two.
 oneagentgraph = "0.2"
+# The same gate on the other sibling `src/payload.rs` reads. That library's
+# `event` module is private, but it re-exports `EventKind` from its crate root,
+# so its kinds are a declaration a consumer can reach and the copy is held to it
+# rather than to a second reading of the wire. Held at the major `onepipeline`
+# resolves, for the same reason as the line above it.
+onevcs = "0.4"
 predicates = "3"
 tempfile = "3"
 

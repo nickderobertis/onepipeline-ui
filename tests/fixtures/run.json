@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 13,
+  "telemetry_schema_version": 14,
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
@@ -18,16 +18,16 @@
       "setup_seconds": 1,
       "scheduling_seconds": 3,
       "wall_seconds": 30,
-      "agent_model_ms": 2500,
-      "judge_model_ms": 3000,
+      "agent_model_ms": null,
+      "judge_model_ms": null,
       "llmlint_model_ms": null,
       "tool_ms": null,
       "idle_orchestration_ms": null,
       "unattributed_ms": 0,
       "wall_ms": 30000,
       "fractions": {
-        "agent_model": 0.08333333333333333,
-        "judge_model": 0.1,
+        "agent_model": null,
+        "judge_model": null,
         "llmlint_model": null,
         "tool": null,
         "idle_orchestration": null,
@@ -50,12 +50,12 @@
             "started_at": "2026-08-07T12:00:03.000Z"
           }
         ],
-        "turns": 2,
+        "turns": 3,
         "lint": 0,
         "timing_quality": "complete",
         "linkage_quality": "labelled",
         "timing_presence": {
-          "agent_model_ms": true,
+          "agent_model_ms": false,
           "judge_model_ms": false,
           "llmlint_model_ms": false,
           "tool_ms": false
@@ -79,7 +79,7 @@
         "linkage_quality": "labelled",
         "timing_presence": {
           "agent_model_ms": false,
-          "judge_model_ms": true,
+          "judge_model_ms": false,
           "llmlint_model_ms": false,
           "tool_ms": false
         }
@@ -87,18 +87,18 @@
     ],
     "usage": {
       "agent": {
-        "input_tokens": null,
-        "output_tokens": null,
-        "cache_read_tokens": null,
-        "cache_write_tokens": null,
-        "cost_usd": null
+        "input_tokens": 776,
+        "output_tokens": 254,
+        "cache_read_tokens": 44051,
+        "cache_write_tokens": 356,
+        "cost_usd": 31.33
       },
       "judge": {
-        "input_tokens": null,
-        "output_tokens": null,
-        "cache_read_tokens": null,
+        "input_tokens": 130545,
+        "output_tokens": 929,
+        "cache_read_tokens": 70144,
         "cache_write_tokens": null,
-        "cost_usd": null
+        "cost_usd": 9.75
       },
       "llmlint": {
         "input_tokens": null,
@@ -108,18 +108,18 @@
         "cost_usd": null
       },
       "total": {
-        "input_tokens": 1600,
-        "output_tokens": 430,
-        "cache_read_tokens": 800,
-        "cache_write_tokens": 120,
-        "cost_usd": 0.53
+        "input_tokens": 159834,
+        "output_tokens": 1654,
+        "cache_read_tokens": 187430,
+        "cache_write_tokens": 712,
+        "cost_usd": 50.83
       }
     },
     "timing_quality": "complete",
     "linkage_quality": "labelled",
     "timing_presence": {
-      "agent_model_ms": true,
-      "judge_model_ms": true,
+      "agent_model_ms": false,
+      "judge_model_ms": false,
       "llmlint_model_ms": false,
       "tool_ms": false
     },
@@ -128,13 +128,13 @@
       "launch.json"
     ],
     "node_work_ms": {
-      "agent_model_ms": 2500,
-      "judge_model_ms": 3000,
+      "agent_model_ms": null,
+      "judge_model_ms": null,
       "llmlint_model_ms": null,
       "tool_ms": null,
       "wall_ms": 30000
     },
-    "turns": 4,
+    "turns": 5,
     "lint": 0
   },
   "graph": {
@@ -201,7 +201,7 @@
         "review"
       ]
     },
-    "last_seq": 24
+    "last_seq": 27
   },
   "conversations": [
     {
@@ -217,40 +217,107 @@
         "state": "turn-completed",
         "turns": [
           {
-            "assistant": "landed the route table",
-            "durationMs": null,
+            "assistant": "Landed the route table; every route answers.",
+            "durationMs": 900,
             "failureKind": null,
+            "finishedAt": "2026-08-07T12:00:03.900Z",
             "harness": "oneagentgraph",
             "id": "node-scope-1786925518098-3163646.worker.0",
-            "model": "a-model",
+            "model": null,
             "reasoning": null,
+            "startedAt": "2026-08-07T12:00:03.000Z",
             "status": "turn-started",
             "timestamp": "2026-08-07T12:00:03.000Z",
-            "tools": [],
+            "tools": [
+              {
+                "index": 0,
+                "kind": "tool_call",
+                "name": "Read",
+                "input": {
+                  "file_path": "src/api.rs"
+                },
+                "output": null
+              },
+              {
+                "index": 1,
+                "kind": "tool_result",
+                "name": null,
+                "input": null,
+                "output": "pub fn routes() -> Router { /* … */ }"
+              }
+            ],
             "unknown": {},
-            "usage": {},
-            "user": "worker"
+            "usage": {
+              "inputTokens": 376,
+              "outputTokens": 164,
+              "cacheReadTokens": 44051,
+              "cacheWriteTokens": 356,
+              "costUsd": 29.71
+            },
+            "user": "## What\nLand the wire contract."
           },
           {
-            "assistant": null,
-            "durationMs": 2500,
+            "assistant": "The gate ran green over the finished tree.",
+            "durationMs": 100,
             "failureKind": null,
+            "finishedAt": null,
             "harness": "oneagentgraph",
             "id": "node-scope-1786925518098-3163646.worker.1",
             "model": null,
             "reasoning": null,
+            "startedAt": null,
+            "status": "turn-started",
+            "timestamp": "2026-08-07T12:00:04.000Z",
+            "tools": [
+              {
+                "index": 0,
+                "kind": "tool_call",
+                "name": "Bash",
+                "input": {
+                  "command": "just gate"
+                },
+                "output": null
+              },
+              {
+                "index": 1,
+                "kind": "tool_result",
+                "name": null,
+                "input": null,
+                "output": null
+              }
+            ],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 376,
+              "outputTokens": 164,
+              "cacheReadTokens": 44051,
+              "cacheWriteTokens": 356,
+              "costUsd": 1.51
+            },
+            "user": "Run the repository's gate once, end to end."
+          },
+          {
+            "assistant": null,
+            "durationMs": null,
+            "failureKind": null,
+            "finishedAt": null,
+            "harness": "oneagentgraph",
+            "id": "node-scope-1786925518098-3163646.worker.2",
+            "model": null,
+            "reasoning": null,
+            "startedAt": null,
             "status": "turn-completed",
             "timestamp": "2026-08-07T12:00:05.000Z",
             "tools": [],
             "unknown": {},
             "usage": {
-              "inputTokens": 1200,
-              "outputTokens": 340,
-              "cacheReadTokens": 800,
-              "cacheWriteTokens": 120,
-              "costUsd": 0.42
+              "inputTokens": 159434,
+              "outputTokens": 1564,
+              "cacheReadTokens": 187430,
+              "cacheWriteTokens": 712,
+              "costUsd": 50.72
             },
-            "user": "worker"
+            "user": ""
           }
         ]
       },
@@ -278,28 +345,38 @@
         "state": "turn-completed",
         "turns": [
           {
-            "assistant": "the contract reads",
-            "durationMs": null,
+            "assistant": "The contract reads; every route it lists is served.",
+            "durationMs": 2800,
             "failureKind": null,
+            "finishedAt": null,
             "harness": "oneagentgraph",
             "id": "node-scope-1786925518102-3163741.judge.0",
-            "model": "a-model",
+            "model": null,
             "reasoning": null,
+            "startedAt": null,
             "status": "turn-started",
             "timestamp": "2026-08-07T12:00:22.000Z",
             "tools": [],
             "unknown": {},
-            "usage": {},
-            "user": "judge"
+            "usage": {
+              "inputTokens": 400,
+              "outputTokens": 90,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": 0.11
+            },
+            "user": "## What\nReview it."
           },
           {
             "assistant": null,
-            "durationMs": 3000,
+            "durationMs": null,
             "failureKind": null,
+            "finishedAt": null,
             "harness": "oneagentgraph",
             "id": "node-scope-1786925518102-3163741.judge.1",
             "model": null,
             "reasoning": null,
+            "startedAt": null,
             "status": "turn-completed",
             "timestamp": "2026-08-07T12:00:25.000Z",
             "tools": [],
@@ -311,7 +388,7 @@
               "cacheWriteTokens": 0,
               "costUsd": 0.11
             },
-            "user": "judge"
+            "user": ""
           }
         ]
       },
@@ -324,6 +401,117 @@
         "agentRole": "judge",
         "persona": "judge",
         "finishedAt": "2026-08-07T12:00:25.000Z"
+      }
+    },
+    {
+      "conversation": {
+        "canContinue": false,
+        "harnesses": [
+          "codex"
+        ],
+        "id": "node-scope-1786925518102-3163741.judge.judge",
+        "name": "review",
+        "project": "run-20260807-a1b2c3",
+        "startedAt": "2026-08-07T12:00:22.400Z",
+        "state": "member-settled",
+        "turns": [
+          {
+            "assistant": null,
+            "durationMs": 500,
+            "failureKind": null,
+            "finishedAt": "2026-08-07T12:00:22.900Z",
+            "harness": "codex:judge",
+            "id": "node-scope-1786925518102-3163741.judge.judge.0",
+            "model": "gpt-5-codex",
+            "reasoning": null,
+            "startedAt": "2026-08-07T12:00:22.400Z",
+            "status": "ok",
+            "timestamp": "2026-08-07T12:00:22.900Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 51204,
+              "outputTokens": 311,
+              "cacheReadTokens": 20480,
+              "cacheWriteTokens": null,
+              "costUsd": null
+            },
+            "user": ""
+          },
+          {
+            "assistant": null,
+            "durationMs": 400,
+            "failureKind": null,
+            "finishedAt": "2026-08-07T12:00:24.600Z",
+            "harness": "codex:judge",
+            "id": "node-scope-1786925518102-3163741.judge.judge.1",
+            "model": "gpt-5-codex",
+            "reasoning": null,
+            "startedAt": "2026-08-07T12:00:24.100Z",
+            "status": "ok",
+            "timestamp": "2026-08-07T12:00:24.600Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 51204,
+              "outputTokens": 311,
+              "cacheReadTokens": 20480,
+              "cacheWriteTokens": null,
+              "costUsd": null
+            },
+            "user": ""
+          },
+          {
+            "assistant": "The dispatch met its bar. The route table is landed, the gate ran green over the finished tree, and the one follow-up it surfaced is recorded rather than silently dropped.",
+            "durationMs": null,
+            "failureKind": null,
+            "finishedAt": null,
+            "harness": "onejudge",
+            "id": "node-scope-1786925518102-3163741.judge.judge.2",
+            "model": null,
+            "reasoning": null,
+            "startedAt": null,
+            "status": "member-settled",
+            "timestamp": "2026-08-07T12:00:26.000Z",
+            "tools": [],
+            "unknown": {
+              "verdicts": [
+                {
+                  "criterion": "every route the contract lists is served",
+                  "kind": "boolean",
+                  "value": true,
+                  "reason": "the route table answers each of them end to end"
+                },
+                {
+                  "criterion": "the gate is green over the finished tree",
+                  "kind": "boolean",
+                  "value": true,
+                  "reason": "the run recorded one green gate and no rerun after it"
+                },
+                {
+                  "criterion": "how completely the acceptance criteria were met",
+                  "kind": "numeric",
+                  "value": 4.5,
+                  "reason": "one follow-up was surfaced rather than done"
+                }
+              ],
+              "completionReason": "the change is approved",
+              "stoppedEarly": false
+            },
+            "usage": {},
+            "user": ""
+          }
+        ]
+      },
+      "attribution": {
+        "runId": "run-20260807-a1b2c3",
+        "nodeId": "review",
+        "launchId": "run-20260807-a1b2c3",
+        "launcher": "claude-code",
+        "transportRole": "judge",
+        "agentRole": "judge",
+        "parentConversationId": "node-scope-1786925518102-3163741.judge",
+        "finishedAt": "2026-08-07T12:00:24.600Z"
       }
     }
   ],
@@ -354,6 +542,11 @@
         "records": [
           {
             "ok": true,
+            "output_tail": "",
+            "artifact_id": "report-node-scope-1786925518098-3163646"
+          },
+          {
+            "ok": true,
             "output_tail": "the gate ran and passed",
             "artifact_id": "artifact-5c8f0a1b"
           },
@@ -375,6 +568,17 @@
         "pr_url": "https://example.invalid/changes/1",
         "commit": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908",
         "base_branch": "main"
+      }
+    },
+    "review": {
+      "verification": {
+        "records": [
+          {
+            "ok": true,
+            "output_tail": "",
+            "artifact_id": "report-node-scope-1786925518102-3163741"
+          }
+        ]
       }
     }
   },

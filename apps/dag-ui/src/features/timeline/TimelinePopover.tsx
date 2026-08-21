@@ -13,9 +13,10 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { markerReadingAt } from "./item-reading";
 
 /**
- * The reading a timeline segment carries, presented where it can actually be read.
+ * The reading a timeline segment or marker carries, where it can actually be read.
  *
  * `@oneharness/ui`'s `Timeline` paints that reading as a fixed-width popover *inside*
  * its own `overflow-hidden` plot, at a fixed offset below the lane row it belongs to,
@@ -33,28 +34,41 @@ import { createPortal } from "react-dom";
  * the document, placed against the segment and flipped or clamped to stay on screen.
  * The portal copy is `aria-hidden`: it is a second rendering of a description the
  * reader's assistive technology already has.
+ *
+ * A marker is read the same way and reaches the same constraint, so it is answered
+ * here rather than beside the plot: the package gives it no description element at
+ * all, so its reading is the one this app hung on its glyph in `item-reading.tsx`,
+ * and everything below — the placement, the flip, the clamp — is what a marker at the
+ * top of a clipped plot needs exactly as much as a segment inside one.
  */
 
-/** How far the reading sits from its segment, and how close it may come to an edge. */
+/** How far the reading sits from what it describes, and how close it may come to an edge. */
 const OFFSET = 6;
 const MARGIN = 8;
 
 /** The prefix the package derives every segment description's id from. */
 const DESCRIBED = '[aria-describedby^="timeline-detail-"]';
 
-/** A segment being read, and the text the package composed for it. */
+/** What is being read, and the text somebody else composed for it. */
 interface Anchored {
   readonly element: HTMLElement;
   readonly detail: string;
 }
 
 /**
- * The segment under an event, with its reading — the package's own text, read off the
- * element the segment's `aria-describedby` names, so this layer never composes a
- * second account of the same record.
+ * The segment or marker under an event, with its reading.
+ *
+ * Neither reading is written here. A segment's is the package's own text, read off
+ * the element its `aria-describedby` names; a marker's is the account
+ * `item-reading.tsx` composes for the detail panel's heading as well. Markers first,
+ * because a marker's glyph sits above the lane rows rather than inside one and only
+ * one of the two selectors can ever match.
  */
 const anchoredAt = (target: EventTarget | null): Anchored | undefined => {
-  const element = target instanceof Element ? target.closest(DESCRIBED) : null;
+  if (!(target instanceof Element)) return undefined;
+  const marker = markerReadingAt(target);
+  if (marker !== undefined) return marker;
+  const element = target.closest(DESCRIBED);
   if (!(element instanceof HTMLElement)) return undefined;
   const described = document.getElementById(
     element.getAttribute("aria-describedby") ?? "",
@@ -63,7 +77,7 @@ const anchoredAt = (target: EventTarget | null): Anchored | undefined => {
   return detail ? { element, detail } : undefined;
 };
 
-/** Keeps the previous value when the same segment is entered again, so nothing churns. */
+/** Keeps the previous value when the same thing is entered again, so nothing churns. */
 const settle = (
   current: Anchored | undefined,
   next: Anchored | undefined,
@@ -91,16 +105,16 @@ export function TimelinePopoverLayer() {
   }, []);
 
   // `pointerover` fires for every element the pointer enters, so one handler both
-  // opens the reading over a segment and closes it on the way out — including the
-  // move from one segment straight onto the next, which a pair of enter/leave
+  // opens the reading over a segment or a marker and closes it on the way out —
+  // including the move from one straight onto the next, which a pair of enter/leave
   // handlers has to reconcile between them.
   useEffect(() => {
     const point = (event: Event) =>
       setHovered((current) => settle(current, anchoredAt(event.target)));
     const focus = (event: Event) =>
       setFocused((current) => settle(current, anchoredAt(event.target)));
-    // Focus moving to something that is not a segment ends the reading; focus moving
-    // to another segment is the `focusin` above.
+    // Focus moving to something with no reading ends this one; focus moving to
+    // something that has one is the `focusin` above.
     const blur = (event: Event) =>
       setFocused((current) =>
         // Safely a `FocusEvent`: this handler is only ever reached through the
@@ -123,7 +137,7 @@ export function TimelinePopoverLayer() {
   }, []);
 
   /**
-   * Put the reading beside its segment, and inside the screen.
+   * Put the reading beside what it describes, and inside the screen.
    *
    * Written straight onto the element rather than held in state: the placement is
    * computed from the rendered size, so feeding it back through a render would either
@@ -133,19 +147,19 @@ export function TimelinePopoverLayer() {
     const element = node.current;
     if (element === null || anchor === undefined) return;
     if (!anchor.element.isConnected) return clear();
-    const segment = anchor.element.getBoundingClientRect();
+    const anchored = anchor.element.getBoundingClientRect();
     const reading = element.getBoundingClientRect();
     const rightmost = window.innerWidth - reading.width - MARGIN;
     const left = Math.min(
-      Math.max(segment.left, MARGIN),
+      Math.max(anchored.left, MARGIN),
       Math.max(MARGIN, rightmost),
     );
-    const below = segment.bottom + OFFSET;
-    const above = segment.top - reading.height - OFFSET;
-    // Below the segment where there is room, above it where there is not — and clamped
-    // either way, because a segment can be off screen entirely: a region scrolled past
-    // it, or the window shrank around it. Without the clamp the preferred side is only
-    // bounded by where the segment went, which is off the top of the screen.
+    const below = anchored.bottom + OFFSET;
+    const above = anchored.top - reading.height - OFFSET;
+    // Below what it describes where there is room, above it where there is not — and
+    // clamped either way, because that can be off screen entirely: a region scrolled
+    // past it, or the window shrank around it. Without the clamp the preferred side is
+    // only bounded by where it went, which is off the top of the screen.
     const lowest = Math.max(
       MARGIN,
       window.innerHeight - reading.height - MARGIN,
@@ -159,11 +173,11 @@ export function TimelinePopoverLayer() {
   }, [anchor, clear]);
 
   // Before paint, so the reading is measured and placed rather than appearing at the
-  // corner a fixed element starts in. `place` changes with the segment, which is the
-  // only thing that moves it — and the segment and its text are set in one commit, so
+  // corner a fixed element starts in. `place` changes with the anchor, which is the
+  // only thing that moves it — and the anchor and its text are set in one commit, so
   // the element exists to be measured by the time this runs.
   useLayoutEffect(place, [place]);
-  // A plot sits inside regions that scroll, so the segment moves without any of this
+  // A plot sits inside regions that scroll, so the anchor moves without any of this
   // changing; the reading follows it rather than being left behind pointing at
   // nothing. `capture`, because the scroll happens in those regions, not on the
   // document.

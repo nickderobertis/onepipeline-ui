@@ -99,6 +99,84 @@ pub const CARRIED_NOTE: &str = "the reviewer asked for a changelog entry";
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
 
+/// A third run, whose lanes ran one after another and whose nodes were re-asked.
+///
+/// The other two fixtures each dispatch a node once, under a persona that is
+/// also a role — so neither can say what a *second* attempt is served as, nor
+/// what a session dispatched under a persona a host invented is read as. This
+/// one is written the way the host that runs this stack really records: personas
+/// are `engineer` and `docs-writer`, the role is the `member` beside them, and a
+/// lifecycle node hands its branch from a worker to a drafting member before
+/// `onevcs` publishes it.
+pub const LANES_RUN_ID: &str = "run-20260807-7a8b9c";
+/// That run's node the engine re-asked: its first attempt was abandoned mid-turn
+/// and its second settled.
+pub const RETRIED_NODE_ID: &str = "retried";
+/// That run's node that worked, drafted a change, and published it.
+pub const DRAFTED_NODE_ID: &str = "drafted";
+/// That run's node whose gate refused it, so its branch was never published and
+/// its worktree was simply taken away.
+pub const REFUSED_NODE_ID: &str = "refused";
+/// That run's node still working: dispatched, talking, and settled by nothing.
+pub const WORKING_NODE_ID: &str = "working";
+/// That run's node whose member died mid-turn, which the graph recorded before
+/// anything else on that node ended.
+pub const DIED_NODE_ID: &str = "died";
+/// That run's node whose worktree was reclaimed while its member was still
+/// talking, so nothing but the branch going away says when the session stopped.
+pub const RECLAIMED_NODE_ID: &str = "reclaimed";
+/// That run's node whose session the graph stamped with a member this wire has
+/// no word for, under the one persona that reads like a role.
+pub const UNNAMED_NODE_ID: &str = "unnamed";
+/// That run's node whose dispatch relayed no session at all, under a persona
+/// that is also a role: the one record it left stamps no member.
+pub const SILENT_NODE_ID: &str = "silent";
+
+/// The streams that run's members ran on, one per member.
+///
+/// A stream is the producing *process*, so a second attempt of one node is a
+/// second stream and a lifecycle node's drafting member is a stream of its own.
+/// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
+/// mints one — the pair has to agree or nothing joins a session to the records
+/// that opened and closed it.
+const LANE_STREAMS: [&str; 9] = [
+    "node-scope-1786925520001-4311",
+    "node-scope-1786925520002-4311",
+    "node-scope-1786925520003-4311",
+    "pr-author-1786925520004-4311",
+    "node-scope-1786925520005-4311",
+    "node-scope-1786925520006-4311",
+    "node-scope-1786925520008-4311",
+    "node-scope-1786925520009-4311",
+    "node-scope-1786925520010-4311",
+];
+/// The session the re-asked node's abandoned first attempt ran under.
+pub const RETRIED_FIRST_CONVERSATION_ID: &str = "node-scope-1786925520001-4311.worker";
+/// The session its second attempt ran under.
+pub const RETRIED_SECOND_CONVERSATION_ID: &str = "node-scope-1786925520002-4311.worker";
+/// The session the published node's worker ran under.
+pub const DRAFTED_WORK_CONVERSATION_ID: &str = "node-scope-1786925520003-4311.worker";
+/// The session its drafting turn ran under — a member of its own, on a stream of
+/// its own, after the worker it drafted for had settled.
+pub const DRAFTED_DRAFTING_CONVERSATION_ID: &str = "pr-author-1786925520004-4311.pr-author";
+/// The session the refused node ran under.
+pub const REFUSED_CONVERSATION_ID: &str = "node-scope-1786925520005-4311.worker";
+/// The session the node still working is talking in.
+pub const WORKING_CONVERSATION_ID: &str = "node-scope-1786925520006-4311.worker";
+/// The session the graph lost: it ran under this one and died in it.
+pub const DIED_CONVERSATION_ID: &str = "node-scope-1786925520008-4311.worker";
+/// The session whose worktree was taken away while it was still talking.
+pub const RECLAIMED_CONVERSATION_ID: &str = "node-scope-1786925520009-4311.worker";
+/// The session the graph ran under a `reviewer`: a member `agentRoleSchema` has
+/// no word for, beside a persona that is the literal word `pr-author`.
+pub const UNNAMED_CONVERSATION_ID: &str = "node-scope-1786925520010-4311.reviewer";
+/// The run's own observer, recorded at no node and under no role word: the
+/// `monitor` member is the run's watching side, and it is served in the
+/// `orchestrator` lane it shares rather than as a member of its own.
+pub const WATCHING_CONVERSATION_ID: &str = "dag-scope-1786925520007-4311.monitor";
+/// The stream that observer runs on.
+const WATCHING_STREAM: &str = "dag-scope-1786925520007-4311";
+
 /// One recorded run under `root`, complete and settled.
 ///
 /// Returns the run's directory, so a test can append to its journal and watch
@@ -167,6 +245,35 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
     .expect("the passing check's log");
 
     fs::write(dir.join("events.jsonl"), journal(run)).expect("the journal");
+    // The dispatch's own settlement, and with it the report that holds what the
+    // journal cannot: the prompts, the replies, what each tool call returned, and
+    // what each turn alone spent and took. Relayed through the same writer the
+    // engine ingests one with, so the copy the server reads is the copy that
+    // promise makes.
+    settle_member(
+        &dir,
+        &SettledMember {
+            stream: WORKER_STREAM,
+            node: NODE_ID,
+            member: "worker",
+            at: "2026-08-07T12:00:05.500Z",
+            artifact: WORKER_REPORT_ARTIFACT,
+            report: &worker_report(),
+        },
+        Produced::Report,
+    );
+    settle_member(
+        &dir,
+        &SettledMember {
+            stream: REVIEWER_STREAM,
+            node: REVIEW_NODE_ID,
+            member: "judge",
+            at: "2026-08-07T12:00:26.000Z",
+            artifact: REVIEWER_REPORT_ARTIFACT,
+            report: &reviewer_report(),
+        },
+        Produced::Report,
+    );
     dir
 }
 
@@ -265,6 +372,23 @@ impl Journal {
 /// what the goldens pin.
 fn journal(run: &str) -> String {
     let at_node = json!({ "run_id": run, "node": NODE_ID });
+    // The labels every record of that node's dispatch carries, session included.
+    let at_member = json!({
+        "run_id": run,
+        "node": NODE_ID,
+        "member": "worker",
+        "persona": "worker",
+        "session": CONVERSATION_ID,
+    });
+    // And the other side of the pair: a member the graph runs as the judge
+    // transport, which is what tells a judge chain's failure from an agent's.
+    let at_reviewer = json!({
+        "run_id": run,
+        "node": REVIEW_NODE_ID,
+        "member": "judge",
+        "persona": "judge",
+        "session": REVIEW_CONVERSATION_ID,
+    });
     let identity = "github.com/nickderobertis/onepipeline-ui";
     let mut journal = Journal::new("a-recording-host-4242");
     journal
@@ -292,41 +416,64 @@ fn journal(run: &str) -> String {
             json!({ "run_id": run, "node": NODE_ID, "persona": "worker" }),
             json!({ "persona": "worker" }),
         )
+        // Two turns, each opened by the producer's own 1-based number and each
+        // followed by the summaries it published from inside itself. That order
+        // is the producer's: `oneagentgraph` opens a turn *before* its
+        // activities, which is why a summary belongs to the record before it.
         .emit(
             "2026-08-07T12:00:03.000Z",
             "agentgraph",
             "turn-started",
-            json!({
-                "run_id": run,
-                "node": NODE_ID,
-                "member": "worker",
-                "persona": "worker",
-                "session": CONVERSATION_ID,
-            }),
-            json!({ "message": "landed the route table", "model": "a-model" }),
+            at_member.clone(),
+            json!({ "turn": 1 }),
         )
-        // What the turn consumed, as `oneagentgraph` reports it when the turn is
-        // done: the only measurement of model time and cost anything in the
-        // stack records.
+        .emit(
+            "2026-08-07T12:00:03.500Z",
+            "agentgraph",
+            "turn-activity",
+            at_member.clone(),
+            json!({
+                "kind": "tool_call",
+                "name": "Read",
+                "detail": "src/api.rs",
+                "truncated": false,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:04.000Z",
+            "agentgraph",
+            "turn-started",
+            at_member.clone(),
+            json!({ "turn": 2 }),
+        )
+        .emit(
+            "2026-08-07T12:00:04.500Z",
+            "agentgraph",
+            "turn-activity",
+            at_member.clone(),
+            json!({
+                "kind": "tool_call",
+                "name": "Bash",
+                "detail": "just gate",
+                "truncated": false,
+            }),
+        )
+        // What the *dispatch* consumed, which is what a `turn-completed` carries:
+        // that library copies the settling member's usage verbatim out of its
+        // onejudge report, so this is the report's own total over both sides and
+        // is spelled the way that document spells it.
         .emit(
             "2026-08-07T12:00:05.000Z",
             "agentgraph",
             "turn-completed",
-            json!({
-                "run_id": run,
-                "node": NODE_ID,
-                "member": "worker",
-                "persona": "worker",
-                "session": CONVERSATION_ID,
-            }),
+            at_member.clone(),
             json!({
                 "usage": {
-                    "tokens_in": 1_200,
-                    "tokens_out": 340,
-                    "cache_read": 800,
-                    "cache_write": 120,
-                    "cost": 0.42,
-                    "duration": 2.5,
+                    "input_tokens": 159_434,
+                    "output_tokens": 1_564,
+                    "cache_read_tokens": 187_430,
+                    "cache_write_tokens": 712,
+                    "cost_usd": 50.72,
                 },
             }),
         )
@@ -518,34 +665,21 @@ fn journal(run: &str) -> String {
             "2026-08-07T12:00:22.000Z",
             "agentgraph",
             "turn-started",
-            json!({
-                "run_id": run,
-                "node": REVIEW_NODE_ID,
-                "member": "judge",
-                "persona": "judge",
-                "session": REVIEW_CONVERSATION_ID,
-            }),
-            json!({ "message": "the contract reads", "model": "a-model" }),
+            at_reviewer.clone(),
+            json!({ "turn": 1 }),
         )
         .emit(
             "2026-08-07T12:00:25.000Z",
             "agentgraph",
             "turn-completed",
-            json!({
-                "run_id": run,
-                "node": REVIEW_NODE_ID,
-                "member": "judge",
-                "persona": "judge",
-                "session": REVIEW_CONVERSATION_ID,
-            }),
+            at_reviewer.clone(),
             json!({
                 "usage": {
-                    "tokens_in": 400,
-                    "tokens_out": 90,
-                    "cache_read": 0,
-                    "cache_write": 0,
-                    "cost": 0.11,
-                    "duration": 3.0,
+                    "input_tokens": 400,
+                    "output_tokens": 90,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "cost_usd": 0.11,
                 },
             }),
         )
@@ -618,10 +752,26 @@ pub struct SettledMember<'a> {
     pub stream: &'a str,
     /// The node whose dispatch it settled.
     pub node: &'a str,
+    /// The member that settled. Named rather than assumed, because the session a
+    /// settlement's report belongs to is the stream and *this* — a settlement
+    /// carries no `session` label, and `{stream}.{member}` is how `oneagentgraph`
+    /// mints one. It stands for the persona too: every member in these fixtures
+    /// runs under a persona of its own name.
+    pub member: &'a str,
+    /// When it settled, so a settlement merges where it happened rather than
+    /// after the node that settled because of it.
+    pub at: &'a str,
     /// The artifact id the producer recorded for the report it stored.
     pub artifact: &'a str,
     /// The report that library wrote.
     pub report: &'a str,
+}
+
+impl SettledMember<'_> {
+    /// The persona the member ran under, which in these fixtures is its own name.
+    fn persona(&self) -> &str {
+        self.member
+    }
 }
 
 /// What the producing library left at the path its settlement names.
@@ -672,7 +822,7 @@ pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
         .count();
     let line = json!({
         "v": 1,
-        "ts": "2026-08-07T12:01:00.000Z",
+        "ts": member.at,
         "stream": member.stream,
         "seq": seq,
         "source": "agentgraph",
@@ -680,8 +830,8 @@ pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
         "labels": {
             "run_id": dir.file_name().and_then(|run| run.to_str()),
             "node": member.node,
-            "member": "worker",
-            "persona": "worker",
+            "member": member.member,
+            "persona": member.persona(),
         },
         "payload": {
             "completed": true,
@@ -865,7 +1015,670 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
     let journal = live_journal(run, &plan, &report_path);
     fs::write(dir.join("events.jsonl"), &journal).expect("the journal");
     retain_reported_control(&dir, &journal);
+    // The lint member settled with a report of its own, which is the only place
+    // the time it spent in a harness is recorded: a `turn-completed` carries the
+    // dispatch's usage and no interval at all.
+    settle_member(
+        &dir,
+        &SettledMember {
+            stream: LINT_STREAM,
+            node: SHIP_NODE_ID,
+            member: "llmlint",
+            at: "2026-08-07T12:00:28.960Z",
+            artifact: LINT_REPORT_ARTIFACT,
+            report: &lint_report(),
+        },
+        Produced::Report,
+    );
     dir
+}
+
+/// One recorded run whose work ran in sequence, still being driven.
+///
+/// Written to be read as a *timeline*: every lane in it is a lane that was the
+/// only thing happening while it ran, so a reading that widens any of them to
+/// the node's own window shows up as two lanes overlapping where the run says
+/// they could not have. It carries the four shapes the other fixtures have none
+/// of — a node the engine re-asked, a lifecycle node handing its branch to a
+/// drafting member, a publication the gate refused, and a node still working.
+pub fn write_lanes(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "claude-code",
+            "session": "claude-code-session-7a8b9c0d",
+            "pid": 4311,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = lanes_plan();
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    // Deliberately no `result.json`: a node of this run is still working, and the
+    // SDK rewrites that document only when a driver closes out.
+    fs::write(dir.join("events.jsonl"), lanes_journal(run, &plan)).expect("the journal");
+    dir
+}
+
+fn lanes_plan() -> Value {
+    json!({
+        "schema_version": 2,
+        "goal": { "text": "land the workstream" },
+        "name": "lanes",
+        "concurrency": 4,
+        "tasks": [
+            { "id": RETRIED_NODE_ID, "persona": "engineer", "task": "## What\nRe-ask me." },
+            {
+                "id": DRAFTED_NODE_ID,
+                "persona": "engineer",
+                "task": "## What\nWork, draft, publish.",
+                "branch": "feature/drafted",
+                "base_branch": "main",
+            },
+            { "id": REFUSED_NODE_ID, "persona": "docs-writer", "task": "## What\nFail the gate." },
+            { "id": WORKING_NODE_ID, "persona": "docs-writer", "task": "## What\nKeep working." },
+            { "id": DIED_NODE_ID, "persona": "engineer", "task": "## What\nDie mid-turn." },
+            {
+                "id": RECLAIMED_NODE_ID,
+                "persona": "engineer",
+                "task": "## What\nLose the worktree.",
+            },
+            { "id": UNNAMED_NODE_ID, "persona": "docs-writer", "task": "## What\nBe stamped." },
+            { "id": SILENT_NODE_ID, "persona": "check-in", "task": "## What\nSay nothing." },
+        ],
+    })
+}
+
+/// That run's merged event store, in merge order.
+///
+/// The personas are the ones this host really dispatches under — `engineer` and
+/// `docs-writer` — and the role beside each is the `member` `oneagentgraph`
+/// stamps, which is the only thing in the record that says what a session *was*.
+///
+/// Each member's records go on the member's own stream, because that is where
+/// the producing process writes them and because `{stream}.{member}` is the
+/// session id they belong to. The streams are merged on `(ts, stream, seq)`, the
+/// way the SDK's own reader merges them.
+fn lanes_journal(run: &str, plan: &Value) -> String {
+    let mut driver = Journal::new("a-recording-host-4311");
+    let mut members: Vec<Journal> = LANE_STREAMS
+        .into_iter()
+        .chain([WATCHING_STREAM])
+        .map(Journal::new)
+        .collect();
+    let at_node = |node: &str| json!({ "run_id": run, "node": node });
+
+    driver.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        json!({ "plan": plan }),
+    );
+
+    // The run's own observer, at no node: a `monitor` member, which is neither a
+    // node's work nor a word `agentRoleSchema` has.
+    let watching = Lane {
+        run,
+        stream: WATCHING_STREAM,
+        session: WATCHING_CONVERSATION_ID,
+        node: None,
+        member: "monitor",
+        persona: "monitor",
+    };
+    watching.turn(&mut members, "2026-08-07T12:00:00.500Z");
+
+    // The node the engine re-asked. `oneagentgraph` opens a member before the
+    // session says anything, which is the one record that says when a session
+    // began — and the first attempt's member never settles, because that attempt
+    // was abandoned where the dispatch superseding it began.
+    let abandoned = Lane {
+        run,
+        stream: LANE_STREAMS[0],
+        session: RETRIED_FIRST_CONVERSATION_ID,
+        node: Some(RETRIED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    let reasked = Lane {
+        run,
+        stream: LANE_STREAMS[1],
+        session: RETRIED_SECOND_CONVERSATION_ID,
+        node: Some(RETRIED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver.emit(
+        "2026-08-07T12:00:01.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": RETRIED_NODE_ID, "persona": "engineer" }),
+        json!({ "persona": "engineer" }),
+    );
+    abandoned.started(&mut members, "2026-08-07T12:00:02.000Z");
+    abandoned.turn(&mut members, "2026-08-07T12:00:03.000Z");
+    driver.emit(
+        "2026-08-07T12:01:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": RETRIED_NODE_ID, "persona": "engineer" }),
+        json!({ "persona": "engineer" }),
+    );
+    reasked.started(&mut members, "2026-08-07T12:01:01.000Z");
+    reasked.turn(&mut members, "2026-08-07T12:01:02.000Z");
+    reasked.settled(&mut members, "2026-08-07T12:01:30.000Z", true);
+    driver.emit(
+        "2026-08-07T12:01:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(RETRIED_NODE_ID),
+        json!({ "status": "done", "outcome": "shipped" }),
+    );
+
+    // The lifecycle node: a worker on the worktree, then a drafting member on the
+    // same branch once it had settled, then `onevcs` publishing what they left.
+    // The three ran one after another and nothing about them overlaps.
+    let working_on_it = Lane {
+        run,
+        stream: LANE_STREAMS[2],
+        session: DRAFTED_WORK_CONVERSATION_ID,
+        node: Some(DRAFTED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    let drafting = Lane {
+        run,
+        stream: LANE_STREAMS[3],
+        session: DRAFTED_DRAFTING_CONVERSATION_ID,
+        node: Some(DRAFTED_NODE_ID),
+        member: "pr-author",
+        persona: "pr-author",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:02:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": DRAFTED_NODE_ID, "persona": "engineer" }),
+            json!({ "persona": "engineer" }),
+        )
+        // The worktree the dispatch was given, which is where the *work* begins
+        // and not where publishing does.
+        .emit(
+            "2026-08-07T12:02:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(DRAFTED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/drafted",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        )
+        // `onevcs` brings its clone up to date to cut that worktree. It fetches
+        // to publish from one too and the record says nothing about which this
+        // was, which is why neither can open a publication.
+        .emit(
+            "2026-08-07T12:02:01.500Z",
+            "vcs",
+            "fetch",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        );
+    working_on_it.started(&mut members, "2026-08-07T12:02:02.000Z");
+    working_on_it.turn(&mut members, "2026-08-07T12:02:03.000Z");
+    working_on_it.settled(&mut members, "2026-08-07T12:20:00.000Z", true);
+    drafting.started(&mut members, "2026-08-07T12:20:01.000Z");
+    drafting.turn(&mut members, "2026-08-07T12:20:02.000Z");
+    drafting.settled(&mut members, "2026-08-07T12:20:40.000Z", true);
+    // And only now the publication. It begins with the same fetch the worktree
+    // began with — this one to publish from — so the span opens at the gate a
+    // second later, which is the first record only publishing writes.
+    driver
+        .emit(
+            "2026-08-07T12:20:40.500Z",
+            "vcs",
+            "fetch",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:20:41.000Z",
+            "vcs",
+            "gate-started",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "command": "just gate", "comparison_remote": "origin" }),
+        )
+        .emit(
+            "2026-08-07T12:21:30.000Z",
+            "vcs",
+            "gate-verdict",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "verdict": "pass", "command": "just gate", "output": "the gate passed" }),
+        )
+        .emit(
+            "2026-08-07T12:21:31.000Z",
+            "vcs",
+            "push",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "branch": "feature/drafted", "remote": "origin", "accepted": true }),
+        )
+        .emit(
+            "2026-08-07T12:21:35.000Z",
+            "vcs",
+            "change-merged",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "url": "https://example.invalid/changes/3", "sha": MERGE_SHA }),
+        )
+        .emit(
+            "2026-08-07T12:21:36.000Z",
+            "vcs",
+            "session-closed",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:21:37.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(DRAFTED_NODE_ID),
+            json!({
+                "status": "done",
+                "outcome": "shipped",
+                "branch": "feature/drafted",
+                "change_url": "https://example.invalid/changes/3",
+            }),
+        );
+
+    // The node whose gate refused it: publication work happened and nothing came
+    // of it, so the branch's span ends where the worktree was taken away and the
+    // run never ruled on what became of the branch.
+    let refused = Lane {
+        run,
+        stream: LANE_STREAMS[4],
+        session: REFUSED_CONVERSATION_ID,
+        node: Some(REFUSED_NODE_ID),
+        member: "worker",
+        persona: "docs-writer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:03:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": REFUSED_NODE_ID, "persona": "docs-writer" }),
+            json!({ "persona": "docs-writer" }),
+        )
+        .emit(
+            "2026-08-07T12:03:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(REFUSED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/refused",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    refused.started(&mut members, "2026-08-07T12:03:02.000Z");
+    refused.turn(&mut members, "2026-08-07T12:03:03.000Z");
+    refused.settled(&mut members, "2026-08-07T12:09:00.000Z", false);
+    driver
+        .emit(
+            "2026-08-07T12:09:01.000Z",
+            "vcs",
+            "gate-started",
+            at_node(REFUSED_NODE_ID),
+            json!({ "command": "just gate", "comparison_remote": "origin" }),
+        )
+        .emit(
+            "2026-08-07T12:09:50.000Z",
+            "vcs",
+            "gate-verdict",
+            at_node(REFUSED_NODE_ID),
+            json!({ "verdict": "fail", "command": "just gate", "output": "the gate refused it" }),
+        )
+        .emit(
+            "2026-08-07T12:09:51.000Z",
+            "vcs",
+            "session-closed",
+            at_node(REFUSED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:09:52.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(REFUSED_NODE_ID),
+            json!({ "status": "failed", "outcome": "gate-failed" }),
+        );
+
+    // The node still working, on a worktree nothing has published from: the run
+    // has said when it began and nothing at all about when it ends.
+    let still_working = Lane {
+        run,
+        stream: LANE_STREAMS[5],
+        session: WORKING_CONVERSATION_ID,
+        node: Some(WORKING_NODE_ID),
+        member: "worker",
+        persona: "docs-writer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:04:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": WORKING_NODE_ID, "persona": "docs-writer" }),
+            json!({ "persona": "docs-writer" }),
+        )
+        .emit(
+            "2026-08-07T12:04:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(WORKING_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/working",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        )
+        .emit(
+            "2026-08-07T12:04:01.500Z",
+            "vcs",
+            "fetch",
+            at_node(WORKING_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        );
+    still_working.started(&mut members, "2026-08-07T12:04:02.000Z");
+    still_working.turn(&mut members, "2026-08-07T12:04:03.000Z");
+
+    // The node whose member died mid-turn. Three records could end its session
+    // and the graph's own is the earliest of them, which is the ranking a span
+    // is bounded by: the run's account of the node never overrides the graph's
+    // account of the session inside it.
+    let lost = Lane {
+        run,
+        stream: LANE_STREAMS[6],
+        session: DIED_CONVERSATION_ID,
+        node: Some(DIED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:05:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": DIED_NODE_ID, "persona": "engineer" }),
+            json!({ "persona": "engineer" }),
+        )
+        .emit(
+            "2026-08-07T12:05:00.500Z",
+            "vcs",
+            "session-opened",
+            at_node(DIED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/died",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    lost.started(&mut members, "2026-08-07T12:05:01.000Z");
+    lost.turn(&mut members, "2026-08-07T12:05:02.000Z");
+    lost.died(&mut members, "2026-08-07T12:05:30.000Z");
+    driver
+        .emit(
+            "2026-08-07T12:05:40.000Z",
+            "vcs",
+            "session-closed",
+            at_node(DIED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:05:41.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(DIED_NODE_ID),
+            json!({ "status": "failed", "outcome": "member-died" }),
+        );
+
+    // And the node whose worktree was reclaimed while its member was still
+    // talking: the graph never ended that session at all, so the branch going
+    // away is the only thing that says when it stopped — ahead of the run's own
+    // settlement a second later.
+    let reclaimed = Lane {
+        run,
+        stream: LANE_STREAMS[7],
+        session: RECLAIMED_CONVERSATION_ID,
+        node: Some(RECLAIMED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:06:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": RECLAIMED_NODE_ID, "persona": "engineer" }),
+            json!({ "persona": "engineer" }),
+        )
+        .emit(
+            "2026-08-07T12:06:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(RECLAIMED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/reclaimed",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    reclaimed.started(&mut members, "2026-08-07T12:06:02.000Z");
+    reclaimed.turn(&mut members, "2026-08-07T12:06:03.000Z");
+    driver
+        .emit(
+            "2026-08-07T12:06:30.000Z",
+            "vcs",
+            "session-closed",
+            at_node(RECLAIMED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:06:31.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(RECLAIMED_NODE_ID),
+            json!({ "status": "failed", "outcome": "worktree-reclaimed" }),
+        );
+
+    // The node the graph ran under a member no vocabulary here has a word for.
+    // The persona beside it is the literal word `pr-author`, which is the one a
+    // host really dispatches under and the one a reading off personas mistook a
+    // whole lane for — so this session says what it was, and what it said is not
+    // servable.
+    let unnamed = Lane {
+        run,
+        stream: LANE_STREAMS[8],
+        session: UNNAMED_CONVERSATION_ID,
+        node: Some(UNNAMED_NODE_ID),
+        member: "reviewer",
+        persona: "pr-author",
+    };
+    driver.emit(
+        "2026-08-07T12:07:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": UNNAMED_NODE_ID, "persona": "docs-writer" }),
+        json!({ "persona": "docs-writer" }),
+    );
+    unnamed.started(&mut members, "2026-08-07T12:07:01.000Z");
+    unnamed.turn(&mut members, "2026-08-07T12:07:02.000Z");
+    unnamed.settled(&mut members, "2026-08-07T12:07:30.000Z", true);
+    driver.emit(
+        "2026-08-07T12:07:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(UNNAMED_NODE_ID),
+        json!({ "status": "done", "outcome": "shipped" }),
+    );
+
+    // And the dispatch that relayed no session at all — the kind the engine
+    // re-asks. Its `node-dispatched` stamps a persona and no member, which is
+    // the record the persona is the reading for.
+    driver
+        .emit(
+            "2026-08-07T12:08:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": SILENT_NODE_ID, "persona": "check-in" }),
+            json!({ "persona": "check-in" }),
+        )
+        .emit(
+            "2026-08-07T12:08:30.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(SILENT_NODE_ID),
+            json!({ "status": "failed", "outcome": "nothing-reported" }),
+        );
+
+    merged(std::iter::once(driver).chain(members))
+}
+
+/// The repository every session of the lanes run publishes to.
+const IDENTITY: &str = "github.com/nickderobertis/onepipeline-ui";
+
+/// One member of the lanes run, and the records `oneagentgraph` writes for it.
+///
+/// It exists so a lane is written as the three things a lane *is* — it began, it
+/// spoke, it settled — rather than as nine near-identical `emit` calls whose
+/// stream and labels a reader has to check against each other by eye.
+struct Lane<'a> {
+    /// The run it belongs to, which every record in the merged store carries.
+    run: &'a str,
+    /// The producing process's own stream, which the session id is spelled from.
+    stream: &'a str,
+    /// That session id: `{stream}.{member}`, and nothing else.
+    session: &'a str,
+    /// The node it ran for, or `None` for the run's own observer.
+    node: Option<&'a str>,
+    /// The member the graph declared, which is what says what the session was.
+    member: &'a str,
+    /// The persona it ran under, which on this host names a style and not a role.
+    persona: &'a str,
+}
+
+impl Lane<'_> {
+    /// The labels every record of it carries. `session` is stamped on the turn
+    /// kinds and on no other, exactly as that library stamps it.
+    fn labels(&self, session: bool) -> Value {
+        let mut labels = json!({
+            "run_id": self.run,
+            "member": self.member,
+            "persona": self.persona,
+        });
+        if let Some(node) = self.node {
+            labels["node"] = json!(node);
+        }
+        if session {
+            labels["session"] = json!(self.session);
+        }
+        labels
+    }
+
+    /// Its own journal, by the stream that names it.
+    fn journal<'j>(&self, members: &'j mut [Journal]) -> &'j mut Journal {
+        members
+            .iter_mut()
+            .find(|journal| journal.stream == self.stream)
+            .expect("a lane writes on the stream its session is spelled from")
+    }
+
+    /// `member-started`: the one record that says when a session began, and the
+    /// one a session with a single turn in it could not otherwise supply.
+    fn started(&self, members: &mut [Journal], at: &str) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "member-started",
+            self.labels(false),
+            json!({}),
+        );
+    }
+
+    fn turn(&self, members: &mut [Journal], at: &str) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "turn-started",
+            self.labels(true),
+            json!({ "turn": 1 }),
+        );
+    }
+
+    /// `member-died`: what ends a session the graph lost rather than one that
+    /// reported. It is a settlement for the purpose of bounding a span and is
+    /// nothing else — no verdict is recorded and none is served.
+    fn died(&self, members: &mut [Journal], at: &str) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "member-died",
+            self.labels(false),
+            json!({ "reason": "the member's process exited" }),
+        );
+    }
+
+    /// `member-settled`: what ends a session, whatever the node it ran for does.
+    fn settled(&self, members: &mut [Journal], at: &str, completed: bool) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "member-settled",
+            self.labels(false),
+            json!({
+                "completed": completed,
+                "verdict": [],
+                "completion_reason": Value::Null,
+            }),
+        );
+    }
+}
+
+/// Several streams as one store, in the order the SDK's own reader merges them.
+fn merged(streams: impl IntoIterator<Item = Journal>) -> String {
+    let mut lines: Vec<(String, String, usize, String)> = Vec::new();
+    for journal in streams {
+        for (seq, line) in journal.lines.iter().enumerate() {
+            let record: Value = serde_json::from_str(line).expect("a record this module wrote");
+            lines.push((
+                record["ts"].as_str().expect("a stamp").to_owned(),
+                journal.stream.clone(),
+                seq,
+                line.clone(),
+            ));
+        }
+    }
+    lines.sort_by(|left, right| (&left.0, &left.1, left.2).cmp(&(&right.0, &right.1, right.2)));
+    let text: Vec<&str> = lines.iter().map(|(_, _, _, line)| line.as_str()).collect();
+    format!("{}\n", text.join("\n"))
 }
 
 /// The run's paths, as the SDK's own nameable type.
@@ -1240,12 +2053,11 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         }),
         json!({
             "usage": {
-                "tokens_in": 900,
-                "tokens_out": 210,
-                "cache_read": 300,
-                "cache_write": 60,
-                "cost": 0.19,
-                "duration": 1.5,
+                "input_tokens": 900,
+                "output_tokens": 210,
+                "cache_read_tokens": 300,
+                "cache_write_tokens": 60,
+                "cost_usd": 0.19,
             },
         }),
     );
@@ -1277,12 +2089,11 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         }),
         json!({
             "usage": {
-                "tokens_in": 120,
-                "tokens_out": 40,
-                "cache_read": 0,
-                "cache_write": 0,
-                "cost": 0.03,
-                "duration": 0.5,
+                "input_tokens": 120,
+                "output_tokens": 40,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": 0.03,
             },
         }),
     );
@@ -1890,4 +2701,495 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
         );
     fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
     dir
+}
+
+/// The stream the settled run's worker member ran on, and the one its session id
+/// is spelled from.
+///
+/// A settlement carries no `session` label; a session id is `{stream}.{member}`,
+/// which is how `oneagentgraph` mints one, so this and [`CONVERSATION_ID`] have
+/// to agree or nothing joins a transcript to the report that holds it.
+pub const WORKER_STREAM: &str = "node-scope-1786925518098-3163646";
+/// The artifact id that settlement recorded for the report it stored.
+pub const WORKER_REPORT_ARTIFACT: &str = "report-node-scope-1786925518098-3163646";
+
+/// The prompt the simulated user opened the dispatch with — the dispatch's own
+/// task prose, which is what a turn's `user` is and what its persona name is not.
+pub const FIRST_PROMPT: &str = "## What\nLand the wire contract.";
+pub const FIRST_REPLY: &str = "Landed the route table; every route answers.";
+/// The second thing it was asked, so a transcript has more than one turn to
+/// attribute a cost to.
+pub const SECOND_PROMPT: &str = "Run the repository's gate once, end to end.";
+pub const SECOND_REPLY: &str = "The gate ran green over the finished tree.";
+/// What the tool the first turn called gave back. Nothing in the journal records
+/// this: `turn-activity` reports the call and never the observation.
+pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
+
+/// The onejudge report the settled run's worker member stored, built from that
+/// library's own types.
+///
+/// Nothing here is a stub of the report contract: these are `onejudge`'s structs
+/// serialized by `onejudge`'s own derives, so a release that renamed a field
+/// fails the suite that reads it rather than serving a transcript with holes.
+///
+/// It is shaped to hold three things the served transcript must get right. The
+/// two turns cost and take **different** amounts, so serving the report's own
+/// `usage` — the run total over both sides — on either of them is visible. The
+/// judge's figures are larger than the agent's on turn 2, so a reading that
+/// crossed the two role vocabularies would show up as a number rather than as a
+/// subtlety. And `telemetry.sessions` holds an `agent` row for the first turn
+/// only, so the second is served bounds-absent rather than handed the row beside
+/// it. The judge's own rows are [`reviewer_report`]'s, which is where the trap
+/// they spring is driven from.
+#[must_use]
+pub fn worker_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
+    };
+
+    let call = ToolEvent {
+        kind: "tool_call".into(),
+        name: Some("Read".into()),
+        input: Some(json!({ "file_path": "src/api.rs" })),
+        output: None,
+        index: 0,
+    };
+    let result = ToolEvent {
+        kind: "tool_result".into(),
+        name: None,
+        input: None,
+        output: Some(TOOL_OBSERVATION.into()),
+        index: 1,
+    };
+    let gate_call = ToolEvent {
+        kind: "tool_call".into(),
+        name: Some("Bash".into()),
+        input: Some(json!({ "command": "just gate" })),
+        output: None,
+        index: 0,
+    };
+    // A call the trace exposed no observation for, which is a different fact from
+    // one that returned nothing: `output` is absent rather than empty.
+    let gate_result = ToolEvent {
+        kind: "tool_result".into(),
+        name: None,
+        input: None,
+        output: None,
+        index: 1,
+    };
+    let agent_usage = |cost| Usage {
+        input_tokens: Some(376),
+        output_tokens: Some(164),
+        cache_read_tokens: Some(44_051),
+        cache_write_tokens: Some(356),
+        cost_usd: Some(cost),
+    };
+    let judge_usage = Usage {
+        input_tokens: Some(79_341),
+        output_tokens: Some(618),
+        cache_read_tokens: Some(49_664),
+        cache_write_tokens: None,
+        cost_usd: Some(9.75),
+    };
+    let ran = |harness: &str, ms, usage| CandidateAttempt {
+        harness: harness.to_owned(),
+        harness_id: format!("{harness}:default"),
+        variant: None,
+        model: None,
+        status: "ok".into(),
+        available: true,
+        ran: true,
+        failure_kind: None,
+        failure_kind_source: None,
+        exit_code: Some(0),
+        duration_ms: Some(ms),
+        error: None,
+        session_id: None,
+        history_id: None,
+        usage: Some(usage),
+    };
+    // The identity the chain fell through before the one that ran. It reports a
+    // duration of its own, which is how long finding out took and is not the
+    // turn's, so a reading that took the first candidate rather than the one that
+    // ran would serve this number.
+    let fell_through = CandidateAttempt {
+        ran: false,
+        available: false,
+        status: "unavailable".into(),
+        exit_code: None,
+        duration_ms: Some(4_364),
+        usage: None,
+        ..ran("claude-code", 0, agent_usage(0.0))
+    };
+    // Read off the candidate rather than named twice, or the judge's attribution
+    // would carry the agent's identity and no reading could tell them apart.
+    let attributed = |role, turn_index, candidates: Vec<CandidateAttempt>| HarnessAttribution {
+        role,
+        turn_index,
+        ran: candidates
+            .iter()
+            .find(|candidate| candidate.ran)
+            .map(|candidate| candidate.harness_id.clone()),
+        fell_through: Vec::new(),
+        candidates,
+        history_file: None,
+    };
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user(FIRST_PROMPT),
+                Message::assistant(FIRST_REPLY).with_events(vec![call, result]),
+                Message::user(SECOND_PROMPT),
+                Message::assistant(SECOND_REPLY).with_events(vec![gate_call, gate_result]),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: Some("the acceptance criteria were met".into()),
+        settled_reason: None,
+        // The whole dispatch's total over both sides, which is what neither turn
+        // spent: 29.71 + 1.51 + 9.75 + 9.75.
+        usage: Some(Usage {
+            input_tokens: Some(159_434),
+            output_tokens: Some(1_564),
+            cache_read_tokens: Some(187_430),
+            cache_write_tokens: Some(712),
+            cost_usd: Some(50.72),
+        }),
+        telemetry: Some(Telemetry {
+            wall_ms: 30_000,
+            agent: PartyTelemetry {
+                usage: Some(agent_usage(31.22)),
+                ..PartyTelemetry::default()
+            },
+            // The asymmetry this host really records: the judge side reports a
+            // provider-measured start and the agent side does not, which is why
+            // the session rows below are the judge's.
+            judge: PartyTelemetry {
+                model_ms: Some(18_000),
+                time_to_first_token_ms: Some(900),
+                usage: Some(judge_usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            orchestration_ms: 1_200,
+            sessions: vec![SessionLink {
+                session_id: "01a01f4c-685b-75e2-8281-e8937fd20d47".into(),
+                role: TelemetryRole::Agent,
+                turn_index: 1,
+                started_at: "2026-08-07T12:00:03.000Z".into(),
+                finished_at: Some("2026-08-07T12:00:03.900Z".into()),
+                history_id: None,
+            }],
+            attribution: vec![
+                attributed(
+                    TelemetryRole::Agent,
+                    1,
+                    vec![fell_through, ran("claude-code", 900, agent_usage(29.71))],
+                ),
+                attributed(
+                    TelemetryRole::Judge,
+                    1,
+                    vec![ran("codex", 70, judge_usage.clone())],
+                ),
+                attributed(
+                    TelemetryRole::Agent,
+                    2,
+                    vec![ran("claude-code", 100, agent_usage(1.51))],
+                ),
+                attributed(TelemetryRole::Judge, 2, vec![ran("codex", 60, judge_usage)]),
+            ],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// The stream the review node's judge member ran on, which [`REVIEW_CONVERSATION_ID`]
+/// is spelled from.
+pub const REVIEWER_STREAM: &str = "node-scope-1786925518102-3163741";
+/// The artifact id that settlement recorded for the report it stored.
+pub const REVIEWER_REPORT_ARTIFACT: &str = "report-node-scope-1786925518102-3163741";
+/// What the reviewer was asked, and what it said.
+pub const REVIEW_PROMPT: &str = "## What\nReview it.";
+pub const REVIEW_REPLY: &str = "The contract reads; every route it lists is served.";
+
+/// The judge that supervised the review dispatch, served under that session's own
+/// id with `.judge` after it. No session relays it; the stored report holds it.
+pub const REVIEW_JUDGE_CONVERSATION_ID: &str = "node-scope-1786925518102-3163741.judge.judge";
+/// What that judge ruled, and the words it ruled it in.
+pub const JUDGE_CRITERIA: [(&str, &str); 2] = [
+    (
+        "every route the contract lists is served",
+        "the route table answers each of them end to end",
+    ),
+    (
+        "the gate is green over the finished tree",
+        "the run recorded one green gate and no rerun after it",
+    ),
+];
+/// The numeric criterion beside them, so the kind is read rather than assumed.
+pub const JUDGE_SCORED: (&str, f64, &str) = (
+    "how completely the acceptance criteria were met",
+    4.5,
+    "one follow-up was surfaced rather than done",
+);
+/// Its closing assessment, which the report keys to the dispatch.
+pub const JUDGE_ASSESSMENT: &str = "The dispatch met its bar. The route table is \
+landed, the gate ran green over the finished tree, and the one follow-up it \
+surfaced is recorded rather than silently dropped.";
+/// The model the judge side ran on; the agent side of this report names none.
+pub const JUDGE_MODEL: &str = "gpt-5-codex";
+/// The instants that report observed the judge between, one pair per turn. None
+/// of them may reach a turn of the transcript the agent side of it had.
+pub const JUDGE_BOUNDS: [(&str, &str); 2] = [
+    ("2026-08-07T12:00:22.400Z", "2026-08-07T12:00:22.900Z"),
+    ("2026-08-07T12:00:24.100Z", "2026-08-07T12:00:24.600Z"),
+];
+
+/// The report the review node's judge member stored.
+///
+/// A member the graph runs as the *judge* transport, whose own report still has
+/// an `agent` side — the side that did the reviewing. Its measurements are
+/// attributed to the party the member is, which is what makes this the second
+/// party the run's timing can measure and not a second reading of the first.
+///
+/// It is also the run's one report that records the side onejudge ran *inside*
+/// this member: `role: judge` rows for both turns, an `agent` row for neither,
+/// and a conclusion keyed to the dispatch. So it springs the trap the other
+/// report cannot — matching a turn to a row by index alone would put this clock
+/// on the reviewer's own turn — and it is the settled data the judge journeys
+/// read.
+#[must_use]
+pub fn reviewer_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, JudgeKind, JudgeValue, JudgeVerdict, Message,
+        NamedVerdict, PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, Transcript,
+        Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(400),
+        output_tokens: Some(90),
+        cache_read_tokens: Some(0),
+        cache_write_tokens: Some(0),
+        cost_usd: Some(0.11),
+    };
+    // What the judge side of this dispatch consumed. No cache write and no cost:
+    // the provider it ran on reports neither, and both are absences rather than
+    // zeroes wherever they are served.
+    let judge_usage = Usage {
+        input_tokens: Some(51_204),
+        output_tokens: Some(311),
+        cache_read_tokens: Some(20_480),
+        cache_write_tokens: None,
+        cost_usd: None,
+    };
+    let judged = |turn: u32, ms| HarnessAttribution {
+        role: TelemetryRole::Judge,
+        turn_index: turn,
+        ran: Some("codex:judge".into()),
+        fell_through: Vec::new(),
+        candidates: vec![CandidateAttempt {
+            harness: "codex".into(),
+            harness_id: "codex:judge".into(),
+            variant: Some("judge".into()),
+            model: Some(JUDGE_MODEL.to_owned()),
+            status: "ok".into(),
+            available: true,
+            ran: true,
+            failure_kind: None,
+            failure_kind_source: None,
+            exit_code: Some(0),
+            duration_ms: Some(ms),
+            error: None,
+            session_id: None,
+            history_id: None,
+            usage: Some(judge_usage.clone()),
+        }],
+        history_file: None,
+    };
+    let observed = |turn: usize| SessionLink {
+        session_id: format!("01a01f5{turn}-6168-72d1-b946-2251794e2fce"),
+        role: TelemetryRole::Judge,
+        turn_index: u32::try_from(turn).expect("a turn number"),
+        started_at: JUDGE_BOUNDS[turn - 1].0.to_owned(),
+        finished_at: Some(JUDGE_BOUNDS[turn - 1].1.to_owned()),
+        history_id: None,
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user(REVIEW_PROMPT),
+                Message::assistant(REVIEW_REPLY),
+            ],
+        },
+        verdicts: JUDGE_CRITERIA
+            .into_iter()
+            .map(|(criterion, reason)| {
+                NamedVerdict::new(
+                    criterion,
+                    JudgeKind::Boolean,
+                    JudgeVerdict {
+                        value: JudgeValue::Bool(true),
+                        reason: reason.to_owned(),
+                        usage: None,
+                    },
+                )
+            })
+            .chain(std::iter::once(NamedVerdict::new(
+                JUDGE_SCORED.0,
+                JudgeKind::Numeric,
+                JudgeVerdict {
+                    value: JudgeValue::Number(JUDGE_SCORED.1),
+                    reason: JUDGE_SCORED.2.to_owned(),
+                    usage: None,
+                },
+            )))
+            .collect(),
+        assessment: Some(JUDGE_ASSESSMENT.to_owned()),
+        completion_reason: Some("the change is approved".into()),
+        settled_reason: None,
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 3_000,
+            agent: PartyTelemetry {
+                usage: Some(usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            judge: PartyTelemetry {
+                usage: Some(judge_usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            orchestration_ms: 100,
+            sessions: vec![observed(1), observed(2)],
+            attribution: vec![
+                HarnessAttribution {
+                    role: TelemetryRole::Agent,
+                    turn_index: 1,
+                    ran: Some("codex:default".into()),
+                    fell_through: Vec::new(),
+                    candidates: vec![CandidateAttempt {
+                        harness: "codex".into(),
+                        harness_id: "codex:default".into(),
+                        variant: None,
+                        model: None,
+                        status: "ok".into(),
+                        available: true,
+                        ran: true,
+                        failure_kind: None,
+                        failure_kind_source: None,
+                        exit_code: Some(0),
+                        duration_ms: Some(2_800),
+                        error: None,
+                        session_id: None,
+                        history_id: None,
+                        usage: Some(usage),
+                    }],
+                    history_file: None,
+                },
+                judged(1, 500),
+                judged(2, 400),
+            ],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// The stream the live run's lint member ran on, and the artifact its settlement
+/// recorded for the report it stored.
+pub const LINT_STREAM: &str = "node-scope-1786925518110-3163812";
+pub const LINT_REPORT_ARTIFACT: &str = "report-node-scope-1786925518110-3163812";
+
+/// The report the lint member stored, which is where the time it spent is.
+///
+/// A third party beside the agent and the judge, told apart from them by the
+/// member label alone — so a run whose lint tier ran is measurable as having run
+/// rather than as having reported nothing.
+#[must_use]
+pub fn lint_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, Telemetry,
+        TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(120),
+        output_tokens: Some(40),
+        cache_read_tokens: Some(0),
+        cache_write_tokens: Some(0),
+        cost_usd: Some(0.03),
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Read the diff for the rules the repository declares."),
+                Message::assistant("The diff reads; no rule it declares is broken."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: None,
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 600,
+            agent: PartyTelemetry {
+                usage: Some(usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 20,
+            sessions: Vec::new(),
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Agent,
+                turn_index: 1,
+                ran: Some("codex:default".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "codex".into(),
+                    harness_id: "codex:default".into(),
+                    variant: None,
+                    model: None,
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(500),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(usage),
+                }],
+                history_file: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
 }

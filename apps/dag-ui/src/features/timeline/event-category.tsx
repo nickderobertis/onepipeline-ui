@@ -86,6 +86,17 @@ export const EVENT_CATEGORIES = Object.keys(
 ) as readonly EventCategory[];
 
 /**
+ * The category as a word, for the readings that have no room to draw its glyph.
+ *
+ * Capitalized off the vocabulary rather than tabled beside it: every category is one
+ * lower-case word already chosen to be the word a reader would use, so a second table
+ * would be the same eleven words with somewhere new to drift from.
+ */
+export function eventCategoryLabel(category: EventCategory): string {
+  return category.charAt(0).toUpperCase() + category.slice(1);
+}
+
+/**
  * Which words of a wire kind decide its category, most specific reading first.
  *
  * Rules over the string rather than a lookup of every kind, because the four

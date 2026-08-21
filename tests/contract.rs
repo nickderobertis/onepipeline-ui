@@ -357,7 +357,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 13);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 14);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
@@ -892,6 +892,60 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
     );
 }
 
+/// The `onevcs` vocabulary this crate reads, against that library's own
+/// declaration of it.
+///
+/// That library's `event` module is private, which is why this gate was long
+/// thought unavailable — but it re-exports `EventKind` from its crate root, so
+/// the kinds are reachable as a type and the copy in `payload::vcs` is held to
+/// them here. A kind renamed there fails on this line rather than in a served
+/// timeline that quietly stops finding the record it reads a publication, a
+/// worktree or a gate from.
+///
+/// The three payload *values* in that module have no equivalent to offer: each
+/// is built inline in a private module that re-exports nothing, and each says so
+/// where it is declared.
+#[test]
+fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
+    use onepipeline_ui::payload::vcs;
+
+    let wire = |kind: onevcs::EventKind| {
+        serde_json::to_value(kind)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .expect("a kind serializes as its wire string")
+    };
+    for (declared, copied) in [
+        (onevcs::EventKind::SessionOpened, vcs::SESSION_OPENED),
+        (onevcs::EventKind::LockWait, vcs::LOCK_WAIT),
+        (onevcs::EventKind::GateVerdict, vcs::GATE_VERDICT),
+        (onevcs::EventKind::Push, vcs::PUSH),
+        (onevcs::EventKind::ChangeOpened, vcs::CHANGE_OPENED),
+        (onevcs::EventKind::ChangeCheck, vcs::CHANGE_CHECK),
+        (onevcs::EventKind::ChangeMerged, vcs::CHANGE_MERGED),
+        (onevcs::EventKind::MergeCompleted, vcs::MERGE_COMPLETED),
+        (onevcs::EventKind::CommitPreserved, vcs::COMMIT_PRESERVED),
+        (onevcs::EventKind::SyncConflict, vcs::SYNC_CONFLICT),
+        (onevcs::EventKind::SessionClosed, vcs::SESSION_CLOSED),
+        (onevcs::EventKind::Fetch, vcs::FETCH),
+    ] {
+        assert_eq!(wire(declared), copied, "{declared:?}");
+    }
+
+    // And the reading a publication's own bounds rest on: the three kinds a
+    // dispatch relays whether or not it ever published. A kind that left this
+    // list would open a publication over every node the run dispatched, which is
+    // the defect timeline schema 6 exists to have fixed.
+    assert_eq!(
+        vcs::SILENT_ON_PUBLICATION.to_vec(),
+        vec![
+            wire(onevcs::EventKind::SessionOpened),
+            wire(onevcs::EventKind::Fetch),
+            wire(onevcs::EventKind::SessionClosed)
+        ]
+    );
+}
+
 /// The `oneagentgraph` vocabulary this crate reads, against that library's own
 /// declaration of it.
 ///
@@ -922,9 +976,15 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         wire(oneagentgraph::event::EventKind::TurnCompleted),
         graph::TURN_COMPLETED
     );
-    // The six names the turn-control reading rests on: three that say a member is
-    // in a turn and three that say it is not. A kind renamed there fails here
-    // rather than making every in-flight node read as un-redirectable.
+    // The seven names the turn-control and interval readings rest on: three that
+    // say a member is in a turn, three that say it is not, and the one that says
+    // when it began. A kind renamed there fails here rather than making every
+    // in-flight node read as un-redirectable, or every session open at the
+    // dispatch that ran it because nothing was ever found to have started.
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::MemberStarted),
+        graph::MEMBER_STARTED
+    );
     assert_eq!(
         wire(oneagentgraph::event::EventKind::TurnStarted),
         graph::TURN_STARTED
@@ -940,6 +1000,28 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     assert_eq!(
         wire(oneagentgraph::event::EventKind::MemberSettled),
         graph::MEMBER_SETTLED
+    );
+
+    // The number a `turn-started` carries, which that library builds inline
+    // rather than from a struct. Its own renderer is the declaration reachable
+    // instead: `render::line` is public, is a pure function of one envelope, and
+    // reads this key — so a rename there empties this line rather than silently
+    // unnumbering every turn a transcript joins to its own measurements.
+    let started = serde_json::from_value::<oneagentgraph::event::Envelope>(serde_json::json!({
+        "v": 1,
+        "ts": "2026-08-07T12:00:00.000Z",
+        "stream": "stream-a",
+        "seq": 1,
+        "source": "agentgraph",
+        "kind": graph::TURN_STARTED,
+        "payload": { graph::TURN: 7 },
+    }))
+    .expect("a turn-started envelope deserializes");
+    assert!(
+        oneagentgraph::render::line(&started).ends_with("turn 7"),
+        "`{}` is not the key that library numbers a turn by: {}",
+        graph::TURN,
+        oneagentgraph::render::line(&started)
     );
 
     // The `turn-interrupted` payload, as that library writes it: every key this
@@ -980,33 +1062,8 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         "a delivered redirection has no reason it did not land: {delivered}"
     );
 
-    // The payload a `turn-completed` carries, as that library writes it: every
-    // key this crate reads is one of its fields, and none of its fields is one
-    // this crate has no reading for.
-    let usage = serde_json::to_value(oneagentgraph::event::Usage {
-        tokens_in: 1,
-        tokens_out: 2,
-        cache_read: 3,
-        cache_write: 4,
-        cost: 0.5,
-        duration: 1.5,
-    })
-    .expect("the usage record serializes");
-    let read = [
-        graph::TOKENS_IN,
-        graph::TOKENS_OUT,
-        graph::CACHE_READ,
-        graph::CACHE_WRITE,
-        graph::COST,
-        graph::DURATION,
-    ];
-    let declared: Vec<&str> = usage
-        .as_object()
-        .expect("a mapping")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(declared, read.to_vec());
+    // Where the usage a `turn-completed` carries sits, as that library declares
+    // it. What is *in* it is asserted below, against the type that writes it.
     assert_eq!(
         serde_json::to_value(oneagentgraph::event::TurnCompleted {
             usage: oneagentgraph::event::Usage {
@@ -1023,6 +1080,125 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         .and_then(|payload| payload.keys().next().cloned()),
         Some(graph::USAGE.to_owned()),
         "the usage sits where this crate looks for it"
+    );
+}
+
+/// The usage keys this crate reads off a `turn-completed`, against the type that
+/// really writes them.
+///
+/// Not `oneagentgraph::event::Usage`, which declares `tokens_in`, `cost` and a
+/// `duration` and which **nothing on this wire writes**: that library relays a
+/// settling member's usage copied verbatim out of the onejudge report, so what
+/// reaches this crate is `onejudge::Usage`. Gating the copy against the declared-
+/// but-unwritten type is what let six keys drift, and every served cost and token
+/// count read `null` for it. There is no `duration` here to read because the
+/// document has never carried one — a turn's own elapsed time is its attribution
+/// candidate's `duration_ms`, which is asserted beside it.
+#[test]
+fn the_usage_keys_this_crate_reads_are_the_ones_the_wire_carries() {
+    use onepipeline_ui::payload::graph;
+
+    let usage = serde_json::to_value(onejudge::Usage {
+        input_tokens: Some(1),
+        output_tokens: Some(2),
+        cache_read_tokens: Some(3),
+        cache_write_tokens: Some(4),
+        cost_usd: Some(0.5),
+    })
+    .expect("the usage record serializes");
+    let read = [
+        graph::INPUT_TOKENS,
+        graph::OUTPUT_TOKENS,
+        graph::CACHE_READ_TOKENS,
+        graph::CACHE_WRITE_TOKENS,
+        graph::COST_USD,
+    ];
+    let declared: Vec<&str> = usage
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(declared, read.to_vec());
+    assert!(
+        !declared.contains(&"duration"),
+        "a usage record carrying a duration would make this crate's per-turn \
+         elapsed time a second reading of it: {usage}"
+    );
+
+    // And the per-turn measurements, which are on the report's attribution and
+    // nowhere else. Named through the library's own type so a rename fails here.
+    let candidate = serde_json::to_value(onejudge::CandidateAttempt {
+        harness: "claude-code".into(),
+        harness_id: "claude-code:alternate".into(),
+        variant: None,
+        model: None,
+        status: "ok".into(),
+        available: true,
+        ran: true,
+        failure_kind: None,
+        failure_kind_source: None,
+        exit_code: Some(0),
+        duration_ms: Some(135_190),
+        error: None,
+        session_id: None,
+        history_id: None,
+        usage: Some(onejudge::Usage {
+            input_tokens: Some(38),
+            output_tokens: Some(8_256),
+            cache_read_tokens: Some(1_273_766),
+            cache_write_tokens: Some(66_561),
+            cost_usd: Some(1.509_083),
+        }),
+    })
+    .expect("the candidate serializes");
+    for key in ["ran", "duration_ms", "usage"] {
+        assert!(
+            candidate.get(key).is_some(),
+            "a turn's own measurements are read off `{key}`: {candidate}"
+        );
+    }
+}
+
+/// The two role vocabularies a stored report carries, which this crate must never
+/// conflate.
+///
+/// `transcript::Role` says who *wrote a message* and `TelemetryRole` says which
+/// *side ran an invocation*, and they are two different closed sets that share no
+/// word. Reading a turn's bounds off a `role: judge` row would put the judge's
+/// clock on the agent's turn, which is the whole reason both are asserted here as
+/// the words the wire carries.
+#[test]
+fn the_report_spells_its_two_role_vocabularies_the_way_this_crate_reads_them() {
+    let message = |role| serde_json::to_value(role).expect("a message role serializes");
+    assert_eq!(message(onejudge::Role::User), serde_json::json!("user"));
+    assert_eq!(
+        message(onejudge::Role::Assistant),
+        serde_json::json!("assistant")
+    );
+    assert_eq!(message(onejudge::Role::System), serde_json::json!("system"));
+
+    let side = |role| serde_json::to_value(role).expect("a telemetry role serializes");
+    assert_eq!(
+        side(onejudge::TelemetryRole::Agent),
+        serde_json::json!("agent")
+    );
+    assert_eq!(
+        side(onejudge::TelemetryRole::Judge),
+        serde_json::json!("judge")
+    );
+
+    // The two sets are disjoint, so no reading of one can be a reading of the
+    // other by accident.
+    assert!(
+        ![
+            message(onejudge::Role::User),
+            message(onejudge::Role::Assistant),
+            message(onejudge::Role::System),
+        ]
+        .contains(&side(onejudge::TelemetryRole::Agent)),
+        "a message role that spells itself like a telemetry role would let one \
+         be read as the other"
     );
 }
 

@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 13,
+  "telemetry_schema_version": 14,
   "observed_at": "2026-08-07T12:00:00Z",
   "conversation": {
     "canContinue": false,
@@ -14,40 +14,107 @@
     "state": "turn-completed",
     "turns": [
       {
-        "assistant": "landed the route table",
-        "durationMs": null,
+        "assistant": "Landed the route table; every route answers.",
+        "durationMs": 900,
         "failureKind": null,
+        "finishedAt": "2026-08-07T12:00:03.900Z",
         "harness": "oneagentgraph",
         "id": "node-scope-1786925518098-3163646.worker.0",
-        "model": "a-model",
+        "model": null,
         "reasoning": null,
+        "startedAt": "2026-08-07T12:00:03.000Z",
         "status": "turn-started",
         "timestamp": "2026-08-07T12:00:03.000Z",
-        "tools": [],
+        "tools": [
+          {
+            "index": 0,
+            "kind": "tool_call",
+            "name": "Read",
+            "input": {
+              "file_path": "src/api.rs"
+            },
+            "output": null
+          },
+          {
+            "index": 1,
+            "kind": "tool_result",
+            "name": null,
+            "input": null,
+            "output": "pub fn routes() -> Router { /* … */ }"
+          }
+        ],
         "unknown": {},
-        "usage": {},
-        "user": "worker"
+        "usage": {
+          "inputTokens": 376,
+          "outputTokens": 164,
+          "cacheReadTokens": 44051,
+          "cacheWriteTokens": 356,
+          "costUsd": 29.71
+        },
+        "user": "## What\nLand the wire contract."
       },
       {
-        "assistant": null,
-        "durationMs": 2500,
+        "assistant": "The gate ran green over the finished tree.",
+        "durationMs": 100,
         "failureKind": null,
+        "finishedAt": null,
         "harness": "oneagentgraph",
         "id": "node-scope-1786925518098-3163646.worker.1",
         "model": null,
         "reasoning": null,
+        "startedAt": null,
+        "status": "turn-started",
+        "timestamp": "2026-08-07T12:00:04.000Z",
+        "tools": [
+          {
+            "index": 0,
+            "kind": "tool_call",
+            "name": "Bash",
+            "input": {
+              "command": "just gate"
+            },
+            "output": null
+          },
+          {
+            "index": 1,
+            "kind": "tool_result",
+            "name": null,
+            "input": null,
+            "output": null
+          }
+        ],
+        "unknown": {},
+        "usage": {
+          "inputTokens": 376,
+          "outputTokens": 164,
+          "cacheReadTokens": 44051,
+          "cacheWriteTokens": 356,
+          "costUsd": 1.51
+        },
+        "user": "Run the repository's gate once, end to end."
+      },
+      {
+        "assistant": null,
+        "durationMs": null,
+        "failureKind": null,
+        "finishedAt": null,
+        "harness": "oneagentgraph",
+        "id": "node-scope-1786925518098-3163646.worker.2",
+        "model": null,
+        "reasoning": null,
+        "startedAt": null,
         "status": "turn-completed",
         "timestamp": "2026-08-07T12:00:05.000Z",
         "tools": [],
         "unknown": {},
         "usage": {
-          "inputTokens": 1200,
-          "outputTokens": 340,
-          "cacheReadTokens": 800,
-          "cacheWriteTokens": 120,
-          "costUsd": 0.42
+          "inputTokens": 159434,
+          "outputTokens": 1564,
+          "cacheReadTokens": 187430,
+          "cacheWriteTokens": 712,
+          "costUsd": 50.72
         },
-        "user": "worker"
+        "user": ""
       }
     ]
   },

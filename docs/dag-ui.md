@@ -218,6 +218,23 @@ component: the graph timeline's rows, a node's plot, and the `ConversationTimeli
 the opened panel — that last one nested deepest inside the clipping, in a panel inside
 a scroll area.
 
+**A marker is read the same way, off a reading this app composes.** The package gives
+a marker button an `aria-label` and this app's category glyph and no description
+element at all, so there is nothing there for the layer above to read — and a marker
+that has to be opened before it can be identified makes a plot of them no faster to
+scan than a list. What a marker's hover states is therefore the record's own kind,
+name, moment and category, hung on the glyph by
+`src/features/timeline/item-reading.tsx` — which is the same module that composes the
+heading the detail panel opens that record under, so the two surfaces are one account
+rather than two that agree until somebody edits one. Adding the description element to
+`@oneharness/ui` instead would have taken on a sixth repository and its release chain
+for content that package does not have: the categories are this app's. The visible
+reading is `aria-hidden` and travels as an attribute rather than as text inside the
+button, so the record a marker's own label already names is not announced twice. The
+reading is looked for both at and inside whatever an event landed on, because the two
+ways of reaching a marker land on different elements: a pointer enters the glyph, and
+focus lands on the package's button around it.
+
 ## The node timeline view
 
 Opening a node replaces the graph with a view over the whole working area — the
@@ -392,6 +409,12 @@ it, rather than a screenshot somebody has to notice something in:
   the control that opens it is the row that was going off the edge;
 - a lone recorded term takes the whole fact row, since the list paints its cells by
   showing its own border colour between them and an empty cell is a filled panel;
+- a hovered **marker's** reading is whole on the same terms, driven at all five widths
+  too, and it is the record's own: what it is, when it happened, and the category its
+  glyph drew it as. Each width drives the marker the plot painted last, because
+  neighbouring markers overlap once the plot is narrow enough and a covered one is not
+  a marker a reader could hover either. Beside it, one journey opens the record it
+  named and finds every part of that line in the panel's heading;
 - a hovered segment's reading is whole — on screen on every side, with nothing hidden
   inside its own box, and carrying exactly the text of the description the segment
   names. That one is driven at **all five** widths rather than the two extremes,

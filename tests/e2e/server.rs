@@ -32,7 +32,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(13), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(14), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -300,9 +300,11 @@ fn a_run_detail_serves_its_graph_plan_and_transcripts() {
     );
 
     // One transcript per session the run relayed, and the pair each was run
-    // under: the worker's own side, and the judge member that reviewed it.
+    // under: the worker's own side, and the judge member that reviewed it. Beside
+    // the second sits the judge that supervised *it*, which no session relayed
+    // and only that member's settled report records.
     let conversations = body["conversations"].as_array().expect("conversations");
-    assert_eq!(conversations.len(), 2);
+    assert_eq!(conversations.len(), 3);
     assert_eq!(
         conversations[0]["conversation"]["id"],
         json!(fixture_run::CONVERSATION_ID)
@@ -322,6 +324,14 @@ fn a_run_detail_serves_its_graph_plan_and_transcripts() {
     assert_eq!(
         conversations[1]["attribution"]["transportRole"],
         json!("judge")
+    );
+    assert_eq!(
+        conversations[2]["conversation"]["id"],
+        json!(fixture_run::REVIEW_JUDGE_CONVERSATION_ID)
+    );
+    assert_eq!(
+        conversations[2]["attribution"]["parentConversationId"],
+        json!(fixture_run::REVIEW_CONVERSATION_ID)
     );
 }
 
@@ -440,7 +450,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(5));
+    assert_eq!(body["timeline_schema_version"], json!(6));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -469,7 +479,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
         .iter()
         .find(|row| row["node"] == json!(fixture_run::NODE_ID))
         .expect("the dispatched node");
-    assert_eq!(node["turns"], json!(2));
+    assert_eq!(node["turns"], json!(3));
     assert_eq!(
         node["turns"],
         json!(detail["conversations"][0]["conversation"]["turns"]
@@ -477,7 +487,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
             .map(Vec::len)
             .expect("the transcript's turns"))
     );
-    assert_eq!(detail["run"]["turns"], json!(4));
+    assert_eq!(detail["run"]["turns"], json!(5));
 }
 
 #[test]
@@ -521,6 +531,432 @@ fn the_run_timeline_covers_the_run_and_the_nodes_under_it() {
     }
 }
 
+/// A server over the run whose lanes ran one after another.
+fn lanes() -> Serving {
+    Serving::start(|root| {
+        fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+    })
+}
+
+/// One node's spans, as an operator opening that node reads them.
+fn node_spans(serving: &Serving, node: &str) -> Vec<Value> {
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={node}",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone()
+}
+
+fn span_named<'a>(spans: &'a [Value], id: &str) -> &'a Value {
+    spans
+        .iter()
+        .find(|span| span["id"] == json!(id))
+        .unwrap_or_else(|| panic!("no span `{id}` among {spans:?}"))
+}
+
+#[test]
+fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
+    let serving = lanes();
+    let spans = node_spans(&serving, fixture_run::RETRIED_NODE_ID);
+
+    // The abandoned attempt: it began where the run dispatched it, a second
+    // before its member came up, and it is over where the dispatch that
+    // superseded it began, because nothing else ever ended it.
+    let abandoned = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::RETRIED_FIRST_CONVERSATION_ID),
+    );
+    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:01.000Z"));
+    assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:01:00.000Z"));
+
+    // And the attempt that did the work, from the `node-dispatched` that asked
+    // for it, which the run ended itself.
+    let ran = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::RETRIED_SECOND_CONVERSATION_ID),
+    );
+    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(ran["ended_at"], json!("2026-08-07T12:01:30.000Z"));
+
+    // Each is the moment the run asked for that attempt, and not the moment the
+    // session it ran first spoke: two attempts of one node are told apart by the
+    // dispatches that bracket them.
+    for (span, dispatched) in [
+        (abandoned, "2026-08-07T12:00:01.000Z"),
+        (ran, "2026-08-07T12:01:00.000Z"),
+    ] {
+        assert_eq!(span["started_at"], json!(dispatched), "{span}");
+    }
+
+    // The two attempts of one node no longer read as having run over one window,
+    // which is the whole of what a reader opens a node's timeline to see.
+    assert_ne!(abandoned["started_at"], ran["started_at"]);
+    assert!(
+        abandoned["ended_at"].as_str() <= ran["started_at"].as_str(),
+        "the attempts overlap: {abandoned} then {ran}"
+    );
+    // The node above them still spans all of them: it is the node's window, and
+    // it is the only span that is.
+    let node = span_named(&spans, &format!("node.{}", fixture_run::RETRIED_NODE_ID));
+    assert_eq!(node["started_at"], json!("2026-08-07T12:00:01.000Z"));
+    assert_eq!(node["ended_at"], json!("2026-08-07T12:01:31.000Z"));
+}
+
+#[test]
+fn a_lifecycle_nodes_lanes_are_each_served_over_the_attempt_that_ran_them() {
+    let serving = lanes();
+    let spans = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+
+    let worked = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::DRAFTED_WORK_CONVERSATION_ID),
+    );
+    let drafted = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID),
+    );
+    let published = span_named(
+        &spans,
+        &format!("publication.{}", fixture_run::DRAFTED_NODE_ID),
+    );
+
+    // The attempt is the unit a session is bracketed by, and this node had one:
+    // both of the members it ran in sequence open at the `node-dispatched` that
+    // asked for them, and each closes where the run said that member was over.
+    // A session is never opened from its own first word — the run's own boundary
+    // is what brackets it, and between two members of one attempt the run
+    // recorded no boundary at all.
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
+    // The publication opens at the gate rather than at 12:02:01, where `onevcs`
+    // cut the worktree the worker then spent eighteen minutes on.
+    assert_eq!(published["started_at"], json!("2026-08-07T12:20:41.000Z"));
+    assert_eq!(published["ended_at"], json!("2026-08-07T12:21:35.000Z"));
+    assert_eq!(published["status"], json!("merged"));
+
+    // And the node's own window is still wider than any lane under it, which is
+    // what says the bounds served are the attempt's rather than the node's.
+    let node = span_named(&spans, &format!("node.{}", fixture_run::DRAFTED_NODE_ID));
+    assert_eq!(node["ended_at"], json!("2026-08-07T12:21:37.000Z"));
+    for lane in [worked, drafted, published] {
+        assert!(
+            lane["ended_at"].as_str() < node["ended_at"].as_str(),
+            "a lane was given the node's own end: {lane}"
+        );
+    }
+}
+
+#[test]
+fn a_session_the_graph_lost_and_one_whose_worktree_went_each_end_where_that_happened() {
+    let serving = lanes();
+
+    // The member died mid-turn. Three records could have ended this session and
+    // the graph's own is the earliest: not the worktree going away ten seconds
+    // later, and not the run's settlement of the node after that.
+    let lost = node_spans(&serving, fixture_run::DIED_NODE_ID);
+    let died = span_named(
+        &lost,
+        &format!("dispatch.{}", fixture_run::DIED_CONVERSATION_ID),
+    );
+    assert_eq!(died["started_at"], json!("2026-08-07T12:05:00.000Z"));
+    assert_eq!(died["ended_at"], json!("2026-08-07T12:05:30.000Z"));
+    assert!(
+        died["ended_at"].as_str()
+            < span_named(&lost, &format!("node.{}", fixture_run::DIED_NODE_ID))["ended_at"]
+                .as_str(),
+        "the session outlived the record that ended it: {died}"
+    );
+
+    // And a session the graph never ended at all: the worktree being reclaimed
+    // is the only thing that says when it stopped, so that is the end it carries
+    // — ahead of the node's own settlement a second later.
+    let taken = node_spans(&serving, fixture_run::RECLAIMED_NODE_ID);
+    let reclaimed = span_named(
+        &taken,
+        &format!("dispatch.{}", fixture_run::RECLAIMED_CONVERSATION_ID),
+    );
+    assert_eq!(reclaimed["started_at"], json!("2026-08-07T12:06:00.000Z"));
+    assert_eq!(reclaimed["ended_at"], json!("2026-08-07T12:06:30.000Z"));
+    assert_eq!(
+        span_named(&taken, &format!("node.{}", fixture_run::RECLAIMED_NODE_ID))["ended_at"],
+        json!("2026-08-07T12:06:31.000Z")
+    );
+}
+
+#[test]
+fn a_session_is_read_in_the_category_the_run_named_its_member() {
+    let serving = lanes();
+    // A persona this host invented and `agentRoleSchema` has no word for. The
+    // member beside it is what says the session was ordinary worker work.
+    for (node, session) in [
+        (
+            fixture_run::RETRIED_NODE_ID,
+            fixture_run::RETRIED_SECOND_CONVERSATION_ID,
+        ),
+        (
+            fixture_run::REFUSED_NODE_ID,
+            fixture_run::REFUSED_CONVERSATION_ID,
+        ),
+    ] {
+        let spans = node_spans(&serving, node);
+        let dispatch = span_named(&spans, &format!("dispatch.{session}"));
+        assert_eq!(dispatch["agent_role"], json!("worker"), "{dispatch}");
+    }
+    let drafting = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+    assert_eq!(
+        span_named(
+            &drafting,
+            &format!("dispatch.{}", fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID)
+        )["agent_role"],
+        json!("pr-author")
+    );
+
+    // The run's own observer, at no node: `monitor` is the watching member and is
+    // served in the `orchestrator` lane it shares, because the vocabulary a
+    // client switches on is closed and a lane it already has is not widened.
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json();
+    let spans = run["spans"].as_array().expect("spans").clone();
+    let watching = span_named(
+        &spans,
+        &format!("run-session.{}", fixture_run::WATCHING_CONVERSATION_ID),
+    );
+    assert_eq!(watching["agent_role"], json!("orchestrator"));
+    // And no word outside that vocabulary reached the wire.
+    for span in &spans {
+        if let Some(role) = span.get("agent_role").and_then(Value::as_str) {
+            assert!(
+                ["orchestrator", "worker", "judge", "check-in", "pr-author"].contains(&role),
+                "`{role}` is not a member of `agentRoleSchema`: {span}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_member_this_wire_has_no_word_for_is_not_read_off_the_persona_beside_it() {
+    let serving = lanes();
+
+    // A session the graph stamped `reviewer`, which `agentRoleSchema` has no word
+    // for, beside the one persona that reads like a role — the literal word
+    // `pr-author`, which is what a host really dispatches a drafting turn under.
+    // The run said what this session was and said something this vocabulary
+    // cannot carry, so no role is served: answering with the persona would put a
+    // *style* over the run's own word for it, and serve a drafting lane for a
+    // session that was not one.
+    let spans = node_spans(&serving, fixture_run::UNNAMED_NODE_ID);
+    let dispatch = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::UNNAMED_CONVERSATION_ID),
+    );
+    assert!(
+        dispatch.get("agent_role").is_none(),
+        "a member this wire has no word for was read off its persona: {dispatch}"
+    );
+    // The span itself is served in full: what the run recorded about *when* the
+    // session ran is not in doubt, only what to call it.
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:07:00.000Z"));
+    assert_eq!(dispatch["ended_at"], json!("2026-08-07T12:07:30.000Z"));
+
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+    // The node is still in the graph-level reading — it ran, and the reader can
+    // see it — and it is in no category, rather than in the drafting one.
+    assert!(
+        run.iter()
+            .any(|span| span["id"] == json!(format!("node.{}", fixture_run::UNNAMED_NODE_ID))),
+        "the node itself went missing: {run:?}"
+    );
+    for span in &run {
+        if span["node_id"] == json!(fixture_run::UNNAMED_NODE_ID) {
+            assert!(
+                span.get("agent_role").is_none(),
+                "an unreadable member reached a category: {span}"
+            );
+        }
+    }
+
+    // And the other half of the same rule, which the member is only ever read
+    // *ahead* of: a record that stamped no member at all is still read by the
+    // persona it ran under. This dispatch relayed no session, so its
+    // `node-dispatched` — persona `check-in`, no member — is the whole of what
+    // the run said about it.
+    let silent = node_spans(&serving, fixture_run::SILENT_NODE_ID);
+    let only = span_named(
+        &silent,
+        &format!("dispatch.{}", fixture_run::SILENT_NODE_ID),
+    );
+    assert_eq!(only["agent_role"], json!("check-in"), "{only}");
+    assert_eq!(
+        span_named(
+            &run,
+            &format!("rollup.{}.agent.check-in", fixture_run::SILENT_NODE_ID)
+        )["agent_role"],
+        json!("check-in")
+    );
+}
+
+#[test]
+fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
+    let serving = lanes();
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+
+    // The graph-level reading of the same node: one lane per category, each over
+    // the attempt its own sessions ran under and closing where they closed,
+    // rather than two lanes over the node's own window.
+    let worked = span_named(
+        &spans,
+        &format!("rollup.{}.agent.worker", fixture_run::DRAFTED_NODE_ID),
+    );
+    let drafted = span_named(
+        &spans,
+        &format!("rollup.{}.agent.pr-author", fixture_run::DRAFTED_NODE_ID),
+    );
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
+
+    // The re-asked node's two attempts are one category, and it covers both.
+    let retried = span_named(
+        &spans,
+        &format!("rollup.{}.agent.worker", fixture_run::RETRIED_NODE_ID),
+    );
+    assert_eq!(retried["count"], json!(2));
+    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:01.000Z"));
+    assert_eq!(retried["ended_at"], json!("2026-08-07T12:01:30.000Z"));
+
+    // Every node of this run dispatched a worker, and every one of them is in the
+    // reading: under a role read off the persona this whole lane was empty.
+    let workers: Vec<&str> = spans
+        .iter()
+        .filter(|span| span["agent_role"] == json!("worker"))
+        .filter_map(|span| span["node_id"].as_str())
+        .collect();
+    assert_eq!(
+        workers,
+        vec![
+            fixture_run::RETRIED_NODE_ID,
+            fixture_run::DRAFTED_NODE_ID,
+            fixture_run::REFUSED_NODE_ID,
+            fixture_run::WORKING_NODE_ID,
+            fixture_run::DIED_NODE_ID,
+            fixture_run::RECLAIMED_NODE_ID,
+        ],
+        "{spans:?}"
+    );
+}
+
+#[test]
+fn a_publication_the_run_never_did_is_absent_and_one_it_never_ruled_on_has_no_status() {
+    let serving = lanes();
+
+    // A node still working, on a worktree nothing has published from: no
+    // publication span at all, rather than one drawn from the worktree to the end
+    // of everything the node recorded.
+    let working = node_spans(&serving, fixture_run::WORKING_NODE_ID);
+    assert!(
+        !working.iter().any(|span| span["kind"] == "publication"),
+        "a node that published nothing was served a publication: {working:?}"
+    );
+    // And its dispatch is open, because nothing in the run has ended it.
+    let session = span_named(
+        &working,
+        &format!("dispatch.{}", fixture_run::WORKING_CONVERSATION_ID),
+    );
+    assert_eq!(session["started_at"], json!("2026-08-07T12:04:00.000Z"));
+    assert_eq!(session["ended_at"], Value::Null, "{session}");
+
+    // The failure a user can cause: the gate refused the branch, so publication
+    // work happened and nothing became of it. The span closes where the worktree
+    // was taken away and carries no verdict, because the run recorded none.
+    let refused = node_spans(&serving, fixture_run::REFUSED_NODE_ID);
+    let published = span_named(
+        &refused,
+        &format!("publication.{}", fixture_run::REFUSED_NODE_ID),
+    );
+    assert_eq!(published["label"], json!("feature/refused"));
+    assert_eq!(published["started_at"], json!("2026-08-07T12:09:01.000Z"));
+    assert_eq!(published["ended_at"], json!("2026-08-07T12:09:51.000Z"));
+    assert!(
+        published.get("status").is_none(),
+        "a publication nothing ruled on was given a verdict: {published}"
+    );
+}
+
+#[test]
+fn a_fetch_is_not_what_opens_a_publication_however_it_was_relayed() {
+    let serving = lanes();
+
+    // `onevcs` fetches to cut a worktree and fetches again to publish from one,
+    // and the record it relays is the same either way. This node did both: one at
+    // 12:02:01.5 to cut the worktree, one at 12:20:40.5 to publish. The span opens
+    // at neither — it opens at the gate, which is the first record only publishing
+    // writes, half a second later.
+    let drafted = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+    let published = span_named(
+        &drafted,
+        &format!("publication.{}", fixture_run::DRAFTED_NODE_ID),
+    );
+    assert_eq!(published["started_at"], json!("2026-08-07T12:20:41.000Z"));
+
+    // Which is what the alternative would have cost: this node fetched to cut its
+    // worktree and has published nothing since, so a fetch that opened a
+    // publication would draw one over every node the run ever dispatched.
+    let working = node_spans(&serving, fixture_run::WORKING_NODE_ID);
+    assert!(
+        relayed_kinds(&working).contains(&"fetch".to_owned()),
+        "the node under test relayed no fetch at all: {working:?}"
+    );
+    assert!(
+        !working.iter().any(|span| span["kind"] == "publication"),
+        "a fetch opened a publication on a node that published nothing: {working:?}"
+    );
+}
+
+/// Every relayed record kind a node's own spans carry.
+fn relayed_kinds(spans: &[Value]) -> Vec<String> {
+    spans
+        .iter()
+        .filter_map(|span| span["events"].as_array())
+        .flatten()
+        .filter_map(|event| event["kind"].as_str().map(str::to_owned))
+        .collect()
+}
+
 #[test]
 fn a_timeline_scope_that_names_no_node_is_refused_rather_than_guessed() {
     let serving = two_runs();
@@ -555,7 +991,7 @@ fn one_conversation_is_served_by_id_and_an_unknown_one_is_a_not_found() {
     assert_enveloped(&body);
     assert_eq!(
         body["conversation"]["turns"][0]["assistant"],
-        json!("landed the route table")
+        json!(fixture_run::FIRST_REPLY)
     );
     assert_eq!(body["attribution"]["agentRole"], json!("worker"));
 
@@ -634,6 +1070,8 @@ fn a_settled_members_report_is_served_from_the_copy_the_run_retained() {
             &fixture_run::SettledMember {
                 stream: PLAIN_STREAM,
                 node: fixture_run::REPORTED_NODE_ID,
+                member: "worker",
+                at: SETTLED_AT,
                 artifact: PLAIN_REPORT_ARTIFACT,
                 report: &plain,
             },
@@ -644,6 +1082,8 @@ fn a_settled_members_report_is_served_from_the_copy_the_run_retained() {
             &fixture_run::SettledMember {
                 stream: REWRITTEN_STREAM,
                 node: fixture_run::REPORTED_NODE_ID,
+                member: "worker",
+                at: SETTLED_AT,
                 artifact: REWRITTEN_REPORT_ARTIFACT,
                 report: &rewritten,
             },
@@ -688,6 +1128,8 @@ fn a_retained_report_bigger_than_one_response_is_served_as_its_tail() {
             &fixture_run::SettledMember {
                 stream: PLAIN_STREAM,
                 node: fixture_run::REPORTED_NODE_ID,
+                member: "worker",
+                at: SETTLED_AT,
                 artifact: PLAIN_REPORT_ARTIFACT,
                 report: &report,
             },
@@ -731,6 +1173,8 @@ fn an_artifact_naming_a_report_the_run_never_retained_is_not_found() {
             &fixture_run::SettledMember {
                 stream: PLAIN_STREAM,
                 node: fixture_run::REPORTED_NODE_ID,
+                member: "worker",
+                at: SETTLED_AT,
                 artifact: PLAIN_REPORT_ARTIFACT,
                 report: &kept,
             },
@@ -741,6 +1185,8 @@ fn an_artifact_naming_a_report_the_run_never_retained_is_not_found() {
             &fixture_run::SettledMember {
                 stream: REWRITTEN_STREAM,
                 node: fixture_run::REPORTED_NODE_ID,
+                member: "worker",
+                at: SETTLED_AT,
                 artifact: REWRITTEN_REPORT_ARTIFACT,
                 report: &refused,
             },
@@ -782,6 +1228,7 @@ fn an_artifact_naming_a_report_the_run_never_retained_is_not_found() {
 
 /// The stream a `member-settled` was relayed on, as `oneagentgraph` mints one.
 const PLAIN_STREAM: &str = "node-scope-1786925518098-3163646";
+const SETTLED_AT: &str = "2026-08-07T12:01:00.000Z";
 /// A stream the SDK's sanitiser rewrites: a producer's id is a producer's
 /// string, and nothing on the envelope constrains its characters.
 const REWRITTEN_STREAM: &str = "node scope/qwen@a recording host-3163646";
@@ -1622,9 +2069,11 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
         listed,
         vec![
             fixture_run::CONVERSATION_ID,
-            fixture_run::REVIEW_CONVERSATION_ID
+            fixture_run::REVIEW_CONVERSATION_ID,
+            fixture_run::REVIEW_JUDGE_CONVERSATION_ID
         ],
-        "one transcript per labelled session, and none for the unlabelled record: {detail}"
+        "one transcript per labelled session — plus the judge the first one's report \
+         holds — and none for the unlabelled record: {detail}"
     );
 
     // Both scopes, because a reader arrives at a turn from either: the run's own
@@ -2028,15 +2477,13 @@ fn a_live_run_reports_what_it_is_doing_and_what_it_is_waiting_on() {
         json!(2),
         "the sibling attributed the block: {timing}"
     );
-    assert!(
-        ms("llmlint_model_ms") > 0,
-        "the lint member reported a turn: {timing}"
-    );
     assert_eq!(
-        timing["judge_model_ms"],
+        timing["llmlint_model_ms"],
         json!(null),
-        "no judge chain reported one, which is not zero of it: {timing}"
+        "nothing reports time inside a model, for any party: {timing}"
     );
+    assert_eq!(timing["judge_model_ms"], json!(null), "{timing}");
+    assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
     assert_eq!(timing["tool_ms"], json!(null), "nothing times a tool call");
     // The run waited on a planner and on a person, and the sibling's vocabulary
     // folds both into `scheduling` — which is where that time is, and why the
@@ -2443,7 +2890,7 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
                 "member": "worker",
                 "persona": "worker",
             }),
-            json!({ "usage": { "duration": 1.0 } }),
+            json!({ "usage": { "cost_usd": 1.0 } }),
         );
     })[fixture_run::REDIRECTED_NODE_ID]
         .clone();
@@ -2713,11 +3160,19 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
         .as_array()
         .expect("the node's verification records")
         .clone();
-    assert_eq!(records.len(), 1, "the node stored one artifact");
-    assert_eq!(records[0]["artifact_id"], json!("artifact-long-log"));
-    assert_eq!(records[0]["ok"], json!(true));
     assert_eq!(
-        records[0]["output_tail"],
+        records.len(),
+        2,
+        "the node stored its lint member's report and the change's own log"
+    );
+    assert_eq!(
+        records[0]["artifact_id"],
+        json!(fixture_run::LINT_REPORT_ARTIFACT)
+    );
+    assert_eq!(records[1]["artifact_id"], json!("artifact-long-log"));
+    assert_eq!(records[1]["ok"], json!(true));
+    assert_eq!(
+        records[1]["output_tail"],
         json!("the change request is open"),
         "the prose belongs to the event that stored the evidence"
     );
@@ -2736,9 +3191,9 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
     let spans = timeline["spans"].as_array().expect("spans");
     let verification = spans
         .iter()
-        .find(|span| span["kind"] == "verification")
+        .filter(|span| span["kind"] == "verification")
+        .find(|span| span["label"] == json!("artifact-long-log"))
         .expect("the evidence the node stored");
-    assert_eq!(verification["label"], json!("artifact-long-log"));
     assert_eq!(verification["status"], json!("ok"));
     assert_eq!(
         verification["detail"]["artifact_id"],
@@ -2755,13 +3210,16 @@ fn the_evidence_a_node_stored_is_served_as_its_verification_record() {
         json!(format!("node.{}", fixture_run::SHIP_NODE_ID))
     );
 
-    // The publication is the interval between the two ends `onevcs` recorded.
+    // The publication is the interval between the two ends `onevcs` recorded —
+    // and it opens where *publishing* began, at the first wait on the identity's
+    // lock, not at the worktree this dispatch was cut into at 12:00:29, where the
+    // work being published began.
     let publication = spans
         .iter()
         .find(|span| span["kind"] == "publication")
         .expect("the branch the node published");
     assert_eq!(publication["label"], json!("feature/ship"));
-    assert_eq!(publication["started_at"], json!("2026-08-07T12:00:29.000Z"));
+    assert_eq!(publication["started_at"], json!("2026-08-07T12:00:33.000Z"));
     assert_eq!(publication["ended_at"], json!("2026-08-07T12:00:38.000Z"));
     // A change the host has not landed: open, and still running as far as the
     // run is concerned, which is what its own records say.
@@ -3182,11 +3640,19 @@ fn a_node_that_observed_no_check_says_so_rather_than_serving_an_empty_one() {
     )
     .json();
     // The review node published nothing and no host ran anything on it, so it
-    // has no detail at all rather than a detail claiming zero checks.
-    let details = body["node_details"].as_object().expect("the node details");
-    assert!(
-        !details.contains_key(fixture_run::REVIEW_NODE_ID),
-        "{details:?}"
+    // carries no checks at all rather than a `checks` list claiming zero of them,
+    // and no publication. What it does carry is what it *kept*: the report its
+    // settled member stored, which is the only evidence that node produced.
+    let detail = &body["node_details"][fixture_run::REVIEW_NODE_ID];
+    let verification = &detail["verification"];
+    assert!(verification.get("checks").is_none(), "{detail}");
+    assert!(verification.get("required_checks").is_none(), "{detail}");
+    assert!(detail.get("publication").is_none(), "{detail}");
+    let records = verification["records"].as_array().expect("what it kept");
+    assert_eq!(records.len(), 1, "{detail}");
+    assert_eq!(
+        records[0]["artifact_id"],
+        json!(fixture_run::REVIEWER_REPORT_ARTIFACT)
     );
 }
 
@@ -3200,36 +3666,38 @@ fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
     .json();
     let usage = &body["run"]["usage"];
     // What the run spent, as the sibling folded it from the turns it relayed.
-    assert_eq!(usage["total"]["input_tokens"], json!(1_600));
-    assert_eq!(usage["total"]["output_tokens"], json!(430));
-    assert_eq!(usage["total"]["cost_usd"], json!(0.53));
+    assert_eq!(usage["total"]["input_tokens"], json!(159_834));
+    assert_eq!(usage["total"]["output_tokens"], json!(1_654));
+    assert_eq!(usage["total"]["cost_usd"], json!(50.83));
     // The per-party split is read from the onejudge report each side keeps, and
-    // this run kept none — so each party is unknown rather than free. A null cost
-    // cannot be read as a run that cost nothing.
-    for party in ["agent", "judge", "llmlint"] {
-        assert_eq!(usage[party]["input_tokens"], json!(null), "{party}");
-        assert_eq!(usage[party]["cost_usd"], json!(null), "{party}");
-    }
+    // both of this run's members kept one. The lint party ran on neither node, so
+    // it is unknown rather than free — a null cost cannot be read as a party that
+    // cost nothing.
+    assert_eq!(usage["agent"]["cost_usd"], json!(31.33));
+    assert_eq!(usage["judge"]["cost_usd"], json!(9.75));
+    assert_eq!(usage["llmlint"]["input_tokens"], json!(null));
+    assert_eq!(usage["llmlint"]["cost_usd"], json!(null));
 
-    // The same distinction on the clock: the two parties that reported a turn
-    // carry a number, and the one that did not carries no number at all.
+    // The clock is where that split stops: what each party spent is a document
+    // the sibling folds, and how long each spent *inside a model* is a thing no
+    // producer in this stack reports. Every one of those lanes says so — absent
+    // on the wire, `false` on the presence flag beside it — so a reader cannot
+    // take one for a party that used no model time.
     let presence = &body["run"]["timing_presence"];
-    assert_eq!(presence["agent_model_ms"], json!(true));
-    assert_eq!(presence["judge_model_ms"], json!(true));
-    assert_eq!(presence["llmlint_model_ms"], json!(false));
-    assert_eq!(presence["tool_ms"], json!(false));
     let timing = &body["run"]["timing"];
-    assert_eq!(timing["gate_seconds"], json!(2), "{timing}");
-    assert_eq!(timing["judge_model_ms"], json!(3_000), "{timing}");
-    assert_eq!(timing["llmlint_model_ms"], json!(null), "{timing}");
-    assert_eq!(timing["tool_ms"], json!(null), "{timing}");
-
-    // The same discipline one level down: a party that reported no turn at a
-    // node has no time there, which is not zero of it.
     let work = &body["run"]["node_work_ms"];
-    assert_eq!(work["judge_model_ms"], json!(3_000), "{work}");
-    assert_eq!(work["llmlint_model_ms"], json!(null), "{work}");
+    for party in ["agent", "judge", "llmlint"] {
+        let lane = format!("{party}_model_ms");
+        assert_eq!(presence[&lane], json!(false), "{party}: {presence}");
+        assert_eq!(timing[&lane], json!(null), "{party}: {timing}");
+        assert_eq!(work[&lane], json!(null), "{party}: {work}");
+    }
+    assert_eq!(presence["tool_ms"], json!(false));
+    assert_eq!(timing["gate_seconds"], json!(2), "{timing}");
+    assert_eq!(timing["tool_ms"], json!(null), "{timing}");
     assert_eq!(work["tool_ms"], json!(null), "{work}");
+    // The one lane a node-level rollup still carries, which is the run's own.
+    assert_eq!(work["wall_ms"], timing["wall_ms"], "{work}");
 }
 
 #[test]
@@ -3319,13 +3787,31 @@ fn a_tool_summary_is_carried_on_its_turn_rather_than_served_as_one() {
     // Two relayed turns, and the tool summary published between them is on the
     // one it belongs to rather than a third turn nobody took.
     assert_eq!(turns.len(), 2, "{turns:?}");
-    let tools = turns[1]["tools"].as_array().expect("the turn's tool calls");
+    // On the turn that *made* the call. `oneagentgraph` opens a turn before its
+    // activities and streams each one live, so the summary between these two
+    // records was published from inside the first — carrying it on the second
+    // put every journal-derived turn's tools one turn late.
+    assert!(
+        turns[1]["tools"].as_array().is_some_and(Vec::is_empty),
+        "the turn after the call made none of its own: {turns:?}"
+    );
+    let tools = turns[0]["tools"].as_array().expect("the turn's tool calls");
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0]["name"], json!("Bash"));
     assert_eq!(tools[0]["kind"], json!("tool_use"));
     assert_eq!(tools[0]["input"], json!("just gate"));
+    assert_eq!(
+        tools[0]["output"],
+        json!(null),
+        "the journal records the call and never what it returned: {tools:?}"
+    );
     assert_eq!(turns[1]["usage"]["inputTokens"], json!(900));
-    assert_eq!(turns[1]["durationMs"], json!(1_500));
+    // This member has not settled, so no report holds what its turn took. An
+    // interval nothing measured is absent, and never the zero a reader would
+    // take for a measurement.
+    assert_eq!(turns[1]["durationMs"], json!(null));
+    assert_eq!(turns[1]["startedAt"], json!(null));
+    assert_eq!(turns[1]["finishedAt"], json!(null));
 }
 
 #[test]
@@ -3351,7 +3837,7 @@ fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
     // Two sessions of one dispatch, under one semantic role and two transports:
     // a failure on either is a different failure, and the pair says which.
     assert_eq!(parties, vec!["llmlint", "agent"], "{node}");
-    assert_eq!(node["lint"], json!(2), "what the lint transport recorded");
+    assert_eq!(node["lint"], json!(3), "what the lint transport recorded");
 
     let lint = http::get(
         serving.address,
@@ -3363,7 +3849,29 @@ fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
     )
     .json();
     assert_eq!(lint["attribution"]["transportRole"], json!("llmlint"));
-    assert_eq!(lint["attribution"]["agentRole"], json!("pr-author"));
+    // `llmlint` is a word in the *transport* vocabulary and in no other, so this
+    // session stamped a member that says which chain ran and nothing about what
+    // the dispatch was for. A stamped member is the reading whether or not this
+    // wire has a word for it, so the persona beside it is not consulted and the
+    // transcript falls to the role every dispatch has.
+    assert_eq!(lint["attribution"]["agentRole"], json!("worker"));
+
+    // The agent side of the same node is the other half of that rule: its first
+    // relayed record stamps a persona and no member — `oneagentgraph` names the
+    // member only from the record after it — so the persona is still what the
+    // role is read from there.
+    let checked = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    )
+    .json();
+    assert_eq!(checked["attribution"]["transportRole"], json!("agent"));
+    assert_eq!(checked["attribution"]["agentRole"], json!("pr-author"));
+    assert_eq!(checked["attribution"]["persona"], json!("pr-author"));
 }
 
 #[test]
@@ -3456,15 +3964,23 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     // what a measured nothing looks like.
     assert!(document.bucket(telemetry::BucketName::Judge).is_none());
     assert_eq!(timing["judge_seconds"], json!(null), "{timing}");
-    // Derived from the document's own wall clock rather than restated, so a
-    // fixture whose timings move does not need this number rewritten with it.
-    #[allow(clippy::cast_precision_loss)]
-    let judge_share = timing["judge_model_ms"]
-        .as_f64()
-        .expect("the judge chain reported turns")
-        / document.wall_ms as f64;
-    assert_eq!(timing["fractions"]["judge_model"], json!(judge_share));
-    assert_eq!(timing["fractions"]["llmlint_model"], json!(null));
+    // And the three lanes for time inside a model, which no producer in this
+    // stack reports: absent on the wire and absent in the fractions beside it,
+    // for every party, however much of the run's clock each one used. What *is*
+    // recorded is one invocation's elapsed time, which is a turn's rather than a
+    // party's and is served on the turn as `durationMs`.
+    for party in ["agent", "judge", "llmlint"] {
+        assert_eq!(
+            timing[format!("{party}_model_ms")],
+            json!(null),
+            "{party}: {timing}"
+        );
+        assert_eq!(
+            timing["fractions"][format!("{party}_model")],
+            json!(null),
+            "{party}: {timing}"
+        );
+    }
 
     // And what each party spent is the sibling's split, not a second reading of
     // the records it already read.
@@ -3511,9 +4027,9 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
     ] {
         assert_eq!(timing[lane], json!(null), "{lane} is not absent: {timing}");
     }
-    // What this server measures for itself is unaffected: a turn reports its own
-    // model time, and that is not the sibling's to answer.
-    assert_eq!(timing["agent_model_ms"], json!(2_500));
+    // Including the three lanes this server would have folded for itself, which
+    // nothing measures either way.
+    assert_eq!(timing["agent_model_ms"], json!(null));
     assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
 
     // The row the operator arrives on says the same thing as the detail they open
@@ -4175,4 +4691,1477 @@ fn a_stream_watching_a_run_with_no_such_profile_is_served_rather_than_broken() {
         refused.json()["error"]["code"],
         json!("unknown_filter_profile")
     );
+}
+
+/// The transcript a settled dispatch really had, served from the report it left.
+///
+/// This is the whole of what the view exists for: a manager supervising hours of
+/// work they cannot watch reads the prompt each turn was given, the reply it
+/// wrote, what its tool calls came back with, and what that turn alone cost. The
+/// journal carries none of those, and the report carries all of them — so every
+/// assertion here is against a run directory the SDK itself writes, holding a
+/// report `onejudge`'s own types serialized.
+#[test]
+fn a_settled_dispatchs_transcript_is_the_conversation_it_really_had() {
+    let serving = two_runs();
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_enveloped(&body);
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    let persona = body["attribution"]["persona"]
+        .as_str()
+        .expect("the dispatch's persona");
+    assert_eq!(persona, "worker");
+
+    // The prompt the simulated user gave, on the turn that answered it. Who was
+    // asked is not what they were asked, and a persona name here is the bug that
+    // made this view unable to answer the question it exists for.
+    assert_eq!(turns[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(turns[1]["user"], json!(fixture_run::SECOND_PROMPT));
+    for turn in &turns {
+        assert_ne!(turn["user"], json!(persona), "a persona name for a prompt");
+    }
+
+    // The prose it wrote back, which no envelope carries.
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(turns[1]["assistant"], json!(fixture_run::SECOND_REPLY));
+
+    // The call, and what it came back with. A `tool_call` carries no observation
+    // and the `tool_result` beside it is where the observation is — that is the
+    // producing library's own pairing, and the client pairs them by it.
+    let tools = turns[0]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(tools.len(), 2, "{tools:?}");
+    assert_eq!(tools[0]["kind"], json!("tool_call"));
+    assert_eq!(tools[0]["name"], json!("Read"));
+    assert_eq!(tools[0]["input"], json!({ "file_path": "src/api.rs" }));
+    assert_eq!(tools[0]["output"], json!(null), "a call returns nothing");
+    assert_eq!(tools[1]["kind"], json!("tool_result"));
+    assert_eq!(tools[1]["name"], json!(null), "a result carries no name");
+    assert_eq!(tools[1]["index"], json!(1));
+    assert_eq!(tools[1]["output"], json!(fixture_run::TOOL_OBSERVATION));
+    // And an absence where the trace exposed none, which is a different fact
+    // from a call that returned an empty string.
+    let second = turns[1]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(second[0]["name"], json!("Bash"));
+    assert_eq!(second[1]["kind"], json!("tool_result"));
+    assert_eq!(second[1]["output"], json!(null), "{second:?}");
+
+    // What *that turn* spent, from the candidate that ran in its own agent
+    // attribution — not the report's total over both sides, which is neither
+    // turn's, and not the judge's, which is the other role's.
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(29.71));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(1.51));
+    assert_eq!(turns[0]["usage"]["inputTokens"], json!(376));
+    assert_eq!(turns[0]["usage"]["cacheReadTokens"], json!(44_051));
+    assert_eq!(turns[0]["usage"]["cacheWriteTokens"], json!(356));
+    assert_eq!(turns[0]["usage"]["outputTokens"], json!(164));
+    for turn in turns.iter().take(2) {
+        assert_ne!(
+            turn["usage"]["costUsd"],
+            json!(50.72),
+            "the run total repeated on a turn: {turn}"
+        );
+        assert_ne!(
+            turn["usage"]["inputTokens"],
+            json!(79_341),
+            "the judge's tokens on an agent turn: {turn}"
+        );
+        assert_ne!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
+    }
+
+    // What that turn took, from the same candidate. Not `4364` — the identity the
+    // chain fell through before it, whose duration is how long finding that out
+    // took — and not `2800`, which is the judge's.
+    assert_eq!(turns[0]["durationMs"], json!(900));
+    assert_eq!(turns[1]["durationMs"], json!(100));
+
+    // The bounds the report observed for the *agent* side of turn 1. It holds a
+    // `role: judge` row for turn 2 as well and none for the agent, so turn 2 is
+    // served both bounds absent rather than the judge's clock.
+    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:00:03.000Z"));
+    assert_eq!(turns[0]["finishedAt"], json!("2026-08-07T12:00:03.900Z"));
+    assert_eq!(turns[1]["startedAt"], json!(null));
+    assert_eq!(turns[1]["finishedAt"], json!(null));
+    // Named exactly: the four instants the report recorded against the *judge*,
+    // one pair per turn. None of them may appear on any turn served here.
+    for judged in [
+        "2026-08-07T12:00:03.910Z",
+        "2026-08-07T12:00:03.980Z",
+        "2026-08-07T12:00:04.800Z",
+        "2026-08-07T12:00:04.900Z",
+    ] {
+        for turn in &turns {
+            for bound in ["startedAt", "finishedAt"] {
+                assert_ne!(
+                    turn[bound],
+                    json!(judged),
+                    "a judge row's clock reached an agent turn: {turn}"
+                );
+            }
+        }
+    }
+
+    // The settlement the report came with is not one of the conversation's turns
+    // and does not pretend to be: no prompt, no reply, and the dispatch's own
+    // total where a turn's usage would be.
+    assert_eq!(turns.len(), 3, "{turns:?}");
+    assert_eq!(turns[2]["status"], json!("turn-completed"));
+    assert_eq!(turns[2]["user"], json!(""));
+    assert_eq!(turns[2]["assistant"], json!(null));
+    assert_eq!(turns[2]["durationMs"], json!(null));
+    assert_eq!(turns[2]["usage"]["costUsd"], json!(50.72));
+}
+
+/// A settled dispatch serves the judge that supervised it as a conversation of
+/// its own, named for the dispatch it ruled on.
+#[test]
+fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversation() {
+    let serving = two_runs();
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::REVIEW_JUDGE_CONVERSATION_ID
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_enveloped(&body);
+
+    // The dispatch it supervised, at the node it supervised it under.
+    let attribution = &body["attribution"];
+    assert_eq!(attribution["agentRole"], json!("judge"));
+    assert_eq!(attribution["transportRole"], json!("judge"));
+    assert_eq!(
+        attribution["parentConversationId"],
+        json!(fixture_run::REVIEW_CONVERSATION_ID)
+    );
+    assert_eq!(attribution["nodeId"], json!(fixture_run::REVIEW_NODE_ID));
+    assert_eq!(attribution["runId"], json!(fixture_run::RUN_ID));
+
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the judge's turns")
+        .clone();
+    assert_eq!(
+        turns.len(),
+        3,
+        "two judge turns and the conclusion: {turns:?}"
+    );
+
+    // Turn by turn: the bounds the report observed, the elapsed time and model of
+    // the candidate that ran it, and what that invocation alone consumed.
+    for (index, (started, finished)) in fixture_run::JUDGE_BOUNDS.into_iter().enumerate() {
+        assert_eq!(turns[index]["startedAt"], json!(started));
+        assert_eq!(turns[index]["finishedAt"], json!(finished));
+    }
+    assert_eq!(turns[0]["durationMs"], json!(500));
+    assert_eq!(turns[1]["durationMs"], json!(400));
+    for turn in turns.iter().take(2) {
+        assert_eq!(turn["model"], json!(fixture_run::JUDGE_MODEL), "{turn}");
+        assert_eq!(turn["harness"], json!("codex:judge"), "{turn}");
+        assert_eq!(turn["usage"]["inputTokens"], json!(51_204), "{turn}");
+        assert_eq!(turn["usage"]["outputTokens"], json!(311), "{turn}");
+        assert_eq!(turn["usage"]["cacheReadTokens"], json!(20_480), "{turn}");
+        // A figure the provider never reported is an explicit absence, never a
+        // zero: this provider reports no cache write and no cost, and a `0` for
+        // either would read as a measurement somebody took.
+        for absent in ["cacheWriteTokens", "costUsd"] {
+            assert_eq!(turn["usage"][absent], json!(null), "{turn}");
+            assert_ne!(turn["usage"][absent], json!(0), "{turn}");
+        }
+        // And nothing the report keys to the *agent* reaches a judge turn.
+        assert_ne!(turn["durationMs"], json!(2_800), "{turn}");
+        assert_ne!(turn["usage"]["costUsd"], json!(0.11), "{turn}");
+        assert_ne!(turn["usage"]["inputTokens"], json!(400), "{turn}");
+    }
+
+    // No text against a judge turn, because the report keys none to one.
+    for turn in turns.iter().take(2) {
+        assert_eq!(turn["assistant"], json!(null), "{turn}");
+        assert_eq!(turn["user"], json!(""), "{turn}");
+        assert_eq!(turn["tools"], json!([]), "{turn}");
+        for prose in [fixture_run::REVIEW_PROMPT, fixture_run::REVIEW_REPLY] {
+            assert_ne!(turn["user"], json!(prose), "{turn}");
+            assert_ne!(turn["assistant"], json!(prose), "{turn}");
+        }
+    }
+
+    // The conclusion, which the report keys to the dispatch rather than a turn.
+    let closing = &turns[2];
+    assert_eq!(closing["assistant"], json!(fixture_run::JUDGE_ASSESSMENT));
+    let verdicts = closing["unknown"]["verdicts"]
+        .as_array()
+        .expect("the judge's verdicts");
+    assert_eq!(verdicts.len(), 3, "{verdicts:?}");
+    for (index, (criterion, reason)) in fixture_run::JUDGE_CRITERIA.into_iter().enumerate() {
+        assert_eq!(verdicts[index]["criterion"], json!(criterion));
+        assert_eq!(verdicts[index]["kind"], json!("boolean"));
+        assert_eq!(verdicts[index]["value"], json!(true));
+        assert_eq!(verdicts[index]["reason"], json!(reason));
+    }
+    let (criterion, score, reason) = fixture_run::JUDGE_SCORED;
+    assert_eq!(verdicts[2]["criterion"], json!(criterion));
+    assert_eq!(verdicts[2]["kind"], json!("numeric"));
+    assert_eq!(verdicts[2]["value"], json!(score));
+    assert_eq!(verdicts[2]["reason"], json!(reason));
+    assert_eq!(
+        closing["unknown"]["completionReason"],
+        json!("the change is approved")
+    );
+    assert_eq!(closing["unknown"]["stoppedEarly"], json!(false));
+    // No invocation is recorded for it, so it claims no clock and no spend.
+    assert_eq!(closing["startedAt"], json!(null));
+    assert_eq!(closing["finishedAt"], json!(null));
+    assert_eq!(closing["durationMs"], json!(null));
+    assert_eq!(closing["usage"], json!({}));
+}
+
+/// A dispatch's own transcript is left as the earlier steps made it, and carries
+/// nothing the report recorded against the judge.
+#[test]
+fn a_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
+    let serving = two_runs();
+    let transcript = |id: &str| {
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/conversations/{id}", fixture_run::RUN_ID),
+        )
+        .json()
+    };
+
+    let body = transcript(fixture_run::CONVERSATION_ID);
+    assert_eq!(
+        body["attribution"]["agentRole"],
+        json!("worker"),
+        "the dispatch is still read as the worker's"
+    );
+    assert_eq!(
+        body["attribution"]["parentConversationId"],
+        json!(null),
+        "a dispatch supervises nothing"
+    );
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 3, "{turns:?}");
+    // The prompts, the replies, and each turn's own agent-side measurements.
+    assert_eq!(turns[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(turns[0]["durationMs"], json!(900));
+    // And none of the figures its report attributes to the judge instead.
+    for turn in &turns {
+        assert_ne!(turn["durationMs"], json!(70), "{turn}");
+        assert_ne!(turn["durationMs"], json!(60), "{turn}");
+        assert_ne!(turn["usage"]["inputTokens"], json!(79_341), "{turn}");
+        assert_ne!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
+        assert_eq!(turn["unknown"], json!({}), "{turn}");
+    }
+    // That report records no judge turn, so there is no second conversation to
+    // open beside it — a verdict alone does not make one.
+    let asked = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}.judge",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    );
+    assert_eq!(asked.status, 404, "{}", asked.body);
+
+    // The other dispatch, whose report *does* hold the judge's rows: its own turn
+    // has no `role: agent` row, and must be served bounds-absent rather than
+    // handed the judge's clock beside it.
+    let reviewed = transcript(fixture_run::REVIEW_CONVERSATION_ID);
+    let turns = reviewed["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns[0]["user"], json!(fixture_run::REVIEW_PROMPT));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::REVIEW_REPLY));
+    assert_eq!(turns[0]["durationMs"], json!(2_800));
+    for turn in &turns {
+        for (started, finished) in fixture_run::JUDGE_BOUNDS {
+            for bound in ["startedAt", "finishedAt"] {
+                assert_ne!(turn[bound], json!(started), "{turn}");
+                assert_ne!(turn[bound], json!(finished), "{turn}");
+            }
+        }
+        assert_eq!(turn["startedAt"], json!(null), "{turn}");
+        assert_eq!(turn["finishedAt"], json!(null), "{turn}");
+        assert_ne!(turn["usage"]["inputTokens"], json!(51_204), "{turn}");
+        assert_eq!(turn["unknown"], json!({}), "{turn}");
+    }
+}
+
+/// The judge's turns are reachable from the node's own timeline, through a lane
+/// that sits with the dispatch it supervised.
+#[test]
+fn the_judges_lane_sits_with_the_dispatch_it_supervised_on_the_nodes_timeline() {
+    let serving = two_runs();
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::REVIEW_NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+
+    let supervised = format!("dispatch.{}", fixture_run::REVIEW_CONVERSATION_ID);
+    let judge = format!("dispatch.{}", fixture_run::REVIEW_JUDGE_CONVERSATION_ID);
+    let at = |id: &str| {
+        spans
+            .iter()
+            .position(|span| span["id"] == json!(id))
+            .unwrap_or_else(|| panic!("no span `{id}` among {spans:?}"))
+    };
+    // Straight after the dispatch in the same scope: that adjacency is what a
+    // client gathers the two into one dispatch by.
+    assert_eq!(at(&judge), at(&supervised) + 1, "{spans:?}");
+    let lane = &spans[at(&judge)];
+    let dispatch = &spans[at(&supervised)];
+    assert_eq!(lane["agent_role"], json!("judge"));
+    assert_eq!(lane["transport_role"], json!("judge"));
+    assert_eq!(lane["kind"], dispatch["kind"]);
+    assert_eq!(lane["parent_id"], dispatch["parent_id"]);
+    assert_eq!(lane["node_id"], json!(fixture_run::REVIEW_NODE_ID));
+    assert_eq!(lane["dispatch_id"], dispatch["dispatch_id"]);
+    // And it opens the judge's own conversation rather than the dispatch's.
+    assert_eq!(
+        lane["reference"],
+        json!({
+            "kind": "conversation",
+            "value": fixture_run::REVIEW_JUDGE_CONVERSATION_ID,
+        })
+    );
+    // Drawn over what the report observed, not over the node's window.
+    assert_eq!(lane["started_at"], json!(fixture_run::JUDGE_BOUNDS[0].0));
+    assert_eq!(lane["ended_at"], json!(fixture_run::JUDGE_BOUNDS[1].1));
+    assert_eq!(lane["events"], json!([]), "the judge relays none");
+
+    // The lane is what makes the conversation reachable.
+    let opened = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            lane["reference"]["value"].as_str().expect("a conversation")
+        ),
+    );
+    assert_eq!(opened.status, 200, "{}", opened.body);
+}
+
+/// A member that has not settled serves no judge lane and no judge conversation,
+/// rather than an empty one.
+#[test]
+fn a_member_that_has_not_settled_serves_no_judge_lane_and_no_judge_conversation() {
+    let serving = live_run();
+    let asked = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}.judge",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    );
+    assert_eq!(asked.status, 404, "{}", asked.body);
+    assert_eq!(
+        asked.json()["error"]["code"],
+        json!("conversation_not_found")
+    );
+
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::REDIRECTED_NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+    assert!(
+        spans.iter().any(
+            |span| span["reference"]["value"] == json!(fixture_run::REDIRECTED_CONVERSATION_ID)
+        ),
+        "the dispatch itself is still drawn: {spans:?}"
+    );
+    assert!(
+        !spans
+            .iter()
+            .any(|span| span["agent_role"] == json!("judge")),
+        "a running dispatch has no judge lane to draw: {spans:?}"
+    );
+}
+
+/// A judge lane the run never closed is served with an absent end, and the
+/// conclusion beside it is served whole however long it is.
+#[test]
+fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
+    const STREAM: &str = "node-scope-1786925519777-3163777";
+    const SESSION: &str = "node-scope-1786925519777-3163777.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                // A lifecycle node's step, which its judge has to be addressable
+                // by and not by the node alone.
+                "step": "build",
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:09.000Z",
+                artifact: "report-node-scope-1786925519777-3163777",
+                report: &unclosed_judge_report(),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::SHIP_NODE_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+    let at = |id: String| {
+        spans
+            .iter()
+            .position(|span| span["id"] == json!(id))
+            .unwrap_or_else(|| panic!("no span `{id}` among {spans:?}"))
+    };
+    // The pairing a client gathers: a judge sibling straight after the *worker*
+    // dispatch it supervised, in the same scope.
+    let worker = at(format!("dispatch.{SESSION}"));
+    let supervising = at(format!("dispatch.{SESSION}.judge"));
+    assert_eq!(supervising, worker + 1, "{spans:?}");
+    assert_eq!(spans[worker]["agent_role"], json!("worker"));
+    let lane = spans[supervising].clone();
+    assert_eq!(lane["agent_role"], json!("judge"));
+    assert_eq!(lane["dispatch_id"], spans[worker]["dispatch_id"]);
+    assert_eq!(lane["started_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(lane["step_id"], json!("build"), "the step it supervised");
+    // The run observed no end for the judge's second turn, so the lane is open —
+    // never given an invented end, and never closed at the turn before it.
+    assert_eq!(lane["ended_at"], json!(null), "{lane}");
+
+    let supervised = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}.judge",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    assert_eq!(
+        supervised["attribution"]["stepId"],
+        json!("build"),
+        "a lifecycle node's judge is addressable by the step it ran under"
+    );
+    let turns = supervised["conversation"]["turns"]
+        .as_array()
+        .expect("the judge's turns")
+        .clone();
+    assert_eq!(turns.len(), 3, "{turns:?}");
+    assert_eq!(turns[0]["durationMs"], json!(2_000));
+    assert_eq!(turns[0]["model"], json!("gpt-5-codex"));
+    // No cost, because codex reports none: an absence, never a zero.
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(null));
+    assert_ne!(turns[0]["usage"]["costUsd"], json!(0));
+    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:01:05.000Z"));
+    assert_eq!(turns[1]["finishedAt"], json!(null), "never observed");
+    // And the turn the report attributes no invocation to keeps the bounds it
+    // does hold and claims none of the figures it does not.
+    assert_eq!(turns[1]["durationMs"], json!(null));
+    assert_eq!(turns[1]["model"], json!(null));
+    assert_eq!(turns[1]["harness"], json!(""));
+    assert_eq!(turns[1]["status"], json!("unknown"));
+    assert_eq!(turns[1]["usage"], json!({}));
+
+    // And the conclusion is served whole rather than bounded as an artifact is.
+    let closing = &turns[2];
+    let assessment = closing["assistant"].as_str().expect("the assessment");
+    assert!(
+        assessment.len() > VERBOSE_ASSESSMENT_BYTES,
+        "cut short at {} bytes",
+        assessment.len()
+    );
+    assert!(
+        assessment.ends_with("and that is the whole of it."),
+        "{closing}"
+    );
+    assert_eq!(
+        closing["unknown"]["verdicts"]
+            .as_array()
+            .map(Vec::len)
+            .expect("the verdicts"),
+        VERBOSE_CRITERIA
+    );
+    assert_eq!(closing["unknown"]["stoppedEarly"], json!(true));
+}
+
+/// How many criteria the verbose report rules on, and how long an assessment it
+/// closes with: past the 64 KiB this API bounds an *artifact's* bytes by.
+const VERBOSE_CRITERIA: usize = 40;
+const VERBOSE_ASSESSMENT_BYTES: usize = 64 * 1024;
+
+/// A report whose judge ran twice, whose second turn was never observed to
+/// finish, and whose conclusion is longer than one screen, in onejudge's own
+/// types.
+fn unclosed_judge_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, JudgeKind, JudgeValue, JudgeVerdict, Message,
+        NamedVerdict, PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, Transcript,
+        Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(64),
+        output_tokens: Some(12),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        // A provider that reports no cost, which must not read as a zero.
+        cost_usd: None,
+    };
+    let candidate = |ms| CandidateAttempt {
+        harness: "codex".into(),
+        harness_id: "codex:default".into(),
+        variant: None,
+        model: Some("gpt-5-codex".into()),
+        status: "ok".into(),
+        available: true,
+        ran: true,
+        failure_kind: None,
+        failure_kind_source: None,
+        exit_code: Some(0),
+        duration_ms: Some(ms),
+        error: None,
+        session_id: None,
+        history_id: None,
+        usage: Some(usage.clone()),
+    };
+    let attributed = |turn_index, ms| HarnessAttribution {
+        role: TelemetryRole::Judge,
+        turn_index,
+        ran: Some("codex:default".into()),
+        fell_through: Vec::new(),
+        candidates: vec![candidate(ms)],
+        history_file: None,
+    };
+    let mut assessment = String::new();
+    while assessment.len() <= VERBOSE_ASSESSMENT_BYTES {
+        assessment.push_str(
+            "The dispatch was read against every criterion it was given, and the \
+             reading is recorded here in full rather than summarised. ",
+        );
+    }
+    assessment.push_str("and that is the whole of it.");
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Land the wire contract."),
+                Message::assistant("The route table is landed."),
+            ],
+        },
+        verdicts: (0..VERBOSE_CRITERIA)
+            .map(|index| {
+                NamedVerdict::new(
+                    format!("the route table answers request {index}"),
+                    JudgeKind::Boolean,
+                    JudgeVerdict {
+                        value: JudgeValue::Bool(index % 2 == 0),
+                        reason: format!("request {index} was read end to end"),
+                        usage: None,
+                    },
+                )
+            })
+            .collect(),
+        assessment: Some(assessment),
+        completion_reason: None,
+        settled_reason: Some("a streaming sink asked to stop".into()),
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 12_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry {
+                usage: Some(usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            orchestration_ms: 40,
+            sessions: vec![
+                SessionLink {
+                    session_id: "01a02f4c-685b-75e2-8281-e8937fd20d47".into(),
+                    role: TelemetryRole::Judge,
+                    turn_index: 1,
+                    started_at: "2026-08-07T12:01:00.000Z".into(),
+                    finished_at: Some("2026-08-07T12:01:02.000Z".into()),
+                    history_id: None,
+                },
+                // The end nobody observed, which leaves the lane open.
+                SessionLink {
+                    session_id: "01a02f4f-6168-72d1-b946-2251794e2fce".into(),
+                    role: TelemetryRole::Judge,
+                    turn_index: 2,
+                    started_at: "2026-08-07T12:01:05.000Z".into(),
+                    finished_at: None,
+                    history_id: None,
+                },
+            ],
+            // One attribution for two links: the second invocation reported a
+            // session and a start, and no candidate is attributed to it.
+            attribution: vec![attributed(1, 2_000)],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: true,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// A stored report whose session bounds are not timestamps is refused where it is
+/// read, rather than served as a turn's clock.
+///
+/// A `SessionLink` spells both of its bounds as a plain string, so a report can
+/// deserialize and version cleanly and still say a turn started at
+/// `in the second turn`. Those two values are served as a judge turn's
+/// `startedAt` and `finishedAt` and folded into the interval its lane is drawn
+/// over — so one this crate cannot order is a duration no client can compute and
+/// an ordering it renders wrong, which is worse than the absence the wire already
+/// has a spelling for.
+///
+/// Both bounds, because two different readings reach them: the interval parses
+/// what it folds, and the turn serves what it was given. The run still holds each
+/// copy — the artifact route serves its bytes — so this is a refusal at the read
+/// and not a file that is not there.
+#[test]
+fn a_report_whose_session_bounds_are_not_timestamps_is_refused() {
+    const OPENED: &str = "node-scope-1786925519888-3163881";
+    const CLOSED: &str = "node-scope-1786925519888-3163882";
+    // The report the readable judge journey uses, restamped one value at a time:
+    // what this asserts is the bound and not a shape this crate dislikes.
+    let restamped = |mutate: fn(&mut Value)| {
+        let mut document: Value =
+            serde_json::from_str(&unclosed_judge_report()).expect("the report parses");
+        mutate(&mut document);
+        format!("{document}\n")
+    };
+    // A start that is not an instant, on a row beside one that is: the lane still
+    // opens, and the turn would carry the word.
+    let unstamped_start = restamped(|document| {
+        document["telemetry"]["sessions"][1]["started_at"] = json!("in the second turn");
+    });
+    // And an end that is not an instant, which the interval already declines to
+    // fold and the turn would serve anyway.
+    let unstamped_end = restamped(|document| {
+        document["telemetry"]["sessions"][0]["finished_at"] = json!("a couple of seconds later");
+    });
+
+    let reports = [(OPENED, unstamped_start), (CLOSED, unstamped_end)];
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for &(stream, ref report) in &reports {
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-started",
+                json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": "worker",
+                    "persona": "pr-author",
+                    "session": format!("{stream}.worker"),
+                }),
+                json!({ "turn": 1 }),
+            );
+            fixture_run::settle_member(
+                &dir,
+                &fixture_run::SettledMember {
+                    stream,
+                    node: fixture_run::SHIP_NODE_ID,
+                    member: "worker",
+                    at: "2026-08-07T12:01:10.000Z",
+                    artifact: &format!("report-{stream}"),
+                    report: report.as_str(),
+                },
+                fixture_run::Produced::Report,
+            );
+        }
+    });
+
+    for &(stream, ref report) in &reports {
+        let session = format!("{stream}.worker");
+        // The run holds the copy: this is a report that was refused, not one that
+        // is missing.
+        let stored = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/report-{stream}",
+                fixture_run::RUN_ID
+            ),
+        );
+        assert_eq!(stored.status, 200, "{}", stored.body);
+        let bytes = stored.json()["content"]
+            .as_str()
+            .expect("the tail")
+            .to_owned();
+        assert!(report.ends_with(&bytes), "{bytes}");
+
+        // No judge conversation is served from a report whose clock cannot be
+        // read, so neither bound reaches the wire.
+        let supervised = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{session}.judge",
+                fixture_run::RUN_ID
+            ),
+        );
+        assert_eq!(supervised.status, 404, "{}", supervised.body);
+        assert_eq!(
+            supervised.json()["error"]["code"],
+            json!("conversation_not_found")
+        );
+        assert!(
+            !supervised.body.contains("in the second turn")
+                && !supervised.body.contains("a couple of seconds later"),
+            "{}",
+            supervised.body
+        );
+
+        // And the dispatch it supervised reads as the journal relayed it, which
+        // is where an unreadable report leaves every other reading too.
+        let turns = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{session}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript")
+            .clone();
+        assert_eq!(turns.len(), 1, "the relayed turn, not the report's");
+        assert_eq!(turns[0]["startedAt"], json!(null), "{turns:?}");
+        assert_eq!(turns[0]["finishedAt"], json!(null), "{turns:?}");
+        assert_eq!(turns[0]["durationMs"], json!(null), "{turns:?}");
+
+        // Nor is a lane drawn from bounds nothing could order.
+        let spans = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=node&node={}",
+                fixture_run::RUN_ID,
+                fixture_run::SHIP_NODE_ID
+            ),
+        )
+        .json()["spans"]
+            .as_array()
+            .expect("spans")
+            .clone();
+        assert!(
+            !spans
+                .iter()
+                .any(|span| span["id"] == json!(format!("dispatch.{session}.judge"))),
+            "{spans:?}"
+        );
+    }
+}
+
+/// A turn whose reply never came reads as having captured none.
+///
+/// The prompt is still the turn's, and so are the tokens and the time its own
+/// invocation spent on it — a turn that produced no prose is not a turn that
+/// produced nothing.
+#[test]
+fn a_turn_whose_report_recorded_no_reply_is_served_as_having_recorded_none() {
+    const STREAM: &str = "node-scope-1786925518444-3163999";
+    const SESSION: &str = "node-scope-1786925518444-3163999.worker";
+    const PROMPT: &str = "Now run the gate.";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for turn in [1, 2] {
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-started",
+                json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": "worker",
+                    "persona": "pr-author",
+                    "session": SESSION,
+                }),
+                json!({ "turn": turn }),
+            );
+        }
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:01.000Z",
+                artifact: "report-node-scope-1786925518444-3163999",
+                report: &unanswered_report(PROMPT),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 2, "{turns:?}");
+    assert_eq!(turns[0]["assistant"], json!("The route table is landed."));
+    // The turn that recorded no reply: the prompt it was given, an explicit
+    // absence where the prose would be, and the measurements it still made.
+    assert_eq!(turns[1]["user"], json!(PROMPT));
+    assert_eq!(turns[1]["assistant"], json!(null));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(2.5));
+    assert_eq!(turns[1]["durationMs"], json!(4_200));
+}
+
+/// A session whose member has not settled is served exactly as the journal
+/// relayed it, which is not the same as being served empty.
+#[test]
+fn a_session_with_no_stored_report_is_served_as_the_journal_relayed_it() {
+    let serving = live_run();
+    let body = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    )
+    .json();
+    let turns = body["conversation"]["turns"].as_array().expect("the turns");
+    assert!(!turns.is_empty(), "an unsettled session still has turns");
+    // What the journal did relay: the record's own prose and the summaries it
+    // published. What it never carried: a prompt, a tool's observation, a
+    // per-turn cost, or a clock.
+    assert_eq!(turns[0]["assistant"], json!("opened the change request"));
+    assert_eq!(turns[0]["tools"][0]["name"], json!("Bash"));
+    assert_eq!(turns[0]["tools"][0]["output"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+    // And never the persona in place of a prompt nobody recorded.
+    let persona = body["attribution"]["persona"]
+        .as_str()
+        .expect("the dispatch's persona");
+    for turn in turns {
+        assert_eq!(turn["user"], json!(""), "{turn}");
+        assert_ne!(turn["user"], json!(persona), "{turn}");
+    }
+}
+
+/// A settlement whose report the run never kept leaves the transcript as the
+/// journal relayed it, rather than emptying it.
+///
+/// `retain` refuses a symlink standing where the report should be, so the member
+/// settled, the artifact was recorded, and no copy exists to read. That is a real
+/// state and it is not "the session recorded nothing" — the turns the journal did
+/// relay are still the turns a reader opens.
+#[test]
+fn a_settlement_whose_report_the_run_never_kept_still_serves_its_relayed_turns() {
+    const STREAM: &str = "node-scope-1786925518555-3163111";
+    const SESSION: &str = "node-scope-1786925518555-3163111.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:02.000Z",
+                artifact: "report-node-scope-1786925518555-3163111",
+                report: &unanswered_report("Now run the gate."),
+            },
+            fixture_run::Produced::SymlinkToReport,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["status"], json!("turn-started"));
+    // Nothing the report would have filled, and nothing borrowed from it either.
+    assert_eq!(turns[0]["user"], json!(""));
+    assert_eq!(turns[0]["assistant"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+    assert_eq!(turns[0]["startedAt"], json!(null));
+}
+
+/// A retained report this crate cannot read as one leaves both readings of it
+/// where a missing report leaves them.
+///
+/// The run *does* hold the copy — the artifact route serves its bytes — so this
+/// is a parse that failed rather than a file that is not there, which are two
+/// different facts about the host and must not become two different answers on
+/// the wire. The transcript stays the turns the journal relayed, and the time the
+/// party's invocations took stays absent rather than becoming a zero.
+#[test]
+fn a_retained_report_this_crate_cannot_read_leaves_the_transcript_and_the_clock_alone() {
+    const STREAM: &str = "node-scope-1786925518666-3163222";
+    const SESSION: &str = "node-scope-1786925518666-3163222.worker";
+    const ARTIFACT: &str = "report-node-scope-1786925518666-3163222";
+    // Valid JSON, and not a report: no `transcript`, which is the one field a
+    // reader of one cannot do without.
+    let unreadable = report_document("the acceptance criteria were met");
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:03.000Z",
+                artifact: ARTIFACT,
+                report: &unreadable,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    // The run holds the copy: this is a document that is not a report, not a
+    // report that is not there.
+    let stored = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/artifacts/{ARTIFACT}", fixture_run::RUN_ID),
+    );
+    assert_eq!(stored.status, 200, "{}", stored.body);
+    assert_eq!(stored.json()["content"], json!(unreadable));
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "the relayed turn, not an empty transcript");
+    assert_eq!(turns[0]["user"], json!(""));
+    assert_eq!(turns[0]["assistant"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+}
+
+/// A report written under a contract newer than the one this binary links is
+/// refused, rather than read as though the fields it shares still mean the same.
+///
+/// The version is what says whether the rest of the document means what a reader
+/// thinks it does, so a transcript it cannot vouch for is served as the journal
+/// relayed it — the same answer a missing report gets, because "this reader
+/// cannot read it" is one fact however it came about.
+#[test]
+fn a_report_written_under_a_newer_contract_than_this_binary_links_is_refused() {
+    const STREAM: &str = "node-scope-1786925518777-3163333";
+    const SESSION: &str = "node-scope-1786925518777-3163333.worker";
+    // The same report the readable journeys use, restamped: one field moved, so
+    // what this asserts is the version check and not a shape this crate dislikes.
+    let mut document: Value =
+        serde_json::from_str(&unanswered_report("Now run the gate.")).expect("the report parses");
+    let linked = document["schema_version"].as_u64().expect("a version");
+    document["schema_version"] = json!(linked + 1);
+    let ahead = format!("{document}\n");
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:04.000Z",
+                artifact: "report-node-scope-1786925518777-3163333",
+                report: &ahead,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "the relayed turn, not the report's");
+    assert_eq!(turns[0]["user"], json!(""), "{turns:?}");
+    assert_eq!(turns[0]["assistant"], json!(null), "{turns:?}");
+    assert_eq!(turns[0]["durationMs"], json!(null), "{turns:?}");
+    // And the timing beside it, which reads the same document through the same
+    // check: the party whose only report is ahead of this reader stays unmeasured.
+    let timing = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json()["run"]["timing"]
+        .clone();
+    assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
+}
+
+/// A report whose last turn was never answered, in onejudge's own types.
+fn unanswered_report(prompt: &str) -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, Telemetry,
+        TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(11),
+        output_tokens: Some(22),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        cost_usd: Some(2.5),
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            // A system preamble opens no turn and answers none: it is neither
+            // party's, so the turn after it is still turn 1 and the numbering the
+            // attribution joins on is unmoved.
+            messages: vec![
+                Message {
+                    role: onejudge::Role::System,
+                    content: "You are reviewing a wire contract.".into(),
+                    events: Vec::new(),
+                },
+                Message::user("Land the wire contract."),
+                Message::assistant("The route table is landed."),
+                Message::user(prompt),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: Some("the supervisor named no next instruction".into()),
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 9_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 10,
+            sessions: Vec::new(),
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Agent,
+                turn_index: 2,
+                ran: Some("claude-code:default".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "claude-code".into(),
+                    harness_id: "claude-code:default".into(),
+                    variant: None,
+                    model: None,
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(4_200),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(usage),
+                }],
+                history_file: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// A report written under an *older* contract than this binary links is still
+/// read.
+///
+/// The refusal beside it is one-sided on purpose: onejudge bumps its version for
+/// an added field, so every report stored before the running binary was built is
+/// older than it, and a reader that demanded equality would blank the transcript
+/// of every dispatch that had already finished.
+#[test]
+fn a_report_written_under_an_older_contract_is_still_read() {
+    const SESSION: &str = "node-scope-1786925518888-3163444.worker";
+    let mut document: Value =
+        serde_json::from_str(&unanswered_report("Now run the gate.")).expect("the report parses");
+    let linked = document["schema_version"].as_u64().expect("a version");
+    assert!(linked > 0, "there is an older contract to be written under");
+    document["schema_version"] = json!(linked - 1);
+
+    let turns = transcript_of(
+        SESSION,
+        "node-scope-1786925518888-3163444",
+        &format!("{document}\n"),
+    );
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["user"], json!("Land the wire contract."));
+    assert_eq!(turns[0]["assistant"], json!("The route table is landed."));
+}
+
+/// A reply with no prompt before it is still the agent's turn.
+///
+/// A transcript alternates, and a report that does not is a report about a
+/// dispatch that did not — the reply is served as the turn it is, with an empty
+/// prompt, rather than joining the turn before it or vanishing.
+#[test]
+fn a_reply_with_no_prompt_before_it_opens_a_turn_of_its_own() {
+    const SESSION: &str = "node-scope-1786925518999-3163555.worker";
+    let turns = transcript_of(
+        SESSION,
+        "node-scope-1786925518999-3163555",
+        &report_of(&[("assistant", "Picking up where the last dispatch left off.")]),
+    );
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["user"], json!(""), "no prompt was recorded");
+    assert_eq!(
+        turns[0]["assistant"],
+        json!("Picking up where the last dispatch left off.")
+    );
+}
+
+/// A summary relayed before the session relayed any turn joins the first turn it
+/// does relay.
+///
+/// It was published from inside a turn whose start never reached the journal, and
+/// dropping it would lose the only record that the turn happened at all.
+#[test]
+fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
+    const SESSION: &str = "node-scope-1786925519111-3163666.worker";
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let labels = json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::SHIP_NODE_ID,
+            "member": "worker",
+            "persona": "pr-author",
+            "session": SESSION,
+        });
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-activity",
+            labels.clone(),
+            json!({
+                "kind": "tool_use",
+                "name": "Read",
+                "detail": "AGENTS.md",
+                "truncated": false,
+            }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            labels.clone(),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-activity",
+            labels,
+            json!({
+                "kind": "tool_use",
+                "name": "Edit",
+                "detail": "src/payload.rs",
+                "truncated": false,
+            }),
+        );
+    });
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    let tools = turns[0]["tools"].as_array().expect("the turn's tools");
+    assert_eq!(tools.len(), 2, "neither summary was dropped: {tools:?}");
+    assert_eq!(tools[0]["name"], json!("Read"), "in the order relayed");
+    assert_eq!(tools[0]["index"], json!(0));
+    assert_eq!(tools[1]["name"], json!("Edit"));
+    assert_eq!(tools[1]["index"], json!(1));
+}
+
+/// A settled member's transcript, from one relayed turn and the report it stored.
+fn transcript_of(session: &str, stream: &str, report: &str) -> Vec<Value> {
+    let stream = stream.to_owned();
+    let labelled = session.to_owned();
+    let report = report.to_owned();
+    let serving = Serving::start(move |root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": labelled,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: &stream,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:05.000Z",
+                artifact: &format!("report-{stream}"),
+                report: &report,
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{session}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone()
+}
+
+/// A report carrying exactly the messages named, in onejudge's own types.
+fn report_of(messages: &[(&str, &str)]) -> String {
+    use onejudge::{Message, PartyTelemetry, Report, Role, Telemetry, Transcript};
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: messages
+                .iter()
+                .map(|(role, content)| Message {
+                    role: match *role {
+                        "user" => Role::User,
+                        "assistant" => Role::Assistant,
+                        other => panic!("{other} is not a message role onejudge declares"),
+                    },
+                    content: (*content).to_owned(),
+                    events: Vec::new(),
+                })
+                .collect(),
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: None,
+        usage: None,
+        telemetry: Some(Telemetry {
+            wall_ms: 1_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 0,
+            sessions: Vec::new(),
+            attribution: Vec::new(),
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// A filter narrows the turns a transcript *lists* and never what each listed
+/// turn was.
+///
+/// The invariant one level down from `a_filter_shapes_the_response_and_never_the
+/// _run`: the events a transcript carries are a listing and are the filter's to
+/// narrow, but a turn's own prompt, reply, tool observations, cost and clock come
+/// from the settled member's stored report — which describes the dispatch, not
+/// the reading of it. A reader who narrowed their attention sees fewer turns, and
+/// every turn they do see says exactly what it said to a reader who asked for
+/// everything.
+#[test]
+fn a_filter_narrows_the_turns_a_transcript_lists_and_never_what_each_one_was() {
+    let serving = two_runs();
+    let detail = |filter: &str| -> Value {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}?include_conversations=true&filter={}",
+                fixture_run::RUN_ID,
+                urlencode(filter)
+            ),
+        )
+        .json()
+    };
+    let transcript = |body: &Value| -> Vec<Value> {
+        body["conversations"]
+            .as_array()
+            .expect("the transcripts")
+            .iter()
+            .find(|document| document["conversation"]["id"] == json!(fixture_run::CONVERSATION_ID))
+            .expect("the dispatch's own transcript")["conversation"]["turns"]
+            .as_array()
+            .expect("its turns")
+            .clone()
+    };
+
+    let wide = detail("monitor");
+    // The settlement record excluded: it is one of the session's relayed
+    // envelopes, so a reader who excluded its kind is not shown it.
+    let narrow = detail(r#"{"exclude":[{"kind":"turn-completed"}]}"#);
+    let all = transcript(&wide);
+    let listed = transcript(&narrow);
+    assert_eq!(all.len(), 3, "{all:?}");
+    assert_eq!(listed.len(), 2, "the listing narrowed: {listed:?}");
+
+    // And every turn still listed is the same turn, down to the fields only the
+    // report can fill.
+    assert_eq!(listed, all[..2].to_vec());
+    assert_eq!(listed[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(listed[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(listed[0]["usage"]["costUsd"], json!(29.71));
+    assert_eq!(listed[0]["durationMs"], json!(900));
+    assert_eq!(
+        listed[0]["tools"][1]["output"],
+        json!(fixture_run::TOOL_OBSERVATION)
+    );
+    assert_eq!(listed[1]["usage"]["costUsd"], json!(1.51));
+
+    // The fold beside them is the run's, not the reading's — including the one
+    // this step re-sourced from the same reports the transcripts are filled from.
+    assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+    assert_eq!(narrow["run"]["usage"], wide["run"]["usage"]);
+    assert_eq!(narrow["run"]["node_work_ms"], wide["run"]["node_work_ms"]);
 }

@@ -41,16 +41,22 @@ anything new here is a proposal to make upstream first.
   a reading rather than a download: a node that dispatched two hundred of them is
   two hundred spans at `scope=node` and one per category at `scope=run`. The SDK
   counts neither.
+- **The interval one dispatched session ran over.** The journal brackets a
+  *node*, not a session: `payload::session_interval` reads one from the attempt
+  that ran it — the `node-dispatched` it appeared after, closed by the next
+  dispatch, the settlement, the `session-closed` or the session's own
+  `member-settled`, joined by the `{stream}.{member}` rule schema 14 already
+  resolves a report by. Every session of one attempt opens at that attempt's
+  dispatch, including one the attempt reached only later: the run records no
+  boundary between the members inside an attempt, and a session opened from its
+  own first word is not bracketed by anything the run said. A node re-asked in
+  place otherwise reads as having run its attempts over one window, which cannot
+  say what was running at a given moment.
 - **The party a record's session ran under.** `transportRoleSchema` is a pair
   with `agentRoleSchema`, and nothing stamps the transport half as such;
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
   writes where it writes one, else the graph `member`, else the persona — and
   falls back to the agent side, which is the one side every dispatch has.
-- **Time inside a model.** The SDK's buckets are wall clock — where the *run's*
-  time went — and the wire also carries how long each party spent in a model,
-  which no fold of a clock can answer. `payload::measured` reads it off each
-  `turn-completed`'s own `usage.duration`, and it is absent for a party that
-  reported no turn rather than zero.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
@@ -155,11 +161,8 @@ Two consequences worth stating because they look like oversights:
 `onevcs` and `oneagentgraph` are independent tools with general integration hooks
 only — neither knows this stack exists — so what they record is read as the wire
 strings they write, quoted in `payload::vcs` and `payload::graph` beside the
-payload each one carries. Read today: `session-opened`, `lock-wait`,
-`gate-started`, `gate-verdict`, `push`, `change-opened`, `change-check`,
-`change-merged`, `merge-completed`, `commit-preserved` and `sync-conflict` from
-`onevcs`; `turn-activity`, `turn-started`, `turn-completed`, `turn-interrupted`,
-`member-died` and `member-settled` from `oneagentgraph`.
+payload each one carries. Those two modules are the inventory; do not restate it
+here.
 
 `onepipeline`'s own vocabulary is an enum this crate imports, with one exception:
 the compiled operations an `edit-committed` carries. That library declares
@@ -169,30 +172,96 @@ public beside them is the submitted `channel::Command`, and `tests/contract.rs`
 gates this crate's reading against it.
 
 `oneagentgraph` declares its own vocabulary in a public module, so
-`tests/contract.rs` holds this crate's copy of it to that library's types.
-`onevcs` declares its in a private one, so the wire is the only declaration a
-consumer can reach and the fixture — written in the records that library emits —
-is the whole of the gate there.
+`tests/contract.rs` holds this crate's copy of it to that library's types. So
+does `onevcs`, whose `event` module is private but whose crate root re-exports
+`EventKind`. **A private module is not the same as an unreachable type — read the
+crate root before concluding a gate is unavailable.** Where a payload *value* is
+genuinely undeclared to any consumer, the fixture — written in the records that
+library emits — is the whole of the gate, and the constant says so where it is
+declared.
 
-Deliberately not read: `fetch`, `lock-acquired`, `merge-queued`,
-`session-closed`, `recovery-attested`. Each is a real record and none of them
-answers a field the wire asks for; they still reach a reader, as the node's own
-timeline events.
+**Gate a copied vocabulary against the type that writes it, never against one
+that merely declares it.** `oneagentgraph` declares an `event::Usage` it never
+writes — it relays a settling member's usage copied verbatim out of the onejudge
+report — so `payload::graph`'s usage keys are `onejudge::Usage`'s. Each exception
+in that module says so where it is declared.
+
+**`payload::vcs::SILENT_ON_PUBLICATION` is a negative list on purpose.** A
+publication span opens at the first relayed record that is not one of them.
+`onevcs` adds to its vocabulary, and naming the publication steps positively
+instead would silently open the span late every time it did. A `fetch` is on that
+list although that library also fetches to publish: the record does not say which
+of the two it was, so opening a publication on one would open a publication for
+every node ever dispatched.
 
 Two readings of a record are the producer's and not this crate's. A verdict is
 read in the words the library that wrote it uses — `onevcs` rules a gate `pass`,
 says whether a push was `accepted`, and treats three check conclusions as not
 blocking a merge — because reading a check's `completed` as a pipeline status is
-what would make every passing check look like a failure. And a tool summary is
-carried on the turn it was published from, never as a turn of its own:
-`turn-activity` is streamed *during* a turn, so counting one as a turn would
-report a turn that had not happened. A `turn-interrupted` is excluded on exactly
-those terms: it is published from inside a turn too, and it is the moment a
-planner changed what the turn already running was doing rather than a turn of its
-own. Both `payload::is_turn_record` and `payload::conversation_document` have to
-exclude it, because a turn's id is its position in the transcript and the timeline
-numbers the same session by the same rule — excluding it in one alone would leave
-a plotted moment pointing at the wrong turn.
+what would make every passing check look like a failure.
+
+**A turn record is a `turn-started` or a `turn-completed`, and nothing else.**
+`oneagentgraph` stamps a `session` label on the `turn-*` kinds and on no other,
+so a `member-settled` or a `member-died` can never *be* a transcript turn, and
+the count beside a node has to agree with the transcript opened from it. A
+`turn-activity` and a `turn-interrupted` are published from *inside* a turn and
+are not turns either. `payload::is_turn_record` and
+`payload::conversation_document` must agree on all of this: a turn's id is its
+position in the transcript and the timeline numbers the same session by the same
+rule, so a kind admitted by one alone leaves a plotted moment pointing at the
+wrong turn.
+
+**A summary belongs to the turn record before it, not the one after it.**
+`oneagentgraph` opens a turn and *then* streams its activities.
+
+## The report a settled member left, which is what a transcript is
+
+The journal records *that* a session reported and what tools it called, and none
+of the prose, the tool returns or the per-turn cost and clock — so a transcript is
+the **stored onejudge report**, and `payload::conversation_document` reads it.
+`onejudge` is *linked* for that, not copied: a whole versioned document this
+repository does not own is exactly what a second source of truth is made of. It is
+unpinned for the reason `oneagentgraph` is — `onepipeline` resolves it and the
+lock follows.
+
+Four joins, each the one the obvious alternative gets wrong:
+
+- **A session to its report, by `{stream}.{member}`**, which is how a session id
+  is minted — so do not add a `session` label upstream for it.
+- **A turn to its measurements, by the producer's own `turn` number**, not by
+  position: a turn that called no tool relays no `turn-started`.
+- **A figure to the turn that spent it, off the attribution candidate that
+  `ran`**, never off the report's top-level `usage` — that is the dispatch's
+  total over both sides, and would repeat on every turn.
+- **A clock to the side that reported it, `telemetry.sessions` at `role: agent`
+  alone.** The report's two `role` vocabularies are different closed sets, and in
+  practice every row one holds is the judge's, so matching by index puts the
+  judge's clock on the agent's turn.
+
+A report absent, uncopied or unreadable is "the report says nothing", never "the
+session recorded nothing".
+
+**And it is the whole of what any run holds about the judge that supervised the
+dispatch.** A plan node dispatches one graph member — `worker`, in
+`graphs/node-scope.yaml` — and the judge runs *inside* onejudge, so nothing
+relays a judge session and no producer change here can. The report does, and only
+once the member settles, which is why `payload::judge_conversation` and
+`payload::judge_span` exist at all.
+
+Three constraints on that reading, each because the obvious alternative is worse:
+
+- **The report's `role: judge` `SessionLink` rows are the gate.** They are the
+  only per-turn bounds any report here holds for that side, so a report holding
+  none has no judge turn to serve — an empty conversation would say the judge
+  recorded nothing, which is a different fact.
+- **A judge turn is bounded, not transcribed.** The report keys no text to one and
+  this crate invents no pairing: the two sides number their turns independently,
+  and the judge's authored prose already reaches the wire as each agent turn's
+  `user` message.
+- **Its conclusion is keyed to the dispatch, not to a turn**, so it is one closing
+  turn rather than smeared over them, and it lands in the turn's `unknown` — the
+  field this wire already carries a producer's own record on. No field is added
+  and neither closed role vocabulary moves, because both already carry `judge`.
 
 ## The one store this crate opens that no run owns
 
@@ -241,9 +310,18 @@ record it before anything here can serve it.
   required, its transition and its conclusion, and its log as an artifact. No
   link to the host's own page for it, so `checks[].url` is absent and a reader
   opens the stored log instead.
-- **Turn bodies and reasoning.** The journal records that a session reported and
-  what tools it called, not the prose it wrote, so a served turn carries the tool
-  calls `turn-activity` published and no assistant text of its own.
+- **Time inside a model, per party** (`timing.*_model_ms`, their fractions, and
+  `node_work_ms`). No producer in this stack reports it: `onepipeline`'s buckets
+  are wall clock, and the usage record a `turn-completed` carries is
+  `onejudge::Usage`, which has no interval in it at all. So `payload::model_lanes`
+  serves all three lanes absent, and the presence flags beside them say `false`.
+
+  **Do not fold a turn's elapsed time into them.** A settled member's report does
+  record how long one invocation ran, as its ran candidate's `duration_ms` — but
+  that is an invocation's wall clock, not a model's, and it belongs to a *turn*
+  rather than to a party. It is served where it is measured, on the turn, as
+  `durationMs`. The upstream change that fills them: a producer that reports
+  model time per party.
 - **Time inside a tool call** (`timing.tool_ms`). `turn-activity` reports *what* a
   turn did and carries no interval, so the presence flag beside that zero says it
   was never measured — which is the wire's own way of telling an unmeasured zero

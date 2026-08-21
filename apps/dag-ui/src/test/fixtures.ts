@@ -63,7 +63,7 @@ const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 13,
+  telemetry_schema_version: 14,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -191,7 +191,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 13,
+    telemetry_schema_version: 14,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -410,7 +410,7 @@ function stamp(seconds: number): string {
 export function runTimeline(runId: string = LIVE_RUN) {
   return {
     api_version: 2,
-    timeline_schema_version: 5,
+    timeline_schema_version: 6,
     // Read shortly after the last record it carries, which is what a poll of a live
     // run actually returns. The graph-level view plots an unfinished run out to this
     // instant, so a stamp an hour past the record would say the run had spent an
@@ -992,7 +992,7 @@ export function busyTimeline(sessions: number) {
   );
   return {
     api_version: 2,
-    timeline_schema_version: 5,
+    timeline_schema_version: 6,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: LIVE_RUN,
     spans: [

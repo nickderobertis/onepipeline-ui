@@ -96,7 +96,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 13,
+    telemetry_schema_version: 14,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -130,7 +130,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 13,
+    telemetry_schema_version: 14,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -162,7 +162,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 13,
+    telemetry_schema_version: 14,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -297,7 +297,7 @@ describe("boundary failures", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 13,
+        telemetry_schema_version: 14,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -314,7 +314,7 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 13,
+      telemetry_schema_version: 14,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       graph: { node_states: { build: "paused" } },
@@ -531,7 +531,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 5,
+      timeline_schema_version: 6,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -628,7 +628,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 5,
+        timeline_schema_version: 6,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

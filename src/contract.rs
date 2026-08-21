@@ -49,7 +49,22 @@ pub const API_VERSION: u32 = 2;
 /// anywhere in a response, and `phase` names a continuous phase rather than
 /// `driving-round`. A client reading 12 must not read a 13 payload: the array it
 /// indexed is gone, not renamed.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 13;
+///
+/// **Schema 14 is the transcript a dispatch really had.** A conversation turn is
+/// assembled from the settled member's stored onejudge report rather than from
+/// the journal envelopes alone, which carry almost none of what a transcript is:
+/// `user` is the prompt the simulated user gave and never the dispatch's persona
+/// name, `assistant` is the reply that turn wrote, a tool call carries the
+/// observation it returned, and `usage` and `durationMs` are what *that turn's*
+/// own invocation spent and took rather than the run's total or nothing at all.
+/// `startedAt` and `finishedAt` are that turn's agent-side bounds where the
+/// report holds them, and both `null` where it does not — never a bound recorded
+/// against the judge. The same removal fixes every recorded usage figure the
+/// payload carries: the six keys this crate read a usage record by were spelled
+/// the way a type nothing writes declares them, so every served cost and token
+/// count was `null`. A client reading 13 sees the same fields it always did and
+/// reads a persona name where a prompt now is.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 14;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -80,7 +95,25 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 13;
 /// does not exist. Version 5 is also where a span may be **filtered**: the events
 /// a span carries are the ones `?filter=` admitted, while the span itself, its
 /// bounds and its status stay what the run recorded.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 5;
+///
+/// **Version 6 is what one lane was doing, and when.** Under 5 every `dispatch`
+/// span of a node carried the node's own bounds and every `rollup` the node's
+/// dispatch and settlement, so a node dispatched three times served three spans
+/// over one identical interval and a drafting turn that took a minute was drawn
+/// across the four hours of work it drafted for. Each is now bounded by the
+/// attempt that ran it: every session of an attempt opens at that attempt's
+/// `node-dispatched`, and each closes at the earliest of the next dispatch, the
+/// settlement, the `session-closed` and the session's own end. A `publication`
+/// opens where publication work begins rather than where the dispatch's worktree
+/// was cut — under 5 it began at the worktree and a node that never published
+/// was drawn publishing for its whole life — and the worktree going away closes
+/// it, behind a merge, a conflict or an opened change. And a span's `agent_role`
+/// is read from the `member` the run recorded for the session rather than from
+/// its persona, so a session dispatched under a persona a host invented is
+/// served in its own category rather than dropped from the reading. No span kind
+/// and no role word moved: `member` `monitor` is served as the `orchestrator` it
+/// already shares a lane with.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 6;
 
 /// The largest run-list page any request can ask for.
 ///

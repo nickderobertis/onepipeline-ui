@@ -107,8 +107,17 @@ export const API_V2_FILTER_PROFILES = {
  * describing the run's whole state, and no `round` survives anywhere in a
  * payload. A server on `12` serves the array this client no longer has a shape
  * for, which is why the literal is pinned rather than ranged.
+ *
+ * `14` is the transcript a dispatch really had. A conversation turn is assembled
+ * from the settled member's stored onejudge report rather than from journal
+ * envelopes alone: `user` is the prompt the simulated user gave rather than the
+ * dispatch's persona name, `assistant` is the reply that turn wrote, a tool call
+ * carries what it returned, and `usage`/`durationMs` are that turn's own rather
+ * than the run's total. Every field was already declared here and is already
+ * rendered — a server on `13` fills none of them and puts a persona name where
+ * the prompt belongs, which is why the literal moves with the server.
  */
-export const TELEMETRY_SCHEMA_VERSION = 13;
+export const TELEMETRY_SCHEMA_VERSION = 14;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -116,6 +125,17 @@ export const TELEMETRY_SCHEMA_VERSION = 13;
  * `3` is where a `rollup` span stopped implying a dispatch: one may now carry no
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
+ *
+ * `6` is where a span says what one lane was doing, and when. A server on `5`
+ * gives every `dispatch` span of a node the node's own bounds and every `rollup`
+ * the node's dispatch and settlement, so a node dispatched three times draws three
+ * spans over one identical interval and a drafting turn that took a minute is drawn
+ * across the hours of work it drafted for. It also opens a `publication` where the
+ * dispatch's worktree was cut rather than where publishing began, so a node that
+ * never published is drawn publishing for its whole life; and it reads a span's
+ * `agent_role` off the persona, which drops every session a host named after
+ * anything but a role. No member joins `agentRoleSchema` or `timelineSpanKindSchema`
+ * under `6`.
  *
  * `5` is where the timeline became continuous: the run is one root span rather
  * than a stack of rounds, no span carries a `round`, and every span id is keyed
@@ -129,7 +149,7 @@ export const TELEMETRY_SCHEMA_VERSION = 13;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 5;
+export const TIMELINE_SCHEMA_VERSION = 6;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
