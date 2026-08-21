@@ -336,6 +336,117 @@
       "conversation": {
         "canContinue": false,
         "harnesses": [
+          "codex"
+        ],
+        "id": "node-scope-1786925518098-3163646.worker.judge",
+        "name": "contract-interface",
+        "project": "run-20260807-a1b2c3",
+        "startedAt": "2026-08-07T12:00:03.910Z",
+        "state": "member-settled",
+        "turns": [
+          {
+            "assistant": null,
+            "durationMs": 70,
+            "failureKind": null,
+            "finishedAt": "2026-08-07T12:00:03.980Z",
+            "harness": "codex:default",
+            "id": "node-scope-1786925518098-3163646.worker.judge.0",
+            "model": "gpt-5-codex",
+            "reasoning": null,
+            "startedAt": "2026-08-07T12:00:03.910Z",
+            "status": "ok",
+            "timestamp": "2026-08-07T12:00:03.980Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 79341,
+              "outputTokens": 618,
+              "cacheReadTokens": 49664,
+              "cacheWriteTokens": null,
+              "costUsd": 9.75
+            },
+            "user": ""
+          },
+          {
+            "assistant": null,
+            "durationMs": 60,
+            "failureKind": null,
+            "finishedAt": "2026-08-07T12:00:04.900Z",
+            "harness": "codex:default",
+            "id": "node-scope-1786925518098-3163646.worker.judge.1",
+            "model": "gpt-5-codex",
+            "reasoning": null,
+            "startedAt": "2026-08-07T12:00:04.800Z",
+            "status": "ok",
+            "timestamp": "2026-08-07T12:00:04.900Z",
+            "tools": [],
+            "unknown": {},
+            "usage": {
+              "inputTokens": 79341,
+              "outputTokens": 618,
+              "cacheReadTokens": 49664,
+              "cacheWriteTokens": null,
+              "costUsd": 9.75
+            },
+            "user": ""
+          },
+          {
+            "assistant": "The dispatch met its bar. The route table is landed, the gate ran green over the finished tree, and the one follow-up it surfaced is recorded rather than silently dropped.",
+            "durationMs": null,
+            "failureKind": null,
+            "finishedAt": null,
+            "harness": "onejudge",
+            "id": "node-scope-1786925518098-3163646.worker.judge.2",
+            "model": null,
+            "reasoning": null,
+            "startedAt": null,
+            "status": "member-settled",
+            "timestamp": "2026-08-07T12:00:05.500Z",
+            "tools": [],
+            "unknown": {
+              "verdicts": [
+                {
+                  "criterion": "every route the contract lists is served",
+                  "kind": "boolean",
+                  "value": true,
+                  "reason": "the route table answers each of them end to end"
+                },
+                {
+                  "criterion": "the gate is green over the finished tree",
+                  "kind": "boolean",
+                  "value": true,
+                  "reason": "the run recorded one green gate and no rerun after it"
+                },
+                {
+                  "criterion": "how completely the acceptance criteria were met",
+                  "kind": "numeric",
+                  "value": 4.5,
+                  "reason": "one follow-up was surfaced rather than done"
+                }
+              ],
+              "completionReason": "the acceptance criteria were met",
+              "stoppedEarly": false
+            },
+            "usage": {},
+            "user": ""
+          }
+        ]
+      },
+      "attribution": {
+        "runId": "run-20260807-a1b2c3",
+        "nodeId": "contract-interface",
+        "launchId": "run-20260807-a1b2c3",
+        "launcher": "claude-code",
+        "transportRole": "judge",
+        "agentRole": "judge",
+        "parentConversationId": "node-scope-1786925518098-3163646.worker",
+        "finishedAt": "2026-08-07T12:00:04.900Z"
+      }
+    },
+    {
+      "conversation": {
+        "canContinue": false,
+        "harnesses": [
           "oneagentgraph"
         ],
         "id": "node-scope-1786925518102-3163741.judge",

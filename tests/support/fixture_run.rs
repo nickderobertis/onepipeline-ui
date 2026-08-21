@@ -2725,6 +2725,35 @@ pub const SECOND_REPLY: &str = "The gate ran green over the finished tree.";
 /// this: `turn-activity` reports the call and never the observation.
 pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
 
+/// What the judge ruled, and the words it ruled it in. The report keys these to
+/// the *dispatch* rather than to any turn of it, which is why the transcript's
+/// last turn is the one that carries them.
+pub const JUDGE_CRITERIA: [(&str, &str); 2] = [
+    (
+        "every route the contract lists is served",
+        "the route table answers each of them end to end",
+    ),
+    (
+        "the gate is green over the finished tree",
+        "the run recorded one green gate and no rerun after it",
+    ),
+];
+/// The numeric criterion beside them, so the served kind is read off the report
+/// rather than assumed boolean.
+pub const JUDGE_SCORED: (&str, f64, &str) = (
+    "how completely the acceptance criteria were met",
+    4.5,
+    "one follow-up was surfaced rather than done",
+);
+/// The judge's closing assessment: prose it wrote about the dispatch as a whole,
+/// which is the half of a failed node an operator otherwise reads by hand.
+pub const JUDGE_ASSESSMENT: &str = "The dispatch met its bar. The route table is \
+landed, the gate ran green over the finished tree, and the one follow-up it \
+surfaced is recorded rather than silently dropped.";
+/// The model the judge side ran on, which the agent side of this report never
+/// names — so a reading that crossed the two would serve it on an agent turn.
+pub const JUDGE_MODEL: &str = "gpt-5-codex";
+
 /// The onejudge report the settled run's worker member stored, built from that
 /// library's own types.
 ///
@@ -2743,8 +2772,9 @@ pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
 #[must_use]
 pub fn worker_report() -> String {
     use onejudge::{
-        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
-        Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
+        CandidateAttempt, HarnessAttribution, JudgeKind, JudgeValue, JudgeVerdict, Message,
+        NamedVerdict, PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, ToolEvent,
+        Transcript, Usage,
     };
 
     let call = ToolEvent {
@@ -2821,10 +2851,24 @@ pub fn worker_report() -> String {
         usage: None,
         ..ran("claude-code", 0, agent_usage(0.0))
     };
-    let attributed = |role, turn_index, candidates| HarnessAttribution {
+    // The judge's own identity, which reports the model it ran with where the
+    // agent side of this report reports none: a reading that crossed the two
+    // vocabularies would put this word on an agent turn.
+    let judged = |ms| CandidateAttempt {
+        model: Some(JUDGE_MODEL.to_owned()),
+        ..ran("codex", ms, judge_usage.clone())
+    };
+    // `ran` is the composed id of the candidate that ran, so it is read off that
+    // candidate rather than named twice: a report that spelled the judge's
+    // attribution with the agent's identity is a report no reading can tell the
+    // two sides apart from.
+    let attributed = |role, turn_index, candidates: Vec<CandidateAttempt>| HarnessAttribution {
         role,
         turn_index,
-        ran: Some("claude-code:default".into()),
+        ran: candidates
+            .iter()
+            .find(|candidate| candidate.ran)
+            .map(|candidate| candidate.harness_id.clone()),
         fell_through: Vec::new(),
         candidates,
         history_file: None,
@@ -2840,8 +2884,30 @@ pub fn worker_report() -> String {
                 Message::assistant(SECOND_REPLY).with_events(vec![gate_call, gate_result]),
             ],
         },
-        verdicts: Vec::new(),
-        assessment: None,
+        verdicts: JUDGE_CRITERIA
+            .into_iter()
+            .map(|(criterion, reason)| {
+                NamedVerdict::new(
+                    criterion,
+                    JudgeKind::Boolean,
+                    JudgeVerdict {
+                        value: JudgeValue::Bool(true),
+                        reason: reason.to_owned(),
+                        usage: None,
+                    },
+                )
+            })
+            .chain(std::iter::once(NamedVerdict::new(
+                JUDGE_SCORED.0,
+                JudgeKind::Numeric,
+                JudgeVerdict {
+                    value: JudgeValue::Number(JUDGE_SCORED.1),
+                    reason: JUDGE_SCORED.2.to_owned(),
+                    usage: None,
+                },
+            )))
+            .collect(),
+        assessment: Some(JUDGE_ASSESSMENT.to_owned()),
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
         // The whole dispatch's total over both sides, which is what neither turn
@@ -2901,17 +2967,13 @@ pub fn worker_report() -> String {
                     1,
                     vec![fell_through, ran("claude-code", 900, agent_usage(29.71))],
                 ),
-                attributed(
-                    TelemetryRole::Judge,
-                    1,
-                    vec![ran("codex", 70, judge_usage.clone())],
-                ),
+                attributed(TelemetryRole::Judge, 1, vec![judged(70)]),
                 attributed(
                     TelemetryRole::Agent,
                     2,
                     vec![ran("claude-code", 100, agent_usage(1.51))],
                 ),
-                attributed(TelemetryRole::Judge, 2, vec![ran("codex", 60, judge_usage)]),
+                attributed(TelemetryRole::Judge, 2, vec![judged(60)]),
             ],
         }),
         processes: Vec::new(),
