@@ -5365,6 +5365,155 @@ fn unclosed_judge_report() -> String {
     )
 }
 
+/// A stored report whose session bounds are not timestamps is refused where it is
+/// read, rather than served as a turn's clock.
+///
+/// A `SessionLink` spells both of its bounds as a plain string, so a report can
+/// deserialize and version cleanly and still say a turn started at
+/// `in the second turn`. Those two values are served as a judge turn's
+/// `startedAt` and `finishedAt` and folded into the interval its lane is drawn
+/// over — so one this crate cannot order is a duration no client can compute and
+/// an ordering it renders wrong, which is worse than the absence the wire already
+/// has a spelling for.
+///
+/// Both bounds, because two different readings reach them: the interval parses
+/// what it folds, and the turn serves what it was given. The run still holds each
+/// copy — the artifact route serves its bytes — so this is a refusal at the read
+/// and not a file that is not there.
+#[test]
+fn a_report_whose_session_bounds_are_not_timestamps_is_refused() {
+    const OPENED: &str = "node-scope-1786925519888-3163881";
+    const CLOSED: &str = "node-scope-1786925519888-3163882";
+    // The report the readable judge journey uses, restamped one value at a time:
+    // what this asserts is the bound and not a shape this crate dislikes.
+    let restamped = |mutate: fn(&mut Value)| {
+        let mut document: Value =
+            serde_json::from_str(&unclosed_judge_report()).expect("the report parses");
+        mutate(&mut document);
+        format!("{document}\n")
+    };
+    // A start that is not an instant, on a row beside one that is: the lane still
+    // opens, and the turn would carry the word.
+    let unstamped_start = restamped(|document| {
+        document["telemetry"]["sessions"][1]["started_at"] = json!("in the second turn");
+    });
+    // And an end that is not an instant, which the interval already declines to
+    // fold and the turn would serve anyway.
+    let unstamped_end = restamped(|document| {
+        document["telemetry"]["sessions"][0]["finished_at"] = json!("a couple of seconds later");
+    });
+
+    let reports = [(OPENED, unstamped_start), (CLOSED, unstamped_end)];
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for &(stream, ref report) in &reports {
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-started",
+                json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": "worker",
+                    "persona": "pr-author",
+                    "session": format!("{stream}.worker"),
+                }),
+                json!({ "turn": 1 }),
+            );
+            fixture_run::settle_member(
+                &dir,
+                &fixture_run::SettledMember {
+                    stream,
+                    node: fixture_run::SHIP_NODE_ID,
+                    member: "worker",
+                    at: "2026-08-07T12:01:10.000Z",
+                    artifact: &format!("report-{stream}"),
+                    report: report.as_str(),
+                },
+                fixture_run::Produced::Report,
+            );
+        }
+    });
+
+    for &(stream, ref report) in &reports {
+        let session = format!("{stream}.worker");
+        // The run holds the copy: this is a report that was refused, not one that
+        // is missing.
+        let stored = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/report-{stream}",
+                fixture_run::RUN_ID
+            ),
+        );
+        assert_eq!(stored.status, 200, "{}", stored.body);
+        let bytes = stored.json()["content"]
+            .as_str()
+            .expect("the tail")
+            .to_owned();
+        assert!(report.ends_with(&bytes), "{bytes}");
+
+        // No judge conversation is served from a report whose clock cannot be
+        // read, so neither bound reaches the wire.
+        let supervised = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{session}.judge",
+                fixture_run::RUN_ID
+            ),
+        );
+        assert_eq!(supervised.status, 404, "{}", supervised.body);
+        assert_eq!(
+            supervised.json()["error"]["code"],
+            json!("conversation_not_found")
+        );
+        assert!(
+            !supervised.body.contains("in the second turn")
+                && !supervised.body.contains("a couple of seconds later"),
+            "{}",
+            supervised.body
+        );
+
+        // And the dispatch it supervised reads as the journal relayed it, which
+        // is where an unreadable report leaves every other reading too.
+        let turns = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{session}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript")
+            .clone();
+        assert_eq!(turns.len(), 1, "the relayed turn, not the report's");
+        assert_eq!(turns[0]["startedAt"], json!(null), "{turns:?}");
+        assert_eq!(turns[0]["finishedAt"], json!(null), "{turns:?}");
+        assert_eq!(turns[0]["durationMs"], json!(null), "{turns:?}");
+
+        // Nor is a lane drawn from bounds nothing could order.
+        let spans = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=node&node={}",
+                fixture_run::RUN_ID,
+                fixture_run::SHIP_NODE_ID
+            ),
+        )
+        .json()["spans"]
+            .as_array()
+            .expect("spans")
+            .clone();
+        assert!(
+            !spans
+                .iter()
+                .any(|span| span["id"] == json!(format!("dispatch.{session}.judge"))),
+            "{spans:?}"
+        );
+    }
+}
+
 /// A turn whose reply never came reads as having captured none.
 ///
 /// The prompt is still the turn's, and so are the tokens and the time its own

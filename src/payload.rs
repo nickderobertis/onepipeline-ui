@@ -2085,16 +2085,52 @@ fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
 }
 
 /// The report one settlement stored, refused unless the contract it was written
-/// under is one this binary links.
+/// under is one this binary links and the bounds it carries are ones this crate
+/// can order.
 ///
 /// **Do not tighten this to equality.** onejudge bumps its version for an added
 /// field, so every report stored before this binary was built is older than it
 /// and reads perfectly well; only a document *ahead* of the linked contract may
 /// mean something else by the fields the two share.
+///
+/// This is the trust boundary for a report: another process wrote it, and every
+/// reading below takes what it says as fact. So the values are checked here and
+/// nowhere else — a caller holding a `judge::Report` is holding one whose stamps
+/// parse.
 fn read_report(view: &RunView, settlement: &Envelope) -> Option<judge::Report> {
     let bytes = fs::read(report_path(view, settlement)).ok()?;
     let report: judge::Report = serde_json::from_slice(&bytes).ok()?;
-    (report.schema_version <= judge::SCHEMA_VERSION).then_some(report)
+    (report.schema_version <= judge::SCHEMA_VERSION && well_stamped(&report)).then_some(report)
+}
+
+/// Whether every bound a report's session rows carry is a stamp this crate can
+/// order.
+///
+/// The version above vouches for the document's *shape* and for nothing in it: a
+/// `SessionLink`'s bounds are `String`s in onejudge's contract, so a report that
+/// deserializes and versions cleanly can still spell an instant as anything at
+/// all. This crate serves them as a turn's `startedAt`, `finishedAt` and
+/// `timestamp`, and folds them into the interval the judge's lane is drawn over
+/// — so a value that is not a timestamp becomes a duration no client can compute
+/// and an ordering it renders wrong, which is worse than the absence the wire
+/// already has a spelling for.
+///
+/// Refused whole rather than row by row, and for both sides' rows rather than the
+/// ones a given reading happens to join: the rows are one document written by one
+/// process, and a report half of whose clock is unreadable is not a clock. An
+/// unobserved finish is `null` here and stays a readable report — that is the
+/// contract's own way of saying a bound was never seen, and not a malformed one.
+fn well_stamped(report: &judge::Report) -> bool {
+    let Some(telemetry) = report.telemetry.as_ref() else {
+        return true;
+    };
+    telemetry.sessions.iter().all(|link| {
+        millis_of(&link.started_at).is_some()
+            && link
+                .finished_at
+                .as_deref()
+                .is_none_or(|finished| millis_of(finished).is_some())
+    })
 }
 
 /// The turns one report's transcript recorded, in the producer's own order.
