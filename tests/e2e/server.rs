@@ -6192,6 +6192,10 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
     assert_eq!(tools[1]["index"], json!(1));
 }
 
+/// When [`transcript_of`]'s member settled, which is the only instant any run
+/// holds for a turn its report kept and no bound was observed for.
+const REPORT_SETTLED_AT: &str = "2026-08-07T12:01:05.000Z";
+
 /// A settled member's transcript, from one relayed turn and the report it stored.
 fn transcript_of(session: &str, stream: &str, report: &str) -> Vec<Value> {
     let stream = stream.to_owned();
@@ -6218,7 +6222,7 @@ fn transcript_of(session: &str, stream: &str, report: &str) -> Vec<Value> {
                 stream: &stream,
                 node: fixture_run::SHIP_NODE_ID,
                 member: "worker",
-                at: "2026-08-07T12:01:05.000Z",
+                at: REPORT_SETTLED_AT,
                 artifact: &format!("report-{stream}"),
                 report: &report,
             },
@@ -7012,4 +7016,155 @@ fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
     // in this reader's listing: an id that moved with a filter would name a
     // different turn than the transcript route serves under it.
     assert_eq!(listed, all[..2].to_vec());
+}
+
+/// What a turn only the report holds is stamped, statused and measured by, when
+/// the report holds less than everything about it.
+///
+/// A report bounds a turn where the harness observed one and attributes an
+/// invocation to it where one ran, and it holds turns with neither. Each of those
+/// is a different fact and each has to reach a reader as one: the instant a row is
+/// stamped by falls back from the bound the report observed to the settlement that
+/// stored it, a turn no invocation is attributed to has the status of nothing
+/// rather than of something that went well, and a turn nothing measured is served
+/// no figures at all rather than zeroes.
+#[test]
+fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, Transcript, Usage,
+    };
+
+    const SESSION: &str = "node-scope-1786925519111-3163777.worker";
+    const OPENED: &str = "2026-08-07T12:01:01.000Z";
+    const CLOSED: &str = "2026-08-07T12:01:02.500Z";
+    const REOPENED: &str = "2026-08-07T12:01:03.000Z";
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Land the wire contract."),
+                Message::assistant("Landed it."),
+                // Bounded and attributed: the harness observed both ends and an
+                // invocation ran.
+                Message::user("Now run the gate."),
+                Message::assistant("The gate is green."),
+                // Bounded at one end and attributed to nothing.
+                Message::user("Say what is left."),
+                Message::assistant("One follow-up, surfaced."),
+                // Neither: the report kept the turn and measured none of it.
+                Message::user("And close it out."),
+                Message::assistant("Closed."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: None,
+        usage: None,
+        telemetry: Some(Telemetry {
+            wall_ms: 9_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 10,
+            sessions: vec![
+                SessionLink {
+                    session_id: "01a01f4c-685b-75e2-8281-e8937fd20d48".into(),
+                    role: TelemetryRole::Agent,
+                    turn_index: 2,
+                    started_at: OPENED.into(),
+                    finished_at: Some(CLOSED.into()),
+                    history_id: None,
+                },
+                // Observed opening and never observed closing, which the contract
+                // spells as a `null` finish rather than as a malformed bound.
+                SessionLink {
+                    session_id: "01a01f4c-685b-75e2-8281-e8937fd20d49".into(),
+                    role: TelemetryRole::Agent,
+                    turn_index: 3,
+                    started_at: REOPENED.into(),
+                    finished_at: None,
+                    history_id: None,
+                },
+            ],
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Agent,
+                turn_index: 2,
+                ran: Some("claude-code:default".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "claude-code".into(),
+                    harness_id: "claude-code:default".into(),
+                    variant: None,
+                    model: Some("claude-opus-5".into()),
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(1_500),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(Usage {
+                        input_tokens: Some(12),
+                        output_tokens: Some(34),
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        cost_usd: Some(0.75),
+                    }),
+                }],
+                history_file: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    let turns = transcript_of(
+        SESSION,
+        "node-scope-1786925519111-3163777",
+        &format!(
+            "{}\n",
+            serde_json::to_string(&report).expect("the report serializes")
+        ),
+    );
+    // Four turns for four prompts: one the journal opened and three it never did.
+    assert_eq!(turns.len(), 4, "{turns:?}");
+
+    // Bounded and attributed: the bounds the report observed, the instant it
+    // observed the turn finish, and what that invocation was, took and spent.
+    assert_eq!(turns[1]["startedAt"], json!(OPENED));
+    assert_eq!(turns[1]["finishedAt"], json!(CLOSED));
+    assert_eq!(turns[1]["timestamp"], json!(CLOSED));
+    assert_eq!(turns[1]["status"], json!("ok"));
+    assert_eq!(turns[1]["model"], json!("claude-opus-5"));
+    assert_eq!(turns[1]["durationMs"], json!(1_500));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(0.75));
+
+    // Bounded at one end and attributed to nothing: stamped by the opening the
+    // report did observe, and served no status, no identity and no figures —
+    // a turn nothing measured is not a turn that measured zero.
+    assert_eq!(turns[2]["startedAt"], json!(REOPENED));
+    assert_eq!(turns[2]["finishedAt"], json!(null));
+    assert_eq!(turns[2]["timestamp"], json!(REOPENED));
+    assert_eq!(turns[2]["status"], json!("unknown"));
+    assert_eq!(turns[2]["model"], json!(null));
+    assert_eq!(turns[2]["durationMs"], json!(null));
+    assert_eq!(turns[2]["usage"], json!({}), "{:?}", turns[2]);
+    // And its prose is served whole, because none of that is what a turn said.
+    assert_eq!(turns[2]["user"], json!("Say what is left."));
+    assert_eq!(turns[2]["assistant"], json!("One follow-up, surfaced."));
+
+    // Neither bound nor attribution: stamped by the settlement that stored the
+    // report, which is the only instant the run holds for it.
+    assert_eq!(turns[3]["timestamp"], json!(REPORT_SETTLED_AT));
+    assert_eq!(turns[3]["startedAt"], json!(null));
+    assert_eq!(turns[3]["finishedAt"], json!(null));
+    assert_eq!(turns[3]["status"], json!("unknown"));
+    assert_eq!(turns[3]["usage"], json!({}), "{:?}", turns[3]);
+    assert_eq!(turns[3]["assistant"], json!("Closed."));
 }

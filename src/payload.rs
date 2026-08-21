@@ -1038,7 +1038,9 @@ fn turns_of(transcripts: &Transcripts<'_>, node: Option<&str>) -> usize {
     transcripts
         .sessions
         .iter()
-        .filter(|session| node.is_none_or(|node| session.node == Some(node)))
+        .filter(|session| {
+            node.is_none_or(|node| session.node.as_ref().is_some_and(|at| at.as_str() == node))
+        })
         .map(|session| session.rows.len())
         .sum()
 }
@@ -2097,13 +2099,8 @@ fn conversations_under(
         .sessions
         .iter()
         .flat_map(|session| {
-            // The records this reader's filter admitted, which is the listing the
-            // document is built against. **What a listed turn *was* is read from
-            // the session's whole record set and from its report**: a filter
-            // narrows which turns a transcript lists and never what one of them
-            // said, and a turn whose reply disappeared because the reader
-            // excluded a kind would be this API answering the same question two
-            // ways.
+            // The listing the document is narrowed to; what each listed turn
+            // *was* is read from the whole, below.
             let events: Vec<&Envelope> = session
                 .records
                 .iter()
@@ -2114,11 +2111,15 @@ fn conversations_under(
                 return Vec::new();
             }
             let mut served = vec![conversation_document(view, session, &events)];
-            served.extend(session.settlement.zip(session.report.as_ref()).and_then(
-                |(settlement, report)| {
-                    judge_conversation(view, session.session, &events, settlement, report)
-                },
-            ));
+            served.extend(session.stored.as_ref().and_then(|stored| {
+                judge_conversation(
+                    view,
+                    session.session.as_str(),
+                    &events,
+                    stored.settlement,
+                    &stored.report,
+                )
+            }));
             served
         })
         .collect()
@@ -2139,21 +2140,33 @@ struct Transcripts<'a> {
 
 /// One session, with everything any reading of its transcript is taken from.
 struct SessionTranscript<'a> {
-    /// The producer's own session label, which is what a reader addresses it by.
-    session: &'a str,
-    /// The node it ran at, as its own records label it.
-    node: Option<&'a str>,
+    /// The label the producer stamped, as the id a reader addresses it by —
+    /// validated once, here, so no reading below can serve one a route refuses.
+    session: ConversationId,
+    /// The node it ran at, and `None` where its records name none this API could
+    /// serve a timeline for.
+    node: Option<NodeId>,
     /// Every record it relayed, whatever a reader's filter said.
     records: Vec<&'a Envelope>,
-    /// The settlement its member left, which is where its report was stored and
-    /// the only instant the report itself is stamped by.
-    settlement: Option<&'a Envelope>,
-    /// The report that settlement stored, where the run holds a readable one.
-    report: Option<judge::Report>,
-    /// The turns that report recorded, in the producer's own order.
-    reported: Vec<ReportedTurn>,
+    /// What its settled member stored, where the run holds a readable report.
+    stored: Option<StoredReport<'a>>,
     /// The rows its transcript serves, in the order it serves them.
     rows: Vec<TranscriptTurn<'a>>,
+}
+
+/// One settled member's report, with the settlement that stored it and the turns
+/// read out of it.
+///
+/// The three arrive together or not at all — a report is located through its
+/// settlement and its turns are read from the report — so they are one value
+/// rather than three fields a reading could find half of.
+struct StoredReport<'a> {
+    /// The settlement that stored it, which is the only instant the report
+    /// itself is stamped by.
+    settlement: &'a Envelope,
+    report: judge::Report,
+    /// The turns it recorded, in the producer's own order.
+    turns: Vec<ReportedTurn>,
 }
 
 impl<'a> Transcripts<'a> {
@@ -2175,86 +2188,111 @@ impl<'a> Transcripts<'a> {
         }
         let sessions = order
             .into_iter()
-            .map(|session| {
+            .filter_map(|session| {
+                // Validated once here rather than at each reading: `session_label`
+                // admits only what the conversation route resolves, and this is
+                // the value every id, count and reference below is spelled from.
+                let session_id = ConversationId::try_from(session).ok()?;
                 let records = grouped.remove(session).unwrap_or_default();
                 // Read once, used three times over: the report is a source of
                 // this transcript's turns, it fills each of them, and it is the
                 // whole of the judge conversation beside them.
-                let settlement = settlement_of(view, session);
-                let report = settlement.and_then(|settlement| read_report(view, settlement));
-                let reported = report.as_ref().map(reported_turns).unwrap_or_default();
+                let stored = settlement_of(view, session).and_then(|settlement| {
+                    let report = read_report(view, settlement)?;
+                    let turns = reported_turns(&report);
+                    Some(StoredReport {
+                        settlement,
+                        report,
+                        turns,
+                    })
+                });
                 // The report's presence, not its contents, is what decides which
-                // reading a session gets — the precedence `docs/contract.md`
-                // states, kept here so no caller can hold a row set built the
-                // other way.
-                let rows = transcript_turns(&records, report.as_ref().map(|_| reported.as_slice()));
-                SessionTranscript {
-                    session,
+                // reading a session gets.
+                let rows = transcript_turns(
+                    &records,
+                    stored.as_ref().map(|stored| stored.turns.as_slice()),
+                );
+                Some(SessionTranscript {
+                    session: session_id,
                     node: records
                         .first()
-                        .and_then(|event| event.labels.node.as_deref()),
+                        .and_then(|event| event.labels.node.as_deref())
+                        .and_then(|node| NodeId::try_from(node).ok()),
                     records,
-                    settlement,
-                    report,
-                    reported,
+                    stored,
                     rows,
-                }
+                })
             })
             .collect();
         Self { sessions }
     }
 }
 
-/// One row of a session's transcript: the turn as the journal relayed it, as the
-/// settled member's report recorded it, or — for every turn both describe — both.
-struct TranscriptTurn<'a> {
-    /// The producer's own 1-based number for the turn, from whichever side names
-    /// one. `None` only for a relayed record that numbers no turn.
-    numbered: Option<u64>,
-    /// What the journal relayed, and `None` for a turn only the report holds.
-    relayed: Option<RelayedTurn<'a>>,
-    /// Where the report's account of it sits among the session's reported turns,
-    /// and `None` for a turn no readable report holds.
-    reported: Option<usize>,
+/// One row of a session's transcript, named for which account of the turn the
+/// run holds.
+///
+/// The three variants are the three that exist, so a row with no account at all —
+/// or a report-held turn with no place in the report — cannot be built.
+enum TranscriptTurn<'a> {
+    /// The journal's account alone: a turn no readable report says anything
+    /// about, including a record that numbers no turn.
+    Relayed {
+        number: Option<u64>,
+        turn: RelayedTurn<'a>,
+    },
+    /// Both accounts of one turn, joined on the producer's own number.
+    Joined {
+        number: u64,
+        turn: RelayedTurn<'a>,
+        /// Where the report's account of it sits among the report's turns.
+        at: usize,
+    },
+    /// The report's account alone: a turn no record of the run ever named.
+    Reported { number: u64, at: usize },
 }
 
 impl<'a> TranscriptTurn<'a> {
+    /// The producer's own number for this turn, absent only for a relayed record
+    /// that names none.
+    fn number(&self) -> Option<u64> {
+        match self {
+            Self::Relayed { number, .. } => *number,
+            Self::Joined { number, .. } | Self::Reported { number, .. } => Some(*number),
+        }
+    }
+
+    /// What the journal relayed for this turn, and `None` for a row the report
+    /// alone holds.
+    fn relayed(&self) -> Option<&RelayedTurn<'a>> {
+        match self {
+            Self::Relayed { turn, .. } | Self::Joined { turn, .. } => Some(turn),
+            Self::Reported { .. } => None,
+        }
+    }
+
+    /// Where the report's account of this turn sits among the report's turns, and
+    /// `None` for a row no report describes.
+    fn reported(&self) -> Option<usize> {
+        match self {
+            Self::Relayed { .. } => None,
+            Self::Joined { at, .. } | Self::Reported { at, .. } => Some(*at),
+        }
+    }
+
     /// The records that describe this row, and none at all for a row the report
     /// alone holds.
     fn records(&self) -> impl Iterator<Item = &'a Envelope> + '_ {
-        self.relayed.iter().flat_map(RelayedTurn::records)
+        self.relayed().into_iter().flat_map(RelayedTurn::records)
     }
 }
 
 /// The rows one session's transcript serves, in the order it serves them.
 ///
-/// **Two readings, and which one a session gets is decided by whether the run
-/// holds a readable report for it** — the precedence every other reading of a
-/// transcript already keeps.
-///
-/// With no report, the session's own records are the whole of what any reader can
-/// be shown, and they are served in the order the journal relayed them, exactly
-/// as they always have been.
-///
-/// With one, **the report is the set of turns and not only their content**. A
-/// producer relays a `turn-started` for a turn it brackets and relays nothing at
-/// all for a member whose turns it never bracketed, so a dispatch the journal
-/// knows one turn of is regularly one the stored report holds fifty of; reading
-/// the report only where a relayed record already stood served every one of those
-/// as a single empty row — the settled dispatch that opens as an empty
-/// transcript. So every turn the report recorded is a row, joined to the relayed
-/// record that numbers it by the producer's own 1-based counter, which is the
-/// order they are served in.
-///
-/// **And a relayed record that numbers no turn is then not a turn at all.**
-/// `oneagentgraph` 0.2 publishes one `turn-completed` per *dispatch*, beside the
-/// settlement, carrying the member's whole total rather than any turn's. Where
-/// the run holds no report it is the only account of that dispatch anything
-/// holds and is served as the row it always was; where the run holds one, serving
-/// it beside the report's turns adds a turn the report does not have — no prompt,
-/// no reply and the dispatch's aggregate cost — which reads as a phantom final
-/// turn billed for all of them. What that record spent is the *run's* usage, and
-/// the run's own payload is where it is served.
+/// With no readable report, the session's records are the whole reading, in the
+/// order the journal relayed them. With one, the report is the set of turns:
+/// every turn it recorded is a row, ordered by the producer's 1-based number and
+/// joined to the relayed record that names that number — and a record naming no
+/// turn is not one. `src/AGENTS.md` holds why each half is that way.
 fn transcript_turns<'a>(
     records: &[&'a Envelope],
     reported: Option<&[ReportedTurn]>,
@@ -2263,10 +2301,9 @@ fn transcript_turns<'a>(
     let Some(reported) = reported else {
         return relayed
             .into_iter()
-            .map(|turn| TranscriptTurn {
-                numbered: turn.numbered(),
-                relayed: Some(turn),
-                reported: None,
+            .map(|turn| TranscriptTurn::Relayed {
+                number: turn.numbered(),
+                turn,
             })
             .collect();
     };
@@ -2275,15 +2312,17 @@ fn transcript_turns<'a>(
         let Some(number) = turn.numbered() else {
             continue;
         };
-        rows.push(TranscriptTurn {
-            numbered: Some(number),
-            reported: reported_index(reported, number),
-            relayed: Some(turn),
+        rows.push(match reported_index(reported, number) {
+            Some(at) => TranscriptTurn::Joined { number, turn, at },
+            None => TranscriptTurn::Relayed {
+                number: Some(number),
+                turn,
+            },
         });
     }
     // A turn the journal numbered is already a row; what is left is every turn
     // the report holds and no record of the run ever named.
-    let claimed: BTreeSet<u64> = rows.iter().filter_map(|row| row.numbered).collect();
+    let claimed: BTreeSet<u64> = rows.iter().filter_map(TranscriptTurn::number).collect();
     for index in 0..reported.len() {
         let Ok(number) = u64::try_from(index + 1) else {
             continue;
@@ -2291,15 +2330,11 @@ fn transcript_turns<'a>(
         if claimed.contains(&number) {
             continue;
         }
-        rows.push(TranscriptTurn {
-            numbered: Some(number),
-            relayed: None,
-            reported: Some(index),
-        });
+        rows.push(TranscriptTurn::Reported { number, at: index });
     }
     // Stable, so two rows a producer numbered the same — one party's turn and
     // the other's — keep the order the journal relayed them in.
-    rows.sort_by_key(|row| row.numbered);
+    rows.sort_by_key(TranscriptTurn::number);
     rows
 }
 
@@ -2985,8 +3020,9 @@ fn conversation_document(
     transcript: &SessionTranscript<'_>,
     events: &[&Envelope],
 ) -> Value {
-    let session = transcript.session;
-    let reported = transcript.report.as_ref();
+    let session = transcript.session.as_str();
+    let stored = transcript.stored.as_ref();
+    let reported = stored.map(|stored| &stored.report);
     let first = events.first().copied();
     let last = events.last().copied();
     let started_at = first.map_or_else(now_rfc3339, |event| event.ts.clone());
@@ -3013,7 +3049,7 @@ fn conversation_document(
         // moved with the reader's filter would name a different turn than the one
         // the transcript route serves under it.
         .enumerate()
-        .filter(|(_, row)| match &row.relayed {
+        .filter(|(_, row)| match row.relayed() {
             // A turn the report alone holds carries no record for a filter to
             // rule on, so it is listed wherever the session itself is: excluding
             // it would let a reading narrowed to a kind change what the report
@@ -3024,14 +3060,16 @@ fn conversation_document(
                 .any(|record| listed.contains(&(record.stream.as_str(), record.seq))),
         })
         .map(|(index, row)| {
-            let turn = row.relayed.as_ref();
+            let turn = row.relayed();
             let event = turn.map(|turn| turn.opened);
             // The producer's own number for this turn, which is the counter the
             // report shares between its sessions and its attribution. A record
             // that names no turn — a settlement, a death — is not one of the
             // conversation's turns and takes nothing from the report.
-            let numbered = row.numbered;
-            let recorded = row.reported.and_then(|at| transcript.reported.get(at));
+            let numbered = row.number();
+            let recorded = row
+                .reported()
+                .and_then(|at| stored.and_then(|stored| stored.turns.get(at)));
             // The same turn as the journal recorded it, for a session the run
             // holds no report for. Empty whenever there is a report, so nothing
             // below can mix the two readings of one turn.
@@ -3101,7 +3139,7 @@ fn conversation_document(
                     Some(event) => json!(event.ts),
                     None => json!(bounds
                         .and_then(|link| link.finished_at.clone().or_else(|| Some(link.started_at.clone())))
-                        .or_else(|| transcript.settlement.map(|settlement| settlement.ts.clone()))
+                        .or_else(|| stored.map(|stored| stored.settlement.ts.clone()))
                         .unwrap_or_else(|| started_at.clone())),
                 },
                 "tools": match recorded {
@@ -4697,9 +4735,10 @@ fn judge_span(
     let report = transcripts
         .sessions
         .iter()
-        .find(|folded| folded.session == session)?
-        .report
-        .as_ref()?;
+        .find(|folded| folded.session.as_str() == session)?
+        .stored
+        .as_ref()
+        .map(|stored| &stored.report)?;
     let (opened, closed) = judge_interval(report)?;
     let agent_role = agent_role(Some(JUDGE_MEMBER), None)?;
     let transport = Party::named(JUDGE_MEMBER)?;
