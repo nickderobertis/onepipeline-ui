@@ -289,8 +289,7 @@ declaration a consumer can reach.** The `oneagentgraph` linked here is whichever
 one the pinned `onepipeline` resolves, and until that pin moves it declares no
 type any of these names can be reconciled against — which is what the suppression
 above `graph::TURN_MESSAGE` says, and the only reason a suppression is allowed to
-stand there. Moving the SDK pin is what retires it; moving `oneagentgraph` alone
-to get there is what the root `AGENTS.md` forbids.
+stand there. Moving the SDK pin is the one thing that retires it.
 
 **A fixture keeps writing the older shape on purpose.** A `turn-started` carrying
 a number and nothing else is what every run recorded before that correction holds,
