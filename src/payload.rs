@@ -658,11 +658,12 @@ fn measured<'a>(events: impl IntoIterator<Item = &'a Envelope>) -> Measured {
 /// document rather than folding the clock again, so the two readings of where a
 /// run's time went cannot come apart.
 ///
-/// What it adds is the one thing that document does not carry: how long each
-/// party's own harness invocations ran, which only an invocation reports. And
-/// what it never adds is a zero — an unmeasured lane is served `null`, here and
-/// in the fractions, because a zero is a measurement and reading one for an
-/// absence is how a run comes to look cheaper than it was.
+/// The rest of the lanes the wire carries are ones no producer in this stack
+/// measures — the per-party model clocks [`model_lanes`] names, the time inside
+/// a tool call, the run's idle orchestration — and every one of them is served
+/// `null`, here and in the fractions, rather than as a zero. A zero is a
+/// measurement, and reading one for an absence is how a run comes to look
+/// cheaper than it was.
 fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
     let wall = document.map(|document| document.wall_ms);
     let bucket = |name| document.and_then(|document| document.bucket(name));
