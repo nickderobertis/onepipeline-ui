@@ -837,6 +837,46 @@ fn a_publication_the_run_never_did_is_absent_and_one_it_never_ruled_on_has_no_st
 }
 
 #[test]
+fn a_fetch_is_not_what_opens_a_publication_however_it_was_relayed() {
+    let serving = lanes();
+
+    // `onevcs` fetches to cut a worktree and fetches again to publish from one,
+    // and the record it relays is the same either way. This node did both: one at
+    // 12:02:01.5 to cut the worktree, one at 12:20:40.5 to publish. The span opens
+    // at neither — it opens at the gate, which is the first record only publishing
+    // writes, half a second later.
+    let drafted = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+    let published = span_named(
+        &drafted,
+        &format!("publication.{}", fixture_run::DRAFTED_NODE_ID),
+    );
+    assert_eq!(published["started_at"], json!("2026-08-07T12:20:41.000Z"));
+
+    // Which is what the alternative would have cost: this node fetched to cut its
+    // worktree and has published nothing since, so a fetch that opened a
+    // publication would draw one over every node the run ever dispatched.
+    let working = node_spans(&serving, fixture_run::WORKING_NODE_ID);
+    assert!(
+        relayed_kinds(&working).contains(&"fetch".to_owned()),
+        "the node under test relayed no fetch at all: {working:?}"
+    );
+    assert!(
+        !working.iter().any(|span| span["kind"] == "publication"),
+        "a fetch opened a publication on a node that published nothing: {working:?}"
+    );
+}
+
+/// Every relayed record kind a node's own spans carry.
+fn relayed_kinds(spans: &[Value]) -> Vec<String> {
+    spans
+        .iter()
+        .filter_map(|span| span["events"].as_array())
+        .flatten()
+        .filter_map(|event| event["kind"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
 fn a_timeline_scope_that_names_no_node_is_refused_rather_than_guessed() {
     let serving = two_runs();
     for (query, code) in [

@@ -149,15 +149,26 @@ mod vcs {
     /// which it does both to cut a worktree and to publish from one.
     pub const FETCH: &str = "fetch";
 
-    /// The relayed kinds that are the dispatch's worktree rather than its
-    /// publication: cutting one, filling it, and taking it away again.
+    /// The relayed kinds that do not, on their own, say a publication began.
     ///
     /// Read as what a publication is *not*. `onevcs` declares its vocabulary
     /// privately and adds to it, so a positive list of publication work would
     /// silently open a span later than the truth every time that library named a
-    /// new step; these three are the setup every dispatch has whether or not it
-    /// ever published, and a node that relayed nothing else published nothing.
-    pub const WORKTREE_LIFECYCLE: [&str; 3] = [SESSION_OPENED, FETCH, SESSION_CLOSED];
+    /// new step.
+    ///
+    /// Cutting a worktree and taking it away again are the setup every dispatch
+    /// has whether or not it ever published. A [`FETCH`] is here on different
+    /// grounds: that library fetches both to cut a worktree and to publish from
+    /// one and the record does not say which, so a publication opened on one
+    /// would be opened for every node that was ever dispatched — which is the
+    /// whole of what this reading exists to stop. A publication that began with
+    /// one therefore opens at the first record only publishing writes, the
+    /// seconds it took to fetch left outside it, and that is the side to err on:
+    /// a span drawn slightly short still answers what the node was doing, and one
+    /// drawn over a node that published nothing answers nothing at all.
+    ///
+    /// A node that relayed nothing but these published nothing.
+    pub const SILENT_ON_PUBLICATION: [&str; 3] = [SESSION_OPENED, FETCH, SESSION_CLOSED];
 
     /// The command `onevcs` records for the gate that is git's own hook.
     ///
@@ -3212,7 +3223,8 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
     let opened = events
         .iter()
         .find(|(_, event)| {
-            event.source == Source::Vcs && !vcs::WORKTREE_LIFECYCLE.contains(&event.kind.0.as_str())
+            event.source == Source::Vcs
+                && !vcs::SILENT_ON_PUBLICATION.contains(&event.kind.0.as_str())
         })
         .map(|(_, event)| *event)?;
     let merged = last_relayed(&[vcs::CHANGE_MERGED, vcs::MERGE_COMPLETED]);

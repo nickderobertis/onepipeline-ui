@@ -183,11 +183,13 @@ writes — it relays a settling member's usage copied verbatim out of the onejud
 report — so `payload::graph`'s usage keys are `onejudge::Usage`'s. Each exception
 in that module says so where it is declared.
 
-**`payload::vcs::WORKTREE_LIFECYCLE` is a negative list on purpose.** A
-publication span opens at the first relayed record that is *not* the worktree
-being cut, filled or taken away. `onevcs` adds to its vocabulary, and naming the
-publication steps positively instead would silently open the span late every time
-it did.
+**`payload::vcs::SILENT_ON_PUBLICATION` is a negative list on purpose.** A
+publication span opens at the first relayed record that is not one of them.
+`onevcs` adds to its vocabulary, and naming the publication steps positively
+instead would silently open the span late every time it did. A `fetch` is on that
+list although that library also fetches to publish: the record does not say which
+of the two it was, so opening a publication on one would open a publication for
+every node ever dispatched.
 
 Two readings of a record are the producer's and not this crate's. A verdict is
 read in the words the library that wrote it uses — `onevcs` rules a gate `pass`,

@@ -1213,6 +1213,16 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
                 "base": "main",
                 "worktree": "/a/recorded/worktree",
             }),
+        )
+        // `onevcs` brings its clone up to date to cut that worktree. It fetches
+        // to publish from one too and the record says nothing about which this
+        // was, which is why neither can open a publication.
+        .emit(
+            "2026-08-07T12:02:01.500Z",
+            "vcs",
+            "fetch",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "identity": IDENTITY }),
         );
     working_on_it.started(&mut members, "2026-08-07T12:02:02.000Z");
     working_on_it.turn(&mut members, "2026-08-07T12:02:03.000Z");
@@ -1220,9 +1230,17 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
     drafting.started(&mut members, "2026-08-07T12:20:01.000Z");
     drafting.turn(&mut members, "2026-08-07T12:20:02.000Z");
     drafting.settled(&mut members, "2026-08-07T12:20:40.000Z", true);
-    // And only now the publication: the gate this repository's own pre-push hook
-    // is, the push, and the merge.
+    // And only now the publication. It begins with the same fetch the worktree
+    // began with — this one to publish from — so the span opens at the gate a
+    // second later, which is the first record only publishing writes.
     driver
+        .emit(
+            "2026-08-07T12:20:40.500Z",
+            "vcs",
+            "fetch",
+            at_node(DRAFTED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
         .emit(
             "2026-08-07T12:20:41.000Z",
             "vcs",
@@ -1366,6 +1384,13 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
                 "base": "main",
                 "worktree": "/a/recorded/worktree",
             }),
+        )
+        .emit(
+            "2026-08-07T12:04:01.500Z",
+            "vcs",
+            "fetch",
+            at_node(WORKING_NODE_ID),
+            json!({ "identity": IDENTITY }),
         );
     still_working.started(&mut members, "2026-08-07T12:04:02.000Z");
     still_working.turn(&mut members, "2026-08-07T12:04:03.000Z");
