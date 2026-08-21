@@ -922,9 +922,15 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         wire(oneagentgraph::event::EventKind::TurnCompleted),
         graph::TURN_COMPLETED
     );
-    // The six names the turn-control reading rests on: three that say a member is
-    // in a turn and three that say it is not. A kind renamed there fails here
-    // rather than making every in-flight node read as un-redirectable.
+    // The seven names the turn-control and interval readings rest on: three that
+    // say a member is in a turn, three that say it is not, and the one that says
+    // when it began. A kind renamed there fails here rather than making every
+    // in-flight node read as un-redirectable, or every session open at the
+    // dispatch that ran it because nothing was ever found to have started.
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::MemberStarted),
+        graph::MEMBER_STARTED
+    );
     assert_eq!(
         wire(oneagentgraph::event::EventKind::TurnStarted),
         graph::TURN_STARTED

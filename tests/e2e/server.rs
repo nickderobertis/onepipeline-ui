@@ -646,6 +646,43 @@ fn a_lifecycle_nodes_lanes_are_each_served_over_the_attempt_that_ran_them() {
 }
 
 #[test]
+fn a_session_the_graph_lost_and_one_whose_worktree_went_each_end_where_that_happened() {
+    let serving = lanes();
+
+    // The member died mid-turn. Three records could have ended this session and
+    // the graph's own is the earliest: not the worktree going away ten seconds
+    // later, and not the run's settlement of the node after that.
+    let lost = node_spans(&serving, fixture_run::DIED_NODE_ID);
+    let died = span_named(
+        &lost,
+        &format!("dispatch.{}", fixture_run::DIED_CONVERSATION_ID),
+    );
+    assert_eq!(died["started_at"], json!("2026-08-07T12:05:00.000Z"));
+    assert_eq!(died["ended_at"], json!("2026-08-07T12:05:30.000Z"));
+    assert!(
+        died["ended_at"].as_str()
+            < span_named(&lost, &format!("node.{}", fixture_run::DIED_NODE_ID))["ended_at"]
+                .as_str(),
+        "the session outlived the record that ended it: {died}"
+    );
+
+    // And a session the graph never ended at all: the worktree being reclaimed
+    // is the only thing that says when it stopped, so that is the end it carries
+    // — ahead of the node's own settlement a second later.
+    let taken = node_spans(&serving, fixture_run::RECLAIMED_NODE_ID);
+    let reclaimed = span_named(
+        &taken,
+        &format!("dispatch.{}", fixture_run::RECLAIMED_CONVERSATION_ID),
+    );
+    assert_eq!(reclaimed["started_at"], json!("2026-08-07T12:06:00.000Z"));
+    assert_eq!(reclaimed["ended_at"], json!("2026-08-07T12:06:30.000Z"));
+    assert_eq!(
+        span_named(&taken, &format!("node.{}", fixture_run::RECLAIMED_NODE_ID))["ended_at"],
+        json!("2026-08-07T12:06:31.000Z")
+    );
+}
+
+#[test]
 fn a_session_is_read_in_the_category_the_run_named_its_member() {
     let serving = lanes();
     // A persona this host invented and `agentRoleSchema` has no word for. The
@@ -755,6 +792,8 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
             fixture_run::DRAFTED_NODE_ID,
             fixture_run::REFUSED_NODE_ID,
             fixture_run::WORKING_NODE_ID,
+            fixture_run::DIED_NODE_ID,
+            fixture_run::RECLAIMED_NODE_ID,
         ],
         "{spans:?}"
     );

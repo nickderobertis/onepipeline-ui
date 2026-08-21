@@ -119,6 +119,12 @@ pub const DRAFTED_NODE_ID: &str = "drafted";
 pub const REFUSED_NODE_ID: &str = "refused";
 /// That run's node still working: dispatched, talking, and settled by nothing.
 pub const WORKING_NODE_ID: &str = "working";
+/// That run's node whose member died mid-turn, which the graph recorded before
+/// anything else on that node ended.
+pub const DIED_NODE_ID: &str = "died";
+/// That run's node whose worktree was reclaimed while its member was still
+/// talking, so nothing but the branch going away says when the session stopped.
+pub const RECLAIMED_NODE_ID: &str = "reclaimed";
 
 /// The streams that run's members ran on, one per member.
 ///
@@ -127,13 +133,15 @@ pub const WORKING_NODE_ID: &str = "working";
 /// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
 /// mints one — the pair has to agree or nothing joins a session to the records
 /// that opened and closed it.
-const LANE_STREAMS: [&str; 6] = [
+const LANE_STREAMS: [&str; 8] = [
     "node-scope-1786925520001-4311",
     "node-scope-1786925520002-4311",
     "node-scope-1786925520003-4311",
     "pr-author-1786925520004-4311",
     "node-scope-1786925520005-4311",
     "node-scope-1786925520006-4311",
+    "node-scope-1786925520008-4311",
+    "node-scope-1786925520009-4311",
 ];
 /// The session the re-asked node's abandoned first attempt ran under.
 pub const RETRIED_FIRST_CONVERSATION_ID: &str = "node-scope-1786925520001-4311.worker";
@@ -148,6 +156,10 @@ pub const DRAFTED_DRAFTING_CONVERSATION_ID: &str = "pr-author-1786925520004-4311
 pub const REFUSED_CONVERSATION_ID: &str = "node-scope-1786925520005-4311.worker";
 /// The session the node still working is talking in.
 pub const WORKING_CONVERSATION_ID: &str = "node-scope-1786925520006-4311.worker";
+/// The session the graph lost: it ran under this one and died in it.
+pub const DIED_CONVERSATION_ID: &str = "node-scope-1786925520008-4311.worker";
+/// The session whose worktree was taken away while it was still talking.
+pub const RECLAIMED_CONVERSATION_ID: &str = "node-scope-1786925520009-4311.worker";
 /// The run's own observer, recorded at no node and under no role word: the
 /// `monitor` member is the run's watching side, and it is served in the
 /// `orchestrator` lane it shares rather than as a member of its own.
@@ -1064,6 +1076,12 @@ fn lanes_plan() -> Value {
             },
             { "id": REFUSED_NODE_ID, "persona": "docs-writer", "task": "## What\nFail the gate." },
             { "id": WORKING_NODE_ID, "persona": "docs-writer", "task": "## What\nKeep working." },
+            { "id": DIED_NODE_ID, "persona": "engineer", "task": "## What\nDie mid-turn." },
+            {
+                "id": RECLAIMED_NODE_ID,
+                "persona": "engineer",
+                "task": "## What\nLose the worktree.",
+            },
         ],
     })
 }
@@ -1352,6 +1370,109 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
     still_working.started(&mut members, "2026-08-07T12:04:02.000Z");
     still_working.turn(&mut members, "2026-08-07T12:04:03.000Z");
 
+    // The node whose member died mid-turn. Three records could end its session
+    // and the graph's own is the earliest of them, which is the ranking a span
+    // is bounded by: the run's account of the node never overrides the graph's
+    // account of the session inside it.
+    let lost = Lane {
+        run,
+        stream: LANE_STREAMS[6],
+        session: DIED_CONVERSATION_ID,
+        node: Some(DIED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:05:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": DIED_NODE_ID, "persona": "engineer" }),
+            json!({ "persona": "engineer" }),
+        )
+        .emit(
+            "2026-08-07T12:05:00.500Z",
+            "vcs",
+            "session-opened",
+            at_node(DIED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/died",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    lost.started(&mut members, "2026-08-07T12:05:01.000Z");
+    lost.turn(&mut members, "2026-08-07T12:05:02.000Z");
+    lost.died(&mut members, "2026-08-07T12:05:30.000Z");
+    driver
+        .emit(
+            "2026-08-07T12:05:40.000Z",
+            "vcs",
+            "session-closed",
+            at_node(DIED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:05:41.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(DIED_NODE_ID),
+            json!({ "status": "failed", "outcome": "member-died" }),
+        );
+
+    // And the node whose worktree was reclaimed while its member was still
+    // talking: the graph never ended that session at all, so the branch going
+    // away is the only thing that says when it stopped — ahead of the run's own
+    // settlement a second later.
+    let reclaimed = Lane {
+        run,
+        stream: LANE_STREAMS[7],
+        session: RECLAIMED_CONVERSATION_ID,
+        node: Some(RECLAIMED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver
+        .emit(
+            "2026-08-07T12:06:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": RECLAIMED_NODE_ID, "persona": "engineer" }),
+            json!({ "persona": "engineer" }),
+        )
+        .emit(
+            "2026-08-07T12:06:01.000Z",
+            "vcs",
+            "session-opened",
+            at_node(RECLAIMED_NODE_ID),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": IDENTITY,
+                "branch": "feature/reclaimed",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    reclaimed.started(&mut members, "2026-08-07T12:06:02.000Z");
+    reclaimed.turn(&mut members, "2026-08-07T12:06:03.000Z");
+    driver
+        .emit(
+            "2026-08-07T12:06:30.000Z",
+            "vcs",
+            "session-closed",
+            at_node(RECLAIMED_NODE_ID),
+            json!({ "identity": IDENTITY }),
+        )
+        .emit(
+            "2026-08-07T12:06:31.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(RECLAIMED_NODE_ID),
+            json!({ "status": "failed", "outcome": "worktree-reclaimed" }),
+        );
+
     merged(std::iter::once(driver).chain(members))
 }
 
@@ -1423,6 +1544,19 @@ impl Lane<'_> {
             "turn-started",
             self.labels(true),
             json!({ "turn": 1 }),
+        );
+    }
+
+    /// `member-died`: what ends a session the graph lost rather than one that
+    /// reported. It is a settlement for the purpose of bounding a span and is
+    /// nothing else — no verdict is recorded and none is served.
+    fn died(&self, members: &mut [Journal], at: &str) {
+        self.journal(members).emit(
+            at,
+            "agentgraph",
+            "member-died",
+            self.labels(false),
+            json!({ "reason": "the member's process exited" }),
         );
     }
 
