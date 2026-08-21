@@ -288,7 +288,7 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
             stream: WORKER_STREAM,
             node: NODE_ID,
             member: "worker",
-            at: "2026-08-07T12:00:05.500Z",
+            at: WORKER_SETTLED_AT,
             artifact: WORKER_REPORT_ARTIFACT,
             report: &worker_report(),
         },
@@ -501,11 +501,11 @@ fn journal(run: &str) -> String {
             at_member.clone(),
             json!({
                 "usage": {
-                    "input_tokens": 159_434,
-                    "output_tokens": 1_564,
-                    "cache_read_tokens": 187_430,
-                    "cache_write_tokens": 712,
-                    "cost_usd": 50.72,
+                    "input_tokens": 159_810,
+                    "output_tokens": 1_728,
+                    "cache_read_tokens": 231_481,
+                    "cache_write_tokens": 1_068,
+                    "cost_usd": 53.79,
                 },
             }),
         )
@@ -3097,6 +3097,11 @@ pub const WORKER_STREAM: &str = "node-scope-1786925518098-3163646";
 /// The artifact id that settlement recorded for the report it stored.
 pub const WORKER_REPORT_ARTIFACT: &str = "report-node-scope-1786925518098-3163646";
 
+/// When that member settled, which is when its report was written — and so the
+/// only instant any run holds for a turn the report kept and the journal never
+/// opened.
+pub const WORKER_SETTLED_AT: &str = "2026-08-07T12:00:05.500Z";
+
 /// The prompt the simulated user opened the dispatch with — the dispatch's own
 /// task prose, which is what a turn's `user` is and what its persona name is not.
 pub const FIRST_PROMPT: &str = "## What\nLand the wire contract.";
@@ -3108,6 +3113,23 @@ pub const SECOND_REPLY: &str = "The gate ran green over the finished tree.";
 /// What the tool the first turn called gave back. Nothing in the journal records
 /// this: `turn-activity` reports the call and never the observation.
 pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
+/// The third thing it was asked — and the turn **the journal never opened**.
+///
+/// `oneagentgraph` relays a `turn-started` for the turns it brackets and nothing
+/// at all for the rest, so a settled dispatch's report regularly holds turns no
+/// record of the run names. This is that turn: the report has it, its
+/// attribution measures it, and no envelope of this fixture mentions it.
+pub const THIRD_PROMPT: &str = "One more: say what the contract now serves.";
+pub const THIRD_REPLY: &str = "It serves the transcript the dispatch really had.";
+/// What that turn's one call came back with.
+pub const UNRELAYED_OBSERVATION: &str = "docs/contract.md: schema 14";
+/// The identity the report attributes to the invocation that ran it, which is
+/// the only account of that turn's model any run holds.
+pub const UNRELAYED_MODEL: &str = "claude-opus-5";
+/// What that turn alone cost and took, so a figure served against it can only
+/// have come from its own attribution.
+pub const UNRELAYED_COST: f64 = 3.07;
+pub const UNRELAYED_MS: u64 = 2_600;
 
 /// The onejudge report the settled run's worker member stored, built from that
 /// library's own types.
@@ -3116,15 +3138,18 @@ pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
 /// serialized by `onejudge`'s own derives, so a release that renamed a field
 /// fails the suite that reads it rather than serving a transcript with holes.
 ///
-/// It is shaped to hold three things the served transcript must get right. The
-/// two turns cost and take **different** amounts, so serving the report's own
-/// `usage` — the run total over both sides — on either of them is visible. The
+/// It is shaped to hold four things the served transcript must get right. The
+/// turns cost and take **different** amounts, so serving the report's own
+/// `usage` — the run total over both sides — on any of them is visible. The
 /// judge's figures are larger than the agent's on turn 2, so a reading that
 /// crossed the two role vocabularies would show up as a number rather than as a
 /// subtlety. And `telemetry.sessions` holds an `agent` row for the first turn
 /// only, so the second is served bounds-absent rather than handed the row beside
-/// it. The judge's own rows are [`reviewer_report`]'s, which is where the trap
-/// they spring is driven from.
+/// it. And its **third** turn is one the journal never opened — no `turn-started`
+/// of this fixture names it — so a transcript that read the report only where a
+/// relayed record already stood would drop it, prose, tools, cost and all. The
+/// judge's own rows are [`reviewer_report`]'s, which is where the trap they
+/// spring is driven from.
 #[must_use]
 pub fn worker_report() -> String {
     use onejudge::{
@@ -3144,6 +3169,22 @@ pub fn worker_report() -> String {
         name: None,
         input: None,
         output: Some(TOOL_OBSERVATION.into()),
+        index: 1,
+    };
+    // The unrelayed turn's own call and what it returned, so a turn the journal
+    // never opened is still served with what its tools did.
+    let unrelayed_call = ToolEvent {
+        kind: "tool_call".into(),
+        name: Some("Read".into()),
+        input: Some(json!({ "file_path": "docs/contract.md" })),
+        output: None,
+        index: 0,
+    };
+    let unrelayed_result = ToolEvent {
+        kind: "tool_result".into(),
+        name: None,
+        input: None,
+        output: Some(UNRELAYED_OBSERVATION.into()),
         index: 1,
     };
     let gate_call = ToolEvent {
@@ -3228,20 +3269,24 @@ pub fn worker_report() -> String {
                 Message::assistant(FIRST_REPLY).with_events(vec![call, result]),
                 Message::user(SECOND_PROMPT),
                 Message::assistant(SECOND_REPLY).with_events(vec![gate_call, gate_result]),
+                // The turn no `turn-started` ever named. It is the report's
+                // third, and the transcript has to serve it as one.
+                Message::user(THIRD_PROMPT),
+                Message::assistant(THIRD_REPLY).with_events(vec![unrelayed_call, unrelayed_result]),
             ],
         },
         verdicts: Vec::new(),
         assessment: None,
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
-        // The whole dispatch's total over both sides, which is what neither turn
-        // spent: 29.71 + 1.51 + 9.75 + 9.75.
+        // The whole dispatch's total over both sides, which is what no turn
+        // spent: 29.71 + 1.51 + 3.07 + 9.75 + 9.75.
         usage: Some(Usage {
-            input_tokens: Some(159_434),
-            output_tokens: Some(1_564),
-            cache_read_tokens: Some(187_430),
-            cache_write_tokens: Some(712),
-            cost_usd: Some(50.72),
+            input_tokens: Some(159_810),
+            output_tokens: Some(1_728),
+            cache_read_tokens: Some(231_481),
+            cache_write_tokens: Some(1_068),
+            cost_usd: Some(53.79),
         }),
         telemetry: Some(Telemetry {
             wall_ms: 30_000,
@@ -3284,6 +3329,16 @@ pub fn worker_report() -> String {
                     vec![ran("claude-code", 100, agent_usage(1.51))],
                 ),
                 attributed(TelemetryRole::Judge, 2, vec![ran("codex", 60, judge_usage)]),
+                // What the unrelayed turn spent and took, and the identity that
+                // ran it. Nothing else in this run records any of the three.
+                attributed(
+                    TelemetryRole::Agent,
+                    3,
+                    vec![CandidateAttempt {
+                        model: Some(UNRELAYED_MODEL.to_owned()),
+                        ..ran("claude-code", UNRELAYED_MS, agent_usage(UNRELAYED_COST))
+                    }],
+                ),
             ],
         }),
         processes: Vec::new(),

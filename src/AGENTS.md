@@ -224,6 +224,18 @@ repository does not own is exactly what a second source of truth is made of. It 
 unpinned for the reason `oneagentgraph` is — `onepipeline` resolves it and the
 lock follows.
 
+**The report is the set of turns, not only their content.** A producer brackets
+some of a member's turns with `turn-started` and some members' with none at all, so
+the journal is not a listing of what a dispatch had. Every turn the report recorded
+is a row.
+
+**And where the run holds a report, a record that numbers no turn is not one.** The
+single `turn-completed` `oneagentgraph` 0.2 publishes per *dispatch* carries the
+member's whole total; beside the report's turns it is a turn the report does not
+have, billed for all of them. Its figures are the **run's** usage and are served
+there. Where the run holds no report it is the only account of that dispatch and is
+served as the row it always was.
+
 Four joins, each the one the obvious alternative gets wrong:
 
 - **A session to its report, by `{stream}.{member}`**, which is how a session id
@@ -277,9 +289,11 @@ builds the live reading only where no readable report was found, which makes the
 precedence a property of that function rather than a habit of its callers.
 
 **Two records describe one turn, and one turn is one row.** Everything that lists,
-counts or numbers a turn goes through `payload::relayed_turns`, so the count beside
-a node, the transcript opened from it and the id the timeline addresses it under
-cannot disagree. The grouping join is the producer's `{turn, role}` and nothing
+counts or numbers a turn goes through one fold, `payload::Transcripts`, so the count
+beside a node, the transcript opened from it and the id the timeline addresses it
+under cannot disagree. That fold is also the one place a stored report is read, and
+a row the report alone holds is addressed by nothing on the timeline — nothing
+relayed it, and the dispatch span is what opens the transcript. The grouping join is the producer's `{turn, role}` and nothing
 else: `oneagentgraph` 0.2 emits one `turn-completed` per *dispatch*, from
 `settle_report`, carrying the member's whole total rather than any turn's, so
 closing a turn by proximity would bill one turn for all of them.

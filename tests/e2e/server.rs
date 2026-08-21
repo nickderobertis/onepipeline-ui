@@ -487,7 +487,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
             .map(Vec::len)
             .expect("the transcript's turns"))
     );
-    assert_eq!(detail["run"]["turns"], json!(5));
+    assert_eq!(detail["run"]["turns"], json!(4));
 }
 
 #[test]
@@ -3702,9 +3702,9 @@ fn what_each_party_consumed_is_served_from_the_records_that_measured_it() {
     .json();
     let usage = &body["run"]["usage"];
     // What the run spent, as the sibling folded it from the turns it relayed.
-    assert_eq!(usage["total"]["input_tokens"], json!(159_834));
-    assert_eq!(usage["total"]["output_tokens"], json!(1_654));
-    assert_eq!(usage["total"]["cost_usd"], json!(50.83));
+    assert_eq!(usage["total"]["input_tokens"], json!(160_210));
+    assert_eq!(usage["total"]["output_tokens"], json!(1_818));
+    assert_eq!(usage["total"]["cost_usd"], json!(53.90));
     // The per-party split is read from the onejudge report each side keeps, and
     // both of this run's members kept one. The lint party ran on neither node, so
     // it is unknown rather than free — a null cost cannot be read as a party that
@@ -4800,10 +4800,10 @@ fn a_settled_dispatchs_transcript_is_the_conversation_it_really_had() {
     assert_eq!(turns[0]["usage"]["cacheReadTokens"], json!(44_051));
     assert_eq!(turns[0]["usage"]["cacheWriteTokens"], json!(356));
     assert_eq!(turns[0]["usage"]["outputTokens"], json!(164));
-    for turn in turns.iter().take(2) {
+    for turn in turns.iter().take(3) {
         assert_ne!(
             turn["usage"]["costUsd"],
-            json!(50.72),
+            json!(53.79),
             "the run total repeated on a turn: {turn}"
         );
         assert_ne!(
@@ -4846,15 +4846,154 @@ fn a_settled_dispatchs_transcript_is_the_conversation_it_really_had() {
         }
     }
 
-    // The settlement the report came with is not one of the conversation's turns
-    // and does not pretend to be: no prompt, no reply, and the dispatch's own
-    // total where a turn's usage would be.
+    // Three turns, because the report recorded three — and the record the
+    // producer publishes beside the settlement is not a fourth. It numbers no
+    // turn and carries the whole dispatch's total, so serving it beside them
+    // would be a turn the report does not have: no prompt, no reply, and every
+    // one of the dispatch's dollars billed to it.
     assert_eq!(turns.len(), 3, "{turns:?}");
-    assert_eq!(turns[2]["status"], json!("turn-completed"));
-    assert_eq!(turns[2]["user"], json!(""));
-    assert_eq!(turns[2]["assistant"], json!(null));
-    assert_eq!(turns[2]["durationMs"], json!(null));
-    assert_eq!(turns[2]["usage"]["costUsd"], json!(50.72));
+    for turn in &turns {
+        assert_ne!(
+            turn["usage"]["costUsd"],
+            json!(53.79),
+            "the dispatch's own total served as a turn: {turn}"
+        );
+        assert_ne!(turn["user"], json!(""), "a turn nobody was asked: {turn}");
+    }
+}
+
+/// A turn the producer never bracketed is still a turn of the transcript: the
+/// settled member's report kept it, and the report is what a settled dispatch's
+/// transcript is.
+///
+/// This is the dispatch that opened as an empty transcript. `oneagentgraph`
+/// relays a `turn-started` for the turns it brackets and nothing at all for the
+/// rest, and reading the report only where a relayed record already stood served
+/// every unrelayed turn as nothing — no prose, no tools and no cost, on data
+/// where the run had stored all three.
+#[test]
+fn a_turn_the_journal_never_opened_is_served_from_the_report_that_kept_it() {
+    let serving = two_runs();
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    let turns = body["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+
+    // As many turns as the report recorded prompts, and no more: the journal
+    // opened two of them, the report holds all three, and the record the producer
+    // publishes beside the settlement numbers no turn and is not one of them.
+    assert_eq!(turns.len(), 3, "{turns:?}");
+
+    // Third in the report and third in the transcript: a row the journal named no
+    // record of takes its place by the producer's own turn number, so the two
+    // turns before it are still the ones the journal opened.
+    let unrelayed = &turns[2];
+    assert_eq!(
+        unrelayed["id"],
+        json!(format!("{}.2", fixture_run::CONVERSATION_ID))
+    );
+    assert_eq!(unrelayed["user"], json!(fixture_run::THIRD_PROMPT));
+    assert_eq!(unrelayed["assistant"], json!(fixture_run::THIRD_REPLY));
+
+    // What it called, and what the call came back with — the observation the
+    // journal never held, on a turn the journal never held either.
+    let tools = unrelayed["tools"].as_array().expect("the turn's tools");
+    assert_eq!(tools.len(), 2, "{tools:?}");
+    assert_eq!(tools[0]["kind"], json!("tool_call"));
+    assert_eq!(tools[0]["name"], json!("Read"));
+    assert_eq!(tools[0]["output"], json!(null), "a call returns nothing");
+    assert_eq!(tools[1]["kind"], json!("tool_result"));
+    assert_eq!(
+        tools[1]["output"],
+        json!(fixture_run::UNRELAYED_OBSERVATION)
+    );
+
+    // What it cost and took, from the candidate that ran in its own attribution.
+    // Five figures, because a dispatch the report credits with a measured cost
+    // must serve that cost rather than an absence.
+    assert_eq!(
+        unrelayed["usage"]["costUsd"],
+        json!(fixture_run::UNRELAYED_COST)
+    );
+    assert_eq!(unrelayed["usage"]["inputTokens"], json!(376));
+    assert_eq!(unrelayed["usage"]["outputTokens"], json!(164));
+    assert_eq!(unrelayed["usage"]["cacheReadTokens"], json!(44_051));
+    assert_eq!(unrelayed["usage"]["cacheWriteTokens"], json!(356));
+    assert_eq!(unrelayed["durationMs"], json!(fixture_run::UNRELAYED_MS));
+    // The identity and the status oneharness gave that invocation, which is the
+    // only account of either any run holds for this turn.
+    assert_eq!(unrelayed["model"], json!(fixture_run::UNRELAYED_MODEL));
+    assert_eq!(unrelayed["status"], json!("ok"));
+    // The report observed no agent-side bounds for it, so the instant it is
+    // stamped by is the settlement that stored the report — and the bounds
+    // themselves stay absent rather than borrowing another turn's.
+    assert_eq!(
+        unrelayed["timestamp"],
+        json!(fixture_run::WORKER_SETTLED_AT)
+    );
+    assert_eq!(unrelayed["startedAt"], json!(null));
+    assert_eq!(unrelayed["finishedAt"], json!(null));
+
+    // The count beside the node is the same reading: a node that reads `2 turns`
+    // above a transcript of three is the disagreement one fold exists to prevent.
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let node = detail["run"]["nodes"]
+        .as_array()
+        .expect("the run's nodes")
+        .iter()
+        .find(|node| node["node"] == json!(fixture_run::NODE_ID))
+        .expect("the dispatched node")
+        .clone();
+    assert_eq!(node["turns"], json!(turns.len()));
+
+    // And the timeline addresses the rows the transcript serves, and only those.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json();
+    let opened = relayed(&timeline, "turn-started");
+    let named: Vec<&Value> = opened.iter().map(|event| &event["id"]).collect();
+    for turn in 0..2 {
+        assert!(
+            named.contains(&&json!(format!("{}.{turn}", fixture_run::CONVERSATION_ID))),
+            "{named:?}"
+        );
+    }
+    // And nothing plotted addresses a row no record produced: the turn the report
+    // alone holds was relayed by nothing, and the record the producer published
+    // beside the settlement is not a row to address either.
+    assert!(
+        !named.contains(&&json!(format!("{}.2", fixture_run::CONVERSATION_ID))),
+        "{named:?}"
+    );
+    for event in relayed(&timeline, "turn-completed") {
+        assert!(
+            !event["id"]
+                .as_str()
+                .expect("the event's id")
+                .starts_with(fixture_run::CONVERSATION_ID),
+            "the dispatch's close addressed as a turn: {event}"
+        );
+    }
 }
 
 /// A settled dispatch serves the judge that supervised it as a conversation of
@@ -5952,9 +6091,15 @@ fn a_report_written_under_an_older_contract_is_still_read() {
         "node-scope-1786925518888-3163444",
         &format!("{document}\n"),
     );
-    assert_eq!(turns.len(), 1, "{turns:?}");
+    // Two: the turn the journal opened, and the one the report holds and no
+    // record of the run ever named — a prompt whose reply never came is a turn
+    // with no reply rather than a turn nobody is shown.
+    assert_eq!(turns.len(), 2, "{turns:?}");
     assert_eq!(turns[0]["user"], json!("Land the wire contract."));
     assert_eq!(turns[0]["assistant"], json!("The route table is landed."));
+    assert_eq!(turns[1]["user"], json!("Now run the gate."));
+    assert_eq!(turns[1]["assistant"], json!(null), "{turns:?}");
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(2.5), "{turns:?}");
 }
 
 /// A reply with no prompt before it is still the agent's turn.
@@ -6047,6 +6192,10 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
     assert_eq!(tools[1]["index"], json!(1));
 }
 
+/// When [`transcript_of`]'s member settled, which is the only instant any run
+/// holds for a turn its report kept and no bound was observed for.
+const REPORT_SETTLED_AT: &str = "2026-08-07T12:01:05.000Z";
+
 /// A settled member's transcript, from one relayed turn and the report it stored.
 fn transcript_of(session: &str, stream: &str, report: &str) -> Vec<Value> {
     let stream = stream.to_owned();
@@ -6073,7 +6222,7 @@ fn transcript_of(session: &str, stream: &str, report: &str) -> Vec<Value> {
                 stream: &stream,
                 node: fixture_run::SHIP_NODE_ID,
                 member: "worker",
-                at: "2026-08-07T12:01:05.000Z",
+                at: REPORT_SETTLED_AT,
                 artifact: &format!("report-{stream}"),
                 report: &report,
             },
@@ -6174,26 +6323,42 @@ fn a_filter_narrows_the_turns_a_transcript_lists_and_never_what_each_one_was() {
     };
 
     let wide = detail("monitor");
-    // The settlement record excluded: it is one of the session's relayed
-    // envelopes, so a reader who excluded its kind is not shown it.
-    let narrow = detail(r#"{"exclude":[{"kind":"turn-completed"}]}"#);
+    // The records that opened the two turns the journal bracketed, excluded: they
+    // are relayed envelopes, so a reader who excluded their kind is not shown the
+    // turns they opened.
+    let narrow = detail(r#"{"exclude":[{"kind":"turn-started"}]}"#);
     let all = transcript(&wide);
     let listed = transcript(&narrow);
     assert_eq!(all.len(), 3, "{all:?}");
-    assert_eq!(listed.len(), 2, "the listing narrowed: {listed:?}");
+    // One of the three: the turn the report alone holds, which no record of the
+    // run names and which a filter therefore has nothing to rule on. The listing
+    // narrows; what the report says the dispatch did does not.
+    assert_eq!(listed.len(), 1, "the listing narrowed: {listed:?}");
 
-    // And every turn still listed is the same turn, down to the fields only the
+    // And the turn still listed is the same turn, down to the fields only the
     // report can fill.
-    assert_eq!(listed, all[..2].to_vec());
-    assert_eq!(listed[0]["user"], json!(fixture_run::FIRST_PROMPT));
-    assert_eq!(listed[0]["assistant"], json!(fixture_run::FIRST_REPLY));
-    assert_eq!(listed[0]["usage"]["costUsd"], json!(29.71));
-    assert_eq!(listed[0]["durationMs"], json!(900));
+    assert_eq!(listed, all[2..].to_vec());
+    assert_eq!(listed[0]["user"], json!(fixture_run::THIRD_PROMPT));
+    assert_eq!(listed[0]["assistant"], json!(fixture_run::THIRD_REPLY));
+    assert_eq!(
+        listed[0]["usage"]["costUsd"],
+        json!(fixture_run::UNRELAYED_COST)
+    );
+    assert_eq!(listed[0]["durationMs"], json!(fixture_run::UNRELAYED_MS));
     assert_eq!(
         listed[0]["tools"][1]["output"],
+        json!(fixture_run::UNRELAYED_OBSERVATION)
+    );
+    // And the wide reading is unmoved, turn for turn.
+    assert_eq!(all[0]["user"], json!(fixture_run::FIRST_PROMPT));
+    assert_eq!(all[0]["assistant"], json!(fixture_run::FIRST_REPLY));
+    assert_eq!(all[0]["usage"]["costUsd"], json!(29.71));
+    assert_eq!(all[0]["durationMs"], json!(900));
+    assert_eq!(
+        all[0]["tools"][1]["output"],
         json!(fixture_run::TOOL_OBSERVATION)
     );
-    assert_eq!(listed[1]["usage"]["costUsd"], json!(1.51));
+    assert_eq!(all[1]["usage"]["costUsd"], json!(1.51));
 
     // The fold beside them is the run's, not the reading's — including the one
     // this step re-sourced from the same reports the transcripts are filled from.
@@ -6851,4 +7016,155 @@ fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
     // in this reader's listing: an id that moved with a filter would name a
     // different turn than the transcript route serves under it.
     assert_eq!(listed, all[..2].to_vec());
+}
+
+/// What a turn only the report holds is stamped, statused and measured by, when
+/// the report holds less than everything about it.
+///
+/// A report bounds a turn where the harness observed one and attributes an
+/// invocation to it where one ran, and it holds turns with neither. Each of those
+/// is a different fact and each has to reach a reader as one: the instant a row is
+/// stamped by falls back from the bound the report observed to the settlement that
+/// stored it, a turn no invocation is attributed to has the status of nothing
+/// rather than of something that went well, and a turn nothing measured is served
+/// no figures at all rather than zeroes.
+#[test]
+fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, Transcript, Usage,
+    };
+
+    const SESSION: &str = "node-scope-1786925519111-3163777.worker";
+    const OPENED: &str = "2026-08-07T12:01:01.000Z";
+    const CLOSED: &str = "2026-08-07T12:01:02.500Z";
+    const REOPENED: &str = "2026-08-07T12:01:03.000Z";
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Land the wire contract."),
+                Message::assistant("Landed it."),
+                // Bounded and attributed: the harness observed both ends and an
+                // invocation ran.
+                Message::user("Now run the gate."),
+                Message::assistant("The gate is green."),
+                // Bounded at one end and attributed to nothing.
+                Message::user("Say what is left."),
+                Message::assistant("One follow-up, surfaced."),
+                // Neither: the report kept the turn and measured none of it.
+                Message::user("And close it out."),
+                Message::assistant("Closed."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: None,
+        usage: None,
+        telemetry: Some(Telemetry {
+            wall_ms: 9_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 10,
+            sessions: vec![
+                SessionLink {
+                    session_id: "01a01f4c-685b-75e2-8281-e8937fd20d48".into(),
+                    role: TelemetryRole::Agent,
+                    turn_index: 2,
+                    started_at: OPENED.into(),
+                    finished_at: Some(CLOSED.into()),
+                    history_id: None,
+                },
+                // Observed opening and never observed closing, which the contract
+                // spells as a `null` finish rather than as a malformed bound.
+                SessionLink {
+                    session_id: "01a01f4c-685b-75e2-8281-e8937fd20d49".into(),
+                    role: TelemetryRole::Agent,
+                    turn_index: 3,
+                    started_at: REOPENED.into(),
+                    finished_at: None,
+                    history_id: None,
+                },
+            ],
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Agent,
+                turn_index: 2,
+                ran: Some("claude-code:default".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "claude-code".into(),
+                    harness_id: "claude-code:default".into(),
+                    variant: None,
+                    model: Some("claude-opus-5".into()),
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(1_500),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(Usage {
+                        input_tokens: Some(12),
+                        output_tokens: Some(34),
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        cost_usd: Some(0.75),
+                    }),
+                }],
+                history_file: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        stopped_early: false,
+    };
+    let turns = transcript_of(
+        SESSION,
+        "node-scope-1786925519111-3163777",
+        &format!(
+            "{}\n",
+            serde_json::to_string(&report).expect("the report serializes")
+        ),
+    );
+    // Four turns for four prompts: one the journal opened and three it never did.
+    assert_eq!(turns.len(), 4, "{turns:?}");
+
+    // Bounded and attributed: the bounds the report observed, the instant it
+    // observed the turn finish, and what that invocation was, took and spent.
+    assert_eq!(turns[1]["startedAt"], json!(OPENED));
+    assert_eq!(turns[1]["finishedAt"], json!(CLOSED));
+    assert_eq!(turns[1]["timestamp"], json!(CLOSED));
+    assert_eq!(turns[1]["status"], json!("ok"));
+    assert_eq!(turns[1]["model"], json!("claude-opus-5"));
+    assert_eq!(turns[1]["durationMs"], json!(1_500));
+    assert_eq!(turns[1]["usage"]["costUsd"], json!(0.75));
+
+    // Bounded at one end and attributed to nothing: stamped by the opening the
+    // report did observe, and served no status, no identity and no figures —
+    // a turn nothing measured is not a turn that measured zero.
+    assert_eq!(turns[2]["startedAt"], json!(REOPENED));
+    assert_eq!(turns[2]["finishedAt"], json!(null));
+    assert_eq!(turns[2]["timestamp"], json!(REOPENED));
+    assert_eq!(turns[2]["status"], json!("unknown"));
+    assert_eq!(turns[2]["model"], json!(null));
+    assert_eq!(turns[2]["durationMs"], json!(null));
+    assert_eq!(turns[2]["usage"], json!({}), "{:?}", turns[2]);
+    // And its prose is served whole, because none of that is what a turn said.
+    assert_eq!(turns[2]["user"], json!("Say what is left."));
+    assert_eq!(turns[2]["assistant"], json!("One follow-up, surfaced."));
+
+    // Neither bound nor attribution: stamped by the settlement that stored the
+    // report, which is the only instant the run holds for it.
+    assert_eq!(turns[3]["timestamp"], json!(REPORT_SETTLED_AT));
+    assert_eq!(turns[3]["startedAt"], json!(null));
+    assert_eq!(turns[3]["finishedAt"], json!(null));
+    assert_eq!(turns[3]["status"], json!("unknown"));
+    assert_eq!(turns[3]["usage"], json!({}), "{:?}", turns[3]);
+    assert_eq!(turns[3]["assistant"], json!("Closed."));
 }
