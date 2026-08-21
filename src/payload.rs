@@ -2046,9 +2046,7 @@ fn conversations_under(view: &RunView, filter: &EventFilter) -> Vec<Value> {
 /// simulated user's message with the agent's, and its 1-based position is the
 /// counter `telemetry.sessions` and `telemetry.attribution` both key on.
 struct ReportedTurn {
-    /// The prompt the simulated user gave, verbatim.
     user: String,
-    /// The reply the agent wrote, or `None` for a turn that recorded none.
     assistant: Option<String>,
     tools: Vec<Value>,
 }
@@ -2133,7 +2131,6 @@ fn reported_turns(report: &judge::Report) -> Vec<ReportedTurn> {
     turns
 }
 
-/// The reported turn one relayed turn number names, if the report holds it.
 fn turn_of(turns: &[ReportedTurn], turn: u64) -> Option<&ReportedTurn> {
     turns.get(usize::try_from(turn).ok()?.checked_sub(1)?)
 }
@@ -3063,7 +3060,6 @@ fn belongs_to(event: &Envelope, session: &str) -> bool {
         .is_some_and(|member| format!("{}.{member}", event.stream) == session)
 }
 
-/// The moments the records matching one test were written, in time order.
 fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) -> Vec<Moment> {
     let mut found: Vec<Moment> = events
         .iter()
@@ -3074,7 +3070,6 @@ fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) 
     found
 }
 
-/// Every `node-dispatched` a node recorded, in time order: one per attempt at it.
 fn dispatches(events: &[(usize, &Envelope)]) -> Vec<Moment> {
     ordered(events, &|event| {
         event.source == Source::Pipeline
@@ -3481,11 +3476,10 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
 ///
 /// The two states are exclusive by construction rather than by agreement between
 /// a flag and a moment: a category holding a session the run has not ended has no
-/// latest end to serve, whatever the sessions beside it did.
+/// latest end to serve, whatever the sessions beside it did. Where every session
+/// ended, what [`Reach::Ended`] carries is the latest of their ends.
 enum Reach {
-    /// Every session in it ended, the latest of them here.
     Ended(Moment),
-    /// One of them is still running, which leaves the category itself unended.
     Running,
 }
 
@@ -3500,7 +3494,6 @@ struct Category {
 }
 
 impl Category {
-    /// The category one session opens.
     fn of(pair: (Party, &'static str), started: Moment, ended: Option<Moment>) -> Self {
         Self {
             pair,
@@ -3510,7 +3503,6 @@ impl Category {
         }
     }
 
-    /// Widen it to cover one more session of the same pair.
     fn fold(&mut self, started: Moment, ended: Option<Moment>) {
         self.count += 1;
         if started.at < self.started.at {
@@ -3526,7 +3518,6 @@ impl Category {
         };
     }
 
-    /// When it was over, or `None` while anything in it is still running.
     fn ended(self) -> Option<Moment> {
         match self.reach {
             Reach::Ended(moment) => Some(moment),
