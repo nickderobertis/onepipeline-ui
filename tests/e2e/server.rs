@@ -2075,6 +2075,23 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
         "one transcript per labelled session — plus the judge the first one's report \
          holds — and none for the unlabelled record: {detail}"
     );
+    // And the count beside the node is the same reading: an unlabelled record
+    // reaches no transcript, so counting it would leave a reader who trusted the
+    // number one turn short when they opened the transcript.
+    let counted = detail["run"]["nodes"]
+        .as_array()
+        .expect("the rows")
+        .iter()
+        .find(|row| row["node"] == json!(fixture_run::NODE_ID))
+        .expect("the worker node")["turns"]
+        .clone();
+    assert_eq!(
+        counted,
+        json!(detail["conversations"][0]["conversation"]["turns"]
+            .as_array()
+            .expect("its turns")
+            .len())
+    );
 
     // Both scopes, because a reader arrives at a turn from either: the run's own
     // timeline and the node's are two readings of the same records, and a
@@ -3784,17 +3801,9 @@ fn a_tool_summary_is_carried_on_its_turn_rather_than_served_as_one() {
     )
     .json();
     let turns = body["conversation"]["turns"].as_array().expect("the turns");
-    // Two relayed turns, and the tool summary published between them is on the
-    // one it belongs to rather than a third turn nobody took.
-    assert_eq!(turns.len(), 2, "{turns:?}");
-    // On the turn that *made* the call. `oneagentgraph` opens a turn before its
-    // activities and streams each one live, so the summary between these two
-    // records was published from inside the first — carrying it on the second
-    // put every journal-derived turn's tools one turn late.
-    assert!(
-        turns[1]["tools"].as_array().is_some_and(Vec::is_empty),
-        "the turn after the call made none of its own: {turns:?}"
-    );
+    // One turn — opened, worked, closed — and the tool summary published from
+    // inside it is on it rather than served as a second turn nobody took.
+    assert_eq!(turns.len(), 1, "{turns:?}");
     let tools = turns[0]["tools"].as_array().expect("the turn's tool calls");
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0]["name"], json!("Bash"));
@@ -3805,13 +3814,16 @@ fn a_tool_summary_is_carried_on_its_turn_rather_than_served_as_one() {
         json!(null),
         "the journal records the call and never what it returned: {tools:?}"
     );
-    assert_eq!(turns[1]["usage"]["inputTokens"], json!(900));
+    // The state the run last recorded it in, which is the record that closed it
+    // and not the one that opened it.
+    assert_eq!(turns[0]["status"], json!("turn-completed"));
+    assert_eq!(turns[0]["usage"]["inputTokens"], json!(900));
     // This member has not settled, so no report holds what its turn took — and
     // the producer stamps the turn's own bounds as it runs, which is what a
     // dispatch nobody will ever have a report for is read from.
-    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:00:28.000Z"));
-    assert_eq!(turns[1]["finishedAt"], json!("2026-08-07T12:00:28.800Z"));
-    assert_eq!(turns[1]["durationMs"], json!(800));
+    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:00:28.000Z"));
+    assert_eq!(turns[0]["finishedAt"], json!("2026-08-07T12:00:28.800Z"));
+    assert_eq!(turns[0]["durationMs"], json!(800));
 }
 
 #[test]
@@ -6240,6 +6252,73 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
     assert_eq!(running["usage"], json!({}), "{running}");
 }
 
+/// A turn the producer opened and closed is one turn, not two.
+///
+/// `oneagentgraph` describes one turn with two records, and reading each of them
+/// as a turn of its own served the same turn twice — one instruction, one reply
+/// and one interval, listed as two rows and plotted as two spans lying exactly
+/// over each other, so the reader could hover or open neither. It doubled the
+/// count beside the node at the same time, and handed a client two ids for the
+/// one turn its timeline addresses.
+///
+/// So this drives the three surfaces that have to agree — the transcript, the
+/// count beside the node, and the timeline's own reference to a turn — over a
+/// session whose five relayed turn records describe three turns.
+#[test]
+fn one_turn_is_one_row_however_many_records_describe_it() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
+    assert_eq!(turns.len(), 3, "{turns:?}");
+
+    // No two of them stand over the same moment, which is what a plot of this
+    // transcript draws as one span that cannot be reached under another.
+    let mut bounds: Vec<&Value> = turns.iter().map(|turn| &turn["startedAt"]).collect();
+    bounds.sort_by_key(|at| at.as_str().unwrap_or_default());
+    bounds.dedup();
+    assert_eq!(bounds.len(), turns.len(), "{turns:?}");
+
+    // The count beside the node is the same reading: a reader who trusts it and
+    // then opens the transcript must not find a different number of turns.
+    let node = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::LANES_RUN_ID),
+    )
+    .json()["run"]["nodes"]
+        .as_array()
+        .expect("the rows")
+        .iter()
+        .find(|row| row["node"] == json!(fixture_run::WORKING_NODE_ID))
+        .expect("the working node")
+        .clone();
+    assert_eq!(node["turns"], json!(turns.len()));
+
+    // And both records of one turn address that one turn from the timeline: a
+    // reader who opened the moment it closed and one who opened the moment it
+    // began are handed the same row.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::LANES_RUN_ID,
+            fixture_run::WORKING_NODE_ID
+        ),
+    )
+    .json();
+    let addressed = |kind: &str, at: &str| -> Value {
+        relayed(&timeline, kind)
+            .into_iter()
+            .find(|event| event["at"] == json!(at))
+            .unwrap_or_else(|| panic!("a {kind} at {at}: {timeline}"))["id"]
+            .clone()
+    };
+    let opened = addressed("turn-started", "2026-08-07T12:04:03.000Z");
+    assert_eq!(
+        opened,
+        addressed("turn-completed", "2026-08-07T12:04:07.000Z")
+    );
+    assert_eq!(opened, turns[0]["id"]);
+}
+
 /// A turn is joined to its own records by the **pair** the producer numbers it
 /// with, and never by the number alone.
 ///
@@ -6569,6 +6648,9 @@ fn a_live_turn_answers_for_the_records_a_recorded_run_has_none_of() {
         .expect("the transcript")
         .clone();
 
+    // One turn, whose two records the producer keyed to each other.
+    assert_eq!(turns.len(), 1, "{turns:?}");
+
     // Served as a record of its own rather than dropped or folded onto a call it
     // does not answer: the run recorded it, and a live reading is the only thing
     // that will ever hold it.
@@ -6587,13 +6669,13 @@ fn a_live_turn_answers_for_the_records_a_recorded_run_has_none_of() {
 
     // And a bound that is not an instant is served as no bound, exactly as a
     // report's unreadable bounds are: absent beats a value no client can order.
-    assert_eq!(turns[1]["status"], json!("turn-completed"));
-    assert_eq!(turns[1]["startedAt"], json!(null));
-    assert_eq!(turns[1]["finishedAt"], json!(null));
-    assert_eq!(turns[1]["durationMs"], json!(null));
-    // The accounting beside them is still that turn's own: one unreadable stamp
-    // is not a reason to drop what the producer did measure.
-    assert_eq!(turns[1]["usage"]["costUsd"], json!(0.05));
+    assert_eq!(turns[0]["status"], json!("turn-completed"));
+    assert_eq!(turns[0]["startedAt"], json!(null));
+    assert_eq!(turns[0]["finishedAt"], json!(null));
+    assert_eq!(turns[0]["durationMs"], json!(null));
+    // The accounting beside it is still that turn's own: one unreadable stamp is
+    // not a reason to drop what the producer did measure.
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(0.05));
 }
 
 /// A filter narrows which turns a live transcript lists and never what one of
@@ -6631,14 +6713,20 @@ fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
     };
 
     let all = transcript("monitor");
-    let listed = transcript(r#"{"exclude":[{"kind":"turn-completed"},{"kind":"turn-message"}]}"#);
-    assert!(listed.len() < all.len(), "the listing narrowed: {listed:?}");
+    // The two kinds a turn is opened and answered by. Excluding them drops the
+    // turn in flight from the listing — the run relayed nothing else for it — and
+    // leaves the two the producer also closed, which it relayed a `turn-completed`
+    // for.
+    let listed = transcript(r#"{"exclude":[{"kind":"turn-started"},{"kind":"turn-message"}]}"#);
+    assert_eq!(all.len(), 3, "{all:?}");
+    assert_eq!(listed.len(), 2, "the listing narrowed: {listed:?}");
     assert_eq!(
         listed[0]["assistant"],
         json!(fixture_run::WORKING_REPLY),
         "the reply is what the turn said, not what this reader asked to list"
     );
-    assert_eq!(listed[0]["usage"], all[0]["usage"]);
-    assert_eq!(listed[0]["durationMs"], all[0]["durationMs"]);
-    assert_eq!(listed[0]["tools"], all[0]["tools"]);
+    // Down to the id, which is the turn's place in the whole session rather than
+    // in this reader's listing: an id that moved with a filter would name a
+    // different turn than the transcript route serves under it.
+    assert_eq!(listed, all[..2].to_vec());
 }

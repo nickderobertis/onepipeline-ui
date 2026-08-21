@@ -1019,19 +1019,49 @@ fn is_turn_record(event: &Envelope) -> bool {
 
 /// How many turns a node — or the whole run — has had relayed to it.
 ///
-/// One relayed turn envelope is one turn: that is what [`conversations`] serves
-/// as a transcript turn, so the count beside a node and the transcript a reader
-/// opens from it cannot disagree.
+/// Counted by [`relayed_turns`], which is what [`conversations`] serves as a
+/// transcript turn, so the count beside a node and the transcript a reader opens
+/// from it cannot disagree. A turn the producer both opened and closed is two
+/// records and one turn, and counting the records instead doubled the number
+/// beside every node whose member had finished a turn.
+///
+/// Grouped **per session**, because a turn is numbered within its own session and
+/// a member's close must never reach across to another member's open.
 ///
 /// It counts what was *relayed*, so a judge conversation adds nothing: folding
 /// its report-bounded turns in would put the count one dispatch ahead of every
 /// transcript a reader opens from the node.
 fn turns_of(view: &RunView, node: Option<&str>) -> usize {
-    view.events
-        .iter()
-        .filter(|event| is_turn_record(event))
-        .filter(|event| node.is_none_or(|node| event.labels.node.as_deref() == Some(node)))
-        .count()
+    let mut relayed: BTreeMap<&str, Vec<&Envelope>> = BTreeMap::new();
+    for event in &view.events {
+        if event.source != Source::Agentgraph
+            || !node.is_none_or(|node| event.labels.node.as_deref() == Some(node))
+        {
+            continue;
+        }
+        let Some(session) = session_label(event) else {
+            continue;
+        };
+        relayed.entry(session).or_default().push(event);
+    }
+    relayed
+        .values()
+        .map(|records| relayed_turns(records).len())
+        .sum()
+}
+
+/// The session one relayed record names, or `None` for a record that names none.
+///
+/// The producer stamps this label on its `turn-*` kinds and on no other, so it is
+/// exactly the set a turn can be read from — and the partition every reading of a
+/// turn is grouped by, because two members number their turns independently.
+fn session_label(event: &Envelope) -> Option<&str> {
+    event
+        .labels
+        .extra
+        .get("session")
+        .and_then(Value::as_str)
+        .filter(|session| !session.is_empty())
 }
 
 /// The events one node recorded, whichever library produced them.
@@ -2490,8 +2520,60 @@ fn candidate_usage(usage: Option<&judge::Usage>) -> Value {
     })
 }
 
-/// The turn records one session relayed, each with the tool summaries published
-/// from inside it.
+/// One turn of a session as its own journal records describe it.
+///
+/// **Two records describe one turn, not two.** The corrected producer opens a
+/// turn and closes it, keyed by the same pair, and serving a row for each hands a
+/// reader one turn twice — the same instruction, the same reply, and the same
+/// interval drawn as two spans lying over each other, which is a plot nothing can
+/// be hovered or opened on. So the pair is grouped here and the turn is served
+/// once, whichever of its records the run holds.
+struct RelayedTurn<'a> {
+    /// The record the journal opened this turn with: its `turn-started`, or the
+    /// `turn-completed` where no start ever reached the journal.
+    opened: &'a Envelope,
+    /// The `turn-completed` that closed it, and `None` for a turn still running —
+    /// which serves its usage and its end bound absent, because a turn nothing has
+    /// measured yet is not a turn that measured zero.
+    completed: Option<&'a Envelope>,
+    /// The `turn-activity` summaries published from inside it.
+    summaries: Vec<&'a Envelope>,
+}
+
+impl<'a> RelayedTurn<'a> {
+    /// The state the run last recorded this turn in, which is the kind of the
+    /// last of its records to reach the journal.
+    fn status(&self) -> &'a str {
+        self.completed.unwrap_or(self.opened).kind.0.as_str()
+    }
+
+    /// The producer's own number for this turn, from whichever of its records
+    /// carries one.
+    fn numbered(&self) -> Option<u64> {
+        self.records()
+            .find_map(|event| event.payload.get(graph::TURN).and_then(Value::as_u64))
+    }
+
+    /// The pair this turn is keyed by, or `None` where neither of its records
+    /// names one — see [`turn_key`] for why half a key joins nothing.
+    fn key(&self) -> Option<(u64, String)> {
+        self.records().find_map(turn_key)
+    }
+
+    /// One field, from whichever of this turn's records carries it.
+    fn field(&self, name: &str) -> Option<&'a str> {
+        self.records()
+            .find_map(|event| event.payload.get(name).and_then(Value::as_str))
+    }
+
+    /// The records that describe this turn, the one that opened it first.
+    fn records(&self) -> impl Iterator<Item = &'a Envelope> {
+        std::iter::once(self.opened).chain(self.completed)
+    }
+}
+
+/// The turns one session relayed, each with the tool summaries published from
+/// inside it.
 ///
 /// `oneagentgraph` opens a turn *before* its activities and streams each summary
 /// live, so a summary belongs to the turn record that precedes it — carrying one
@@ -2504,10 +2586,10 @@ fn candidate_usage(usage: Option<&judge::Usage>) -> Value {
 /// Summaries relayed before the session relayed any turn join the first turn it
 /// does relay: they were published from inside a turn whose start never reached
 /// the journal, and dropping them would lose the only record of it.
-fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<(&'a Envelope, Vec<&'a Envelope>)> {
-    let mut turns: Vec<(&Envelope, Vec<&Envelope>)> = Vec::new();
-    let mut open: Vec<&Envelope> = Vec::new();
-    for event in events {
+fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<RelayedTurn<'a>> {
+    let mut turns: Vec<RelayedTurn<'a>> = Vec::new();
+    let mut open: Vec<&'a Envelope> = Vec::new();
+    for event in events.iter().copied() {
         if event.kind.0 == graph::TURN_ACTIVITY {
             open.push(event);
             continue;
@@ -2515,15 +2597,46 @@ fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<(&'a Envelope, Vec<&'a Enve
         if !is_turn_record(event) {
             continue;
         }
-        if let Some((_, running)) = turns.last_mut() {
-            running.append(&mut open);
+        if let Some(turn) = turns.last_mut() {
+            turn.summaries.append(&mut open);
         }
-        turns.push((event, std::mem::take(&mut open)));
+        match closes(&turns, event) {
+            Some(at) => turns[at].completed = Some(event),
+            None => turns.push(RelayedTurn {
+                opened: event,
+                completed: None,
+                summaries: std::mem::take(&mut open),
+            }),
+        }
     }
-    if let Some((_, running)) = turns.last_mut() {
-        running.append(&mut open);
+    if let Some(turn) = turns.last_mut() {
+        turn.summaries.append(&mut open);
     }
     turns
+}
+
+/// Which turn already relayed a record closes, as a position in `turns`.
+///
+/// **The producer's own join and nothing else**: the pair of the turn number and
+/// the party, which is what tells the supervisor's third turn from the agent's.
+/// The producer that predates that pair publishes one `turn-completed` per
+/// *dispatch* rather than per turn — it is emitted beside the settlement, and the
+/// usage on it is the member's whole total — so a record carrying no pair closes
+/// nothing and is served as the record it is, exactly as it always has been.
+/// Guessing by proximity there would hand one turn a bill for all of them.
+///
+/// `None` for a `turn-completed` whose start never reached the journal too, which
+/// makes it a turn of its own: a member that died mid-turn still had the turn.
+fn closes(turns: &[RelayedTurn<'_>], event: &Envelope) -> Option<usize> {
+    if event.kind.0 != graph::TURN_COMPLETED {
+        return None;
+    }
+    let key = turn_key(event)?;
+    turns.iter().rposition(|turn| {
+        turn.opened.kind.0 == graph::TURN_STARTED
+            && turn.completed.is_none()
+            && turn.key().as_ref() == Some(&key)
+    })
 }
 
 /// What one session's own journal records say about one turn of it.
@@ -2711,35 +2824,39 @@ fn conversation_document(
         Some(_) => BTreeMap::new(),
         None => live_transcript(whole),
     };
-    // The summaries each turn published, taken over the whole session for the
-    // reason its words are: they are what that turn *did*, and a reader who
-    // narrowed the listing did not ask to be told a turn made fewer calls than it
-    // made. Keyed by the producing stream and its own sequence, which is what
-    // names one record in a merged store.
-    let carried: BTreeMap<(&str, u64), Vec<&Envelope>> = relayed_turns(whole)
-        .into_iter()
-        .map(|(event, summaries)| ((event.stream.as_str(), event.seq), summaries))
-        .collect();
-    let turns: Vec<Value> = events
+    // Which turn records the reader's filter admitted, named the way one record is
+    // named in a merged store. It decides which turns are **listed** and nothing
+    // else: every turn below is grouped and read from the session's whole record
+    // set, for the reason a report is read whole — a filter narrows which turns a
+    // transcript lists and never what one of them was.
+    let listed: BTreeSet<(&str, u64)> = events
         .iter()
-        .copied()
         .filter(|event| is_turn_record(event))
+        .map(|event| (event.stream.as_str(), event.seq))
+        .collect();
+    let turns: Vec<Value> = relayed_turns(whole)
+        .into_iter()
+        // Numbered over the whole session before the listing narrows it, which is
+        // the numbering [`turn_ids`] hands a client from the timeline: an id that
+        // moved with the reader's filter would name a different turn than the one
+        // the transcript route serves under it.
         .enumerate()
-        .map(|(index, event)| {
-            let summaries = carried
-                .get(&(event.stream.as_str(), event.seq))
-                .cloned()
-                .unwrap_or_default();
+        .filter(|(_, turn)| {
+            turn.records()
+                .any(|record| listed.contains(&(record.stream.as_str(), record.seq)))
+        })
+        .map(|(index, turn)| {
+            let event = turn.opened;
             // The producer's own number for this turn, which is the counter the
             // report shares between its sessions and its attribution. A record
             // that names no turn — a settlement, a death — is not one of the
             // conversation's turns and takes nothing from the report.
-            let numbered = event.payload.get(graph::TURN).and_then(Value::as_u64);
+            let numbered = turn.numbered();
             let recorded = numbered.and_then(|turn| turn_of(&transcript, turn));
             // The same turn as the journal recorded it, for a session the run
             // holds no report for. Empty whenever there is a report, so nothing
             // below can mix the two readings of one turn.
-            let relayed = turn_key(event).and_then(|key| live.get(&key));
+            let relayed = turn.key().and_then(|key| live.get(&key));
             let ran = numbered
                 .and_then(|turn| u32::try_from(turn).ok())
                 .zip(reported)
@@ -2771,28 +2888,34 @@ fn conversation_document(
                 },
                 "harness": "oneagentgraph",
                 "id": format!("{session}.{index}"),
-                "model": event.payload.get("model").and_then(Value::as_str),
+                "model": turn.field("model"),
                 "reasoning": Value::Null,
                 "startedAt": match bounds {
                     Some(link) => json!(link.started_at),
                     None => json!(relayed.and_then(LiveTurn::started_at)),
                 },
-                "status": event.kind.0,
+                // The state the run last recorded the turn in, not the kind of
+                // one of the two records that describe it.
+                "status": turn.status(),
                 "timestamp": event.ts,
                 "tools": match recorded {
                     Some(turn) => Value::Array(turn.tools.clone()),
-                    None => Value::Array(live_tools(&summaries)),
+                    None => Value::Array(live_tools(&turn.summaries)),
                 },
                 "unknown": relayed.map(LiveTurn::cut).unwrap_or_default(),
                 "usage": match ran {
                     Some(candidate) => candidate_usage(candidate.usage.as_ref()),
-                    // The record that closed this turn, wherever the turn's own
-                    // number reaches it: a turn's cost is recorded once, on the
-                    // `turn-completed`, and a reader of the record that opened it
-                    // is asking about the same turn.
-                    None => relayed
-                        .and_then(|turn| turn.completed)
-                        .map_or_else(|| relayed_usage(event), relayed_usage),
+                    // The record that closed this turn: a turn's cost is
+                    // recorded once, on the `turn-completed`, and a turn nothing
+                    // has closed yet is served without one. Read from the whole
+                    // session ahead of the reader's own listing, for the reason
+                    // every other figure on this row is.
+                    None => relayed_usage(
+                        relayed
+                            .and_then(|live| live.completed)
+                            .or(turn.completed)
+                            .unwrap_or(event),
+                    ),
                 },
                 // The prompt the simulated user gave, which is what the turn
                 // answered. Never the dispatch's persona name, which is who was
@@ -3290,34 +3413,40 @@ struct Turn {
 /// behind it. Computed once per timeline rather than per event, because the
 /// number is a position in the run and not a property of the envelope.
 fn turn_ids(view: &RunView) -> Vec<Option<Turn>> {
-    let mut counted: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut ids: Vec<Option<Turn>> = Vec::with_capacity(view.events.len());
+    let mut relayed: BTreeMap<&str, Vec<&Envelope>> = BTreeMap::new();
     for event in &view.events {
-        let named = is_turn_record(event)
-            .then(|| {
-                event
-                    .labels
-                    .extra
-                    .get("session")
-                    .and_then(Value::as_str)
-                    .and_then(|session| {
-                        ConversationId::try_from(session)
-                            .ok()
-                            .map(|id| (session, id))
-                    })
-            })
-            .flatten();
-        ids.push(named.map(|(session, id)| {
-            let index = counted.entry(session).or_insert(0);
-            let turn = Turn {
-                session: id,
-                id: format!("{session}.{index}"),
-            };
-            *index += 1;
-            turn
-        }));
+        let Some(session) = session_label(event).filter(|session| {
+            event.source == Source::Agentgraph && ConversationId::try_from(*session).is_ok()
+        }) else {
+            continue;
+        };
+        relayed.entry(session).or_default().push(event);
     }
-    ids
+    // The turn each of a session's records belongs to, grouped exactly as
+    // [`conversations`] groups it: **both** records of one turn name the same
+    // turn, so a reader who opened the moment the turn closed and one who opened
+    // the moment it began are handed the same transcript row.
+    let mut named: BTreeMap<(&str, u64), String> = BTreeMap::new();
+    for (session, records) in &relayed {
+        for (index, turn) in relayed_turns(records).into_iter().enumerate() {
+            for record in turn.records() {
+                named.insert(
+                    (record.stream.as_str(), record.seq),
+                    format!("{session}.{index}"),
+                );
+            }
+        }
+    }
+    view.events
+        .iter()
+        .map(|event| {
+            let id = named.get(&(event.stream.as_str(), event.seq))?;
+            Some(Turn {
+                session: ConversationId::try_from(session_label(event)?).ok()?,
+                id: id.clone(),
+            })
+        })
+        .collect()
 }
 
 /// The redirection one record was, when it was one.

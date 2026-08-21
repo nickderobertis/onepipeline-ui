@@ -287,6 +287,23 @@ it serves a bound only when the stamp parses as an instant, and it carries the
 producer's own cut flags on the turn's `unknown` map — the same field the judge's
 conclusion lands in, for the same reason.
 
+**Two records describe one turn, and one turn is one row.** `payload::relayed_turns`
+groups a `turn-completed` onto the turn its `turn-started` opened, by that same
+pair, and everything that counts or numbers a turn goes through it — the
+transcript, the `turns` beside a node, and `payload::turn_ids`, so the timeline
+addresses one turn under one id whichever of its records a reader opened. Reading
+each record as a turn of its own served one turn twice, with one instruction and
+one interval on both, and a plot drew them as two spans lying over each other that
+nothing could be hovered or clicked through. A turn nothing has closed is served
+with its usage and its end bound **absent**, which is a different fact from a
+second row.
+
+The join is the producer's and only the producer's: a `turn-completed` carrying no
+`{turn, role}` closes nothing. `oneagentgraph` 0.2 emits exactly one of those, from
+`settle_report`, carrying the member's whole total rather than any turn's — so
+attaching it by proximity would bill one turn for the dispatch. It is served as the
+record it is, which is what those runs have always shown.
+
 **The names it reads are not gateable against a type at this pin, and that is the
 one thing to fix upstream.** The linked `oneagentgraph` is the one the pinned
 `onepipeline` resolves — 0.2, which publishes its two turn payloads inline, has no
