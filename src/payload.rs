@@ -3455,6 +3455,18 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
         .collect()
 }
 
+/// How far a category of sessions has got.
+///
+/// The two states are exclusive by construction rather than by agreement between
+/// a flag and a moment: a category holding a session the run has not ended has no
+/// latest end to serve, whatever the sessions beside it did.
+enum Reach {
+    /// Every session in it ended, the latest of them here.
+    Ended(Moment),
+    /// One of them is still running, which leaves the category itself unended.
+    Running,
+}
+
 /// One category of a node's sessions, and the interval they ran over between
 /// them.
 struct Category {
@@ -3464,11 +3476,8 @@ struct Category {
     count: usize,
     /// The earliest of their starts.
     started: Moment,
-    /// The latest of their ends.
-    latest: Option<Moment>,
-    /// Whether one of them is a session the run has not ended, which is what
-    /// leaves the category itself unended however the sessions beside it fared.
-    running: bool,
+    /// Where their ends have got to.
+    reach: Reach,
 }
 
 impl Category {
@@ -3478,8 +3487,7 @@ impl Category {
             pair,
             count: 1,
             started,
-            running: ended.is_none(),
-            latest: ended,
+            reach: ended.map_or(Reach::Running, Reach::Ended),
         }
     }
 
@@ -3489,23 +3497,22 @@ impl Category {
         if started.at < self.started.at {
             self.started = started;
         }
-        match ended {
-            None => self.running = true,
-            Some(moment) => {
-                if self
-                    .latest
-                    .as_ref()
-                    .is_none_or(|latest| moment.at > latest.at)
-                {
-                    self.latest = Some(moment);
-                }
-            }
-        }
+        self.reach = match (std::mem::replace(&mut self.reach, Reach::Running), ended) {
+            (Reach::Running, _) | (Reach::Ended(_), None) => Reach::Running,
+            (Reach::Ended(latest), Some(moment)) => Reach::Ended(if moment.at > latest.at {
+                moment
+            } else {
+                latest
+            }),
+        };
     }
 
     /// When it was over, or `None` while anything in it is still running.
     fn ended(self) -> Option<Moment> {
-        self.latest.filter(|_| !self.running)
+        match self.reach {
+            Reach::Ended(moment) => Some(moment),
+            Reach::Running => None,
+        }
     }
 }
 
