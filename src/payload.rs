@@ -157,23 +157,8 @@ pub mod vcs {
 
     /// The relayed kinds that do not, on their own, say a publication began.
     ///
-    /// Read as what a publication is *not*. `onevcs` declares its vocabulary
-    /// privately and adds to it, so a positive list of publication work would
-    /// silently open a span later than the truth every time that library named a
-    /// new step.
-    ///
-    /// Cutting a worktree and taking it away again are the setup every dispatch
-    /// has whether or not it ever published. A [`FETCH`] is here on different
-    /// grounds: that library fetches both to cut a worktree and to publish from
-    /// one and the record does not say which, so a publication opened on one
-    /// would be opened for every node that was ever dispatched — which is the
-    /// whole of what this reading exists to stop. A publication that began with
-    /// one therefore opens at the first record only publishing writes, the
-    /// seconds it took to fetch left outside it, and that is the side to err on:
-    /// a span drawn slightly short still answers what the node was doing, and one
-    /// drawn over a node that published nothing answers nothing at all.
-    ///
-    /// A node that relayed nothing but these published nothing.
+    /// A node that relayed nothing but these published nothing. Why the list is
+    /// negative, and why a [`FETCH`] is on it, is in `src/AGENTS.md`.
     pub const SILENT_ON_PUBLICATION: [&str; 3] = [SESSION_OPENED, FETCH, SESSION_CLOSED];
 
     /// The command `onevcs` records for the gate that is git's own hook.
@@ -229,16 +214,9 @@ pub mod graph {
     /// The producer's own 1-based number for the turn a [`TURN_STARTED`] opens.
     ///
     /// The one name in this module with no type behind it: `oneagentgraph` builds
-    /// this payload inline rather than from a declared struct. Its own reader of
-    /// it is public, though — `render::line` is a pure function of one envelope
-    /// and renders a `turn-started` by this key — so `tests/contract.rs` holds
-    /// the copy to that reading, which moves with a rename exactly as a type
-    /// would. It is read rather than counted because a turn that called no tool
-    /// relays no `turn-started` at all, so the position of one among the records
-    /// a session relayed is not the number the producer gave it. That number is
-    /// the counter the stored report shares between its `telemetry.sessions` and
-    /// its `telemetry.attribution`, which is what a turn is joined to its own
-    /// measurements by.
+    /// this payload inline, so `tests/contract.rs` holds the copy to the public
+    /// `render::line` that reads it instead. Why a turn is joined by this number
+    /// rather than by position is in `src/AGENTS.md`.
     pub const TURN: &str = "turn";
     /// `{member, delivered, input_bytes, reason}` — an operator asked a member's
     /// in-flight turn to do something else. Published for every interrupt,
@@ -782,14 +760,9 @@ fn timing(document: Option<&RunTelemetry>, measured: &Measured) -> Value {
 
 /// The wire's three per-party model-time lanes, each served as unmeasured.
 ///
-/// **Nothing in this stack measures how long a party spent inside a model.**
-/// `onepipeline`'s buckets are wall clock, and the usage record a `turn-completed`
-/// carries is `onejudge::Usage`, which has no interval in it at all — so each of
-/// these lanes is served as the wire's own absence, which is what tells a lane
-/// nobody measured from one measured at zero. What *is* recorded is how long one
-/// invocation ran, and that is a turn's, not a party's: it is served on the turn
-/// it belongs to, as `durationMs`, and folding it into a lane named for a model's
-/// clock would answer a question no producer has answered.
+/// Nothing in this stack measures how long a party spent inside a model, and
+/// `src/AGENTS.md` lists that gap with the upstream change that would fill it —
+/// including why a turn's own elapsed time may not be folded into these.
 ///
 /// One function because the same three lanes are named four times — the timings,
 /// their fractions, the presence flags beside them, and the node-level rollup —
@@ -2053,16 +2026,10 @@ struct ReportedTurn {
 
 /// The report one settled member stored, read from the copy the run keeps.
 ///
-/// `member-settled` carries no `session` label and does not need one: a session
-/// id is the emitting stream and the member that ran on it, which is exactly how
-/// `oneagentgraph` mints one — so the settlement a session belongs to is the one
-/// whose `stream` and `labels.member` spell it. The bytes are located the one way
-/// `docs/contract.md` allows, through the SDK's own [`RunPaths::report_for`].
-///
-/// `None` for a session whose member has not settled, whose copy the run does not
-/// hold, and for a document this crate cannot read as a report — all three are
-/// "the report says nothing", and each leaves the transcript as the journal
-/// relayed it rather than emptying it.
+/// Joined by `{stream}.{member}` and located through the SDK's own
+/// [`RunPaths::report_for`], which is the one way `docs/contract.md` allows.
+/// `None` where the report says nothing — see `src/AGENTS.md` for that join and
+/// for what an absent report leaves a transcript as.
 ///
 /// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
 fn stored_report(view: &RunView, session: &str) -> Option<judge::Report> {
@@ -3115,23 +3082,9 @@ fn attempt_of<'a>(dispatched: &'a [Moment], appeared: Option<&Moment>) -> Option
 
 /// When one dispatched session ran, inside the attempt of its node that ran it.
 ///
-/// A node's own window is the window of *everything* it ran, and so is nobody's
-/// answer to what it was doing at a given moment: the engine re-asks a dispatch
-/// that produced nothing, and a lifecycle node runs several members in sequence
-/// on one worktree.
-///
-/// - **It opens at the attempt that ran it**: the latest `node-dispatched` at or
-///   before the session first appeared. Every session of one attempt opens there,
-///   including one the attempt reached only later — an attempt is the unit a
-///   session is bracketed by, and the run records no other boundary between the
-///   members it ran.
-/// - **It closes at the earliest of** the next `node-dispatched`, the
-///   `node-settled` that followed it, the `session-closed` that took the worktree
-///   away, and the `member-settled` or `member-died` that ended the session
-///   itself, none of which may close it before the last thing it said.
-///
-/// A session nothing has ended yet is returned open, and is served that way: a
-/// run that has not said when something stopped has not stopped it.
+/// `src/AGENTS.md` states the bracketing rule and why a node's own window cannot
+/// stand in for it. Nothing here may close a session before the last thing it
+/// said, and one nothing has ended yet is returned open.
 fn session_interval(
     events: &[(usize, &Envelope)],
     session: &str,
@@ -3194,17 +3147,11 @@ fn session_interval(
 /// The branch a node opened and what became of it, from the records `onevcs`
 /// relayed for it.
 ///
-/// This is the publication interval the journal actually holds: the record that
-/// opens it and whatever closed it are separate relayed records, so the span
-/// between them is recorded rather than derived. A node that did no publication
-/// work contributes none, and one whose publication nothing closed is served
-/// open-ended, which is what an in-flight publication is.
-///
-/// **It opens at publication work and not at the worktree the dispatch was given.**
-/// A worktree is cut when the node is dispatched and is where the *worker* then
-/// spends its hours; a span drawn from there covers the work it published rather
-/// than the publishing, and a node that never published at all would be drawn
-/// publishing for its whole life.
+/// Both ends are relayed records, so the interval is recorded rather than
+/// derived. A node that did no publication work contributes none, and one
+/// nothing closed is served open-ended. It opens at publication work rather than
+/// at the worktree the dispatch was cut into — see [`vcs::SILENT_ON_PUBLICATION`]
+/// and `src/AGENTS.md`.
 fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Option<Value> {
     let relayed = |kinds: &[&str]| {
         events
