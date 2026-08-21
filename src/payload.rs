@@ -2486,18 +2486,17 @@ fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
         .iter()
         .filter_map(|link| moment_at(&link.started_at))
         .min_by_key(|moment| moment.at)?;
-    let closed = links
-        .iter()
-        .map(|link| link.finished_at.as_deref().and_then(moment_at))
-        .try_fold(None::<Moment>, |latest, ended| {
-            let ended = ended?;
-            Some(Some(match latest {
-                Some(seen) if seen.at >= ended.at => seen,
-                _ => ended,
-            }))
-        })
-        .flatten();
-    Some((opened, closed))
+    let mut ends: Vec<Moment> = Vec::with_capacity(links.len());
+    for link in &links {
+        let Some(ended) = link.finished_at.as_deref().and_then(moment_at) else {
+            // One row the run never saw finish leaves the whole lane open,
+            // whatever the rows beside it did.
+            ends.clear();
+            break;
+        };
+        ends.push(ended);
+    }
+    Some((opened, ends.into_iter().max_by_key(|moment| moment.at)))
 }
 
 /// The judge's own conversation for one settled dispatch, or `None` where the

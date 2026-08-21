@@ -5116,6 +5116,10 @@ fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
             json!({
                 "run_id": fixture_run::RUN_ID,
                 "node": fixture_run::SHIP_NODE_ID,
+                // A lifecycle node runs several steps in sequence on one branch,
+                // so the judge of one of them has to be addressable by the step
+                // its dispatch ran under and not by the node alone.
+                "step": "build",
                 "member": "worker",
                 "persona": "pr-author",
                 "session": SESSION,
@@ -5152,24 +5156,43 @@ fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
         .expect("the judge's lane")
         .clone();
     assert_eq!(lane["started_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(lane["step_id"], json!("build"), "the step it supervised");
     // The run observed no end for the judge's second turn, so the lane is open —
     // never given an invented end, and never closed at the turn before it.
     assert_eq!(lane["ended_at"], json!(null), "{lane}");
 
-    let turns = http::get(
+    let supervised = http::get(
         serving.address,
         &format!(
             "/api/v2/runs/{}/conversations/{SESSION}.judge",
             fixture_run::RUN_ID
         ),
     )
-    .json()["conversation"]["turns"]
+    .json();
+    assert_eq!(
+        supervised["attribution"]["stepId"],
+        json!("build"),
+        "a lifecycle node's judge is addressable by the step it ran under"
+    );
+    let turns = supervised["conversation"]["turns"]
         .as_array()
         .expect("the judge's turns")
         .clone();
     assert_eq!(turns.len(), 3, "{turns:?}");
+    assert_eq!(turns[0]["durationMs"], json!(2_000));
+    assert_eq!(turns[0]["model"], json!("gpt-5-codex"));
+    // No cost, because codex reports none: an absence, never a zero.
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(null));
+    assert_ne!(turns[0]["usage"]["costUsd"], json!(0));
     assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:01:05.000Z"));
     assert_eq!(turns[1]["finishedAt"], json!(null), "never observed");
+    // And the turn the report attributes no invocation to keeps the bounds it
+    // does hold and claims none of the figures it does not.
+    assert_eq!(turns[1]["durationMs"], json!(null));
+    assert_eq!(turns[1]["model"], json!(null));
+    assert_eq!(turns[1]["harness"], json!(""));
+    assert_eq!(turns[1]["status"], json!("unknown"));
+    assert_eq!(turns[1]["usage"], json!({}));
 
     // And the conclusion is served whole. A report-backed read is not bounded
     // the way an artifact's bytes are, so a long assessment reaches the reader
@@ -5306,7 +5329,11 @@ fn unclosed_judge_report() -> String {
                     history_id: None,
                 },
             ],
-            attribution: vec![attributed(1, 2_000), attributed(2, 1_000)],
+            // One attribution, for two links: the second invocation reported a
+            // session and a start and the report attributes no candidate to it,
+            // which is the same asymmetry the agent side of `worker_report` has
+            // in the other direction.
+            attribution: vec![attributed(1, 2_000)],
         }),
         processes: Vec::new(),
         control: None,
