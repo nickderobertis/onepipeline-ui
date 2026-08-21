@@ -1416,7 +1416,6 @@ impl Lane<'_> {
         );
     }
 
-    /// One turn it took.
     fn turn(&self, members: &mut [Journal], at: &str) {
         self.journal(members).emit(
             at,

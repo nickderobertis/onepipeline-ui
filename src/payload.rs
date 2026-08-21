@@ -2273,7 +2273,6 @@ fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<(&'a Envelope, Vec<&'a Enve
     turns
 }
 
-/// One conversation and its attribution.
 fn conversation_document(view: &RunView, session: &str, events: &[&Envelope]) -> Value {
     let first = events.first().copied();
     let last = events.last().copied();
