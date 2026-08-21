@@ -284,16 +284,13 @@ else: `oneagentgraph` 0.2 emits one `turn-completed` per *dispatch*, from
 `settle_report`, carrying the member's whole total rather than any turn's, so
 closing a turn by proximity would bill one turn for all of them.
 
-**The names it reads are not gateable against a type at this pin, and that is the
-one thing to fix upstream.** The linked `oneagentgraph` is the one the pinned
-`onepipeline` resolves — 0.2, which publishes its two turn payloads inline, has no
-`turn-message`, no per-turn bounds and no observation on an activity. So this
-vocabulary stands where the `onevcs` one does: the wire is the only declaration a
-consumer can reach, and `tests/support/fixture_run.rs` writing the corrected
-producer's records is the gate available. Moving the SDK pin — which is what moves
-`oneagentgraph` — makes `tests/contract.rs` able to hold every one of them to that
-library's own `event::TurnStarted`, `TurnMessage`, `TurnActivity` and
-`TurnCompleted`. Do not move `oneagentgraph` alone to get there.
+**This vocabulary stands where the `onevcs` one does: the wire is the only
+declaration a consumer can reach.** The `oneagentgraph` linked here is whichever
+one the pinned `onepipeline` resolves, and until that pin moves it declares no
+type any of these names can be reconciled against — which is what the suppression
+above `graph::TURN_MESSAGE` says, and the only reason a suppression is allowed to
+stand there. Moving the SDK pin is what retires it; moving `oneagentgraph` alone
+to get there is what the root `AGENTS.md` forbids.
 
 **A fixture keeps writing the older shape on purpose.** A `turn-started` carrying
 a number and nothing else is what every run recorded before that correction holds,

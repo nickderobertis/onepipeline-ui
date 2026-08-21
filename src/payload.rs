@@ -1051,18 +1051,22 @@ fn turns_of(view: &RunView, node: Option<&str>) -> usize {
         .sum()
 }
 
-/// The session one relayed record names, or `None` for a record that names none.
+/// The session one relayed record names, or `None` for a record that names none
+/// this API could serve a transcript for.
 ///
 /// The producer stamps this label on its `turn-*` kinds and on no other, so it is
 /// exactly the set a turn can be read from — and the partition every reading of a
 /// turn is grouped by, because two members number their turns independently.
+///
+/// **Validated here, once, rather than at each reading.** The label is another
+/// process's bytes and it is what a client addresses a transcript by, so a value
+/// the conversation route would refuse must not reach a listing, a turn id or a
+/// count either: a `turns` beside a node that folded in a session nobody can open
+/// is exactly the disagreement [`turns_of`] exists to prevent.
 fn session_label(event: &Envelope) -> Option<&str> {
-    event
-        .labels
-        .extra
-        .get("session")
-        .and_then(Value::as_str)
-        .filter(|session| !session.is_empty())
+    let session = event.labels.extra.get("session").and_then(Value::as_str)?;
+    ConversationId::try_from(session).ok()?;
+    Some(session)
 }
 
 /// The events one node recorded, whichever library produced them.
@@ -2085,18 +2089,9 @@ fn conversations_under(view: &RunView, filter: &EventFilter) -> Vec<Value> {
         if event.source != Source::Agentgraph || !filter.allows(event) {
             continue;
         }
-        let Some(session) = event
-            .labels
-            .extra
-            .get("session")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(session) = session_label(event) else {
             continue;
         };
-        if ConversationId::try_from(session).is_err() {
-            continue;
-        }
         if !grouped.contains_key(session) {
             order.push(session.to_owned());
         }
@@ -2168,10 +2163,7 @@ fn stored_report(view: &RunView, session: &str) -> Option<judge::Report> {
 fn session_records<'a>(view: &'a RunView, session: &str) -> Vec<&'a Envelope> {
     view.events
         .iter()
-        .filter(|event| {
-            event.source == Source::Agentgraph
-                && event.labels.extra.get("session").and_then(Value::as_str) == Some(session)
-        })
+        .filter(|event| event.source == Source::Agentgraph && session_label(event) == Some(session))
         .collect()
 }
 
@@ -3440,9 +3432,8 @@ struct Turn {
 fn turn_ids(view: &RunView) -> Vec<Option<Turn>> {
     let mut relayed: BTreeMap<&str, Vec<&Envelope>> = BTreeMap::new();
     for event in &view.events {
-        let Some(session) = session_label(event).filter(|session| {
-            event.source == Source::Agentgraph && ConversationId::try_from(*session).is_ok()
-        }) else {
+        let Some(session) = session_label(event).filter(|_| event.source == Source::Agentgraph)
+        else {
             continue;
         };
         relayed.entry(session).or_default().push(event);

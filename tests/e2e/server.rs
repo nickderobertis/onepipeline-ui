@@ -2050,6 +2050,24 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
         }),
         json!({ "turn": 9 }),
     );
+    // And one carrying a label no route could resolve. A session id is what a
+    // client addresses a transcript by, so a label the conversation route would
+    // refuse must reach no listing, no turn id and no count either — a number
+    // beside a node that folded in a session nobody can open is the same broken
+    // promise as no number at all.
+    fixture_run::append_relayed(
+        &serving.runs.path().join(fixture_run::RUN_ID),
+        "agentgraph",
+        "turn-started",
+        json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": "../not-a-session",
+        }),
+        json!({ "turn": 10, "role": "assistant" }),
+    );
 
     let detail = http::get(
         serving.address,
@@ -2134,8 +2152,9 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
         }
         assert_eq!(referenced, expected, "{scope}: {timeline}");
         assert_eq!(
-            unlabelled, 1,
-            "{scope}: the unlabelled record is served, with no transcript hung on it"
+            unlabelled, 2,
+            "{scope}: the record with no label and the one with a label no route \
+             resolves are both served, with no transcript hung on either"
         );
 
         // Every reference is followed, because a reference a reader cannot open
