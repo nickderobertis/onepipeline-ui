@@ -32,9 +32,6 @@ pub const SESSION: &str = "claude-code-session-3f9a1c2e";
 /// a uuid and nothing here may assume one — the label is a *pair*, which is what
 /// keeps two members of one dispatch two conversations.
 pub const CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker";
-/// The judge that supervised that dispatch, served under the worker session's own
-/// id with `.judge` after it. No session relays it; the stored report holds it.
-pub const JUDGE_CONVERSATION_ID: &str = "node-scope-1786925518098-3163646.worker.judge";
 /// The session the review node's judge member ran under, from that member's own
 /// stream.
 pub const REVIEW_CONVERSATION_ID: &str = "node-scope-1786925518102-3163741.judge";
@@ -2728,30 +2725,6 @@ pub const SECOND_REPLY: &str = "The gate ran green over the finished tree.";
 /// this: `turn-activity` reports the call and never the observation.
 pub const TOOL_OBSERVATION: &str = "pub fn routes() -> Router { /* … */ }";
 
-/// What the judge ruled, and the words it ruled it in.
-pub const JUDGE_CRITERIA: [(&str, &str); 2] = [
-    (
-        "every route the contract lists is served",
-        "the route table answers each of them end to end",
-    ),
-    (
-        "the gate is green over the finished tree",
-        "the run recorded one green gate and no rerun after it",
-    ),
-];
-/// The numeric criterion beside them, so the kind is read rather than assumed.
-pub const JUDGE_SCORED: (&str, f64, &str) = (
-    "how completely the acceptance criteria were met",
-    4.5,
-    "one follow-up was surfaced rather than done",
-);
-/// The judge's closing assessment, which the report keys to the dispatch.
-pub const JUDGE_ASSESSMENT: &str = "The dispatch met its bar. The route table is \
-landed, the gate ran green over the finished tree, and the one follow-up it \
-surfaced is recorded rather than silently dropped.";
-/// The model the judge side ran on; the agent side of this report names none.
-pub const JUDGE_MODEL: &str = "gpt-5-codex";
-
 /// The onejudge report the settled run's worker member stored, built from that
 /// library's own types.
 ///
@@ -2764,15 +2737,15 @@ pub const JUDGE_MODEL: &str = "gpt-5-codex";
 /// `usage` — the run total over both sides — on either of them is visible. The
 /// judge's figures are larger than the agent's on turn 2, so a reading that
 /// crossed the two role vocabularies would show up as a number rather than as a
-/// subtlety. And `telemetry.sessions` holds a `judge` row for *both* turns and an
-/// `agent` row for only the first, which is the trap: matching a turn to a row by
-/// its index alone puts the judge's clock on the agent's turn.
+/// subtlety. And `telemetry.sessions` holds an `agent` row for the first turn
+/// only, so the second is served bounds-absent rather than handed the row beside
+/// it. The judge's own rows are [`reviewer_report`]'s, which is where the trap
+/// they spring is driven from.
 #[must_use]
 pub fn worker_report() -> String {
     use onejudge::{
-        CandidateAttempt, HarnessAttribution, JudgeKind, JudgeValue, JudgeVerdict, Message,
-        NamedVerdict, PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, ToolEvent,
-        Transcript, Usage,
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
     };
 
     let call = ToolEvent {
@@ -2849,11 +2822,6 @@ pub fn worker_report() -> String {
         usage: None,
         ..ran("claude-code", 0, agent_usage(0.0))
     };
-    // The judge's own identity, naming the model the agent side does not.
-    let judged = |ms| CandidateAttempt {
-        model: Some(JUDGE_MODEL.to_owned()),
-        ..ran("codex", ms, judge_usage.clone())
-    };
     // Read off the candidate rather than named twice, or the judge's attribution
     // would carry the agent's identity and no reading could tell them apart.
     let attributed = |role, turn_index, candidates: Vec<CandidateAttempt>| HarnessAttribution {
@@ -2878,30 +2846,8 @@ pub fn worker_report() -> String {
                 Message::assistant(SECOND_REPLY).with_events(vec![gate_call, gate_result]),
             ],
         },
-        verdicts: JUDGE_CRITERIA
-            .into_iter()
-            .map(|(criterion, reason)| {
-                NamedVerdict::new(
-                    criterion,
-                    JudgeKind::Boolean,
-                    JudgeVerdict {
-                        value: JudgeValue::Bool(true),
-                        reason: reason.to_owned(),
-                        usage: None,
-                    },
-                )
-            })
-            .chain(std::iter::once(NamedVerdict::new(
-                JUDGE_SCORED.0,
-                JudgeKind::Numeric,
-                JudgeVerdict {
-                    value: JudgeValue::Number(JUDGE_SCORED.1),
-                    reason: JUDGE_SCORED.2.to_owned(),
-                    usage: None,
-                },
-            )))
-            .collect(),
-        assessment: Some(JUDGE_ASSESSMENT.to_owned()),
+        verdicts: Vec::new(),
+        assessment: None,
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
         // The whole dispatch's total over both sides, which is what neither turn
@@ -2929,45 +2875,31 @@ pub fn worker_report() -> String {
                 ..PartyTelemetry::default()
             },
             orchestration_ms: 1_200,
-            sessions: vec![
-                SessionLink {
-                    session_id: "01a01f4c-685b-75e2-8281-e8937fd20d47".into(),
-                    role: TelemetryRole::Agent,
-                    turn_index: 1,
-                    started_at: "2026-08-07T12:00:03.000Z".into(),
-                    finished_at: Some("2026-08-07T12:00:03.900Z".into()),
-                    history_id: None,
-                },
-                SessionLink {
-                    session_id: "01a01f4c-ace8-7a73-86b7-3c747c7bd78a".into(),
-                    role: TelemetryRole::Judge,
-                    turn_index: 1,
-                    started_at: "2026-08-07T12:00:03.910Z".into(),
-                    finished_at: Some("2026-08-07T12:00:03.980Z".into()),
-                    history_id: None,
-                },
-                SessionLink {
-                    session_id: "01a01f4f-6168-72d1-b946-2251794e2fce".into(),
-                    role: TelemetryRole::Judge,
-                    turn_index: 2,
-                    started_at: "2026-08-07T12:00:04.800Z".into(),
-                    finished_at: Some("2026-08-07T12:00:04.900Z".into()),
-                    history_id: None,
-                },
-            ],
+            sessions: vec![SessionLink {
+                session_id: "01a01f4c-685b-75e2-8281-e8937fd20d47".into(),
+                role: TelemetryRole::Agent,
+                turn_index: 1,
+                started_at: "2026-08-07T12:00:03.000Z".into(),
+                finished_at: Some("2026-08-07T12:00:03.900Z".into()),
+                history_id: None,
+            }],
             attribution: vec![
                 attributed(
                     TelemetryRole::Agent,
                     1,
                     vec![fell_through, ran("claude-code", 900, agent_usage(29.71))],
                 ),
-                attributed(TelemetryRole::Judge, 1, vec![judged(70)]),
+                attributed(
+                    TelemetryRole::Judge,
+                    1,
+                    vec![ran("codex", 70, judge_usage.clone())],
+                ),
                 attributed(
                     TelemetryRole::Agent,
                     2,
                     vec![ran("claude-code", 100, agent_usage(1.51))],
                 ),
-                attributed(TelemetryRole::Judge, 2, vec![judged(60)]),
+                attributed(TelemetryRole::Judge, 2, vec![ran("codex", 60, judge_usage)]),
             ],
         }),
         processes: Vec::new(),
@@ -2990,17 +2922,58 @@ pub const REVIEWER_REPORT_ARTIFACT: &str = "report-node-scope-1786925518102-3163
 pub const REVIEW_PROMPT: &str = "## What\nReview it.";
 pub const REVIEW_REPLY: &str = "The contract reads; every route it lists is served.";
 
+/// The judge that supervised the review dispatch, served under that session's own
+/// id with `.judge` after it. No session relays it; the stored report holds it.
+pub const REVIEW_JUDGE_CONVERSATION_ID: &str = "node-scope-1786925518102-3163741.judge.judge";
+/// What that judge ruled, and the words it ruled it in.
+pub const JUDGE_CRITERIA: [(&str, &str); 2] = [
+    (
+        "every route the contract lists is served",
+        "the route table answers each of them end to end",
+    ),
+    (
+        "the gate is green over the finished tree",
+        "the run recorded one green gate and no rerun after it",
+    ),
+];
+/// The numeric criterion beside them, so the kind is read rather than assumed.
+pub const JUDGE_SCORED: (&str, f64, &str) = (
+    "how completely the acceptance criteria were met",
+    4.5,
+    "one follow-up was surfaced rather than done",
+);
+/// Its closing assessment, which the report keys to the dispatch.
+pub const JUDGE_ASSESSMENT: &str = "The dispatch met its bar. The route table is \
+landed, the gate ran green over the finished tree, and the one follow-up it \
+surfaced is recorded rather than silently dropped.";
+/// The model the judge side ran on; the agent side of this report names none.
+pub const JUDGE_MODEL: &str = "gpt-5-codex";
+/// The instants that report observed the judge between, one pair per turn. None
+/// of them may reach a turn of the transcript the agent side of it had.
+pub const JUDGE_BOUNDS: [(&str, &str); 2] = [
+    ("2026-08-07T12:00:22.400Z", "2026-08-07T12:00:22.900Z"),
+    ("2026-08-07T12:00:24.100Z", "2026-08-07T12:00:24.600Z"),
+];
+
 /// The report the review node's judge member stored.
 ///
 /// A member the graph runs as the *judge* transport, whose own report still has
 /// an `agent` side — the side that did the reviewing. Its measurements are
 /// attributed to the party the member is, which is what makes this the second
 /// party the run's timing can measure and not a second reading of the first.
+///
+/// It is also the run's one report that records the side onejudge ran *inside*
+/// this member: `role: judge` rows for both turns, an `agent` row for neither,
+/// and a conclusion keyed to the dispatch. So it springs the trap the other
+/// report cannot — matching a turn to a row by index alone would put this clock
+/// on the reviewer's own turn — and it is the settled data the judge journeys
+/// read.
 #[must_use]
 pub fn reviewer_report() -> String {
     use onejudge::{
-        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, Telemetry,
-        TelemetryRole, Transcript, Usage,
+        CandidateAttempt, HarnessAttribution, JudgeKind, JudgeValue, JudgeVerdict, Message,
+        NamedVerdict, PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, Transcript,
+        Usage,
     };
 
     let usage = Usage {
@@ -3010,6 +2983,48 @@ pub fn reviewer_report() -> String {
         cache_write_tokens: Some(0),
         cost_usd: Some(0.11),
     };
+    // What the judge side of this dispatch consumed. No cache write and no cost:
+    // the provider it ran on reports neither, and both are absences rather than
+    // zeroes wherever they are served.
+    let judge_usage = Usage {
+        input_tokens: Some(51_204),
+        output_tokens: Some(311),
+        cache_read_tokens: Some(20_480),
+        cache_write_tokens: None,
+        cost_usd: None,
+    };
+    let judged = |turn: u32, ms| HarnessAttribution {
+        role: TelemetryRole::Judge,
+        turn_index: turn,
+        ran: Some("codex:judge".into()),
+        fell_through: Vec::new(),
+        candidates: vec![CandidateAttempt {
+            harness: "codex".into(),
+            harness_id: "codex:judge".into(),
+            variant: Some("judge".into()),
+            model: Some(JUDGE_MODEL.to_owned()),
+            status: "ok".into(),
+            available: true,
+            ran: true,
+            failure_kind: None,
+            failure_kind_source: None,
+            exit_code: Some(0),
+            duration_ms: Some(ms),
+            error: None,
+            session_id: None,
+            history_id: None,
+            usage: Some(judge_usage.clone()),
+        }],
+        history_file: None,
+    };
+    let observed = |turn: usize| SessionLink {
+        session_id: format!("01a01f5{turn}-6168-72d1-b946-2251794e2fce"),
+        role: TelemetryRole::Judge,
+        turn_index: u32::try_from(turn).expect("a turn number"),
+        started_at: JUDGE_BOUNDS[turn - 1].0.to_owned(),
+        finished_at: Some(JUDGE_BOUNDS[turn - 1].1.to_owned()),
+        history_id: None,
+    };
     let report = Report {
         schema_version: onejudge::SCHEMA_VERSION,
         transcript: Transcript {
@@ -3018,8 +3033,30 @@ pub fn reviewer_report() -> String {
                 Message::assistant(REVIEW_REPLY),
             ],
         },
-        verdicts: Vec::new(),
-        assessment: None,
+        verdicts: JUDGE_CRITERIA
+            .into_iter()
+            .map(|(criterion, reason)| {
+                NamedVerdict::new(
+                    criterion,
+                    JudgeKind::Boolean,
+                    JudgeVerdict {
+                        value: JudgeValue::Bool(true),
+                        reason: reason.to_owned(),
+                        usage: None,
+                    },
+                )
+            })
+            .chain(std::iter::once(NamedVerdict::new(
+                JUDGE_SCORED.0,
+                JudgeKind::Numeric,
+                JudgeVerdict {
+                    value: JudgeValue::Number(JUDGE_SCORED.1),
+                    reason: JUDGE_SCORED.2.to_owned(),
+                    usage: None,
+                },
+            )))
+            .collect(),
+        assessment: Some(JUDGE_ASSESSMENT.to_owned()),
         completion_reason: Some("the change is approved".into()),
         settled_reason: None,
         usage: Some(usage.clone()),
@@ -3029,33 +3066,40 @@ pub fn reviewer_report() -> String {
                 usage: Some(usage.clone()),
                 ..PartyTelemetry::default()
             },
-            judge: PartyTelemetry::default(),
+            judge: PartyTelemetry {
+                usage: Some(judge_usage.clone()),
+                ..PartyTelemetry::default()
+            },
             orchestration_ms: 100,
-            sessions: Vec::new(),
-            attribution: vec![HarnessAttribution {
-                role: TelemetryRole::Agent,
-                turn_index: 1,
-                ran: Some("codex:default".into()),
-                fell_through: Vec::new(),
-                candidates: vec![CandidateAttempt {
-                    harness: "codex".into(),
-                    harness_id: "codex:default".into(),
-                    variant: None,
-                    model: None,
-                    status: "ok".into(),
-                    available: true,
-                    ran: true,
-                    failure_kind: None,
-                    failure_kind_source: None,
-                    exit_code: Some(0),
-                    duration_ms: Some(2_800),
-                    error: None,
-                    session_id: None,
-                    history_id: None,
-                    usage: Some(usage),
-                }],
-                history_file: None,
-            }],
+            sessions: vec![observed(1), observed(2)],
+            attribution: vec![
+                HarnessAttribution {
+                    role: TelemetryRole::Agent,
+                    turn_index: 1,
+                    ran: Some("codex:default".into()),
+                    fell_through: Vec::new(),
+                    candidates: vec![CandidateAttempt {
+                        harness: "codex".into(),
+                        harness_id: "codex:default".into(),
+                        variant: None,
+                        model: None,
+                        status: "ok".into(),
+                        available: true,
+                        ran: true,
+                        failure_kind: None,
+                        failure_kind_source: None,
+                        exit_code: Some(0),
+                        duration_ms: Some(2_800),
+                        error: None,
+                        session_id: None,
+                        history_id: None,
+                        usage: Some(usage),
+                    }],
+                    history_file: None,
+                },
+                judged(1, 500),
+                judged(2, 400),
+            ],
         }),
         processes: Vec::new(),
         control: None,

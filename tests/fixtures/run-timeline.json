@@ -261,24 +261,6 @@
       ]
     },
     {
-      "id": "dispatch.node-scope-1786925518098-3163646.worker.judge",
-      "kind": "dispatch",
-      "label": "node-scope-1786925518098-3163646.worker.judge",
-      "started_at": "2026-08-07T12:00:03.910Z",
-      "ended_at": "2026-08-07T12:00:04.900Z",
-      "parent_id": "node.contract-interface",
-      "node_id": "contract-interface",
-      "dispatch_id": "run-20260807-a1b2c3.contract-interface",
-      "transport_role": "judge",
-      "agent_role": "judge",
-      "status": "done",
-      "reference": {
-        "kind": "conversation",
-        "value": "node-scope-1786925518098-3163646.worker.judge"
-      },
-      "events": []
-    },
-    {
       "id": "verification.contract-interface.report-node-scope-1786925518098-3163646",
       "kind": "verification",
       "label": "report-node-scope-1786925518098-3163646",

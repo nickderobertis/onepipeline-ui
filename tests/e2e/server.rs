@@ -301,8 +301,8 @@ fn a_run_detail_serves_its_graph_plan_and_transcripts() {
 
     // One transcript per session the run relayed, and the pair each was run
     // under: the worker's own side, and the judge member that reviewed it. Beside
-    // the first sits the judge that supervised it, which no session relayed and
-    // the settled member's report is the whole record of.
+    // the second sits the judge that supervised *it*, which no session relayed
+    // and only that member's settled report records.
     let conversations = body["conversations"].as_array().expect("conversations");
     assert_eq!(conversations.len(), 3);
     assert_eq!(
@@ -319,19 +319,19 @@ fn a_run_detail_serves_its_graph_plan_and_transcripts() {
     );
     assert_eq!(
         conversations[1]["conversation"]["id"],
-        json!(fixture_run::JUDGE_CONVERSATION_ID)
-    );
-    assert_eq!(
-        conversations[1]["attribution"]["parentConversationId"],
-        json!(fixture_run::CONVERSATION_ID)
-    );
-    assert_eq!(
-        conversations[2]["conversation"]["id"],
         json!(fixture_run::REVIEW_CONVERSATION_ID)
     );
     assert_eq!(
-        conversations[2]["attribution"]["transportRole"],
+        conversations[1]["attribution"]["transportRole"],
         json!("judge")
+    );
+    assert_eq!(
+        conversations[2]["conversation"]["id"],
+        json!(fixture_run::REVIEW_JUDGE_CONVERSATION_ID)
+    );
+    assert_eq!(
+        conversations[2]["attribution"]["parentConversationId"],
+        json!(fixture_run::REVIEW_CONVERSATION_ID)
     );
 }
 
@@ -2069,8 +2069,8 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
         listed,
         vec![
             fixture_run::CONVERSATION_ID,
-            fixture_run::JUDGE_CONVERSATION_ID,
-            fixture_run::REVIEW_CONVERSATION_ID
+            fixture_run::REVIEW_CONVERSATION_ID,
+            fixture_run::REVIEW_JUDGE_CONVERSATION_ID
         ],
         "one transcript per labelled session — plus the judge the first one's report \
          holds — and none for the unlabelled record: {detail}"
@@ -4833,7 +4833,7 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
         &format!(
             "/api/v2/runs/{}/conversations/{}",
             fixture_run::RUN_ID,
-            fixture_run::JUDGE_CONVERSATION_ID
+            fixture_run::REVIEW_JUDGE_CONVERSATION_ID
         ),
     );
     assert_eq!(response.status, 200, "{}", response.body);
@@ -4846,9 +4846,9 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
     assert_eq!(attribution["transportRole"], json!("judge"));
     assert_eq!(
         attribution["parentConversationId"],
-        json!(fixture_run::CONVERSATION_ID)
+        json!(fixture_run::REVIEW_CONVERSATION_ID)
     );
-    assert_eq!(attribution["nodeId"], json!(fixture_run::NODE_ID));
+    assert_eq!(attribution["nodeId"], json!(fixture_run::REVIEW_NODE_ID));
     assert_eq!(attribution["runId"], json!(fixture_run::RUN_ID));
 
     let turns = body["conversation"]["turns"]
@@ -4863,26 +4863,29 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
 
     // Turn by turn: the bounds the report observed, the elapsed time and model of
     // the candidate that ran it, and what that invocation alone consumed.
-    assert_eq!(turns[0]["startedAt"], json!("2026-08-07T12:00:03.910Z"));
-    assert_eq!(turns[0]["finishedAt"], json!("2026-08-07T12:00:03.980Z"));
-    assert_eq!(turns[0]["durationMs"], json!(70));
-    assert_eq!(turns[1]["startedAt"], json!("2026-08-07T12:00:04.800Z"));
-    assert_eq!(turns[1]["finishedAt"], json!("2026-08-07T12:00:04.900Z"));
-    assert_eq!(turns[1]["durationMs"], json!(60));
+    for (index, (started, finished)) in fixture_run::JUDGE_BOUNDS.into_iter().enumerate() {
+        assert_eq!(turns[index]["startedAt"], json!(started));
+        assert_eq!(turns[index]["finishedAt"], json!(finished));
+    }
+    assert_eq!(turns[0]["durationMs"], json!(500));
+    assert_eq!(turns[1]["durationMs"], json!(400));
     for turn in turns.iter().take(2) {
         assert_eq!(turn["model"], json!(fixture_run::JUDGE_MODEL), "{turn}");
-        assert_eq!(turn["harness"], json!("codex:default"), "{turn}");
-        assert_eq!(turn["usage"]["inputTokens"], json!(79_341), "{turn}");
-        assert_eq!(turn["usage"]["outputTokens"], json!(618), "{turn}");
-        assert_eq!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
+        assert_eq!(turn["harness"], json!("codex:judge"), "{turn}");
+        assert_eq!(turn["usage"]["inputTokens"], json!(51_204), "{turn}");
+        assert_eq!(turn["usage"]["outputTokens"], json!(311), "{turn}");
+        assert_eq!(turn["usage"]["cacheReadTokens"], json!(20_480), "{turn}");
         // A figure the provider never reported is an explicit absence, never a
-        // zero: this host's judge side reports no cache write at all, and a `0`
-        // here would read as a measurement somebody took.
-        assert_eq!(turn["usage"]["cacheWriteTokens"], json!(null), "{turn}");
-        assert_ne!(turn["usage"]["cacheWriteTokens"], json!(0), "{turn}");
+        // zero: this provider reports no cache write and no cost, and a `0` for
+        // either would read as a measurement somebody took.
+        for absent in ["cacheWriteTokens", "costUsd"] {
+            assert_eq!(turn["usage"][absent], json!(null), "{turn}");
+            assert_ne!(turn["usage"][absent], json!(0), "{turn}");
+        }
         // And nothing the report keys to the *agent* reaches a judge turn.
-        assert_ne!(turn["durationMs"], json!(900), "{turn}");
-        assert_ne!(turn["usage"]["costUsd"], json!(29.71), "{turn}");
+        assert_ne!(turn["durationMs"], json!(2_800), "{turn}");
+        assert_ne!(turn["usage"]["costUsd"], json!(0.11), "{turn}");
+        assert_ne!(turn["usage"]["inputTokens"], json!(400), "{turn}");
     }
 
     // No text against a judge turn, because the report keys none to one.
@@ -4890,12 +4893,7 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
         assert_eq!(turn["assistant"], json!(null), "{turn}");
         assert_eq!(turn["user"], json!(""), "{turn}");
         assert_eq!(turn["tools"], json!([]), "{turn}");
-        for prose in [
-            fixture_run::FIRST_PROMPT,
-            fixture_run::FIRST_REPLY,
-            fixture_run::SECOND_PROMPT,
-            fixture_run::SECOND_REPLY,
-        ] {
+        for prose in [fixture_run::REVIEW_PROMPT, fixture_run::REVIEW_REPLY] {
             assert_ne!(turn["user"], json!(prose), "{turn}");
             assert_ne!(turn["assistant"], json!(prose), "{turn}");
         }
@@ -4921,7 +4919,7 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
     assert_eq!(verdicts[2]["reason"], json!(reason));
     assert_eq!(
         closing["unknown"]["completionReason"],
-        json!("the acceptance criteria were met")
+        json!("the change is approved")
     );
     assert_eq!(closing["unknown"]["stoppedEarly"], json!(false));
     // No invocation is recorded for it, so it claims no clock and no spend.
@@ -4931,20 +4929,20 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
     assert_eq!(closing["usage"], json!({}));
 }
 
-/// The agent's own transcript is left as the earlier steps made it, and carries
-/// nothing of the judge's.
+/// A dispatch's own transcript is left as the earlier steps made it, and carries
+/// nothing the report recorded against the judge.
 #[test]
-fn the_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
+fn a_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
     let serving = two_runs();
-    let body = http::get(
-        serving.address,
-        &format!(
-            "/api/v2/runs/{}/conversations/{}",
-            fixture_run::RUN_ID,
-            fixture_run::CONVERSATION_ID
-        ),
-    )
-    .json();
+    let transcript = |id: &str| {
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/conversations/{id}", fixture_run::RUN_ID),
+        )
+        .json()
+    };
+
+    let body = transcript(fixture_run::CONVERSATION_ID);
     assert_eq!(
         body["attribution"]["agentRole"],
         json!("worker"),
@@ -4964,11 +4962,47 @@ fn the_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
     assert_eq!(turns[0]["user"], json!(fixture_run::FIRST_PROMPT));
     assert_eq!(turns[0]["assistant"], json!(fixture_run::FIRST_REPLY));
     assert_eq!(turns[0]["durationMs"], json!(900));
-    // And no figure the report recorded against the judge.
+    // And none of the figures its report attributes to the judge instead.
     for turn in &turns {
-        assert_ne!(turn["model"], json!(fixture_run::JUDGE_MODEL), "{turn}");
         assert_ne!(turn["durationMs"], json!(70), "{turn}");
         assert_ne!(turn["durationMs"], json!(60), "{turn}");
+        assert_ne!(turn["usage"]["inputTokens"], json!(79_341), "{turn}");
+        assert_ne!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
+        assert_eq!(turn["unknown"], json!({}), "{turn}");
+    }
+    // That report records no judge turn, so there is no second conversation to
+    // open beside it — a verdict alone does not make one.
+    let asked = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}.judge",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    );
+    assert_eq!(asked.status, 404, "{}", asked.body);
+
+    // The other dispatch, whose report *does* hold the judge's rows: its own turn
+    // has no `role: agent` row, and must be served bounds-absent rather than
+    // handed the judge's clock beside it.
+    let reviewed = transcript(fixture_run::REVIEW_CONVERSATION_ID);
+    let turns = reviewed["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns[0]["user"], json!(fixture_run::REVIEW_PROMPT));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::REVIEW_REPLY));
+    assert_eq!(turns[0]["durationMs"], json!(2_800));
+    for turn in &turns {
+        for (started, finished) in fixture_run::JUDGE_BOUNDS {
+            for bound in ["startedAt", "finishedAt"] {
+                assert_ne!(turn[bound], json!(started), "{turn}");
+                assert_ne!(turn[bound], json!(finished), "{turn}");
+            }
+        }
+        assert_eq!(turn["startedAt"], json!(null), "{turn}");
+        assert_eq!(turn["finishedAt"], json!(null), "{turn}");
+        assert_ne!(turn["usage"]["inputTokens"], json!(51_204), "{turn}");
         assert_eq!(turn["unknown"], json!({}), "{turn}");
     }
 }
@@ -4983,7 +5017,7 @@ fn the_judges_lane_sits_with_the_dispatch_it_supervised_on_the_nodes_timeline() 
         &format!(
             "/api/v2/runs/{}/timeline?scope=node&node={}",
             fixture_run::RUN_ID,
-            fixture_run::NODE_ID
+            fixture_run::REVIEW_NODE_ID
         ),
     )
     .json()["spans"]
@@ -4991,8 +5025,8 @@ fn the_judges_lane_sits_with_the_dispatch_it_supervised_on_the_nodes_timeline() 
         .expect("spans")
         .clone();
 
-    let worker = format!("dispatch.{}", fixture_run::CONVERSATION_ID);
-    let judge = format!("dispatch.{}", fixture_run::JUDGE_CONVERSATION_ID);
+    let supervised = format!("dispatch.{}", fixture_run::REVIEW_CONVERSATION_ID);
+    let judge = format!("dispatch.{}", fixture_run::REVIEW_JUDGE_CONVERSATION_ID);
     let at = |id: &str| {
         spans
             .iter()
@@ -5001,26 +5035,26 @@ fn the_judges_lane_sits_with_the_dispatch_it_supervised_on_the_nodes_timeline() 
     };
     // Straight after the dispatch in the same scope: that adjacency is what a
     // client gathers the two into one dispatch by.
-    assert_eq!(at(&judge), at(&worker) + 1, "{spans:?}");
+    assert_eq!(at(&judge), at(&supervised) + 1, "{spans:?}");
     let lane = &spans[at(&judge)];
-    let dispatch = &spans[at(&worker)];
+    let dispatch = &spans[at(&supervised)];
     assert_eq!(lane["agent_role"], json!("judge"));
     assert_eq!(lane["transport_role"], json!("judge"));
     assert_eq!(lane["kind"], dispatch["kind"]);
     assert_eq!(lane["parent_id"], dispatch["parent_id"]);
-    assert_eq!(lane["node_id"], json!(fixture_run::NODE_ID));
+    assert_eq!(lane["node_id"], json!(fixture_run::REVIEW_NODE_ID));
     assert_eq!(lane["dispatch_id"], dispatch["dispatch_id"]);
-    // And it opens the judge's own conversation rather than the worker's.
+    // And it opens the judge's own conversation rather than the dispatch's.
     assert_eq!(
         lane["reference"],
         json!({
             "kind": "conversation",
-            "value": fixture_run::JUDGE_CONVERSATION_ID,
+            "value": fixture_run::REVIEW_JUDGE_CONVERSATION_ID,
         })
     );
     // Drawn over what the report observed, not over the node's window.
-    assert_eq!(lane["started_at"], json!("2026-08-07T12:00:03.910Z"));
-    assert_eq!(lane["ended_at"], json!("2026-08-07T12:00:04.900Z"));
+    assert_eq!(lane["started_at"], json!(fixture_run::JUDGE_BOUNDS[0].0));
+    assert_eq!(lane["ended_at"], json!(fixture_run::JUDGE_BOUNDS[1].1));
     assert_eq!(lane["events"], json!([]), "the judge relays none");
 
     // The lane is what makes the conversation reachable.
@@ -5119,7 +5153,7 @@ fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
         );
     });
 
-    let lane = http::get(
+    let spans = http::get(
         serving.address,
         &format!(
             "/api/v2/runs/{}/timeline?scope=node&node={}",
@@ -5130,10 +5164,22 @@ fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
     .json()["spans"]
         .as_array()
         .expect("spans")
-        .iter()
-        .find(|span| span["id"] == json!(format!("dispatch.{SESSION}.judge")))
-        .expect("the judge's lane")
         .clone();
+    let at = |id: String| {
+        spans
+            .iter()
+            .position(|span| span["id"] == json!(id))
+            .unwrap_or_else(|| panic!("no span `{id}` among {spans:?}"))
+    };
+    // The pairing a client gathers: a judge sibling straight after the *worker*
+    // dispatch it supervised, in the same scope.
+    let worker = at(format!("dispatch.{SESSION}"));
+    let supervising = at(format!("dispatch.{SESSION}.judge"));
+    assert_eq!(supervising, worker + 1, "{spans:?}");
+    assert_eq!(spans[worker]["agent_role"], json!("worker"));
+    let lane = spans[supervising].clone();
+    assert_eq!(lane["agent_role"], json!("judge"));
+    assert_eq!(lane["dispatch_id"], spans[worker]["dispatch_id"]);
     assert_eq!(lane["started_at"], json!("2026-08-07T12:01:00.000Z"));
     assert_eq!(lane["step_id"], json!("build"), "the step it supervised");
     // The run observed no end for the judge's second turn, so the lane is open —
