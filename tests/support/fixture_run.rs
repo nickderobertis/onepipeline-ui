@@ -125,6 +125,12 @@ pub const DIED_NODE_ID: &str = "died";
 /// That run's node whose worktree was reclaimed while its member was still
 /// talking, so nothing but the branch going away says when the session stopped.
 pub const RECLAIMED_NODE_ID: &str = "reclaimed";
+/// That run's node whose session the graph stamped with a member this wire has
+/// no word for, under the one persona that reads like a role.
+pub const UNNAMED_NODE_ID: &str = "unnamed";
+/// That run's node whose dispatch relayed no session at all, under a persona
+/// that is also a role: the one record it left stamps no member.
+pub const SILENT_NODE_ID: &str = "silent";
 
 /// The streams that run's members ran on, one per member.
 ///
@@ -133,7 +139,7 @@ pub const RECLAIMED_NODE_ID: &str = "reclaimed";
 /// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
 /// mints one — the pair has to agree or nothing joins a session to the records
 /// that opened and closed it.
-const LANE_STREAMS: [&str; 8] = [
+const LANE_STREAMS: [&str; 9] = [
     "node-scope-1786925520001-4311",
     "node-scope-1786925520002-4311",
     "node-scope-1786925520003-4311",
@@ -142,6 +148,7 @@ const LANE_STREAMS: [&str; 8] = [
     "node-scope-1786925520006-4311",
     "node-scope-1786925520008-4311",
     "node-scope-1786925520009-4311",
+    "node-scope-1786925520010-4311",
 ];
 /// The session the re-asked node's abandoned first attempt ran under.
 pub const RETRIED_FIRST_CONVERSATION_ID: &str = "node-scope-1786925520001-4311.worker";
@@ -160,6 +167,9 @@ pub const WORKING_CONVERSATION_ID: &str = "node-scope-1786925520006-4311.worker"
 pub const DIED_CONVERSATION_ID: &str = "node-scope-1786925520008-4311.worker";
 /// The session whose worktree was taken away while it was still talking.
 pub const RECLAIMED_CONVERSATION_ID: &str = "node-scope-1786925520009-4311.worker";
+/// The session the graph ran under a `reviewer`: a member `agentRoleSchema` has
+/// no word for, beside a persona that is the literal word `pr-author`.
+pub const UNNAMED_CONVERSATION_ID: &str = "node-scope-1786925520010-4311.reviewer";
 /// The run's own observer, recorded at no node and under no role word: the
 /// `monitor` member is the run's watching side, and it is served in the
 /// `orchestrator` lane it shares rather than as a member of its own.
@@ -1081,6 +1091,8 @@ fn lanes_plan() -> Value {
                 "persona": "engineer",
                 "task": "## What\nLose the worktree.",
             },
+            { "id": UNNAMED_NODE_ID, "persona": "docs-writer", "task": "## What\nBe stamped." },
+            { "id": SILENT_NODE_ID, "persona": "check-in", "task": "## What\nSay nothing." },
         ],
     })
 }
@@ -1495,6 +1507,56 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "node-settled",
             at_node(RECLAIMED_NODE_ID),
             json!({ "status": "failed", "outcome": "worktree-reclaimed" }),
+        );
+
+    // The node the graph ran under a member no vocabulary here has a word for.
+    // The persona beside it is the literal word `pr-author`, which is the one a
+    // host really dispatches under and the one a reading off personas mistook a
+    // whole lane for — so this session says what it was, and what it said is not
+    // servable.
+    let unnamed = Lane {
+        run,
+        stream: LANE_STREAMS[8],
+        session: UNNAMED_CONVERSATION_ID,
+        node: Some(UNNAMED_NODE_ID),
+        member: "reviewer",
+        persona: "pr-author",
+    };
+    driver.emit(
+        "2026-08-07T12:07:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": UNNAMED_NODE_ID, "persona": "docs-writer" }),
+        json!({ "persona": "docs-writer" }),
+    );
+    unnamed.started(&mut members, "2026-08-07T12:07:01.000Z");
+    unnamed.turn(&mut members, "2026-08-07T12:07:02.000Z");
+    unnamed.settled(&mut members, "2026-08-07T12:07:30.000Z", true);
+    driver.emit(
+        "2026-08-07T12:07:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(UNNAMED_NODE_ID),
+        json!({ "status": "done", "outcome": "shipped" }),
+    );
+
+    // And the dispatch that relayed no session at all — the kind the engine
+    // re-asks. Its `node-dispatched` stamps a persona and no member, which is
+    // the record the persona is the reading for.
+    driver
+        .emit(
+            "2026-08-07T12:08:00.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": SILENT_NODE_ID, "persona": "check-in" }),
+            json!({ "persona": "check-in" }),
+        )
+        .emit(
+            "2026-08-07T12:08:30.000Z",
+            "pipeline",
+            "node-settled",
+            at_node(SILENT_NODE_ID),
+            json!({ "status": "failed", "outcome": "nothing-reported" }),
         );
 
     merged(std::iter::once(driver).chain(members))

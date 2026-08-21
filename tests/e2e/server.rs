@@ -738,6 +738,78 @@ fn a_session_is_read_in_the_category_the_run_named_its_member() {
 }
 
 #[test]
+fn a_member_this_wire_has_no_word_for_is_not_read_off_the_persona_beside_it() {
+    let serving = lanes();
+
+    // A session the graph stamped `reviewer`, which `agentRoleSchema` has no word
+    // for, beside the one persona that reads like a role — the literal word
+    // `pr-author`, which is what a host really dispatches a drafting turn under.
+    // The run said what this session was and said something this vocabulary
+    // cannot carry, so no role is served: answering with the persona would put a
+    // *style* over the run's own word for it, and serve a drafting lane for a
+    // session that was not one.
+    let spans = node_spans(&serving, fixture_run::UNNAMED_NODE_ID);
+    let dispatch = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::UNNAMED_CONVERSATION_ID),
+    );
+    assert!(
+        dispatch.get("agent_role").is_none(),
+        "a member this wire has no word for was read off its persona: {dispatch}"
+    );
+    // The span itself is served in full: what the run recorded about *when* the
+    // session ran is not in doubt, only what to call it.
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:07:00.000Z"));
+    assert_eq!(dispatch["ended_at"], json!("2026-08-07T12:07:30.000Z"));
+
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+    // The node is still in the graph-level reading — it ran, and the reader can
+    // see it — and it is in no category, rather than in the drafting one.
+    assert!(
+        run.iter()
+            .any(|span| span["id"] == json!(format!("node.{}", fixture_run::UNNAMED_NODE_ID))),
+        "the node itself went missing: {run:?}"
+    );
+    for span in &run {
+        if span["node_id"] == json!(fixture_run::UNNAMED_NODE_ID) {
+            assert!(
+                span.get("agent_role").is_none(),
+                "an unreadable member reached a category: {span}"
+            );
+        }
+    }
+
+    // And the other half of the same rule, which the member is only ever read
+    // *ahead* of: a record that stamped no member at all is still read by the
+    // persona it ran under. This dispatch relayed no session, so its
+    // `node-dispatched` — persona `check-in`, no member — is the whole of what
+    // the run said about it.
+    let silent = node_spans(&serving, fixture_run::SILENT_NODE_ID);
+    let only = span_named(
+        &silent,
+        &format!("dispatch.{}", fixture_run::SILENT_NODE_ID),
+    );
+    assert_eq!(only["agent_role"], json!("check-in"), "{only}");
+    assert_eq!(
+        span_named(
+            &run,
+            &format!("rollup.{}.agent.check-in", fixture_run::SILENT_NODE_ID)
+        )["agent_role"],
+        json!("check-in")
+    );
+}
+
+#[test]
 fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
     let serving = lanes();
     let spans = http::get(
@@ -3765,7 +3837,29 @@ fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
     )
     .json();
     assert_eq!(lint["attribution"]["transportRole"], json!("llmlint"));
-    assert_eq!(lint["attribution"]["agentRole"], json!("pr-author"));
+    // `llmlint` is a word in the *transport* vocabulary and in no other, so this
+    // session stamped a member that says which chain ran and nothing about what
+    // the dispatch was for. A stamped member is the reading whether or not this
+    // wire has a word for it, so the persona beside it is not consulted and the
+    // transcript falls to the role every dispatch has.
+    assert_eq!(lint["attribution"]["agentRole"], json!("worker"));
+
+    // The agent side of the same node is the other half of that rule: its first
+    // relayed record stamps a persona and no member — `oneagentgraph` names the
+    // member only from the record after it — so the persona is still what the
+    // role is read from there.
+    let checked = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::LIVE_CONVERSATION_ID
+        ),
+    )
+    .json();
+    assert_eq!(checked["attribution"]["transportRole"], json!("agent"));
+    assert_eq!(checked["attribution"]["agentRole"], json!("pr-author"));
+    assert_eq!(checked["attribution"]["persona"], json!("pr-author"));
 }
 
 #[test]

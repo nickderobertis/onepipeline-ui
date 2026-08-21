@@ -880,17 +880,24 @@ fn event_agent_role(event: &Envelope) -> Option<&'static str> {
 /// worker under two names, and reading a role off one drops every session a host
 /// did not happen to name after a role. The member is the run's own word for what
 /// the session *was*.
+///
+/// So a stamped member decides the reading whether or not this crate has a word
+/// for it, and the persona beside it is never consulted: a record naming a member
+/// outside [`ROLE_MEMBERS`] has said what the session was and said something this
+/// vocabulary cannot carry, while a persona that happens to read like a role — the
+/// literal word `pr-author` — would answer with a *style* over the run's own word
+/// for it. The persona is the reading for a record that stamped no member at all,
+/// which is what a `node-dispatched` is.
 fn agent_role(member: Option<&str>, persona: Option<&str>) -> Option<&'static str> {
-    member
-        .and_then(|member| {
-            ROLE_MEMBERS
-                .into_iter()
-                .find_map(|(named, role)| (named == member).then_some(role))
-        })
-        .or_else(|| {
+    match member {
+        Some(member) => ROLE_MEMBERS
+            .into_iter()
+            .find_map(|(named, role)| (named == member).then_some(role)),
+        None => {
             let persona = persona?;
             AGENT_ROLES.into_iter().find(|role| *role == persona)
-        })
+        }
+    }
 }
 
 /// The statuses that mean this node's own work ran, or was cut short, without
