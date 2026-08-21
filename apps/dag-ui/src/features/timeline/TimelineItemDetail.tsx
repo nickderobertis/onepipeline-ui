@@ -9,7 +9,6 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
-  Badge,
   Button,
   Card,
   CardContent,
@@ -33,6 +32,7 @@ import { useEffect, useState } from "react";
 import type { NodeView } from "../../lib/run-model";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
+import { ItemHeading } from "./item-reading";
 import {
   dispatchRoleLabel,
   LLMLINT_TRANSPORT,
@@ -96,25 +96,7 @@ export function TimelineItemDetail({
             </div>
           ) : (
             <>
-              <header className="detail-title">
-                <div>
-                  {/* The category the operator already read in the lane and the
-                      transcript, never the served identifier behind it. */}
-                  <Badge className="mb-1" variant="outline">
-                    {row.displayKind}
-                  </Badge>
-                  <h2>{row.displayLabel}</h2>
-                  <p className="detail-when">
-                    <Timestamp at={row.startedAt} />
-                    {row.durationMs !== null &&
-                      ` · ${formatDuration(row.durationMs)}`}
-                    {row.endedAt === null &&
-                      row.rowKind === "span" &&
-                      " · still running"}
-                  </p>
-                </div>
-                {row.status && <Badge variant="secondary">{row.status}</Badge>}
-              </header>
+              <ItemHeading row={row} />
               <Separator className="my-4" />
               <Body
                 client={client}

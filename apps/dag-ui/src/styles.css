@@ -770,6 +770,16 @@ p {
   box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
 }
 
+/* A marker's glyph fills the button the package draws it in, so the reading it carries
+   answers anywhere on the hit target rather than only over the drawing inside it. */
+.timeline-marker-reading {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
 /* The package's own copy, retired from the painted surface but left in the accessibility
    tree — see `TimelinePopover`. Selected on the role because the package sets it exactly
    while it would be painting that element, so this reaches the painted copy and nothing
