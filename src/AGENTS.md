@@ -248,7 +248,6 @@ A report that is absent, uncopied or unreadable leaves the transcript as the
 journal relayed it. All three are "the report says nothing", and none is "the
 session recorded nothing".
 
-
 ## The one store this crate opens that no run owns
 
 A `oneharness_session` artifact's bytes are the only ones this API serves from
