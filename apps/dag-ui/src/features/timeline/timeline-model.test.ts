@@ -368,6 +368,31 @@ describe("one node's slice of the run timeline", () => {
     ).toEqual([judge.id, worker.id]);
   });
 
+  test("drops a lane drawn across the middle of the one it runs inside", () => {
+    const projected = nodeTimelineV2(timeline, "dashboard");
+    const worker = projected.items.find(({ laneId }) => laneId === "worker");
+    const lint = projected.items.find(({ laneId }) => laneId === "lint");
+    const waits = projected.items.find(({ laneId }) => laneId === "lock-waits");
+    if (worker === undefined || lint === undefined || waits === undefined)
+      throw new Error("fixture lost the dashboard's work");
+    // What a node dispatched once and never settled serves: the worker opens at
+    // the dispatch and the lint run it made of its own work opens inside it, both
+    // still going, so the shorter one is painted straight across the middle of the
+    // longer — the pixel a hover or a click on that bar lands on.
+    const served = [
+      { ...worker, start: 0, end: 60_000 },
+      { ...lint, start: 27_000, end: 60_000 },
+      { ...waits, start: 58_000, end: 59_000 },
+    ];
+    // The lint run goes; the aggregate at the very end does not, because it leaves
+    // the worker's own hit target alone and dropping it would hide work the node
+    // really did there.
+    expect(compactTimelineItems(served).map(({ id }) => id)).toEqual([
+      worker.id,
+      waits.id,
+    ]);
+  });
+
   test("spans the same window compact as expanded", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
     const worker = projected.items.find(({ laneId }) => laneId === "worker");

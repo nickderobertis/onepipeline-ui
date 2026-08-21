@@ -266,32 +266,41 @@ export function compactTimelineItems<Payload>(
     });
     // An item that meets one of the two boundaries neither replaces it nor is
     // dropped by it: both are kept, because losing either end moves the axis and
-    // losing the other would silently hide work that really did happen there —
-    // a shorter one inside a window end is drawn over it and stays reachable.
-    // One that runs the *same* length as it is not: it would be painted over
-    // every pixel of a segment nothing else can reach, so the moment goes to
-    // whichever category dominates it and the rest are read in the lanes.
+    // losing the other would silently hide work that really did happen there.
+    // One drawn across the *middle* of what it overlaps is: a pointer lands on
+    // the middle of a bar, so painting over it leaves the longer one with no hit
+    // target at all. The moment goes to whichever category dominates it and the
+    // rest are read in the lanes.
     if (collision === undefined || boundaries.has(item.id)) {
       result.push(item);
     } else if (compactPriority(item) < compactPriority(collision)) {
       if (boundaries.has(collision.id)) result.push(item);
       else result[result.indexOf(collision)] = item;
-    } else if (!coincident(item, collision, pointCluster)) {
+    } else if (!hidesHitTarget(item, collision, pointCluster)) {
       result.push(item);
     }
   }
   return result;
 }
 
-/** Whether two plotted items occupy the same pixels, to within one visual moment. */
-function coincident(
+/**
+ * Whether one plotted item is drawn over the pixel a pointer reaches another by.
+ *
+ * The plot paints in the order it is given, so a later item covers the stretch of
+ * an earlier one it overlaps. Two that run the same length is the whole of the
+ * earlier one; one nested inside it is the middle, which is where a hover or a
+ * click on a bar actually lands. Either way the item underneath has no hit target
+ * left, and the reader reaches it in the expanded lanes instead.
+ */
+function hidesHitTarget(
   item: TimelineItem<unknown>,
   other: TimelineItem<unknown>,
   cluster: number,
 ): boolean {
+  const target = (other.start + (other.end ?? other.start)) / 2;
   return (
-    Math.abs(item.start - other.start) <= cluster &&
-    Math.abs((item.end ?? item.start) - (other.end ?? other.start)) <= cluster
+    item.start - cluster <= target &&
+    target <= (item.end ?? item.start) + cluster
   );
 }
 
@@ -502,14 +511,36 @@ export function pathTo(
   return [];
 }
 
+/**
+ * What one span lists: the stretches inside it, and the moments it recorded that
+ * none of them already shows.
+ *
+ * A node's span carries every record the node made and each session's span
+ * carries its own again, so a record shown inside the session it belongs to was
+ * listed a second time beside it — and the second copy fell between two sessions,
+ * splitting a run of hundreds of them into fragments too short to group. A
+ * moment is listed once, at the tightest stretch that holds it.
+ */
 function spanRows(
   span: TimelineSpan,
   children: Map<string, TimelineSpan[]>,
 ): TimelineRow[] {
+  const nested = (children.get(span.id) ?? []).map((child) =>
+    spanRow(child, children),
+  );
+  const shown = new Set(nested.flatMap(recordedIn));
   return [
-    ...(children.get(span.id) ?? []).map((child) => spanRow(child, children)),
-    ...span.events.map(eventRow),
+    ...nested,
+    ...span.events.filter(({ id }) => !shown.has(id)).map(eventRow),
   ].sort(byStart);
+}
+
+/** Every moment one row already shows, itself or through the rows under it. */
+function recordedIn(row: TimelineRow): string[] {
+  return [
+    ...(row.rowKind === "event" ? [row.id] : []),
+    ...row.children.flatMap(recordedIn),
+  ];
 }
 
 function spanRow(
@@ -804,17 +835,29 @@ function count(rows: readonly TimelineRow[]): number {
 }
 
 /**
- * Recorded order: by the instant, and by the order the server served them where
- * two records share one.
+ * Recorded order: by the instant, then a moment ahead of a stretch that opens on
+ * it, and by the order the server served them where two records still share one.
  *
- * The sort is stable, so equal instants keep the order they arrived in — which is
- * the order the run recorded them. Breaking that tie on the id instead sorted the
- * sessions of one dispatch alphabetically by session name, so which of them read
- * as the dispatch that opened the group depended on what its session happened to
- * be called.
+ * A `node-dispatched` and the session it opened share an instant, because a
+ * session is served from the dispatch that ran it — and a moment drawn *between*
+ * two sessions of one node splits a run of hundreds of them into ungroupable
+ * fragments. The record that opened the stretch reads before it, which is the
+ * order the run made them in.
+ *
+ * The sort is otherwise stable, so equal instants keep the order they arrived in.
+ * Breaking that tie on the id instead sorted the sessions of one dispatch
+ * alphabetically by session name, so which of them read as the dispatch that
+ * opened the group depended on what its session happened to be called.
  */
 function byStart(first: TimelineRow, next: TimelineRow): number {
-  return first.startedAt.localeCompare(next.startedAt);
+  const instant = first.startedAt.localeCompare(next.startedAt);
+  if (instant !== 0) return instant;
+  return moments(first) - moments(next);
+}
+
+/** Whether a row is a moment the run recorded rather than a stretch it ran over. */
+function moments(row: TimelineRow): number {
+  return row.rowKind === "event" ? 0 : 1;
 }
 
 function elapsed(startedAt: string, endedAt: string | null): number | null {
