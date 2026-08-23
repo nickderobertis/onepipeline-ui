@@ -3803,3 +3803,169 @@ pub fn lint_report() -> String {
         serde_json::to_string(&report).expect("the report serializes")
     )
 }
+
+/// The run id of the malformed-releases fixture below.
+pub const MALFORMED_RELEASE_RUN_ID: &str = "run-20260807-b6a5c4";
+
+/// A run whose release records are each broken in one of the ways a producer can
+/// break one.
+///
+/// A read surface reads what a producer wrote, and a producer that wrote a field
+/// and left it blank, or wrote a stamp as a word, has said nothing rather than
+/// said something wrong. Every record here is a plausible near-miss rather than
+/// nonsense, and what the crate makes of each is the observable behaviour
+/// `tests/e2e/server.rs` holds:
+///
+/// - a `release-observed` for the commit this node landed as that names no
+///   `version`, so the node item is served no release rather than a nameless one;
+/// - a `release-arrived` whose every field is blank, so the event carries no
+///   `release` key rather than an empty object;
+/// - a `release-wait` whose one entry names nothing it waits on, on the same
+///   terms;
+/// - a second `release-wait` whose entry began at a word rather than an instant,
+///   which is served without a `since` and with everything else intact;
+/// - a `release-adopted` whose version entries are each missing one of the three
+///   things a version *is*, so no `versions` are served and the delivery still is.
+pub fn write_malformed_releases(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "codex",
+            "session": SESSION,
+            "pid": 4260,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "name": "malformed-releases",
+        "concurrency": 1,
+        "tasks": [
+            { "id": NODE_ID, "persona": "worker", "task": "## What\nLand it." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let at_node = json!({ "run_id": run, "node": NODE_ID });
+    let at_run = json!({ "run_id": run });
+    let mut journal = Journal::new("a-recording-host-4260");
+    journal
+        .emit(
+            START,
+            "pipeline",
+            "run-started",
+            at_run.clone(),
+            json!({ "plan": plan }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "release-wait",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "awaiting": [{ "identity": DEP_IDENTITY, "target": "crate" }],
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:02.000Z",
+            "pipeline",
+            "release-wait",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "awaiting": [{
+                    "dep": "sdk",
+                    "identity": DEP_IDENTITY,
+                    "target": "crate",
+                    "style": "automated",
+                    "since": "a little while ago",
+                    "last_answer": "not-released",
+                }],
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:03.000Z",
+            "pipeline",
+            "release-arrived",
+            at_node.clone(),
+            json!({ "dep": "", "identity": "", "target": "  ", "version": "" }),
+        )
+        .emit(
+            "2026-08-07T12:00:04.000Z",
+            "pipeline",
+            "release-adopted",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "delivery": "deferred",
+                "versions": [
+                    { "target": "crate", "version": DEP_VERSION },
+                    { "identity": DEP_IDENTITY, "version": DEP_VERSION },
+                    { "identity": DEP_IDENTITY, "target": "npm" },
+                ],
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:05.000Z",
+            "pipeline",
+            "node-dispatched",
+            at_node.clone(),
+            json!({ "persona": "worker" }),
+        )
+        .emit(
+            "2026-08-07T12:00:05.500Z",
+            "vcs",
+            "session-opened",
+            at_node.clone(),
+            json!({
+                "token": "a-vcs-session-token",
+                "identity": "github.com/nickderobertis/onepipeline-ui",
+                "branch": "feature/malformed-releases",
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:06.000Z",
+            "vcs",
+            "merge-completed",
+            at_node.clone(),
+            json!({
+                "identity": "github.com/nickderobertis/onepipeline-ui",
+                "sha": MERGE_SHA,
+                "base": "main",
+            }),
+        )
+        // The commit this node landed as, released — and the record names no
+        // version, which is one of the three things a release is.
+        .emit(
+            "2026-08-07T12:00:07.000Z",
+            "vcs",
+            "release-observed",
+            at_run,
+            json!({
+                "identity": "github.com/nickderobertis/onepipeline-ui",
+                "target": "crate",
+                "style": "automated",
+                "landing_commit": MERGE_SHA,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:08.000Z",
+            "pipeline",
+            "node-settled",
+            at_node,
+            json!({ "status": "done", "outcome": "shipped" }),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    dir
+}

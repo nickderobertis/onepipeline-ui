@@ -630,6 +630,90 @@ fn a_nodes_item_carries_the_release_the_commit_it_landed_as_went_out_in() {
     );
 }
 
+/// What a reader is served when a producer wrote a release record badly.
+///
+/// A read surface reads what a producer wrote, and every one of these is a
+/// plausible near-miss rather than nonsense: a release nobody named a version
+/// for, a record whose every field is blank, a wait that names nothing it waits
+/// on, a wait that began at a word rather than an instant, and adopted versions
+/// each missing one of the three things a version is. The rule in each case is
+/// the same — a field a producer left blank has said nothing, and absent is what
+/// nothing is — and what makes it worth a journey is that the alternative is
+/// visible: an empty release object reaches a reader as a heading over a blank
+/// panel, and a `since` that no client can parse fails the *whole* timeline over
+/// one entry.
+#[test]
+fn a_release_record_a_producer_wrote_badly_is_served_as_the_nothing_it_said() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_malformed_releases(root, fixture_run::MALFORMED_RELEASE_RUN_ID);
+    });
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::MALFORMED_RELEASE_RUN_ID),
+    )
+    .json();
+    // The node landed, and a release names that commit — but it names no version,
+    // so there is no release to serve rather than a release nobody could install.
+    assert_eq!(
+        detail["node_details"][fixture_run::NODE_ID]["publication"]["commit"],
+        json!(fixture_run::MERGE_SHA)
+    );
+    let node = &detail["graph"]["node_results"][fixture_run::NODE_ID];
+    assert!(node.get("release").is_none(), "{node}");
+
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::MALFORMED_RELEASE_RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json();
+    let events: Vec<Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .collect();
+    let of_kind = |kind: &str| -> Vec<&Value> {
+        events
+            .iter()
+            .filter(|event| event["kind"] == json!(kind))
+            .collect()
+    };
+    // Both records really reached the timeline; what is asserted below is what
+    // each carries, not that either went missing.
+    let waits = of_kind("release-wait");
+    assert_eq!(waits.len(), 2, "{events:?}");
+    // A wait naming nothing it is held on says nothing at all, so the whole key
+    // is absent — never an empty object, which reads as a node held on nothing.
+    assert!(waits[0].get("release").is_none(), "{:?}", waits[0]);
+    // The one beside it began at a word rather than an instant. Every other field
+    // it filled is served; the stamp is not, because the wire types it as one and
+    // a client that types it would refuse this whole timeline over the entry.
+    let entry = &waits[1]["release"]["awaiting"][0];
+    assert_eq!(entry["dep"], json!("sdk"));
+    assert_eq!(entry["style"], json!("automated"));
+    assert_eq!(entry["last_answer"], json!("not-released"));
+    assert!(entry.get("since").is_none(), "{entry}");
+    // A record whose every field is blank is a record that said nothing.
+    let arrived = of_kind("release-arrived");
+    assert_eq!(arrived.len(), 1);
+    assert!(arrived[0].get("release").is_none(), "{:?}", arrived[0]);
+    // And an adoption keeps the one thing it did say. Each version entry is
+    // missing one of the three a version is, so none is served — while the
+    // delivery, which the record did name, still is.
+    let adopted = of_kind("release-adopted");
+    assert_eq!(adopted.len(), 1);
+    assert_eq!(adopted[0]["release"]["delivery"], json!("deferred"));
+    assert!(
+        adopted[0]["release"].get("versions").is_none(),
+        "{:?}",
+        adopted[0]
+    );
+}
+
 #[test]
 fn the_run_timeline_covers_the_run_and_the_nodes_under_it() {
     let serving = two_runs();

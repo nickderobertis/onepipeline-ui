@@ -3987,22 +3987,29 @@ fn release_facts(event: &Envelope) -> Option<Value> {
 /// person told. An entry naming nothing it waits on is dropped.
 fn awaited(entry: &Value) -> Option<Value> {
     let entry = entry.as_object()?;
+    // Served in the order the record declares them, so a reader of the wire meets
+    // the entry the way the producer's own contract spells it.
     let mut waited = Map::new();
-    for key in [
-        "dep",
-        "identity",
-        "target",
-        "style",
-        "action",
-        "since",
-        "last_answer",
-    ] {
+    for key in ["dep", "identity", "target", "style", "action"] {
         if let Some(value) = non_empty(entry.get(key).and_then(Value::as_str)) {
             waited.insert(key.to_owned(), json!(value));
         }
     }
+    // The one string here that is not free text: `since` is when the wait began,
+    // the wire types it as an instant, and a client that types it refuses the
+    // whole timeline over one entry a producer wrote a word into. So it is served
+    // only where it parses as one, and a wait whose start this crate cannot read
+    // is served without it rather than with something no reader can plot.
+    if let Some(since) = non_empty(entry.get("since").and_then(Value::as_str))
+        .filter(|since| millis_of(since).is_some())
+    {
+        waited.insert("since".into(), json!(since));
+    }
     if let Some(seconds) = entry.get("waited_seconds").and_then(Value::as_u64) {
         waited.insert("waited_seconds".into(), json!(seconds));
+    }
+    if let Some(answer) = non_empty(entry.get("last_answer").and_then(Value::as_str)) {
+        waited.insert("last_answer".into(), json!(answer));
     }
     waited.contains_key("dep").then(|| Value::Object(waited))
 }

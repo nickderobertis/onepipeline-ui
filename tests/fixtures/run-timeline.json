@@ -33,8 +33,8 @@
                 "target": "crate",
                 "style": "automated",
                 "since": "2026-08-07T12:00:01.000Z",
-                "last_answer": "not-released",
-                "waited_seconds": 12
+                "waited_seconds": 12,
+                "last_answer": "not-released"
               },
               {
                 "dep": "sdk",
@@ -43,8 +43,8 @@
                 "style": "human-step",
                 "action": "publish the npm wrapper from the tagged release",
                 "since": "2026-08-07T12:00:01.000Z",
-                "last_answer": "awaiting-human-step",
-                "waited_seconds": 12
+                "waited_seconds": 12,
+                "last_answer": "awaiting-human-step"
               }
             ]
           }
