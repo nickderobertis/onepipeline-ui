@@ -275,6 +275,20 @@ lint-llm-validate *args:
     llmlint validate {{args}}
 
 # The blocking `llmlint` PR check; `just gate` runs it before you push.
+#
+# Memoized: the judge is non-deterministic, so this runs the cached Nx target
+# `onepipeline-ui:lint-llm-diff` rather than llmlint directly, and one tree judged
+# against one base with one judge configuration gets one verdict — a second run
+# over an unchanged tree replays the first run's report instead of rolling again.
+# `scripts/llmlint-cached-diff.sh` holds what is keyed and why; only a clean run
+# is replayed, because Nx caches successful tasks only.
+#
+# The name and the argument shape are what they always were, so the CI job and
+# the operator calling `just lint-llm-diff origin/main` are unaffected. What the
+# trailing arguments reach changed: they are Nx's now, not llmlint's, which is
+# what makes `just lint-llm-diff origin/main --skip-nx-cache` the one supported
+# way to force a fresh roll. Reach llmlint's own flags through `just lint-llm`,
+# or `scripts/lint-llm-diff.sh` for the diff-scoped run without the memo.
 # llmlint scoped to the files this branch changed since it forked from main.
-lint-llm-diff base="origin/main" *args:
-    @./scripts/lint-llm-diff.sh "{{base}}" {{args}}
+lint-llm-diff base="origin/main" *nx_args:
+    @./scripts/llmlint-cached-diff.sh "{{base}}" {{nx_args}}

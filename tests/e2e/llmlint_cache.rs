@@ -1,0 +1,576 @@
+//! The judged tier's memo: `just lint-llm-diff`, driven the way the gate and CI
+//! drive it, over a real Nx workspace and a real git repository.
+//!
+//! The judge is non-deterministic across the gap between what it judges and what
+//! changed — it judges every file in the base-to-head diff, because llmlint has
+//! no increment mode, while what changed is one hunk. Rolls of one branch have
+//! named a different rule each time, and one gate invocation over one tree has
+//! returned two opposite verdicts. So the tier is memoized, and these journeys
+//! are what that memo has to be worth: one tree judged against one base with one
+//! judge configuration gets **one** verdict, and each of the three moving on
+//! costs a real re-judge rather than a replay.
+//!
+//! Everything here is the real thing but one. The recipe is the committed
+//! `justfile`'s, the Nx target is `nx.json`'s and `project.json`'s, the scripts
+//! are the ones the gate runs, and the workspace is a git repository with a base
+//! commit and a change — because what is being asserted is a cache key, and a key
+//! computed over a stub workspace would key nothing this repository has.
+//!
+//! The one stand-in is `llmlint` itself. The real one bills a model call and is
+//! the very thing whose answer varies, so a journey that drove it could not tell
+//! a replay from a lucky reroll. It stands in from inside the scratch `HOME`,
+//! which is also how these journeys check that the tier resolves its judge
+//! through `scripts/llmlint-runtime-env.sh` rather than through whatever the
+//! caller had on PATH.
+
+// The tier is bash scripts fanned out by Nx, and its scratch workspace reaches
+// the orchestrator through a symlinked `node_modules` — which on Windows needs a
+// privilege a test runner does not have. Nothing is lost by scoping to the
+// platforms that run this tier: `.github/workflows/ci.yml` runs the `llmlint` job
+// on ubuntu alone, and `just check-cross`, which is what macOS and Windows run,
+// covers the deterministic tiers rather than this one.
+#![cfg(unix)]
+
+use std::fs;
+use std::os::unix::fs::symlink;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use tempfile::TempDir;
+
+/// Everything the cached tier reads out of a checkout, and nothing else. Spelled
+/// out rather than swept up, so a file this tier starts depending on has to be
+/// named here — which is the same list an operator would have to explain.
+const WORKSPACE_FILES: &[&str] = &[
+    // The recipe under test, and the two manifests whose backticks `just`
+    // evaluates before it will parse that recipe at all.
+    "justfile",
+    "Cargo.toml",
+    "Cargo.lock",
+    // The cached target: its defaults and inputs, and the project that owns it.
+    "nx.json",
+    "project.json",
+    "package.json",
+    "package-lock.json",
+    // Without this, `.nx/cache` would be a tracked part of the workspace Nx
+    // hashes, so every run would change the tree and nothing would ever replay.
+    ".gitignore",
+    // The tier itself, end to end.
+    "scripts/nx.sh",
+    "scripts/workspace-install.sh",
+    "scripts/lint-llm-diff.sh",
+    "scripts/llmlint-cached-diff.sh",
+    "scripts/llmlint-judge.sh",
+    "scripts/llmlint-fingerprint.sh",
+    "scripts/llmlint-runtime-env.sh",
+];
+
+/// The stand-in judge, and the whole of this suite's substitution.
+///
+/// It answers the two questions `scripts/llmlint-fingerprint.sh` asks — its
+/// version, and its effective merged configuration — from its environment rather
+/// than from the workspace, which is what lets a journey move the judge
+/// configuration without touching the tree. Everything else is a judge call: it
+/// is recorded, and it answers with a verdict naming which call it was, so a
+/// replayed report is distinguishable from a fresh one that happens to agree.
+///
+/// llmlint: ignore-file[e2e_not_mocked] the real `llmlint` bills a model call and
+/// is precisely the thing whose answer varies between two runs over one tree — a
+/// journey that drove it could not tell a replayed verdict from a lucky reroll,
+/// which is the entire subject here. This is the narrowest cut available: the
+/// recipe, the Nx target, the scripts and the workspace are all real, and the
+/// stand-in only makes "was the judge asked again?" readable. This constant is
+/// the whole of that substitution.
+const STUB_LLMLINT: &str = "#!/usr/bin/env bash\n\
+     set -eu\n\
+     case \"${1:-}\" in\n\
+       --version) printf 'llmlint %s\\n' \"${STUB_LLMLINT_VERSION:-9.9.9}\"; exit 0 ;;\n\
+       config)\n\
+         [ -z \"${STUB_CONFIG_STATUS:-}\" ] || { echo 'stub llmlint: cannot resolve the config' >&2; exit \"$STUB_CONFIG_STATUS\"; }\n\
+         printf 'rules=%s\\noneharness_bin=%s\\n' \"${STUB_CONFIG_RULES:-baseline}\" \"${LLMLINT_ONEHARNESS_BIN:-null}\"\n\
+         exit 0 ;;\n\
+     esac\n\
+     printf '%s\\n' \"$*\" >> \"$STUB_CALLS\"\n\
+     printf 'stub llmlint verdict #%s\\n' \"$(wc -l < \"$STUB_CALLS\" | tr -d ' ')\"\n\
+     exit \"${STUB_JUDGE_STATUS:-0}\"\n";
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.email=gate@example.invalid",
+            "-c",
+            "user.name=gate",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git is on PATH");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("utf-8 git output")
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// What one run said about where its verdict came from, as the recipe reports it.
+#[derive(Debug, PartialEq, Eq)]
+enum Provenance {
+    Judged,
+    Replayed,
+}
+
+/// A scratch Nx workspace carrying this repository's own tier, over a git
+/// repository whose branch commit changed one file.
+struct Fixture {
+    dir: TempDir,
+    /// The base the journeys judge against.
+    base: String,
+    /// A commit before it, so "the base moved" is a base this checkout really
+    /// has and really diffs differently against.
+    earlier: String,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let dir = TempDir::new().expect("temp dir");
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(workspace.join("scripts")).expect("create the scratch workspace");
+        for name in WORKSPACE_FILES {
+            fs::copy(repo_root().join(name), workspace.join(name))
+                .unwrap_or_else(|error| panic!("copy {name} into the scratch workspace: {error}"));
+        }
+        // The orchestrator itself, borrowed rather than installed: `npm ci` here
+        // would cost minutes per test, and Nx is a tool this tier runs, not a
+        // thing it decides. `scripts/workspace-install.sh` sees the shim and
+        // no-ops, exactly as it does in a bootstrapped clone.
+        symlink(
+            repo_root().join("node_modules"),
+            workspace.join("node_modules"),
+        )
+        .expect("borrow the workspace's node_modules");
+
+        git(&workspace, &["init", "--quiet"]);
+        git(&workspace, &["add", "-A"]);
+        git(&workspace, &["commit", "--quiet", "-m", "the repository"]);
+        // Commits rather than branch names: what the recipe resolves a base *to*
+        // is the point, and a commit resolves the same however this git was
+        // configured to name its first branch.
+        let earlier = git(&workspace, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        fs::write(workspace.join("BEFORE.md"), "already on the base branch\n")
+            .expect("write the earlier commit");
+        git(&workspace, &["add", "-A"]);
+        git(
+            &workspace,
+            &[
+                "commit",
+                "--quiet",
+                "-m",
+                "the base this branch forked from",
+            ],
+        );
+        let base = git(&workspace, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        fs::write(workspace.join("CHANGED.md"), "the change under judgement\n")
+            .expect("write the change");
+        git(&workspace, &["add", "-A"]);
+        git(&workspace, &["commit", "--quiet", "-m", "the change"]);
+
+        let stub_dir = dir.path().join("home/.local/bin");
+        fs::create_dir_all(&stub_dir).expect("create the scratch home");
+        let stub = stub_dir.join("llmlint");
+        fs::write(&stub, STUB_LLMLINT).expect("write the stand-in judge");
+        let mut mode = fs::metadata(&stub)
+            .expect("stat the stand-in")
+            .permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
+        fs::set_permissions(&stub, mode).expect("chmod the stand-in");
+
+        Self { dir, base, earlier }
+    }
+
+    fn workspace(&self) -> PathBuf {
+        self.dir.path().join("workspace")
+    }
+
+    fn calls_log(&self) -> PathBuf {
+        self.dir.path().join("judge-calls.log")
+    }
+
+    /// Run the recipe the gate and CI run, against this fixture's base.
+    fn run(&self) -> Output {
+        self.run_full(&self.base.clone(), &[], &[])
+    }
+
+    /// The same, with `environment` layered on and `nx_args` forwarded.
+    fn run_with(&self, environment: &[(&str, &str)], nx_args: &[&str]) -> Output {
+        self.run_full(&self.base.clone(), environment, nx_args)
+    }
+
+    fn run_full(&self, base: &str, environment: &[(&str, &str)], nx_args: &[&str]) -> Output {
+        let mut command = Command::new("just");
+        command
+            .arg("lint-llm-diff")
+            .arg(base)
+            .args(nx_args)
+            .current_dir(self.workspace())
+            // The scratch home is where the stand-in judge lives, so this is also
+            // what makes `scripts/llmlint-runtime-env.sh` resolve it: the tier
+            // prepends `$HOME/.local/bin`, which is where `just setup-llmlint`
+            // installs the real one.
+            .env("HOME", self.dir.path().join("home"))
+            .env("STUB_CALLS", self.calls_log());
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+        command.output().expect("just is on PATH")
+    }
+
+    /// Every judge call the tier asked for, in order.
+    fn judge_calls(&self) -> Vec<String> {
+        fs::read_to_string(self.calls_log())
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+/// Where the run said its verdict came from. Read off the recipe's own line
+/// rather than off Nx's, because that line is this tier's contract with an
+/// operator reading a gate log — and it is what a wrong reading would mislabel.
+fn provenance(output: &Output) -> Provenance {
+    let reported = stderr(output);
+    let replayed = reported.contains("lint-llm-diff: replayed the recorded verdict");
+    let judged = reported.contains("lint-llm-diff: judged this diff against base");
+    assert!(
+        replayed ^ judged,
+        "the run did not report exactly one provenance:\n{reported}"
+    );
+    if replayed {
+        Provenance::Replayed
+    } else {
+        Provenance::Judged
+    }
+}
+
+/// The whole point of the memo: a second gate over an unchanged tree and an
+/// unchanged base does not roll the dice again, it replays the first roll.
+#[test]
+fn a_second_run_over_an_unchanged_tree_replays_the_first_verdict() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run();
+    let second = fixture.run();
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(provenance(&first), Provenance::Judged);
+    assert_eq!(provenance(&second), Provenance::Replayed);
+    assert_eq!(
+        fixture.judge_calls().len(),
+        1,
+        "the judge was asked twice, so the tier is still an independent roll per run"
+    );
+    // Nx annotates its own task line on a hit, so what has to match is the
+    // judge's report inside it — which is the verdict a reader came for.
+    assert!(
+        stdout(&first).contains("stub llmlint verdict #1")
+            && stdout(&second).contains("stub llmlint verdict #1"),
+        "the replayed run did not reproduce the recorded verdict:\nfirst:\n{}\nsecond:\n{}",
+        stdout(&first),
+        stdout(&second)
+    );
+}
+
+/// The tree is in the key, so the hunk a worker just wrote is judged rather than
+/// answered from the verdict its predecessor earned.
+#[test]
+fn a_changed_tree_is_judged_again() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run();
+    fs::write(fixture.workspace().join("CHANGED.md"), "a second hunk\n").expect("change the tree");
+    let second = fixture.run();
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(provenance(&second), Provenance::Judged);
+    assert_eq!(fixture.judge_calls().len(), 2);
+}
+
+/// "Green" means green *against that commit*, so a base that moved is a
+/// different question and gets a fresh answer.
+#[test]
+fn a_base_that_moved_is_judged_again() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run();
+    let earlier = fixture.earlier.clone();
+    let second = fixture.run_full(&earlier, &[], &[]);
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(provenance(&second), Provenance::Judged);
+    assert_eq!(fixture.judge_calls().len(), 2);
+    let judged = fixture.judge_calls();
+    assert!(
+        judged[1].contains(&earlier),
+        "the second run judged against the wrong base: {}",
+        judged[1]
+    );
+}
+
+/// The judge configuration is in the key, and it has to be — the rules come from
+/// plugins pinned in `llmlint.yml` but fetched from outside this repository, so a
+/// rule can change with no file in the tree changing at all. Moved here the same
+/// way: entirely outside the workspace.
+#[test]
+fn a_judge_configuration_that_moved_outside_the_tree_is_judged_again() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run();
+    let second = fixture.run_with(&[("STUB_CONFIG_RULES", "a rule the plugin added")], &[]);
+    let third = fixture.run();
+
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(provenance(&first), Provenance::Judged);
+    assert_eq!(
+        provenance(&second),
+        Provenance::Judged,
+        "a changed judge configuration replayed a verdict it has moved on from"
+    );
+    assert_eq!(
+        provenance(&third),
+        Provenance::Replayed,
+        "the original configuration's own verdict should still be on record"
+    );
+    assert_eq!(fixture.judge_calls().len(), 2);
+}
+
+/// The subtle half. `llmlint config` renders the resolved oneharness binary, and
+/// this host really does leak one — a checkout of another repository exports
+/// `LLMLINT_ONEHARNESS_BIN` at its own wrapper. Read from the caller, that would
+/// hash one judged diff to a different key per dispatch and re-roll the judge
+/// every round, so the fingerprint resolves it through the environment the target
+/// itself judges under.
+#[test]
+fn a_callers_environment_cannot_change_the_key_for_one_judged_diff() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run_with(
+        &[("LLMLINT_ONEHARNESS_BIN", "/dispatch-one/wrapper.sh")],
+        &[],
+    );
+    let second = fixture.run_with(
+        &[("LLMLINT_ONEHARNESS_BIN", "/dispatch-two/wrapper.sh")],
+        &[],
+    );
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(provenance(&first), Provenance::Judged);
+    assert_eq!(
+        provenance(&second),
+        Provenance::Replayed,
+        "the caller's environment reached the cache key, so every dispatch re-rolls the judge"
+    );
+    assert_eq!(fixture.judge_calls().len(), 1);
+}
+
+/// A fingerprint that cannot be produced must stop the tier, not quietly leave
+/// the judge configuration out of the key. Nx scores a failing `runtime` input as
+/// no contribution rather than as an error, which is why the recipe resolves this
+/// itself — and why the failure has to be asserted as *fatal* rather than as
+/// merely logged.
+#[test]
+fn a_fingerprint_that_cannot_be_produced_fails_the_tier_rather_than_replaying() {
+    let fixture = Fixture::new();
+
+    let recorded = fixture.run();
+    let broken = fixture.run_with(&[("STUB_CONFIG_STATUS", "3")], &[]);
+
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    assert_eq!(
+        broken.status.code(),
+        Some(2),
+        "a tier with no fingerprint reported something other than a usage error:\n{}",
+        stderr(&broken)
+    );
+    assert!(
+        stderr(&broken).contains("refusing to judge without a fingerprint"),
+        "the failure does not say why it stopped:\n{}",
+        stderr(&broken)
+    );
+    assert_eq!(
+        fixture.judge_calls().len(),
+        1,
+        "the tier judged, or replayed, without a fingerprint of the judge configuration"
+    );
+}
+
+/// Only a green is memoized. Findings are re-judged every run — the deliberate
+/// price of having no verdict record of our own to write, restore, or race on.
+#[test]
+fn findings_are_judged_again_rather_than_replayed() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run_with(&[("STUB_JUDGE_STATUS", "1")], &[]);
+    let second = fixture.run_with(&[("STUB_JUDGE_STATUS", "1")], &[]);
+
+    assert_eq!(first.status.code(), Some(1), "{}", stderr(&first));
+    assert_eq!(second.status.code(), Some(1), "{}", stderr(&second));
+    assert_eq!(provenance(&second), Provenance::Judged);
+    assert_eq!(fixture.judge_calls().len(), 2);
+}
+
+/// A judge that never reached a verdict is not a finding to clear, and it is not
+/// cached either. Nx reports every failed task as exit 1, so the tier restores
+/// the status llmlint actually exited with — the difference between "clear this"
+/// and "repair the toolchain".
+#[test]
+fn a_judge_that_never_reached_a_verdict_is_judged_again_and_keeps_its_exit_code() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run_with(&[("STUB_JUDGE_STATUS", "2")], &[]);
+    let second = fixture.run_with(&[("STUB_JUDGE_STATUS", "2")], &[]);
+
+    assert_eq!(
+        first.status.code(),
+        Some(2),
+        "a judge that never reached a verdict was reported as findings:\n{}",
+        stderr(&first)
+    );
+    assert_eq!(second.status.code(), Some(2), "{}", stderr(&second));
+    assert!(
+        stdout(&first).contains("never reached a verdict"),
+        "the failure does not distinguish itself from a finding:\n{}",
+        stdout(&first)
+    );
+    assert_eq!(provenance(&second), Provenance::Judged);
+    assert_eq!(fixture.judge_calls().len(), 2);
+}
+
+/// The one supported way to force a fresh roll, and it is per-invocation on
+/// purpose: it neither reads the recorded verdict nor overwrites it, so the next
+/// ordinary run still replays the entry that was there before.
+#[test]
+fn the_per_invocation_option_re_judges_without_reading_or_writing_the_cache() {
+    let fixture = Fixture::new();
+
+    let recorded = fixture.run();
+    let forced = fixture.run_with(&[], &["--skip-nx-cache"]);
+    let after = fixture.run();
+
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    assert!(forced.status.success(), "{}", stderr(&forced));
+    assert!(after.status.success(), "{}", stderr(&after));
+    assert_eq!(
+        provenance(&forced),
+        Provenance::Judged,
+        "--skip-nx-cache read the cache instead of re-judging"
+    );
+    assert_eq!(fixture.judge_calls().len(), 2);
+    assert_eq!(provenance(&after), Provenance::Replayed);
+    assert!(
+        stdout(&after).contains("stub llmlint verdict #1"),
+        "the forced run overwrote the recorded verdict:\n{}",
+        stdout(&after)
+    );
+}
+
+/// The provenance line is read back out of Nx's own wording, and Nx paints that
+/// wording whenever something sets `FORCE_COLOR` — which Nx itself does for every
+/// task it runs. Matching the painted text reported every replay as a fresh
+/// judgement, which is the one way this line can be worse than absent: an
+/// operator reads it to know whether the verdict in front of them was rolled or
+/// recalled.
+#[test]
+fn a_colourized_nx_report_is_still_read_as_a_replay() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run_with(&[("FORCE_COLOR", "true")], &[]);
+    let second = fixture.run_with(&[("FORCE_COLOR", "true")], &[]);
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert!(
+        stdout(&second).contains('\u{1b}'),
+        "the run was not colourized, so this journey proves nothing:\n{}",
+        stdout(&second)
+    );
+    assert_eq!(provenance(&first), Provenance::Judged);
+    assert_eq!(
+        provenance(&second),
+        Provenance::Replayed,
+        "a painted cache annotation was read as a fresh judgement"
+    );
+    assert_eq!(fixture.judge_calls().len(), 1);
+}
+
+/// An ambient global cache skip — exported to re-roll this tier and then
+/// inherited by every unrelated command — is reported and ignored here, because
+/// honouring it would put the judge back to one independent roll per run. Every
+/// other Nx target still honours it.
+#[test]
+fn an_ambient_global_cache_skip_is_reported_and_ignored() {
+    let fixture = Fixture::new();
+
+    let recorded = fixture.run();
+    let ambient = fixture.run_with(&[("NX_SKIP_NX_CACHE", "true")], &[]);
+    let disabled = fixture.run_with(&[("NX_DISABLE_NX_CACHE", "true")], &[]);
+
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    for (output, name) in [
+        (&ambient, "NX_SKIP_NX_CACHE"),
+        (&disabled, "NX_DISABLE_NX_CACHE"),
+    ] {
+        assert!(output.status.success(), "{}", stderr(output));
+        assert_eq!(
+            provenance(output),
+            Provenance::Replayed,
+            "{name} re-rolled the judge from an ambient setting"
+        );
+        assert!(
+            stderr(output).contains("ignoring the ambient global Nx cache skip")
+                && stderr(output).contains("--skip-nx-cache"),
+            "{name} was ignored without saying so, or without naming the per-invocation lever:\n{}",
+            stderr(output)
+        );
+    }
+    assert_eq!(fixture.judge_calls().len(), 1);
+}
+
+/// A base that does not resolve is a usage error, and nothing is judged against
+/// it — the same contract the tier had before it was memoized.
+#[test]
+fn a_base_that_does_not_resolve_is_a_usage_error() {
+    let fixture = Fixture::new();
+
+    let output = fixture.run_full("no-such-ref", &[], &[]);
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("no-such-ref"),
+        "the message should name the base it could not resolve:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        fixture.judge_calls().is_empty(),
+        "the judge was asked about a base that does not resolve"
+    );
+}

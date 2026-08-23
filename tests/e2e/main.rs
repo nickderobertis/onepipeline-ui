@@ -7,13 +7,14 @@
 //! bytes it serves; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
 //! platform package through node's own resolution; `lint_llm_diff` runs the
-//! gate's own llmlint recipe over a real git repository, `release_status` runs
+//! gate's own llmlint recipe over a real git repository, `llmlint_cache` runs
+//! the memo around that recipe over a real Nx workspace, `release_status` runs
 //! the release workflow's own last job over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
 //! surface, and `ensure_sibling` runs the recipe the gate provisions the sibling
 //! CLI with, plus the task graph Nx itself builds for `test`.
 //!
-//! Those last four each stand in for exactly one program on PATH — `llmlint`,
+//! Those last five each stand in for exactly one program on PATH — `llmlint`,
 //! which bills a model call, `gh`, which rewrites a public Release, and `cargo`,
 //! whose reading downloads and builds two dependency trees and whose install
 //! compiles a second CLI. The script under test is the real one in each, and
@@ -22,6 +23,7 @@
 mod cli;
 mod ensure_sibling;
 mod lint_llm_diff;
+mod llmlint_cache;
 mod packaging;
 mod release_status;
 mod semver_check;
