@@ -23,7 +23,15 @@
 mod cli;
 mod ensure_sibling;
 mod lint_llm_diff;
+// llmlint: ignore-block[e2e_not_mocked] the real `llmlint` bills a model call
+// and answers differently on each roll, so a journey that drove it could not
+// tell a replayed verdict from a lucky reroll — which is the entire subject of
+// the suite this line declares. It substitutes exactly one program at the PATH
+// boundary and nothing above it: the recipe, the Nx target, the scripts and the
+// workspace it drives are all real, and the module records that substitution and
+// its reason at the constant that makes it.
 mod llmlint_cache;
+// llmlint: ignore-end[e2e_not_mocked]
 mod packaging;
 mod release_status;
 mod semver_check;
