@@ -83,6 +83,16 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "change-check": "verification",
   "change-merged": "publication",
   "sync-conflict": "failure",
+  // The releases, across the two producers that record them: `onevcs` probes,
+  // acknowledges and observes, `onepipeline` holds a node, sees the release arrive
+  // and adopts the versions. The wait is the one filed apart from the rest, because
+  // what a reader scans a stalled run for is the wait rather than what it is for.
+  "release-probed": "publication",
+  "release-acknowledged": "publication",
+  "release-observed": "publication",
+  "release-wait": "contention",
+  "release-arrived": "publication",
+  "release-adopted": "publication",
   // Records written before any producer stamped a `source` on them.
   "setup-finished": "lifecycle",
   "step-started": "lifecycle",

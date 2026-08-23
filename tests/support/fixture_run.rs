@@ -41,6 +41,21 @@ pub const ARTIFACT_ID: &str = "artifact-5c8f0a1b";
 pub const CHECK_LOG_ARTIFACT: &str = "artifact-published-smoke";
 /// The commit the change merged as. No url: the host owns that and records none.
 pub const MERGE_SHA: &str = "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908";
+/// The release that carried the node's landed work, as `onevcs` observed it.
+///
+/// Never stamped with a node: a release is observed long after the dispatch that
+/// produced the work has settled and outside any session of it, so what joins it
+/// to a node is [`MERGE_SHA`] and nothing else. That is the whole point of the
+/// record and the reason it is written here without one.
+pub const RELEASE_VERSION: &str = "0.13.0";
+/// The sibling whose release the node was held on before it could start.
+pub const DEP_IDENTITY: &str = "github.com/nickderobertis/onepipeline";
+/// The version of it the node was waiting for, on both of its targets.
+pub const DEP_VERSION: &str = "0.7.3";
+/// The commit that release carried, which is not this run's own merge.
+pub const DEP_LANDING_SHA: &str = "3c1d5e7f9081a2b3c4d5e6f708192a3b4c5d6e7f";
+/// What a person had to go and do before the node's second wait could clear.
+pub const HUMAN_RELEASE_ACTION: &str = "publish the npm wrapper from the tagged release";
 /// The node whose timeline the `scope=node` fixture is taken from.
 pub const NODE_ID: &str = "contract-interface";
 /// The node that depends on it.
@@ -441,6 +456,144 @@ fn journal(run: &str) -> String {
             at_node.clone(),
             json!({}),
         )
+        // Ready, and then held: this node needs the *released* sibling rather
+        // than the work in it, so the run records what it is waiting on. Two
+        // entries, because the two waits are not the same wait — the crate
+        // publishes itself and the npm wrapper needs a person, and only the
+        // second one carries the `action` somebody has to be told about.
+        .emit(
+            "2026-08-07T12:00:01.200Z",
+            "pipeline",
+            "release-wait",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "awaiting": [
+                    {
+                        "dep": "sdk",
+                        "identity": DEP_IDENTITY,
+                        "target": "crate",
+                        "style": "automated",
+                        "since": "2026-08-07T12:00:01.000Z",
+                        "waited_seconds": 12,
+                        "last_answer": "not-released",
+                    },
+                    {
+                        "dep": "sdk",
+                        "identity": DEP_IDENTITY,
+                        "target": "npm",
+                        "style": "human-step",
+                        "action": HUMAN_RELEASE_ACTION,
+                        "since": "2026-08-07T12:00:01.000Z",
+                        "waited_seconds": 12,
+                        "last_answer": "awaiting-human-step",
+                    },
+                ],
+            }),
+        )
+        // The automated half answers itself: `onevcs` asks the registry, and the
+        // answer is the release. Neither record carries a node — the release is
+        // the sibling's, and no session of this run is open on it.
+        .emit(
+            "2026-08-07T12:00:01.300Z",
+            "vcs",
+            "release-probed",
+            json!({ "run_id": run }),
+            json!({
+                "identity": DEP_IDENTITY,
+                "target": "crate",
+                "form": "registry-index",
+                "outcome": "released",
+                "version": DEP_VERSION,
+                "elapsed_ms": 412,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.350Z",
+            "vcs",
+            "release-observed",
+            json!({ "run_id": run }),
+            json!({
+                "identity": DEP_IDENTITY,
+                "target": "crate",
+                "style": "automated",
+                "version": DEP_VERSION,
+                "landing_commit": DEP_LANDING_SHA,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.400Z",
+            "pipeline",
+            "release-arrived",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "dep": "sdk",
+                "identity": DEP_IDENTITY,
+                "target": "crate",
+                "style": "automated",
+                "version": DEP_VERSION,
+            }),
+        )
+        // The human half ends the only way it can: somebody did it and said so.
+        .emit(
+            "2026-08-07T12:00:01.500Z",
+            "vcs",
+            "release-acknowledged",
+            json!({ "run_id": run }),
+            json!({
+                "identity": DEP_IDENTITY,
+                "target": "npm",
+                "version": DEP_VERSION,
+                "landing_commit": DEP_LANDING_SHA,
+                "actor": "a-recording-host",
+                "superseded": false,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.550Z",
+            "vcs",
+            "release-observed",
+            json!({ "run_id": run }),
+            json!({
+                "identity": DEP_IDENTITY,
+                "target": "npm",
+                "style": "human-step",
+                "version": DEP_VERSION,
+                "landing_commit": DEP_LANDING_SHA,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:01.600Z",
+            "pipeline",
+            "release-arrived",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "dep": "sdk",
+                "identity": DEP_IDENTITY,
+                "target": "npm",
+                "style": "human-step",
+                "version": DEP_VERSION,
+            }),
+        )
+        // Both waits are over, so the versions go into the node's own context
+        // before it is dispatched: nothing is running yet, so the note rides the
+        // dispatch rather than a turn.
+        .emit(
+            "2026-08-07T12:00:01.800Z",
+            "pipeline",
+            "release-adopted",
+            at_node.clone(),
+            json!({
+                "node": NODE_ID,
+                "delivery": "deferred",
+                "versions": [
+                    { "identity": DEP_IDENTITY, "target": "crate", "version": DEP_VERSION },
+                    { "identity": DEP_IDENTITY, "target": "npm", "version": DEP_VERSION },
+                ],
+            }),
+        )
         .emit(
             "2026-08-07T12:00:02.000Z",
             "pipeline",
@@ -660,6 +813,24 @@ fn journal(run: &str) -> String {
             "merge-completed",
             at_node.clone(),
             json!({ "identity": identity, "sha": MERGE_SHA, "base": "main" }),
+        )
+        // And the release that carried this node's own work, observed after the
+        // fact and stamped with **no node at all** — which is why the served
+        // node item is joined to it by the commit it landed as and never by a
+        // label. A label lookup would find nothing here, exactly as it finds
+        // nothing on a real run.
+        .emit(
+            "2026-08-07T12:00:19.500Z",
+            "vcs",
+            "release-observed",
+            json!({ "run_id": run }),
+            json!({
+                "identity": identity,
+                "target": "crate",
+                "style": "automated",
+                "version": RELEASE_VERSION,
+                "landing_commit": MERGE_SHA,
+            }),
         )
         .emit(
             "2026-08-07T12:00:20.000Z",

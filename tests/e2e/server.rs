@@ -450,7 +450,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(6));
+    assert_eq!(body["timeline_schema_version"], json!(7));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -488,6 +488,146 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
             .expect("the transcript's turns"))
     );
     assert_eq!(detail["run"]["turns"], json!(4));
+}
+
+/// A run's releases, over real HTTP: the join, the six records, and the wait a
+/// person has to be told about.
+///
+/// The join is the whole of the first half. `onevcs` observes a release long after
+/// the dispatch that produced the work has settled and outside any session of it,
+/// so nothing stamps that envelope with a node — the fixture writes it with none,
+/// exactly as a real one has none. A reading that joined on the envelope's label
+/// would serve this key absent on every run in existence and pass every other
+/// assertion about the shape of it, so what is asserted here is that the served
+/// node item carries the release *and* that no record of the node is that
+/// observation.
+#[test]
+fn a_nodes_item_carries_the_release_the_commit_it_landed_as_went_out_in() {
+    let serving = two_runs();
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    let node = &detail["graph"]["node_results"][fixture_run::NODE_ID];
+    assert_eq!(
+        node["release"],
+        json!({
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "target": "crate",
+            "style": "automated",
+            "version": fixture_run::RELEASE_VERSION,
+        }),
+        "{node}"
+    );
+    // The same commit the node's own publication is served with, which is what the
+    // two readings share and the only thing that joins them.
+    assert_eq!(
+        detail["node_details"][fixture_run::NODE_ID]["publication"]["commit"],
+        json!(fixture_run::MERGE_SHA)
+    );
+    // Absent — not null — for the node beside it, which published nothing and was
+    // released in nothing.
+    assert!(
+        detail["graph"]["node_results"][fixture_run::REVIEW_NODE_ID]
+            .get("release")
+            .is_none(),
+        "{detail}"
+    );
+
+    // And no record labelled with that node is the observation it came from.
+    let at_node = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json();
+    let kinds = |body: &Value| -> Vec<String> {
+        body["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+            .filter_map(|event| event["kind"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let labelled = kinds(&at_node);
+    assert!(
+        !labelled.iter().any(|kind| kind == "release-observed"),
+        "the observation carries a node label after all, so this join proves nothing: {labelled:?}"
+    );
+
+    // Every one of the six reaches a reader, each carrying its own record's fields.
+    let at_run = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    let served = kinds(&at_run);
+    for kind in [
+        "release-probed",
+        "release-acknowledged",
+        "release-observed",
+        "release-wait",
+        "release-arrived",
+        "release-adopted",
+    ] {
+        assert!(
+            served.iter().any(|seen| seen == kind),
+            "the run serves no {kind}: {served:?}"
+        );
+    }
+    let events: Vec<Value> = at_run["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .collect();
+    let of = |kind: &str| -> Value {
+        events
+            .iter()
+            .find(|event| event["kind"] == json!(kind))
+            .unwrap_or_else(|| panic!("no {kind} was served"))["release"]
+            .clone()
+    };
+    // A probe names what it asked and what it was told, and no commit: it is a
+    // question to a registry rather than a record of what a release carried.
+    assert_eq!(of("release-probed")["outcome"], json!("released"));
+    assert_eq!(of("release-probed")["elapsed_ms"], json!(412));
+    assert!(of("release-probed").get("landing_commit").is_none());
+    // An acknowledgement names the person, because a human step has one.
+    assert_eq!(
+        of("release-acknowledged")["actor"],
+        json!("a-recording-host")
+    );
+    assert_eq!(of("release-acknowledged")["superseded"], json!(false));
+    // And the wait tells the two apart: only the entry a person owes carries the
+    // action they have to perform.
+    let awaiting = of("release-wait")["awaiting"].clone();
+    let awaiting = awaiting.as_array().expect("the entries a node is held on");
+    assert_eq!(
+        awaiting
+            .iter()
+            .map(|entry| (entry["style"].clone(), entry.get("action").cloned()))
+            .collect::<Vec<_>>(),
+        vec![
+            (json!("automated"), None),
+            (
+                json!("human-step"),
+                Some(json!(fixture_run::HUMAN_RELEASE_ACTION))
+            ),
+        ]
+    );
+    assert_eq!(
+        of("release-adopted")["versions"]
+            .as_array()
+            .map(Vec::len)
+            .expect("the versions an adoption wrote"),
+        2
+    );
 }
 
 #[test]

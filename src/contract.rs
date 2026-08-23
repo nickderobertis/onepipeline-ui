@@ -113,7 +113,20 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 14;
 /// served in its own category rather than dropped from the reading. No span kind
 /// and no role word moved: `member` `monitor` is served as the `orchestrator` it
 /// already shares a lane with.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 6;
+///
+/// **Schema 7 carries the release a record was about.** An event produced by one
+/// of the six release kinds — `release-probed`, `release-acknowledged`,
+/// `release-observed`, `release-wait`, `release-arrived` and `release-adopted` —
+/// carries `release`, which is that record's own fields and nothing defaulted:
+/// the identity, target, style and version where it named them, the awaiting
+/// entries a wait was held on, and the versions an adoption wrote. Additive and
+/// optional exactly as `redirection` was in 4 — every other event is byte-for-byte
+/// what 6 served — but a client that reads a `release-wait` and finds no `release`
+/// on it can only draw four different waits as one word, which is the reading this
+/// version exists to have fixed. A node held on a **person** is the one a reader
+/// has to be able to pick out, and it is picked out by the `action` that entry
+/// carries and no automated entry does.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 7;
 
 /// The largest run-list page any request can ask for.
 ///

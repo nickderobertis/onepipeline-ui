@@ -131,6 +131,28 @@ test("the checked-in v2 run-timeline contract parses, and v1's meaning is refuse
   ]);
   expect(others.every((span) => !("transport_role" in span))).toBe(true);
 
+  // The releases a conforming server relays. The wait that needs a person told is
+  // told apart from the one beside it by the action it carries and nothing else,
+  // and the observation carries the commit a node item's own release is joined to
+  // it by.
+  const events = parsed.spans.flatMap((span) => span.events);
+  const held = events.find((event) => event.kind === "release-wait");
+  expect(
+    held?.release?.awaiting?.map((entry) => [entry.style, entry.action]),
+  ).toEqual([
+    ["automated", undefined],
+    ["human-step", "publish the npm wrapper from the tagged release"],
+  ]);
+  expect(
+    events.find((event) => event.kind === "release-observed")?.release,
+  ).toEqual({
+    identity: "github.com/example/sdk",
+    target: "crate",
+    style: "automated",
+    version: "1.4.0",
+    landing_commit: "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334",
+  });
+
   // A payload on the other meaning of that pair is refused rather than rendered as
   // though it agreed with this one.
   expect(() =>
@@ -535,7 +557,7 @@ test("a package consumer validates populated telemetry and attribution", () => {
 test("a package consumer parses a served run timeline through the export", () => {
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 6,
+    timeline_schema_version: 7,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -593,7 +615,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   };
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 6,
+    timeline_schema_version: 7,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -623,7 +645,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   expect(() =>
     parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 6,
+      timeline_schema_version: 7,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "run-1",
       spans: [

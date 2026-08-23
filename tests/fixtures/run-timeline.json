@@ -2,7 +2,7 @@
   "api_version": 2,
   "telemetry_schema_version": 14,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 6,
+  "timeline_schema_version": 7,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -22,6 +22,82 @@
         },
         {
           "id": "e2",
+          "kind": "release-wait",
+          "at": "2026-08-07T12:00:01.200Z",
+          "node_id": "contract-interface",
+          "release": {
+            "awaiting": [
+              {
+                "dep": "sdk",
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "crate",
+                "style": "automated",
+                "since": "2026-08-07T12:00:01.000Z",
+                "last_answer": "not-released",
+                "waited_seconds": 12
+              },
+              {
+                "dep": "sdk",
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "npm",
+                "style": "human-step",
+                "action": "publish the npm wrapper from the tagged release",
+                "since": "2026-08-07T12:00:01.000Z",
+                "last_answer": "awaiting-human-step",
+                "waited_seconds": 12
+              }
+            ]
+          }
+        },
+        {
+          "id": "e5",
+          "kind": "release-arrived",
+          "at": "2026-08-07T12:00:01.400Z",
+          "node_id": "contract-interface",
+          "release": {
+            "dep": "sdk",
+            "identity": "github.com/nickderobertis/onepipeline",
+            "target": "crate",
+            "style": "automated",
+            "version": "0.7.3"
+          }
+        },
+        {
+          "id": "e8",
+          "kind": "release-arrived",
+          "at": "2026-08-07T12:00:01.600Z",
+          "node_id": "contract-interface",
+          "release": {
+            "dep": "sdk",
+            "identity": "github.com/nickderobertis/onepipeline",
+            "target": "npm",
+            "style": "human-step",
+            "version": "0.7.3"
+          }
+        },
+        {
+          "id": "e9",
+          "kind": "release-adopted",
+          "at": "2026-08-07T12:00:01.800Z",
+          "node_id": "contract-interface",
+          "release": {
+            "delivery": "deferred",
+            "versions": [
+              {
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "crate",
+                "version": "0.7.3"
+              },
+              {
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "npm",
+                "version": "0.7.3"
+              }
+            ]
+          }
+        },
+        {
+          "id": "e10",
           "kind": "node-dispatched",
           "at": "2026-08-07T12:00:02.000Z",
           "node_id": "contract-interface"
@@ -37,7 +113,7 @@
           }
         },
         {
-          "id": "e4",
+          "id": "e12",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
           "node_id": "contract-interface"
@@ -53,19 +129,19 @@
           }
         },
         {
-          "id": "e6",
+          "id": "e14",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e7",
+          "id": "e15",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e8",
+          "id": "e16",
           "kind": "member-settled",
           "at": "2026-08-07T12:00:05.500Z",
           "node_id": "contract-interface",
@@ -75,19 +151,19 @@
           }
         },
         {
-          "id": "e9",
+          "id": "e17",
           "kind": "session-opened",
           "at": "2026-08-07T12:00:06.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e10",
+          "id": "e18",
           "kind": "gate-started",
           "at": "2026-08-07T12:00:07.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e11",
+          "id": "e19",
           "kind": "gate-verdict",
           "at": "2026-08-07T12:00:09.000Z",
           "node_id": "contract-interface",
@@ -97,13 +173,13 @@
           }
         },
         {
-          "id": "e12",
+          "id": "e20",
           "kind": "push",
           "at": "2026-08-07T12:00:10.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e13",
+          "id": "e21",
           "kind": "change-opened",
           "at": "2026-08-07T12:00:11.000Z",
           "node_id": "contract-interface",
@@ -114,14 +190,14 @@
           }
         },
         {
-          "id": "e14",
+          "id": "e22",
           "kind": "change-check",
           "at": "2026-08-07T12:00:12.000Z",
           "node_id": "contract-interface",
           "status": "queued"
         },
         {
-          "id": "e15",
+          "id": "e23",
           "kind": "change-check",
           "at": "2026-08-07T12:00:13.000Z",
           "node_id": "contract-interface",
@@ -132,7 +208,7 @@
           }
         },
         {
-          "id": "e16",
+          "id": "e24",
           "kind": "change-check",
           "at": "2026-08-07T12:00:14.000Z",
           "node_id": "contract-interface",
@@ -143,19 +219,19 @@
           }
         },
         {
-          "id": "e17",
+          "id": "e25",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:15.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e18",
+          "id": "e26",
           "kind": "lock-acquired",
           "at": "2026-08-07T12:00:15.100Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e19",
+          "id": "e27",
           "kind": "merge-queued",
           "at": "2026-08-07T12:00:16.000Z",
           "node_id": "contract-interface",
@@ -165,13 +241,13 @@
           }
         },
         {
-          "id": "e20",
+          "id": "e28",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:17.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e21",
+          "id": "e29",
           "kind": "change-merged",
           "at": "2026-08-07T12:00:18.000Z",
           "node_id": "contract-interface",
@@ -181,13 +257,13 @@
           }
         },
         {
-          "id": "e22",
+          "id": "e30",
           "kind": "merge-completed",
           "at": "2026-08-07T12:00:19.000Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e23",
+          "id": "e32",
           "kind": "node-settled",
           "at": "2026-08-07T12:00:20.000Z",
           "node_id": "contract-interface",
@@ -223,7 +299,7 @@
           }
         },
         {
-          "id": "e4",
+          "id": "e12",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
           "node_id": "contract-interface"
@@ -239,13 +315,13 @@
           }
         },
         {
-          "id": "e6",
+          "id": "e14",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
           "node_id": "contract-interface"
         },
         {
-          "id": "e7",
+          "id": "e15",
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
           "node_id": "contract-interface"

@@ -25,6 +25,7 @@ import type {
   DagConversation,
   Redirection as RedirectionRecord,
   TimelineReference,
+  TimelineRelease,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
@@ -33,6 +34,7 @@ import type { NodeView } from "../../lib/run-model";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
 import { ItemHeading } from "./item-reading";
+import { ReleaseRecord } from "./release";
 import {
   dispatchRoleLabel,
   LLMLINT_TRANSPORT,
@@ -138,6 +140,13 @@ function Body({
   const redirection = redirectionOf(row);
   if (redirection !== undefined)
     return <Redirection redirection={redirection} row={row} />;
+  // Before every reference below, because a release record is what it says it is:
+  // a node held on a person, the acknowledgement that ended that wait, the release
+  // arriving and the versions being adopted are four different facts, and reading
+  // any of them as the artifact it happened to store would answer a question
+  // nobody asked in place of the one they did.
+  const release = releaseOf(row);
+  if (release !== undefined) return <ReleaseRecord release={release} />;
   if (reference?.kind === "conversation")
     return <Session row={row} transcript={transcript} />;
   if (isVerification(row))
@@ -766,6 +775,16 @@ function availableTurnCount(
 /** The redirection one row is, when it is one. Only an event row can be. */
 function redirectionOf(row: TimelineRow): RedirectionRecord | undefined {
   return row.rowKind === "event" ? row.event.redirection : undefined;
+}
+
+/**
+ * The release facts one row carried, when it carried any.
+ *
+ * Only an event row can: a release is a moment the run recorded rather than an
+ * interval it spent, so the six kinds are events and never spans.
+ */
+function releaseOf(row: TimelineRow): TimelineRelease | undefined {
+  return row.rowKind === "event" ? row.event.release : undefined;
 }
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {

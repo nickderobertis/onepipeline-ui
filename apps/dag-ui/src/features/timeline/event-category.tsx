@@ -127,18 +127,28 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     ["planning", ["planner", "decision"]],
     // `lock-wait` alone is most of the records this store holds, so what a reader sees
     // most is this category — kept apart from the sessions for exactly that reason.
-    ["contention", ["lock", "concurrent", "quiet"]],
+    // `wait` is the word itself rather than any one producer's kind: a node held on
+    // a lock and a node held on a dependency's release are the same thing to a
+    // reader scanning for why nothing is moving. It sits before the publications so
+    // `release-wait` reads as the wait it is rather than as the release it is for.
+    ["contention", ["lock", "concurrent", "quiet", "wait"]],
     // `check` and `checks` are both here because the producers spell the same act
     // both ways — `onevcs` writes one `change-check` per check it observed, the
     // older unattributed records a single `pr-checks-observed` — and a word is
     // matched whole, so one spelling does not reach the other.
     ["verification", ["verification", "gate", "check", "checks", "coverage"]],
+    // `release` joins this line rather than opening a twelfth category: publishing a
+    // crate and merging the change that will be in it are one act to a reader
+    // scanning a run, and a glyph they had to learn to tell apart would be the
+    // legend this scheme exists not to be. The wait is the exception above, because
+    // a wait is what a reader scans for.
     [
       "publication",
       [
         "pr",
         "publication",
         "published",
+        "release",
         "merge",
         "merged",
         "change",

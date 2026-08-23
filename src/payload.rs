@@ -155,6 +155,30 @@ pub mod vcs {
     /// which it does both to cut a worktree and to publish from one.
     pub const FETCH: &str = "fetch";
 
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the pinned `onevcs` declares none of the three release kinds below — it is the release the sibling has not cut yet that would carry them, and `onepipeline` is pinned `=0.7.3` here, so there is no `EventKind` variant for this copy to be reconciled against and no requirement this node may move to reach one. They stand on the terms the `oneagentgraph` vocabulary below already does: the wire is the only declaration a consumer can reach. What gates them meanwhile is `tests/contract.rs`, which fails when a kind declared here is filed under no category by the browser's corpus, and `tests/support/fixture_run.rs`, which writes the records as the table in that library's own contract spells them. Folding them into a typed sibling vocabulary is the follow-up recorded in `src/AGENTS.md`.
+
+    /// `{identity, target, form, outcome, version, elapsed_ms}` — one look at one
+    /// **automated** release target, and what the registry answered. A human-step
+    /// target is never probed: nothing but a person can say it is done.
+    ///
+    /// The three release kinds here and the three in [`super::pipeline`] are the
+    /// one group in this module the pinned `onevcs` does not declare, which is
+    /// the block suppression above.
+    pub const RELEASE_PROBED: &str = "release-probed";
+    /// `{identity, target, version, landing_commit, actor, superseded}` — a person
+    /// said the human step they owed had been performed, naming the commit the
+    /// release carried. `superseded` is a later acknowledgement having replaced it.
+    pub const RELEASE_ACKNOWLEDGED: &str = "release-acknowledged";
+    /// `{identity, target, style, version, landing_commit}` — a release is out.
+    ///
+    /// The one record this crate joins a node to, and it is joined by
+    /// `landing_commit` rather than by a node label: a release is observed long
+    /// after the dispatch that produced the work ended and outside any session, so
+    /// nothing stamps this envelope with a node at all. `release_of`, in this
+    /// module's parent, is that join.
+    pub const RELEASE_OBSERVED: &str = "release-observed";
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+
     /// The relayed kinds that do not, on their own, say a publication began.
     ///
     /// A node that relayed nothing but these published nothing. Why the list is
@@ -298,6 +322,42 @@ pub mod graph {
     pub const INDEX: &str = "index";
     // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 }
+
+/// The release kinds `onepipeline` writes about a node's own dependencies, as the
+/// wire strings that library writes.
+///
+/// A sibling module to [`vcs`] rather than a member of `onepipeline::event::
+/// PipelineKind`, and for the same reason as the release kinds in that one: the
+/// pinned SDK is `=0.7.3` and declares none of these, so there is no variant to
+/// read them as and no requirement this crate may move to reach one. They are
+/// what a node *waiting on a release* records — the other half of the sequencing
+/// the `onevcs` kinds are the first half of.
+///
+/// This crate reads none of these three for a payload it computes; they are here
+/// so the six kinds are declared in one place with the payload each carries, and
+/// `tests/contract.rs` holds every one of them to the browser's own category
+/// corpus. The timeline serves each record's own fields through `release_facts`.
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the same reason the release kinds in `vcs` carry: `onepipeline` is pinned `=0.7.3` here and its `PipelineKind` declares none of these three, so no type exists for this copy to be reconciled against and moving the pin is not this node's to do. The gates available are `tests/contract.rs`, which fails when a kind declared here is filed under no category by the browser's corpus, and `tests/support/fixture_run.rs`, which writes the records as that library's own contract spells them.
+pub mod pipeline {
+    /// `{node, awaiting: [{dep, identity, target, style, action, since,
+    /// waited_seconds, last_answer}]}` — a node is held until a dependency's
+    /// release is out, one entry per thing it is held on.
+    ///
+    /// `style` is `automated` or `human-step`, and `action` is carried only on a
+    /// human-step entry, because only that one is a thing somebody has to be told
+    /// to do. `last_answer` is that library's own word for what the last look
+    /// found: `not-released`, `awaiting-human-step`, `not-answered` or
+    /// `not-landed`.
+    pub const RELEASE_WAIT: &str = "release-wait";
+    /// `{node, dep, identity, target, style, version}` — the release a node was
+    /// held on is out, and the wait is over.
+    pub const RELEASE_ARRIVED: &str = "release-arrived";
+    /// `{node, delivery, versions: [{identity, target, version}]}` — the versions
+    /// that arrived were written into the node's own context, `live` into the turn
+    /// already running or `deferred` onto its next dispatch.
+    pub const RELEASE_ADOPTED: &str = "release-adopted";
+}
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 /// What one accepted live edit compiled to, as `onepipeline` writes it on an
 /// `edit-committed` payload.
@@ -1677,6 +1737,19 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
             item.insert("status".into(), json!(word));
         }
     }
+    // The release that carried this node's work, beside the change request that
+    // opened it — and absent, never null, for a node the run recorded no release
+    // for, exactly as `pr` is absent for a node that opened no change request.
+    // Joined through the commit the work landed as, which is the only thing a
+    // `release-observed` and a node have in common; see [`release_of`].
+    let mine: Vec<&Envelope> = view
+        .events
+        .iter()
+        .filter(|event| event.labels.node.as_deref() == Some(node.id.as_str()))
+        .collect();
+    if let Some(release) = landing_commit(&mine).and_then(|commit| release_of(view, commit)) {
+        item.insert("release".into(), release);
+    }
     if let Some(finished) = view.state.completed_steps.get(&node.id) {
         let steps: Vec<Value> = node
             .steps
@@ -1950,13 +2023,65 @@ fn recorded_any(events: &[&Envelope], kinds: &[&str]) -> bool {
         .any(|event| event.source == Source::Vcs && kinds.contains(&event.kind.0.as_str()))
 }
 
+/// The records that say a node's work reached the default branch.
+const MERGED: [&str; 2] = [vcs::CHANGE_MERGED, vcs::MERGE_COMPLETED];
+
+/// The commit one node's work landed as: the merge the host completed, or — for
+/// work that was preserved rather than published — the commit it was preserved
+/// on.
+///
+/// One derivation with two readers. The publication serves it as the node's own
+/// `commit`, and [`release_of`] joins the node to a release by it, so a node
+/// whose publication names one commit can never be shown a release that carried
+/// another.
+fn landing_commit<'a>(events: &[&'a Envelope]) -> Option<&'a str> {
+    last_recorded(events, &MERGED, "sha")
+        .or_else(|| last_recorded(events, &[vcs::COMMIT_PRESERVED], "sha"))
+}
+
+/// The release that carried one node's landed work, or `None` for a node the run
+/// recorded no release for.
+///
+/// Joined by the commit rather than by the node, because a node is not something
+/// a [`vcs::RELEASE_OBSERVED`] can carry: the release is observed long after the
+/// dispatch that produced the work has settled and outside any session of it, so
+/// nothing is there to stamp the envelope with one. A label lookup would find
+/// nothing on every run, and this key would be silently absent rather than wrong,
+/// which is the worse of the two failures. Where such an envelope does happen to
+/// carry a node label it is corroboration and nothing is filtered on it.
+///
+/// The newest wins: a target released twice for one commit is a version that was
+/// yanked and cut again, and the later one is what a reader would go and install.
+///
+/// Served only when the record named the three things a release *is* — who
+/// published it, what was published, and which version — because a release
+/// object missing any of them is a row a reader cannot act on and this crate
+/// inventing the rest is worse than serving none. `style` is the one optional
+/// field: an envelope written before that field existed carries none, and the
+/// schema the browser holds this to says so.
+fn release_of(view: &RunView, commit: &str) -> Option<Value> {
+    let observed = view.events.iter().rev().find(|event| {
+        event.source == Source::Vcs
+            && event.kind.0 == vcs::RELEASE_OBSERVED
+            && event.payload.get("landing_commit").and_then(Value::as_str) == Some(commit)
+    })?;
+    let field = |key: &str| non_empty(observed.payload.get(key).and_then(Value::as_str));
+    let mut release = Map::new();
+    release.insert("identity".into(), json!(field("identity")?));
+    release.insert("target".into(), json!(field("target")?));
+    if let Some(style) = field("style") {
+        release.insert("style".into(), json!(style));
+    }
+    release.insert("version".into(), json!(field("version")?));
+    Some(Value::Object(release))
+}
+
 /// What one node's publication reached, from the records `onevcs` relayed for it.
 ///
 /// `None` when the run recorded neither a branch for the node nor a publication
 /// record of any kind: an absent publication is a node that published nothing,
 /// where an empty one would read as a publication that reached nowhere.
 fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Value> {
-    const MERGED: [&str; 2] = [vcs::CHANGE_MERGED, vcs::MERGE_COMPLETED];
     const OPENED: [&str; 2] = [vcs::CHANGE_OPENED, vcs::CHANGE_MERGED];
     let branch = view
         .state
@@ -1987,12 +2112,10 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
     {
         publication.insert("pr_url".into(), json!(url));
     }
-    // The commit the work landed as: the merge the host completed, or — for work
-    // that was preserved rather than published — the commit it was preserved on.
-    // Its *url* is the host's own and nothing records one, so none is served.
-    if let Some(sha) = last_recorded(events, &MERGED, "sha")
-        .or_else(|| last_recorded(events, &[vcs::COMMIT_PRESERVED], "sha"))
-    {
+    // The commit the work landed as, which is also what a release is joined to
+    // this node by. Its *url* is the host's own and nothing records one, so none
+    // is served.
+    if let Some(sha) = landing_commit(events) {
         publication.insert("commit".into(), json!(sha));
     }
     if let Some(base) = last_recorded(events, &[vcs::MERGE_COMPLETED], "base")
@@ -3782,6 +3905,120 @@ fn redirection(event: &Envelope) -> Option<Value> {
     Some(Value::Object(record))
 }
 
+/// The release facts one record carried, when it is one of the six that carry any.
+///
+/// The six are two producers' halves of one sequencing: `onepipeline` records a
+/// node being **held** on a dependency's release, the release **arriving**, and
+/// the versions being **adopted** into the node's context; `onevcs` records the
+/// **probe** of an automated target, a person **acknowledging** a human step, and
+/// the release being **observed**. A reader meets them in one timeline, in order,
+/// so they are served under one shape rather than six.
+///
+/// Every field is optional and each is present exactly when the record carried
+/// it — the same discipline the redirection above keeps, and for the same reason:
+/// the two producers know different halves, and a field defaulted here would be
+/// this crate saying something no record did. What decides the shape is which of
+/// the six the record is, and each kind's own payload is quoted where it is
+/// declared, in [`vcs`] and [`pipeline`].
+///
+/// A record that carried none of them is served **no release at all** rather than
+/// an empty object: an empty one would read as a release nobody could name.
+fn release_facts(event: &Envelope) -> Option<Value> {
+    let recognized: &[&str] = match (event.source, event.kind.0.as_str()) {
+        (Source::Vcs, vcs::RELEASE_PROBED) => &["identity", "target", "form", "outcome", "version"],
+        (Source::Vcs, vcs::RELEASE_ACKNOWLEDGED) => {
+            &["identity", "target", "version", "landing_commit", "actor"]
+        }
+        (Source::Vcs, vcs::RELEASE_OBSERVED) => {
+            &["identity", "target", "style", "version", "landing_commit"]
+        }
+        (Source::Pipeline, pipeline::RELEASE_WAIT) => &[],
+        (Source::Pipeline, pipeline::RELEASE_ARRIVED) => {
+            &["dep", "identity", "target", "style", "version"]
+        }
+        (Source::Pipeline, pipeline::RELEASE_ADOPTED) => &["delivery"],
+        _ => return None,
+    };
+    let mut record = Map::new();
+    for key in recognized {
+        if let Some(value) = non_empty(event.payload.get(*key).and_then(Value::as_str)) {
+            record.insert((*key).to_owned(), json!(value));
+        }
+    }
+    // The two numbers and the flag, each read as what its own type is so a
+    // recorded string can never reach a client that types them.
+    if let Some(elapsed) = event.payload.get("elapsed_ms").and_then(Value::as_u64) {
+        record.insert("elapsed_ms".into(), json!(elapsed));
+    }
+    if let Some(superseded) = event.payload.get("superseded").and_then(Value::as_bool) {
+        record.insert("superseded".into(), json!(superseded));
+    }
+    // What the node is held on, one entry per thing. A wait with no readable
+    // entry is a wait this build cannot describe, so it serves none rather than
+    // an empty list that would read as a node held on nothing.
+    let awaiting: Vec<Value> = event
+        .payload
+        .get("awaiting")
+        .and_then(Value::as_array)
+        .map(|entries| entries.iter().filter_map(awaited).collect())
+        .unwrap_or_default();
+    if !awaiting.is_empty() {
+        record.insert("awaiting".into(), Value::Array(awaiting));
+    }
+    // The versions an adoption wrote into the node's context, under the
+    // producer's own name for the list.
+    let versions: Vec<Value> = event
+        .payload
+        .get("versions")
+        .and_then(Value::as_array)
+        .map(|entries| entries.iter().filter_map(released_version).collect())
+        .unwrap_or_default();
+    if !versions.is_empty() {
+        record.insert("versions".into(), Value::Array(versions));
+    }
+    (!record.is_empty()).then(|| Value::Object(record))
+}
+
+/// One thing a node is being held on, from a [`pipeline::RELEASE_WAIT`] entry.
+///
+/// `action` is served exactly where the record carried one, which is exactly the
+/// **human-step** entries: it is what somebody has to go and do, and it is the
+/// difference between a wait that will clear itself and a wait that needs a
+/// person told. An entry naming nothing it waits on is dropped.
+fn awaited(entry: &Value) -> Option<Value> {
+    let entry = entry.as_object()?;
+    let mut waited = Map::new();
+    for key in [
+        "dep",
+        "identity",
+        "target",
+        "style",
+        "action",
+        "since",
+        "last_answer",
+    ] {
+        if let Some(value) = non_empty(entry.get(key).and_then(Value::as_str)) {
+            waited.insert(key.to_owned(), json!(value));
+        }
+    }
+    if let Some(seconds) = entry.get("waited_seconds").and_then(Value::as_u64) {
+        waited.insert("waited_seconds".into(), json!(seconds));
+    }
+    waited.contains_key("dep").then(|| Value::Object(waited))
+}
+
+/// One `{identity, target, version}` an adoption wrote, or `None` when the entry
+/// names no version — which is an entry a reader could not go and look up.
+fn released_version(entry: &Value) -> Option<Value> {
+    let entry = entry.as_object()?;
+    let field = |key: &str| non_empty(entry.get(key).and_then(Value::as_str));
+    Some(json!({
+        "identity": field("identity")?,
+        "target": field("target")?,
+        "version": field("version")?,
+    }))
+}
+
 /// One recorded string, or `None` when what was recorded is blank.
 ///
 /// Every string the redirection and the control reading serve is typed non-empty
@@ -3851,6 +4088,13 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     }
     if let Some(redirection) = redirection(event) {
         item.insert("redirection".into(), redirection);
+    }
+    // What one release record said about itself. A node held on a release, the
+    // person who ended that wait, the release arriving and the versions being
+    // adopted are four different facts, and without the record's own fields a
+    // reader meets four rows that differ only in the word at the front.
+    if let Some(release) = release_facts(event) {
+        item.insert("release".into(), release);
     }
     // Where the event's own heavy content lives, never inlined: the transcript it
     // is a turn of, the change it published, or the first evidence it stored. A

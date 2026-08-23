@@ -1414,6 +1414,54 @@ fn the_browser_files_every_kind_those_libraries_declare() {
     );
 }
 
+/// The six release kinds this crate declares, against the browser's own corpus.
+///
+/// The gate above is the one the two typed siblings offer: a kind either of them
+/// declares must be filed by the browser. The release kinds have no such
+/// declaration to be read off — the pinned `onevcs` and `onepipeline` predate
+/// every one of them and this node moves neither pin — so this is the gate
+/// available in its place, and it runs in the same direction: a kind this crate
+/// reads as a wire string and the browser has decided no category for is a record
+/// that reaches a reader as the default, which is the honest answer for a kind
+/// nobody has seen and the wrong one for a kind this crate names.
+///
+/// It is deliberately not a check that the *categories* agree. Which of the eleven
+/// a kind reads under is a decision the browser owns; that it has made one is what
+/// is owed here.
+#[test]
+fn the_browser_files_every_release_kind_this_crate_reads() {
+    use onepipeline_ui::payload::{pipeline, vcs};
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("apps/dag-ui/src/features/timeline/event-category.test.tsx");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the suite that carries the corpus has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let filed = corpus_keys(&source);
+    let declared = [
+        vcs::RELEASE_PROBED,
+        vcs::RELEASE_ACKNOWLEDGED,
+        vcs::RELEASE_OBSERVED,
+        pipeline::RELEASE_WAIT,
+        pipeline::RELEASE_ARRIVED,
+        pipeline::RELEASE_ADOPTED,
+    ];
+    let unfiled: Vec<&str> = declared
+        .into_iter()
+        .filter(|kind| !filed.iter().any(|key| key == kind))
+        .collect();
+    assert!(
+        unfiled.is_empty(),
+        "{} files no category for {unfiled:?}, which this crate reads as release \
+         records; decide one for each and add it to CORPUS",
+        path.display()
+    );
+}
+
 /// Every key of the `CORPUS` map in the browser suite's category tests.
 ///
 /// Parsed rather than matched as substrings so a kind named in that file's prose,

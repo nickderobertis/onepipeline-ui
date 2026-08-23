@@ -861,6 +861,22 @@ p {
   font-size: 11px;
 }
 
+/* One row per thing a node is held on, and per version an adoption wrote. A list
+   marker would say nothing the row does not: each opens with what it is, and what
+   separates them is the space between. */
+.release-awaiting {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release-awaiting li {
+  display: grid;
+  gap: 4px;
+}
+
 .detail-reference-kind {
   padding: 1px 5px;
   border: 1px solid var(--border);

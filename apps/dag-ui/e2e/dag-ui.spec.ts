@@ -25,7 +25,11 @@ import {
   OFFLINE_UI_URL,
   STALLED_UI_URL,
 } from "../playwright.config";
-import { EVENT_CATEGORIES } from "../src/features/timeline/event-category";
+import {
+  DEFAULT_EVENT_CATEGORY,
+  EVENT_CATEGORIES,
+  eventCategory,
+} from "../src/features/timeline/event-category";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -788,6 +792,9 @@ const EXPECTED_GLYPH: Readonly<Record<string, string>> = {
   "hand-over": "lucide-user-round-check", // human
   "gate-verdict": "lucide-shield-check", // verification
   "lock-wait": "lucide-hourglass", // contention
+  "release-wait": "lucide-hourglass",
+  "release-arrived": "lucide-git-pull-request", // publication
+  "release-adopted": "lucide-git-pull-request",
   "Redirected into the running turn": "lucide-rotate-ccw", // recovery
   "member-died": "lucide-triangle-alert", // failure
   "decision-pending": "lucide-clipboard-list", // planning
@@ -1078,6 +1085,142 @@ test("shows a verification and a publication as the records they are", async ({
       name: new RegExp(fixture().foundation_pr),
     }),
   ).toBeVisible();
+});
+
+/**
+ * A run's releases, end to end: what the server derived, and what the reader sees.
+ *
+ * Two halves of one sequencing, and both are driven here because either alone is
+ * the wrong reading. The server's half is a **join through the landing commit**:
+ * `onevcs` observes a release long after the dispatch that produced the work has
+ * settled and outside any session of it, so nothing stamps that envelope with a
+ * node — the fixture writes it with none, exactly as a real one has none, and this
+ * asserts that the node-scoped timeline (which is every record labelled with the
+ * node) holds no such record while the node's own item carries the release anyway.
+ * A reading that had joined on the label would pass every other assertion here and
+ * serve this key absent on every run in existence.
+ *
+ * The reader's half is the wait. A node held on a machine will clear itself; a node
+ * held on a **person** will not, and that is the one thing an operator has to be
+ * able to see without opening anything else — so the two are drawn apart, and the
+ * one that needs somebody told carries the action they have to perform.
+ */
+test("shows the release that carried a node's work and the waits before it", async ({
+  page,
+}) => {
+  const facts = fixture();
+  const detail = await (
+    await page.request.get(`/api/v2/runs/${runs().live}`)
+  ).json();
+
+  // The release the node's work went out in, beside the change request it opened.
+  expect(detail.graph.node_results.foundation.release).toEqual({
+    identity: facts.release.identity,
+    target: facts.release.target,
+    style: "automated",
+    version: facts.release.version,
+  });
+  // Joined by the commit that node's work landed as, and by nothing else: the
+  // publication says which commit that was, and the node-scoped timeline — every
+  // record the run labelled with this node — carries no `release-observed` at all.
+  expect(detail.node_details.foundation.publication.commit).toBe(
+    facts.foundation_commit,
+  );
+  const atNode = await (
+    await page.request.get(
+      `/api/v2/runs/${runs().live}/timeline?scope=node&node=foundation`,
+    )
+  ).json();
+  const kindsAtNode: string[] = atNode.spans.flatMap(
+    (span: { events: { kind: string }[] }) =>
+      span.events.map((event) => event.kind),
+  );
+  expect(kindsAtNode).not.toContain("release-observed");
+  expect(kindsAtNode).toContain("release-wait");
+  // Absent, never null, for a node the run recorded no release for.
+  expect("release" in detail.graph.node_results.dashboard).toBe(false);
+
+  // Every one of the six kinds really reached the served store, and every one of
+  // them is filed under a category this build draws rather than under the default
+  // it keeps for a kind nobody has decided one for.
+  const atRun = await (
+    await page.request.get(`/api/v2/runs/${runs().live}/timeline?scope=run`)
+  ).json();
+  const served = new Set<string>(
+    atRun.spans.flatMap((span: { events: { kind: string }[] }) =>
+      span.events.map((event) => event.kind),
+    ),
+  );
+  const six = [
+    "release-probed",
+    "release-acknowledged",
+    "release-observed",
+    "release-wait",
+    "release-arrived",
+    "release-adopted",
+  ];
+  expect(six.filter((kind) => !served.has(kind))).toEqual([]);
+  expect(
+    six.filter((kind) => eventCategory(kind) === DEFAULT_EVENT_CATEGORY),
+  ).toEqual([]);
+
+  // What the reader sees. The node's own release sits beside its change request.
+  await openObservatory(page, `/?run=${runs().live}&node=foundation`);
+  await page.getByRole("tab", { name: "PR" }).click();
+  const released = page.locator(".facts");
+  await expect(released).toContainText(facts.release.version);
+  await expect(released).toContainText(facts.release.target);
+
+  // And the waits before it, opened from the node's own transcript. The wait on a
+  // person names the action somebody has to perform; the wait beside it, on the
+  // same record, does not — which is the whole of how a reader tells them apart.
+  await page.getByRole("tab", { name: "Timeline" }).click();
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "release-wait" })
+    .getByRole("button")
+    .click();
+  await expect(itemDetail(page)).toContainText("Waiting on a person");
+  await expect(itemDetail(page)).toContainText(facts.release.human_action);
+  await expect(itemDetail(page)).toContainText(
+    "Waiting on an automated release",
+  );
+  await expect(itemDetail(page)).toContainText(facts.release.dep_identity);
+  await page.getByRole("button", { name: "Close detail" }).click();
+
+  // The arrival that ended one of them, read as the release it was.
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "release-arrived" })
+    .first()
+    .getByRole("button")
+    .click();
+  await expect(itemDetail(page)).toContainText(facts.release.dep_version);
+  await expect(itemDetail(page)).toContainText("Release target");
+  await page.getByRole("button", { name: "Close detail" }).click();
+
+  // The adoption that wrote both versions into the node's own context.
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("article", { name: "release-adopted" })
+    .getByRole("button")
+    .click();
+  await expect(itemDetail(page)).toContainText("Versions adopted");
+  await expect(itemDetail(page)).toContainText(facts.release.dep_version);
+
+  // Drawn as the categories they belong to, which is what a reader scanning the
+  // plot is answering: the wait apart from the two releases beside it.
+  const marker = (named: string): Locator =>
+    timeline(page).getByRole("button", {
+      name: `${named}, marker`,
+      exact: true,
+    });
+  for (const named of ["release-wait", "release-arrived", "release-adopted"]) {
+    expect(await glyphName(marker(named).first())).toBe(expectedGlyph(named));
+  }
+  expect(await glyphName(marker("release-wait").first())).not.toBe(
+    await glyphName(marker("release-arrived").first()),
+  );
 });
 
 /**

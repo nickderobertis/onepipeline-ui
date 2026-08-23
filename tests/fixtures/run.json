@@ -182,7 +182,13 @@
         "completed": true,
         "outcome": "shipped",
         "branch": "feature/contract-interface",
-        "pr": "https://example.invalid/changes/1"
+        "pr": "https://example.invalid/changes/1",
+        "release": {
+          "identity": "github.com/nickderobertis/onepipeline-ui",
+          "target": "crate",
+          "style": "automated",
+          "version": "0.13.0"
+        }
       },
       "review": {
         "kind": "agent",
@@ -201,7 +207,7 @@
         "review"
       ]
     },
-    "last_seq": 27
+    "last_seq": 36
   },
   "conversations": [
     {

@@ -126,6 +126,11 @@ export const TELEMETRY_SCHEMA_VERSION = 14;
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
  *
+ * `7` is where an event began carrying the release it was about. A server on `6`
+ * serves the six release kinds as a kind and a stamp alone, so a node held on a
+ * machine and a node held on a **person** draw as the same row with the same word
+ * on it — and the reader with something to go and do cannot tell that they have it.
+ *
  * `6` is where a span says what one lane was doing, and when. A server on `5`
  * gives every `dispatch` span of a node the node's own bounds and every `rollup`
  * the node's dispatch and settlement, so a node dispatched three times draws three
@@ -149,7 +154,7 @@ export const TELEMETRY_SCHEMA_VERSION = 14;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 6;
+export const TIMELINE_SCHEMA_VERSION = 7;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -538,6 +543,26 @@ const resumeSchema = openObject({
   pr: z.string().nullable(),
   mode: z.string().optional(),
 });
+/**
+ * The release that carried one node's landed work.
+ *
+ * `style` alone is optional: an envelope written before that field existed carries
+ * none, and a node whose release predates it is still a node whose release a reader
+ * opens. The other three are what a release *is* — who published it, what was
+ * published, and which version — and the server serves no release at all rather
+ * than one missing any of them.
+ *
+ * `style` and `target` are open strings rather than enums for the reason `kind` on
+ * a timeline event is: the vocabulary is `onevcs`'s, that library is released on its
+ * own schedule, and a conforming server relaying a target this build has never heard
+ * of must not have the whole run detail refused over a field it filled correctly.
+ */
+export const nodeReleaseSchema = openObject({
+  identity: z.string().min(1),
+  target: z.string().min(1),
+  style: z.string().min(1).optional(),
+  version: z.string().min(1),
+});
 export const graphResultItemSchema = openObject({
   kind: z.string().optional(),
   status: z.string().optional(),
@@ -565,6 +590,12 @@ export const graphResultItemSchema = openObject({
   outcome: z.string().optional(),
   ok: z.boolean().optional(),
   pr: z.string().nullable().optional(),
+  /**
+   * Optional *and* nullable, exactly as `pr` beside it is: a payload served before
+   * this key existed carries neither, and a node the run recorded no release for is
+   * served an absent key rather than an empty object.
+   */
+  release: nodeReleaseSchema.nullable().optional(),
   detail: z.string().optional(),
   follow_ups: z.string().nullable().optional(),
   steps: z.array(stepResultSchema).optional(),
@@ -961,6 +992,65 @@ export const redirectionSchema = openObject({
  * an `edit-committed` that added context to a node — and is deliberately not *keyed*
  * on those two names here, for the same reason `kind` is open at all.
  */
+/**
+ * One thing a node is being held on, from a `release-wait` record.
+ *
+ * `action` is what somebody has to go and do, and it is carried on **human-step**
+ * entries and no others — which is what lets a client draw the waits that need a
+ * person told apart from the waits that will clear themselves. `last_answer` is the
+ * producer's own word for what the last look found: `not-released`,
+ * `awaiting-human-step`, `not-answered` or `not-landed`.
+ *
+ * Only `dep` is required, because only `dep` says *what* is being waited on; every
+ * other field is one the producer fills where it has it, and a server that filled
+ * fewer of them has told a reader less rather than told them something wrong.
+ */
+export const releaseAwaitedSchema = openObject({
+  dep: z.string().min(1),
+  identity: z.string().min(1).optional(),
+  target: z.string().min(1).optional(),
+  style: z.string().min(1).optional(),
+  action: z.string().min(1).optional(),
+  since: timestamp.optional(),
+  waited_seconds: counter.optional(),
+  last_answer: z.string().min(1).optional(),
+});
+/**
+ * What one release record said about itself, under one shape for all six kinds.
+ *
+ * The six are two producers' halves of one sequencing — `onepipeline` records a node
+ * being held, the release arriving and the versions being adopted; `onevcs` records
+ * the probe, the acknowledgement and the observation — and a reader meets them in
+ * one timeline, so they are served as one object rather than six. Every field is
+ * optional and each is present exactly when the record carried it, on the discipline
+ * `redirection` above already keeps: the two producers know different halves, and a
+ * field defaulted here would be this client inventing what no record said.
+ */
+export const timelineReleaseSchema = openObject({
+  identity: z.string().min(1).optional(),
+  target: z.string().min(1).optional(),
+  style: z.string().min(1).optional(),
+  version: z.string().min(1).optional(),
+  landing_commit: z.string().min(1).optional(),
+  actor: z.string().min(1).optional(),
+  superseded: z.boolean().optional(),
+  form: z.string().min(1).optional(),
+  outcome: z.string().min(1).optional(),
+  elapsed_ms: counter.optional(),
+  dep: z.string().min(1).optional(),
+  delivery: z.string().min(1).optional(),
+  awaiting: z.array(releaseAwaitedSchema).min(1).optional(),
+  versions: z
+    .array(
+      openObject({
+        identity: z.string().min(1),
+        target: z.string().min(1),
+        version: z.string().min(1),
+      }),
+    )
+    .min(1)
+    .optional(),
+});
 // llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
   id: z.string().min(1),
@@ -977,6 +1067,13 @@ export const timelineEventSchema = openObject({
    */
   author: z.string().min(1).optional(),
   redirection: redirectionSchema.optional(),
+  /**
+   * The release facts a record carried, on the six kinds that carry any and on no
+   * other. Not *keyed* on those six names here, for the same reason `redirection`
+   * is not keyed on its two: `kind` is the journal event kind and the journal owns
+   * that vocabulary.
+   */
+  release: timelineReleaseSchema.optional(),
   reference: timelineReferenceSchema.optional(),
 });
 /**
@@ -1123,6 +1220,12 @@ export type Decision = z.infer<typeof decisionSchema>;
 export type NodeControl = z.infer<typeof nodeControlSchema>;
 /** The moment a planner redirected a node's running turn. */
 export type Redirection = z.infer<typeof redirectionSchema>;
+/** The release that carried one node's landed work. */
+export type NodeRelease = z.infer<typeof nodeReleaseSchema>;
+/** One thing a node is being held on until a release is out. */
+export type ReleaseAwaited = z.infer<typeof releaseAwaitedSchema>;
+/** What one release record said about itself. */
+export type TimelineRelease = z.infer<typeof timelineReleaseSchema>;
 export type DagConversation = z.infer<typeof dagConversationSchema>;
 export type NodeConversations = z.infer<typeof nodeConversationsSchema>;
 export type RunConversations = z.infer<typeof runConversationsSchema>;
