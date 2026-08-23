@@ -480,6 +480,20 @@ export function spanAsRow(span: TimelineSpan): TimelineRow {
   return spanRow(span, new Map());
 }
 
+/**
+ * One journal record on its own, for the surfaces that open a record rather than
+ * the span holding it.
+ *
+ * The run-level lane is the one that needs it. A record the run made at **no
+ * node** — `onevcs` observing a release long after the dispatch that produced the
+ * work has settled, or a person acknowledging one — belongs to the run and to
+ * nothing under it, so the only span it is ever inside is the run's own and the
+ * only way to open it is as itself.
+ */
+export function eventAsRow(event: TimelineEvent): TimelineRow {
+  return eventRow(event);
+}
+
 /** Depth-first lookup of one row by the id the query string carries. */
 export function findRow(
   rows: readonly TimelineRow[],

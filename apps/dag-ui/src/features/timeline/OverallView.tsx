@@ -27,7 +27,7 @@ import {
   graphTimeline,
 } from "./graph-timeline";
 import { TimelineItemDetail } from "./TimelineItemDetail";
-import { spanAsRow } from "./timeline-model";
+import { eventAsRow, spanAsRow } from "./timeline-model";
 
 /**
  * The run as a whole, read as one clock rather than as a list of its parts.
@@ -66,11 +66,28 @@ export function OverallView({
     () => graphTimeline(timeline, nodes),
     [timeline, nodes],
   );
-  // The one run-level session an operator opened, projected exactly as the node view
+  // The one run-level item an operator opened, projected exactly as the node view
   // projects a node's own, so both readings are the same reading.
-  const opened = (timeline?.spans ?? []).find(
-    (span) => span.id === selectedItemId && span.node_id === undefined,
+  //
+  // A *record* as well as a session, because some records belong to the run and to
+  // nothing under it: `onevcs` observes a release long after the dispatch that
+  // produced the work has settled and outside any session of it, so it is stamped
+  // with no node and this lane is the only place a reader meets it. The plot has
+  // always drawn those markers as focusable buttons; before this they selected an
+  // id nothing rendered, and pressing Enter on one did nothing at all.
+  const runLevel = (timeline?.spans ?? []).filter(
+    (span) => span.node_id === undefined,
   );
+  const openedSpan = runLevel.find((span) => span.id === selectedItemId);
+  const openedEvent = runLevel
+    .flatMap((span) => span.events)
+    .find((event) => event.id === selectedItemId);
+  const opened =
+    openedSpan === undefined
+      ? openedEvent === undefined
+        ? undefined
+        : eventAsRow(openedEvent)
+      : spanAsRow(openedSpan);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && selectedItemId !== undefined)
@@ -185,11 +202,7 @@ export function OverallView({
           >
             <X />
           </Button>
-          <TimelineItemDetail
-            client={client}
-            row={spanAsRow(opened)}
-            runId={runId}
-          />
+          <TimelineItemDetail client={client} row={opened} runId={runId} />
         </aside>
       )}
     </div>
@@ -227,7 +240,15 @@ function GraphExecution({
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
   const range = zoom ?? graph.range;
   const open = (segment: GraphSegment) => {
-    if (segment.nodeId !== undefined) onOpenNode(segment.nodeId);
+    // A record the run made at **no node** opens as itself, because there is
+    // nowhere else to read it: `onevcs` observes a release, and a person
+    // acknowledges one, long after the dispatch that produced the work has
+    // settled and outside any session of it, so no node view holds them and this
+    // lane is where a reader meets them. The plot has always drawn those markers
+    // as focusable buttons; before this they selected an id nothing rendered.
+    if (segment.kind === "record" && segment.nodeId === undefined)
+      onOpenSession(segment.id);
+    else if (segment.nodeId !== undefined) onOpenNode(segment.nodeId);
     else if (segment.conversationId !== undefined) onOpenSession(segment.id);
   };
   const lineLanes = graph.line.lanes.filter(({ id }) =>

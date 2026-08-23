@@ -63,7 +63,13 @@ export const GRAPH_LANES: readonly TimelineLane[] = [...NODE_LANES, IDLE_LANE];
  */
 export interface GraphSegment {
   readonly id: string;
-  readonly kind: "work" | "idle";
+  /**
+   * What was plotted: a stretch of work, the silence between stretches, or — on a
+   * marker — one journal record. A record is told apart from the work around it
+   * because it is opened differently: it *is* the thing a reader asked for, where
+   * a stretch of a node's work is a way into that node.
+   */
+  readonly kind: "work" | "idle" | "record";
   readonly label: string;
   /** The row this segment was projected from; absent on the whole-graph line's idle. */
   readonly rowId?: string;
@@ -270,7 +276,7 @@ function row({
           status: event.status,
           payload: {
             id: event.id,
-            kind: "work",
+            kind: "record",
             label: event.kind,
             rowId: id,
             ...(nodeId === undefined ? {} : { nodeId }),

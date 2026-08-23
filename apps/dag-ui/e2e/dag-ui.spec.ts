@@ -1218,6 +1218,44 @@ test("shows the release that carried a node's work and the waits before it", asy
   expect(await glyphName(marker("release-wait").first())).not.toBe(
     await glyphName(marker("release-arrived").first()),
   );
+
+  // The three `onevcs` writes are the run's own rather than any node's — that is
+  // why the node item is joined to one by a commit — so they are read where the
+  // run-level lane plots them, and each opens as the record it is.
+  await openObservatory(page, `/?run=${runs().live}&view=overall`);
+  await expandGraphRows(page);
+  const runLevel = page.getByRole("region", { name: "Run-level timeline" });
+  await runLevel.getByRole("button", { name: "Expand timeline" }).click();
+  // Opened from the keyboard, which is the path a marker on this plot is reached
+  // by: the graph line paints a cursor over its whole height as the pointer moves
+  // across it, so a click lands on the reading of the moment rather than on the
+  // record. Enter on the focused marker is what a reader without a pointer does.
+  const openRunMarker = async (kind: string, which: "first" | "last") => {
+    const marker = runLevel.getByRole("button", {
+      name: `Run-level · ${kind}, marker`,
+    });
+    await (which === "first" ? marker.first() : marker.last()).focus();
+    await page.keyboard.press("Enter");
+  };
+
+  // A probe names what it asked and what it was told, and no commit: it is a
+  // question to a registry rather than a record of what a release carried.
+  await openRunMarker("release-probed", "first");
+  await expect(itemDetail(page)).toContainText("Probe outcome");
+  await expect(itemDetail(page)).toContainText("released");
+  await expect(itemDetail(page)).not.toContainText("Landed as");
+
+  // An acknowledgement names the person, because a human step has one.
+  await openRunMarker("release-acknowledged", "first");
+  await expect(itemDetail(page)).toContainText("Acknowledged by");
+  await expect(itemDetail(page)).toContainText(facts.release.human_actor);
+
+  // And the observation carries the commit the node item's own release is joined
+  // to it by, which is the whole of that derivation shown to a reader.
+  await openRunMarker("release-observed", "last");
+  await expect(itemDetail(page)).toContainText(facts.release.version);
+  await expect(itemDetail(page)).toContainText(facts.foundation_commit);
+  await expect(itemDetail(page)).toContainText("Landed as");
 });
 
 /**
