@@ -985,14 +985,6 @@ export const redirectionSchema = openObject({
 });
 
 /**
- * `kind` is an open string on purpose: it is the journal event kind that produced
- * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
- *
- * `redirection` appears only on the records that are one — a `turn-interrupted`, or
- * an `edit-committed` that added context to a node — and is deliberately not *keyed*
- * on those two names here, for the same reason `kind` is open at all.
- */
-/**
  * One thing a node is being held on, from a `release-wait` record.
  *
  * `action` is what somebody has to go and do, and it is carried on **human-step**
@@ -1063,6 +1055,14 @@ export const timelineReleaseSchema = openObject({
     });
   }
 });
+/**
+ * `kind` is an open string on purpose: it is the journal event kind that produced
+ * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
+ *
+ * `redirection` appears only on the records that are one — a `turn-interrupted`, or
+ * an `edit-committed` that added context to a node — and is deliberately not *keyed*
+ * on those two names here, for the same reason `kind` is open at all.
+ */
 // llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
   id: z.string().min(1),

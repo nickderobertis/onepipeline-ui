@@ -183,7 +183,7 @@ export function OverallView({
                 <GraphExecution
                   graph={graph}
                   onOpenNode={onSelectNode}
-                  onOpenSession={onSelectItem}
+                  onOpenItem={onSelectItem}
                   selectedItemId={selectedItemId}
                 />
               )}
@@ -219,12 +219,17 @@ export function OverallView({
 function GraphExecution({
   graph,
   onOpenNode,
-  onOpenSession,
+  onOpenItem,
   selectedItemId,
 }: {
   readonly graph: ReturnType<typeof graphTimeline>;
   readonly onOpenNode: (nodeId: string) => void;
-  readonly onOpenSession: (itemId?: string) => void;
+  /**
+   * Open one plotted item beside the plot, by the id it is selected under. Not a
+   * session: what a run-level lane plots is a session *or* a record the run made
+   * at no node, and both are read in the same panel.
+   */
+  readonly onOpenItem: (itemId?: string) => void;
   readonly selectedItemId?: string;
 }) {
   // A different run is a different clock, and none of this framing follows it there:
@@ -247,9 +252,9 @@ function GraphExecution({
     // lane is where a reader meets them. The plot has always drawn those markers
     // as focusable buttons; before this they selected an id nothing rendered.
     if (segment.kind === "record" && segment.nodeId === undefined)
-      onOpenSession(segment.id);
+      onOpenItem(segment.id);
     else if (segment.nodeId !== undefined) onOpenNode(segment.nodeId);
-    else if (segment.conversationId !== undefined) onOpenSession(segment.id);
+    else if (segment.conversationId !== undefined) onOpenItem(segment.id);
   };
   const lineLanes = graph.line.lanes.filter(({ id }) =>
     graph.line.items.some((item) => item.laneId === id),
