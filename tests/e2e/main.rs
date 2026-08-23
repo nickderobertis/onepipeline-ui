@@ -14,11 +14,16 @@
 //! surface, and `ensure_sibling` runs the recipe the gate provisions the sibling
 //! CLI with, plus the task graph Nx itself builds for `test`.
 //!
-//! Those last five each stand in for exactly one program on PATH — `llmlint`,
-//! which bills a model call, `gh`, which rewrites a public Release, and `cargo`,
-//! whose reading downloads and builds two dependency trees and whose install
-//! compiles a second CLI. The script under test is the real one in each, and
-//! `support/stub_bin.rs` is what makes what it asked for readable.
+//! Those last five each stand in for exactly one program — `llmlint`, which
+//! bills a model call and answers differently each time, `gh`, which rewrites a
+//! public Release, and `cargo`, whose reading downloads and builds two dependency
+//! trees and whose install compiles a second CLI. What is under test is the real
+//! script or recipe in every one of them, and the stand-in only makes what it
+//! asked for readable. `support/stub_bin.rs` is how four of them put it on PATH;
+//! `llmlint_cache` installs its own inside the scratch `HOME` it hands the tier,
+//! which is where `just setup-llmlint` installs the real one — so that
+//! substitution also demonstrates the tier resolving its judge through its own
+//! runtime environment rather than through the caller's.
 
 mod cli;
 mod ensure_sibling;

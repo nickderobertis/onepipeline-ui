@@ -362,6 +362,33 @@ fn a_judge_configuration_that_moved_outside_the_tree_is_judged_again() {
     assert_eq!(fixture.judge_calls().len(), 2);
 }
 
+/// The *installed* llmlint version is in the key beside the merged config, and it
+/// has to be: no tracked file in this repository records it, so an upgraded judge
+/// would otherwise answer from a verdict the version it replaced produced.
+#[test]
+fn an_upgraded_llmlint_is_judged_again() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run();
+    let upgraded = fixture.run_with(&[("STUB_LLMLINT_VERSION", "9.9.10")], &[]);
+    let original = fixture.run();
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(upgraded.status.success(), "{}", stderr(&upgraded));
+    assert_eq!(provenance(&first), Provenance::Judged);
+    assert_eq!(
+        provenance(&upgraded),
+        Provenance::Judged,
+        "an upgraded llmlint replayed the verdict the version it replaced produced"
+    );
+    assert_eq!(
+        provenance(&original),
+        Provenance::Replayed,
+        "the version that recorded it should still have its own verdict"
+    );
+    assert_eq!(fixture.judge_calls().len(), 2);
+}
+
 /// The subtle half. `llmlint config` renders the resolved oneharness binary, and
 /// this host really does leak one — a checkout of another repository exports
 /// `LLMLINT_ONEHARNESS_BIN` at its own wrapper. Read from the caller, that would
