@@ -416,6 +416,35 @@ fn an_upgraded_llmlint_is_judged_again() {
     assert_eq!(fixture.judge_calls().len(), 2);
 }
 
+/// The shard budget is in the key beside the fingerprint, because it is the other
+/// half of the same question. `scripts/lint-llm-diff.sh` splits a change too large
+/// for one harness turn across several judge calls, and a rule that needs two
+/// files together only sees them together when they share a shard — so a verdict
+/// reached under one budget is not a verdict under another.
+#[test]
+fn a_changed_shard_budget_is_judged_again() {
+    let fixture = Fixture::new();
+
+    let first = fixture.run();
+    let rebudgeted = fixture.run_with(&[("LLMLINT_SHARD_BUDGET_CHARS", "4000")], &[]);
+    let original = fixture.run();
+
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(rebudgeted.status.success(), "{}", stderr(&rebudgeted));
+    assert_eq!(provenance(&first), Provenance::Judged);
+    assert_eq!(
+        provenance(&rebudgeted),
+        Provenance::Judged,
+        "a change split differently across judge calls replayed the other split's verdict"
+    );
+    assert_eq!(
+        provenance(&original),
+        Provenance::Replayed,
+        "the budget that recorded it should still have its own verdict"
+    );
+    assert_eq!(fixture.judge_calls().len(), 2);
+}
+
 /// The subtle half. `llmlint config` renders the resolved oneharness binary, and
 /// this host really does leak one — a checkout of another repository exports
 /// `LLMLINT_ONEHARNESS_BIN` at its own wrapper. Read from the caller, that would

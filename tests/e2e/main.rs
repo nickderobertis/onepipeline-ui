@@ -14,11 +14,11 @@
 //! surface, and `ensure_sibling` runs the recipe the gate provisions the sibling
 //! CLI with, plus the task graph Nx itself builds for `test`.
 //!
-//! Those last five each stand in for exactly one program on PATH — `llmlint`,
-//! which bills a model call, `gh`, which rewrites a public Release, and `cargo`,
-//! whose reading downloads and builds two dependency trees and whose install
-//! compiles a second CLI. The script under test is the real one in each, and
-//! `support/stub_bin.rs` is what makes what it asked for readable.
+//! What is under test in every one of them is the real script, recipe or binary,
+//! over a real tree. Where a journey cannot let one of them reach a program for
+//! real — because it bills a model call, rewrites a public Release, or compiles a
+//! second CLI — the module that does so names it in its own header, beside the
+//! directive that permits it and the reason it is the narrowest cut available.
 
 mod cli;
 mod ensure_sibling;
