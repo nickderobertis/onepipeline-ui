@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.2...v0.6.3) - 2026-08-23
+
+### Added
+
+- show the release that carried each landed node, and every release event ([#36](https://github.com/nickderobertis/onepipeline-ui/pull/36))
+
 ## [0.6.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.1...v0.6.2) - 2026-08-21
 
 ### Fixed
