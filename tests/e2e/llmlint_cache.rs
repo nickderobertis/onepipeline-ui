@@ -250,9 +250,17 @@ impl Fixture {
         command.output().expect("just is on PATH")
     }
 
-    /// The cached target's own body, run the way Nx runs it — which is how the
-    /// journeys below reach the guards that exist because a target reached
-    /// directly has had no base resolved for it.
+    /// The cached target's body, run exactly as `project.json` tells Nx to run
+    /// it. That is the real usage the guards below exist for: they catch a target
+    /// reached without `just lint-llm-diff` in front of it, which has had no base
+    /// resolved for it, and `scripts/llmlint-judge.sh` says so in its own header.
+    ///
+    /// Reaching it through `just nx run onepipeline-ui:lint-llm-diff` was tried
+    /// and is not usable here: these refusals fail in tens of milliseconds, and
+    /// Nx drops a task's stderr that fast often enough — one run in four, under
+    /// the load of the whole suite — that the journey would assert on a refusal
+    /// message Nx had swallowed. The 17 journeys either side of these two drive
+    /// the recipe, which is where that entry point is covered.
     fn run_judge_target(&self, environment: &[(&str, &str)]) -> Output {
         let mut command = Command::new("bash");
         command
@@ -712,12 +720,14 @@ fn the_cached_target_refuses_a_base_that_was_never_resolved() {
             output.status.code(),
             Some(2),
             "{handed:?} was accepted as a resolved commit id:\n{}",
-            stderr(&output)
+            reported(&output)
         );
         assert!(
-            stderr(&output).contains("just lint-llm-diff"),
-            "the message should name the command that resolves a base:\n{}",
-            stderr(&output)
+            reported(&output).contains("not a resolved commit id")
+                && reported(&output).contains("just lint-llm-diff"),
+            "the refusal should say what was wrong and name the command that \
+             resolves a base:\n{}",
+            reported(&output)
         );
     }
     assert!(
@@ -739,14 +749,15 @@ fn the_cached_target_refuses_a_commit_this_checkout_does_not_have() {
         output.status.code(),
         Some(2),
         "a commit missing from the checkout was judged against:\n{}",
-        stderr(&output)
+        reported(&output)
     );
     assert!(
-        stderr(&output).contains(&absent) && stderr(&output).contains("missing from this checkout"),
+        reported(&output).contains(&absent)
+            && reported(&output).contains("missing from this checkout"),
         "the target did not refuse the commit itself — the wrapper behind it \
          reports a base it cannot diff against in its own words, which would let \
          this pass with the target's own guard gone:\n{}",
-        stderr(&output)
+        reported(&output)
     );
     assert!(fixture.judge_calls().is_empty());
 }
