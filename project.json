@@ -31,6 +31,10 @@
     "doc": {
       "command": "just _crate-doc"
     },
+    "lint-llm-diff": {
+      "command": "bash scripts/llmlint-judge.sh",
+      "options": { "cwd": "." }
+    },
     "check": {
       "executor": "nx:noop"
     }

@@ -98,6 +98,21 @@ to `oneagentgraph`'s own declaration of it rather than to a second reading of th
 wire. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
+**The judged tier is memoized.** `just lint-llm-diff <base>` runs the cached Nx
+target `onepipeline-ui:lint-llm-diff` rather than llmlint directly, so one tree
+judged against one base with one judge configuration gets **one** verdict rather
+than a fresh sample. That is not a speed optimisation: the judge is
+non-deterministic across the gap between what it judges — every file in the
+base-to-head diff, because llmlint has no increment mode — and what changed, one
+hunk. One `just gate` invocation over one tree has returned two opposite
+verdicts. Only a green is replayed; findings and a toolchain that never reached a
+verdict are judged again next run, which is the trade for owning no verdict record
+to write, restore or race on. Force a fresh roll with
+`just lint-llm-diff <base> --skip-nx-cache`; an ambient `NX_SKIP_NX_CACHE` is
+reported and ignored by this tier alone, because it would re-roll the judge from
+every unrelated command. The recipe's trailing arguments are Nx's, not llmlint's.
+`scripts/llmlint-cached-diff.sh` holds what is in the key and why.
+
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx
 fans one uniformly-named target across all of them.
 

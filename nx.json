@@ -15,6 +15,7 @@
       "{workspaceRoot}/tsconfig.base.json"
     ],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "wholeWorkspace": ["{workspaceRoot}/**/*"],
     "apiServerSurface": [
       "{workspaceRoot}/src/**/*.rs",
       "{workspaceRoot}/Cargo.toml",
@@ -31,6 +32,15 @@
     "build": { "cache": true, "inputs": ["default"] },
     "test": { "cache": true, "inputs": ["default"] },
     "doc": { "cache": true, "inputs": ["default"] },
+    "lint-llm-diff": {
+      "cache": true,
+      "inputs": [
+        "wholeWorkspace",
+        { "env": "LLMLINT_DIFF_BASE_SHA" },
+        { "env": "LLMLINT_JUDGE_FINGERPRINT" },
+        { "env": "LLMLINT_SHARD_BUDGET_CHARS" }
+      ]
+    },
     "check": {
       "cache": false,
       "dependsOn": ["format-check", "lint", "typecheck", "build", "test", "doc"]
