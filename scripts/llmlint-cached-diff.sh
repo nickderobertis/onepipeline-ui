@@ -91,27 +91,33 @@ if [ -n "${NX_SKIP_NX_CACHE:-}${NX_DISABLE_NX_CACHE:-}" ]; then
 fi
 unset NX_SKIP_NX_CACHE NX_DISABLE_NX_CACHE
 
-report="$(mktemp)" || {
+# The run is captured to be read back, not to be re-plumbed: each stream is
+# replayed onto the one it arrived on, so llmlint's and Nx's diagnostics stay on
+# stderr and this tier keeps the stream contract it had before it was memoized.
+workdir="$(mktemp -d)" || {
   echo "lint-llm-diff: could not open temporary storage for the judge report" >&2
   echo "ACTION: free disk space and retry" >&2
   exit 1
 }
-trap 'rm -f "$report"' EXIT
+trap 'rm -rf "$workdir"' EXIT
 
 status=0
 LLMLINT_DIFF_BASE_SHA="$base_sha" \
   LLMLINT_JUDGE_FINGERPRINT="$fingerprint" \
-  bash scripts/nx.sh run "$TARGET" ${@+"$@"} >"$report" 2>&1 || status=$?
-cat "$report"
+  bash scripts/nx.sh run "$TARGET" ${@+"$@"} \
+  >"$workdir/out" 2>"$workdir/err" || status=$?
+cat "$workdir/out"
+cat "$workdir/err" >&2
 
-# Read below rather than `$report` itself: the provenance and the exit status are
-# both recovered from Nx's own wording, and Nx colourizes that wording whenever
-# something sets `FORCE_COLOR` — which Nx itself does for every task it runs, so a
-# nested invocation buries `[local cache]` in escape sequences. Matching the
-# painted text reported every replay as a fresh judgement, which is worse than
-# saying nothing: it is the one line an operator reads to know whether the verdict
-# in front of them was rolled or recalled.
-plain="$(sed "s/$(printf '\033')\[[0-9;]*[a-zA-Z]//g" "$report")" || {
+# Read below rather than either stream directly: the provenance and the exit
+# status are both recovered from Nx's own wording, and Nx colourizes that wording
+# whenever something sets `FORCE_COLOR` — which Nx itself does for every task it
+# runs, so a nested invocation buries `[local cache]` in escape sequences.
+# Matching the painted text reported every replay as a fresh judgement, which is
+# worse than saying nothing: this is the one line an operator reads to know
+# whether the verdict in front of them was rolled or recalled. Both streams are
+# read because which one carries a replayed report is Nx's choice, not ours.
+plain="$(sed "s/$(printf '\033')\[[0-9;]*[a-zA-Z]//g" "$workdir/out" "$workdir/err")" || {
   echo "lint-llm-diff: could not read the judge report back" >&2
   echo "ACTION: rerun; if it persists, verify sed is on PATH" >&2
   exit 1

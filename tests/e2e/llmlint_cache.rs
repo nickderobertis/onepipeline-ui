@@ -38,6 +38,8 @@ use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
+use crate::stub_bin;
+
 /// Everything the cached tier reads out of a checkout, and nothing else. Spelled
 /// out rather than swept up, so a file this tier starts depending on has to be
 /// named here — which is the same list an operator would have to explain.
@@ -126,6 +128,13 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// Both streams together. Which one a *replayed* report arrives on is Nx's
+/// choice — it records one terminal output and hands it back whole — so a
+/// journey asserting on the judge's own words reads both.
+fn reported(output: &Output) -> String {
+    format!("{}{}", stdout(output), stderr(output))
+}
+
 /// What one run said about where its verdict came from, as the recipe reports it.
 #[derive(Debug, PartialEq, Eq)]
 enum Provenance {
@@ -190,15 +199,14 @@ impl Fixture {
         git(&workspace, &["add", "-A"]);
         git(&workspace, &["commit", "--quiet", "-m", "the change"]);
 
-        let stub_dir = dir.path().join("home/.local/bin");
-        fs::create_dir_all(&stub_dir).expect("create the scratch home");
-        let stub = stub_dir.join("llmlint");
-        fs::write(&stub, STUB_LLMLINT).expect("write the stand-in judge");
-        let mut mode = fs::metadata(&stub)
-            .expect("stat the stand-in")
-            .permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
-        fs::set_permissions(&stub, mode).expect("chmod the stand-in");
+        // Into the scratch `HOME`, which is where `just setup-llmlint` installs
+        // the real one — so the tier reaches it only by resolving its judge
+        // through `scripts/llmlint-runtime-env.sh`. The search path this answers
+        // with is deliberately dropped rather than used: putting the stand-in on
+        // PATH as well would resolve it whether or not that runtime environment
+        // works, which is one of the things these journeys are here to assert.
+        let _on_path =
+            stub_bin::install(&dir.path().join("home/.local/bin"), "llmlint", STUB_LLMLINT);
 
         Self { dir, base, earlier }
     }
@@ -289,11 +297,11 @@ fn a_second_run_over_an_unchanged_tree_replays_the_first_verdict() {
     // Nx annotates its own task line on a hit, so what has to match is the
     // judge's report inside it — which is the verdict a reader came for.
     assert!(
-        stdout(&first).contains("stub llmlint verdict #1")
-            && stdout(&second).contains("stub llmlint verdict #1"),
+        reported(&first).contains("stub llmlint verdict #1")
+            && reported(&second).contains("stub llmlint verdict #1"),
         "the replayed run did not reproduce the recorded verdict:\nfirst:\n{}\nsecond:\n{}",
-        stdout(&first),
-        stdout(&second)
+        reported(&first),
+        reported(&second)
     );
 }
 
@@ -484,9 +492,9 @@ fn a_judge_that_never_reached_a_verdict_is_judged_again_and_keeps_its_exit_code(
     );
     assert_eq!(second.status.code(), Some(2), "{}", stderr(&second));
     assert!(
-        stdout(&first).contains("never reached a verdict"),
-        "the failure does not distinguish itself from a finding:\n{}",
-        stdout(&first)
+        stderr(&first).contains("never reached a verdict"),
+        "the failure does not distinguish itself from a finding, or did not reach stderr:\n{}",
+        stderr(&first)
     );
     assert_eq!(provenance(&second), Provenance::Judged);
     assert_eq!(fixture.judge_calls().len(), 2);
@@ -514,9 +522,9 @@ fn the_per_invocation_option_re_judges_without_reading_or_writing_the_cache() {
     assert_eq!(fixture.judge_calls().len(), 2);
     assert_eq!(provenance(&after), Provenance::Replayed);
     assert!(
-        stdout(&after).contains("stub llmlint verdict #1"),
+        reported(&after).contains("stub llmlint verdict #1"),
         "the forced run overwrote the recorded verdict:\n{}",
-        stdout(&after)
+        reported(&after)
     );
 }
 
@@ -536,9 +544,9 @@ fn a_colourized_nx_report_is_still_read_as_a_replay() {
     assert!(first.status.success(), "{}", stderr(&first));
     assert!(second.status.success(), "{}", stderr(&second));
     assert!(
-        stdout(&second).contains('\u{1b}'),
+        reported(&second).contains('\u{1b}'),
         "the run was not colourized, so this journey proves nothing:\n{}",
-        stdout(&second)
+        reported(&second)
     );
     assert_eq!(provenance(&first), Provenance::Judged);
     assert_eq!(
