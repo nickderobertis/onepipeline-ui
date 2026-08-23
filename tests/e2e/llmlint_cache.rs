@@ -86,7 +86,9 @@ const WORKSPACE_FILES: &[&str] = &[
 const STUB_LLMLINT: &str = "#!/usr/bin/env bash\n\
      set -eu\n\
      case \"${1:-}\" in\n\
-       --version) printf 'llmlint %s\\n' \"${STUB_LLMLINT_VERSION:-9.9.9}\"; exit 0 ;;\n\
+       --version)\n\
+         [ -z \"${STUB_VERSION_STATUS:-}\" ] || { echo 'stub llmlint: cannot report a version' >&2; exit \"$STUB_VERSION_STATUS\"; }\n\
+         printf 'llmlint %s\\n' \"${STUB_LLMLINT_VERSION:-9.9.9}\"; exit 0 ;;\n\
        config)\n\
          [ -z \"${STUB_CONFIG_STATUS:-}\" ] || { echo 'stub llmlint: cannot resolve the config' >&2; exit \"$STUB_CONFIG_STATUS\"; }\n\
          printf 'rules=%s\\noneharness_bin=%s\\n' \"${STUB_CONFIG_RULES:-baseline}\" \"${LLMLINT_ONEHARNESS_BIN:-null}\"\n\
@@ -246,6 +248,23 @@ impl Fixture {
             command.env(name, value);
         }
         command.output().expect("just is on PATH")
+    }
+
+    /// The cached target's own body, run the way Nx runs it — which is how the
+    /// journeys below reach the guards that exist because a target reached
+    /// directly has had no base resolved for it.
+    fn run_judge_target(&self, environment: &[(&str, &str)]) -> Output {
+        let mut command = Command::new("bash");
+        command
+            .arg("scripts/llmlint-judge.sh")
+            .current_dir(self.workspace())
+            .env("HOME", self.dir.path().join("home"))
+            .env("STUB_CALLS", self.calls_log())
+            .env_remove("LLMLINT_DIFF_BASE_SHA");
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+        command.output().expect("bash is on PATH")
     }
 
     /// Every judge call the tier asked for, in order.
@@ -588,6 +607,119 @@ fn an_ambient_global_cache_skip_is_reported_and_ignored() {
         );
     }
     assert_eq!(fixture.judge_calls().len(), 1);
+}
+
+/// A base is interpolated into `git rev-parse` as a revision, so a leading dash
+/// would arrive there as an option rather than as a name. It is refused at the
+/// boundary, before anything is resolved or judged.
+#[test]
+fn a_base_that_is_not_a_revision_is_refused_at_the_boundary() {
+    let fixture = Fixture::new();
+
+    for base in ["--all", "-x"] {
+        let output = fixture.run_full(base, &[], &[]);
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "'{base}' was not refused as a usage error:\n{}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains(base) && stderr(&output).contains("not a revision"),
+            "the message should name what it refused and why:\n{}",
+            stderr(&output)
+        );
+    }
+    assert!(
+        fixture.judge_calls().is_empty(),
+        "something was judged against a base that is not a revision"
+    );
+}
+
+/// A judge that cannot even report its version cannot be fingerprinted, so the
+/// tier stops rather than keying on the tree and the base alone. This is the same
+/// guard as an unresolvable config, on the other reading the fingerprint takes.
+#[test]
+fn a_judge_that_cannot_report_its_version_fails_the_tier() {
+    let fixture = Fixture::new();
+
+    let recorded = fixture.run();
+    let broken = fixture.run_with(&[("STUB_VERSION_STATUS", "127")], &[]);
+
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    assert_eq!(
+        broken.status.code(),
+        Some(2),
+        "a judge with no reportable version did not stop the tier:\n{}",
+        stderr(&broken)
+    );
+    assert!(
+        stderr(&broken).contains("setup-llmlint"),
+        "the failure does not say how to repair the toolchain:\n{}",
+        stderr(&broken)
+    );
+    assert_eq!(
+        fixture.judge_calls().len(),
+        1,
+        "the tier judged, or replayed, without a fingerprint of the judge configuration"
+    );
+}
+
+/// The cached target keys on the base it is handed, so being handed a ref name —
+/// or nothing — would let one recorded verdict be replayed for another commit.
+/// Reached directly, it refuses and says which command resolves a base for it.
+#[test]
+fn the_cached_target_refuses_a_base_that_was_never_resolved() {
+    let fixture = Fixture::new();
+
+    for handed in [None, Some("origin/main"), Some("HEAD"), Some("not-a-sha")] {
+        let environment: Vec<(&str, &str)> = handed
+            .map(|value| vec![("LLMLINT_DIFF_BASE_SHA", value)])
+            .unwrap_or_default();
+        let output = fixture.run_judge_target(&environment);
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{handed:?} was accepted as a resolved commit id:\n{}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains("just lint-llm-diff"),
+            "the message should name the command that resolves a base:\n{}",
+            stderr(&output)
+        );
+    }
+    assert!(
+        fixture.judge_calls().is_empty(),
+        "the judge was asked about a base nothing had resolved"
+    );
+}
+
+/// A commit id this checkout does not have is well-formed and still unusable:
+/// llmlint would diff against nothing. Refused with the one thing that fixes it.
+#[test]
+fn the_cached_target_refuses_a_commit_this_checkout_does_not_have() {
+    let fixture = Fixture::new();
+    let absent = "0".repeat(40);
+
+    let output = fixture.run_judge_target(&[("LLMLINT_DIFF_BASE_SHA", &absent)]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a commit missing from the checkout was judged against:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains(&absent) && stderr(&output).contains("missing from this checkout"),
+        "the target did not refuse the commit itself — the wrapper behind it \
+         reports a base it cannot diff against in its own words, which would let \
+         this pass with the target's own guard gone:\n{}",
+        stderr(&output)
+    );
+    assert!(fixture.judge_calls().is_empty());
 }
 
 /// A base that does not resolve is a usage error, and nothing is judged against

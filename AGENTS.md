@@ -98,39 +98,20 @@ to `oneagentgraph`'s own declaration of it rather than to a second reading of th
 wire. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
-**The judged tier is memoized, and `just gate` and CI both reach it through the
-memo.** `just lint-llm-diff <base>` resolves the base ref to a commit,
-fingerprints the judge configuration, and runs the cached Nx target
-`onepipeline-ui:lint-llm-diff` — it no longer calls llmlint directly. One tree
-judged against one base with one judge configuration therefore gets **one**
-verdict. That is not a speed optimisation: the judge is non-deterministic across
-the gap between what it judges (every file in the base-to-head diff, because
-llmlint has no increment mode) and what changed (one hunk), and one `just gate`
-invocation over one tree has returned two opposite verdicts. Three things are in
-the key and nothing else — the whole workspace, the resolved base commit, and the
-judge configuration. That last is `scripts/llmlint-fingerprint.sh`, which covers
-the *installed* llmlint version and the resolved content of plugins pinned in
-`llmlint.yml` but fetched from outside this repository, plus
-`LLMLINT_SHARD_BUDGET_CHARS`, which decides how the change is split across judge
-calls and so which files any one call sees together. The fingerprint is read under
-`scripts/llmlint-runtime-env.sh`, the environment `scripts/llmlint-judge.sh`
-itself judges under, so a caller's `LLMLINT_ONEHARNESS_BIN` — which this host does
-leak, from a checkout of another repository — cannot split one judged diff across
-a key per dispatch. It is taken in the recipe rather than declared as an Nx
-`runtime` input because Nx scores a failing runtime input as *no contribution*
-rather than as an error, which would drop the judge configuration out of the key
-silently and replay a verdict it has moved on from; taken there, an unproducible
-fingerprint fails the tier. **Only a green is replayed** — Nx caches successful
-tasks only, so findings and a toolchain that never reached a verdict are both
-judged again next run, and that is the deliberate trade for owning no verdict
-record to write, restore or race on. Force a fresh roll with
-`just lint-llm-diff <base> --skip-nx-cache`, which neither reads nor writes the
-cache; an ambient `NX_SKIP_NX_CACHE` / `NX_DISABLE_NX_CACHE` is reported and
-ignored by this tier alone, because it would re-roll a non-deterministic judge
-from every unrelated command. The recipe's trailing arguments are Nx's now rather
-than llmlint's — reach llmlint's own flags through `just lint-llm`, or
-`scripts/lint-llm-diff.sh`, which still shards the diff to fit a harness turn and
-is what the memo wraps.
+**The judged tier is memoized.** `just lint-llm-diff <base>` runs the cached Nx
+target `onepipeline-ui:lint-llm-diff` rather than llmlint directly, so one tree
+judged against one base with one judge configuration gets **one** verdict rather
+than a fresh sample. That is not a speed optimisation: the judge is
+non-deterministic across the gap between what it judges — every file in the
+base-to-head diff, because llmlint has no increment mode — and what changed, one
+hunk. One `just gate` invocation over one tree has returned two opposite
+verdicts. Only a green is replayed; findings and a toolchain that never reached a
+verdict are judged again next run, which is the trade for owning no verdict record
+to write, restore or race on. Force a fresh roll with
+`just lint-llm-diff <base> --skip-nx-cache`; an ambient `NX_SKIP_NX_CACHE` is
+reported and ignored by this tier alone, because it would re-roll the judge from
+every unrelated command. The recipe's trailing arguments are Nx's, not llmlint's.
+`scripts/llmlint-cached-diff.sh` holds what is in the key and why.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx
 fans one uniformly-named target across all of them.
