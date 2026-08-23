@@ -1050,6 +1050,18 @@ export const timelineReleaseSchema = openObject({
     )
     .min(1)
     .optional(),
+}).superRefine((release, context) => {
+  // A release that says nothing is not a release record: the server serves no
+  // `release` at all for a record that carried none of these, because an empty
+  // object would reach a reader as a release nobody could name — a heading over
+  // a blank panel. So an empty one is a payload this client cannot render rather
+  // than one it renders as nothing.
+  if (Object.values(release).every((fact) => fact === undefined)) {
+    context.addIssue({
+      code: "custom",
+      message: "a release record carries at least one recorded fact",
+    });
+  }
 });
 // llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
@@ -1073,6 +1085,7 @@ export const timelineEventSchema = openObject({
    * is not keyed on its two: `kind` is the journal event kind and the journal owns
    * that vocabulary.
    */
+  // llmlint: ignore[boundary_inputs_validated] the pairing of `release` with a `kind` is the same constraint this parser may not enforce as the `redirection` pairing above, and for the same reason: the six release kinds are `onevcs`'s and `onepipeline`'s, both released on their own schedules, so a conforming server relaying a seventh release record — or relaying one of these six under a name this build has never seen — would have its whole timeline refused over a field it filled correctly. What `release` itself carries is fully validated above, down to refusing one that carries nothing, and that is the part this contract owns.
   release: timelineReleaseSchema.optional(),
   reference: timelineReferenceSchema.optional(),
 });

@@ -724,6 +724,12 @@ describe("run timeline", () => {
         },
       }).release?.landing_commit,
     ).toBe("0f1e2d3c4b5a69788796a5b4c3d2e1f001122334");
+    // A release that says nothing is not a release record: the server serves none
+    // rather than an empty object, which would reach a reader as a heading over a
+    // blank panel.
+    expect(
+      timelineEventSchema.safeParse({ ...held, release: {} }).success,
+    ).toBe(false);
     // An entry naming nothing it waits on says nothing at all, and an empty list
     // would read as a node held on nothing rather than as a node not held.
     expect(

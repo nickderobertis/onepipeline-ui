@@ -25,11 +25,7 @@ import {
   OFFLINE_UI_URL,
   STALLED_UI_URL,
 } from "../playwright.config";
-import {
-  DEFAULT_EVENT_CATEGORY,
-  EVENT_CATEGORIES,
-  eventCategory,
-} from "../src/features/timeline/event-category";
+import { EVENT_CATEGORIES } from "../src/features/timeline/event-category";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -1140,9 +1136,11 @@ test("shows the release that carried a node's work and the waits before it", asy
   // Absent, never null, for a node the run recorded no release for.
   expect("release" in detail.graph.node_results.dashboard).toBe(false);
 
-  // Every one of the six kinds really reached the served store, and every one of
-  // them is filed under a category this build draws rather than under the default
-  // it keeps for a kind nobody has decided one for.
+  // Every one of the six kinds really reached the reader. That they are each
+  // *filed* under a category is held over this same served store by
+  // `event-category.test.tsx`, which reads the fixture's own kinds and fails on
+  // one nobody decided a category for; what this asserts is the half that suite
+  // cannot — that the server actually serves them.
   const atRun = await (
     await page.request.get(`/api/v2/runs/${runs().live}/timeline?scope=run`)
   ).json();
@@ -1151,17 +1149,15 @@ test("shows the release that carried a node's work and the waits before it", asy
       span.events.map((event) => event.kind),
     ),
   );
-  const six = [
-    "release-probed",
-    "release-acknowledged",
-    "release-observed",
-    "release-wait",
-    "release-arrived",
-    "release-adopted",
-  ];
-  expect(six.filter((kind) => !served.has(kind))).toEqual([]);
   expect(
-    six.filter((kind) => eventCategory(kind) === DEFAULT_EVENT_CATEGORY),
+    [
+      "release-probed",
+      "release-acknowledged",
+      "release-observed",
+      "release-wait",
+      "release-arrived",
+      "release-adopted",
+    ].filter((kind) => !served.has(kind)),
   ).toEqual([]);
 
   // What the reader sees. The node's own release sits beside its change request.
@@ -1208,8 +1204,9 @@ test("shows the release that carried a node's work and the waits before it", asy
   await expect(itemDetail(page)).toContainText("Versions adopted");
   await expect(itemDetail(page)).toContainText(facts.release.dep_version);
 
-  // Drawn as the categories they belong to, which is what a reader scanning the
-  // plot is answering: the wait apart from the two releases beside it.
+  // And drawn as the categories they belong to, which is what a reader scanning
+  // the plot is answering: the wait apart from the two releases beside it, each
+  // against a glyph stated independently of the table that assigns it.
   const marker = (named: string): Locator =>
     timeline(page).getByRole("button", {
       name: `${named}, marker`,

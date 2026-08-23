@@ -58,6 +58,31 @@ function lastAnswerLabel(answer: string): string {
   }
 }
 
+/**
+ * Whether a later acknowledgement has replaced this one.
+ *
+ * A word rather than the flag, because "Superseded: false" is a row a reader has
+ * to translate, and the thing they are asking is whether this is still the
+ * acknowledgement that counts.
+ */
+function supersededLabel(superseded?: boolean): string | undefined {
+  if (superseded === undefined) return undefined;
+  return superseded ? "yes — a later acknowledgement replaced this one" : "no";
+}
+
+/**
+ * Where an adoption's versions went: into the turn that was already running, or
+ * onto the node's next dispatch. The producer's own word for anything else.
+ */
+function adoptionLabel(delivery?: string): string | undefined {
+  if (delivery === undefined) return undefined;
+  if (delivery === "live")
+    return "Live — into the turn that was already running";
+  if (delivery === "deferred")
+    return "Deferred — onto the node's next dispatch";
+  return delivery;
+}
+
 /** One awaited release, named the way a reader would name it. */
 function awaitedLabel(entry: ReleaseAwaited): string {
   return (
@@ -83,58 +108,34 @@ export function ReleaseRecord({
 }: {
   readonly release: TimelineRelease;
 }) {
-  const facts: readonly (readonly [string, string])[] = [
-    ...(release.dep === undefined
-      ? []
-      : ([["Dependency", release.dep]] as const)),
-    ...(release.identity === undefined
-      ? []
-      : ([["Identity", release.identity]] as const)),
-    ...(release.target === undefined
-      ? []
-      : ([["Release target", release.target]] as const)),
-    ...(release.style === undefined
-      ? []
-      : ([["Style", releaseStyleLabel(release.style)]] as const)),
-    ...(release.version === undefined
-      ? []
-      : ([["Version", release.version]] as const)),
-    ...(release.outcome === undefined
-      ? []
-      : ([["Probe outcome", release.outcome]] as const)),
-    ...(release.form === undefined
-      ? []
-      : ([["Probed through", release.form]] as const)),
-    ...(release.elapsed_ms === undefined
-      ? []
-      : ([["Probe took", `${release.elapsed_ms} ms`]] as const)),
-    ...(release.actor === undefined
-      ? []
-      : ([["Acknowledged by", release.actor]] as const)),
-    ...(release.superseded === undefined
-      ? []
-      : ([
-          [
-            "Superseded",
-            release.superseded
-              ? "yes — a later acknowledgement replaced this one"
-              : "no",
-          ],
-        ] as const)),
-    ...(release.landing_commit === undefined
-      ? []
-      : ([["Landed as", release.landing_commit]] as const)),
-    ...(release.delivery === undefined
-      ? []
-      : ([
-          [
-            "Adopted",
-            release.delivery === "live"
-              ? "Live — into the turn that was already running"
-              : release.delivery,
-          ],
-        ] as const)),
+  // One row per fact the record carried, in the order a reader reads them, with
+  // the ones it did not carry left undefined rather than filtered out here: which
+  // of them a kind fills is the difference between a probe and an
+  // acknowledgement, and dropping them at the source would leave the two reading
+  // as one shape with holes in it.
+  const stated: readonly (readonly [string, string | undefined])[] = [
+    ["Dependency", release.dep],
+    ["Identity", release.identity],
+    ["Release target", release.target],
+    [
+      "Style",
+      release.style === undefined
+        ? undefined
+        : releaseStyleLabel(release.style),
+    ],
+    ["Version", release.version],
+    ["Probe outcome", release.outcome],
+    ["Probed through", release.form],
+    [
+      "Probe took",
+      release.elapsed_ms === undefined ? undefined : `${release.elapsed_ms} ms`,
+    ],
+    ["Acknowledged by", release.actor],
+    ["Superseded", supersededLabel(release.superseded)],
+    ["Landed as", release.landing_commit],
+    ["Adopted", adoptionLabel(release.delivery)],
   ];
+  const facts = stated.filter(([, value]) => value !== undefined);
   return (
     <>
       {facts.length > 0 && (
