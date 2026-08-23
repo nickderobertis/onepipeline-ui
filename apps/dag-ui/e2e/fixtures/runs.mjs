@@ -56,6 +56,34 @@ export const REMOTE_OPEN_PR = "https://example.invalid/changes/13";
  */
 export const UNFILED_KIND = "worktree-pruned";
 
+/**
+ * The release the foundation node's landed work went out in.
+ *
+ * Recorded with **no node label at all**, exactly as `onevcs` records one: a
+ * release is observed long after the dispatch that produced the work has settled
+ * and outside any session of it, so what joins it to the node is
+ * {@link FOUNDATION_COMMIT} and nothing else.
+ */
+export const FOUNDATION_RELEASE_VERSION = "0.13.0";
+/** What that release published. */
+export const FOUNDATION_RELEASE_TARGET = "crate";
+/** The sibling the foundation node was held on before it could start. */
+export const RELEASE_DEP_IDENTITY = "github.com/example/sdk";
+/** The version of it the node was waiting for, on both of its targets. */
+export const RELEASE_DEP_VERSION = "1.4.0";
+/** The commit that release carried, which is not this run's own merge. */
+export const RELEASE_DEP_COMMIT = "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334";
+/** What a person had to go and do before the node's second wait could clear. */
+export const HUMAN_RELEASE_ACTION =
+  "publish the npm wrapper from the tagged release";
+/** Who said they had done it. */
+export const HUMAN_RELEASE_ACTOR = "a-recording-host";
+/**
+ * The third target the node was held on, whose human step the run recorded no
+ * action for — the wait a reader must still be able to tell needs a person.
+ */
+export const RELEASE_UNSPOKEN_TARGET = "wheel";
+
 /** The identity every publication of this fixture queues on. */
 const IDENTITY = "github.com/example/repo";
 /** The command `onevcs` records for the gate that is git's own hook. */
@@ -543,7 +571,164 @@ function writeLiveRun(root) {
     "orchestrator",
     "Coordinating the execution frontier",
   );
-  journal.advance(4).emit("pipeline", "node-dispatched", {
+  // Held before it could start: this node needs the *released* sibling rather
+  // than the work in it. Two entries, because the two waits are not the same
+  // wait — the crate publishes itself and the npm wrapper needs a person, and
+  // only the second carries the action somebody has to be told about.
+  journal.advance(2).emit(
+    "pipeline",
+    "release-wait",
+    { ...run, node: "foundation" },
+    {
+      node: "foundation",
+      awaiting: [
+        {
+          dep: "sdk",
+          identity: RELEASE_DEP_IDENTITY,
+          target: "crate",
+          style: "automated",
+          since: stamp(journal.at),
+          waited_seconds: 42,
+          last_answer: "not-released",
+        },
+        {
+          dep: "sdk",
+          identity: RELEASE_DEP_IDENTITY,
+          target: "npm",
+          style: "human-step",
+          action: HUMAN_RELEASE_ACTION,
+          since: stamp(journal.at),
+          waited_seconds: 42,
+          last_answer: "awaiting-human-step",
+        },
+        {
+          // The third is the same human step written by a producer that had no
+          // action text to record for it: `action` is optional on the wire, and
+          // a rule can name a person without naming what they do. A reader still
+          // has to be told this one needs somebody, which is the whole reason it
+          // is here rather than only in the schema.
+          dep: "sdk",
+          identity: RELEASE_DEP_IDENTITY,
+          target: RELEASE_UNSPOKEN_TARGET,
+          style: "human-step",
+          since: stamp(journal.at),
+          waited_seconds: 42,
+          last_answer: "awaiting-human-step",
+        },
+      ],
+    },
+  );
+  // The automated half answers itself. Neither `onevcs` record carries a node:
+  // the release is the sibling's, and no session of this run is open on it.
+  journal.advance(1).emit("vcs", "release-probed", run, {
+    identity: RELEASE_DEP_IDENTITY,
+    target: "crate",
+    form: "registry-index",
+    outcome: "released",
+    version: RELEASE_DEP_VERSION,
+    elapsed_ms: 412,
+  });
+  journal.emit("vcs", "release-observed", run, {
+    identity: RELEASE_DEP_IDENTITY,
+    target: "crate",
+    style: "automated",
+    version: RELEASE_DEP_VERSION,
+    landing_commit: RELEASE_DEP_COMMIT,
+  });
+  journal.emit(
+    "pipeline",
+    "release-arrived",
+    { ...run, node: "foundation" },
+    {
+      node: "foundation",
+      dep: "sdk",
+      identity: RELEASE_DEP_IDENTITY,
+      target: "crate",
+      style: "automated",
+      version: RELEASE_DEP_VERSION,
+    },
+  );
+  // The human half ends the only way it can: somebody did it and said so.
+  journal.advance(1).emit("vcs", "release-acknowledged", run, {
+    identity: RELEASE_DEP_IDENTITY,
+    target: "npm",
+    version: RELEASE_DEP_VERSION,
+    landing_commit: RELEASE_DEP_COMMIT,
+    actor: HUMAN_RELEASE_ACTOR,
+    superseded: false,
+  });
+  journal.emit("vcs", "release-observed", run, {
+    identity: RELEASE_DEP_IDENTITY,
+    target: "npm",
+    style: "human-step",
+    version: RELEASE_DEP_VERSION,
+    landing_commit: RELEASE_DEP_COMMIT,
+  });
+  journal.emit(
+    "pipeline",
+    "release-arrived",
+    { ...run, node: "foundation" },
+    {
+      node: "foundation",
+      dep: "sdk",
+      identity: RELEASE_DEP_IDENTITY,
+      target: "npm",
+      style: "human-step",
+      version: RELEASE_DEP_VERSION,
+    },
+  );
+  // The step nobody wrote an action for is performed all the same, and observed
+  // like any other: what the run did not record is what a person had to do, not
+  // whether it happened.
+  journal.advance(1).emit("vcs", "release-observed", run, {
+    identity: RELEASE_DEP_IDENTITY,
+    target: RELEASE_UNSPOKEN_TARGET,
+    style: "human-step",
+    version: RELEASE_DEP_VERSION,
+    landing_commit: RELEASE_DEP_COMMIT,
+  });
+  journal.emit(
+    "pipeline",
+    "release-arrived",
+    { ...run, node: "foundation" },
+    {
+      node: "foundation",
+      dep: "sdk",
+      identity: RELEASE_DEP_IDENTITY,
+      target: RELEASE_UNSPOKEN_TARGET,
+      style: "human-step",
+      version: RELEASE_DEP_VERSION,
+    },
+  );
+  // Every wait is over, so the versions go into the node's own context. Nothing
+  // is running yet, so the note rides the dispatch rather than a turn.
+  journal.advance(1).emit(
+    "pipeline",
+    "release-adopted",
+    { ...run, node: "foundation" },
+    {
+      node: "foundation",
+      delivery: "deferred",
+      versions: [
+        {
+          identity: RELEASE_DEP_IDENTITY,
+          target: "crate",
+          version: RELEASE_DEP_VERSION,
+        },
+        {
+          identity: RELEASE_DEP_IDENTITY,
+          target: "npm",
+          version: RELEASE_DEP_VERSION,
+        },
+        {
+          identity: RELEASE_DEP_IDENTITY,
+          target: RELEASE_UNSPOKEN_TARGET,
+          version: RELEASE_DEP_VERSION,
+        },
+      ],
+    },
+  );
+  journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
     node: "foundation",
     persona: "worker",
@@ -605,6 +790,16 @@ function writeLiveRun(root) {
     { ...run, node: "foundation" },
     { identity: IDENTITY, sha: FOUNDATION_COMMIT, base: "main" },
   );
+  // And the release that carried this node's own work, observed after the fact
+  // and stamped with no node at all — which is why the served node item is joined
+  // to it by the commit it landed as and never by a label.
+  journal.advance(1).emit("vcs", "release-observed", run, {
+    identity: IDENTITY,
+    target: FOUNDATION_RELEASE_TARGET,
+    style: "automated",
+    version: FOUNDATION_RELEASE_VERSION,
+    landing_commit: FOUNDATION_COMMIT,
+  });
   // The record whose kind this build has never seen; see {@link UNFILED_KIND}.
   journal
     .advance(2)
@@ -1638,6 +1833,16 @@ export function facts() {
     },
     remote_open_pr: REMOTE_OPEN_PR,
     foundation_commit: FOUNDATION_COMMIT,
+    release: {
+      version: FOUNDATION_RELEASE_VERSION,
+      target: FOUNDATION_RELEASE_TARGET,
+      identity: IDENTITY,
+      dep_identity: RELEASE_DEP_IDENTITY,
+      dep_version: RELEASE_DEP_VERSION,
+      human_action: HUMAN_RELEASE_ACTION,
+      human_actor: HUMAN_RELEASE_ACTOR,
+      unspoken_target: RELEASE_UNSPOKEN_TARGET,
+    },
     artifacts: {
       gate: GATE_ARTIFACT,
       missing: MISSING_ARTIFACT,

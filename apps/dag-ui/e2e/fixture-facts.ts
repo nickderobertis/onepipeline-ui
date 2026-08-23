@@ -25,6 +25,22 @@ const fixtureSchema = z.object({
   unfiled_kind: z.string().min(1),
   remote_open_pr: z.string().min(1),
   foundation_commit: z.string().min(1),
+  /**
+   * The release the foundation node's work went out in, and the sibling release
+   * that node was held on before it could start — including the action a person
+   * had to perform, which is the wait a reader has to be able to pick out.
+   */
+  release: z.object({
+    version: z.string().min(1),
+    target: z.string().min(1),
+    identity: z.string().min(1),
+    dep_identity: z.string().min(1),
+    dep_version: z.string().min(1),
+    human_action: z.string().min(1),
+    human_actor: z.string().min(1),
+    /** The human step the run named a person for but no action. */
+    unspoken_target: z.string().min(1),
+  }),
   sessions: z.object({
     worker: z.string().min(1),
     lint: z.string().min(1),

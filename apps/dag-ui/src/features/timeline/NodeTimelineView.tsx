@@ -44,6 +44,7 @@ import {
 } from "../../lib/useUrlSelection";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
+import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
   compactTimelineItems,
@@ -189,6 +190,17 @@ export function NodeTimelineView({
               <dt>Publication</dt>
               <dd>
                 <Publication node={node} />
+              </dd>
+            </div>
+            {/* Beside the change request rather than under a tab of its own: the
+                release is what the change request eventually went out in, and a
+                reader sequencing another node behind it is reading both. A node
+                the run recorded no release for says so, exactly as an unpublished
+                node's publication does. */}
+            <div>
+              <dt>Release</dt>
+              <dd>
+                <NodeRelease node={node} />
               </dd>
             </div>
           </dl>

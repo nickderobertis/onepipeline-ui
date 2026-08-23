@@ -485,6 +485,64 @@ describe("boundary failures", () => {
     ).toBe(false);
   });
 
+  test("carries the release that carried a node's work, or carries none", () => {
+    // Absent is a node the run recorded no release for, which is most of them and
+    // every node of every payload served before this key existed.
+    expect(
+      graphResultItemSchema.parse({ status: "done", pr: "https://x/pull/7" })
+        .release,
+    ).toBeUndefined();
+    // Present, beside the change request rather than in place of it.
+    expect(
+      graphResultItemSchema.parse({
+        status: "done",
+        pr: "https://x/pull/7",
+        release: {
+          identity: "github.com/nickderobertis/onevcs",
+          target: "crate",
+          style: "automated",
+          version: "0.13.0",
+        },
+      }).release,
+    ).toEqual({
+      identity: "github.com/nickderobertis/onevcs",
+      target: "crate",
+      style: "automated",
+      version: "0.13.0",
+    });
+    // An envelope written before `style` existed carries none, and the node whose
+    // release it is is still a node a reader opens.
+    expect(
+      graphResultItemSchema.parse({
+        status: "done",
+        release: {
+          identity: "github.com/nickderobertis/onevcs",
+          target: "crate",
+          version: "0.13.0",
+        },
+      }).release?.style,
+    ).toBeUndefined();
+    // Null is what a server that has the key and nothing to put in it serves, and
+    // it parses on the same terms `pr` does.
+    expect(
+      graphResultItemSchema.parse({ status: "done", release: null }).release,
+    ).toBeNull();
+    // The three fields a release *is*. A payload missing any of them is not a
+    // release a reader could go and install, and is refused rather than rendered
+    // half-blank.
+    for (const missing of ["identity", "target", "version"]) {
+      const release: Record<string, string> = {
+        identity: "github.com/nickderobertis/onevcs",
+        target: "crate",
+        version: "0.13.0",
+      };
+      delete release[missing];
+      expect(
+        graphResultItemSchema.safeParse({ status: "done", release }).success,
+      ).toBe(false);
+    }
+  });
+
   test("rejects malformed nested plan and result payloads", () => {
     expect(() =>
       planTaskSchema.parse({
@@ -531,7 +589,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 6,
+      timeline_schema_version: 7,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -611,6 +669,90 @@ describe("run timeline", () => {
     ).toBeUndefined();
   });
 
+  test("carries what a release record said, and tells the two waits apart", () => {
+    // The wait a person has to be told about carries the action; the wait beside
+    // it, on the same record, does not — which is the whole of how a reader picks
+    // one out from the other.
+    const held = timelineEventSchema.parse({
+      id: "e12",
+      kind: "release-wait",
+      at: "2026-07-26T12:00:08Z",
+      node_id: "api",
+      release: {
+        awaiting: [
+          {
+            dep: "sdk",
+            identity: "github.com/example/sdk",
+            target: "crate",
+            style: "automated",
+            since: "2026-07-26T11:55:00Z",
+            waited_seconds: 300,
+            last_answer: "not-released",
+          },
+          {
+            dep: "sdk",
+            identity: "github.com/example/sdk",
+            target: "npm",
+            style: "human-step",
+            action: "publish the npm wrapper",
+            since: "2026-07-26T11:55:00Z",
+            waited_seconds: 300,
+            last_answer: "awaiting-human-step",
+          },
+        ],
+      },
+    });
+    expect(
+      held.release?.awaiting?.map((entry) => [entry.style, entry.action]),
+    ).toEqual([
+      ["automated", undefined],
+      ["human-step", "publish the npm wrapper"],
+    ]);
+    // The observation the node item's own release is derived from, carrying the
+    // commit that join is made on.
+    expect(
+      timelineEventSchema.parse({
+        id: "e13",
+        kind: "release-observed",
+        at: "2026-07-26T12:00:09Z",
+        release: {
+          identity: "github.com/example/sdk",
+          target: "crate",
+          style: "automated",
+          version: "1.4.0",
+          landing_commit: "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334",
+        },
+      }).release?.landing_commit,
+    ).toBe("0f1e2d3c4b5a69788796a5b4c3d2e1f001122334");
+    // A release that says nothing is not a release record: the server serves none
+    // rather than an empty object, which would reach a reader as a heading over a
+    // blank panel.
+    expect(
+      timelineEventSchema.safeParse({ ...held, release: {} }).success,
+    ).toBe(false);
+    // An entry naming nothing it waits on says nothing at all, and an empty list
+    // would read as a node held on nothing rather than as a node not held.
+    expect(
+      timelineEventSchema.safeParse({
+        ...held,
+        release: { awaiting: [{ identity: "github.com/example/sdk" }] },
+      }).success,
+    ).toBe(false);
+    expect(
+      timelineEventSchema.safeParse({ ...held, release: { awaiting: [] } })
+        .success,
+    ).toBe(false);
+    // And every other record carries none, which is what keeps this key a fact
+    // about the six kinds rather than a shape every event grew.
+    expect(
+      timelineEventSchema.parse({
+        id: "e14",
+        kind: "node-settled",
+        at: "2026-07-26T12:00:10Z",
+      }).release,
+    ).toBeUndefined();
+  });
+
   test("rejects an unsupported span kind, reference kind, or negative rollup", () => {
     expect(() =>
       timelineSpanSchema.parse({ ...span, kind: "guess" }),
@@ -628,7 +770,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 6,
+        timeline_schema_version: 7,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],
