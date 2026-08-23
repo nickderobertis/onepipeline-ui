@@ -58,9 +58,21 @@ config="$(llmlint config)" || {
   echo "ACTION: repair llmlint.yml or its plugin pins and retry" >&2
   exit 1
 }
-digest="$(printf '%s\n%s\n' "$version" "${config//"$root"/\{root\}}" | sha256sum)" || {
+# `sha256sum` is coreutils; macOS ships `shasum` instead, and `just check-cross`
+# runs this repository's suite there. Either spelling of one digest is fine —
+# nothing compares a fingerprint across machines, only across runs on one.
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256
+  else
+    return 1
+  fi
+}
+digest="$(printf '%s\n%s\n' "$version" "${config//"$root"/\{root\}}" | sha256)" || {
   echo "llmlint-fingerprint: could not hash the judge configuration" >&2
-  echo "ACTION: verify sha256sum is on PATH and retry" >&2
+  echo "ACTION: install coreutils (sha256sum) or perl (shasum) and retry" >&2
   exit 1
 }
 printf '%s\n' "${digest%% *}"

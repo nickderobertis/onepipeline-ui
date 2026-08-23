@@ -91,7 +91,7 @@ const STUB_LLMLINT: &str = "#!/usr/bin/env bash\n\
          printf 'llmlint %s\\n' \"${STUB_LLMLINT_VERSION:-9.9.9}\"; exit 0 ;;\n\
        config)\n\
          [ -z \"${STUB_CONFIG_STATUS:-}\" ] || { echo 'stub llmlint: cannot resolve the config' >&2; exit \"$STUB_CONFIG_STATUS\"; }\n\
-         printf 'rules=%s\\noneharness_bin=%s\\n' \"${STUB_CONFIG_RULES:-baseline}\" \"${LLMLINT_ONEHARNESS_BIN:-null}\"\n\
+         printf 'rules=%s\\noneharness_bin=%s\\nconfig_file=%s/llmlint.yml\\n' \"${STUB_CONFIG_RULES:-baseline}\" \"${LLMLINT_ONEHARNESS_BIN:-null}\" \"$PWD\"\n\
          exit 0 ;;\n\
      esac\n\
      printf '%s\\n' \"$*\" >> \"$STUB_CALLS\"\n\
@@ -273,6 +273,23 @@ impl Fixture {
             command.env(name, value);
         }
         command.output().expect("bash is on PATH")
+    }
+
+    /// The judge-configuration fingerprint this workspace resolves, through the
+    /// script the recipe resolves it with.
+    fn judge_fingerprint(&self) -> String {
+        let output = Command::new("bash")
+            .arg("scripts/llmlint-fingerprint.sh")
+            .current_dir(self.workspace())
+            .env("HOME", self.dir.path().join("home"))
+            .output()
+            .expect("bash is on PATH");
+        assert!(
+            output.status.success(),
+            "the fingerprint could not be resolved:\n{}",
+            stderr(&output)
+        );
+        stdout(&output).trim().to_owned()
     }
 
     /// Every judge call the tier asked for, in order.
@@ -760,6 +777,73 @@ fn the_cached_target_refuses_a_commit_this_checkout_does_not_have() {
         reported(&output)
     );
     assert!(fixture.judge_calls().is_empty());
+}
+
+/// An annotated tag is a name for a commit, and a tag object is not that commit.
+/// The base is resolved through `^{commit}` so both names for one tree reach one
+/// verdict, rather than the tag being judged all over again.
+#[test]
+fn a_tag_and_the_commit_it_names_share_one_verdict() {
+    let fixture = Fixture::new();
+    git(
+        &fixture.workspace(),
+        &[
+            "tag",
+            "-a",
+            "v9.9.9",
+            &fixture.base,
+            "-m",
+            "the base, under a name",
+        ],
+    );
+
+    let by_commit = fixture.run();
+    let by_tag = fixture.run_full("v9.9.9", &[], &[]);
+
+    assert!(by_commit.status.success(), "{}", stderr(&by_commit));
+    assert!(by_tag.status.success(), "{}", stderr(&by_tag));
+    assert_eq!(provenance(&by_commit), Provenance::Judged);
+    assert_eq!(
+        provenance(&by_tag),
+        Provenance::Replayed,
+        "the tag was judged again, so it keyed on the tag object rather than on \
+         the commit it names"
+    );
+    assert_eq!(fixture.judge_calls().len(), 1);
+    assert!(
+        stderr(&by_tag).contains(&fixture.base),
+        "the verdict should be reported against the commit, not the tag:\n{}",
+        stderr(&by_tag)
+    );
+}
+
+/// `llmlint config` names the files it merged by absolute path, so the only
+/// path-dependent thing in it is the checkout root. It is folded out, because two
+/// checkouts of one repository — a worktree and the clone a publication cuts —
+/// are judging the same configuration and must share the entry, not each roll
+/// their own.
+#[test]
+fn two_checkouts_of_one_repository_fingerprint_the_same_judge_configuration() {
+    let here = Fixture::new();
+    let elsewhere = Fixture::new();
+
+    let one = here.judge_fingerprint();
+    let other = elsewhere.judge_fingerprint();
+
+    assert_ne!(
+        one, "",
+        "the fingerprint is empty, so it distinguishes nothing"
+    );
+    assert_ne!(
+        here.workspace(),
+        elsewhere.workspace(),
+        "both checkouts are at one path, so this journey proves nothing"
+    );
+    assert_eq!(
+        one, other,
+        "the checkout path reached the fingerprint, so every checkout of one \
+         repository keys its own verdict"
+    );
 }
 
 /// A base that does not resolve is a usage error, and nothing is judged against

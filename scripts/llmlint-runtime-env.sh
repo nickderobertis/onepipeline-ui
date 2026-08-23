@@ -30,6 +30,9 @@
 set -euo pipefail
 
 llmlint_runtime_env() {
-  [ -z "${HOME:-}" ] || export PATH="$HOME/.local/bin:$PATH"
+  # Both expansions are guarded rather than assumed: these scripts run under
+  # `set -u`, where a bare `$PATH` in an environment that has none aborts with
+  # bash's own unbound-variable message and no way to act on it.
+  [ -z "${HOME:-}" ] || export PATH="$HOME/.local/bin${PATH:+:$PATH}"
   unset LLMLINT_ONEHARNESS_BIN
 }
