@@ -1160,12 +1160,33 @@ test("shows the release that carried a node's work and the waits before it", asy
     ].filter((kind) => !served.has(kind)),
   ).toEqual([]);
 
-  // What the reader sees. The node's own release sits beside its change request.
+  // What the reader sees. The node's own release sits beside its change request,
+  // and is read under its own heading rather than off the panel as a whole: the
+  // two rows say different things and a reader has to be able to tell which one
+  // said nothing.
+  const fact = (label: string): Locator =>
+    page
+      .locator(".facts > div")
+      .filter({
+        has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }),
+      })
+      .locator("dd");
   await openObservatory(page, `/?run=${runs().live}&node=foundation`);
   await page.getByRole("tab", { name: "PR" }).click();
-  const released = page.locator(".facts");
-  await expect(released).toContainText(facts.release.version);
-  await expect(released).toContainText(facts.release.target);
+  await expect(fact("Release")).toContainText(facts.release.version);
+  await expect(fact("Release")).toContainText(facts.release.target);
+
+  // And a node the run recorded no release for says exactly that, about the
+  // release alone: this one opened a change request, so its publication row is
+  // recorded and only the row beside it is not. A panel-wide reading would pass
+  // on a node that recorded neither and prove nothing about this row.
+  await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
+  await page.getByRole("tab", { name: "PR" }).click();
+  await expect(fact("Release")).toHaveText("Not recorded");
+  await expect(
+    fact("Publication").getByRole("link", { name: "Pull request" }),
+  ).toHaveAttribute("href", facts.remote_open_pr);
+  await openObservatory(page, `/?run=${runs().live}&node=foundation`);
 
   // And the waits before it, opened from the node's own transcript. The wait on a
   // person names the action somebody has to perform; the wait beside it, on the
@@ -1182,6 +1203,18 @@ test("shows the release that carried a node's work and the waits before it", asy
     "Waiting on an automated release",
   );
   await expect(itemDetail(page)).toContainText(facts.release.dep_identity);
+  // The third wait is the same human step written with no action: `action` is
+  // optional on the wire, so a rule can name a person without naming what they
+  // do. It is still drawn as a wait on a person — the reader is told somebody is
+  // needed and told that the run did not say what for, rather than shown a blank
+  // where the instruction should be.
+  const unspoken = itemDetail(page)
+    .getByRole("listitem")
+    .filter({ hasText: facts.release.unspoken_target });
+  await expect(unspoken).toContainText("Waiting on a person");
+  await expect(unspoken).toContainText(
+    "The release is a human step and the run recorded no action for it.",
+  );
   await page.getByRole("button", { name: "Close detail" }).click();
 
   // The arrival that ended one of them, read as the release it was.

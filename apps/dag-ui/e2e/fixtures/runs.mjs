@@ -78,6 +78,11 @@ export const HUMAN_RELEASE_ACTION =
   "publish the npm wrapper from the tagged release";
 /** Who said they had done it. */
 export const HUMAN_RELEASE_ACTOR = "a-recording-host";
+/**
+ * The third target the node was held on, whose human step the run recorded no
+ * action for — the wait a reader must still be able to tell needs a person.
+ */
+export const RELEASE_UNSPOKEN_TARGET = "wheel";
 
 /** The identity every publication of this fixture queues on. */
 const IDENTITY = "github.com/example/repo";
@@ -596,6 +601,20 @@ function writeLiveRun(root) {
           waited_seconds: 42,
           last_answer: "awaiting-human-step",
         },
+        {
+          // The third is the same human step written by a producer that had no
+          // action text to record for it: `action` is optional on the wire, and
+          // a rule can name a person without naming what they do. A reader still
+          // has to be told this one needs somebody, which is the whole reason it
+          // is here rather than only in the schema.
+          dep: "sdk",
+          identity: RELEASE_DEP_IDENTITY,
+          target: RELEASE_UNSPOKEN_TARGET,
+          style: "human-step",
+          since: stamp(journal.at),
+          waited_seconds: 42,
+          last_answer: "awaiting-human-step",
+        },
       ],
     },
   );
@@ -658,7 +677,30 @@ function writeLiveRun(root) {
       version: RELEASE_DEP_VERSION,
     },
   );
-  // Both waits are over, so the versions go into the node's own context. Nothing
+  // The step nobody wrote an action for is performed all the same, and observed
+  // like any other: what the run did not record is what a person had to do, not
+  // whether it happened.
+  journal.advance(1).emit("vcs", "release-observed", run, {
+    identity: RELEASE_DEP_IDENTITY,
+    target: RELEASE_UNSPOKEN_TARGET,
+    style: "human-step",
+    version: RELEASE_DEP_VERSION,
+    landing_commit: RELEASE_DEP_COMMIT,
+  });
+  journal.emit(
+    "pipeline",
+    "release-arrived",
+    { ...run, node: "foundation" },
+    {
+      node: "foundation",
+      dep: "sdk",
+      identity: RELEASE_DEP_IDENTITY,
+      target: RELEASE_UNSPOKEN_TARGET,
+      style: "human-step",
+      version: RELEASE_DEP_VERSION,
+    },
+  );
+  // Every wait is over, so the versions go into the node's own context. Nothing
   // is running yet, so the note rides the dispatch rather than a turn.
   journal.advance(1).emit(
     "pipeline",
@@ -676,6 +718,11 @@ function writeLiveRun(root) {
         {
           identity: RELEASE_DEP_IDENTITY,
           target: "npm",
+          version: RELEASE_DEP_VERSION,
+        },
+        {
+          identity: RELEASE_DEP_IDENTITY,
+          target: RELEASE_UNSPOKEN_TARGET,
           version: RELEASE_DEP_VERSION,
         },
       ],
@@ -1794,6 +1841,7 @@ export function facts() {
       dep_version: RELEASE_DEP_VERSION,
       human_action: HUMAN_RELEASE_ACTION,
       human_actor: HUMAN_RELEASE_ACTOR,
+      unspoken_target: RELEASE_UNSPOKEN_TARGET,
     },
     artifacts: {
       gate: GATE_ARTIFACT,

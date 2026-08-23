@@ -38,6 +38,8 @@ const fixtureSchema = z.object({
     dep_version: z.string().min(1),
     human_action: z.string().min(1),
     human_actor: z.string().min(1),
+    /** The human step the run named a person for but no action. */
+    unspoken_target: z.string().min(1),
   }),
   sessions: z.object({
     worker: z.string().min(1),
