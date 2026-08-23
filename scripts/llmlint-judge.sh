@@ -44,6 +44,15 @@ root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)" || {
 # `llmlint --diff-base` as a revision — so it is validated to the shape a
 # resolved commit id has rather than trusted, and then to a commit this checkout
 # actually has.
+# llmlint: ignore-block[changed_behavior_has_e2e] both refusals are covered by
+# `tests/e2e/llmlint_cache.rs`, which runs this file exactly as `project.json`
+# tells Nx to run it — the real invocation these guards exist for, since what
+# they catch is the target reached without `just lint-llm-diff` in front of it.
+# Driving them through `just nx run onepipeline-ui:lint-llm-diff` was tried and
+# measured unusable: they fail in tens of milliseconds and Nx drops a task's
+# stderr that fast one run in four under the whole suite's load, so the journey
+# would assert on a refusal message Nx had swallowed. The recipe entry point is
+# covered by the 17 journeys either side of those two.
 base_sha="${LLMLINT_DIFF_BASE_SHA:-}"
 [[ "$base_sha" =~ ^[0-9a-f]{40,64}$ ]] || {
   echo "lint-llm-diff: LLMLINT_DIFF_BASE_SHA is '${base_sha:-<unset>}', not a resolved commit id" >&2
@@ -55,6 +64,7 @@ git -C "$root" rev-parse --verify --quiet "${base_sha}^{commit}" >/dev/null || {
   echo "ACTION: fetch it and retry" >&2
   exit 2
 }
+# llmlint: ignore-end[changed_behavior_has_e2e]
 
 llmlint_runtime_env
 cd "$root" || {

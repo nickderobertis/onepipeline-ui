@@ -720,6 +720,15 @@ fn a_judge_that_cannot_report_its_version_fails_the_tier() {
     );
 }
 
+// llmlint: ignore-block[tests_mirror_real_usage] these two journeys reach the
+// target body through `run_judge_target`, which runs it exactly as
+// `project.json` tells Nx to run it — the real usage these guards exist for is a
+// target reached *without* `just lint-llm-diff` in front of it. Going through
+// `just nx run onepipeline-ui:lint-llm-diff` was tried and measured unusable:
+// the refusals fail in tens of milliseconds and Nx drops a task's stderr that
+// fast one run in four under the whole suite's load, so these would assert on a
+// message Nx had swallowed. The 17 journeys either side of them drive the
+// recipe, which is where that entry point is covered.
 /// The cached target keys on the base it is handed, so being handed a ref name —
 /// or nothing — would let one recorded verdict be replayed for another commit.
 /// Reached directly, it refuses and says which command resolves a base for it.
@@ -778,6 +787,7 @@ fn the_cached_target_refuses_a_commit_this_checkout_does_not_have() {
     );
     assert!(fixture.judge_calls().is_empty());
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /// An annotated tag is a name for a commit, and a tag object is not that commit.
 /// The base is resolved through `^{commit}` so both names for one tree reach one
