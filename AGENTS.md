@@ -155,11 +155,12 @@ fans one uniformly-named target across all of them.
 - **`release-targets.json` declares what this repository publishes, and
   `scripts/release-probe.sh` answers what a registry currently serves for one of
   those names.** That is how a repository downstream of this one waits for a
-  dependency to actually ship rather than launching on a merged commit. Four
-  targets, registry-qualified because a bare name cannot say which registry
-  served it: `crate:onepipeline-ui`, `pypi:onepipeline-api-cli`,
-  `npm:onepipeline-api-cli`, and `npm:onepipeline-ui`. The five per-platform npm
-  packages are covered by the launcher target — nothing depends on one by name.
+  dependency to actually ship rather than launching on a merged commit. That file
+  is the list — do not restate it here, or the copy becomes a second source.
+  Identifiers are registry-qualified (`npm:…`, `pypi:…`, `crate:…`) because a
+  bare name cannot say which registry served it, and a per-platform package a
+  launcher resolves at its own exact version is covered by that launcher's target
+  rather than being one, because nothing depends on it by name.
   The probe's three answers are a version, nothing at all (no release yet), and a
   non-zero exit (**not answered**), and the third is never the second: a consumer
   holds forever on it, so an unreachable registry must never read as an

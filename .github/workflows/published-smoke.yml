@@ -151,6 +151,24 @@ jobs:
           PYPI_PUBLISH: ${{ vars.PYPI_PUBLISH }}
           NPM_PUBLISH: ${{ vars.NPM_PUBLISH }}
         run: |
+          # Read the declaration into a value before probing anything, so a
+          # declaration that is missing, unparseable, or shaped wrong fails this
+          # step. Streamed straight into the loop it would not: the loop would
+          # read nothing, probe nothing, and report green — a sweep that verified
+          # no target while saying every target was fine.
+          ids="$(node -e '
+            const declared = require("./release-targets.json").targets;
+            if (!Array.isArray(declared) || declared.length === 0) {
+              throw new Error("release-targets.json declares no release target to probe");
+            }
+            for (const target of declared) {
+              if (typeof target?.id !== "string" || !/^(crate|pypi|npm):.+$/.test(target.id)) {
+                throw new Error(`not a registry-qualified target id: ${JSON.stringify(target?.id)}`);
+              }
+              console.log(target.id);
+            }
+          ')"
+          [ -n "$ids" ] || { echo "::error::release-targets.json yielded no target to probe"; exit 1; }
           failed=0
           while read -r id; do
             if ! served="$(scripts/release-probe.sh "$id")"; then
@@ -175,9 +193,10 @@ jobs:
             else
               echo "$id -> nothing yet (this repository is not publishing to that registry)"
             fi
-          # One id per line, terminated: `read` drops an unterminated last line,
-          # which would silently leave one declared target unprobed.
-          done < <(node -e 'for (const t of require("./release-targets.json").targets) console.log(t.id)')
+          # A here-string, which terminates its last line: `read` drops an
+          # unterminated one, and that would silently leave a declared target
+          # unprobed.
+          done <<< "$ids"
           [ "$failed" -eq 0 ]
       # The answer a consumer must be able to tell from the ones above, and the
       # only place a real registry can give it: a name no registry has ever

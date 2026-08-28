@@ -411,6 +411,25 @@ fn each_registry_is_read_for_the_version_that_registry_itself_serves() {
 }
 
 #[test]
+fn a_registry_serving_nothing_under_a_name_is_read_as_no_release_yet() {
+    // The two statuses that mean "nothing is served here", and the only two: 404
+    // for a name the registry has never held, 410 for one it has stopped
+    // serving. Both are answers, so both exit 0 with nothing — which is what
+    // separates them from the 503 above, and what a consumer reads as "keep
+    // waiting" rather than "hold indefinitely".
+    for status in ["404", "410"] {
+        let probe = Probe::with_curl(status, "");
+        assert!(
+            matches!(
+                answer(&probe.run(&["npm:onepipeline-api-cli"])),
+                Answer::NoReleaseYet
+            ),
+            "HTTP {status} was not read as `no release yet`"
+        );
+    }
+}
+
+#[test]
 fn a_document_that_names_no_version_is_read_as_no_release_yet() {
     // The other side of the line above: a well-formed document that simply names
     // no version is the registry saying it serves nothing, which is an answer.
