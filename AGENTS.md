@@ -152,6 +152,23 @@ fans one uniformly-named target across all of them.
   unpublished.
 - **A tag is not evidence of a release; the registry is.** Check what npm, PyPI
   and crates.io serve before reporting a version shipped.
+- **`release-targets.json` declares what this repository publishes, and
+  `scripts/release-probe.sh` answers what a registry currently serves for one of
+  those names.** That is how a repository downstream of this one waits for a
+  dependency to actually ship rather than launching on a merged commit. That file
+  is the list — do not restate it here, or the copy becomes a second source.
+  Identifiers are registry-qualified (`npm:…`, `pypi:…`, `crate:…`) because a
+  bare name cannot say which registry served it, and a per-platform package a
+  launcher resolves at its own exact version is covered by that launcher's target
+  rather than being one, because nothing depends on it by name.
+  The probe's three answers are a version, nothing at all (no release yet), and a
+  non-zero exit (**not answered**), and the third is never the second: a consumer
+  holds forever on it, so an unreachable registry must never read as an
+  unreleased artifact. `tests/packaging.rs` derives the published set from
+  `release.yml` and the manifests and fails on either kind of drift — a new
+  publish job it cannot read is a panic, not an omission. A new artifact means a
+  new entry there; the `probe` job in `published-smoke.yml` is what asks a real
+  registry.
 - **The bump is read off the public surface, and a green reading is only as good
   as a baseline that builds.** `semver_check = true` has release-plz diff the API
   against the last release with cargo-semver-checks, so a breaking change no

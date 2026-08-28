@@ -1,0 +1,42 @@
+{
+  "probe": "scripts/release-probe.sh",
+  "targets": [
+    {
+      "id": "crate:onepipeline-ui",
+      "what": "The read API itself: the library and the `onepipeline-api` binary, on crates.io.",
+      "published_by": ".github/workflows/release.yml — the publish-crate job's `cargo publish`, under Cargo.toml's [package] name."
+    },
+    {
+      "id": "pypi:onepipeline-api-cli",
+      "what": "The same binary, as per-platform wheels maturin wraps it in.",
+      "published_by": ".github/workflows/release.yml — the publish-pypi job, under pyproject.toml's [project] name."
+    },
+    {
+      "id": "npm:onepipeline-api-cli",
+      "what": "The same binary again, as the launcher a consumer installs. The per-platform packages under `covers` exist only for this launcher to resolve at its own exact version, so nothing depends on one by name and they are not targets of their own.",
+      "published_by": ".github/workflows/release.yml — the publish-npm job, from `npm-build.mjs launcher` and, for the covered names, `npm-build.mjs platform` over the build-npm target matrix.",
+      "covers": [
+        "npm:onepipeline-api-cli-linux-x64",
+        "npm:onepipeline-api-cli-linux-arm64",
+        "npm:onepipeline-api-cli-darwin-x64",
+        "npm:onepipeline-api-cli-darwin-arm64",
+        "npm:onepipeline-api-cli-win32-x64"
+      ]
+    },
+    {
+      "id": "npm:onepipeline-ui",
+      "what": "The browser view: the built frontend bundle, carrying no binary. A consumer serves this against the read API above, and one release stamps both — serving one release's view against another release's data is what pairing them prevents.",
+      "published_by": ".github/workflows/release.yml — the publish-npm job's `npm-build.mjs ui`, under npm/onepipeline-ui/package.json's name."
+    }
+  ],
+  "retired": [
+    {
+      "id": "pypi:onepipeline-ui-cli",
+      "why": "What the wrappers published as up to v0.1.0. Nothing here publishes it again; a consumer pinning it is pinned to 0.1.0. See AGENTS.md."
+    },
+    {
+      "id": "npm:onepipeline-ui-cli",
+      "why": "The npm half of the same retirement, also frozen at 0.1.0."
+    }
+  ]
+}

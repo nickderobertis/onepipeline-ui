@@ -11,8 +11,9 @@
 //! the memo around that recipe over a real Nx workspace, `release_status` runs
 //! the release workflow's own last job over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
-//! surface, and `ensure_sibling` runs the recipe the gate provisions the sibling
-//! CLI with, plus the task graph Nx itself builds for `test`.
+//! surface, `release_probe` runs the probe a consumer waiting on a release of
+//! this repository asks, and `ensure_sibling` runs the recipe the gate provisions
+//! the sibling CLI with, plus the task graph Nx itself builds for `test`.
 //!
 //! What is under test in every one of them is the real script, recipe or binary,
 //! over a real tree. Where a journey cannot let one of them reach a program for
@@ -33,6 +34,7 @@ mod lint_llm_diff;
 mod llmlint_cache;
 // llmlint: ignore-end[e2e_not_mocked]
 mod packaging;
+mod release_probe;
 mod release_status;
 mod semver_check;
 mod server;
