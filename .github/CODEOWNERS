@@ -32,3 +32,4 @@
 /project.json            @nickderobertis
 /justfile                @nickderobertis
 /release-plz.toml        @nickderobertis
+/release-targets.json    @nickderobertis

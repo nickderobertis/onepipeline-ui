@@ -733,10 +733,6 @@ fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
     assert!(stderr.contains("ACTION:"), "{stderr}");
 }
 
-// ---------------------------------------------------------------------------
-// The release targets a consumer waits on.
-// ---------------------------------------------------------------------------
-//
 // A repository that declares no release target releases nothing as far as the
 // mechanism sequencing work across repositories is concerned: a dependency
 // landing here would earn a consumer no hold at all, silently. So

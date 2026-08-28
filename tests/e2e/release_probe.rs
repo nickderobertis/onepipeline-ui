@@ -17,11 +17,11 @@
 //! repository already verifies against real registries: the `probe` job in
 //! `.github/workflows/published-smoke.yml`, which drives this same script.
 //!
-//! One thing is stood in for, at three sites collected into [`Registry`]:
-//! `curl` on PATH. A public registry cannot be made unreachable, made to answer
-//! 503, or made to serve something that is not JSON, and those are exactly the
-//! states the distinction above turns on. The script under test is the real
-//! script, spawned the way the contract says a consumer spawns it.
+//! One thing is stood in for, by [`Probe::with_curl`]: `curl` on PATH. A public
+//! registry cannot be made unreachable, made to answer 503, or made to serve
+//! something that is not JSON, and those are exactly the states the distinction
+//! above turns on. The script under test is the real script, spawned the way the
+//! contract says a consumer spawns it.
 
 use std::ffi::OsString;
 use std::fs;
@@ -103,12 +103,16 @@ fn refused(output: &Output, about: &str) {
     }
 }
 
+/// Where the stand-in `curl` records what it was handed, inside the fixture's
+/// own directory: the URL the probe built is only observable as an argument.
+const CURL_ARGV: &str = "curl-argv";
+
 /// A run of the real probe, with the environment the contract promises it and
 /// nothing else.
 struct Probe {
     /// Kept alive for as long as a stand-in it holds is on the search path, and
     /// absent for a run that stands in for nothing.
-    _dir: Option<TempDir>,
+    dir: Option<TempDir>,
     search_path: OsString,
 }
 
@@ -117,34 +121,68 @@ impl Probe {
     /// no stand-in ahead of anything.
     fn plain() -> Self {
         Self {
-            _dir: None,
+            dir: None,
             search_path: std::env::var_os("PATH").expect("PATH is set"),
         }
     }
 
-    /// The same, with a `curl` ahead of the real one that behaves as `script`
-    /// says.
-    ///
-    /// llmlint: ignore-block[e2e_not_mocked] a live public registry cannot be
-    /// made unreachable, made to answer 503, or made to serve something that is
-    /// not JSON — and those three states are precisely what the "not answered is
-    /// never no release yet" distinction turns on, so a journey that could not
-    /// reach them would leave the contract's most damaging failure untested.
-    /// Standing in for the program on PATH is the narrowest cut available: the
-    /// script under test is the real script, spawned the way the contract says a
-    /// consumer spawns it, and the two answers a real registry *can* produce are
-    /// driven against real registries by the `probe` job in
-    /// `.github/workflows/published-smoke.yml`. This constructor is the whole of
-    /// the substitution.
-    fn with_curl(script: &str) -> Self {
+    /// The same, with a `curl` ahead of the real one that answers `status` and
+    /// serves `document`.
+    fn with_curl(status: &str, document: &str) -> Self {
+        Self::standing_in(&|record| {
+            format!(
+                "#!/usr/bin/env bash\n\
+                 set -eu\n\
+                 printf '%s\\n' \"$@\" > '{record}'\n\
+                 target=\"\"\n\
+                 while [ \"$#\" -gt 0 ]; do\n\
+                   case \"$1\" in\n\
+                     --output) target=\"$2\"; shift 2 ;;\n\
+                     *) shift ;;\n\
+                   esac\n\
+                 done\n\
+                 printf '%s' '{document}' > \"$target\"\n\
+                 printf '%s' '{status}'\n"
+            )
+        })
+    }
+
+    /// The same, with a `curl` that cannot connect at all — curl's own exit 7,
+    /// which is what a host on a network it cannot leave produces.
+    fn with_unreachable_curl() -> Self {
+        Self::standing_in(&|record| {
+            format!(
+                "#!/usr/bin/env bash\n\
+                 set -eu\n\
+                 printf '%s\\n' \"$@\" > '{record}'\n\
+                 echo 'curl: (7) Failed to connect' >&2\n\
+                 exit 7\n"
+            )
+        })
+    }
+
+    /// Install a stand-in `curl` written against this fixture's own recording
+    /// path, and answer with the search path that puts it ahead of a real one.
+    fn standing_in(script: &dyn Fn(&str) -> String) -> Self {
         let dir = TempDir::new().expect("temp dir");
-        let search_path = stub_bin::install(&dir.path().join("stub-bin"), "curl", script);
+        let record = dir.path().join(CURL_ARGV);
+        let search_path = stub_bin::install(
+            &dir.path().join("stub-bin"),
+            "curl",
+            &script(record.to_str().expect("utf-8 path")),
+        );
         Self {
-            _dir: Some(dir),
+            dir: Some(dir),
             search_path,
         }
     }
-    // llmlint: ignore-end[e2e_not_mocked]
+
+    /// What the stand-in `curl` was handed, one argument per line. The URL is
+    /// the only place the probe's own encoding of a name is observable.
+    fn curl_argv(&self) -> String {
+        let dir = self.dir.as_ref().expect("this run installed no stand-in");
+        fs::read_to_string(dir.path().join(CURL_ARGV)).expect("the stand-in recorded no argv")
+    }
 
     fn run(&self, arguments: &[&str]) -> Output {
         let mut command = spawn();
@@ -215,6 +253,9 @@ fn a_name_no_registry_could_serve_is_not_answered() {
     for (identifier, about) in [
         ("npm:Not A Package", "is not an npm package name"),
         ("crate:onepipeline ui", "is not a crate name"),
+        ("pypi:not a project", "is not a PyPI project name"),
+        // PyPI's own names may not open with a separator.
+        ("pypi:-onepipeline-api-cli", "is not a PyPI project name"),
         ("pypi:", "names no artifact"),
         // A name that would climb out of the URL path rather than be looked up
         // in it.
@@ -234,14 +275,66 @@ fn a_call_that_does_not_name_exactly_one_target_is_not_answered() {
     );
 }
 
+/// A host missing one of the two programs the probe needs cannot establish
+/// anything, and must say so rather than answer — a probe that could not run is
+/// the one case where "no release yet" would be a lie told by an absent tool.
+#[cfg(unix)]
+#[test]
+fn a_host_without_the_tools_it_needs_is_not_answered() {
+    let dir = TempDir::new().expect("temp dir");
+    // Each run leaves one of the two behind. The `#!` line resolves the
+    // interpreter through PATH, so `bash` is in both; what varies is which of
+    // the probe's own dependencies is reachable, which also holds the order it
+    // reports them in.
+    for (present, missing) in [("node", "curl"), ("curl", "node")] {
+        let search = dir.path().join(missing);
+        fs::create_dir_all(&search).expect("create the search path");
+        for program in ["bash", present] {
+            let resolved = String::from_utf8(
+                Command::new("bash")
+                    .args(["-c", &format!("command -v {program}")])
+                    .output()
+                    .expect("bash is on PATH")
+                    .stdout,
+            )
+            .expect("utf-8 path");
+            std::os::unix::fs::symlink(resolved.trim(), search.join(program))
+                .unwrap_or_else(|err| panic!("link {program}: {err}"));
+        }
+
+        let output = Command::new(probe())
+            .arg("npm:onepipeline-ui")
+            .current_dir(repo_root())
+            .env_clear()
+            .env("PATH", &search)
+            .env("HOME", std::env::var_os("HOME").expect("HOME is set"))
+            .output()
+            .expect("spawn the probe");
+        refused(&output, &format!("{missing} is not on PATH"));
+    }
+}
+
+// llmlint: ignore-block[e2e_not_mocked] the journeys from here to the end of the
+// file stand in for `curl` at the PATH boundary, and each of them is a state a
+// live public registry cannot be put into: a registry cannot be made
+// unreachable, made to answer 503, made to serve a proxy's error page, or made
+// to hold a crate whose newest release is a prerelease. Those are precisely the
+// states the contract's "not answered is never no release yet" distinction turns
+// on, and the field each registry names its current release in — which is what a
+// consumer's installer would actually resolve to — is only checkable where the
+// expected version is known. Standing in for the program on PATH is the narrowest
+// cut available: the script under test is the real script, spawned the way the
+// contract says a consumer spawns it, over the real URL it built. What a live
+// registry does answer is driven against real registries by the `probe` job in
+// `.github/workflows/published-smoke.yml`, which is where this repository puts
+// verification that cannot be offline.
+
 #[test]
 fn a_registry_it_cannot_reach_is_not_answered_rather_than_reported_as_unreleased() {
-    // curl's own exit for "could not connect", which is what a consumer's host
-    // produces on a network it cannot leave. The release it is waiting for may
-    // well exist, so answering "no release yet" here would launch dependent work
+    // The release a consumer is waiting for may well exist, so answering "no
+    // release yet" to a network it could not leave would launch dependent work
     // against a version nothing published.
-    let probe =
-        Probe::with_curl("#!/usr/bin/env bash\necho 'curl: (7) Failed to connect' >&2\nexit 7\n");
+    let probe = Probe::with_unreachable_curl();
     for identifier in [
         "crate:onepipeline-ui",
         "pypi:onepipeline-api-cli",
@@ -256,7 +349,7 @@ fn a_registry_that_answers_with_an_error_is_not_answered() {
     // A reachable registry having a bad day. Only 404 and 410 mean "nothing is
     // served under this name"; every other status is a reading that did not
     // happen.
-    let probe = Probe::with_curl(&stub_curl("503", ""));
+    let probe = Probe::with_curl("503", "");
     refused(
         &probe.run(&["npm:onepipeline-api-cli"]),
         "answered HTTP 503",
@@ -267,7 +360,7 @@ fn a_registry_that_answers_with_an_error_is_not_answered() {
 fn an_answer_the_probe_cannot_read_is_not_answered() {
     // A 200 carrying something that is not the document this reads — a captive
     // portal, a proxy's error page, a registry that changed its shape.
-    let probe = Probe::with_curl(&stub_curl("200", "<html>we are upgrading</html>"));
+    let probe = Probe::with_curl("200", "<html>we are upgrading</html>");
     refused(
         &probe.run(&["pypi:onepipeline-api-cli"]),
         "could not read a version",
@@ -279,9 +372,7 @@ fn each_registry_is_read_for_the_version_that_registry_itself_serves() {
     // Three registries answer in three shapes, and the field that *is* "what
     // this registry currently serves" is different in each. Reading the wrong
     // one would report a version no installer would resolve to, which a consumer
-    // cannot tell from a correct answer — so each shape is driven here, where the
-    // expected version is known. That a live registry really answers in these
-    // shapes is what the `probe` job in published-smoke.yml holds.
+    // cannot tell from a correct answer.
     for (identifier, document, serves) in [
         // crates.io names the newest stable release, and the newest of any kind
         // for a crate that has never cut a stable one.
@@ -308,7 +399,7 @@ fn each_registry_is_read_for_the_version_that_registry_itself_serves() {
             "0.6.3",
         ),
     ] {
-        let probe = Probe::with_curl(&stub_curl("200", document));
+        let probe = Probe::with_curl("200", document);
         match answer(&probe.run(&[identifier])) {
             Answer::Serves(version) => assert_eq!(
                 version, serves,
@@ -323,7 +414,7 @@ fn each_registry_is_read_for_the_version_that_registry_itself_serves() {
 fn a_document_that_names_no_version_is_read_as_no_release_yet() {
     // The other side of the line above: a well-formed document that simply names
     // no version is the registry saying it serves nothing, which is an answer.
-    let probe = Probe::with_curl(&stub_curl("200", "{\"crate\":{}}"));
+    let probe = Probe::with_curl("200", "{\"crate\":{}}");
     assert!(
         matches!(
             answer(&probe.run(&["crate:onepipeline-ui"])),
@@ -333,51 +424,24 @@ fn a_document_that_names_no_version_is_read_as_no_release_yet() {
     );
 }
 
-/// A host missing one of the two programs the probe needs cannot establish
-/// anything, and must say so rather than answer.
-#[cfg(unix)]
 #[test]
-fn a_host_without_the_tools_it_needs_is_not_answered() {
-    let dir = TempDir::new().expect("temp dir");
-    let only_bash = dir.path().join("only-bash");
-    fs::create_dir_all(&only_bash).expect("create the search path");
-    // The `#!` line resolves `bash` through PATH, so the one program this leaves
-    // reachable is the interpreter itself: no curl, no node.
-    let bash = String::from_utf8(
-        Command::new("bash")
-            .args(["-c", "command -v bash"])
-            .output()
-            .expect("bash is on PATH")
-            .stdout,
-    )
-    .expect("utf-8 path");
-    std::os::unix::fs::symlink(bash.trim(), only_bash.join("bash")).expect("link bash");
-
-    let output = Command::new(probe())
-        .arg("npm:onepipeline-ui")
-        .current_dir(repo_root())
-        .env_clear()
-        .env("PATH", &only_bash)
-        .env("HOME", std::env::var_os("HOME").expect("HOME is set"))
-        .output()
-        .expect("spawn the probe");
-    refused(&output, "is not on PATH");
+fn a_scoped_npm_name_is_looked_up_in_the_registry_path_rather_than_below_it() {
+    // npm's own names may carry a scope, and the `/` in one is a path separator
+    // unless the probe encodes it. Unencoded, the read would go to a URL naming
+    // a different resource — which the registry answers 404 to, and 404 is "no
+    // release yet". So a scope would silently report every scoped package as
+    // unreleased forever. The URL is only observable as an argument, so the
+    // stand-in records what it was handed.
+    let probe = Probe::with_curl("200", "{\"version\":\"1.2.3\"}");
+    let served = probe.run(&["npm:@onepipeline/observatory"]);
+    assert!(
+        matches!(answer(&served), Answer::Serves(ref version) if version == "1.2.3"),
+        "a scoped npm name was not answered with the version its registry serves"
+    );
+    let argv = probe.curl_argv();
+    assert!(
+        argv.contains("https://registry.npmjs.org/@onepipeline%2Fobservatory/latest"),
+        "the scoped name was not encoded into the registry path; curl was handed:\n{argv}"
+    );
 }
-
-/// A stand-in `curl` that writes `body` where the real one was told to put the
-/// document, and reports `status` where it was told to write the code.
-fn stub_curl(status: &str, body: &str) -> String {
-    format!(
-        "#!/usr/bin/env bash\n\
-         set -eu\n\
-         document=\"\"\n\
-         while [ \"$#\" -gt 0 ]; do\n\
-           case \"$1\" in\n\
-             --output) document=\"$2\"; shift 2 ;;\n\
-             *) shift ;;\n\
-           esac\n\
-         done\n\
-         printf '%s' '{body}' > \"$document\"\n\
-         printf '%s' '{status}'\n"
-    )
-}
+// llmlint: ignore-end[e2e_not_mocked]
