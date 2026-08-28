@@ -11,7 +11,7 @@
 //! a released package must *contain*. Running the launcher a user installed is
 //! `tests/e2e/packaging.rs`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -32,14 +32,14 @@ const CRATE: &str = "onepipeline-ui";
 /// The npm distribution that carries the frontend rather than a binary.
 const FRONTEND: &str = "onepipeline-ui";
 
-/// The `name = "..."` a Cargo manifest sets inside `header`, e.g. `[[bin]]`.
+/// The `name = "..."` a TOML manifest sets inside `header`, e.g. `[[bin]]`.
 ///
-/// Reading the section rather than the whole file is the point: the manifest
+/// Reading the section rather than the whole file is the point: `Cargo.toml`
 /// declares two different names, and a substring search would let either one
 /// satisfy an assertion about the other.
-fn manifest_name(cargo: &str, header: &str) -> String {
+fn manifest_name(manifest: &str, header: &str) -> String {
     let mut inside = false;
-    for line in cargo.lines() {
+    for line in manifest.lines() {
         let line = line.trim();
         if line.starts_with('[') {
             inside = line == header;
@@ -49,7 +49,7 @@ fn manifest_name(cargo: &str, header: &str) -> String {
             }
         }
     }
-    panic!("Cargo.toml declares no name under {header}");
+    panic!("no name is declared under {header}");
 }
 
 #[test]
@@ -731,4 +731,352 @@ fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("unknown target"), "{stderr}");
     assert!(stderr.contains("ACTION:"), "{stderr}");
+}
+
+// ---------------------------------------------------------------------------
+// The release targets a consumer waits on.
+// ---------------------------------------------------------------------------
+//
+// A repository that declares no release target releases nothing as far as the
+// mechanism sequencing work across repositories is concerned: a dependency
+// landing here would earn a consumer no hold at all, silently. So
+// `release-targets.json` declares what this repository publishes, and the
+// assertions below derive the published set from the release configuration
+// *itself* — the workflow that publishes, the manifests it publishes under, and
+// the script that writes the manifests it generates. A hand-written inventory is
+// the thing that goes stale without saying so, which is the whole failure this
+// declaration exists to stop.
+
+/// The registries a release target may be qualified by.
+const REGISTRIES: &[&str] = &["crate", "pypi", "npm"];
+
+/// Every job `release.yml` declares, at the one indentation `jobs:` nests them
+/// at.
+///
+/// Enumerated rather than looked for by name: a new publishing job is a new
+/// artifact, and it has to reach [`published_names`] as something that fails
+/// rather than as something nobody thought to look for.
+fn workflow_jobs(workflow: &str) -> Vec<String> {
+    workflow
+        .lines()
+        .skip_while(|line| *line != "jobs:")
+        .filter_map(|line| {
+            let id = line.strip_prefix("  ")?.strip_suffix(':')?;
+            (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c == '-'))
+                .then(|| id.to_owned())
+        })
+        .collect()
+}
+
+/// The lines of `release.yml` that are one job: its id, and everything nested
+/// under it up to the next thing declared beside it.
+fn workflow_job(workflow: &str, job: &str) -> String {
+    let header = format!("  {job}:");
+    let mut lines = workflow.lines().skip_while(|line| **line != *header);
+    let first = lines
+        .next()
+        .unwrap_or_else(|| panic!("release.yml declares no `{job}` job"));
+    std::iter::once(first)
+        .chain(lines.take_while(|line| {
+            line.strip_prefix("  ")
+                .is_none_or(|rest| rest.starts_with(' ') || rest.is_empty())
+        }))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The committed package directory `scripts/npm-build.mjs` assembles `mode`
+/// from, read out of that mode's own function.
+///
+/// The directory is where the published name comes from — the manifest in it is
+/// shipped verbatim — so this follows the script to it rather than restating it.
+fn npm_build_source_dir(build: &str, mode: &str) -> String {
+    let mut characters = mode.chars();
+    let function = format!(
+        "function build{}{}(",
+        characters.next().expect("a mode name").to_ascii_uppercase(),
+        characters.as_str()
+    );
+    let (_, body) = build
+        .split_once(&function)
+        .unwrap_or_else(|| panic!("scripts/npm-build.mjs has no `{function})`"));
+    let body = body.split("\nfunction ").next().expect("a function body");
+    // `const src = ...` and not merely the first `npm/` path in the body: the
+    // output root is written just above it and is `npm/dist`, which is a
+    // directory this reads nothing from and a package nobody publishes.
+    let (_, source) = body
+        .split_once("const src = join(REPO_ROOT, \"npm\", \"")
+        .unwrap_or_else(|| panic!("`{function})` assembles no committed package under npm/"));
+    source
+        .split_once('"')
+        .expect("an unterminated directory name")
+        .0
+        .to_owned()
+}
+
+/// The npm package name `scripts/npm-build.mjs` generates for a Rust target.
+///
+/// A platform package has no committed manifest, so the script's own template
+/// and its target table are the only source of the name — read here rather than
+/// spelled a second time.
+fn npm_platform_package(build: &str, target: &str) -> String {
+    let (_, entry) = build
+        .split_once(&format!("\"{target}\": {{"))
+        .unwrap_or_else(|| panic!("scripts/npm-build.mjs maps no {target}"));
+    let entry = entry
+        .split_once('}')
+        .expect("an unterminated target entry")
+        .0;
+    let fact = |key: &str| {
+        let (_, value) = entry
+            .split_once(&format!("{key}: \""))
+            .unwrap_or_else(|| panic!("scripts/npm-build.mjs gives {target} no {key}"));
+        value.split_once('"').expect("an unterminated value").0
+    };
+    let (_, template) = build
+        .split_once("const pkgName = `")
+        .expect("scripts/npm-build.mjs names no platform package");
+    template
+        .split_once('`')
+        .expect("an unterminated package-name template")
+        .0
+        .replace("${facts.platform}", fact("platform"))
+        .replace("${facts.arch}", fact("arch"))
+}
+
+/// Every name this repository publishes, registry-qualified, derived from the
+/// release configuration.
+///
+/// Nothing here is a transcribed list. Each publishing job in `release.yml`
+/// names the registry, and the name is read from whatever that job publishes
+/// under: `Cargo.toml` for the crate, `pyproject.toml` for the wheels, and for
+/// npm the committed manifest of each package `scripts/npm-build.mjs` assembles
+/// plus the per-platform names it generates over the release matrix. A publish
+/// job this cannot read is a panic rather than a silent omission — a new
+/// artifact has to fail here, not pass unnoticed.
+fn published_names() -> BTreeSet<String> {
+    let workflow = read(".github/workflows/release.yml");
+    let mut published = BTreeSet::new();
+    for job in workflow_jobs(&workflow) {
+        let Some(registry) = job.strip_prefix("publish-") else {
+            continue;
+        };
+        let block = workflow_job(&workflow, &job);
+        match registry {
+            "crate" => {
+                assert!(
+                    block.contains("cargo publish"),
+                    "the publish-crate job no longer runs `cargo publish`, so what it \
+                     puts on crates.io is not what Cargo.toml names"
+                );
+                published.insert(format!(
+                    "crate:{}",
+                    manifest_name(&read("Cargo.toml"), "[package]")
+                ));
+            }
+            "pypi" => {
+                assert!(
+                    block.contains("pypa/gh-action-pypi-publish"),
+                    "the publish-pypi job no longer uploads the maturin wheels, so what \
+                     it puts on PyPI is not what pyproject.toml names"
+                );
+                published.insert(format!(
+                    "pypi:{}",
+                    manifest_name(&read("pyproject.toml"), "[project]")
+                ));
+            }
+            "npm" => {
+                assert!(
+                    block.contains("scripts/publish-npm.sh"),
+                    "the publish-npm job no longer publishes through scripts/publish-npm.sh"
+                );
+                let build = read("scripts/npm-build.mjs");
+                // Read from the whole workflow, not this job: the per-platform
+                // packages are assembled on the native runners in `build-npm`
+                // and published from the tarballs it hands over, so a mode this
+                // job never types is still a package this job publishes.
+                let modes = names_after(&workflow, "node scripts/npm-build.mjs ", |character| {
+                    character.is_ascii_alphabetic()
+                });
+                assert!(
+                    !modes.is_empty(),
+                    "release.yml assembles no npm package at all, yet publishes to npm"
+                );
+                for mode in modes {
+                    if mode == "platform" {
+                        let targets = names_after(
+                            &workflow_job(&workflow, "build-npm"),
+                            "- target: ",
+                            |character| !character.is_whitespace(),
+                        );
+                        assert!(
+                            !targets.is_empty(),
+                            "the build-npm job builds no target, so no platform package \
+                             is published for the launcher to resolve"
+                        );
+                        for target in targets {
+                            published
+                                .insert(format!("npm:{}", npm_platform_package(&build, &target)));
+                        }
+                    } else {
+                        let directory = npm_build_source_dir(&build, &mode);
+                        let manifest: serde_json::Value =
+                            serde_json::from_str(&read(&format!("npm/{directory}/package.json")))
+                                .expect("parse a committed npm manifest");
+                        published.insert(format!(
+                            "npm:{}",
+                            manifest["name"].as_str().expect("a package name")
+                        ));
+                    }
+                }
+            }
+            other => panic!(
+                "release.yml has a `publish-{other}` job whose artifact this gate cannot \
+                 name. Teach `published_names` what it publishes and declare it in \
+                 release-targets.json — an artifact nobody declares earns a consumer no \
+                 hold on the release that carries it."
+            ),
+        }
+    }
+    assert!(
+        !published.is_empty(),
+        "release.yml publishes nothing, so release-targets.json describes a repository \
+         this is not"
+    );
+    published
+}
+
+fn release_targets() -> serde_json::Value {
+    serde_json::from_str(&read("release-targets.json")).expect("parse release-targets.json")
+}
+
+/// Every name a declared target accounts for, mapped to the target accounting
+/// for it: the target's own identifier, and each per-platform package it covers.
+fn declared_coverage(declaration: &serde_json::Value) -> BTreeMap<String, String> {
+    let targets = declaration["targets"]
+        .as_array()
+        .expect("targets is an array");
+    assert!(
+        !targets.is_empty(),
+        "release-targets.json declares no target, so a consumer waiting on a release of \
+         this repository is told there is nothing to wait for"
+    );
+    let mut coverage: BTreeMap<String, String> = BTreeMap::new();
+    for target in targets {
+        let id = target["id"].as_str().expect("a target id").to_owned();
+        let mut accounted = vec![id.clone()];
+        if let Some(covers) = target.get("covers") {
+            for covered in covers.as_array().expect("covers is an array") {
+                accounted.push(covered.as_str().expect("a covered name").to_owned());
+            }
+        }
+        for name in accounted {
+            let (registry, artifact) = name.split_once(':').unwrap_or_else(|| {
+                panic!(
+                    "`{name}` is not registry-qualified. One name can be a project on one \
+                     registry and a different package on another, so a consumer handed an \
+                     unqualified name cannot say which artifact it got."
+                )
+            });
+            assert!(
+                REGISTRIES.contains(&registry),
+                "`{name}` names the registry `{registry}`, which nothing here publishes to \
+                 and scripts/release-probe.sh cannot read"
+            );
+            assert!(!artifact.is_empty(), "`{name}` names no artifact");
+            if let Some(already) = coverage.insert(name.clone(), id.clone()) {
+                panic!(
+                    "`{name}` is accounted for by both `{already}` and `{id}`; every name \
+                     this repository publishes belongs to exactly one target"
+                );
+            }
+        }
+    }
+    coverage
+}
+
+/// The declaration and the release configuration describe the same set of
+/// artifacts — in both directions.
+///
+/// Undeclared is the damaging direction: a consumer waiting on a release of this
+/// repository gets no hold on an artifact nobody declared, so its dependency
+/// lands and dependent work launches against a version that never published.
+/// Over-declared is the other: a target naming something this repository does
+/// not publish is a wait that can never end.
+#[test]
+fn every_name_this_repository_publishes_is_accounted_for_by_exactly_one_release_target() {
+    let declaration = release_targets();
+    let coverage = declared_coverage(&declaration);
+    let declared: BTreeSet<String> = coverage.keys().cloned().collect();
+    let published = published_names();
+
+    let undeclared: Vec<&String> = published.difference(&declared).collect();
+    assert!(
+        undeclared.is_empty(),
+        "release.yml publishes these, and release-targets.json accounts for none of them — \
+         a consumer waiting on a release that carries one would be told there is nothing to \
+         wait for:\n  {}",
+        undeclared
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+
+    let unpublished: Vec<&String> = declared.difference(&published).collect();
+    assert!(
+        unpublished.is_empty(),
+        "release-targets.json declares these, and nothing in the release configuration \
+         publishes them — a consumer waiting on one waits forever:\n  {}",
+        unpublished
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+
+    // A name published under a retired identifier would hand a consumer a hold
+    // on a package frozen at 0.1.0 (see AGENTS.md), which is worse than no hold.
+    for retired in declaration["retired"]
+        .as_array()
+        .expect("retired is an array")
+    {
+        let id = retired["id"].as_str().expect("a retired id");
+        assert!(
+            !published.contains(id),
+            "`{id}` is declared retired and the release configuration publishes it"
+        );
+        assert!(
+            !coverage.contains_key(id),
+            "`{id}` is declared retired and also declared as a live target"
+        );
+    }
+}
+
+/// The declaration names the probe that answers it, the probe is in the tree,
+/// and something drives it against a live registry.
+///
+/// A declaration is only worth anything if something can ask the registry what
+/// it currently serves for each name in it. `tests/e2e/release_probe.rs` drives
+/// every way that probe can fail to answer, and the two answers only a real
+/// registry can give it are driven by the sweep — which is outside the gate
+/// because the gate is offline, and so is the one part of this nothing else
+/// would notice the loss of.
+#[test]
+fn the_declaration_names_a_probe_this_repository_carries_and_sweeps() {
+    let declaration = release_targets();
+    let probe = declaration["probe"]
+        .as_str()
+        .expect("release-targets.json names no probe");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(probe);
+    assert!(
+        path.is_file(),
+        "release-targets.json names `{probe}`, which this repository does not carry"
+    );
+    assert!(
+        read(".github/workflows/published-smoke.yml").contains(probe),
+        "nothing asks a live registry what `{probe}` answers, so the version it \
+         serves and the emptiness of a name it has never released are verified \
+         nowhere — the gate is offline and cannot verify either"
+    );
 }

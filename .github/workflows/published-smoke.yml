@@ -113,3 +113,102 @@ jobs:
           bash scripts/smoke-published.sh \
             --expect-version "$ver" \
             --label "npm onepipeline-api-cli latest ($ver) on $RUNNER_OS/$RUNNER_ARCH"
+
+  # The other thing a registry serves, and the other thing that can rot between
+  # releases: the answer a *consumer* gets when it asks whether the release it is
+  # waiting on has happened. `release-targets.json` declares what this repository
+  # publishes and `scripts/release-probe.sh` answers for one of those names;
+  # `tests/e2e/release_probe.rs` drives every way that probe can fail to answer,
+  # but the two answers it can only get from a live public registry — the version
+  # one serves, and the emptiness of one that has never released a name — cannot
+  # be in the deterministic gate, which is offline. They are here, for the same
+  # reason the installs above are: nothing else in this repository asks a registry
+  # anything between releases.
+  #
+  # Ungated, unlike the two jobs above. A probe that answers is what a consumer
+  # depends on whether or not this repository is publishing today, and the one
+  # thing this must never do is report "no release yet" for a registry it could
+  # not reach — so the read itself is exercised on every sweep, and only the
+  # expectation of a *version* follows the operator's publishing switches.
+  probe:
+    name: probe
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # Spawned as a direct subprocess, the way the release-target contract says
+      # a consumer spawns it — no `bash` in front, so the execute bit and the
+      # `#!` line are part of what this proves.
+      - name: What each declared release target is serving right now
+        env:
+          PYPI_PUBLISH: ${{ vars.PYPI_PUBLISH }}
+          NPM_PUBLISH: ${{ vars.NPM_PUBLISH }}
+        run: |
+          failed=0
+          while read -r id; do
+            if ! served="$(scripts/release-probe.sh "$id")"; then
+              echo "::error::the probe could not establish what $id is serving"
+              failed=1
+              continue
+            fi
+            case "${id%%:*}" in
+              # crates.io publishing has no switch of its own — it activates with
+              # the CARGO_REGISTRY_TOKEN secret, and this repository's crate is
+              # live.
+              crate) live=true ;;
+              pypi) [ "${PYPI_PUBLISH:-}" = "true" ] && live=true || live=false ;;
+              npm) [ "${NPM_PUBLISH:-}" = "true" ] && live=true || live=false ;;
+              *) echo "::error::$id names a registry this workflow cannot switch on"; failed=1; continue ;;
+            esac
+            if [ -n "$served" ]; then
+              echo "$id -> $served"
+            elif [ "$live" = "true" ]; then
+              echo "::error::$id is published from this repository, and its registry serves no release of it"
+              failed=1
+            else
+              echo "$id -> nothing yet (this repository is not publishing to that registry)"
+            fi
+          # One id per line, terminated: `read` drops an unterminated last line,
+          # which would silently leave one declared target unprobed.
+          done < <(node -e 'for (const t of require("./release-targets.json").targets) console.log(t.id)')
+          [ "$failed" -eq 0 ]
+      # The answer a consumer must be able to tell from the ones above, and the
+      # only place a real registry can give it: a name no registry has ever
+      # released is an *answer*, so it exits 0 with nothing at all.
+      - name: A name no registry has released is answered, and answered empty
+        run: |
+          failed=0
+          for id in crate:onepipeline-ui-has-never-been-published \
+                    pypi:onepipeline-ui-has-never-been-published \
+                    npm:onepipeline-ui-has-never-been-published; do
+            if ! served="$(scripts/release-probe.sh "$id")"; then
+              echo "::error::the probe could not reach the registry for $id"
+              failed=1
+              continue
+            fi
+            if [ -n "$served" ]; then
+              echo "::error::$id was answered '$served'; someone now holds that name, so pick another sentinel"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ]
+      # And the distinction the whole mechanism turns on, asserted on the same
+      # runner that just produced two empty answers: a target the probe cannot
+      # answer for must not look like one that has no release.
+      - name: An identifier the probe cannot answer is refused, not answered empty
+        run: |
+          failed=0
+          for id in onepipeline-ui docker:onepipeline-ui "npm:Not A Package"; do
+            if served="$(scripts/release-probe.sh "$id" 2>/dev/null)"; then
+              echo "::error::'$id' was answered '${served:-<nothing>}' rather than refused"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ]
