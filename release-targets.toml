@@ -1,0 +1,83 @@
+# What this repository publishes, in the canonical shape every repository in this
+# plan declares it in — `onevcs`'s `release-targets.toml` schema, defined in that
+# repository's `docs/contract.md` and enforced by its reader. A consumer reads
+# this file across repositories it does not own, so the name, the location and the
+# shape are all fixed; the reasoning is what this file adds, and it lives here as
+# comments because nothing else in the release configuration has anywhere to put it.
+#
+# A repository that declares no release target releases nothing as far as the
+# mechanism sequencing work across repositories is concerned: a dependency landing
+# here would earn a consumer no hold at all, silently. `tests/packaging.rs`
+# reconciles what is declared here against the release configuration *itself* — the
+# workflow that publishes, the manifests it publishes under, and the script that
+# writes the manifests it generates — in both directions, so an artifact this
+# repository starts or stops publishing fails there rather than going stale here.
+schema_version = 1
+
+# What a consumer runs to ask a registry what it currently serves for one `id`
+# below. A merged commit is not a release and a tag is not one either (AGENTS.md:
+# "A tag is not evidence of a release; the registry is"), so the registry is the
+# only thing that can tell a consumer its wait is over.
+probe = "scripts/release-probe.sh"
+
+# Every identifier below is registry-qualified, and that is load-bearing rather
+# than decorative: one name can be a project on one registry and a different
+# package on another — `onepipeline-ui` is this crate on crates.io and the built
+# frontend on npm — so a consumer handed an unqualified name cannot say which
+# artifact it got.
+
+[[target]]
+id = "crate:onepipeline-ui"
+name = "crate"
+what = "The read API itself: the library and the `onepipeline-api` binary, on crates.io."
+published_by = ".github/workflows/release.yml — the publish-crate job's `cargo publish`, under Cargo.toml's [package] name."
+manifest = "Cargo.toml"
+
+[[target]]
+id = "pypi:onepipeline-api-cli"
+name = "pypi-cli"
+what = "The same binary, as per-platform wheels maturin wraps it in."
+published_by = ".github/workflows/release.yml — the publish-pypi job, under pyproject.toml's [project] name."
+manifest = "pyproject.toml"
+
+# The npm launcher, and the only entry here with a `covers` list. The per-platform
+# packages it covers exist for this launcher to resolve at its own exact version:
+# nothing depends on one by name, so none of them is a target of their own and a
+# consumer never waits on one. They are still named, because the release that
+# carries this launcher ships them too and a reader reconciling this declaration
+# against the release configuration has to account for every name it publishes.
+[[target]]
+id = "npm:onepipeline-api-cli"
+name = "npm-cli"
+what = "The same binary again, as the launcher a consumer installs from npm."
+published_by = ".github/workflows/release.yml — the publish-npm job, from `npm-build.mjs launcher` and, for the covered names, `npm-build.mjs platform` over the build-npm target matrix."
+manifest = "npm/onepipeline-api-cli/package.json"
+covers = [
+  "npm:onepipeline-api-cli-linux-x64",
+  "npm:onepipeline-api-cli-linux-arm64",
+  "npm:onepipeline-api-cli-darwin-x64",
+  "npm:onepipeline-api-cli-darwin-arm64",
+  "npm:onepipeline-api-cli-win32-x64",
+]
+
+# One release stamps this and the read API above together: serving one release's
+# view against another release's data is what pairing them prevents.
+[[target]]
+id = "npm:onepipeline-ui"
+name = "npm-ui"
+what = "The browser view: the built frontend bundle, carrying no binary, served against the read API above."
+published_by = ".github/workflows/release.yml — the publish-npm job's `npm-build.mjs ui`, under npm/onepipeline-ui/package.json's name."
+manifest = "npm/onepipeline-ui/package.json"
+
+# Retired rather than renamed, and recorded rather than deleted: a consumer that
+# finds one of these on a registry and asks whether it is still served is told it
+# is gone, instead of being told nothing. Publishing either again would hand a
+# consumer a hold on a package frozen at 0.1.0, which is worse than no hold.
+
+[[retired]]
+id = "pypi:onepipeline-ui-cli"
+why = "What the wrappers published as up to v0.1.0. Nothing here publishes it again; a consumer pinning it is pinned to 0.1.0. See AGENTS.md."
+
+[[retired]]
+id = "npm:onepipeline-ui-cli"
+why = "The npm half of the same retirement, also frozen at 0.1.0."

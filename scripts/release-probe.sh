@@ -6,7 +6,7 @@
 # release that carries it, and the only thing that can tell it the wait is over
 # is the registry itself — a merged commit is not a release, and a tag is not
 # one either (AGENTS.md: "A tag is not evidence of a release; the registry is").
-# `release-targets.json` declares what this repository publishes; this answers
+# `release-targets.toml` declares what this repository publishes; this answers
 # what each of those names currently resolves to.
 #
 # One argument: a registry-qualified identifier, `crate:<name>`, `pypi:<name>`,
