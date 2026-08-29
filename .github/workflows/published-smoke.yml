@@ -11,9 +11,18 @@ name: Published smoke
 #
 # So this runs the identical `scripts/smoke-published.sh` those jobs run, against
 # `latest` rather than a tag, on Linux, both macOS architectures, and Windows,
-# once a week. The registry's own idea of the version (`pip show`, `npm view`) is
-# what the binary is held to, so a package whose metadata and payload disagree
-# fails here rather than confusing someone reading `--version`.
+# every time `release.yml` finishes. A release is the only thing that changes what
+# `latest` resolves to, so that is precisely when the answer can have just become
+# wrong — a publish that half-completed, a dist-tag pointed at a build whose
+# assets never uploaded — and the registry is asked then rather than on a clock
+# with no relationship to when anything changed. The registry's own idea of the
+# version (`pip show`, `npm view`) is what the binary is held to, so a package
+# whose metadata and payload disagree fails here rather than confusing someone
+# reading `--version`.
+#
+# On `completed` rather than on a successful release: a release run that went red
+# partway is the one most likely to have left a registry serving something broken,
+# and it is exactly the run whose smoke nobody would think to ask for by hand.
 #
 # Deliberately cheap: a checkout, the language runtime that owns the installer,
 # `pip install` / `npm install -g`, and bash. No Rust toolchain, no build, no
@@ -21,30 +30,47 @@ name: Published smoke
 # switched off, and this one has to keep running while nobody is looking.
 #
 # NOT a required check, and it cannot become one: branch protection lists
-# contexts a *pull request* reports, and nothing here runs on one. See AGENTS.md.
+# contexts a *pull request* reports, and neither a completed workflow run nor a
+# manual dispatch is one. See AGENTS.md.
 #
-# llmlint: ignore-file[changed_behavior_has_e2e] this workflow is a schedule, two
-# registry installs, and a call to scripts/smoke-published.sh. The script is what holds
-# the behaviour, and it is driven for real against the compiled binary on every pull
-# request by ci.yml's `install` job. What is left here is the trigger and the two
-# installs, which only a hosted runner and a live registry can exercise; simulating
-# either would put the simulation under test.
+# A failure therefore has no check to turn red and nobody waiting on it, so the
+# `report` job below files it as an issue — one thread, commented on at each
+# further failure. That is the whole of the alarm; without it this detects rot
+# and tells no one.
 #
-# llmlint: ignore-file[live_tier_compiles_and_requires_credential] there is no
-# credential to require: every step reads a public registry anonymously, and the jobs
-# are switched by the same PYPI_PUBLISH / NPM_PUBLISH repository variables that decide
-# whether this project publishes to those registries at all. A repo that publishes
-# nowhere has nothing to smoke, and a weekly red run for an absent package is how a
-# sweep gets switched off.
+# llmlint: ignore-file[changed_behavior_has_e2e] what is left here after the
+# reporter is the trigger, two registry installs, and calls to
+# `scripts/smoke-published.sh` and `scripts/report-workflow-failure.sh`. Both
+# scripts hold the behaviour and both are driven for real — the smoke against the
+# compiled binary on every pull request by ci.yml's `install` job, the reporter's
+# create-versus-comment branch by `tests/e2e/report_workflow_failure.rs`. The
+# installs are what only a hosted runner and a live registry can exercise;
+# simulating either would put the simulation under test.
+#
+# llmlint: ignore-file[live_tier_compiles_and_requires_credential] the registry
+# reads require no credential: every step reads a public registry anonymously, and
+# the jobs are switched by the same PYPI_PUBLISH / NPM_PUBLISH repository
+# variables that decide whether this project publishes to those registries at all.
+# A repo that publishes nowhere has nothing to smoke, and a red run for an absent
+# package is how a sweep gets switched off. The one job that does need a
+# credential — `report`, which writes an issue — takes the run's own
+# `github.token` and declares the `issues: write` it needs beside it.
 
 on:
-  schedule:
-    # Mondays, early UTC: a break found at the start of the week gets a week to
-    # be fixed in, and an off-the-hour minute keeps this out of the queue every
-    # other cron job on GitHub is in.
-    - cron: "37 6 * * 1"
+  # Every finished run of `release.yml`, whatever it concluded. A release is the
+  # only thing that changes what `latest` resolves to, so this asks the registry
+  # precisely when its answer can have just become wrong.
+  #
+  # This matches `release.yml` by its *display name*, and GitHub says nothing
+  # when it matches none — a rename would leave this silently never running
+  # again, which looks exactly like a smoke that keeps passing. Nothing here can
+  # reference that workflow's `name:`, so `tests/packaging.rs` holds the two
+  # together instead.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   # The manual entry point — after a registry incident, or to confirm a fix
-  # without waiting for Monday.
+  # without waiting for the next release.
   workflow_dispatch:
 
 # Nothing by default. Each job asks for `contents: read` because it checks out
@@ -231,3 +257,49 @@ jobs:
             fi
           done
           [ "$failed" -eq 0 ]
+
+  # Where a failure goes. Neither trigger above is a pull request, so nothing
+  # here turns a check red and nobody is waiting on the answer — which is how a
+  # sweep spends months detecting a real publication defect and telling no one.
+  #
+  # One open issue, commented on at each further failure, so a run of bad
+  # releases is one thread rather than one issue apiece. It reports on a manual
+  # dispatch too: a human who ran it by hand has already seen the red, and the
+  # thread is the same thread either way, so filing is cheaper than reasoning
+  # about which trigger deserves an alarm.
+  #
+  # `needs` lists every job that can fail; `failure()` is false when they were
+  # all skipped, which is what a repository publishing nowhere looks like.
+  report:
+    name: report a failure
+    needs: [pypi, npm, probe]
+    if: >-
+      failure() && github.repository == 'nickderobertis/onepipeline-ui'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 5
+    steps:
+      # The reporter is a file in this repository, so the job that runs it has
+      # to have this repository in its workspace — a reporting job without this
+      # step fails on the one run it exists for.
+      - uses: actions/checkout@v4
+      - name: Open or update the published-smoke issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TITLE: Published smoke is failing
+          BODY: >-
+            The published smoke failed. It installs what PyPI and npm serve as
+            `latest` on Linux, both macOS architectures and Windows, and asks
+            every declared release target what its registry is serving; open the
+            run to see which legs failed. This runs after a release completes,
+            so the first thing to rule out is the release that just finished
+            leaving a registry serving something that does not work.
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # A script, not inline YAML: the create-versus-comment branch is real
+        # behaviour, and `tests/e2e/report_workflow_failure.rs` drives both
+        # halves against a stand-in `gh`. This path only ever runs when
+        # something is already broken, so it cannot debug itself in place.
+        run: bash scripts/report-workflow-failure.sh

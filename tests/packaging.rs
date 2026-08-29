@@ -1076,3 +1076,101 @@ fn the_declaration_names_a_probe_this_repository_carries_and_sweeps() {
          nowhere — the gate is offline and cannot verify either"
     );
 }
+
+/// The one alarm on a published-smoke failure is wired to a job that can
+/// actually run it.
+///
+/// `tests/e2e/report_workflow_failure.rs` holds what the reporter *does*; what
+/// it cannot hold is whether the workflow reaches it, and there are exactly two
+/// ways that goes wrong silently. A job that never checks the repository out has
+/// no `scripts/` in its workspace, so the reporter is missing on the one run it
+/// exists for — that is the defect this was copied from. And a job that does not
+/// declare `issues: write` gets a token that cannot open the issue, because a
+/// workflow-run leg is given no more than the workflow declares. Neither shows
+/// up until a smoke has already failed and told nobody, which is the whole
+/// failure this repository is trying to stop having.
+#[test]
+fn the_published_smoke_can_reach_and_run_its_own_failure_reporter() {
+    const REPORTER: &str = "scripts/report-workflow-failure.sh";
+    let workflow = read(".github/workflows/published-smoke.yml");
+
+    assert!(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(REPORTER)
+            .is_file(),
+        "the published smoke reports its failures with `{REPORTER}`, which this \
+         repository does not carry"
+    );
+
+    let report = workflow
+        .split_once("\n  report:\n")
+        .map(|(_, rest)| rest)
+        .expect(
+            "published-smoke.yml declares no `report` job, so a failure of it is announced nowhere",
+        );
+
+    assert!(
+        report.contains("actions/checkout@"),
+        "the `report` job does not check this repository out, so `{REPORTER}` is \
+         not in its workspace and the failure it exists to announce is announced \
+         nowhere"
+    );
+    assert!(
+        report.contains(REPORTER),
+        "the `report` job does not run `{REPORTER}`"
+    );
+    assert!(
+        report.contains("issues: write"),
+        "the `report` job does not ask for `issues: write`, so its token cannot \
+         open the issue it exists to open"
+    );
+
+    // The title is how the reporter finds the thread it already opened, so it
+    // has to be the same text on every run. One `${{ … }}` in it — a run number,
+    // a ref, the release it followed — and every failure opens its own issue,
+    // which is the pile this was built to avoid.
+    let title = report
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("TITLE:"))
+        .expect("the `report` job passes the reporter no TITLE, so it has nothing to file under");
+    assert!(
+        !title.contains("${{"),
+        "the `report` job's title is computed per run (`{}`), so a second failure \
+         would not find the issue the first one opened",
+        title.trim()
+    );
+}
+
+/// The smoke is triggered by a workflow it names in prose, so the name has to
+/// still be that workflow's.
+///
+/// `workflow_run` matches on a workflow's *display name*, and GitHub says
+/// nothing when it matches none: renaming `release.yml` would leave the smoke
+/// silently never running again, which is indistinguishable from a smoke that
+/// keeps passing. The name is not derivable at trigger time — a workflow cannot
+/// reference another workflow's `name:` — so this is the drift gate that keeps
+/// the restatement honest.
+#[test]
+fn the_published_smoke_is_triggered_by_the_workflow_that_actually_releases() {
+    let released_by = read(".github/workflows/release.yml")
+        .lines()
+        .find_map(|line| line.strip_prefix("name:"))
+        .map(|name| name.trim().to_owned())
+        .expect("release.yml declares no name for `workflow_run` to match on");
+
+    let workflow = read(".github/workflows/published-smoke.yml");
+    let (trigger, _) = workflow
+        .split_once("\n\njobs:\n")
+        .expect("published-smoke.yml declares no jobs");
+    let watched = trigger
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("workflows:"))
+        .expect("published-smoke.yml does not run on another workflow's completion");
+
+    assert!(
+        watched.contains(&format!("\"{released_by}\"")),
+        "the published smoke waits on {watched}, and the workflow that publishes \
+         this repository is named `{released_by}` — a `workflow_run` that matches \
+         nothing never runs and never says so"
+    );
+}
