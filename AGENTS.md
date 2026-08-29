@@ -124,7 +124,11 @@ fans one uniformly-named target across all of them.
   may bypass in a break-glass.
 - **All gating checks are required**, including the `gate` job and the separate
   `llmlint` job. `published-smoke` is *not* required and cannot be: branch
-  protection lists contexts a pull request reports, and it runs on a schedule.
+  protection lists contexts a pull request reports, and it runs on a completed
+  run of `release.yml` or on a manual dispatch — neither of which is one. Nothing
+  turns red for it, so its own `report` job files a failure as an issue and
+  comments on that same issue each further time; without that it detects rot and
+  tells nobody.
 - **Releases are fully automated; the only human action is merging a PR.**
   release-plz is the single version driver — it computes the version, writes
   `CHANGELOG.md` and the manifests, tags `vX.Y.Z`, and cuts the Release, which

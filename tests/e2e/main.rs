@@ -12,8 +12,10 @@
 //! the release workflow's own last job over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
 //! surface, `release_probe` runs the probe a consumer waiting on a release of
-//! this repository asks, and `ensure_sibling` runs the recipe the gate provisions
-//! the sibling CLI with, plus the task graph Nx itself builds for `test`.
+//! this repository asks, `report_workflow_failure` runs the reporter that is the
+//! only alarm on a published-smoke failure, and `ensure_sibling` runs the recipe
+//! the gate provisions the sibling CLI with, plus the task graph Nx itself builds
+//! for `test`.
 //!
 //! What is under test in every one of them is the real script, recipe or binary,
 //! over a real tree. Where a journey cannot let one of them reach a program for
@@ -36,6 +38,7 @@ mod llmlint_cache;
 mod packaging;
 mod release_probe;
 mod release_status;
+mod report_workflow_failure;
 mod semver_check;
 mod server;
 

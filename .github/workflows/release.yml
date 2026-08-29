@@ -45,7 +45,9 @@ name: Release
 #
 # Every verify job runs the version at publish time only. `published-smoke.yml`
 # runs the identical script against whatever the registries and the Release serve
-# as `latest`, on a weekly schedule, so rot between releases surfaces without one.
+# as `latest`, on every completed run of this workflow — the moment what `latest`
+# resolves to can have changed — and files a failure as an issue, since no check
+# turns red for it.
 #
 # The version is never written here: every artifact takes it from Cargo.toml
 # (maturin via `dynamic = ["version"]`, npm via scripts/npm-build.mjs), so
