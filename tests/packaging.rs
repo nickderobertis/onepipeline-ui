@@ -1085,13 +1085,15 @@ fn a_name_this_repository_declares_and_does_not_publish_fails_the_reconciliation
     );
 }
 
-/// The document this repository carries is one the canonical schema accepts.
+/// The document this repository carries is one every caller here can act on.
 ///
-/// The schema is `onevcs`'s, not this repository's; `tests/support/release_declaration.rs`
-/// is this repository's boundary check on it, and what it refuses is held to
-/// below. This is the pass side of that check, over the real document.
+/// The pass side of `tests/support/release_declaration.rs`, over the real
+/// document; the refusal side is the table below it. Conformance to the
+/// *canonical* schema is `onevcs`'s reader to judge — what this holds is that
+/// this repository's own machinery can read what it committed, and that the
+/// short name each artifact is waited on by is one name.
 #[test]
-fn the_declaration_this_repository_carries_conforms_to_the_canonical_schema() {
+fn the_declaration_this_repository_carries_is_one_its_own_machinery_can_read() {
     let declaration = release_declaration::declared();
     assert_eq!(
         declaration.schema_version,
@@ -1113,15 +1115,17 @@ fn the_declaration_this_repository_carries_conforms_to_the_canonical_schema() {
     );
 }
 
-/// The refusal side of the same check, driven document by document.
+/// The refusal side of the same reading, driven document by document.
 ///
-/// A schema check nobody has watched refuse is a check nobody knows the shape
-/// of, and this one is what stops a sixth shape of this document appearing. Each
-/// row is a document that is wrong in exactly one way the canonical schema names
-/// — a required field dropped, an identifier malformed, a short name repeated,
-/// and the rest of what only a whole document can be wrong about.
+/// A reader nobody has watched refuse is a reader nobody knows the shape of, and
+/// this one is what stops a declaration this repository could not act on being
+/// committed. Each row is a document that is wrong in exactly one way — a
+/// required field dropped, an identifier the probe could not be handed, a short
+/// name two targets both take, and the rest of what only a whole document can be
+/// wrong about. What the canonical reader refuses beyond these is its own; see
+/// `tests/support/release_declaration.rs`.
 #[test]
-fn a_declaration_the_canonical_schema_refuses_is_refused_here() {
+fn a_declaration_no_caller_here_could_act_on_is_refused() {
     // One well-formed target, spelled out so each row below can be one edit away
     // from a document that reads.
     const TARGET: &str = "\n[[target]]\nid = \"crate:onepipeline-ui\"\nname = \"crate\"\n\
@@ -1135,79 +1139,49 @@ fn a_declaration_the_canonical_schema_refuses_is_refused_here() {
             "declares no schema_version",
         ),
         (
-            "a schema_version older than this check reads",
+            "a schema_version older than this reader was written against",
             format!("schema_version = 0\n{TARGET}"),
-            "reads schema_version 1 and newer",
-        ),
-        (
-            "a key the schema does not declare",
-            format!("schema_version = 1\nprobes = \"scripts/release-probe.sh\"\n{TARGET}"),
-            "\"probes\"",
-        ),
-        (
-            "a misspelled key inside a target",
-            format!("schema_version = 1\n{TARGET}manifset = \"Cargo.toml\"\n"),
-            "\"manifset\"",
+            "written against schema_version 1",
         ),
         (
             "a required field dropped",
-            format!("schema_version = 1\n{}", TARGET.replace("name = \"crate\"\n", "")),
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("name = \"crate\"\n", "")
+            ),
             "missing field `name`",
         ),
         (
             "an identifier that names no registry",
-            format!("schema_version = 1\n{}", TARGET.replace("crate:onepipeline-ui", "onepipeline-ui")),
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("crate:onepipeline-ui", "onepipeline-ui")
+            ),
             "names no registry",
         ),
         (
-            "an identifier whose name no registry serves",
-            format!("schema_version = 1\n{}", TARGET.replace("crate:onepipeline-ui", "crate:not a package")),
-            "is not a name a registry serves",
+            "an identifier with nothing on one side of its colon",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("crate:onepipeline-ui", "crate:")
+            ),
+            "nothing on one side of its colon",
         ),
         (
-            "an identifier whose registry is not one word",
-            format!("schema_version = 1\n{}", TARGET.replace("crate:onepipeline-ui", "Crates.IO:onepipeline-ui")),
-            "not one word of lowercase letters",
-        ),
-        (
-            "a short name outside the alphabet a target name is spelled in",
-            format!("schema_version = 1\n{}", TARGET.replace("name = \"crate\"", "name = \"the crate\"")),
-            "may hold only letters, digits",
-        ),
-        (
-            "a short name that does not open with a letter or a digit",
-            format!("schema_version = 1\n{}", TARGET.replace("name = \"crate\"", "name = \"-crate\"")),
-            "must start with a letter or a digit",
+            "a short name that is not one word",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("name = \"crate\"", "name = \"the crate\"")
+            ),
+            "is not one word",
         ),
         (
             "a blank sentence",
-            format!("schema_version = 1\n{}", TARGET.replace("The read API itself.", "  ")),
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("The read API itself.", "  ")
+            ),
             "none of them may be blank",
-        ),
-        (
-            "a sentence longer than one line's worth",
-            format!("schema_version = 1\n{}", TARGET.replace("The read API itself.", &"x".repeat(401))),
-            "longer than 400 characters",
-        ),
-        (
-            "a probe that leaves the repository root",
-            format!("schema_version = 1\nprobe = \"../elsewhere/release-probe.sh\"\n{TARGET}"),
-            "leaves the repository root",
-        ),
-        (
-            "a probe on the reader's own machine",
-            format!("schema_version = 1\nprobe = \"/usr/local/bin/release-probe.sh\"\n{TARGET}"),
-            "is absolute",
-        ),
-        (
-            "a probe naming a drive on the reader's own machine",
-            format!("schema_version = 1\nprobe = \"C:release-probe.sh\"\n{TARGET}"),
-            "names a drive",
-        ),
-        (
-            "a probe that is no path at all",
-            format!("schema_version = 1\nprobe = \"\"\n{TARGET}"),
-            "empty path",
         ),
         (
             "a declaration with no target at all",
@@ -1216,12 +1190,18 @@ fn a_declaration_the_canonical_schema_refuses_is_refused_here() {
         ),
         (
             "two targets taking one short name",
-            format!("schema_version = 1\n{TARGET}{}", TARGET.replace("crate:onepipeline-ui", "npm:onepipeline-ui")),
+            format!(
+                "schema_version = 1\n{TARGET}{}",
+                TARGET.replace("crate:onepipeline-ui", "npm:onepipeline-ui")
+            ),
             "already takes",
         ),
         (
             "two targets declaring one identifier",
-            format!("schema_version = 1\n{TARGET}{}", TARGET.replace("name = \"crate\"", "name = \"crate-again\"")),
+            format!(
+                "schema_version = 1\n{TARGET}{}",
+                TARGET.replace("name = \"crate\"", "name = \"crate-again\"")
+            ),
             "one artifact is one target",
         ),
         (
@@ -1232,7 +1212,9 @@ fn a_declaration_the_canonical_schema_refuses_is_refused_here() {
         (
             "one identifier two targets both cover",
             format!(
-                "schema_version = 1\n{TARGET}covers = [\"npm:onepipeline-api-cli-linux-x64\"]\n{}covers = [\"npm:onepipeline-api-cli-linux-x64\"]\n",
+                "schema_version = 1\n{TARGET}covers = \
+                 [\"npm:onepipeline-api-cli-linux-x64\"]\n{}covers = \
+                 [\"npm:onepipeline-api-cli-linux-x64\"]\n",
                 TARGET
                     .replace("crate:onepipeline-ui", "npm:onepipeline-api-cli")
                     .replace("name = \"crate\"", "name = \"npm-cli\"")
@@ -1241,12 +1223,19 @@ fn a_declaration_the_canonical_schema_refuses_is_refused_here() {
         ),
         (
             "a retired artifact this repository still publishes",
-            format!("schema_version = 1\n{TARGET}\n[[retired]]\nid = \"crate:onepipeline-ui\"\nwhy = \"Frozen at 0.1.0.\"\n"),
+            format!(
+                "schema_version = 1\n{TARGET}\n[[retired]]\nid = \"crate:onepipeline-ui\"\n\
+                 why = \"Frozen at 0.1.0.\"\n"
+            ),
             "retiring what [[target]] 1 publishes",
         ),
         (
             "one artifact retired twice",
-            format!("schema_version = 1\n{TARGET}\n[[retired]]\nid = \"npm:onepipeline-ui-cli\"\nwhy = \"Frozen at 0.1.0.\"\n[[retired]]\nid = \"npm:onepipeline-ui-cli\"\nwhy = \"Frozen at 0.1.0, again.\"\n"),
+            format!(
+                "schema_version = 1\n{TARGET}\n[[retired]]\nid = \"npm:onepipeline-ui-cli\"\n\
+                 why = \"Frozen at 0.1.0.\"\n[[retired]]\nid = \"npm:onepipeline-ui-cli\"\n\
+                 why = \"Frozen at 0.1.0, again.\"\n"
+            ),
             "already records",
         ),
         (
@@ -1270,9 +1259,10 @@ fn a_declaration_the_canonical_schema_refuses_is_refused_here() {
 
 /// A later schema is read as this one, with what it names beyond it ignored.
 ///
-/// The promise the document makes to a consumer one release behind: refusing a
-/// key it has never heard of would leave a reader that could have listed every
-/// artifact this repository publishes listing none of them.
+/// The promise the document makes to a consumer one release behind, and the
+/// reason nothing in this reader refuses a key it does not know: refusing one
+/// would leave a reader that could have listed every artifact this repository
+/// publishes listing none of them.
 #[test]
 fn a_declaration_written_against_a_later_schema_is_still_read() {
     let declaration = release_declaration::validate(

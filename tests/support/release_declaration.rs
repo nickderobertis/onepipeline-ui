@@ -1,25 +1,25 @@
-//! The canonical release-target schema, as this repository's own boundary check
-//! on the `release-targets.toml` it carries.
+//! The reader this repository's own machinery takes `release-targets.toml`
+//! through.
 //!
-//! The schema is **not this repository's**. It is defined once, in `onevcs`'s
-//! `docs/contract.md`, and enforced by that crate's own reader — six repositories
-//! write a document against it, and a shape any one of them was free to amend
-//! would be six shapes again, which is the divergence this document exists to end.
-//! What lives here is the check at this repository's boundary: schema version 1,
-//! spelled the way that contract spells it, so a declaration this repository could
-//! not have meant fails in this repository's gate rather than in a consumer that
-//! read it.
+//! **The schema is not this repository's, and neither is judging conformance to
+//! it.** It is defined once — in `onevcs`'s `docs/contract.md`, enforced by that
+//! crate's own reader — because six repositories write one of these documents and
+//! a consumer parses all six. Restating it here would be a second definition of a
+//! contract that has one source, and nothing in an offline gate could hold the
+//! copy to the original. So this reads what *this* repository reads out of its own
+//! declaration and refuses what would leave one of its own callers with no answer,
+//! and nothing beyond that: how long a sentence may be, how a path may be spelled,
+//! and which keys a later schema adds are the canonical reader's to have an
+//! opinion on. When a release of `onevcs` carries
+//! `validate_release_declaration`, this becomes a call to it.
 //!
-//! It is a second implementation of that schema and deliberately not a second
-//! definition of it: every refusal below is one the contract names, in the order
-//! it names them. Linking `onevcs`'s reader instead would be strictly better and
-//! is not yet possible — the reader landed on that repository's default branch and
-//! is not on crates.io, and this crate's dev-dependency on `onevcs` is held at the
-//! major `onepipeline` resolves. When a release carries it, this module becomes a
-//! call to `onevcs::validate_release_declaration`.
-//!
-//! Refusing well is most of the value: a declaration is written once and then read
-//! by machinery, so every refusal names the document and what in it is wrong.
+//! What it does refuse is what its own callers cannot proceed past: a field
+//! `tests/packaging.rs` or `tests/e2e/release_probe.rs` reads and the document does
+//! not carry, an identifier the probe could not be handed, and a document saying
+//! two things about one artifact — two targets under one short name or one
+//! identifier, an identifier that is both covered and a target, an artifact both
+//! retired and published. Each of those was already a refusal this repository made
+//! about the JSON document this one replaced.
 
 #![allow(dead_code)] // Each test binary uses the part of the reader it needs.
 
@@ -33,24 +33,30 @@ use serde::Deserialize;
 /// does not own, and a location it would have to be told is one it cannot discover.
 pub const FILE: &str = "release-targets.toml";
 
-/// The schema version this check reads, and the oldest it accepts.
+/// The schema version this reader was written against.
+///
+/// A document declaring an older one is a different shape and is refused. A later
+/// one is read as this shape with whatever it names beyond it ignored — the
+/// leniency the document promises a consumer one release behind, and the reason
+/// nothing here refuses a key it does not know.
 pub const SCHEMA_VERSION: i64 = 1;
-
-/// How long a registry-qualified identifier may be, so a refusal quoting one is
-/// still a sentence.
-const MAX_IDENTIFIER: usize = 128;
-
-/// How long the prose fields may be. `what` is one sentence and `published_by`
-/// names a workflow, a job and a manifest; both render on one line.
-const MAX_PROSE: usize = 400;
-
-/// How long a target's short name may be.
-const MAX_TARGET_NAME: usize = 64;
 
 /// What one repository publishes, as its own `release-targets.toml` declares it.
 ///
 /// The order of [`targets`](Self::targets) is the document's own — the schema says
 /// publication order — and reading preserves it.
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the one source
+// is `onevcs`'s reader and this is not permitted to become a second one, which is
+// why the fields below are only those a caller in this repository reads and carry
+// none of the schema's own opinions about them. It cannot yet *be* that source:
+// `validate_release_declaration` landed on `onevcs`'s default branch and no
+// release carries it, and this crate's `onevcs` dev-dependency is pinned at the
+// major `onepipeline` resolves so that the tree holds one copy of that library.
+// A drift gate is the other way the rule can be satisfied and is not available
+// either: the canonical reader is reachable only over the network, and this
+// repository's gate is deterministic and offline by construction (AGENTS.md).
+// The move is a one-line call, not a rewrite: when a release carries the reader,
+// `validate` below becomes it and this block goes.
 #[derive(Debug, Deserialize)]
 pub struct Declaration {
     /// The schema this document is written against.
@@ -59,7 +65,7 @@ pub struct Declaration {
     /// [`DeclaredTarget::id`]. Optional: a repository whose targets are answered
     /// some other way declares none.
     #[serde(default)]
-    pub probe: Option<RepositoryPath>,
+    pub probe: Option<String>,
     /// The consumable artifacts this repository publishes, in publication order.
     #[serde(rename = "target", default)]
     pub targets: Vec<DeclaredTarget>,
@@ -81,9 +87,12 @@ pub struct DeclaredTarget {
     /// The workflow and job that publish it, and the manifest its name and version
     /// come from.
     pub published_by: Prose,
-    /// The manifest this target's version is read from.
+    /// The manifest this target's version is read from. That this repository
+    /// carries the file it names is `tests/packaging.rs`'s assertion, which is a
+    /// stronger thing to ask of this document than any rule about how a path may
+    /// be spelled.
     #[serde(default)]
-    pub manifest: Option<RepositoryPath>,
+    pub manifest: Option<String>,
     /// Identifiers this target's release also ships, which are not targets of their
     /// own because nothing depends on one by name.
     #[serde(default)]
@@ -100,11 +109,13 @@ pub struct RetiredArtifact {
     pub why: Prose,
 }
 
-/// A registry-qualified identifier, `<registry>:<name>`.
+/// A registry-qualified identifier, `<registry>:<name>`, as the probe is handed it.
 ///
 /// The qualification is load-bearing: `onepipeline-ui` is this crate on crates.io
-/// and the built frontend on npm, so an unqualified name is two artifacts. The
-/// registry half is an open vocabulary — what is closed is the shape.
+/// and the built frontend on npm, so an unqualified name is two artifacts — and
+/// `scripts/release-probe.sh` refuses one, which would leave a target nobody could
+/// ever be answered for. The registry half is an open vocabulary; which registries
+/// *this* repository's probe reads is `tests/packaging.rs`'s question.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct RegistryId(String);
@@ -130,11 +141,6 @@ impl TryFrom<String> for RegistryId {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() > MAX_IDENTIFIER {
-            return Err(format!(
-                "the release-target identifier {value:?} is longer than {MAX_IDENTIFIER} characters"
-            ));
-        }
         let Some((registry, name)) = value.split_once(':') else {
             return Err(format!(
                 "the release-target identifier {value:?} names no registry; spell every \
@@ -142,30 +148,10 @@ impl TryFrom<String> for RegistryId {
                  is two artifacts"
             ));
         };
-        if registry.is_empty()
-            || !registry
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
+        if registry.is_empty() || name.is_empty() {
             return Err(format!(
-                "the release-target identifier {value:?} names the registry {registry:?}, which \
-                 is not one word of lowercase letters, digits, and '-'"
-            ));
-        }
-        // The name becomes a path segment of a registry URL wherever one is asked,
-        // so it is held to the alphabet crates.io, PyPI and npm all serve rather
-        // than to whichever of them a reader happens to ask first.
-        if !name
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_alphanumeric())
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/'))
-        {
-            return Err(format!(
-                "the release-target identifier {value:?} names {name:?}, which is not a name a \
-                 registry serves; spell the name exactly as its registry does"
+                "the release-target identifier {value:?} has nothing on one side of its colon; \
+                 spell every identifier as <registry>:<name>"
             ));
         }
         Ok(Self(value))
@@ -173,7 +159,8 @@ impl TryFrom<String> for RegistryId {
 }
 
 /// The short name a target is waited on by — the vocabulary a host document and a
-/// plan node both name a target in.
+/// plan node both name a target in, and the one a reader of this document lists
+/// artifacts by.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct TargetName(String);
@@ -188,27 +175,12 @@ impl TryFrom<String> for TargetName {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() > MAX_TARGET_NAME {
+        // One word, because it is typed on a command line and matched by a host
+        // document against what it calls the same target.
+        if value.is_empty() || value.chars().any(char::is_whitespace) {
             return Err(format!(
-                "the release target name {value:?} is longer than {MAX_TARGET_NAME} characters"
-            ));
-        }
-        if !value
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_alphanumeric())
-        {
-            return Err(format!(
-                "the release target name {value:?} must start with a letter or a digit"
-            ));
-        }
-        if !value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        {
-            return Err(format!(
-                "the release target name {value:?} may hold only letters, digits, '-', '_', \
-                 and '.'"
+                "the release target name {value:?} is not one word; it is what a host document \
+                 and a consumer's plan name this target by"
             ));
         }
         Ok(Self(value))
@@ -217,10 +189,8 @@ impl TryFrom<String> for TargetName {
 
 /// One line of operator-written text: `what`, `published_by`, and `why`.
 ///
-/// Each is a sentence a reader acts on and each renders on one line beside the
-/// entry it describes, so a blank one leaves a reader with an identifier where they
-/// were promised a sentence, and one carrying a control character renders as
-/// something other than what it is wherever it lands.
+/// Each is the sentence a reader of this document learns the entry from, so a blank
+/// one leaves them with an identifier where they were promised a sentence.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct Prose(String);
@@ -242,100 +212,22 @@ impl TryFrom<String> for Prose {
                     .to_owned(),
             );
         }
-        if value.len() > MAX_PROSE {
-            return Err(format!(
-                "a release declaration's prose is longer than {MAX_PROSE} characters; it is \
-                 rendered on one line beside the entry it describes, and the reasoning behind it \
-                 belongs in a comment"
-            ));
-        }
-        if value.chars().any(char::is_control) {
-            return Err(format!(
-                "the release declaration prose {value:?} carries a control character; it is \
-                 rendered on one line, so it must be one"
-            ));
-        }
         Ok(Self(value))
     }
 }
 
-/// A path to something the repository being released carries.
-///
-/// Decided on how the path is *spelled*, never on what the reader's own platform
-/// makes of it: six repositories share one document and a consumer resolves it on
-/// whichever machine it runs on, so a path either names a place in a checkout
-/// everywhere or is refused everywhere.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "String")]
-pub struct RepositoryPath(String);
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
-impl RepositoryPath {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Both separators, because one of the platforms reading a declaration separates
-/// with `\` and a document meaning different things on the two would be worse than
-/// one refused on either.
-const SEPARATORS: [char; 2] = ['/', '\\'];
-
-impl TryFrom<String> for RepositoryPath {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty() {
-            return Err("a release declaration names an empty path".to_owned());
-        }
-        if value.starts_with(SEPARATORS) {
-            return Err(format!(
-                "the release declaration path {value:?} is absolute; it is a path relative to \
-                 the repository root, because it names something the repository being released \
-                 carries"
-            ));
-        }
-        // `C:\Cargo.toml`, and the drive-relative `C:Cargo.toml` with it, both name
-        // a location on whichever machine resolves them rather than one in a
-        // checkout. A UNC share opens with a separator and is refused above.
-        let mut characters = value.chars();
-        if matches!(
-            (characters.next(), characters.next()),
-            (Some(drive), Some(':')) if drive.is_ascii_alphabetic()
-        ) {
-            return Err(format!(
-                "the release declaration path {value:?} names a drive on the reader's own \
-                 machine; it is a path relative to the repository root"
-            ));
-        }
-        if value.split(SEPARATORS).any(|component| component == "..") {
-            return Err(format!(
-                "the release declaration path {value:?} leaves the repository root; it names \
-                 something the repository being released carries"
-            ));
-        }
-        Ok(Self(value))
-    }
-}
-
-/// The keys schema version 1 declares, by the table they belong to.
-///
-/// Spelled here rather than derived from serde's `deny_unknown_fields`, because
-/// that would refuse a *later* schema's keys too — and the whole of the leniency
-/// this document promises is that it does not.
-const TOP_LEVEL_KEYS: [&str; 4] = ["schema_version", "probe", "target", "retired"];
-const TARGET_KEYS: [&str; 6] = ["id", "name", "what", "published_by", "manifest", "covers"];
-const RETIRED_KEYS: [&str; 2] = ["id", "why"];
-
-/// Validate one release declaration's text, and answer what it declares.
+/// Read one release declaration's text, and answer what it declares.
 ///
 /// `origin` is what the refusals name the document by.
 pub fn validate(document: &str, origin: &str) -> Result<Declaration, String> {
+    // The version is read before the shape, and refused before it: which shape a
+    // document has is a fact about the schema it declares, so one this reader was
+    // not written against is answered as that rather than as whichever of its
+    // fields read strangely first.
     let table: toml::Table = toml::from_str(document)
         .map_err(|failure| format!("the release declaration at {origin} is not TOML: {failure}"))?;
-    // The version is read before the shape is enforced, and refused before it too:
-    // which keys a document may carry is a fact about the schema it declares, so
-    // one this check cannot read is answered as that rather than as whichever of
-    // its keys was unrecognized first.
     let Some(declared) = table
         .get("schema_version")
         .and_then(toml::Value::as_integer)
@@ -347,69 +239,27 @@ pub fn validate(document: &str, origin: &str) -> Result<Declaration, String> {
     };
     if declared < SCHEMA_VERSION {
         return Err(format!(
-            "the release declaration at {origin} declares schema_version {declared}; this check \
-             reads schema_version {SCHEMA_VERSION} and newer"
+            "the release declaration at {origin} declares schema_version {declared}; this reader \
+             was written against schema_version {SCHEMA_VERSION} and reads it and newer"
         ));
-    }
-    if declared == SCHEMA_VERSION {
-        // Only at the version this check *knows*. A typo is the likeliest defect in
-        // a hand-written document and reading `manifset` as an absent `manifest`
-        // would publish an answer nobody declared. A later schema's keys are not
-        // this check's to have an opinion on, and are ignored.
-        refuse_unknown_keys(&table, origin)?;
     }
     // Deserialized from the text rather than from the table just parsed: `toml`
     // carries the line and column of every field through a string it still has, and
     // loses them through a value it does not.
     let declaration: Declaration = toml::from_str(document).map_err(|failure| {
-        format!(
-            "the release declaration at {origin} is not the shape schema_version \
-             {SCHEMA_VERSION} declares: {failure}"
-        )
+        format!("the release declaration at {origin} is not a declaration this reads: {failure}")
     })?;
     coherent(&declaration, origin)?;
     Ok(declaration)
 }
 
-/// Refuse a key this schema does not declare, naming it and the table it is in.
-fn refuse_unknown_keys(table: &toml::Table, origin: &str) -> Result<(), String> {
-    let unknown = |where_: &str, key: &str| {
-        format!(
-            "the release declaration at {origin} names {key:?} in {where_}, which schema_version \
-             {SCHEMA_VERSION} does not declare; a misspelled key would otherwise be read as an \
-             absent one"
-        )
-    };
-    for key in table.keys() {
-        if !TOP_LEVEL_KEYS.contains(&key.as_str()) {
-            return Err(unknown("the document", key));
-        }
-    }
-    for (array, keys) in [("target", &TARGET_KEYS[..]), ("retired", &RETIRED_KEYS[..])] {
-        let Some(entries) = table.get(array).and_then(toml::Value::as_array) else {
-            continue;
-        };
-        for (index, entry) in entries.iter().enumerate() {
-            let Some(entry) = entry.as_table() else {
-                continue;
-            };
-            for key in entry.keys() {
-                if !keys.contains(&key.as_str()) {
-                    return Err(unknown(&format!("[[{array}]] {}", index + 1), key));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Refuse a declaration whose fields are each readable but which together say
-/// something no repository can mean.
+/// Refuse a declaration whose fields are each readable but which together say two
+/// things about one artifact.
 ///
-/// What is wrong on its own — an identifier that names no registry, a short name
-/// outside the alphabet — is refused by its own conversion, with the line and
-/// column the TOML reader knows. What only a *whole document* can be wrong about is
-/// here, and each refusal names the entry by its position and its identifier.
+/// Each of these leaves a caller here with no answer rather than a wrong one:
+/// `declared_coverage` cannot say which target accounts for an identifier two of
+/// them claim, and a consumer cannot say which release it is waiting for. Each
+/// refusal names the entry by its position and its identifier.
 fn coherent(declaration: &Declaration, origin: &str) -> Result<(), String> {
     if declaration.targets.is_empty() {
         return Err(format!(
@@ -513,8 +363,8 @@ fn retired(declaration: &Declaration, origin: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The declaration this repository carries, refused loudly if it is one no
-/// consumer could act on.
+/// The declaration this repository carries, refused loudly if it is one no caller
+/// here could act on.
 pub fn declared() -> Declaration {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(FILE);
     let document = std::fs::read_to_string(&path)

@@ -188,6 +188,12 @@ jobs:
           # every target out of is one no consumer could either. Handed over as a
           # heredoc rather than as `python3 -c`, because YAML strips this block's
           # indentation and Python refuses a program that still carries any.
+          #
+          # It reads ids and does not judge them: which registries an identifier
+          # may name is `scripts/release-probe.sh`'s own vocabulary, and it
+          # refuses one it cannot read — with the loop below reporting that as a
+          # target it could not establish. A copy of that list here would be a
+          # second answer with nothing holding it to the first.
           ids="$(python3 - <<'READ_DECLARATION'
           import tomllib
 
@@ -197,8 +203,8 @@ jobs:
               raise SystemExit("release-targets.toml declares no release target to probe")
           for target in declared:
               identifier = target.get("id")
-              if not isinstance(identifier, str) or identifier.split(":")[0] not in ("crate", "pypi", "npm"):
-                  raise SystemExit(f"not a registry-qualified target id: {identifier!r}")
+              if not isinstance(identifier, str) or not identifier:
+                  raise SystemExit(f"a [[target]] declares no id: {target!r}")
               print(identifier)
           READ_DECLARATION
           )"
