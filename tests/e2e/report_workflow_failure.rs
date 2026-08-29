@@ -594,7 +594,14 @@ fn a_run_url_that_is_not_a_run_url_is_marked_rather_than_published_as_one() {
         "an unusable run link was filed as though it were one: {}",
         reporter.calls()
     );
+    // One line, because this run ends in a success: a report that filed what it
+    // was asked to file should read as one rather than as a run with warnings.
     let said = stderr(&output);
+    assert_eq!(
+        said.lines().count(),
+        1,
+        "a successful filing is noisier than the one thing it had to say: {said}"
+    );
     assert!(said.contains(NOT_A_URL), "{said}");
     assert!(said.contains("ACTION:"), "{said}");
 }

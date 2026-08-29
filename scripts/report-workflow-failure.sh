@@ -58,13 +58,14 @@ fi
 # expression that resolved to something other than a run URL would otherwise be
 # published as one. It is content rather than an address this writes to, though,
 # so a bad one is not worth losing the whole report over: it is carried through
-# marked as unusable, and stderr says so. Everything below reads `$run_url`.
+# marked as unusable, and one line of stderr says so — one, because this path
+# ends in a success and a run that filed what it was asked to file should read
+# as one. Everything below reads `$run_url`.
 run_url="${RUN_URL:-}"
 case "$run_url" in
 "" | http://?* | https://?*) ;;
 *)
-  echo "report-workflow-failure: \$RUN_URL is '$run_url', which is not a http(s) run URL — filing anyway, with it marked rather than linked" >&2
-  echo "ACTION: the caller passes 'env: RUN_URL: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}'; an expression that resolved to nothing usable lands here." >&2
+  echo "report-workflow-failure: \$RUN_URL is '$run_url' rather than a http(s) run URL, so it is filed marked rather than linked. ACTION: the caller passes 'env: RUN_URL: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}' — an expression that resolved to nothing usable lands here." >&2
   run_url="$run_url (not a run URL)"
   ;;
 esac
