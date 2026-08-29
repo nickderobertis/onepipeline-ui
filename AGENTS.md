@@ -156,7 +156,7 @@ fans one uniformly-named target across all of them.
   unpublished.
 - **A tag is not evidence of a release; the registry is.** Check what npm, PyPI
   and crates.io serve before reporting a version shipped.
-- **`release-targets.json` declares what this repository publishes, and
+- **`release-targets.toml` declares what this repository publishes, and
   `scripts/release-probe.sh` answers what a registry currently serves for one of
   those names.** That is how a repository downstream of this one waits for a
   dependency to actually ship rather than launching on a merged commit. That file
@@ -165,6 +165,17 @@ fans one uniformly-named target across all of them.
   bare name cannot say which registry served it, and a per-platform package a
   launcher resolves at its own exact version is covered by that launcher's target
   rather than being one, because nothing depends on it by name.
+  **Its shape is not this repository's to choose, and conformance to it is not
+  this repository's to judge.** The schema is `onevcs`'s — defined in that
+  repository's `docs/contract.md` and enforced by its own reader — because six
+  repositories write one of these and a consumer parses all six with a standard
+  TOML parser and no knowledge of any of them.
+  `tests/support/release_declaration.rs` is deliberately *not* a copy of that
+  schema, which would be a second definition of a contract with one source and
+  nothing offline to hold it to the original: it reads what this repository's own
+  machinery reads and refuses only what would leave one of its callers with no
+  answer. When a release of `onevcs` carries `validate_release_declaration`,
+  that module becomes a call to it.
   The probe's three answers are a version, nothing at all (no release yet), and a
   non-zero exit (**not answered**), and the third is never the second: a consumer
   holds forever on it, so an unreachable registry must never read as an

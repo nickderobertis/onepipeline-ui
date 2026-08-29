@@ -139,6 +139,13 @@ oneagentgraph = "0.2"
 onevcs = "0.4"
 predicates = "3"
 tempfile = "3"
+# The parser `release-targets.toml` is read with, both by the schema check in
+# `tests/packaging.rs` and by the journeys that drive the probe over every
+# identifier that document declares. The declaration is TOML because the
+# canonical schema says so, and reading it with a real parser rather than by
+# pattern is what makes this repository's copy of the schema a check on the
+# document rather than a second reading of its text.
+toml = "1"
 
 [[test]]
 name = "e2e"

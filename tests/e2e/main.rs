@@ -48,6 +48,8 @@ mod fixture_run;
 mod harness_history;
 #[path = "../support/http.rs"]
 mod http;
+#[path = "../support/release_declaration.rs"]
+mod release_declaration;
 #[path = "../support/serving.rs"]
 mod serving;
 #[path = "../support/stub_bin.rs"]

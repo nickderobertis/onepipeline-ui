@@ -142,7 +142,7 @@ jobs:
 
   # The other thing a registry serves, and the other thing that can rot between
   # releases: the answer a *consumer* gets when it asks whether the release it is
-  # waiting on has happened. `release-targets.json` declares what this repository
+  # waiting on has happened. `release-targets.toml` declares what this repository
   # publishes and `scripts/release-probe.sh` answers for one of those names;
   # `tests/e2e/release_probe.rs` drives every way that probe can fail to answer,
   # but the two answers it can only get from a live public registry — the version
@@ -182,19 +182,33 @@ jobs:
           # step. Streamed straight into the loop it would not: the loop would
           # read nothing, probe nothing, and report green — a sweep that verified
           # no target while saying every target was fine.
-          ids="$(node -e '
-            const declared = require("./release-targets.json").targets;
-            if (!Array.isArray(declared) || declared.length === 0) {
-              throw new Error("release-targets.json declares no release target to probe");
-            }
-            for (const target of declared) {
-              if (typeof target?.id !== "string" || !/^(crate|pypi|npm):.+$/.test(target.id)) {
-                throw new Error(`not a registry-qualified target id: ${JSON.stringify(target?.id)}`);
-              }
-              console.log(target.id);
-            }
-          ')"
-          [ -n "$ids" ] || { echo "::error::release-targets.json yielded no target to probe"; exit 1; }
+          # Read with a standard TOML parser and no knowledge of this repository,
+          # the way the consumer this document is written for reads it: `tomllib`
+          # is in Python's standard library, and a declaration this cannot list
+          # every target out of is one no consumer could either. Handed over as a
+          # heredoc rather than as `python3 -c`, because YAML strips this block's
+          # indentation and Python refuses a program that still carries any.
+          #
+          # It reads ids and does not judge them: which registries an identifier
+          # may name is `scripts/release-probe.sh`'s own vocabulary, and it
+          # refuses one it cannot read — with the loop below reporting that as a
+          # target it could not establish. A copy of that list here would be a
+          # second answer with nothing holding it to the first.
+          ids="$(python3 - <<'READ_DECLARATION'
+          import tomllib
+
+          with open("release-targets.toml", "rb") as document:
+              declared = tomllib.load(document).get("target")
+          if not isinstance(declared, list) or not declared:
+              raise SystemExit("release-targets.toml declares no release target to probe")
+          for target in declared:
+              identifier = target.get("id")
+              if not isinstance(identifier, str) or not identifier:
+                  raise SystemExit(f"a [[target]] declares no id: {target!r}")
+              print(identifier)
+          READ_DECLARATION
+          )"
+          [ -n "$ids" ] || { echo "::error::release-targets.toml yielded no target to probe"; exit 1; }
           failed=0
           while read -r id; do
             if ! served="$(scripts/release-probe.sh "$id")"; then

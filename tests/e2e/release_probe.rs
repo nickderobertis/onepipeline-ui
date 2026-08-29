@@ -30,6 +30,7 @@ use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
+use crate::release_declaration;
 use crate::stub_bin;
 
 fn repo_root() -> PathBuf {
@@ -440,6 +441,65 @@ fn a_document_that_names_no_version_is_read_as_no_release_yet() {
             Answer::NoReleaseYet
         ),
         "a registry document naming no version was not read as `no release yet`"
+    );
+}
+
+/// Every identifier `release-targets.toml` declares is one this probe answers,
+/// and every one it does not declare is one the probe refuses.
+///
+/// The declaration and the probe are two halves of one promise to a consumer:
+/// the document says what to wait for, and the script says what a registry is
+/// serving for it. A declared identifier the probe cannot answer for is a wait
+/// that never ends, and the document is where a new one arrives — a target, or a
+/// per-platform package a launcher covers — so the sweep is taken from the
+/// document rather than from a list beside it.
+///
+/// The registry read is the one thing stood in for, for the reason this module's
+/// header gives; the identifiers, the script, and its own reading of each
+/// registry's answer are real. What a *live* registry serves for each of these
+/// is the `probe` job in `.github/workflows/published-smoke.yml`.
+#[test]
+fn every_identifier_the_declaration_names_is_one_this_probe_answers() {
+    let declaration = release_declaration::declared();
+    // One document carrying all three registries' shapes, so a single stand-in
+    // answers whichever of them an identifier is qualified by, and a version
+    // read out of the wrong field would not be this one.
+    let served = "{\"crate\":{\"max_stable_version\":\"9.9.9\"},\
+                  \"info\":{\"version\":\"9.9.9\"},\"version\":\"9.9.9\"}";
+
+    let declared = declaration
+        .targets
+        .iter()
+        .flat_map(|target| std::iter::once(&target.id).chain(target.covers.iter()));
+    let mut swept = 0;
+    for id in declared {
+        let probe = Probe::with_curl("200", served);
+        match answer(&probe.run(&[id.as_str()])) {
+            Answer::Serves(version) => assert_eq!(
+                version,
+                "9.9.9",
+                "{id} was answered a version its registry did not serve",
+                id = id.as_str()
+            ),
+            other => panic!(
+                "{id} is declared in release-targets.toml and the probe answered `{other:?}`; \
+                 a consumer waiting on it would never be told what is served",
+                id = id.as_str()
+            ),
+        }
+        swept += 1;
+    }
+    assert!(
+        swept > 0,
+        "release-targets.toml declared nothing to probe, so this swept no identifier at all"
+    );
+
+    // And the other half: an identifier the document does not declare, because
+    // no repository could — a registry this probe cannot read. Answering one
+    // would be answering for an artifact nobody publishes.
+    refused(
+        &Probe::plain().run(&["docker:onepipeline-ui"]),
+        "not a registry",
     );
 }
 

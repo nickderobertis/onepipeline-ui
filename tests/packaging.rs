@@ -15,6 +15,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// This repository's boundary check on the canonical release-target schema, and
+// the reader the assertions below take the declaration through. Shared with
+// `tests/e2e/release_probe.rs`, which drives the probe over every identifier the
+// same document declares.
+#[path = "support/release_declaration.rs"]
+mod release_declaration;
+
+use release_declaration::{Declaration, FILE};
+
 fn read(relative: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
     fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
@@ -736,7 +745,7 @@ fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
 // A repository that declares no release target releases nothing as far as the
 // mechanism sequencing work across repositories is concerned: a dependency
 // landing here would earn a consumer no hold at all, silently. So
-// `release-targets.json` declares what this repository publishes, and the
+// `release-targets.toml` declares what this repository publishes, and the
 // assertions below derive the published set from the release configuration
 // *itself* — the workflow that publishes, the manifests it publishes under, and
 // the script that writes the manifests it generates. A hand-written inventory is
@@ -929,152 +938,395 @@ fn published_names() -> BTreeSet<String> {
             other => panic!(
                 "release.yml has a `publish-{other}` job whose artifact this gate cannot \
                  name. Teach `published_names` what it publishes and declare it in \
-                 release-targets.json — an artifact nobody declares earns a consumer no \
+                 release-targets.toml — an artifact nobody declares earns a consumer no \
                  hold on the release that carries it."
             ),
         }
     }
     assert!(
         !published.is_empty(),
-        "release.yml publishes nothing, so release-targets.json describes a repository \
+        "release.yml publishes nothing, so release-targets.toml describes a repository \
          this is not"
     );
     published
 }
 
-fn release_targets() -> serde_json::Value {
-    serde_json::from_str(&read("release-targets.json")).expect("parse release-targets.json")
-}
-
 /// Every name a declared target accounts for, mapped to the target accounting
 /// for it: the target's own identifier, and each per-platform package it covers.
-fn declared_coverage(declaration: &serde_json::Value) -> BTreeMap<String, String> {
-    let targets = declaration["targets"]
-        .as_array()
-        .expect("targets is an array");
-    assert!(
-        !targets.is_empty(),
-        "release-targets.json declares no target, so a consumer waiting on a release of \
-         this repository is told there is nothing to wait for"
-    );
+///
+/// The schema check has already refused a malformed identifier and one two
+/// entries both account for. What is left here is this repository's own half:
+/// the registries `scripts/release-probe.sh` can read, because a target it
+/// cannot ask about is one a consumer can never be answered for.
+fn declared_coverage(declaration: &Declaration) -> BTreeMap<String, String> {
     let mut coverage: BTreeMap<String, String> = BTreeMap::new();
-    for target in targets {
-        let id = target["id"].as_str().expect("a target id").to_owned();
-        let mut accounted = vec![id.clone()];
-        if let Some(covers) = target.get("covers") {
-            for covered in covers.as_array().expect("covers is an array") {
-                accounted.push(covered.as_str().expect("a covered name").to_owned());
-            }
-        }
-        for name in accounted {
-            let (registry, artifact) = name.split_once(':').unwrap_or_else(|| {
-                panic!(
-                    "`{name}` is not registry-qualified. One name can be a project on one \
-                     registry and a different package on another, so a consumer handed an \
-                     unqualified name cannot say which artifact it got."
-                )
-            });
+    for target in &declaration.targets {
+        let id = target.id.as_str().to_owned();
+        for accounted in std::iter::once(&target.id).chain(target.covers.iter()) {
             assert!(
-                REGISTRIES.contains(&registry),
-                "`{name}` names the registry `{registry}`, which nothing here publishes to \
-                 and scripts/release-probe.sh cannot read"
+                REGISTRIES.contains(&accounted.registry()),
+                "`{accounted}` names the registry `{registry}`, which nothing here publishes to \
+                 and scripts/release-probe.sh cannot read",
+                accounted = accounted.as_str(),
+                registry = accounted.registry()
             );
-            assert!(!artifact.is_empty(), "`{name}` names no artifact");
-            if let Some(already) = coverage.insert(name.clone(), id.clone()) {
-                panic!(
-                    "`{name}` is accounted for by both `{already}` and `{id}`; every name \
-                     this repository publishes belongs to exactly one target"
-                );
-            }
+            coverage.insert(accounted.as_str().to_owned(), id.clone());
         }
     }
     coverage
 }
 
-/// The declaration and the release configuration describe the same set of
-/// artifacts — in both directions.
+/// Reconcile what the declaration says this repository publishes against what
+/// the release configuration actually publishes — in both directions.
 ///
 /// Undeclared is the damaging direction: a consumer waiting on a release of this
 /// repository gets no hold on an artifact nobody declared, so its dependency
 /// lands and dependent work launches against a version that never published.
 /// Over-declared is the other: a target naming something this repository does
-/// not publish is a wait that can never end.
-#[test]
-fn every_name_this_repository_publishes_is_accounted_for_by_exactly_one_release_target() {
-    let declaration = release_targets();
-    let coverage = declared_coverage(&declaration);
+/// not publish is a wait that can never end. A separate function from the test
+/// that runs it over the real tree, because a drift check nothing has ever seen
+/// refuse is a check nobody knows the direction of: the two tests below hand it
+/// each kind of drift.
+fn reconcile(declaration: &Declaration, published: &BTreeSet<String>) -> Result<(), String> {
+    let coverage = declared_coverage(declaration);
     let declared: BTreeSet<String> = coverage.keys().cloned().collect();
-    let published = published_names();
+    let listed = |names: Vec<&String>| {
+        names
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    };
 
     let undeclared: Vec<&String> = published.difference(&declared).collect();
-    assert!(
-        undeclared.is_empty(),
-        "release.yml publishes these, and release-targets.json accounts for none of them — \
-         a consumer waiting on a release that carries one would be told there is nothing to \
-         wait for:\n  {}",
-        undeclared
-            .iter()
-            .map(|name| name.as_str())
-            .collect::<Vec<_>>()
-            .join("\n  ")
-    );
+    if !undeclared.is_empty() {
+        return Err(format!(
+            "release.yml publishes these, and {FILE} accounts for none of them — a consumer \
+             waiting on a release that carries one would be told there is nothing to wait \
+             for:\n  {}",
+            listed(undeclared)
+        ));
+    }
 
-    let unpublished: Vec<&String> = declared.difference(&published).collect();
-    assert!(
-        unpublished.is_empty(),
-        "release-targets.json declares these, and nothing in the release configuration \
-         publishes them — a consumer waiting on one waits forever:\n  {}",
-        unpublished
-            .iter()
-            .map(|name| name.as_str())
-            .collect::<Vec<_>>()
-            .join("\n  ")
-    );
+    let unpublished: Vec<&String> = declared.difference(published).collect();
+    if !unpublished.is_empty() {
+        return Err(format!(
+            "{FILE} declares these, and nothing in the release configuration publishes them — a \
+             consumer waiting on one waits forever:\n  {}",
+            listed(unpublished)
+        ));
+    }
 
     // A name published under a retired identifier would hand a consumer a hold
     // on a package frozen at 0.1.0 (see AGENTS.md), which is worse than no hold.
-    for retired in declaration["retired"]
-        .as_array()
-        .expect("retired is an array")
-    {
-        let id = retired["id"].as_str().expect("a retired id");
+    // That it is not *also* a live target is the schema's own refusal.
+    for entry in &declaration.retired {
+        let id = entry.id.as_str();
+        if published.contains(id) {
+            return Err(format!(
+                "`{id}` is declared retired and the release configuration publishes it"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The declaration and the release configuration describe the same set of
+/// artifacts.
+#[test]
+fn every_name_this_repository_publishes_is_accounted_for_by_exactly_one_release_target() {
+    if let Err(drift) = reconcile(&release_declaration::declared(), &published_names()) {
+        panic!("{drift}");
+    }
+}
+
+/// The undeclared direction, driven: a name the release configuration publishes
+/// and the declaration does not account for.
+///
+/// A new per-platform package added to the `build-npm` matrix is exactly how
+/// this arrives in practice — the workflow publishes it, nothing declares it,
+/// and a consumer holding on the launcher that resolves it is told there is
+/// nothing to wait for.
+#[test]
+fn a_name_this_repository_publishes_and_does_not_declare_fails_the_reconciliation() {
+    let mut published = published_names();
+    published.insert("npm:onepipeline-api-cli-freebsd-x64".to_owned());
+
+    let drift = reconcile(&release_declaration::declared(), &published)
+        .expect_err("a published name nothing declares reconciled");
+    assert!(
+        drift.contains("npm:onepipeline-api-cli-freebsd-x64"),
+        "the refusal does not name the undeclared artifact: {drift}"
+    );
+}
+
+/// The over-declared direction, driven: a target the declaration names and
+/// nothing in the release configuration publishes.
+///
+/// Appended to this repository's own document rather than written beside it, so
+/// what is reconciled is the real declaration plus one target — the shape a
+/// retired or renamed artifact left behind in it would have.
+#[test]
+fn a_name_this_repository_declares_and_does_not_publish_fails_the_reconciliation() {
+    let document = format!(
+        "{}\n[[target]]\nid = \"npm:onepipeline-ui-nothing-publishes\"\nname = \"phantom\"\n\
+         what = \"An artifact no job in the release workflow assembles.\"\n\
+         published_by = \"Nothing: this target is the drift this reconciliation exists to \
+         refuse.\"\n",
+        read(FILE)
+    );
+    let declaration = release_declaration::validate(&document, FILE).expect("a valid declaration");
+
+    let drift = reconcile(&declaration, &published_names())
+        .expect_err("a declared name nothing publishes reconciled");
+    assert!(
+        drift.contains("npm:onepipeline-ui-nothing-publishes"),
+        "the refusal does not name the unpublished artifact: {drift}"
+    );
+}
+
+/// The document this repository carries is one every caller here can act on.
+///
+/// The pass side of `tests/support/release_declaration.rs`, over the real
+/// document; the refusal side is the table below it. Conformance to the
+/// *canonical* schema is `onevcs`'s reader to judge — what this holds is that
+/// this repository's own machinery can read what it committed, and that the
+/// short name each artifact is waited on by is one name.
+#[test]
+fn the_declaration_this_repository_carries_is_one_its_own_machinery_can_read() {
+    let declaration = release_declaration::declared();
+    assert_eq!(
+        declaration.schema_version,
+        release_declaration::SCHEMA_VERSION
+    );
+
+    let mut names: Vec<&str> = declaration
+        .targets
+        .iter()
+        .map(|target| target.name.as_str())
+        .collect();
+    let short = names.len();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(
+        names.len(),
+        short,
+        "two targets are waited on by one short name"
+    );
+}
+
+/// The refusal side of the same reading, driven document by document.
+///
+/// A reader nobody has watched refuse is a reader nobody knows the shape of, and
+/// this one is what stops a declaration this repository could not act on being
+/// committed. Each row is a document that is wrong in exactly one way — a
+/// required field dropped, an identifier the probe could not be handed, a short
+/// name two targets both take, and the rest of what only a whole document can be
+/// wrong about. What the canonical reader refuses beyond these is its own; see
+/// `tests/support/release_declaration.rs`.
+#[test]
+fn a_declaration_no_caller_here_could_act_on_is_refused() {
+    // One well-formed target, spelled out so each row below can be one edit away
+    // from a document that reads.
+    const TARGET: &str = "\n[[target]]\nid = \"crate:onepipeline-ui\"\nname = \"crate\"\n\
+                          what = \"The read API itself.\"\n\
+                          published_by = \"release.yml, the publish-crate job.\"\n";
+
+    let refusals: Vec<(&str, String, &str)> = vec![
+        (
+            "no schema_version",
+            TARGET.to_owned(),
+            "declares no schema_version",
+        ),
+        (
+            "a schema_version older than this reader was written against",
+            format!("schema_version = 0\n{TARGET}"),
+            "written against schema_version 1",
+        ),
+        (
+            "a required field dropped",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("name = \"crate\"\n", "")
+            ),
+            "missing field `name`",
+        ),
+        (
+            "an identifier that names no registry",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("crate:onepipeline-ui", "onepipeline-ui")
+            ),
+            "names no registry",
+        ),
+        (
+            "an identifier with nothing on one side of its colon",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("crate:onepipeline-ui", "crate:")
+            ),
+            "nothing on one side of its colon",
+        ),
+        (
+            "a short name that is not one word",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("name = \"crate\"", "name = \"the crate\"")
+            ),
+            "is not one word",
+        ),
+        (
+            "a blank sentence",
+            format!(
+                "schema_version = 1\n{}",
+                TARGET.replace("The read API itself.", "  ")
+            ),
+            "none of them may be blank",
+        ),
+        (
+            "a declaration with no target at all",
+            "schema_version = 1\n".to_owned(),
+            "declares no [[target]]",
+        ),
+        (
+            "two targets taking one short name",
+            format!(
+                "schema_version = 1\n{TARGET}{}",
+                TARGET.replace("crate:onepipeline-ui", "npm:onepipeline-ui")
+            ),
+            "already takes",
+        ),
+        (
+            "two targets declaring one identifier",
+            format!(
+                "schema_version = 1\n{TARGET}{}",
+                TARGET.replace("name = \"crate\"", "name = \"crate-again\"")
+            ),
+            "one artifact is one target",
+        ),
+        (
+            "a covered identifier that is a target of its own",
+            format!("schema_version = 1\n{TARGET}covers = [\"crate:onepipeline-ui\"]\n"),
+            "declares as a target of its own",
+        ),
+        (
+            "one identifier two targets both cover",
+            format!(
+                "schema_version = 1\n{TARGET}covers = \
+                 [\"npm:onepipeline-api-cli-linux-x64\"]\n{}covers = \
+                 [\"npm:onepipeline-api-cli-linux-x64\"]\n",
+                TARGET
+                    .replace("crate:onepipeline-ui", "npm:onepipeline-api-cli")
+                    .replace("name = \"crate\"", "name = \"npm-cli\"")
+            ),
+            "already covers",
+        ),
+        (
+            "a retired artifact this repository still publishes",
+            format!(
+                "schema_version = 1\n{TARGET}\n[[retired]]\nid = \"crate:onepipeline-ui\"\n\
+                 why = \"Frozen at 0.1.0.\"\n"
+            ),
+            "retiring what [[target]] 1 publishes",
+        ),
+        (
+            "one artifact retired twice",
+            format!(
+                "schema_version = 1\n{TARGET}\n[[retired]]\nid = \"npm:onepipeline-ui-cli\"\n\
+                 why = \"Frozen at 0.1.0.\"\n[[retired]]\nid = \"npm:onepipeline-ui-cli\"\n\
+                 why = \"Frozen at 0.1.0, again.\"\n"
+            ),
+            "already records",
+        ),
+        (
+            "a document that is not TOML at all",
+            "schema_version =\n".to_owned(),
+            "is not TOML",
+        ),
+    ];
+
+    for (wrong, document, refusal) in refusals {
+        let answer = release_declaration::validate(&document, "the document under test");
+        let Err(said) = answer else {
+            panic!("a declaration with {wrong} was accepted");
+        };
         assert!(
-            !published.contains(id),
-            "`{id}` is declared retired and the release configuration publishes it"
-        );
-        assert!(
-            !coverage.contains_key(id),
-            "`{id}` is declared retired and also declared as a live target"
+            said.contains(refusal),
+            "a declaration with {wrong} was refused, and the refusal does not say why:\n{said}"
         );
     }
 }
 
-/// The declaration names the probe that answers it, the probe is in the tree,
-/// and something drives it against a live registry.
+/// A later schema is read as this one, with what it names beyond it ignored.
+///
+/// The promise the document makes to a consumer one release behind, and the
+/// reason nothing in this reader refuses a key it does not know: refusing one
+/// would leave a reader that could have listed every artifact this repository
+/// publishes listing none of them.
+#[test]
+fn a_declaration_written_against_a_later_schema_is_still_read() {
+    let declaration = release_declaration::validate(
+        "schema_version = 2\nnot_a_key_this_check_knows = true\n\
+         [[target]]\nid = \"crate:onepipeline-ui\"\nname = \"crate\"\n\
+         what = \"The read API itself.\"\n\
+         published_by = \"release.yml, the publish-crate job.\"\n",
+        "a document from one release ahead",
+    )
+    .expect("a later schema was refused rather than read as this one");
+    assert_eq!(declaration.targets.len(), 1);
+}
+
+/// The declaration names the probe that answers it, the probe and every manifest
+/// it names are in the tree, and something drives the probe against a live
+/// registry.
 ///
 /// A declaration is only worth anything if something can ask the registry what
 /// it currently serves for each name in it. `tests/e2e/release_probe.rs` drives
-/// every way that probe can fail to answer, and the two answers only a real
-/// registry can give it are driven by the sweep — which is outside the gate
-/// because the gate is offline, and so is the one part of this nothing else
-/// would notice the loss of.
+/// every way that probe can fail to answer, and every identifier this document
+/// declares through it; the two answers only a real registry can give it are
+/// driven by the sweep — which is outside the gate because the gate is offline,
+/// and so is the one part of this nothing else would notice the loss of.
 #[test]
-fn the_declaration_names_a_probe_this_repository_carries_and_sweeps() {
-    let declaration = release_targets();
-    let probe = declaration["probe"]
+fn the_declaration_names_a_probe_and_manifests_this_repository_carries() {
+    let declaration = release_declaration::declared();
+    let carried = |relative: &str| {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(relative)
+            .is_file()
+    };
+
+    let probe = declaration
+        .probe
+        .as_ref()
+        .unwrap_or_else(|| panic!("{FILE} names no probe"))
         .as_str()
-        .expect("release-targets.json names no probe");
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(probe);
+        .to_owned();
     assert!(
-        path.is_file(),
-        "release-targets.json names `{probe}`, which this repository does not carry"
+        carried(&probe),
+        "{FILE} names `{probe}`, which this repository does not carry"
     );
     assert!(
-        read(".github/workflows/published-smoke.yml").contains(probe),
+        read(".github/workflows/published-smoke.yml").contains(&probe),
         "nothing asks a live registry what `{probe}` answers, so the version it \
          serves and the emptiness of a name it has never released are verified \
          nowhere — the gate is offline and cannot verify either"
     );
+
+    // The other path the schema lets a declaration carry, and the reason it is
+    // worth carrying: a manifest is where this target's version is read from, so
+    // one naming a file this repository does not have is a version nobody can read.
+    for target in &declaration.targets {
+        let Some(manifest) = target.manifest.as_ref() else {
+            continue;
+        };
+        assert!(
+            carried(manifest.as_str()),
+            "{FILE} reads `{name}`'s version from `{manifest}`, which this repository \
+             does not carry",
+            name = target.name.as_str(),
+            manifest = manifest.as_str()
+        );
+    }
 }
 
 /// The one alarm on a published-smoke failure is wired to a job that can
