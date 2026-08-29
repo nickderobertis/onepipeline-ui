@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.3...v0.6.4) - 2026-08-29
+
+### Changed
+
+- *(release)* declare release targets in the canonical release-targets.toml ([#40](https://github.com/nickderobertis/onepipeline-ui/pull/40))
+
 ## [0.6.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.2...v0.6.3) - 2026-08-23
 
 ### Added
