@@ -47,6 +47,11 @@ const BODY: &str = "The smoke failed. Open the run to see which legs failed.";
 /// survive every way this script can go wrong.
 const RUN_URL: &str = "https://example.invalid/runs/1";
 
+/// The directory a runner with no temporary storage is pointed at. Nothing
+/// creates it, and the refusal has to name it: a reporter that refused for some
+/// other reason, or a `mktemp` that quietly captured somewhere else, would not.
+const ABSENT_TMPDIR: &str = "no-such-directory";
+
 struct Reporter {
     dir: TempDir,
     /// The PATH every run below is given: the stand-in's directory, then this
@@ -146,9 +151,16 @@ impl Reporter {
 
     /// The same run on a runner whose `TMPDIR` does not exist, which is the one
     /// way this cannot capture what `gh` says.
+    ///
+    /// `TMPDIR` is the whole of the signal, and it has to be, because the three
+    /// runners this suite runs on do not agree about what an absent one means to
+    /// `mktemp`: GNU mktemp refuses, and the BSD mktemp on a macOS runner
+    /// resolves into `/tmp` and succeeds. So the assertion below is that the
+    /// *script* read this directory and refused, which is a claim every runner
+    /// answers the same way.
     fn run_without_a_tmpdir(&self) -> Output {
         self.command(TITLE)
-            .env("TMPDIR", self.dir.path().join("no-such-directory"))
+            .env("TMPDIR", self.dir.path().join(ABSENT_TMPDIR))
             .output()
             .expect("bash is on PATH")
     }
@@ -337,6 +349,12 @@ fn a_missing_input_is_refused_by_name_before_anything_is_filed() {
 /// tells this script's failures apart, so a run that cannot capture it cannot
 /// diagnose anything — and it is already reporting a failure, so dying on
 /// `mktemp`'s own one-liner would take that finding with it.
+///
+/// The refusal is required to name the directory it was pointed at, because
+/// that is what says the script decided this rather than `mktemp` — and
+/// `mktemp` decides it differently on each of the three runners this suite runs
+/// on, so a reporter that delegated would refuse on ubuntu and file an issue on
+/// macOS from the same run.
 #[test]
 fn a_runner_with_no_temporary_storage_says_so_and_keeps_the_run_findable() {
     let reporter = Reporter::facing_no_open_issue();
@@ -349,6 +367,10 @@ fn a_runner_with_no_temporary_storage_says_so_and_keeps_the_run_findable() {
     );
     let said = stderr(&output);
     assert!(said.contains("temporary storage"), "{said}");
+    assert!(
+        said.contains(ABSENT_TMPDIR),
+        "the refusal does not name the storage it was pointed at: {said}"
+    );
     assert!(said.contains("ACTION:"), "{said}");
     assert!(said.contains(RUN_URL), "{said}");
     assert!(
@@ -540,4 +562,39 @@ fn a_body_filed_without_a_run_url_carries_no_empty_run_line() {
         reporter.calls()
     );
     assert!(reporter.calls().contains(BODY), "{}", reporter.calls());
+}
+
+/// A `RUN_URL` that is not a run URL — the shape an `env:` expression takes when
+/// it resolved to something other than a link. It reaches the filed issue as the
+/// reader's next click and every failure below repeats it as where the finding
+/// still lives, so it is checked rather than trusted for being non-empty.
+///
+/// It is content rather than an address this writes to, so the report is still
+/// filed: refusing here would lose the failure being reported, which is the one
+/// thing this script exists not to do. What it must not do is publish a
+/// non-link as one.
+#[test]
+fn a_run_url_that_is_not_a_run_url_is_marked_rather_than_published_as_one() {
+    const NOT_A_URL: &str = "${{ github.server_url }}";
+    let reporter = Reporter::facing_no_open_issue();
+    let output = reporter
+        .command(TITLE)
+        .env("RUN_URL", NOT_A_URL)
+        .output()
+        .expect("bash is on PATH");
+
+    assert!(
+        output.status.success(),
+        "the failure went unreported over its run link: {}",
+        stderr(&output)
+    );
+    assert!(reporter.asked("issue create "), "{}", reporter.calls());
+    assert!(
+        reporter.calls().contains("not a run URL"),
+        "an unusable run link was filed as though it were one: {}",
+        reporter.calls()
+    );
+    let said = stderr(&output);
+    assert!(said.contains(NOT_A_URL), "{said}");
+    assert!(said.contains("ACTION:"), "{said}");
 }

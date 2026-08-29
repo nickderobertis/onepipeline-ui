@@ -22,7 +22,7 @@
 #   REPO      owner/name to file against
 #   TITLE     the issue title, which is also how an existing one is found
 #   BODY      the issue or comment body
-#   RUN_URL   appended to the body when set
+#   RUN_URL   the http(s) run being reported, appended to the body when set
 # `gh` must be authenticated — GH_TOKEN in CI.
 set -euo pipefail
 
@@ -51,6 +51,23 @@ if [ "$repo_ok" != true ]; then
   echo "ACTION: pass the repository as owner/name — in CI that is 'env: REPO: \${{ github.repository }}'." >&2
   exit 2
 fi
+
+# `$RUN_URL` is the reader's next click: it is appended to what gets filed and
+# repeated by every failure below as where the finding still lives. So its shape
+# is checked here too rather than trusted for being non-empty — an `env:`
+# expression that resolved to something other than a run URL would otherwise be
+# published as one. It is content rather than an address this writes to, though,
+# so a bad one is not worth losing the whole report over: it is carried through
+# marked as unusable, and stderr says so. Everything below reads `$run_url`.
+run_url="${RUN_URL:-}"
+case "$run_url" in
+"" | http://?* | https://?*) ;;
+*)
+  echo "report-workflow-failure: \$RUN_URL is '$run_url', which is not a http(s) run URL — filing anyway, with it marked rather than linked" >&2
+  echo "ACTION: the caller passes 'env: RUN_URL: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}'; an expression that resolved to nothing usable lands here." >&2
+  run_url="$run_url (not a run URL)"
+  ;;
+esac
 
 # One place every `gh` failure is answered, because the causes that can
 # plausibly happen here need different answers and the exit code tells them
@@ -83,23 +100,37 @@ gh_failed() {
     echo "ACTION: reproduce the command above with 'gh --repo $REPO' and read its error. The three causes worth ruling out first are the credential ('gh auth status'), the job's 'issues: write' permission, and \$TITLE." >&2
     ;;
   esac
-  echo "The failure being reported is NOT lost: it is the red run at ${RUN_URL:-<no RUN_URL was passed>}." >&2
+  echo "The failure being reported is NOT lost: it is the red run at ${run_url:-<no RUN_URL was passed>}." >&2
   exit 1
 }
 
 # shellcheck disable=SC2153  # BODY is an input, not a typo for the local below
 body="$BODY"
-[ -n "${RUN_URL:-}" ] && body="$body"$'\n\n'"Run: $RUN_URL"
+[ -n "$run_url" ] && body="$body"$'\n\n'"Run: $run_url"
 
 # What `gh` writes is the only thing that tells the failures below apart, so a
 # run that cannot capture it cannot diagnose anything — and this one is already
 # reporting a failure, so it says what to do rather than dying on `set -e` with
 # mktemp's own one-liner.
-said="$(mktemp)" || {
-  echo "report-workflow-failure: could not open temporary storage for what gh says" >&2
-  echo "ACTION: free disk space on the runner and re-run the workflow. The failure being reported is NOT lost: it is the red run at ${RUN_URL:-<no RUN_URL was passed>}." >&2
+no_temporary_storage() {
+  echo "report-workflow-failure: could not open temporary storage for what gh says, under '${TMPDIR:-the runner default}'" >&2
+  echo "ACTION: free disk space on the runner, or point \$TMPDIR at a directory that exists, and re-run the workflow. The failure being reported is NOT lost: it is the red run at ${run_url:-<no RUN_URL was passed>}." >&2
   exit 1
 }
+
+# Whether this runner *has* temporary storage is decided here rather than left
+# to `mktemp`, because `mktemp` is not the same program on every runner the
+# reporter is asked to file from and the two disagree on exactly this: GNU
+# mktemp (the ubuntu and windows legs) fails when $TMPDIR names a directory that
+# is not there, while the BSD mktemp on a macOS runner resolves into /tmp
+# instead and succeeds. Delegating the decision therefore meant a reporter that
+# refused on one runner and captured into a directory nobody chose on another.
+# One reading of $TMPDIR, before anything is asked of `gh`, so the answer is the
+# same everywhere.
+if [ -n "${TMPDIR:-}" ] && [ ! -d "$TMPDIR" ]; then
+  no_temporary_storage
+fi
+said="$(mktemp)" || no_temporary_storage
 trap 'rm -f "$said"' EXIT
 
 # `--search "<title> in:title"` rather than a label: a label has to exist first,
