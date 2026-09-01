@@ -132,6 +132,16 @@ pub mod vcs {
     /// `{identity, elapsed, queue_position}` — one wait on one identity's lock.
     pub const LOCK_WAIT: &str = "lock-wait";
     /// `{verdict, command, output, preserved_log}`, with the log as an artifact.
+    ///
+    /// The one kind in this module with no variant behind it. `onevcs` **deleted**
+    /// `gate-verdict` in its 0.11.0 rather than retiring it — its own `EventKind`
+    /// documents both the deletion and what it cost — so there is no declaration
+    /// left for `tests/contract.rs` to reconcile this copy against. It is still
+    /// read here because the runs that recorded one are still runs an operator
+    /// opens, and dropping the reading would take a verification span off every
+    /// one of them. `tests/support/fixture_run.rs` writes the record as that
+    /// library emitted it, which is the gate available.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the producing library deleted this variant in 0.11.0 without retiring it, so — unlike every other kind in this module — no reachable declaration of it exists to be reconciled against, in this release or any later one. The wire is the only source left, and the fixture and goldens are the gate.
     pub const GATE_VERDICT: &str = "gate-verdict";
     /// `{branch, remote, accepted}`.
     pub const PUSH: &str = "push";
@@ -155,15 +165,9 @@ pub mod vcs {
     /// which it does both to cut a worktree and to publish from one.
     pub const FETCH: &str = "fetch";
 
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the pinned `onevcs` declares none of the three release kinds below — it is the release the sibling has not cut yet that would carry them, and `onepipeline` is pinned `=0.7.3` here, so there is no `EventKind` variant for this copy to be reconciled against and no requirement this node may move to reach one. They stand on the terms the `oneagentgraph` vocabulary below already does: the wire is the only declaration a consumer can reach. What gates them meanwhile is `tests/contract.rs`, which fails when a kind declared here is filed under no category by the browser's corpus, and `tests/support/fixture_run.rs`, which writes the records as the table in that library's own contract spells them. Folding them into a typed sibling vocabulary is the follow-up recorded in `src/AGENTS.md`.
-
     /// `{identity, target, form, outcome, version, elapsed_ms}` — one look at one
     /// **automated** release target, and what the registry answered. A human-step
     /// target is never probed: nothing but a person can say it is done.
-    ///
-    /// The three release kinds here and the three in [`super::pipeline`] are the
-    /// one group in this module the pinned `onevcs` does not declare, which is
-    /// the block suppression above.
     pub const RELEASE_PROBED: &str = "release-probed";
     /// `{identity, target, version, landing_commit, actor, superseded}` — a person
     /// said the human step they owed had been performed, naming the commit the
@@ -177,7 +181,6 @@ pub mod vcs {
     /// nothing stamps this envelope with a node at all. `release_of`, in this
     /// module's parent, is that join.
     pub const RELEASE_OBSERVED: &str = "release-observed";
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
     /// The relayed kinds that do not, on their own, say a publication began.
     ///
@@ -206,10 +209,10 @@ pub mod vcs {
 /// with, on the same terms as the `onevcs` vocabulary beside it: matched as the
 /// wire strings that library writes, because the vocabulary is the sibling's.
 ///
-/// Unlike `onevcs`, that library declares most of this vocabulary in a public
-/// module, so `tests/contract.rs` holds those names here to the sibling's own
-/// type rather than to a second reading of the wire. Two of them it does not,
-/// and each says so where it is declared.
+/// Unlike `onevcs`, that library declares this vocabulary in a public module, so
+/// `tests/contract.rs` holds the names here to the sibling's own types rather
+/// than to a second reading of the wire. One of them it does not, and it says so
+/// where it is declared.
 pub mod graph {
     /// `{kind, name, detail, truncated, output, output_truncated, tool_call_id,
     /// index}` — one bounded tool summary, or the observation that answered one,
@@ -271,15 +274,11 @@ pub mod graph {
     ///
     /// The names from here to the end of this module are the ones the producer
     /// added when it corrected what a live turn publishes, and they are the whole
-    /// of what a dispatch still in flight can be read from. **They are not
-    /// gateable against a type at this pin**: the SDK this crate links resolves
-    /// `oneagentgraph` 0.2, whose `event` module predates every one of them and
-    /// builds the two payloads it does publish inline. So they stand on the same
-    /// terms as the `onevcs` vocabulary above — the wire is the only declaration
-    /// a consumer can reach — and `tests/support/fixture_run.rs` writes the
-    /// records as that library emits them, which is the gate available. Moving
-    /// the SDK is what makes them gateable; `src/AGENTS.md` records that.
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the linked `oneagentgraph` is the one the pinned `onepipeline` resolves, and it declares none of the names from here to the end of this module — 0.2 publishes `turn-started` and `turn-completed` inline and has no `turn-message`, no role, no per-turn bounds and no observation on an activity. There is therefore no type to reconcile any of this copy against, exactly as for the `onevcs` vocabulary above; the gate available is `tests/support/fixture_run.rs` writing the corrected producer's records and the journeys over them. Moving the SDK pin is the proposal recorded in `src/AGENTS.md`, and the four names 0.2 *does* declare are held to it by `tests/contract.rs` rather than covered here.
+    /// of what a dispatch still in flight can be read from. Every one of them is
+    /// a field of `oneagentgraph::event::TurnStarted`, `TurnMessage`,
+    /// `TurnCompleted` or `TurnActivity`, so `tests/contract.rs` holds each to
+    /// the payload type that writes it — a key renamed there fails on that gate
+    /// rather than in a live transcript that quietly stops carrying a reply.
     pub const TURN_MESSAGE: &str = "turn-message";
     /// Which party a turn record is about: `assistant`, `user` or `system`.
     ///
@@ -288,6 +287,10 @@ pub mod graph {
     /// independently, so a number alone reads one side's turn as the other's.
     pub const ROLE: &str = "role";
     /// The party whose words a transcript serves as a turn's reply.
+    ///
+    /// A `role` is a `String` on the wire; `oneagentgraph::event::Party` is the
+    /// closed set the producer mints one from, and this word is that type's own
+    /// spelling of it.
     pub const ASSISTANT_ROLE: &str = "assistant";
     /// A party's own words on a [`TURN_MESSAGE`].
     pub const TEXT: &str = "text";
@@ -309,6 +312,12 @@ pub mod graph {
     /// The bounded summary of what a call was given.
     pub const DETAIL: &str = "detail";
     /// The observation kind, which answers a call rather than making one.
+    ///
+    /// The one name in this module with no field or variant behind it:
+    /// `TurnActivity::kind` is a `String`, because a *call's* kind is the
+    /// producing harness's own word and is served through verbatim. This is the
+    /// one word the producer closes, and it closes it inline.
+    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `oneagentgraph::event::TurnActivity::kind` is a `String` rather than an enum — deliberately, so a call's kind can be the harness's own word — so this single closed spelling is declared by no type a consumer can reach. `tests/support/fixture_run.rs` writes the record as that library emits it and the goldens pin what this crate makes of it, which is the whole of the gate available.
     pub const TOOL_RESULT: &str = "tool_result";
     /// What a tool returned, on the observation that carries it.
     pub const OUTPUT: &str = "output";
@@ -320,24 +329,24 @@ pub mod graph {
     /// A tool event's position within its turn, which is what an observation is
     /// joined by where no identity was published.
     pub const INDEX: &str = "index";
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 }
 
 /// The release kinds `onepipeline` writes about a node's own dependencies, as the
 /// wire strings that library writes.
 ///
-/// A sibling module to [`vcs`] rather than a member of `onepipeline::event::
-/// PipelineKind`, and for the same reason as the release kinds in that one: the
-/// pinned SDK is `=0.7.3` and declares none of these, so there is no variant to
-/// read them as and no requirement this crate may move to reach one. They are
-/// what a node *waiting on a release* records — the other half of the sequencing
-/// the `onevcs` kinds are the first half of.
+/// A sibling module to [`vcs`] rather than a re-export of
+/// `onepipeline::event::PipelineKind`, on the terms that module's own kinds are
+/// declared under: the vocabulary belongs to the producer and this is the copy
+/// each payload's shape is documented beside. They are what a node *waiting on a
+/// release* records — the other half of the sequencing the `onevcs` kinds are the
+/// first half of, and `tests/contract.rs` holds all three to that library's own
+/// `PipelineKind`.
 ///
 /// This crate reads none of these three for a payload it computes; they are here
 /// so the six kinds are declared in one place with the payload each carries, and
 /// `tests/contract.rs` holds every one of them to the browser's own category
-/// corpus. The timeline serves each record's own fields through `release_facts`.
-// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the same reason the release kinds in `vcs` carry: `onepipeline` is pinned `=0.7.3` here and its `PipelineKind` declares none of these three, so no type exists for this copy to be reconciled against and moving the pin is not this node's to do. The gates available are `tests/contract.rs`, which fails when a kind declared here is filed under no category by the browser's corpus, and `tests/support/fixture_run.rs`, which writes the records as that library's own contract spells them.
+/// corpus too. The timeline serves each record's own fields through
+/// `release_facts`.
 pub mod pipeline {
     /// `{node, awaiting: [{dep, identity, target, style, action, since,
     /// waited_seconds, last_answer}]}` — a node is held until a dependency's
@@ -357,7 +366,6 @@ pub mod pipeline {
     /// already running or `deferred` onto its next dispatch.
     pub const RELEASE_ADOPTED: &str = "release-adopted";
 }
-// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 /// What one accepted live edit compiled to, as `onepipeline` writes it on an
 /// `edit-committed` payload.
@@ -369,7 +377,7 @@ pub mod pipeline {
 /// `tests/contract.rs` holds this crate's reading of a `context` edit to that
 /// library's own type, and `tests/support/fixture_run.rs` writes the operations as
 /// the reconciler compiles them.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module in 0.1.7, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.18.3 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
 mod edits {
     /// The compiled mutations one accepted edit became.
     pub const OPERATIONS: &str = "operations";
@@ -1343,11 +1351,19 @@ fn kind_word(node: &Node) -> &'static str {
 /// it now stands, and the SDK's fold applies every accepted edit to it. The file
 /// on disk is the fallback for a run whose journal this host cannot fold — it is
 /// the plan the run was launched with, so it carries no edit committed since.
+///
+/// The file is deserialized here rather than through a loader of the SDK's:
+/// `onepipeline` now reads its plans out of the onetaskgraph store and no longer
+/// publishes one, but `RunPaths::plan()` still names the JSON document `start`
+/// writes and `Plan` is still the published shape of it — so the deserialization
+/// is this crate's while the *schema* stays the SDK's, which is the same terms
+/// every other record here is read on.
 fn plan_of(view: &RunView) -> Option<Plan> {
     if let Some(source) = view.state.plan.as_ref() {
         return Some(view.state.graph.to_plan(source));
     }
-    Plan::load(&view.paths.plan()).ok()
+    let text = std::fs::read_to_string(view.paths.plan()).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 /// Whether one member is in a turn a planner's note could be delivered into.

@@ -438,6 +438,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -934,10 +944,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "memo-map"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minijinja"
+version = "2.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86886cf6dbf4e614b19c9a1eec9775f021869d7eadde0fc73921a81b90c9b4c9"
+dependencies = [
+ "memo-map",
+ "serde",
+]
 
 [[package]]
 name = "mio"
@@ -1054,13 +1080,13 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.2.19"
+version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7cdd46d9c05961388ad9daf847b5022d4f2f2ebb28b8765eb1a68054ecd0db8"
+checksum = "f447a2e5af83c978a8db52eb35f256bfed138ff5834656707a04524e71e959cf"
 dependencies = [
  "clap",
  "libc",
- "oneharness-core 0.10.1",
+ "oneharness-core",
  "onejudge",
  "serde",
  "serde_json",
@@ -1074,30 +1100,9 @@ dependencies = [
 
 [[package]]
 name = "oneharness-core"
-version = "0.8.0"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aedaf60bd157b17835616aff1e021cd40ca6a07041a68f59c135a3af36e7fc"
-dependencies = [
- "fs2",
- "jsonschema",
- "libc",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
- "toml",
- "uuid",
- "wait-timeout",
- "which",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "oneharness-core"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "703b2cae0e922191ae5baea8bafde9d738a09e1e8f40847b9bae1880231a955f"
+checksum = "d84324dd21e51347276be30e2439017537daaea65dbc3a00a5871c9ebdf201b0"
 dependencies = [
  "fs2",
  "jsonschema",
@@ -1116,12 +1121,12 @@ dependencies = [
 
 [[package]]
 name = "onejudge"
-version = "0.4.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c95a8421050c0d50a75df24fce139a14de23aaa971ec20806f2c8c2c3172ad4"
+checksum = "1c0bcac1c62a16eec9709dd09a4eba570aa3039548651c522bd55b3d5e240823"
 dependencies = [
  "clap",
- "oneharness-core 0.8.0",
+ "oneharness-core",
  "rustix",
  "serde",
  "serde_json",
@@ -1131,17 +1136,20 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.7.3"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49564835e48902a9cdd0725f76cba506a9542b554e82fc0336e8693b7e433789"
+checksum = "f76c191b10d0a6f7fb57bae8230a270b46f92122bf1cc6f1bd3389e37713169b"
 dependencies = [
  "clap",
  "libc",
+ "minijinja",
  "oneagentgraph",
+ "onejudge",
  "onevcs",
  "serde",
  "serde_json",
  "serde_norway",
+ "serde_path_to_error",
  "thiserror",
  "windows-sys 0.61.2",
 ]
@@ -1156,7 +1164,7 @@ dependencies = [
  "futures-core",
  "libc",
  "oneagentgraph",
- "oneharness-core 0.10.1",
+ "oneharness-core",
  "onejudge",
  "onepipeline",
  "onevcs",
@@ -1174,20 +1182,26 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.4.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8580dc19066c568d99061b93a7eca14ba0b9d7281ff11be666f0c3d27844efca"
+checksum = "059f072c561b58056d1aed2da4a13cd6b708fb4d8436910dac8c456595f62aff"
 dependencies = [
  "clap",
  "dunce",
+ "filetime",
  "fs4",
+ "icu_properties",
  "libc",
+ "minijinja",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml_ng",
  "sha2",
+ "tempfile",
  "thiserror",
  "time",
+ "toml",
  "url",
  "windows-sys 0.61.2",
 ]

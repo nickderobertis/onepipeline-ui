@@ -135,8 +135,14 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // `check` and `checks` are both here because the producers spell the same act
     // both ways — `onevcs` writes one `change-check` per check it observed, the
     // older unattributed records a single `pr-checks-observed` — and a word is
-    // matched whole, so one spelling does not reach the other.
-    ["verification", ["verification", "gate", "check", "checks", "coverage"]],
+    // matched whole, so one spelling does not reach the other. `criterion` is the
+    // judge's own half of the same act: `onepipeline` writes one
+    // `criterion-checked` per acceptance criterion it ruled on, and a reader
+    // scanning for what was verified is scanning for those too.
+    [
+      "verification",
+      ["verification", "gate", "check", "checks", "checked", "criterion", "coverage"],
+    ],
     // `release` joins this line rather than opening a twelfth category: publishing a
     // crate and merging the change that will be in it are one act to a reader
     // scanning a run, and a glyph they had to learn to tell apart would be the

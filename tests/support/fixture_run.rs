@@ -3334,6 +3334,7 @@ pub fn worker_report() -> String {
         input: Some(json!({ "file_path": "src/api.rs" })),
         output: None,
         index: 0,
+        tool_call_id: None,
     };
     let result = ToolEvent {
         kind: "tool_result".into(),
@@ -3341,6 +3342,7 @@ pub fn worker_report() -> String {
         input: None,
         output: Some(TOOL_OBSERVATION.into()),
         index: 1,
+        tool_call_id: None,
     };
     // The unrelayed turn's own call and what it returned, so a turn the journal
     // never opened is still served with what its tools did.
@@ -3350,6 +3352,7 @@ pub fn worker_report() -> String {
         input: Some(json!({ "file_path": "docs/contract.md" })),
         output: None,
         index: 0,
+        tool_call_id: None,
     };
     let unrelayed_result = ToolEvent {
         kind: "tool_result".into(),
@@ -3357,6 +3360,7 @@ pub fn worker_report() -> String {
         input: None,
         output: Some(UNRELAYED_OBSERVATION.into()),
         index: 1,
+        tool_call_id: None,
     };
     let gate_call = ToolEvent {
         kind: "tool_call".into(),
@@ -3364,6 +3368,7 @@ pub fn worker_report() -> String {
         input: Some(json!({ "command": "just gate" })),
         output: None,
         index: 0,
+        tool_call_id: None,
     };
     // A call the trace exposed no observation for, which is a different fact from
     // one that returned nothing: `output` is absent rather than empty.
@@ -3373,6 +3378,7 @@ pub fn worker_report() -> String {
         input: None,
         output: None,
         index: 1,
+        tool_call_id: None,
     };
     let agent_usage = |cost| Usage {
         input_tokens: Some(376),
@@ -3515,6 +3521,8 @@ pub fn worker_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(
@@ -3714,6 +3722,8 @@ pub fn reviewer_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(
@@ -3796,6 +3806,8 @@ pub fn lint_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(

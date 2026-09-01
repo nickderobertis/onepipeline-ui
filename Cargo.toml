@@ -105,11 +105,11 @@ futures-core = "0.3"
 # library writes, and a requirement string cannot say "the same release" — so
 # `tests/packaging.rs` reconciles the two edges the lockfile records instead.
 # Why the store is linked at all, and read without a lock: `src/AGENTS.md`.
-oneharness-core = "0.10.1"
+oneharness-core = "0.12.2"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.4"
-onepipeline = "=0.7.3"
+onejudge = "0.7"
+onepipeline = "=0.18.3"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -130,13 +130,13 @@ libc = "0.2"
 # a second reading of the wire. Held at the major `onepipeline` itself resolves,
 # so the gate reads the same declaration the records reaching this crate were
 # written by, and the tree carries one version of it rather than two.
-oneagentgraph = "0.2"
+oneagentgraph = "0.3"
 # The same gate on the other sibling `src/payload.rs` reads. That library's
 # `event` module is private, but it re-exports `EventKind` from its crate root,
 # so its kinds are a declaration a consumer can reach and the copy is held to it
 # rather than to a second reading of the wire. Held at the major `onepipeline`
 # resolves, for the same reason as the line above it.
-onevcs = "0.4"
+onevcs = "0.18"
 predicates = "3"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in

@@ -5754,6 +5754,8 @@ fn unclosed_judge_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: true,
     };
     format!(
@@ -6286,6 +6288,8 @@ fn unanswered_report(prompt: &str) -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(
@@ -6502,6 +6506,8 @@ fn report_of(messages: &[(&str, &str)]) -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(
@@ -7346,6 +7352,8 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     let turns = transcript_of(
