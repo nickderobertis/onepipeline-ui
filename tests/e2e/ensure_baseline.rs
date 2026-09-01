@@ -122,6 +122,13 @@ impl Fixture {
         // driving the real script over a real git repository; standing in for the
         // program on PATH is what makes the tree it laid out readable. This call
         // is the whole of that substitution.
+        // llmlint: ignore-block[tests_mirror_real_usage] the same substitution
+        // read by the other rule that names it, on the same terms and at the same
+        // site: `cargo` is a program on PATH rather than a layer of this
+        // repository, and every part of the recipe a user runs — the justfile,
+        // the script, the git repository, the provisioning path, the stamp — is
+        // the real one here. `tests/e2e/ensure_sibling.rs` stands in for the same
+        // program for the same reason.
         let stub_dir = root.join("stub-bin");
         let search_path = stub_bin::install(
             &stub_dir,
@@ -146,6 +153,7 @@ impl Fixture {
              cp \"$(dirname \"$manifest\")/which-tree.txt\" \"$target/debug/onepipeline-api\"\n\
              chmod +x \"$target/debug/onepipeline-api\"\n",
         );
+        // llmlint: ignore-end[tests_mirror_real_usage]
         // llmlint: ignore-end[e2e_not_mocked]
 
         Self {
@@ -316,6 +324,45 @@ fn a_checkout_with_no_default_branch_is_refused_rather_than_guessed() {
         stderr(&refused).contains("resolves neither"),
         "the refusal does not say why it stopped:\n{}",
         stderr(&refused)
+    );
+}
+
+#[test]
+fn a_provisioning_path_outside_this_clone_is_refused() {
+    // The path arrives from the environment and the script *deletes* at it before
+    // installing, so a caller that could name any path could have the recipe
+    // remove a file of its own choosing. The recipe exports exactly one value,
+    // and anything else is refused rather than written to.
+    // Driven at the script rather than through the recipe, because the recipe is
+    // where the one value comes from: `just` *exports* the path, so a caller
+    // cannot reach this guard through it. What can is a caller running the script
+    // directly, which is exactly who the refusal's own ACTION line is addressed
+    // to.
+    let fixture = Fixture::new();
+    let elsewhere = fixture.dir.path().join("somewhere-else");
+
+    let refused = Command::new("bash")
+        .arg("scripts/ensure-baseline-api.sh")
+        .current_dir(fixture.dir.path())
+        .env("PATH", &fixture.search_path)
+        .env("CARGO_CALLS", fixture.dir.path().join("cargo-calls"))
+        .env("ONEPIPELINE_UI_BASELINE_BIN", &elsewhere)
+        .output()
+        .expect("bash is on PATH");
+
+    assert_eq!(refused.status.code(), Some(2), "{}", stderr(&refused));
+    assert!(
+        stderr(&refused).contains("not this clone's provisioning path"),
+        "the refusal does not say why it stopped:\n{}",
+        stderr(&refused)
+    );
+    assert!(
+        !elsewhere.exists(),
+        "the refused path was written to anyway"
+    );
+    assert!(
+        fixture.calls().is_empty(),
+        "the recipe built a server for a path it was going to refuse"
     );
 }
 

@@ -21,12 +21,28 @@ root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)" || {
 }
 cd "$root"
 
+# Where to provision to. It arrives from the environment and this script then
+# *deletes and writes* at it, so it is checked to the one place this repository
+# provisions rather than trusted: a caller that could name any path could have
+# this script remove a file of its own choosing, and the recipe exports exactly
+# one value. Compared as a whole path rather than by prefix — a prefix test
+# admits `.tools/bin/../../something` — and the name is the one the justfile
+# derives from the platform, read back rather than restated.
 binary="${ONEPIPELINE_UI_BASELINE_BIN:-}"
 [ -n "$binary" ] || {
   echo "ensure-baseline: ONEPIPELINE_UI_BASELINE_BIN is unset" >&2
   echo "ACTION: run 'just _ensure-baseline' rather than this script directly" >&2
   exit 2
 }
+provisioned="$root/.tools/bin/onepipeline-api-baseline"
+case "$binary" in
+  "$provisioned" | "$provisioned.exe") : ;;
+  *)
+    echo "ensure-baseline: ONEPIPELINE_UI_BASELINE_BIN is '$binary', which is not this clone's provisioning path" >&2
+    echo "ACTION: run 'just _ensure-baseline', which exports the one path this script writes" >&2
+    exit 2
+    ;;
+esac
 stamp="$binary.commit"
 
 # The commit this branch forked from. `origin/main` first and `main` after it: a
@@ -68,9 +84,13 @@ git archive --format=tar "$base" | tar -x -C "$work" || {
 
 # The base commit's own lockfile decides its dependency graph, and this process's
 # environment must not reach in and redirect where it is built.
+# `--quiet` for the reason every other recipe here is quiet on success: what this
+# provisioning has to say is that it could not do it. Cargo's own diagnostics
+# still reach stderr when the build fails, which is the case the guard below
+# names an action for.
 (
   unset CARGO_TARGET_DIR
-  cargo build --locked --bin onepipeline-api \
+  cargo build --locked --quiet --bin onepipeline-api \
     --manifest-path "$work/Cargo.toml" --target-dir "$work/target"
 ) || {
   echo "ensure-baseline: could not build the server at $base" >&2
@@ -86,10 +106,24 @@ case "$binary" in
   *) built="$work/target/debug/onepipeline-api" ;;
 esac
 
-mkdir -p "$(dirname -- "$binary")"
-# The stamp goes last and the old one goes first, so an interrupted copy leaves a
-# binary with no stamp — which reads as "not provisioned" and is rebuilt — rather
-# than a stale binary a stamp vouches for.
-rm -f "$binary" "$stamp"
-cp "$built" "$binary"
-printf '%s\n' "$base" >"$stamp"
+# The stamp goes last and the old one goes first, so an interrupted install
+# leaves a binary with no stamp — which reads as "not provisioned" and is built
+# again — rather than a stale server a stamp vouches for. Each step says what to
+# do about it: `set -e` would end the script here with the shell's own message,
+# and a provisioning that stopped without saying why is one an operator has to
+# reconstruct from an empty `.tools/`.
+mkdir -p "$(dirname -- "$binary")" && rm -f "$binary" "$stamp" || {
+  echo "ensure-baseline: could not clear $(dirname -- "$binary") to provision into" >&2
+  echo "ACTION: check the directory is writable — a container run as root can leave it unwritable — and retry" >&2
+  exit 1
+}
+cp "$built" "$binary" || {
+  echo "ensure-baseline: could not install the server built at $base" >&2
+  echo "ACTION: free disk space, check $(dirname -- "$binary") is writable, and retry" >&2
+  exit 1
+}
+printf '%s\n' "$base" >"$stamp" || {
+  echo "ensure-baseline: could not stamp the provisioned server with $base" >&2
+  echo "ACTION: check $(dirname -- "$binary") is writable and retry; the unstamped binary is rebuilt rather than used" >&2
+  exit 1
+}

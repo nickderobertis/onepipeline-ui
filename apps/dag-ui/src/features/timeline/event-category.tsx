@@ -135,22 +135,8 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // `check` and `checks` are both here because the producers spell the same act
     // both ways — `onevcs` writes one `change-check` per check it observed, the
     // older unattributed records a single `pr-checks-observed` — and a word is
-    // matched whole, so one spelling does not reach the other. `criterion` is the
-    // judge's own half of the same act: `onepipeline` writes one
-    // `criterion-checked` per acceptance criterion it ruled on, and a reader
-    // scanning for what was verified is scanning for those too.
-    [
-      "verification",
-      [
-        "verification",
-        "gate",
-        "check",
-        "checks",
-        "checked",
-        "criterion",
-        "coverage",
-      ],
-    ],
+    // matched whole, so one spelling does not reach the other.
+    ["verification", ["verification", "gate", "check", "checks", "coverage"]],
     // `release` joins this line rather than opening a twelfth category: publishing a
     // crate and merging the change that will be in it are one act to a reader
     // scanning a run, and a glyph they had to learn to tell apart would be the
@@ -207,6 +193,10 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "completion-requested": "lifecycle",
   // The PR body could not be drafted, which is a fact about the publication.
   "body-not-drafted": "publication",
+  // One acceptance criterion ruled on. `checked` is not `check`, and a word is
+  // matched whole — and adding it to the verification rule would be adding a
+  // word that names this kind and no other, which is what this table is for.
+  "criterion-checked": "verification",
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
