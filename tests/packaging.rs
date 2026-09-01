@@ -506,6 +506,37 @@ fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
     );
 }
 
+/// Every sibling vocabulary this crate reads is the release the pinned engine
+/// itself reads it through.
+///
+/// The engine is pinned exactly and each sibling is not, for the reason
+/// `src/AGENTS.md` gives: a requirement string cannot say "whatever the SDK
+/// resolves", and pinning one here would be a second opinion about a version the
+/// SDK's own graph decides. What can say it is the lockfile, which records both
+/// edges — so this reads them rather than restating either in prose.
+///
+/// It matters in both directions and the second is the one that bites. This crate
+/// *reads* records these libraries write, and `tests/contract.rs` holds its copies
+/// of their vocabularies to their own declarations: a suite linking a different
+/// release than the engine does would gate this crate's reading against a
+/// vocabulary no record on disk was ever written by, and pass. Dev-dependencies
+/// are therefore held to exactly the same rule as dependencies — for two of these
+/// three, the dev edge is the only one there is.
+#[test]
+fn every_sibling_is_the_release_the_pinned_engine_resolves() {
+    let lock = read("Cargo.lock");
+    for sibling in ["oneagentgraph", "onejudge", "onevcs"] {
+        let ours = locked_dependency(&lock, "onepipeline-ui", sibling);
+        let theirs = locked_dependency(&lock, "onepipeline", sibling);
+        assert_eq!(
+            ours, theirs,
+            "this crate resolves {sibling} {ours} and the pinned onepipeline resolves \
+             {theirs}, so the vocabulary the suite gates against is not the one the records \
+             reaching this crate were written by"
+        );
+    }
+}
+
 /// The oneharness history store is read by linking its library, never by
 /// spawning its CLI.
 ///
