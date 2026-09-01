@@ -27,6 +27,7 @@
 
 mod baseline;
 mod cli;
+mod ensure_baseline;
 mod ensure_sibling;
 mod lint_llm_diff;
 // llmlint: ignore-block[e2e_not_mocked] the real `llmlint` bills a model call

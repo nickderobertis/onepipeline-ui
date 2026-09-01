@@ -15,6 +15,10 @@
       "command": "just _ensure-sibling",
       "cache": false
     },
+    "ensure-baseline": {
+      "command": "just _ensure-baseline",
+      "cache": false
+    },
     "format": {
       "command": "just _crate-format"
     },
@@ -26,7 +30,7 @@
     },
     "test": {
       "command": "just _crate-test",
-      "dependsOn": ["ensure-sibling"]
+      "dependsOn": ["ensure-sibling", "ensure-baseline"]
     },
     "doc": {
       "command": "just _crate-doc"

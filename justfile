@@ -42,6 +42,12 @@ onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^
 sibling-exe := if os_family() == "windows" { ".exe" } else { "" }
 export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onepipeline" + sibling-exe
 
+# The server this branch forked from, which `tests/e2e/baseline.rs` serves one
+# runs root through beside this build's. Clone-local for the reason the sibling
+# above is: it is built from another commit of *this* repository rather than
+# installed, so nothing on PATH can be it.
+export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
+
 # List available recipes.
 default:
     @just --list
@@ -80,6 +86,17 @@ _ensure-sibling:
     @[ "$("$ONEPIPELINE_UI_ONEPIPELINE_BIN" --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
       || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
       || { echo "cannot provision onepipeline {{onepipeline-version}} — the read API serves no timing without it" >&2; exit 1; }
+
+# The base commit's own server, for the journeys that compare what this build
+# serves against what it served. Behind its own Nx target rather than inside the
+# suite, because the comparison is cheap and compiling another commit's whole
+# dependency graph is not: a change to a workflow, a script or a document must
+# not make the root project's tests build a second server.
+#
+# Idempotent on `_ensure-sibling`'s terms — the binary is stamped with the commit
+# it was built from — and the reasoning is in the script.
+_ensure-baseline:
+    @bash scripts/ensure-baseline-api.sh
 
 # These are test runners, not rules: their version cannot change the gate's
 # verdict, so both here and CI take the latest rather than keeping two pins that
@@ -192,13 +209,22 @@ _crate-doc:
 
 # Coverage instrumentation is measured on Linux only, so the cross-platform CI
 # legs run the same suite through this instead of `test`.
+#
+# The baseline comparison is excluded on the same terms coverage is. It asks
+# whether *this crate* still serves what the commit it forked from served, which
+# is a property of the payload rather than of the platform — and paying for a
+# whole second server on each of the two cross legs would triple what the gate
+# spends to learn one thing. The Linux `test` tier runs it, behind the
+# `onepipeline-ui:ensure-baseline` target that provisions what it serves through.
+# `ensure_baseline::` is *not* excluded: those journeys stub the build and are as
+# platform-sensitive as any other recipe here.
 # Full test suite without coverage instrumentation.
 test-quick:
-    @cargo nextest run --locked --status-level fail
+    @cargo nextest run --locked -E 'not test(/^baseline::/)' --status-level fail
 
 # Drives the compiled binary and the committed npm launcher — never a stub.
 # The end-to-end journeys in isolation (also run by `test`/`check`).
-test-e2e:
+test-e2e: _ensure-baseline
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.

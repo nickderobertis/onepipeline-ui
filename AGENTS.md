@@ -88,6 +88,19 @@ A new project whose tests start the read API joins that dependency. Reaching the
 recipe from more places must never soften it: falling back to a build on PATH is
 the failure the pin exists to prevent.
 
+**`.tools/` holds a second clone-local binary, and it is the server this branch
+forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
+served is served now — a question no fixture on a branch can answer, because a
+fixture is editable by the change it is meant to hold. Compiling another commit
+of this repository is the expensive half of that, so it lives behind
+`onepipeline-ui:ensure-baseline` rather than inside the suite: an unrelated change
+to a workflow, a script or a document must not rebuild a second server. The binary
+is stamped with the commit it was built from and the journeys refuse a stamp that
+names anything but this branch's base, because a stale server answers every
+request and reports that nothing was dropped between a pair it was never asked
+about. The cross-platform legs skip that comparison on the terms they skip
+coverage — it is a property of the payload, not of the platform.
+
 **`oneagentgraph` is not pinned here: the SDK's requirement decides it and the
 lock follows.** Cargo unifies one version of it across this crate and
 `onepipeline`, and that library has shipped a breaking field in a *patch*

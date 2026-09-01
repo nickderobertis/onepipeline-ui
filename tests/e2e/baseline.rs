@@ -7,18 +7,22 @@
 //! catch that, because a fixture is editable by the change it is meant to hold —
 //! so the baseline here is read from version control.
 //!
-//! The journey builds the base commit's own `onepipeline-api`, from that commit's
-//! own tree and its own lockfile, starts it beside this build's over **one** runs
-//! root, and asks both the same questions. What it compares is what the criterion
-//! is about: every route the older binary answered is answered now, and every
-//! field it served on each of them is served now. Values are deliberately not
-//! compared — repairing what a conversation is *read from* is the whole point of
-//! the adoption, and a value that improved is a change this branch's own record
-//! states rather than one a comparison should refuse.
+//! The journeys start the base commit's own `onepipeline-api` beside this build's
+//! over **one** runs root and ask both the same questions. What they compare is
+//! what the criterion is about: every route the older binary answered is answered
+//! now, and every field it served on each of them is served now. Values are
+//! deliberately not compared — repairing what a conversation is *read from* is
+//! the whole point of the adoption, and a value that improved is a change this
+//! branch's own record states rather than one a comparison should refuse.
 //!
-//! The build is cached under `target/` by the base commit's own sha, so a second
-//! run of the suite over an unmoved base pays nothing for it, and the build tree
-//! is removed once the binary is out of it.
+//! **Neither journey builds anything.** Compiling another commit's whole
+//! dependency graph is the expensive half of this, and it lives behind the
+//! `onepipeline-ui:ensure-baseline` Nx target — the same arrangement the sibling
+//! CLI has, and for the same reason: a change to a workflow, a script or a
+//! document must not make the root project's tests build a second server. What
+//! reaches here is a provisioned binary and the commit it was stamped with, and a
+//! stamp naming anything but this branch's base fails the journey rather than
+//! comparing this build against something that is not what it replaced.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -30,6 +34,13 @@ use serde_json::Value;
 use crate::fixture_run;
 use crate::http;
 use crate::serving::{ForeignServing, Serving};
+
+/// The environment variable naming the provisioned baseline server.
+///
+/// Exported by the justfile beside the sibling CLI's, so every tier that runs
+/// this suite reaches the one binary the `ensure-baseline` target built rather
+/// than whatever a checkout happens to hold.
+const BASELINE_BIN_ENV: &str = "ONEPIPELINE_UI_BASELINE_BIN";
 
 /// This repository's own checkout, which is where the base commit is read from.
 fn repository() -> &'static Path {
@@ -70,86 +81,37 @@ fn base_commit() -> String {
         })
 }
 
-/// The base commit's own server binary, built from that commit's own tree.
+/// The base commit's own server binary, as `just _ensure-baseline` provisioned
+/// it, and the commit it was built from.
 ///
-/// Cached by the sha, because the tree it compiles is a whole dependency graph a
-/// generation older than this one's and nothing about it changes while the base
-/// does not. The build directory goes away once the binary is out of it: what is
-/// worth keeping is one executable, not several gigabytes of another commit's
-/// intermediate objects.
+/// The stamp is read rather than trusted: the recipe rebuilds when the base
+/// moves, and a stamp that names something else means this journey is about to
+/// compare against a commit that is not the one this branch forked from — which
+/// says nothing while looking exactly like a comparison that did.
 fn baseline_binary(base: &str) -> PathBuf {
-    let cached = repository().join("target/baseline");
-    let cache = cached.join(base);
-    let binary = cache.join(format!("onepipeline-api{}", std::env::consts::EXE_SUFFIX));
-    if binary.exists() {
-        return binary;
-    }
-    // A base that moved leaves an executable nothing will ask for again, and it
-    // is a debug build of a whole server. Swept here rather than left to a
-    // `cargo clean` nobody runs.
-    if let Ok(stale) = fs::read_dir(&cached) {
-        for entry in stale.flatten() {
-            let _ = fs::remove_dir_all(entry.path());
-        }
-    }
-
-    let tree = cache.join("tree");
-    let _ = fs::remove_dir_all(&tree);
-    fs::create_dir_all(&tree).expect("the baseline tree directory");
-    let archive = Command::new("git")
-        .arg("-C")
-        .arg(repository())
-        .args(["archive", "--format=tar", base])
-        .output()
-        .expect("git archive runs");
-    assert!(
-        archive.status.success(),
-        "git archive {base}: {}",
-        String::from_utf8_lossy(&archive.stderr)
+    let binary = std::env::var_os(BASELINE_BIN_ENV).map_or_else(
+        || {
+            repository().join(".tools/bin").join(format!(
+                "onepipeline-api-baseline{}",
+                std::env::consts::EXE_SUFFIX
+            ))
+        },
+        PathBuf::from,
     );
-    let unpacked = Command::new("tar")
-        .arg("-x")
-        .arg("-C")
-        .arg(&tree)
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin is piped")
-                .write_all(&archive.stdout)?;
-            child.wait()
-        })
-        .expect("tar runs");
-    assert!(unpacked.success(), "unpacking the tree at {base} failed");
-
-    let target = cache.join("target");
-    let built = Command::new(env!("CARGO"))
-        .arg("build")
-        .arg("--locked")
-        .args(["--bin", "onepipeline-api"])
-        .arg("--manifest-path")
-        .arg(tree.join("Cargo.toml"))
-        .arg("--target-dir")
-        .arg(&target)
-        // The base commit's own lockfile decides its dependency graph, and this
-        // process's environment must not reach in and change where it is built.
-        .env_remove("CARGO_TARGET_DIR")
-        .status()
-        .expect("cargo runs");
-    assert!(built.success(), "building the server at {base} failed");
-
-    fs::copy(
-        target
-            .join("debug")
-            .join(format!("onepipeline-api{}", std::env::consts::EXE_SUFFIX)),
-        &binary,
-    )
-    .expect("the baseline binary");
-    let _ = fs::remove_dir_all(&target);
-    let _ = fs::remove_dir_all(&tree);
+    assert!(
+        binary.is_file(),
+        "{} is not provisioned: run `just _ensure-baseline`, which is the \
+         `onepipeline-ui:ensure-baseline` target every test tier depends on",
+        binary.display()
+    );
+    let stamp = fs::read_to_string(format!("{}.commit", binary.display()))
+        .unwrap_or_else(|err| panic!("{}.commit: {err}", binary.display()));
+    assert_eq!(
+        stamp.trim(),
+        base,
+        "the provisioned baseline was built from another commit; run \
+         `just _ensure-baseline`"
+    );
     binary
 }
 
