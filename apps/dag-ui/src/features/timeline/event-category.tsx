@@ -141,7 +141,15 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // scanning for what was verified is scanning for those too.
     [
       "verification",
-      ["verification", "gate", "check", "checks", "checked", "criterion", "coverage"],
+      [
+        "verification",
+        "gate",
+        "check",
+        "checks",
+        "checked",
+        "criterion",
+        "coverage",
+      ],
     ],
     // `release` joins this line rather than opening a twelfth category: publishing a
     // crate and merging the change that will be in it are one act to a reader
