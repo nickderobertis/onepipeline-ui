@@ -229,6 +229,180 @@ fn the_run_list_pages_by_opaque_cursor() {
     );
 }
 
+/// Every path template `contract::routes` declares, filled in for one run.
+///
+/// Driven off that constant rather than a list written here, so a route added to
+/// the contract is a route this journey serves rather than one it forgets: the
+/// `{...}` placeholders are the only thing filled in, and an unfilled one leaves
+/// a path the server answers `404` for, which fails the assertion. The timeline
+/// carries the one selection the contract makes required — a scope — because a
+/// route answering `422` for a missing one has not been asked about the run.
+///
+/// Returned paired with the template each was built from, so a caller tells the
+/// stream and the unenveloped liveness apart by that template rather than by a
+/// string it spelled itself.
+fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'static str, String)> {
+    onepipeline_ui::contract::routes::ALL
+        .iter()
+        .map(|template| {
+            let path = template
+                .replace("{run}", run)
+                .replace(
+                    "/conversations/{id}",
+                    &format!("/conversations/{conversation}"),
+                )
+                .replace("/artifacts/{id}", &format!("/artifacts/{artifact}"));
+            let path = if *template == onepipeline_ui::contract::routes::RUN_TIMELINE {
+                format!("{path}?scope=run")
+            } else {
+                path
+            };
+            (*template, path)
+        })
+        .collect()
+}
+
+#[test]
+fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
+    // The shape every run this host launches now has, and the one an eleven-minor
+    // behind engine dropped on sight: its `LaunchRecord` was
+    // `deny_unknown_fields` with a required `plan`, so a record naming a project
+    // instead did not deserialize and the run was not in the list at all.
+    let serving = two_runs();
+
+    // Read off disk first, so this journey cannot go on passing after the fixture
+    // has quietly stopped being the shape it is about.
+    let record: Value = serde_json::from_str(
+        &fs::read_to_string(serving.run_dir(fixture_run::RUN_ID).join("launch.json"))
+            .expect("the launch record"),
+    )
+    .expect("the launch record parses");
+    assert_eq!(record["project"], json!(fixture_run::PLAN_PROJECT));
+    assert!(
+        record.get("plan").is_none(),
+        "the run under test names no plan path: {record}"
+    );
+
+    // Listed — with `include_settled`, because this one is finished and the list
+    // is a supervision surface.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    assert!(
+        listed["runs"]
+            .as_array()
+            .expect("the rows")
+            .iter()
+            .any(|row| row["run_id"] == json!(fixture_run::RUN_ID)),
+        "the run is in the list: {listed}"
+    );
+
+    // And served in full by every route that serves a run: a detail with its
+    // graph, a timeline with spans, a transcript with turns, and the artifact's
+    // own bytes.
+    for (template, path) in every_route_over(
+        fixture_run::RUN_ID,
+        fixture_run::CONVERSATION_ID,
+        fixture_run::ARTIFACT_ID,
+    ) {
+        if template == onepipeline_ui::contract::routes::EVENTS {
+            let mut stream = http::stream(serving.address, &path, None);
+            assert_eq!(stream.status, 200, "{path}");
+            let snapshot = stream.frames(1).remove(0).json();
+            assert!(
+                snapshot["runs"]
+                    .as_array()
+                    .expect("the snapshot's rows")
+                    .iter()
+                    .any(|row| row["run_id"] == json!(fixture_run::RUN_ID)),
+                "{path} opens on a snapshot naming the run: {snapshot}"
+            );
+            continue;
+        }
+        let response = http::get(serving.address, &path);
+        assert_eq!(response.status, 200, "{path}: {}", response.body);
+        if template != onepipeline_ui::contract::routes::HEALTHZ {
+            assert_enveloped(&response.json());
+        }
+    }
+
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(detail["graph"]["run_id"], json!(fixture_run::RUN_ID));
+    assert!(
+        !detail["graph"]["node_states"]
+            .as_object()
+            .expect("the node states")
+            .is_empty(),
+        "the run is served whole, not as an empty shell: {detail}"
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    assert!(
+        !timeline["spans"].as_array().expect("the spans").is_empty(),
+        "{timeline}"
+    );
+    let conversation = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    )
+    .json();
+    assert!(
+        !conversation["conversation"]["turns"]
+            .as_array()
+            .expect("the turns")
+            .is_empty(),
+        "{conversation}"
+    );
+}
+
+#[test]
+fn every_launch_record_shape_this_reader_must_accept_is_listed() {
+    // The launch record is the first thing read and the one thing that can stop a
+    // run being read at all. Five shapes are on a real runs root — the plan path
+    // the engine used to name, the project it names now, both across the change,
+    // neither, and a key recorded by a build later than this one — and a reader
+    // that refuses any of them serves an operator a list their run is missing
+    // from, with nothing anywhere saying why.
+    let mut shapes = Vec::new();
+    let serving = Serving::start(|root| {
+        shapes = fixture_run::write_launch_shapes(root);
+    });
+    assert_eq!(shapes.len(), 5, "every shape is written");
+
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let rows: Vec<&str> = listed["runs"]
+        .as_array()
+        .expect("the rows")
+        .iter()
+        .filter_map(|row| row["run_id"].as_str())
+        .collect();
+    for (run, shape) in &shapes {
+        assert!(
+            rows.contains(&run.as_str()),
+            "a launch record carrying {shape} is not in the list: {listed}"
+        );
+        // And it opens, rather than being a row that answers nothing.
+        let response = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+        assert_eq!(
+            response.status, 200,
+            "a launch record carrying {shape} does not open: {}",
+            response.body
+        );
+        let detail = response.json();
+        assert_enveloped(&detail);
+        assert_eq!(detail["run"]["run_id"], json!(run.as_str()));
+    }
+}
+
 #[test]
 fn a_settled_node_serves_the_words_its_settlement_recorded() {
     // A card that says only "failed" tells a reader less than the run knows. The
@@ -6216,6 +6390,115 @@ fn a_report_written_under_a_newer_contract_than_this_binary_links_is_refused() {
     .json()["run"]["timing"]
         .clone();
     assert_eq!(timing["agent_model_ms"], json!(null), "{timing}");
+}
+
+/// A stored report at the version this host's runs carry, and one behind it, are
+/// both read — which is the other half of the refusal above.
+///
+/// The refusal is only correct while it is a refusal of documents *ahead* of the
+/// linked contract. Tightened to equality it would refuse every report written
+/// before this binary was built, which on a host that has been running a while is
+/// most of them, and each one would fall out of the report-backed transcript into
+/// the journal's — the same defect the version pin caused, arrived at from the
+/// other side. So both directions are driven: the numbers here are literals
+/// rather than the linked constant, because a test that restates the constant
+/// cannot tell a reader that moved from a contract that did.
+#[test]
+fn a_report_at_or_behind_the_linked_contract_is_read() {
+    /// The version onejudge stamped when this crate linked its 0.4, and what a
+    /// member that settled under that build left behind.
+    const BEHIND: u64 = 9;
+    /// The version the reports on the host this server was written for carry, and
+    /// the one this repository's own fixtures are stamped with. A binary linking
+    /// a judge library older than this reads none of them.
+    const STORED: u64 = 11;
+
+    assert!(
+        u64::from(onejudge::SCHEMA_VERSION) >= STORED,
+        "the linked judge library declares {}, which is behind the reports this host stores",
+        onejudge::SCHEMA_VERSION
+    );
+
+    for (version, stream, node) in [
+        (BEHIND, "node-scope-1786925518888-3163444", "worker"),
+        (STORED, "node-scope-1786925518999-3163555", "worker"),
+    ] {
+        let session = format!("{stream}.{node}");
+        let mut document: Value = serde_json::from_str(&unanswered_report("Now run the gate."))
+            .expect("the report parses");
+        document["schema_version"] = json!(version);
+        if version == BEHIND {
+            // What a report written under that contract really looks like: the
+            // pair onejudge added in 11 is not a key it could have carried.
+            let fields = document.as_object_mut().expect("a mapping");
+            fields.remove("supervisor_control");
+            fields.remove("supervisor_control_unavailable");
+        }
+        let stored = format!("{document}\n");
+
+        let serving = Serving::start(|root| {
+            let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::append_relayed(
+                &dir,
+                "agentgraph",
+                "turn-started",
+                json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": node,
+                    "persona": "pr-author",
+                    "session": session,
+                }),
+                json!({ "turn": 1 }),
+            );
+            fixture_run::settle_member(
+                &dir,
+                &fixture_run::SettledMember {
+                    stream,
+                    node: fixture_run::SHIP_NODE_ID,
+                    member: node,
+                    at: "2026-08-07T12:01:05.000Z",
+                    artifact: "report-stored",
+                    report: &stored,
+                },
+                fixture_run::Produced::Report,
+            );
+        });
+
+        let turns = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{session}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript")
+            .clone();
+        // The report's own turns, not the journal's one empty row: the prompt the
+        // simulated user gave, and the reply the agent wrote.
+        assert!(
+            turns.len() > 1,
+            "a report stamped {version} was not read: {turns:?}"
+        );
+        assert_eq!(
+            turns[0]["user"],
+            json!("Land the wire contract."),
+            "a report stamped {version} was not read: {turns:?}"
+        );
+        assert_eq!(
+            turns[0]["assistant"],
+            json!("The route table is landed."),
+            "a report stamped {version} was not read: {turns:?}"
+        );
+        let unanswered = turns.last().expect("a turn");
+        assert_eq!(unanswered["user"], json!("Now run the gate."), "{turns:?}");
+        // And what only the report holds: what that turn's own invocation spent
+        // and how long it took, off the attribution candidate that ran.
+        assert_eq!(unanswered["usage"]["inputTokens"], json!(11), "{turns:?}");
+        assert_eq!(unanswered["durationMs"], json!(4_200), "{turns:?}");
+    }
 }
 
 /// A report whose last turn was never answered, in onejudge's own types.

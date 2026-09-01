@@ -1,7 +1,9 @@
 //! End-to-end journeys: the compiled binary and the committed npm launcher,
 //! driven the way a user drives them.
 //!
-//! Nothing here is stubbed. `cli` spawns the real binary as a subprocess and
+//! Nothing here is stubbed. `baseline` builds the binary this branch forked from
+//! and serves one runs root through it and this one; `cli` spawns the real binary
+//! as a subprocess and
 //! asserts on its exit code, stdout, and stderr; `server` starts that binary on
 //! a real port over a directory the onepipeline SDK itself writes and reads the
 //! bytes it serves; `packaging` assembles the real npm packages with
@@ -23,6 +25,7 @@
 //! second CLI — the module that does so names it in its own header, beside the
 //! directive that permits it and the reason it is the narrowest cut available.
 
+mod baseline;
 mod cli;
 mod ensure_sibling;
 mod lint_llm_diff;
