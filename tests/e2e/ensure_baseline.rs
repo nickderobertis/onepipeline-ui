@@ -532,27 +532,67 @@ fn the_comparison_is_keyed_by_the_commit_it_compares_against() {
 /// got nothing wrong. That failure is loud but unreadable — a red macOS leg
 /// naming a git object — and it is invisible from here, because every local tree
 /// has the refs it wants.
+///
+/// Every workflow, rather than `ci.yml`: the gate is re-run on the release path
+/// as well, over a checkout of its own, and a guard that read one file said
+/// nothing about the other. That is not hypothetical — `release.yml` ran `just
+/// check` at the default depth while this was scoped to `ci.yml`, so the branch
+/// that put the resolution in the gate would have reddened the release the first
+/// time it cut one, in the same way and for the same reason, with the check that
+/// exists to prevent it passing.
 #[test]
 fn every_leg_running_the_gate_checks_out_the_history_it_resolves() {
-    let workflow =
-        fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("the CI workflow");
     let mut legs = 0_usize;
-    for (job, block) in jobs_in(&workflow) {
-        if !block.contains("run: just check") {
-            continue;
+    for workflow in workflows() {
+        let name = workflow
+            .file_name()
+            .expect("a workflow file name")
+            .to_string_lossy()
+            .into_owned();
+        let text = fs::read_to_string(&workflow)
+            .unwrap_or_else(|error| panic!("{}: {error}", workflow.display()));
+        for (job, block) in jobs_in(&text) {
+            if !block.contains("run: just check") {
+                continue;
+            }
+            legs += 1;
+            assert!(
+                block.contains("fetch-depth: 0"),
+                "the `{job}` job in {name} runs the gate over a shallow checkout, which \
+                 resolves neither `origin/main` nor `main`, so every journey that reads \
+                 the base commit fails there for want of history"
+            );
         }
-        legs += 1;
-        assert!(
-            block.contains("fetch-depth: 0"),
-            "the `{job}` job runs the gate over a shallow checkout, which resolves \
-             neither `origin/main` nor `main`, so every journey that reads the base \
-             commit fails there for want of history"
-        );
     }
     assert!(
         legs > 0,
-        "no job in ci.yml runs a `just check` recipe, so this is guarding nothing"
+        "no job in any workflow runs a `just check` recipe, so this is guarding nothing"
     );
+}
+
+/// Every workflow this repository declares, in a stable order.
+///
+/// Read off the directory rather than listed here, so a workflow added later is
+/// guarded by being a workflow rather than by somebody remembering this test.
+fn workflows() -> Vec<PathBuf> {
+    let directory = repo_root().join(".github/workflows");
+    let mut found: Vec<PathBuf> = fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("{}: {error}", directory.display()))
+        .map(|entry| entry.expect("a workflow directory entry").path())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("yml" | "yaml")
+            )
+        })
+        .collect();
+    assert!(
+        !found.is_empty(),
+        "{} holds no workflow, so this is guarding nothing",
+        directory.display()
+    );
+    found.sort();
+    found
 }
 
 /// The workflow's job ids, each paired with the block that follows it.
