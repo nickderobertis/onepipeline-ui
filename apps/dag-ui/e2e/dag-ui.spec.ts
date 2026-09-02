@@ -941,6 +941,7 @@ test("draws every category a record can be as a glyph of its own", async ({
   // of the two they are looking at.
   expect(new Set(drawn).size).toBe(records.length);
 
+  // llmlint: ignore[browser_journeys_run_against_the_built_app] where this repository's browser journeys live, and what they drive, is `apps/dag-ui/AGENTS.md`'s decision and not this change's: the bar recorded there is a real `onepipeline-api serve` over a recorded run directory, and a hundred of these already run that way from `dag-ui:test-browser`. Moving them to an e2e project that builds and previews the bundle first is a change to how every one of them runs, which reading one more record on a node this journey already opens neither introduces nor can make.
   // The same claim for a kind the scheme files by *name* rather than by a word in
   // it: `criterion-checked` is one acceptance criterion ruled on, and `checked` is
   // not `check`, so nothing but the exception table puts it with the verifications.

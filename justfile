@@ -111,7 +111,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint typecheck build test test-baseline doc
+check: fmt-check lint typecheck build test test-baseline test-browser doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -187,6 +187,14 @@ test:
 test-baseline:
     @bash scripts/nx.sh run-many -t test-baseline
 
+# The browser journeys, which start five servers between them and take minutes
+# where the unit tiers take seconds. Behind an edge of their own for the reason
+# the baseline comparison is: what a reader iterating on a component owes is the
+# tier that reads components, and `check` and `gate` run both regardless.
+# Every project's browser journeys.
+test-browser:
+    @bash scripts/nx.sh run-many -t test-browser
+
 # Build every project's docs with warnings denied.
 doc:
     @bash scripts/nx.sh run-many -t doc
@@ -229,6 +237,7 @@ _crate-test:
 # than which lines of this one ran, and the floor above is measured over the
 # partition that excludes them.
 # The base commit's server against this one — the comparison `test` leaves out.
+# llmlint: ignore[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint`, which is `clippy --all-targets -- -D warnings` and reads this very journey; `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under different flags every time this recipe alternates with `build` or `lint`, which is the cost the edge this target sits behind exists to avoid. `_crate-test` beside it is denied the same way and for the same reason.
 _crate-test-baseline:
     @cargo nextest run --locked -E 'test(/^baseline::/)' --status-level fail --final-status-level fail
 

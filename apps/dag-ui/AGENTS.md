@@ -5,12 +5,17 @@ is the bar it is held to, not a tour of it.
 
 ## The bar is journeys, not a number
 
-There is no line-coverage floor here. `test` runs vitest and *both* Playwright
-configs — `playwright.config.ts` for the journeys and `isolation.config.ts` for
-what one run of that tier owes another — and a change to what a reader sees is
-not done until one of them drives it, in a browser, against a real
-`onepipeline-api serve` over a recorded run directory. Nothing between the browser
-and the read model is doubled.
+There is no line-coverage floor here. A change to what a reader sees is not done
+until a journey drives it, in a browser, against a real `onepipeline-api serve`
+over a recorded run directory — `playwright.config.ts` for the journeys and
+`isolation.config.ts` for what one run of that tier owes another. Nothing between
+the browser and the read model is doubled.
+
+Those two configs are `test-browser` and the components are `test`, because the
+first starts five servers and takes minutes and the second takes seconds: a
+reader iterating on a component should not pay for the fleet. `check` runs both,
+so nothing is spared the journeys except somebody who asked for the unit tier by
+name.
 
 `just dag-ui-screens` photographs every surface at every viewport in the matrix.
 It asserts nothing; it is how the operator sees a polish problem at a width
