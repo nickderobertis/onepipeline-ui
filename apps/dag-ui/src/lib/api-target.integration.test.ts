@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { loadConfigFromFile } from "vite";
 import { afterAll, describe, expect, it } from "vitest";
 
 const run = promisify(execFile);
@@ -156,11 +157,6 @@ describe("the proxy the config really builds", () => {
   // rather than `preview` because the two are handed the same `proxy` object and
   // this one needs no bundle built to start.
   //
-  // The default is not driven here: proving it would mean binding 127.0.0.1:8765
-  // itself, and on a host where somebody is already serving their own runs there
-  // that is either a refused bind or somebody else's server answering. What can
-  // drift about it is the literal, and `tests/contract.rs` reconciles that against
-  // `onepipeline_ui::cli::default_bind`.
   it("sends a read to the origin it was given, and never to its path", async () => {
     const api = await recordingApi();
     // Chosen here rather than read back out of Vite's own output: a readiness
@@ -208,6 +204,38 @@ describe("the proxy the config really builds", () => {
       // Started here, so signalled here — by the handle, never by a pattern.
       ui.kill();
       api.close();
+    }
+  }, 60_000);
+
+  it("proxies to the port the CLI binds when nothing names a target", async () => {
+    // Read off the config Vite resolved rather than by binding 127.0.0.1:8765 and
+    // watching a request arrive: that port is the one an operator's own
+    // `onepipeline-api serve` is on, so a test that took it would be a refused
+    // bind on a working host, and one that did not would be asserting against
+    // somebody else's server. What a reader needs true is that the app's proxy
+    // points at what the CLI binds, and that is decided here, before any socket.
+    const withoutTarget = { ...process.env };
+    delete withoutTarget.DAG_UI_API_URL;
+    const restore = process.env.DAG_UI_API_URL;
+    process.env = withoutTarget;
+    try {
+      const loaded = await loadConfigFromFile(
+        { command: "serve", mode: "development" },
+        join(app, "vite.config.ts"),
+        app,
+      );
+      const proxy = loaded?.config.server?.proxy;
+      // Both paths the app reads through, because a default that reached one of
+      // them and not the other is the same broken read for half the app.
+      expect(proxy?.["/api"]).toBe("http://127.0.0.1:8765");
+      expect(proxy?.["/healthz"]).toBe("http://127.0.0.1:8765");
+      // And `preview` serves the built bundle the journeys drive, so it carries
+      // the same default rather than falling back to Vite's own behaviour.
+      expect(loaded?.config.preview?.proxy?.["/healthz"]).toBe(
+        "http://127.0.0.1:8765",
+      );
+    } finally {
+      if (restore !== undefined) process.env.DAG_UI_API_URL = restore;
     }
   }, 60_000);
 });
