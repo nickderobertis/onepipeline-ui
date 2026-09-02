@@ -32,6 +32,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use onepipeline_ui::contract::routes;
 use serde_json::Value;
 
 use crate::fixture_run;
@@ -148,24 +149,69 @@ fn shared_store(root: &Path) {
     }
 }
 
-/// Every path a run is asked for, with the selections the contract requires.
-fn asked(run: &str) -> Vec<String> {
+/// Every path a run is asked for, with the selections the contract requires and
+/// the route each one exercises.
+///
+/// The paths are built from `contract::routes` rather than spelled again here.
+/// Spelled again, this list and the route table would be two declarations of one
+/// set, and a renamed route would leave *both* servers asked for the old path —
+/// two 404s, compared, agreeing, and saying nothing about what was dropped. The
+/// route beside each path is what
+/// [`the_comparison_asks_for_every_route_the_contract_defines`] reads back.
+fn asked(run: &str) -> Vec<(&'static str, String)> {
+    let for_run = |route: &str| route.replace("{run}", run);
+    let detail = for_run(routes::RUN);
+    let timeline = for_run(routes::RUN_TIMELINE);
     vec![
-        "/healthz".to_owned(),
-        "/api/v2/runs?include_settled=true".to_owned(),
-        format!("/api/v2/runs/{run}"),
-        format!("/api/v2/runs/{run}?include_conversations=true"),
-        format!("/api/v2/runs/{run}/timeline?scope=run"),
-        format!(
-            "/api/v2/runs/{run}/timeline?scope=node&node={}",
-            fixture_run::NODE_ID
+        (routes::HEALTHZ, routes::HEALTHZ.to_owned()),
+        (
+            routes::RUNS,
+            format!("{}?include_settled=true", routes::RUNS),
         ),
-        format!(
-            "/api/v2/runs/{run}/conversations/{}",
-            fixture_run::CONVERSATION_ID
+        (routes::RUN, detail.clone()),
+        (routes::RUN, format!("{detail}?include_conversations=true")),
+        (routes::RUN_TIMELINE, format!("{timeline}?scope=run")),
+        (
+            routes::RUN_TIMELINE,
+            format!("{timeline}?scope=node&node={}", fixture_run::NODE_ID),
         ),
-        format!("/api/v2/runs/{run}/artifacts/{}", fixture_run::ARTIFACT_ID),
+        (
+            routes::RUN_CONVERSATION,
+            for_run(routes::RUN_CONVERSATION).replace("{id}", fixture_run::CONVERSATION_ID),
+        ),
+        (
+            routes::RUN_ARTIFACT,
+            for_run(routes::RUN_ARTIFACT).replace("{id}", fixture_run::ARTIFACT_ID),
+        ),
     ]
+}
+
+/// Every route the contract defines is one this comparison asks for.
+///
+/// Deriving the paths closes the renamed route; what it does not close is a route
+/// *added* to the contract and not added here, which is a route the comparison
+/// stops covering — silently, and in the direction of passing. So the list is
+/// read back against `routes::ALL`, which is what makes it a reading of that
+/// source rather than a second copy of it.
+#[test]
+fn the_comparison_asks_for_every_route_the_contract_defines() {
+    let exercised: BTreeSet<&str> = asked(fixture_run::RUN_ID)
+        .into_iter()
+        .map(|(route, _)| route)
+        .collect();
+    for route in routes::ALL {
+        // The event stream is the one route with no single response to compare:
+        // it stays open rather than answering once, and what it opens with is the
+        // run list this already asks for. `tests/e2e/server.rs` drives it.
+        if route == routes::EVENTS {
+            continue;
+        }
+        assert!(
+            exercised.contains(route),
+            "`{route}` is a route the contract defines and this comparison never asks \
+             for, so nothing holds this build to what the base commit served on it"
+        );
+    }
 }
 
 /// Every field one response carries, as a path from its root.
@@ -257,7 +303,7 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
         "run-baseline-recorded",
         "run-baseline-stopped",
     ] {
-        for path in asked(run) {
+        for (_, path) in asked(run) {
             let before = http::get(older.address, &path);
             let after = http::get(serving.address, &path);
             if before.status != 200 {
@@ -271,7 +317,7 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
                 "{path}: the base commit answered it and this build does not: {}",
                 after.body
             );
-            if path == "/healthz" {
+            if path == routes::HEALTHZ {
                 // The one response whose *value* is meant to have moved: it names
                 // the engine the binary links, which is the whole subject of this
                 // branch.
