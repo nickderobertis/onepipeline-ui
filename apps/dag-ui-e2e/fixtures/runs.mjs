@@ -54,6 +54,20 @@ export const NARROW_NODE = "narrow";
 export const WIDE_NODE = "wide";
 /** The node whose reading is a long list of uniform rows and nothing else. */
 export const DENSE_NODE = "dense";
+/** The node held on a release nobody had published, and then for a reason this build has no wording for. */
+export const ADOPTING_NODE = "adopting";
+/** What it was waiting for the release of. */
+export const ADOPTING_AWAITS = "sdk";
+/**
+ * A hold reason written by an engine newer than the app reading it.
+ *
+ * The engine owns that vocabulary and releases on its own schedule, so a corpus of
+ * only recognised reasons can never put a reader in the state a real store will:
+ * a node held by two things where the app can name one, reading as held by one.
+ * This is the entry that does — and a journey asserts the app names it rather than
+ * quietly drawing a hold with nothing in it.
+ */
+export const UNREAD_HOLD_KIND = "budget";
 /** How many of them: comfortably more than a screen's worth at any supported size. */
 export const DENSE_RECORDS = 40;
 
@@ -1867,6 +1881,11 @@ function writeBusyRun(root) {
         persona: "worker",
         task: `## What\nBe judged against ${DENSE_RECORDS} criteria.\n\n## Acceptance criteria\nEvery one of them is read`,
       },
+      {
+        id: ADOPTING_NODE,
+        persona: "worker",
+        task: "## What\nAdopt the published sibling.\n\n## Acceptance criteria\nThe adopted version is the released one",
+      },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
@@ -1960,6 +1979,42 @@ function writeBusyRun(root) {
       },
     );
   }
+  // A node held for reasons that are neither concurrency nor a dependency: the
+  // release of a sibling nobody has published yet, and then a reason written by an
+  // engine newer than the app reading it. Both are real states of a run — the first
+  // is what `release-wait` is the other half of, and the second is what every hold
+  // looks like from a build one release behind.
+  journal
+    .advance(1)
+    .emit("pipeline", "node-ready", { ...run, node: ADOPTING_NODE }, {});
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-held",
+      { ...run, node: ADOPTING_NODE },
+      { reasons: [{ kind: "release", awaiting: [ADOPTING_AWAITS] }] },
+    )
+    .advance(2)
+    .emit(
+      "pipeline",
+      "node-held",
+      { ...run, node: ADOPTING_NODE },
+      { reasons: [{ kind: UNREAD_HOLD_KIND, ceiling: 4 }] },
+    )
+    .advance(2)
+    .emit(
+      "pipeline",
+      "node-unheld",
+      { ...run, node: ADOPTING_NODE },
+      { released: [{ kind: UNREAD_HOLD_KIND, ceiling: 4 }] },
+    )
+    .advance(1)
+    .emit("pipeline", "node-dispatched", {
+      ...run,
+      node: ADOPTING_NODE,
+      persona: "worker",
+    });
   journal.write();
 }
 
@@ -2005,6 +2060,11 @@ export function facts() {
       wide_node: WIDE_NODE,
       dense_node: DENSE_NODE,
       dense_records: DENSE_RECORDS,
+    },
+    holds: {
+      adopting_node: ADOPTING_NODE,
+      awaits: ADOPTING_AWAITS,
+      unread_kind: UNREAD_HOLD_KIND,
     },
     queue: {
       behind_node: QUEUE_BEHIND_NODE,

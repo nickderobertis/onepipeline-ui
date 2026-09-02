@@ -4863,6 +4863,19 @@ fn waiting_span(
     }))
 }
 
+/// Which of the loop's two hold records one envelope is.
+///
+/// Both bound a span — a hold that changed opens the next one and closes the one
+/// before it, and the clearance closes the last — so what separates them is not
+/// *whether* they matter but which end they are. A `bool` here read as neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldMark {
+    /// `node-held`: the loop is not running this node, and these are the reasons.
+    Held,
+    /// `node-unheld`: the hold cleared.
+    Cleared,
+}
+
 /// Why the loop was not running this node, drawn as the spans it recorded.
 ///
 /// The engine writes `node-held` when a hold **begins** and again whenever what
@@ -4881,22 +4894,22 @@ fn waiting_span(
 /// on showing, because a span inferred from a dispatch that came late would be
 /// indistinguishable from one the run actually recorded.
 fn queued_spans(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<Value> {
-    let marks: Vec<(usize, &Envelope, bool)> = events
+    let marks: Vec<(usize, &Envelope, HoldMark)> = events
         .iter()
         .filter_map(|(index, event)| {
             if event.source != Source::Pipeline {
                 return None;
             }
             match PipelineKind::from_wire(&event.kind) {
-                Some(PipelineKind::NodeHeld) => Some((*index, *event, true)),
-                Some(PipelineKind::NodeUnheld) => Some((*index, *event, false)),
+                Some(PipelineKind::NodeHeld) => Some((*index, *event, HoldMark::Held)),
+                Some(PipelineKind::NodeUnheld) => Some((*index, *event, HoldMark::Cleared)),
                 _ => None,
             }
         })
         .collect();
     let mut spans: Vec<Value> = Vec::new();
-    for (position, (index, event, held)) in marks.iter().enumerate() {
-        if !held {
+    for (position, (index, event, mark)) in marks.iter().enumerate() {
+        if *mark != HoldMark::Held {
             continue;
         }
         let reasons = hold_reasons(event.payload.get("reasons"));

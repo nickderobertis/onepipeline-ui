@@ -38,6 +38,18 @@ const fixtureSchema = z.object({
     dense_records: z.number().int().min(20),
   }),
   /**
+   * The two hold reasons no other run in this corpus carries: a node waiting on a
+   * sibling's release, and a node held for a reason written by an engine newer
+   * than the app reading it — which every hold looks like from a build one release
+   * behind, and which must reach a reader as its own reason rather than as a hold
+   * with nothing in it.
+   */
+  holds: z.object({
+    adopting_node: z.string().min(1),
+    awaits: z.string().min(1),
+    unread_kind: z.string().min(1),
+  }),
+  /**
    * What the live run's scheduler recorded about the nodes it was not running:
    * the node it held behind other work and what was ahead of it each time that
    * changed, the node held for reasons that are not concurrency, and a node the

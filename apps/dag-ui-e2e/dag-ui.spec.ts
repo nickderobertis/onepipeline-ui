@@ -2131,6 +2131,27 @@ test("tells the reasons a node was not running apart from one another", async ({
   await expect(
     page.getByText("This node has no recorded timeline yet."),
   ).toBeVisible();
+
+  // The two reasons no other node here carries: a sibling's release nobody has
+  // published, and a reason written by an engine newer than this app. The second is
+  // the one that matters most — the vocabulary is the engine's, so a reason this
+  // build has no wording for still has to reach the reader as its own reason rather
+  // than as a hold with nothing in it.
+  const holds = fixture().holds;
+  await openObservatory(
+    page,
+    `/?run=${runs().busy}&node=${holds.adopting_node}`,
+  );
+  await expect(
+    reading(page).getByRole("article", {
+      name: `Queued awaiting the release of ${holds.awaits}`,
+    }),
+  ).toHaveCount(1);
+  await expect(
+    reading(page).getByRole("article", {
+      name: `Queued held by ${holds.unread_kind}`,
+    }),
+  ).toHaveCount(1);
 });
 
 test("reports a node whose recorded work the run has not written yet", async ({

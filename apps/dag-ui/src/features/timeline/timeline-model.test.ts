@@ -1,4 +1,4 @@
-import { parseRunTimeline } from "@onepipeline-ui/dag-model";
+import { parseRunTimeline, type TimelineSpan } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { busyTimeline, LIVE_RUN, runTimeline } from "../../test/fixtures";
 import {
@@ -186,11 +186,14 @@ describe("one node's slice of the run timeline", () => {
     expect(busy.total).toBeGreaterThan(200);
   });
 
+  /** The two kinds of row this list can hold a consecutive run of. */
+  const SHAPES: readonly ["event", "span"] = ["event", "span"];
+
   /** A run of `count` identical rows of `kind`, as a node's own span carries them. */
   const runOf = (
     kind: string,
     count: number,
-    shape: "event" | "span",
+    shape: (typeof SHAPES)[number],
   ): readonly TimelineRow[] => {
     const fixture = parseRunTimeline(runTimeline(LIVE_RUN));
     const node = fixture.spans.find(({ id }) => id === "node-dashboard");
@@ -204,26 +207,27 @@ describe("one node's slice of the run timeline", () => {
     fixture.spans = fixture.spans.filter(
       (span) => span.node_id !== "dashboard" || span.id === "node-dashboard",
     );
-    if (shape === "span")
-      fixture.spans.push(
-        ...Array.from({ length: count }, (_, index) => ({
-          id: `verification-${index}`,
-          kind: "verification" as const,
-          label: `check-${index}`,
-          parent_id: "node-dashboard",
-          node_id: "dashboard",
-          started_at: `2026-07-26T13:${String(index).padStart(2, "0")}:00.000Z`,
-          ended_at: `2026-07-26T13:${String(index).padStart(2, "0")}:30.000Z`,
-          events: [],
-        })),
-      );
+    const siblings: TimelineSpan[] = Array.from(
+      { length: count },
+      (_, index) => ({
+        id: `verification-${index}`,
+        kind: "verification",
+        label: `check-${index}`,
+        parent_id: "node-dashboard",
+        node_id: "dashboard",
+        started_at: `2026-07-26T13:${String(index).padStart(2, "0")}:00.000Z`,
+        ended_at: `2026-07-26T13:${String(index).padStart(2, "0")}:30.000Z`,
+        events: [],
+      }),
+    );
+    if (shape === "span") fixture.spans.push(...siblings);
     return nodeTimeline(fixture, "dashboard").rows;
   };
 
   test("collapses a run of journal records on the rule it collapses spans by", () => {
     // The boundary, from both sides, for the two kinds of row this list holds. One
     // rule, one count: a reader learns this behaviour once.
-    for (const shape of ["event", "span"] as const) {
+    for (const shape of SHAPES) {
       const kind = shape === "event" ? "turn-activity" : "verification";
       const short = runOf(kind, GROUP_THRESHOLD - 1, shape);
       expect(short.filter(({ rowKind }) => rowKind === "group")).toHaveLength(

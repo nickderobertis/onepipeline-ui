@@ -963,7 +963,7 @@ fn queued_spans(spans: &[Value]) -> Vec<&Value> {
 }
 
 #[test]
-fn a_node_behind_running_work_is_served_a_span_per_thing_that_was_ahead_of_it() {
+fn a_node_behind_running_work_is_served_a_span_per_hold_the_engine_recorded() {
     let serving = held();
     let spans = held_node_spans(&serving, fixture_run::HELD_BEHIND_NODE_ID);
     let queued = queued_spans(&spans);
