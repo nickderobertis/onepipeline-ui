@@ -31,6 +31,7 @@
     "typecheck": { "cache": true, "inputs": ["default"] },
     "build": { "cache": true, "inputs": ["default"] },
     "test": { "cache": true, "inputs": ["default"] },
+    "test-baseline": { "cache": true, "inputs": ["default"] },
     "doc": { "cache": true, "inputs": ["default"] },
     "lint-llm-diff": {
       "cache": true,
@@ -43,7 +44,15 @@
     },
     "check": {
       "cache": false,
-      "dependsOn": ["format-check", "lint", "typecheck", "build", "test", "doc"]
+      "dependsOn": [
+        "format-check",
+        "lint",
+        "typecheck",
+        "build",
+        "test",
+        "test-baseline",
+        "doc"
+      ]
     }
   }
 }

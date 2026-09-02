@@ -94,7 +94,16 @@ served is served now — a question no fixture on a branch can answer, because a
 fixture is editable by the change it is meant to hold. Compiling another commit
 of this repository is the expensive half of that, so it lives behind
 `onepipeline-ui:ensure-baseline` rather than inside the suite: an unrelated change
-to a workflow, a script or a document must not rebuild a second server. The binary
+to a workflow, a script or a document must not rebuild a second server. **The
+journeys sit behind an edge of their own for the same reason**:
+`onepipeline-ui:test-baseline` is the one target that declares the provisioning,
+`onepipeline-ui:test` runs everything else under the coverage floor, and the two
+nextest filters are one partition, so every test runs under exactly one of them.
+`check` depends on both — the gate's verdict covers the comparison, and only a
+`just test` on its own is spared the second server. What that split can break is
+the comparison running *nowhere*, so `tests/e2e/ensure_baseline.rs` holds all
+three of those to each other: the edge, the `check` aggregate, and the partition.
+The binary
 is stamped with the commit it was built from and the journeys refuse a stamp that
 names anything but this branch's base, because a stale server answers every
 request and reports that nothing was dropped between a pair it was never asked

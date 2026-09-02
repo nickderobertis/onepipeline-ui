@@ -26,7 +26,6 @@
 //! second CLI — the module that does so names it in its own header, beside the
 //! directive that permits it and the reason it is the narrowest cut available.
 
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] the expense this rule is about is already behind its own edge: compiling the base commit's dependency graph is `onepipeline-ui:ensure-baseline`, which the module header and `AGENTS.md` both record, and which no-ops on a stamp naming the base already built, so an unrelated change pays nothing. What is left in this binary builds nothing — two servers over one runs root. The edge on the broad `test` target is not an oversight but an invariant this suite enforces: `ensure_baseline::every_suite_that_serves_the_baseline_depends_on_the_provisioning` fails the build when a suite that serves the baseline does not declare it, because a publication clone is fresh and a suite reaching the comparison without it would pass against no baseline at all. Splitting the journeys out would not save the gate that build — `check` would run that target too — it would only delete that guard.
 mod baseline;
 mod cli;
 mod ensure_baseline;

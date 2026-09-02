@@ -31,7 +31,15 @@ use crate::stub_bin;
 
 /// The suites that serve a run store through the base commit's binary, and so
 /// cannot run before it is provisioned.
-const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui:test"];
+///
+/// One target rather than the whole crate's `test`, because compiling another
+/// commit of this repository is what the comparison costs and nothing else in the
+/// suite owes it: `onepipeline-ui:test` runs everything but the comparison and
+/// provisions nothing for it, and this target runs the comparison alone. What that
+/// split can break is the comparison running *nowhere*, which is why
+/// [`the_gate_runs_the_comparison_beside_the_rest_of_the_suite`] and
+/// [`the_two_test_recipes_partition_the_suite`] are here beside it.
+const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui:test-baseline"];
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
 
@@ -393,6 +401,57 @@ fn every_suite_that_serves_the_baseline_depends_on_the_provisioning() {
              depend on {PROVISIONING}, so it fails on a clone nobody bootstrapped"
         );
     }
+}
+
+/// The comparison is reached by the gate, and not only by whoever asks for it.
+///
+/// The edge that makes the provisioning cheap — `test` no longer depending on it —
+/// is the same edge that could leave the comparison running nowhere. `check` is
+/// what every gate here fans out (`just check`, `just check-affected`, and `gate`
+/// through the first of them), so a target missing from its dependencies is a tier
+/// that silently stops running rather than one that fails.
+#[test]
+fn the_gate_runs_the_comparison_beside_the_rest_of_the_suite() {
+    let workspace: Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("nx.json")).expect("the workspace definition"),
+    )
+    .expect("the workspace definition parses");
+    let depends = workspace["targetDefaults"]["check"]["dependsOn"]
+        .as_array()
+        .expect("the check aggregate declares dependencies");
+    for tier in ["test", "test-baseline"] {
+        assert!(
+            depends
+                .iter()
+                .any(|edge| edge == &Value::String(tier.into())),
+            "`check` does not depend on `{tier}`, so the gate rules without running it"
+        );
+    }
+}
+
+/// Every test runs under exactly one of the two recipes the split leaves.
+///
+/// The filters are two halves of one partition — `_crate-test` is `not` what
+/// `_crate-test-baseline` is — and they are written in two places, so nothing but
+/// this holds them to each other. Either half drifting alone is silent: widen the
+/// exclusion and tests stop running under the coverage floor, narrow the inclusion
+/// and the comparison stops running at all.
+#[test]
+fn the_two_test_recipes_partition_the_suite() {
+    let recipes = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
+    let selection = "test(/^baseline::/)";
+    let covered = format!("-E 'not {selection}'");
+    let compared = format!("-E '{selection}'");
+    assert!(
+        recipes.contains(&covered),
+        "`_crate-test` does not exclude the baseline journeys with `{covered}`, so the \
+         floor is measured over a suite that needs the base commit's server"
+    );
+    assert!(
+        recipes.contains(&compared),
+        "no recipe selects the baseline journeys with `{compared}`, so the comparison \
+         `onepipeline-ui:test-baseline` is declared for runs nowhere"
+    );
 }
 
 /// The recipe writes where the suite reads, and neither restates the other's path.

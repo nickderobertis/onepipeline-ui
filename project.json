@@ -30,6 +30,10 @@
     },
     "test": {
       "command": "just _crate-test",
+      "dependsOn": ["ensure-sibling"]
+    },
+    "test-baseline": {
+      "command": "just _crate-test-baseline",
       "dependsOn": ["ensure-sibling", "ensure-baseline"]
     },
     "doc": {
