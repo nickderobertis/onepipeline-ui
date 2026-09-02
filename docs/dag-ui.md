@@ -67,7 +67,7 @@ just nx run dag-ui:serve
 ```
 
 Open `http://127.0.0.1:4173`. Vite proxies `/api` and `/healthz` to
-`http://127.0.0.1:8787` — the loopback address and port `onepipeline-api serve`
+`http://127.0.0.1:8765` — the loopback address and port `onepipeline-api serve`
 binds by default. Set `DAG_UI_API_URL` to proxy somewhere else. In a production
 deployment, serve the built files from `apps/dag-ui/dist` on the same origin as
 the API, or route those paths to it.

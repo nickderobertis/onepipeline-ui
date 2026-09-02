@@ -4,9 +4,9 @@ import { readApiTarget } from "./api-target";
 
 describe("the read API a browser's proxy is pointed at", () => {
   it("is the loopback server the CLI binds when nothing names one", () => {
-    expect(readApiTarget(undefined)).toBe("http://127.0.0.1:8787");
+    expect(readApiTarget(undefined)).toBe("http://127.0.0.1:8765");
     // An exported-but-empty variable is a shell that set nothing, not a choice.
-    expect(readApiTarget("")).toBe("http://127.0.0.1:8787");
+    expect(readApiTarget("")).toBe("http://127.0.0.1:8765");
   });
 
   it("is the origin of what was named, and never its path", () => {

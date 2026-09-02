@@ -2,9 +2,13 @@
  * The read API the dev server and `vite preview` proxy to, read from the
  * environment and validated where it arrives rather than trusted.
  *
- * It defaults to the loopback address and port `onepipeline-api serve` binds, and
- * the browser journeys override it to point at the throwaway fixture server they
- * start instead of at the operator's own runs.
+ * It defaults to the loopback address and port `onepipeline-api serve` binds —
+ * `onepipeline_ui::cli::default_bind`, which this cannot read and which
+ * `tests/contract.rs` therefore holds this literal to. They were two different
+ * ports until 2026-09, so `just dag-ui` beside a default server proxied every
+ * read to one nothing was listening on. The browser journeys override the
+ * variable to point at the throwaway fixture server they start instead of at the
+ * operator's own runs.
  *
  * A proxy target is where every `/api` read a browser makes is sent, so a value
  * this refuses is one that would otherwise send an operator's run data somewhere
@@ -18,7 +22,7 @@
  * plugin loading as much as on this.
  */
 export function readApiTarget(named = process.env.DAG_UI_API_URL): string {
-  if (named === undefined || named === "") return "http://127.0.0.1:8787";
+  if (named === undefined || named === "") return "http://127.0.0.1:8765";
   let parsed: URL;
   try {
     parsed = new URL(named);

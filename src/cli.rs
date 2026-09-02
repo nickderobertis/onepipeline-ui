@@ -60,7 +60,7 @@ pub struct ServeArgs {
     ///
     /// Loopback by default: this serves a local run store and is not
     /// authenticated, so reaching the network is an explicit choice.
-    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:8765")]
+    #[arg(long, value_name = "ADDR", default_value_t = default_bind())]
     #[serde(default = "default_bind")]
     pub bind: SocketAddr,
 
@@ -92,7 +92,14 @@ fn default_poll_ms() -> NonZeroU64 {
     DEFAULT_POLL_MS
 }
 
-fn default_bind() -> SocketAddr {
+/// The address this server binds when nothing says otherwise.
+///
+/// The one spelling of it: the flag's own default is rendered from this rather
+/// than written beside it as a string, and `tests/contract.rs` holds the
+/// browser's proxy default to it — that copy is in TypeScript and cannot read
+/// this, and the two disagreeing is a `just dag-ui` that proxies to a port
+/// nothing is listening on.
+pub fn default_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8765))
 }
 
