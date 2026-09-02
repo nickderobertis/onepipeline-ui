@@ -133,9 +133,11 @@ function serverBinary() {
  * condition, not a stand-in for the API: it serves nothing and answers nothing, so the
  * app's own request stays pending exactly as it would against a wedged server.
  *
- * With `--refuse-port`, a second port is held bound but never listened on, so the
- * kernel refuses every connection to it — which merely leaving a port free cannot
- * promise, because a concurrent run's API server could take it.
+ * With `--refuse-port`, a second port is *taken* and every connection to it is
+ * dropped the moment it arrives. Taken rather than left free, because a free port
+ * is one a concurrent run's API server could bind, and this journey would then be
+ * quietly driving a reachable API; dropped rather than answered, because what the
+ * app must meet is a read that fails.
  */
 async function stall(port, refusePort) {
   // Said before anything is taken, because a line that only appears on success
@@ -151,10 +153,11 @@ async function stall(port, refusePort) {
   const held = [];
   if (refusePort !== undefined) {
     const reservation = createServer();
-    // Bound without listening: `listen` would accept, and accepting is the opposite
-    // of what this port is for. Node has no bind-only primitive, so the reservation
-    // listens and immediately destroys anything that arrives — a connection refused
-    // as far as the browser's first read is concerned.
+    // Node has no bind-only primitive, so this holds the port the only way a
+    // process can — by listening on it — and destroys whatever arrives before a
+    // byte is exchanged. What the browser meets is a connection that closes on
+    // it, which is a failed read either way; what matters is that nothing else on
+    // this host can take the port while the journey needs it unreachable.
     reservation.on("connection", (socket) => socket.destroy());
     await bound(reservation, refusePort, "refusing");
     held.push(reservation);

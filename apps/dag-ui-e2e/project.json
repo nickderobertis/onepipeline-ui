@@ -42,6 +42,24 @@
         }
       ]
     },
+    "screens": {
+      "command": "npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts",
+      "cache": false,
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build-api-server"
+        },
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        }
+      ]
+    },
     "lint": {
       "command": "npx biome check apps/dag-ui-e2e && npx eslint apps/dag-ui-e2e"
     },

@@ -146,12 +146,12 @@ function currentSession(): Session {
 const session = currentSession();
 
 /**
- * A second UI origin whose proxy points at a port that refuses every connection. It is
- * how the unreachable-API journey reaches the real failure — a real browser making real
- * requests that really fail — without mocking anything. The stall server below holds
- * that port bound but unlistened, which is what makes it refuse: merely leaving a port
- * free would let a concurrent run's API server take it, and this journey would quietly
- * be driving a reachable API.
+ * A second UI origin whose proxy points at a port where every connection is dropped
+ * as it arrives. It is how the unreachable-API journey reaches the real failure — a
+ * real browser making real requests that really fail — without mocking anything. The
+ * stall server below holds that port for the run rather than leaving it free, because
+ * a free port is one a concurrent run's API server could take, and this journey would
+ * quietly be driving a reachable API.
  */
 export const OFFLINE_UI_URL = `http://${LOOPBACK}:${session.offlineUi}`;
 /**

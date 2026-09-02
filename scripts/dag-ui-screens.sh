@@ -5,9 +5,12 @@
 # The operator iterates on this UI visually and cannot otherwise see it while a change
 # is being made: a polish problem at one width stays invisible until somebody starts
 # the app by hand at that width. This runs the browser tier's own fixture server and
-# Vite stack (`apps/dag-ui/screenshots.config.ts` reuses `playwright.config.ts`, which
-# chooses free ports and a fixture directory per run), so two of these at once is two
-# independent stacks — and the gallery directory is made here, per invocation, for the
+# Vite stack through `dag-ui-e2e:screens`, whose config reuses `playwright.config.ts`
+# — which chooses free ports and a fixture directory per run — so two of these at once
+# is two independent stacks. Through that target rather than Playwright directly
+# because the journeys serve the *built* bundle: the target depends on `dag-ui:build`,
+# and photographing whatever `dist/` happened to hold is how a gallery shows a change
+# that is not in it — and the gallery directory is made here, per invocation, for the
 # same reason: the one thing the Playwright configs do not already keep apart.
 #
 # The gallery is named exactly once, by whichever ending the run reaches: the path on
@@ -33,7 +36,7 @@ gallery="$(mktemp -d "$gallery_root/gallery-XXXXXXXX")" || {
 }
 status=0
 # llmlint: ignore[tool_output_is_signal] Playwright's per-capture progress is what tells the operator which surfaces have been photographed while the tier runs.
-(cd "$repo_root" && DAG_UI_SCREENSHOT_DIR="$gallery" npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts "$@") || status=$?
+(cd "$repo_root" && DAG_UI_SCREENSHOT_DIR="$gallery" bash scripts/nx.sh run dag-ui-e2e:screens "$@") || status=$?
 
 if [ "$status" -eq 0 ]; then
     echo "dag-ui-screens: gallery at $gallery/index.html"
