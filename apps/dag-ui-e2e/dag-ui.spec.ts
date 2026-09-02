@@ -3834,10 +3834,11 @@ test("stays quiet when the run it is opening is swept out from under it", async 
   // And the reader lands on a run the server still serves rather than on the one
   // that went away.
   await expect(graphNodeList(page).getByRole("button").first()).toBeVisible();
-  // llmlint: ignore[tests_mirror_real_usage] this is the journey's precondition rather than an assertion about the app: it says the removal really did land before the read reached the server, so the `404 run_not_found` this journey is for was actually served. A read that beat the sweep satisfies every user-visible assertion here and proves nothing, and "the read raced" has no user-visible surface by construction — the flag is the fixture's record of its own timing, not the app's state.
   // The read really was taken after the run had gone — a read that beat the
   // removal would have proven nothing about the refusal this journey is for.
+  // llmlint: ignore-block[tests_mirror_real_usage] this is the journey's precondition rather than an assertion about the app: it says the removal really did land before the read reached the server, so the `404 run_not_found` this journey is for was actually served. A read that beat the sweep satisfies every user-visible assertion here and proves nothing, and "the read raced" has no user-visible surface by construction — the flag is the fixture's record of its own timing, not the app's state.
   expect(sweep.swept()).toBe(true);
+  // llmlint: ignore-end[tests_mirror_real_usage]
   // Nothing was ever shown to fail.
   expect(await banners()).toBe(0);
 });
