@@ -56,6 +56,39 @@ export const isRunList = (url: URL): boolean =>
   url.pathname === API_V2_PATHS.runs;
 
 /**
+ * The runs a `?select=` names, or `undefined` for a page read.
+ *
+ * A selection and a page are two answers to different questions on one route, so
+ * everything here that answers the run list has to tell them apart the way the
+ * server does.
+ */
+export const selectedRuns = (url: URL): string[] | undefined => {
+  const select = url.searchParams.get(API_V2_QUERY.select);
+  return select === null ? undefined : select.split(",");
+};
+
+/**
+ * The selection answer for a list, under the server's own rules: the rows for the
+ * runs named, in the order the list serves them, the ones it could not find in
+ * `missing`, and no cursor.
+ */
+export const selectionOf = (
+  list: { runs: { run_id: string }[] },
+  named: readonly string[],
+): Record<string, unknown> => {
+  const runs = list.runs.filter(({ run_id }) => named.includes(run_id));
+  const missing = named.filter(
+    (runId) => !runs.some(({ run_id }) => run_id === runId),
+  );
+  return {
+    ...list,
+    runs,
+    next_cursor: undefined,
+    ...(missing.length > 0 ? { missing } : {}),
+  };
+};
+
+/**
  * True for a single run's detail path, whatever run it names — the run route itself
  * and nothing beneath it, so a route added under `/runs/<id>/` is not mistaken for
  * the detail read.
@@ -96,7 +129,12 @@ export const fixtureRunFor = (url: URL): string =>
  * opting out of the same payload it would opt out of in production.
  */
 export function defaultResponder(url: URL): Response {
-  if (isRunList(url)) return Response.json(runList);
+  if (isRunList(url)) {
+    const named = selectedRuns(url);
+    return Response.json(
+      named === undefined ? runList : selectionOf(runList, named),
+    );
+  }
   const runId = fixtureRunFor(url);
   if (isTimeline(url))
     return Response.json(

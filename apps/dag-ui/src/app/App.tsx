@@ -32,7 +32,7 @@ import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
-import { groupRuns, nodeViews } from "../lib/run-model";
+import { nodeViews } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
 import {
   DETAIL_LEVELS,
@@ -82,10 +82,9 @@ export function App({
     timelineScope,
     filter,
   );
-  const groups = useMemo(
-    () => groupRuns(telemetry.list?.runs ?? []),
-    [telemetry.list],
-  );
+  // The order is the server's — most recent activity first — and is never
+  // recomputed here.
+  const runs = telemetry.list?.runs ?? [];
   const selectedRunId = telemetry.runId;
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
@@ -126,10 +125,11 @@ export function App({
       <TimelinePopoverLayer />
       <div className="app-shell">
         <RunNavigation
-          groups={groups}
+          runs={runs}
           selectedRunId={selectedRunId}
           liveRunIds={liveRunIds}
           hasMore={telemetry.hasMore}
+          loadingMore={telemetry.loadingMore}
           onLoadMore={telemetry.loadMore}
           onSelect={selection.selectRun}
         />

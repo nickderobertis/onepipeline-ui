@@ -1832,12 +1832,13 @@ function writeEventlessRun(
 ) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
-  // The paging runs are launched by the *other* session: the codex group is the one
-  // a journey counts, and forty-odd paging runs under it would make that count a
-  // page size. The named eventless run records a launch whose launcher is outside
-  // the closed vocabulary a client switches on and no session at all — every run
-  // launched before the launcher was detected reads that way — so it is grouped by
-  // the launch it does know rather than pooled with the runs that recorded none.
+  // The paging runs are launched by the *other* session: the codex session is the
+  // one a journey counts tagged rows for, and forty-odd paging runs carrying it
+  // would make that count a page size. The named eventless run records a launch
+  // whose launcher is outside the closed vocabulary a client switches on and no
+  // session at all — every run launched before the launcher was detected reads that
+  // way — so its tag is the launch it does know rather than one shared name pooling
+  // it with the runs that recorded none.
   writeJson(
     join(dir, "launch.json"),
     launch(runId, launcher, session, stamp(HISTORIC), 4248),
@@ -2173,6 +2174,33 @@ export function recordActivity(root, name, detail) {
     },
     { kind: "tool_use", name, detail, truncated: false },
   );
+}
+
+/**
+ * Keep the live run recording, for as long as it is asked to.
+ *
+ * What every other writer here cannot do: a run that is *still moving* while a
+ * reader is opening it. The server invalidates a subscriber when the journal it is
+ * watching has grown since the last poll, so a single append raises one
+ * invalidation and a reader is never overtaken by one. This appends `count` records
+ * `intervalMs` apart, which is what makes a stream invalidate faster than a read of
+ * that run can complete — the state an operator's thirty-node graph is in the whole
+ * time they are trying to open it.
+ *
+ * Records the same bounded tool summary `recordActivity` does, so what lands in the
+ * journal is still only what `oneagentgraph` could have written.
+ */
+export async function churnLive(root, count, intervalMs) {
+  if (!Number.isInteger(count) || count < 1 || count > 1000) {
+    throw new Error(`a churn is 1 to 1000 records, not '${count}'`);
+  }
+  if (!Number.isInteger(intervalMs) || intervalMs < 1 || intervalMs > 5000) {
+    throw new Error(`a churn interval is 1 to 5000 ms, not '${intervalMs}'`);
+  }
+  for (let index = 0; index < count; index += 1) {
+    recordActivity(root, "Read", `churn record ${index + 1} of ${count}`);
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 /** Record turns onto the live dashboard's worker session until it has `turns`. */

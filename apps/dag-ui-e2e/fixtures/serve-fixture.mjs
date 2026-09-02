@@ -17,6 +17,7 @@
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
+ *                     | --churn-live N --churn-interval MS
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
@@ -29,6 +30,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildRuns,
+  churnLive,
   facts,
   growTranscript,
   recordActivity,
@@ -257,6 +259,8 @@ function parseArgs(argv) {
     "--port",
     "--remove-run",
     "--grow-worker-session",
+    "--churn-live",
+    "--churn-interval",
     "--record-activity",
     "--activity-detail",
     "--refuse-port",
@@ -298,6 +302,7 @@ const ACTIONS = [
   "remove-page-runs",
   "remove-run",
   "grow-worker-session",
+  "churn-live",
   "record-activity",
 ];
 const asked = ACTIONS.filter((action) => args[action] !== undefined);
@@ -386,6 +391,26 @@ if (args.stall) {
         );
       }
       growTranscript(runsRoot, turns);
+    } else if (args["churn-live"] !== undefined) {
+      // Both halves, because a churn is a count *and* a spacing: a count with no
+      // spacing would be one burst the server sees as a single change, which is
+      // the opposite of what a caller asking for a churn is asking for.
+      if (args["churn-interval"] === undefined) {
+        die(
+          "--churn-live needs --churn-interval",
+          "pass --churn-interval the milliseconds between records",
+        );
+      }
+      await churnLive(
+        runsRoot,
+        Number(args["churn-live"]),
+        Number(args["churn-interval"]),
+      );
+    } else if (args["churn-interval"] !== undefined) {
+      die(
+        "--churn-interval needs --churn-live",
+        "pass --churn-live the number of records to append",
+      );
     } else if (args["record-activity"] !== undefined) {
       // Both halves or neither, checked in both directions: a tool summary is
       // the tool's name *and* what it was given, and the half of it that arrived

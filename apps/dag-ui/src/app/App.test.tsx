@@ -38,6 +38,8 @@ import {
   isRunDetail,
   isRunList,
   isTimeline,
+  selectedRuns,
+  selectionOf,
   telemetryHarness,
 } from "../test/telemetry-harness";
 import { App } from "./App";
@@ -915,11 +917,14 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
   });
 
-  test("groups historical runs by launcher and reloads on SSE invalidation", async () => {
+  test("tags each row with its launching session and refreshes it on SSE invalidation", async () => {
     const { client, sources, fetch } = telemetryHarness();
     render(<App client={client} />);
+    // One flat list: the session is a tag on the row rather than a heading the
+    // list is broken into, so it never outranks the order the server serves.
     expect(await screen.findByText(/Codex session/)).toBeInTheDocument();
     expect(screen.getByText(/Claude session/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /session/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: RegExp(HISTORY_RUN) }));
     await waitFor(() =>
@@ -927,11 +932,23 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
     expect(await screen.findByText("archive")).toBeInTheDocument();
 
-    const before = fetch.mock.calls.length;
+    // The invalidation names one run, so what is read is that one row — never the
+    // first page, which would throw away every page a reader had scrolled to.
+    const selections = () =>
+      fetch.mock.calls
+        .map((call: unknown[]) =>
+          selectedRuns(new URL(String(call[0]), window.location.origin)),
+        )
+        .filter((named): named is string[] => named !== undefined);
+    const pages = () =>
+      fetch.mock.calls.filter((call: unknown[]) => {
+        const url = new URL(String(call[0]), window.location.origin);
+        return isRunList(url) && selectedRuns(url) === undefined;
+      }).length;
+    const before = pages();
     sources[0]?.emit("run.changed", { run_id: HISTORY_RUN }, "8");
-    await waitFor(() =>
-      expect(fetch.mock.calls.length).toBeGreaterThan(before),
-    );
+    await waitFor(() => expect(selections()).toContainEqual([HISTORY_RUN]));
+    expect(pages()).toBe(before);
   });
 
   test("shows live activity while leaving a settled transcript unread", async () => {
@@ -1543,10 +1560,15 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   test("stays quiet when an invalidated run has already been removed", async () => {
     let removed = false;
     const { client, sources } = telemetryHarness((url) => {
-      if (isRunList(url))
+      if (isRunList(url)) {
+        const served = removed
+          ? { ...runList, runs: runList.runs.slice(1) }
+          : runList;
+        const named = selectedRuns(url);
         return Response.json(
-          removed ? { ...runList, runs: runList.runs.slice(1) } : runList,
+          named === undefined ? served : selectionOf(served, named),
         );
+      }
       if (removed && url.pathname.endsWith(LIVE_RUN))
         return Response.json(
           { error: { code: "run_not_found", message: "no recorded run" } },
@@ -1593,15 +1615,22 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   test("drops a removed run and falls back to the remaining one", async () => {
     let removed = false;
     const { client, sources } = telemetryHarness((url) => {
-      if (isRunList(url))
+      if (isRunList(url)) {
+        const served = removed
+          ? { ...runList, runs: runList.runs.slice(1) }
+          : runList;
+        const named = selectedRuns(url);
         return Response.json(
-          removed ? { ...runList, runs: runList.runs.slice(1) } : runList,
+          named === undefined ? served : selectionOf(served, named),
         );
+      }
       return defaultResponder(url);
     });
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
+    // The row goes because the selection names it in `missing` — the server's own
+    // companion list — rather than because the list was refetched from page one.
     removed = true;
     sources[0]?.emit("run.removed", { run_id: LIVE_RUN }, "3");
     expect(await screen.findByText("archive")).toBeInTheDocument();
@@ -1755,4 +1784,136 @@ describe("the reading a viewer asks for", () => {
       cleanup();
     },
   );
+});
+
+describe("a read that outlives the invalidation that arrived during it", () => {
+  afterEach(cleanup);
+
+  /**
+   * A run-detail read of one run the test releases, so a stream can invalidate
+   * faster than the server answers — which is the shape the operator hit: a read
+   * taking over twenty seconds, another fired the moment it returned, and "Loading
+   * execution history…" forever. Every other run reads at once, so what is held is
+   * the reading under test and not the app.
+   */
+  const heldDetail = (runId: string) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let taken = 0;
+    const harness = telemetryHarness(async (url) => {
+      if (!isRunDetail(url) || !url.pathname.endsWith(`/${runId}`))
+        return defaultResponder(url);
+      taken += 1;
+      await held;
+      return defaultResponder(url);
+    });
+    return { ...harness, release: () => release(), reads: () => taken };
+  };
+
+  test(
+    "renders a live run's detail rather than starving it",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+      const { client, sources, release, reads } = heldDetail(LIVE_RUN);
+      render(<App client={client} />);
+      await screen.findByText("Loading execution history…");
+      await waitFor(() => expect(reads()).toBe(1));
+
+      // The run is recording continuously: every poll tick invalidates it while
+      // the read of it is still in flight.
+      for (const id of ["2", "3", "4", "5", "6"])
+        act(() => sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, id));
+      // Not one further read is started while one is out. Forty reads of one run
+      // in flight together is the other half of the livelock: each makes the next
+      // slower, and none of them ever lands.
+      expect(reads()).toBe(1);
+
+      release();
+      // The read was invalidated five times before it landed, and it is still this
+      // reading's read — so the detail is rendered rather than discarded.
+      expect(await screen.findByText("dashboard")).toBeInTheDocument();
+      expect(screen.queryByText("Loading execution history…")).toBeNull();
+    },
+  );
+
+  test(
+    "discards a read of the run the reader has moved away from",
+    JOURNEY_TIMEOUT,
+    async () => {
+      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+      const { client, release } = heldDetail(LIVE_RUN);
+      render(<App client={client} />);
+      await screen.findByText("Loading execution history…");
+
+      // The reader moves to the other run while the first one's read is still out,
+      // and that run answers at once.
+      await userEvent.click(
+        await screen.findByRole("button", { name: RegExp(HISTORY_RUN) }),
+      );
+      expect(await screen.findByText("archive")).toBeInTheDocument();
+
+      // Only now does the read they moved away from land. Letting a still-current
+      // read land is not the same as letting any read land: this one describes a
+      // different reading, and drawing it here would put one run's detail on
+      // screen under another's name.
+      release();
+      await expect(
+        waitFor(
+          () => expect(screen.getByText("dashboard")).toBeInTheDocument(),
+          { timeout: 2_000 },
+        ),
+      ).rejects.toThrow();
+      expect(screen.getByRole("heading", { name: HISTORY_RUN })).toBeVisible();
+    },
+  );
+});
+
+describe("a run swept between the read that listed it and the read that fetched it", () => {
+  afterEach(cleanup);
+
+  /**
+   * The one read failure that is not a failure, and it is still the detail route's
+   * to swallow: the run-list route naming a requested id in `missing` tells the
+   * *list* that a row has gone and says nothing about a detail read already out,
+   * which still answers `404 run_not_found`. Both halves are asserted here, because
+   * what makes the swallow safe is that it is matched on the code and not the
+   * status — remove it and the first of these reports a race as a failure.
+   */
+  const detailAnswering = (error: { code: string; message: string }) =>
+    telemetryHarness((url) => {
+      if (!isRunDetail(url)) return defaultResponder(url);
+      return Response.json({ error }, { status: 404 });
+    });
+
+  test("leaves the view showing no run rather than a failure", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+    const { client } = detailAnswering({
+      code: "run_not_found",
+      message: "no recorded run",
+    });
+    render(<App client={client} />);
+    await screen.findByText("Loading execution history…");
+    // Nothing to report: the race is what the next list resolves, and a banner
+    // about it would describe the race rather than a problem.
+    await expect(
+      waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument(), {
+        timeout: 2_000,
+      }),
+    ).rejects.toThrow();
+  });
+
+  test("still reports a read that really failed", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+    const { client } = detailAnswering({
+      code: "unknown_filter_profile",
+      message: '"planner" is not a filter profile of this run',
+    });
+    render(<App client={client} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /not a filter profile/,
+    );
+  });
 });

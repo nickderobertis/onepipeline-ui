@@ -99,6 +99,42 @@ describe("TelemetryClient fetch boundary", () => {
     );
   });
 
+  test("names the runs a selection asks about and sends nothing paging", async () => {
+    let requested = "";
+    const client = new TelemetryClient("http://127.0.0.1:8000/", {
+      fetch: async (input) => {
+        requested = String(input);
+        return Response.json({ ...emptyList, missing: ["gone"] });
+      },
+    });
+    const answer = await client.selectRuns(["one", "two"]);
+    // A selection and a page are two answers to different questions on one route,
+    // and the server refuses a paging parameter beside one — so none is sent.
+    expect(requested).toBe(
+      "http://127.0.0.1:8000/api/v2/runs?select=one%2Ctwo",
+    );
+    expect(answer.missing).toEqual(["gone"]);
+  });
+
+  test("refuses a selection the run-list route could not mean", async () => {
+    const client = new TelemetryClient("http://localhost", {
+      fetch: async () => Response.json(emptyList),
+    });
+    // Nothing named at all: `?select=` with no run is a caller asking about no
+    // runs, which the server refuses rather than reading as "list everything".
+    await expect(client.selectRuns([])).rejects.toBeInstanceOf(
+      TelemetryClientError,
+    );
+    // A comma is what separates two ids on this wire, so an id carrying one is
+    // refused here rather than sent as two runs the caller never named.
+    await expect(client.selectRuns(["one,two"])).rejects.toBeInstanceOf(
+      TelemetryClientError,
+    );
+    await expect(client.selectRuns(["a/b"])).rejects.toBeInstanceOf(
+      TelemetryClientError,
+    );
+  });
+
   test("rejects a successful response that violates the model", async () => {
     const client = new TelemetryClient("http://localhost", {
       fetch: async () => Response.json({ ...emptyList, api_version: 3 }),

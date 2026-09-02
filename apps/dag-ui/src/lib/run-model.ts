@@ -10,18 +10,10 @@ import type {
   PlanTask,
   RunDetail,
   RunLaunch,
-  RunSummary,
 } from "@onepipeline-ui/dag-model";
 
 /** How a launching harness is named wherever this app names one. */
 export type LauncherName = "Claude" | "Codex" | "Unattributed";
-
-export interface RunGroup {
-  readonly id: string;
-  readonly label: string;
-  readonly launcher: LauncherName;
-  readonly runs: readonly RunSummary[];
-}
 
 export interface NodeView {
   readonly id: string;
@@ -118,8 +110,15 @@ export function launcherName(launch?: RunLaunch): LauncherName {
 }
 
 /**
- * How one run's launch is named on screen — in the sidebar heading and beside a
- * run-level transcript alike, so the two never disagree about the same run.
+ * How one run's launch is named on screen — as the tag on its row in the run list
+ * and beside a run-level transcript alike, so the two never disagree about the same
+ * run.
+ *
+ * It names the *session*, not the launch: one planner session launches many runs
+ * and mints a fresh `launch_id` for each, so a row tagged by launch id told an
+ * operator nothing about which planner it belonged to. The join is served on the
+ * list row itself, so a row is tagged before a single run's detail — let alone its
+ * transcripts — has been read.
  *
  * There are three honest answers, and none of them is "unknown session". A run
  * whose launching session is named reads as that session. A run that recorded a
@@ -222,38 +221,6 @@ export function isUnhealthy(status: NodeStatus): boolean {
   return (
     OWN_WORK_LOST.has(status) || status === "blocked" || status === "skipped"
   );
-}
-
-/**
- * Gather the listed runs under the session that launched each one.
- *
- * The join is served on the list row itself, so this needs nothing but the list: a
- * run whose transcripts have been swept, and a run whose detail has not been read
- * because it is not the one selected, both still group under their own launcher.
- *
- * Grouping is by *session*, not by launch: one planner session launches many runs
- * and mints a fresh `launch_id` for each, so keying on the launch id put every run
- * in a group of its own and told an operator nothing. A run whose session cannot be
- * named still gets a group to itself rather than being pooled with unrelated runs
- * under one bucket that would falsely claim they share a planner.
- */
-export function groupRuns(runs: readonly RunSummary[]): RunGroup[] {
-  const groups = new Map<string, RunGroup>();
-  for (const run of runs) {
-    const key = run.launch?.session_key;
-    const id =
-      key !== undefined
-        ? `session:${run.launch?.launcher}:${key}`
-        : `run:${run.run_id}`;
-    const existing = groups.get(id);
-    groups.set(id, {
-      id,
-      launcher: launcherName(run.launch),
-      label: launchLabel(run.launch),
-      runs: [...(existing?.runs ?? []), run],
-    });
-  }
-  return [...groups.values()];
 }
 
 export function readString(
