@@ -1,3 +1,4 @@
+// llmlint: ignore-file[feature_code_colocated] the vocabulary is not this feature's to keep: `apps/dag-ui-e2e` reads the same categories to assert what the timeline plots, and a workspace project may not reach into another's source — so a copy here would be a second declaration of one closed set, and the two would drift silently in the direction of a journey that still passes. What is genuinely this feature's, the glyph and the styling each category is drawn as, is declared in this file and nowhere else; the import and the re-export below are one decision rather than two, which is why this is answered for the module rather than at either site.
 import type { EventCategory } from "@onepipeline-ui/timeline-categories";
 import {
   Circle,
@@ -21,7 +22,6 @@ import {
  * The vocabulary itself is `@onepipeline-ui/timeline-categories`, shared with the
  * journeys that count it; what is declared here is what draws it.
  */
-// llmlint: ignore-block[feature_code_colocated] the vocabulary is not this feature's to keep: `apps/dag-ui-e2e` reads the same categories to assert what the timeline plots, and a workspace project may not reach into another's source — so a copy here would be a second declaration of one closed set, and the two would drift silently in the direction of a journey that still passes. What is genuinely this feature's, the glyph and the styling each category is drawn as, is declared below and nowhere else.
 export {
   DEFAULT_EVENT_CATEGORY,
   EVENT_CATEGORIES,
@@ -29,8 +29,6 @@ export {
   eventCategory,
   eventCategoryLabel,
 } from "@onepipeline-ui/timeline-categories";
-
-// llmlint: ignore-end[feature_code_colocated]
 
 /**
  * The glyph each category is drawn as, keyed by the closed vocabulary above so a
