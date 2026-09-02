@@ -19,6 +19,14 @@ reader iterating on a component should not pay for the fleet. `check` runs both,
 so nothing is spared the journeys except somebody who asked for the unit tier by
 name.
 
+They are targets of this project rather than a project of their own, and that is
+not for want of trying: the journeys import the app's own source — the category
+scheme they hold to — and the Playwright config that chose this run's ports, and
+`@nx/enforce-module-boundaries` refuses both across a project line. A project of
+their own means an npm-scope alias for the app's source and the configs moved in
+beside them, which is a change to how the frontend is imported rather than to how
+it is tested.
+
 `just dag-ui-screens` photographs every surface at every viewport in the matrix.
 It asserts nothing; it is how the operator sees a polish problem at a width
 nobody opens by hand.

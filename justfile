@@ -239,9 +239,10 @@ _crate-test:
 # than which lines of this one ran, and the floor above is measured over the
 # partition that excludes them.
 # The base commit's server against this one — the comparison `test` leaves out.
-# llmlint: ignore[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint`, which is `clippy --all-targets -- -D warnings` and reads this very journey; `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under different flags every time this recipe alternates with `build` or `lint`, which is the cost the edge this target sits behind exists to avoid. `_crate-test` beside it is denied the same way and for the same reason.
+# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on.
 _crate-test-baseline:
     @cargo nextest run --locked -E 'test(/^baseline::/)' --status-level fail --final-status-level fail
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Build the docs with warnings denied (kept in the gate so doc links don't rot).
 _crate-doc:
@@ -259,8 +260,10 @@ _crate-doc:
 # `ensure_baseline::` is *not* excluded: those journeys stub the build and are as
 # platform-sensitive as any other recipe here.
 # Full test suite without coverage instrumentation.
+# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on. The cross-platform legs this recipe is for run `_crate-lint` beside it, so the deny reaches these tests on every platform the gate rules on.
 test-quick:
     @cargo nextest run --locked -E 'not test(/^baseline::/)' --status-level fail
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Drives the compiled binary and the committed npm launcher — never a stub. The
 # whole e2e binary, which is `test` and `test-baseline` together: that split is

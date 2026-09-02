@@ -92,14 +92,22 @@ pub(crate) fn base_commit() -> String {
 /// compare against a commit that is not the one this branch forked from — which
 /// says nothing while looking exactly like a comparison that did.
 fn baseline_binary(base: &str) -> PathBuf {
-    let binary = std::env::var_os(BASELINE_BIN_ENV).map_or_else(
-        || {
-            repository().join(".tools/bin").join(format!(
-                "onepipeline-api-baseline{}",
-                std::env::consts::EXE_SUFFIX
-            ))
-        },
-        PathBuf::from,
+    let provisioned = repository().join(".tools/bin").join(format!(
+        "onepipeline-api-baseline{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let binary =
+        std::env::var_os(BASELINE_BIN_ENV).map_or_else(|| provisioned.clone(), PathBuf::from);
+    // The variable says *which* provisioned binary, not which program: this
+    // journey spawns what it names, and the one path this repository provisions to
+    // is derivable here. So a value that is anything else is refused rather than
+    // run, on the same terms `scripts/ensure-baseline-api.sh` refuses one before
+    // deleting and writing at it — a whole path compared, because a prefix test
+    // admits `.tools/bin/../../something`.
+    assert_eq!(
+        binary, provisioned,
+        "{BASELINE_BIN_ENV} names a path this clone does not provision to; run the \
+         `onepipeline-ui:ensure-baseline` target, which exports the one it writes"
     );
     assert!(
         binary.is_file(),
