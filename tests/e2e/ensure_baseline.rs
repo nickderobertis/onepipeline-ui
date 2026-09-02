@@ -42,7 +42,12 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
 const AT_THE_BASE: &str = "the base commit's tree\n";
 const ON_THE_BRANCH: &str = "the branch's tree\n";
 
-/// The file that carries them.
+/// The file that carries them, at the root of the tree the recipe lays out.
+///
+/// The stand-in `cargo` below spells this name again, in shell, where it cannot
+/// read a constant declared here. The two are one file: move either alone and the
+/// stand-in copies nothing, so the provisioned server says nothing about which
+/// tree it was built from and every journey below reads the same empty answer.
 const MARKER: &str = "which-tree.txt";
 
 fn repo_root() -> PathBuf {

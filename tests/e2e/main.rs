@@ -26,6 +26,7 @@
 //! second CLI — the module that does so names it in its own header, beside the
 //! directive that permits it and the reason it is the narrowest cut available.
 
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] the expense this rule is about is already behind its own edge: compiling the base commit's dependency graph is `onepipeline-ui:ensure-baseline`, which the module header and `AGENTS.md` both record, and which no-ops on a stamp naming the base already built. What is left in this binary is two servers over one runs root and builds nothing. Moving the journeys to a project of their own would not save the gate that build — `just check` would run that project too — it would only stop `just test` being able to require the artifact it reads, which is how a comparison silently starts passing against no baseline at all.
 mod baseline;
 mod cli;
 mod ensure_baseline;
