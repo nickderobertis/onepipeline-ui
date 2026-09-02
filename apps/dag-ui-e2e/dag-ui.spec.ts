@@ -15,6 +15,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -3119,8 +3120,25 @@ test("refuses a change no recorded run could have held", () => {
   // it before it reads or removes anything under it — `/etc` is still here.
   const elsewhere = refusedInvocation(["--settle-dashboard"], "/etc");
   expect(elsewhere.status).toBe(2);
-  expect(elsewhere.stderr).toContain("is not a directory under");
+  expect(elsewhere.stderr).toContain("directory");
   expect(existsSync("/etc/hosts")).toBe(true);
+
+  // And the temp root is shared with every other program on this host, so being
+  // under it is not enough either: a directory there that this tier did not make
+  // is somebody's, and one *inside* a workspace would let an argument delete
+  // within another run's. Both are refused with the run's own files still there.
+  const somebodyElses = mkdtempSync(join(tmpdir(), "not-this-tiers-"));
+  writeFileSync(join(somebodyElses, "theirs.txt"), "theirs\n");
+  const outsider = refusedInvocation(["--settle-dashboard"], somebodyElses);
+  expect(outsider.status).toBe(2);
+  expect(outsider.stderr).toContain("dag-ui-e2e-");
+  expect(existsSync(join(somebodyElses, "theirs.txt"))).toBe(true);
+
+  const nested = join(FIXTURE_WORKSPACE, "runs");
+  const under = refusedInvocation(["--settle-dashboard"], nested);
+  expect(under.status).toBe(2);
+  expect(existsSync(nested)).toBe(true);
+  rmSync(somebodyElses, { recursive: true, force: true });
 });
 
 /**

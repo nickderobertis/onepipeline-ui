@@ -24,7 +24,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -36,6 +36,16 @@ import {
   removeRun,
   settleDashboard,
 } from "./runs.mjs";
+
+/**
+ * What every directory this script may delete is named with.
+ *
+ * `playwright.config.ts` and the journeys make theirs with
+ * `mkdtempSync(join(tmpdir(), "dag-ui-e2e-…"))`, so this is the whole of what a
+ * `--workspace` may be — and the check below is what keeps a recursive delete
+ * inside this tier's own scratch rather than anywhere in a shared temp root.
+ */
+const WORKSPACE_PREFIX = "dag-ui-e2e-";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -333,16 +343,22 @@ if (args.stall) {
   // And one this script is allowed to own. Absolute is not enough in front of a
   // recursive delete: `serve` removes the whole directory before rebuilding it,
   // so an absolute path that is somebody else's — a home directory, a source
-  // tree, `/` — is exactly the argument that must not be honoured. The temp root
-  // is the bound because `playwright.config.ts` makes every workspace with
-  // `mkdtempSync(join(tmpdir(), …))`, so nothing this may delete is ever outside
-  // it, and the temp root itself is not a workspace either.
+  // tree, `/` — is exactly the argument that must not be honoured.
+  //
+  // The bound is this tier's own directories rather than the temp root, which is
+  // shared with every other program on the host: a workspace is a *direct child*
+  // of the temp root named `dag-ui-e2e-…`, which is what every caller makes with
+  // `mkdtempSync`. Anything else under `/tmp` belongs to somebody, and a nested
+  // path would let one caller's argument delete inside another's workspace.
   const workspace = resolve(args.workspace);
   const temporary = resolve(tmpdir());
-  if (workspace === temporary || !workspace.startsWith(`${temporary}${sep}`)) {
+  const own =
+    dirname(workspace) === temporary &&
+    basename(workspace).startsWith(WORKSPACE_PREFIX);
+  if (!own) {
     die(
-      `'${args.workspace}' is not a directory under ${temporary}`,
-      "pass --workspace a fixture directory inside the temp root, as playwright.config.ts creates it",
+      `'${args.workspace}' is not a ${join(temporary, `${WORKSPACE_PREFIX}*`)} directory`,
+      "pass --workspace a fixture directory this tier made, as playwright.config.ts and the journeys create them",
     );
   }
   const runsRoot = join(workspace, "runs");
