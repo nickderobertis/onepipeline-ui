@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { defineConfig } from "@playwright/test";
 import { z } from "zod";
 
@@ -23,6 +23,18 @@ import { z } from "zod";
 const LOOPBACK = "127.0.0.1";
 
 /**
+ * The app these journeys drive, which is where the Vite origins below run from:
+ * that is where its `vite.config.ts` and the bundle `dag-ui:build` produced are.
+ *
+ * The fixture servers are named from this project instead, because the script
+ * they run belongs to the journeys rather than to the app.
+ */
+const APP = join(import.meta.dirname, "../dag-ui");
+
+/** The fixture server this project owns, named from this file. */
+const SERVE_FIXTURE = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
+
+/**
  * Everything one run of this tier must not share with another: its ports and the
  * fixture directory its servers build.
  *
@@ -39,6 +51,27 @@ const LOOPBACK = "127.0.0.1";
  * reads that back instead of choosing again.
  */
 const port = z.number().int().min(1).max(65535);
+/**
+ * The fixture directory, confined to the shape this tier makes for itself.
+ *
+ * `e2e/global-teardown.ts` removes this path recursively, and it arrives through
+ * the environment — which every worker inherits and anything else could set. A
+ * length check would let one that named a checkout be deleted by the run that
+ * read it, so what is accepted is what `mkdtempSync` below produces and nothing
+ * else: a directory of this host's temporary directory, named by this tier.
+ */
+const FIXTURE_PREFIX = join(tmpdir(), "dag-ui-e2e-fixture-");
+const fixtureWorkspace = z
+  .string()
+  .startsWith(
+    FIXTURE_PREFIX,
+    `a fixture workspace is a ${FIXTURE_PREFIX}* directory`,
+  )
+  .refine((path) => !path.slice(FIXTURE_PREFIX.length).includes(sep), {
+    message:
+      "a fixture workspace is that directory itself, not a path under it",
+  });
+
 const sessionSchema = z.object({
   api: port,
   ui: port,
@@ -46,7 +79,7 @@ const sessionSchema = z.object({
   offlineUi: port,
   stalledApi: port,
   stalledUi: port,
-  workspace: z.string().min(1),
+  workspace: fixtureWorkspace,
 });
 type Session = z.infer<typeof sessionSchema>;
 
@@ -96,7 +129,7 @@ function chooseSession(): Session {
     offlineUi,
     stalledApi,
     stalledUi,
-    workspace: mkdtempSync(join(tmpdir(), "dag-ui-e2e-fixture-")),
+    workspace: mkdtempSync(FIXTURE_PREFIX),
   };
 }
 
@@ -113,12 +146,12 @@ function currentSession(): Session {
 const session = currentSession();
 
 /**
- * A second UI origin whose proxy points at a port that refuses every connection. It is
- * how the unreachable-API journey reaches the real failure — a real browser making real
- * requests that really fail — without mocking anything. The stall server below holds
- * that port bound but unlistened, which is what makes it refuse: merely leaving a port
- * free would let a concurrent run's API server take it, and this journey would quietly
- * be driving a reachable API.
+ * A second UI origin whose proxy points at a port where every connection is dropped
+ * as it arrives. It is how the unreachable-API journey reaches the real failure — a
+ * real browser making real requests that really fail — without mocking anything. The
+ * stall server below holds that port for the run rather than leaving it free, because
+ * a free port is one a concurrent run's API server could take, and this journey would
+ * quietly be driving a reachable API.
  */
 export const OFFLINE_UI_URL = `http://${LOOPBACK}:${session.offlineUi}`;
 /**
@@ -136,12 +169,15 @@ export const STALLED_UI_URL = `http://${LOOPBACK}:${session.stalledUi}`;
 export const FIXTURE_WORKSPACE = session.workspace;
 
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: ".",
   // The gallery lives beside the journeys because it drives the same surfaces against
   // the same stack, but it asserts nothing and writes images; `screenshots.config.ts`
   // selects it, and `just dag-ui-screens` is when it runs.
-  testIgnore: "**/*.screens.spec.ts",
-  globalTeardown: "./e2e/global-teardown.ts",
+  // The gallery asserts nothing and `isolation/` runs *this* config rather than
+  // being run by it; both would otherwise be selected, since the journeys and
+  // they now share a directory.
+  testIgnore: ["**/*.screens.spec.ts", "isolation/**"],
+  globalTeardown: "./global-teardown.ts",
   /**
    * Budgeted for this host rather than inherited. Every wait here crosses the browser,
    * the dev server, the axum server and a disk read, and this host runs live agent dispatches
@@ -162,8 +198,10 @@ export default defineConfig({
   /**
    * Every timeout below is a *readiness* budget: how long a process may take to bind
    * its port, not how long it may take to exist. So no command here may build
-   * anything. The read API the fixture server serves through is built by
-   * `dag-ui:build-api-server`, which `dag-ui:test` and `dag-ui:bootstrap` depend on;
+   * anything. That is why the three UI origins are `vite preview` over a bundle
+   * `dag-ui:build` already produced rather than a `vite build` of their own, and
+   * why the read API the fixture server serves through is built by
+   * `dag-ui:build-api-server`. `dag-ui-e2e:test` depends on both of them, and
    * `serve-fixture.mjs` finds that binary and refuses in milliseconds when it is
    * absent. A compile here is a wait whose length is the runner's and whatever else
    * holds the cargo lock, and Playwright can only report it as a server that would
@@ -181,7 +219,8 @@ export default defineConfig({
   webServer: [
     {
       name: "fixture-api",
-      command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
+      cwd: APP,
+      command: `node ${SERVE_FIXTURE} --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
       url: `http://${LOOPBACK}:${session.api}/healthz`,
       reuseExistingServer: false,
       stdout: "pipe",
@@ -189,7 +228,8 @@ export default defineConfig({
     },
     {
       name: "ui",
-      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.ui} --strictPort`,
+      cwd: APP,
+      command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.ui} --strictPort`,
       url: `http://${LOOPBACK}:${session.ui}`,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.api}` },
       reuseExistingServer: false,
@@ -198,7 +238,8 @@ export default defineConfig({
     },
     {
       name: "stalled-api",
-      command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
+      cwd: APP,
+      command: `node ${SERVE_FIXTURE} --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
       /**
        * Readiness is what this server says, because it is the one server here that
        * answers nothing when it is working — an accepted connection is all a
@@ -221,7 +262,8 @@ export default defineConfig({
     },
     {
       name: "stalled-ui",
-      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.stalledUi} --strictPort`,
+      cwd: APP,
+      command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.stalledUi} --strictPort`,
       url: STALLED_UI_URL,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.stalledApi}` },
       reuseExistingServer: false,
@@ -230,7 +272,8 @@ export default defineConfig({
     },
     {
       name: "offline-ui",
-      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.offlineUi} --strictPort`,
+      cwd: APP,
+      command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.offlineUi} --strictPort`,
       url: OFFLINE_UI_URL,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.offlineApi}` },
       reuseExistingServer: false,

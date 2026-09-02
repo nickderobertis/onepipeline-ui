@@ -88,6 +88,24 @@ A new project whose tests start the read API joins that dependency. Reaching the
 recipe from more places must never soften it: falling back to a build on PATH is
 the failure the pin exists to prevent.
 
+**`.tools/` holds a second clone-local binary, and it is the server this branch
+forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
+served is served now — a question no fixture on a branch can answer, because a
+fixture is editable by the change it is meant to hold. Compiling another commit
+of this repository is the expensive half of that, so it lives behind
+`onepipeline-ui:ensure-baseline` rather than inside the suite: an unrelated change
+to a workflow, a script or a document must not rebuild a second server. **The
+journeys sit behind an edge of their own for the same reason**, so that nothing
+but the comparison pays for the comparison. Splitting a tier out that way is what
+lets it run *nowhere*, and caching one is what lets it replay a verdict about a
+commit this branch no longer forks from — no file says which commit that is, and
+no reading of the payload can tell you it was the wrong one. The binary
+is stamped with the commit it was built from and the journeys refuse a stamp that
+names anything but this branch's base, because a stale server answers every
+request and reports that nothing was dropped between a pair it was never asked
+about. The cross-platform legs skip that comparison on the terms they skip
+coverage — it is a property of the payload, not of the platform.
+
 **`oneagentgraph` is not pinned here: the SDK's requirement decides it and the
 lock follows.** Cargo unifies one version of it across this crate and
 `onepipeline`, and that library has shipped a breaking field in a *patch*
@@ -215,6 +233,9 @@ fans one uniformly-named target across all of them.
 
 - The gate is strict: no warnings-only mode anywhere. A diagnostic is an error or
   a suppression with a written reason at the narrowest scope the tool allows.
+  Every tool is told so in the way it needs telling: clippy takes `-D warnings`,
+  rustdoc `RUSTDOCFLAGS`, and ESLint `--max-warnings 0`, which is the one of the
+  three that otherwise exits `0` with its findings printed.
 - **Coverage is enforced at 95% line coverage**; the gate fails below it. That
   is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend is held
   to its journeys rather than to a number.

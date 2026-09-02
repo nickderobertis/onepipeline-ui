@@ -1,6 +1,17 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
+/**
+ * The config these runs launch, named absolutely.
+ *
+ * Playwright resolves a relative `--config` against the nearest `package.json`
+ * rather than against the working directory, so a bare `playwright.config.ts`
+ * here is looked for one directory above this project and found nowhere.
+ */
+const TIER_CONFIG = join(import.meta.dirname, "..", "playwright.config.ts");
 
 /**
  * What one run of the browser tier owes another, proven by running the tier itself.
@@ -42,7 +53,7 @@ function runTier(...extra: string[]): Promise<TierRun> {
         "playwright",
         "test",
         "--config",
-        "playwright.config.ts",
+        TIER_CONFIG,
         "--grep",
         JOURNEYS,
         ...extra,

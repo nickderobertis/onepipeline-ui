@@ -12,7 +12,7 @@ import { defineConfig } from "@playwright/test";
  * launched would reuse it instead of choosing their own.
  */
 export default defineConfig({
-  testDir: "./e2e-isolation",
+  testDir: "./isolation",
   workers: 1,
   // Two whole runs of the browser tier, each starting five servers of its own.
   timeout: 900_000,

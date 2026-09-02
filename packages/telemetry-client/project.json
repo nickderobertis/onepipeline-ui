@@ -11,7 +11,7 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "npx biome check packages/telemetry-client && npx eslint packages/telemetry-client"
+      "command": "npx biome check packages/telemetry-client && npx eslint --max-warnings 0 packages/telemetry-client"
     },
     "test": {
       "command": "npx vitest run --root packages/telemetry-client"

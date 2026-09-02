@@ -506,6 +506,37 @@ fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
     );
 }
 
+/// Every sibling vocabulary this crate reads is the release the pinned engine
+/// itself reads it through.
+///
+/// The engine is pinned exactly and each sibling is not, for the reason
+/// `src/AGENTS.md` gives: a requirement string cannot say "whatever the SDK
+/// resolves", and pinning one here would be a second opinion about a version the
+/// SDK's own graph decides. What can say it is the lockfile, which records both
+/// edges — so this reads them rather than restating either in prose.
+///
+/// It matters in both directions and the second is the one that bites. This crate
+/// *reads* records these libraries write, and `tests/contract.rs` holds its copies
+/// of their vocabularies to their own declarations: a suite linking a different
+/// release than the engine does would gate this crate's reading against a
+/// vocabulary no record on disk was ever written by, and pass. Dev-dependencies
+/// are therefore held to exactly the same rule as dependencies — for two of these
+/// three, the dev edge is the only one there is.
+#[test]
+fn every_sibling_is_the_release_the_pinned_engine_resolves() {
+    let lock = read("Cargo.lock");
+    for sibling in ["oneagentgraph", "onejudge", "onevcs"] {
+        let ours = locked_dependency(&lock, "onepipeline-ui", sibling);
+        let theirs = locked_dependency(&lock, "onepipeline", sibling);
+        assert_eq!(
+            ours, theirs,
+            "this crate resolves {sibling} {ours} and the pinned onepipeline resolves \
+             {theirs}, so the vocabulary the suite gates against is not the one the records \
+             reaching this crate were written by"
+        );
+    }
+}
+
 /// The oneharness history store is read by linking its library, never by
 /// spawning its CLI.
 ///
@@ -1425,4 +1456,71 @@ fn the_published_smoke_is_triggered_by_the_workflow_that_actually_releases() {
          this repository is named `{released_by}` — a `workflow_run` that matches \
          nothing never runs and never says so"
     );
+}
+
+/// Every workspace sibling is depended on the way `npm ci` here accepts.
+///
+/// npm's own `workspace:` protocol is the obvious spelling of "the sibling in
+/// this repository", and it is the one thing these manifests may not use: npm
+/// 11.17.0 refuses it outright — `npm install` and `npm ci` both exit
+/// `EUNSUPPORTEDPROTOCOL, Unsupported URL Type "workspace:"`, measured from a
+/// manifest and a lockfile regenerated together — and `npm ci` is what
+/// `scripts/workspace-install.sh` runs, in a fresh clone, ahead of every tier.
+/// npm also normalises the protocol out of `package-lock.json`, so a manifest
+/// carrying it and a lockfile that cannot are drift by construction.
+///
+/// A `*` beside a `workspaces` entry already means the sibling and nothing else:
+/// the root manifest lists these directories, so npm links them rather than
+/// resolving a registry range. What this refuses is a spelling that would install
+/// nowhere, and it is a test rather than a comment because a comment would be
+/// read after the clone that failed.
+#[test]
+fn no_manifest_names_a_sibling_with_a_protocol_this_npm_refuses() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifests = ["package.json", "apps/dag-ui/package.json"]
+        .into_iter()
+        .map(PathBuf::from)
+        .chain(
+            ["apps", "packages"]
+                .into_iter()
+                .flat_map(|directory| {
+                    fs::read_dir(root.join(directory))
+                        .unwrap_or_else(|error| panic!("read {directory}: {error}"))
+                        .filter_map(Result::ok)
+                        .map(move |entry| {
+                            Path::new(directory)
+                                .join(entry.file_name())
+                                .join("package.json")
+                        })
+                })
+                .filter(|manifest| root.join(manifest).is_file()),
+        )
+        .collect::<BTreeSet<_>>();
+    assert!(
+        manifests.len() > 2,
+        "no workspace manifests were found, so this gate is watching nothing"
+    );
+
+    for manifest in manifests {
+        let read = fs::read_to_string(root.join(&manifest))
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()));
+        let parsed: serde_json::Value = serde_json::from_str(&read)
+            .unwrap_or_else(|error| panic!("parse {}: {error}", manifest.display()));
+        for field in ["dependencies", "devDependencies"] {
+            let Some(declared) = parsed[field].as_object() else {
+                continue;
+            };
+            for (name, requirement) in declared {
+                assert!(
+                    !requirement
+                        .as_str()
+                        .is_some_and(|spelled| spelled.starts_with("workspace:")),
+                    "{} depends on {name} as {requirement}, and `npm ci` refuses the \
+                     `workspace:` protocol with EUNSUPPORTEDPROTOCOL — a clone this \
+                     repository provisions would install nothing",
+                    manifest.display()
+                );
+            }
+        }
+    }
 }

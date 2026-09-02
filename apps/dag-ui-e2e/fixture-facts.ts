@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { FIXTURE_WORKSPACE } from "../playwright.config";
+import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
  * What the fixture wrote, read from the file it publishes beside its runs.

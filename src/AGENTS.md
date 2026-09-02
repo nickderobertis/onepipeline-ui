@@ -15,6 +15,12 @@ here — until it lands, this list is the record of what an agent reading the CL
 cannot currently see that a human in the UI can. Do not add to it silently:
 anything new here is a proposal to make upstream first.
 
+- **A plan document a consumer can load.** `onepipeline` reads its plans out of
+  the onetaskgraph store now and no longer publishes a loader, but `start` still
+  writes `plan.json` and `RunPaths::plan()` still names it — so `payload::plan_of`
+  deserializes that file itself, for the run whose journal this host cannot fold.
+  The *schema* is still the SDK's `plan::Plan`; only the read is this crate's.
+  Republishing a loader beside the path is the proposal.
 - **The eight-way timing breakdown, and the per-party usage.** Both are the
   SDK's own fold and neither is recomputed here — but its `telemetry` module is
   private, so the document is read through `onepipeline telemetry <run>` rather
@@ -159,10 +165,12 @@ Two consequences worth stating because they look like oversights:
 ## What the siblings record and this crate reads
 
 `onevcs` and `oneagentgraph` are independent tools with general integration hooks
-only — neither knows this stack exists — so what they record is read as the wire
-strings they write, quoted in `payload::vcs` and `payload::graph` beside the
-payload each one carries. Those two modules are the inventory; do not restate it
-here.
+only — neither knows this stack exists — so what they record is quoted in
+`payload::vcs` and `payload::graph` beside the payload each one carries. Those two
+modules are the inventory; do not restate it here. Both libraries declare their
+vocabularies to a consumer at the versions linked here, so those copies are held
+to the producers' own types by `tests/contract.rs` rather than to a second reading
+of the wire — with the two exceptions each module names where it declares them.
 
 `onepipeline`'s own vocabulary is an enum this crate imports, with one exception:
 the compiled operations an `edit-committed` carries. That library declares
@@ -180,11 +188,23 @@ genuinely undeclared to any consumer, the fixture — written in the records tha
 library emits — is the whole of the gate, and the constant says so where it is
 declared.
 
+**A deleted variant is the one case a moved pin makes worse, and `gate-verdict` is
+it.** `onevcs` states the rule this crate depends on — a kind is retired by keeping
+it recognised and inert, never by deleting it — and records that `gate-started` and
+`gate-verdict` went with the host-run gate in its 0.11.0 before that rule was
+written down. So `vcs::GATE_VERDICT` is read here with no declaration behind it and
+will never have one again, while the runs that recorded one are still runs an
+operator opens. It is the only name in `payload::vcs` on those terms, and the
+suppression beside it says so.
+
 **Gate a copied vocabulary against the type that writes it, never against one
-that merely declares it.** `oneagentgraph` declares an `event::Usage` it never
-writes — it relays a settling member's usage copied verbatim out of the onejudge
-report — so `payload::graph`'s usage keys are `onejudge::Usage`'s. Each exception
-in that module says so where it is declared.
+that merely declares it.** `oneagentgraph` used to declare an `event::Usage` it
+never wrote — it relays a settling member's usage copied verbatim out of the
+onejudge report — and gating this crate's copy against that declared-but-unwritten
+type is what let six keys drift until every served cost and token count read
+`null`. Its 0.3 spells that type the way the wire always did, so the two
+declarations now agree and `tests/contract.rs` asserts both; the rule stands
+whatever they happen to say, because the next one to disagree will do it quietly.
 
 **`payload::vcs::SILENT_ON_PUBLICATION` is a negative list on purpose.** A
 publication span opens at the first relayed record that is not one of them.
@@ -230,11 +250,14 @@ the journal is not a listing of what a dispatch had. Every turn the report recor
 is a row.
 
 **And where the run holds a report, a record that numbers no turn is not one.** The
-single `turn-completed` `oneagentgraph` 0.2 publishes per *dispatch* carries the
+single `turn-completed` `oneagentgraph` 0.2 published per *dispatch* carries the
 member's whole total; beside the report's turns it is a turn the report does not
 have, billed for all of them. Its figures are the **run's** usage and are served
 there. Where the run holds no report it is the only account of that dispatch and is
-served as the row it always was.
+served as the row it always was. That producer has since corrected itself — 0.3
+numbers every `turn-completed` and names the party that took it — so the rule now
+reads the records already on disk rather than the ones being written, and it is not
+retired for that: those runs are still opened.
 
 Four joins, each the one the obvious alternative gets wrong:
 
@@ -298,12 +321,14 @@ else: `oneagentgraph` 0.2 emits one `turn-completed` per *dispatch*, from
 `settle_report`, carrying the member's whole total rather than any turn's, so
 closing a turn by proximity would bill one turn for all of them.
 
-**This vocabulary stands where the `onevcs` one does: the wire is the only
-declaration a consumer can reach.** The `oneagentgraph` linked here is whichever
-one the pinned `onepipeline` resolves, and until that pin moves it declares no
-type any of these names can be reconciled against — which is what the suppression
-above `graph::TURN_MESSAGE` says, and the only reason a suppression is allowed to
-stand there. Moving the SDK pin is the one thing that retires it.
+**This vocabulary is declared, and is gated against its declaration.** The
+`oneagentgraph` linked here is whichever one the pinned `onepipeline` resolves, and
+0.3 publishes `TurnStarted`, `TurnMessage`, `TurnCompleted` and `TurnActivity` as
+types — so every name in `payload::graph` but one is a field or a variant
+`tests/contract.rs` holds the copy to. The one that is not is `TOOL_RESULT`: a
+call's kind is the producing harness's own word, served through verbatim, so that
+library types the field as a `String` and closes only the observation's spelling
+inline. Moving the SDK pin is what retired the rest, and this is what it left.
 
 **A fixture keeps writing the older shape on purpose.** A `turn-started` carrying
 a number and nothing else is what every run recorded before that correction holds,

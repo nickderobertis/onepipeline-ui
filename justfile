@@ -42,6 +42,12 @@ onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^
 sibling-exe := if os_family() == "windows" { ".exe" } else { "" }
 export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onepipeline" + sibling-exe
 
+# The server this branch forked from, which `tests/e2e/baseline.rs` serves one
+# runs root through beside this build's. Clone-local for the reason the sibling
+# above is: it is built from another commit of *this* repository rather than
+# installed, so nothing on PATH can be it.
+export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
+
 # List available recipes.
 default:
     @just --list
@@ -81,6 +87,17 @@ _ensure-sibling:
       || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
       || { echo "cannot provision onepipeline {{onepipeline-version}} — the read API serves no timing without it" >&2; exit 1; }
 
+# The base commit's own server, for the journeys that compare what this build
+# serves against what it served. Behind its own Nx target rather than inside the
+# suite, because the comparison is cheap and compiling another commit's whole
+# dependency graph is not: a change to a workflow, a script or a document must
+# not make the root project's tests build a second server.
+#
+# Idempotent on `_ensure-sibling`'s terms — the binary is stamped with the commit
+# it was built from — and the reasoning is in the script.
+_ensure-baseline:
+    @bash scripts/ensure-baseline-api.sh
+
 # These are test runners, not rules: their version cannot change the gate's
 # verdict, so both here and CI take the latest rather than keeping two pins that
 # drift apart.
@@ -94,7 +111,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint typecheck build test doc
+check: fmt-check lint typecheck build test test-baseline doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -158,9 +175,20 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Every project's test suite; the crate's enforces its coverage floor.
+# Every project's own test target: the crate's suite under its coverage floor, the
+# frontend's components, and the browser journeys, which are a project of their
+# own. `test-baseline` is the one tier outside this, because it is the one that
+# needs another commit of this repository compiled first.
 test:
     @bash scripts/nx.sh run-many -t test
+
+# Only the crate declares this target, so this fans out to one project. It is a
+# recipe of its own rather than a step inside `test` because provisioning the base
+# commit's server is what it costs, and a reader iterating on the crate's own tests
+# should not pay it — `check` and `gate` run both.
+# The baseline comparison, which needs the base commit's server provisioned.
+test-baseline:
+    @bash scripts/nx.sh run-many -t test-baseline
 
 # Build every project's docs with warnings denied.
 doc:
@@ -180,11 +208,34 @@ _crate-lint:
 
 # 95% line coverage is the gate; lower it only with a documented reason in
 # AGENTS.md.
-# The crate's full test suite (contract + e2e) with coverage enforced.
+#
+# The baseline comparison is the one thing this excludes, and `_crate-test-baseline`
+# below is where it runs. The two filters partition the suite — this one is `not`
+# what that one is — so every test runs under exactly one of them and the floor is
+# still measured over everything this target executes. `tests/e2e/ensure_baseline.rs`
+# holds both recipes to that partition, because a filter that drifted here would
+# leave the comparison running nowhere rather than failing.
+# The crate's test suite (contract + e2e) with coverage enforced, less the baseline.
 _crate-test:
     @cargo llvm-cov nextest --locked --fail-under-lines 95 \
+      -E 'not test(/^baseline::/)' \
       --status-level fail --final-status-level fail \
       || { echo "tests failed, or coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
+
+# The baseline comparison, behind an edge of its own because it is the one tier
+# here that cannot run until another commit of this repository has been compiled.
+# `onepipeline-ui:test-baseline` is what declares that dependency; `check` runs
+# this target beside `test`, so the gate's verdict still covers it and only a
+# `test` run on its own is spared the provisioning.
+#
+# No coverage instrumentation: these journeys ask what two *binaries* serve rather
+# than which lines of this one ran, and the floor above is measured over the
+# partition that excludes them.
+# The base commit's server against this one — the comparison `test` leaves out.
+# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on.
+_crate-test-baseline:
+    @cargo nextest run --locked -E 'test(/^baseline::/)' --status-level fail --final-status-level fail
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Build the docs with warnings denied (kept in the gate so doc links don't rot).
 _crate-doc:
@@ -192,13 +243,27 @@ _crate-doc:
 
 # Coverage instrumentation is measured on Linux only, so the cross-platform CI
 # legs run the same suite through this instead of `test`.
+#
+# The baseline comparison is excluded on the same terms coverage is. It asks
+# whether *this crate* still serves what the commit it forked from served, which
+# is a property of the payload rather than of the platform — and paying for a
+# whole second server on each of the two cross legs would triple what the gate
+# spends to learn one thing. The Linux `test-baseline` tier runs it, behind the
+# `onepipeline-ui:ensure-baseline` target that provisions what it serves through.
+# `ensure_baseline::` is *not* excluded: those journeys stub the build and are as
+# platform-sensitive as any other recipe here.
 # Full test suite without coverage instrumentation.
+# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on. The cross-platform legs this recipe is for run `_crate-lint` beside it, so the deny reaches these tests on every platform the gate rules on.
 test-quick:
-    @cargo nextest run --locked --status-level fail
+    @cargo nextest run --locked -E 'not test(/^baseline::/)' --status-level fail
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
-# Drives the compiled binary and the committed npm launcher — never a stub.
-# The end-to-end journeys in isolation (also run by `test`/`check`).
-test-e2e:
+# Drives the compiled binary and the committed npm launcher — never a stub. The
+# whole e2e binary, which is `test` and `test-baseline` together: that split is
+# about what the gate provisions for which tier, and reaching for the journeys
+# themselves should not have to know it.
+# The end-to-end journeys in isolation (all of them, unlike `test`).
+test-e2e: _ensure-baseline
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.

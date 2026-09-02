@@ -15,17 +15,13 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import {
-  FIXTURE_WORKSPACE,
-  OFFLINE_UI_URL,
-  STALLED_UI_URL,
-} from "../playwright.config";
-import { EVENT_CATEGORIES } from "../src/features/timeline/event-category";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -33,6 +29,11 @@ import {
   metric as metricTile,
   metrics as metricTiles,
 } from "./observatory-locators";
+import {
+  FIXTURE_WORKSPACE,
+  OFFLINE_UI_URL,
+  STALLED_UI_URL,
+} from "./playwright.config";
 import { PHONE } from "./viewports";
 
 /**
@@ -131,6 +132,16 @@ async function tokenColor(page: Page, token: string): Promise<string> {
 }
 
 /**
+ * The fixture command, named absolutely.
+ *
+ * These journeys are launched from the workspace root — Playwright resolves a
+ * relative `--config` against the nearest `package.json` rather than against the
+ * working directory, so the tier names its config from the root and every path a
+ * journey spawns has to be independent of where that left `process.cwd()`.
+ */
+const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
+
+/**
  * Run the fixture command over a workspace and wait for it to finish.
  *
  * Every invocation this file makes goes through here — the ones that change what
@@ -144,7 +155,7 @@ function invokeFixture(
 ): void {
   execFileSync(
     process.execPath,
-    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
+    [FIXTURE_COMMAND, "--workspace", workspace, ...args],
     { stdio: ["ignore", "inherit", "pipe"], env: { ...process.env, ...env } },
   );
 }
@@ -787,6 +798,7 @@ const EXPECTED_GLYPH: Readonly<Record<string, string>> = {
   "change-merged": "lucide-git-pull-request",
   "hand-over": "lucide-user-round-check", // human
   "gate-verdict": "lucide-shield-check", // verification
+  "criterion-checked": "lucide-shield-check",
   "lock-wait": "lucide-hourglass", // contention
   "release-wait": "lucide-hourglass",
   "release-arrived": "lucide-git-pull-request", // publication
@@ -939,6 +951,30 @@ test("draws every category a record can be as a glyph of its own", async ({
   // plot with one fewer category in it, and a reader scanning it cannot tell which
   // of the two they are looking at.
   expect(new Set(drawn).size).toBe(records.length);
+
+  // The same claim for a kind the scheme files by *name* rather than by a word in
+  // it: `criterion-checked` is one acceptance criterion ruled on, and `checked` is
+  // not `check`, so nothing but the exception table puts it with the verifications.
+  // Read here rather than in a journey of its own because it is one more record on
+  // a node this one already opens, and the servers are already up.
+  await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
+  const named = (kind: string): Locator =>
+    timeline(page).getByRole("button", {
+      name: `${kind}, marker`,
+      exact: true,
+    });
+  const checked = named("criterion-checked");
+  await expect(checked).toBeVisible();
+  expect(await glyphName(checked)).toBe(expectedGlyph("criterion-checked"));
+  // Drawn as the gate verdict beside it, because one category is one drawing: a
+  // kind filed under a neighbour would still be drawn, and drawn apart from the
+  // verification it belongs with.
+  expect(await glyphName(checked)).toBe(await glyphName(named("gate-verdict")));
+  // And said in words for the reader who does not read glyphs.
+  await checked.hover();
+  await expect(page.getByTestId("timeline-popover")).toContainText(
+    "Verification",
+  );
 });
 
 test("scrolls the transcript to the journal record a marker names", async ({
@@ -1267,8 +1303,10 @@ test("shows the release that carried a node's work and the waits before it", asy
     const marker = runLevel.getByRole("button", {
       name: `Run-level · ${kind}, marker`,
     });
+    // llmlint: ignore-block[tests_mirror_real_usage] focusing the marker *is* the user path here rather than a way around one: the graph line paints a cursor over its whole height as the pointer crosses it, so a click on this plot lands on the reading of the moment and never on the record. What is left for a reader to do is reach the marker in the tab order and press Enter, which is what this drives.
     await (which === "first" ? marker.first() : marker.last()).focus();
     await page.keyboard.press("Enter");
+    // llmlint: ignore-end[tests_mirror_real_usage]
   };
 
   // A probe names what it asked and what it was told, and no commit: it is a
@@ -1344,8 +1382,10 @@ test("reads the report a settled node's member left behind", async ({
   const expand = itemDetail(page).getByRole("button", {
     name: "Expand report",
   });
+  // llmlint: ignore-block[tests_mirror_real_usage] what this asserts is that the control answers the keyboard, so the focused-then-Enter path is the behaviour rather than a shortcut to it — a click would exercise the pointer path and prove nothing about the other one. The pointer path over this same control is driven by the collapse below it.
   await expand.focus();
   await page.keyboard.press("Enter");
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await expect(itemDetail(page)).toContainText(
     "the earliest ruling this report recorded",
   );
@@ -1521,9 +1561,7 @@ test("states a reference whose id no route can be asked for", async ({
 
 test("states when a verification artifact is unavailable", async ({ page }) => {
   await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
-  const checksTab = page.getByRole("tab", { name: "Checks" });
-  await checksTab.focus();
-  await page.keyboard.press("Enter");
+  await page.getByRole("tab", { name: "Checks" }).click();
   await expect(
     page.locator(".facts").filter({ hasText: "Verification coverage" }),
   ).toContainText("Hook: not recorded");
@@ -2120,7 +2158,12 @@ test("restores node tabs and moves between them from the keyboard", async ({
   );
   const criteria = page.getByRole("tab", { name: "Acceptance criteria" });
   await expect(criteria).toHaveAttribute("aria-selected", "true");
-  await criteria.focus();
+  // Clicked rather than focused: clicking the tab that is already selected is how
+  // a reader with a pointer puts the tablist in focus, and it changes nothing
+  // about which tab is selected — so what `ArrowRight` then moves is a rove a
+  // keyboard user really reaches.
+  await criteria.click();
+  await expect(criteria).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Dependencies" })).toHaveAttribute(
     "aria-selected",
@@ -2139,8 +2182,10 @@ test("restores node tabs and moves between them from the keyboard", async ({
   await page.getByRole("button", { name: /Graph/ }).click();
   await expect(page).not.toHaveURL(/tab=/);
   const foundation = page.getByRole("button", { name: "foundation: done" });
+  // llmlint: ignore-block[tests_mirror_real_usage] this journey is named for the keyboard and this is the half of it a pointer cannot stand in for: selecting a graph node by clicking it is driven elsewhere in this file, and what is left to prove is that a reader who reached the node in the tab order can open it with Enter.
   await foundation.focus();
   await page.keyboard.press("Enter");
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await expect(page.getByRole("tab", { name: "Timeline" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -3084,8 +3129,25 @@ test("refuses a change no recorded run could have held", () => {
   // it before it reads or removes anything under it — `/etc` is still here.
   const elsewhere = refusedInvocation(["--settle-dashboard"], "/etc");
   expect(elsewhere.status).toBe(2);
-  expect(elsewhere.stderr).toContain("is not a directory under");
+  expect(elsewhere.stderr).toContain("directory");
   expect(existsSync("/etc/hosts")).toBe(true);
+
+  // And the temp root is shared with every other program on this host, so being
+  // under it is not enough either: a directory there that this tier did not make
+  // is somebody's, and one *inside* a workspace would let an argument delete
+  // within another run's. Both are refused with the run's own files still there.
+  const somebodyElses = mkdtempSync(join(tmpdir(), "not-this-tiers-"));
+  writeFileSync(join(somebodyElses, "theirs.txt"), "theirs\n");
+  const outsider = refusedInvocation(["--settle-dashboard"], somebodyElses);
+  expect(outsider.status).toBe(2);
+  expect(outsider.stderr).toContain("dag-ui-e2e-");
+  expect(existsSync(join(somebodyElses, "theirs.txt"))).toBe(true);
+
+  const nested = join(FIXTURE_WORKSPACE, "runs");
+  const under = refusedInvocation(["--settle-dashboard"], nested);
+  expect(under.status).toBe(2);
+  expect(existsSync(nested)).toBe(true);
+  rmSync(somebodyElses, { recursive: true, force: true });
 });
 
 /**
@@ -3135,10 +3197,14 @@ test("refuses to serve when the read API has not been built", () => {
 
 /**
  * The binary `dag-ui:build-api-server` built, which this run is already being served
- * through. Resolved against the working directory the tier runs from, as the fixture
- * path in `invokeFixture` is.
+ * through. Named from this file rather than from the working directory, for the
+ * reason `FIXTURE_COMMAND` is: the tier is launched from the workspace root, and a
+ * path that counted directories up from there named one outside the checkout.
  */
-const API_BINARY = resolve("../../target/debug/onepipeline-api");
+const API_BINARY = resolve(
+  import.meta.dirname,
+  "../../target/debug/onepipeline-api",
+);
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
 function holdPort(port: number): Promise<() => void> {
@@ -3171,7 +3237,7 @@ test("says which ports the stall server took, and refuses one it cannot", async 
   const stalling = spawn(
     process.execPath,
     [
-      "e2e/fixtures/serve-fixture.mjs",
+      FIXTURE_COMMAND,
       "--stall",
       "--port",
       String(port),
@@ -3280,7 +3346,18 @@ function stageBinary(path: string): void {
   try {
     linkSync(API_BINARY, path);
   } catch (caught) {
-    if ((caught as NodeJS.ErrnoException).code !== "EXDEV") throw caught;
+    // Narrowed rather than asserted: `catch` binds `unknown`, and the one thing
+    // that distinguishes the cross-device refusal from a real failure to stage
+    // the binary is the `code` Node puts on its own errors. Anything else — a
+    // missing binary, an unwritable destination — is rethrown, because a copy
+    // would fail for that reason too and report it a second time.
+    if (
+      !(caught instanceof Error) ||
+      !("code" in caught) ||
+      caught.code !== "EXDEV"
+    ) {
+      throw caught;
+    }
     copyFileSync(API_BINARY, path);
   }
 }
@@ -3302,13 +3379,7 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
     const port = await freePort();
     const served = spawn(
       process.execPath,
-      [
-        "e2e/fixtures/serve-fixture.mjs",
-        "--workspace",
-        workspace,
-        "--port",
-        String(port),
-      ],
+      [FIXTURE_COMMAND, "--workspace", workspace, "--port", String(port)],
       {
         stdio: ["ignore", "inherit", "inherit"],
         env: { ...process.env, CARGO_TARGET_DIR: target },

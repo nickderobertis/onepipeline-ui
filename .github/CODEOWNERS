@@ -16,8 +16,12 @@
 # The frontend: the React app and the packages it reads the contract through.
 # Each of them carries its own AGENTS.md; the root holds only what is repo-wide.
 /apps/dag-ui/            @nickderobertis
+# The journeys are their own project: they drive the built app rather than being
+# part of it, and they carry their own AGENTS.md.
+/apps/dag-ui-e2e/        @nickderobertis
 /packages/dag-model/     @nickderobertis
 /packages/dag-layout/    @nickderobertis
+/packages/timeline-categories/ @nickderobertis
 /packages/telemetry-client/ @nickderobertis
 /docs/dag-ui.md          @nickderobertis
 

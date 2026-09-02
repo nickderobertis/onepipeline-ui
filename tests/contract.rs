@@ -902,6 +902,13 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
 /// timeline that quietly stops finding the record it reads a publication, a
 /// worktree or a gate from.
 ///
+/// `vcs::GATE_VERDICT` is the one kind this crate reads that is **not** on this
+/// list, because that library deleted the variant in its 0.11.0 rather than
+/// retiring it — its own `EventKind` doc records both the deletion and the cost.
+/// This crate still reads the record, because the runs that hold one are still
+/// runs an operator opens, so it stands where the payload values below it do:
+/// the wire is the only declaration reachable, and the fixture is the gate.
+///
 /// The three payload *values* in that module have no equivalent to offer: each
 /// is built inline in a private module that re-exports nothing, and each says so
 /// where it is declared.
@@ -918,7 +925,6 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
     for (declared, copied) in [
         (onevcs::EventKind::SessionOpened, vcs::SESSION_OPENED),
         (onevcs::EventKind::LockWait, vcs::LOCK_WAIT),
-        (onevcs::EventKind::GateVerdict, vcs::GATE_VERDICT),
         (onevcs::EventKind::Push, vcs::PUSH),
         (onevcs::EventKind::ChangeOpened, vcs::CHANGE_OPENED),
         (onevcs::EventKind::ChangeCheck, vcs::CHANGE_CHECK),
@@ -928,6 +934,15 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
         (onevcs::EventKind::SyncConflict, vcs::SYNC_CONFLICT),
         (onevcs::EventKind::SessionClosed, vcs::SESSION_CLOSED),
         (onevcs::EventKind::Fetch, vcs::FETCH),
+        // The three release kinds, which that library now declares: the reading
+        // of a run's releases is held to the producer's own vocabulary rather
+        // than to a second copy of the wire.
+        (onevcs::EventKind::ReleaseProbed, vcs::RELEASE_PROBED),
+        (
+            onevcs::EventKind::ReleaseAcknowledged,
+            vcs::RELEASE_ACKNOWLEDGED,
+        ),
+        (onevcs::EventKind::ReleaseObserved, vcs::RELEASE_OBSERVED),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }
@@ -1062,24 +1077,154 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         "a delivered redirection has no reason it did not land: {delivered}"
     );
 
-    // Where the usage a `turn-completed` carries sits, as that library declares
-    // it. What is *in* it is asserted below, against the type that writes it.
-    assert_eq!(
-        serde_json::to_value(oneagentgraph::event::TurnCompleted {
-            usage: oneagentgraph::event::Usage {
-                tokens_in: 1,
-                tokens_out: 2,
-                cache_read: 3,
-                cache_write: 4,
-                cost: 0.5,
-                duration: 1.5,
-            },
-        })
-        .expect("the payload serializes")
+    // The `turn-completed` payload, as that library writes it: every key this
+    // crate reads off one is a field of it. What is *in* the usage is asserted
+    // below, against the type that writes it.
+    let completed = serde_json::to_value(oneagentgraph::event::TurnCompleted {
+        turn: 7,
+        role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
+        usage: oneagentgraph::event::Usage {
+            input_tokens: Some(1),
+            output_tokens: Some(2),
+            cache_read_tokens: Some(3),
+            cache_write_tokens: Some(4),
+            cost_usd: Some(0.5),
+        },
+        started_at: "2026-08-07T12:00:00.000Z".into(),
+        finished_at: "2026-08-07T12:00:30.000Z".into(),
+    })
+    .expect("the payload serializes");
+    let declared: Vec<&str> = completed
         .as_object()
-        .and_then(|payload| payload.keys().next().cloned()),
-        Some(graph::USAGE.to_owned()),
-        "the usage sits where this crate looks for it"
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            graph::TURN,
+            graph::ROLE,
+            graph::USAGE,
+            graph::STARTED_AT,
+            graph::FINISHED_AT
+        ],
+        "a turn's close is read by the keys that library writes it with"
+    );
+
+    // The three payloads a live turn is read from, each held to the type that
+    // now declares it. The names were the wire's alone while this crate linked
+    // `oneagentgraph` 0.2, which published two of them inline and had neither a
+    // party, a per-turn bound, nor an observation on an activity.
+    let started = serde_json::to_value(oneagentgraph::event::TurnStarted {
+        turn: 7,
+        role: oneagentgraph::event::Party::User.as_str().to_string(),
+        instruction: "re-run the gate".into(),
+        instruction_truncated: true,
+        started_at: "2026-08-07T12:00:00.000Z".into(),
+    })
+    .expect("the opening serializes");
+    let declared: Vec<&str> = started
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            graph::TURN,
+            graph::ROLE,
+            graph::INSTRUCTION,
+            graph::INSTRUCTION_TRUNCATED,
+            graph::STARTED_AT
+        ]
+    );
+
+    let message = serde_json::to_value(oneagentgraph::event::TurnMessage {
+        turn: 7,
+        role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
+        text: "the gate is green".into(),
+        truncated: true,
+    })
+    .expect("the message serializes");
+    let declared: Vec<&str> = message
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![graph::TURN, graph::ROLE, graph::TEXT, graph::TRUNCATED]
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::TurnMessage),
+        graph::TURN_MESSAGE
+    );
+
+    let activity = serde_json::to_value(oneagentgraph::event::TurnActivity {
+        kind: graph::TOOL_RESULT.into(),
+        name: None,
+        detail: "2 passed; 0 failed".into(),
+        // Both bound flags set, because that library skips either when it is
+        // false: read off an activity that cut nothing, this gate would name
+        // neither field, and a rename of one would pass it unchanged.
+        truncated: true,
+        output: Some("2 passed; 0 failed".into()),
+        output_truncated: true,
+        tool_call_id: Some("call-1".into()),
+        index: 4,
+    })
+    .expect("the activity serializes");
+    let declared: Vec<&str> = activity
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            graph::KIND,
+            graph::NAME,
+            graph::DETAIL,
+            graph::TRUNCATED,
+            graph::OUTPUT,
+            graph::OUTPUT_TRUNCATED,
+            graph::TOOL_CALL_ID,
+            graph::INDEX
+        ],
+        "a live tool event is read by the keys that library writes it with: {activity}"
+    );
+    assert_eq!(
+        activity.get(graph::NAME),
+        Some(&serde_json::json!(null)),
+        "an observation names no tool: {activity}"
+    );
+    assert_eq!(
+        serde_json::to_value(oneagentgraph::event::TurnActivity {
+            kind: "tool_call".into(),
+            name: Some("bash".into()),
+            detail: "just gate".into(),
+            truncated: false,
+            output: None,
+            output_truncated: false,
+            tool_call_id: None,
+            index: 3,
+        })
+        .expect("the call serializes")
+        .get(graph::NAME),
+        Some(&serde_json::json!("bash")),
+        "a call names the tool it invoked"
+    );
+
+    // The three words a turn record's `role` is read as, in that library's own
+    // spelling. `role` is a `String` on the wire, and `Party` is the closed set
+    // the producer mints one from.
+    assert_eq!(
+        oneagentgraph::event::Party::Assistant.as_str(),
+        graph::ASSISTANT_ROLE
     );
 }
 
@@ -1186,6 +1331,7 @@ fn the_tool_event_names_a_live_turn_is_read_by_are_the_ones_that_type_declares()
         input: None,
         output: Some("2 passed; 0 failed".into()),
         index: 4,
+        tool_call_id: None,
     })
     .expect("the tool event serializes");
     for key in [graph::KIND, graph::OUTPUT, graph::INDEX] {
@@ -1206,6 +1352,7 @@ fn the_tool_event_names_a_live_turn_is_read_by_are_the_ones_that_type_declares()
         input: None,
         output: None,
         index: 3,
+        tool_call_id: None,
     })
     .expect("the call serializes");
     assert_eq!(
@@ -1309,7 +1456,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
 /// the fixture's copy fails here until it follows.
 #[test]
 fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui/e2e/fixtures/runs.mjs");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/fixtures/runs.mjs");
     let source = fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
             "read {}: {err} — the fixture that carries the copy has moved, so this gate no \
@@ -1345,7 +1492,7 @@ fn the_browser_files_every_kind_those_libraries_declare() {
     use oneagentgraph::event::EventKind;
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("apps/dag-ui/src/features/timeline/event-category.test.tsx");
+        .join("packages/timeline-categories/src/index.test.ts");
     let source = fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
             "read {}: {err} — the suite that carries the corpus has moved, so this gate no \
@@ -1360,12 +1507,15 @@ fn the_browser_files_every_kind_those_libraries_declare() {
     let agentgraph = [
         EventKind::GraphStarted,
         EventKind::MemberStarted,
+        EventKind::PreTurnContext,
         EventKind::TurnStarted,
         EventKind::TurnActivity,
+        EventKind::TurnMessage,
         EventKind::TurnCompleted,
         EventKind::TurnInterrupted,
         EventKind::MemberHeartbeat,
         EventKind::FallbackAdvanced,
+        EventKind::OneharnessSession,
         EventKind::MemberDied,
         EventKind::CronFired,
         EventKind::CronReset,
@@ -1376,12 +1526,15 @@ fn the_browser_files_every_kind_those_libraries_declare() {
     .map(|kind| match kind {
         EventKind::GraphStarted
         | EventKind::MemberStarted
+        | EventKind::PreTurnContext
         | EventKind::TurnStarted
         | EventKind::TurnActivity
+        | EventKind::TurnMessage
         | EventKind::TurnCompleted
         | EventKind::TurnInterrupted
         | EventKind::MemberHeartbeat
         | EventKind::FallbackAdvanced
+        | EventKind::OneharnessSession
         | EventKind::MemberDied
         | EventKind::CronFired
         | EventKind::CronReset
@@ -1414,16 +1567,43 @@ fn the_browser_files_every_kind_those_libraries_declare() {
     );
 }
 
+/// The three release kinds `onepipeline` writes, against that library's own
+/// declaration of them.
+///
+/// The companion of the `onevcs` gate above, and the other half of one sequencing:
+/// that library records what a *release* did and this one records what a **node
+/// waiting on one** did. Both vocabularies are now declared as types, so a kind
+/// renamed in either fails here rather than in a timeline that silently stops
+/// carrying the wait a stalled run is stalled on.
+#[test]
+fn the_pipeline_release_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
+    use onepipeline_ui::payload::pipeline;
+
+    for (declared, copied) in [
+        (
+            onepipeline::event::PipelineKind::ReleaseWait,
+            pipeline::RELEASE_WAIT,
+        ),
+        (
+            onepipeline::event::PipelineKind::ReleaseArrived,
+            pipeline::RELEASE_ARRIVED,
+        ),
+        (
+            onepipeline::event::PipelineKind::ReleaseAdopted,
+            pipeline::RELEASE_ADOPTED,
+        ),
+    ] {
+        assert_eq!(declared.as_str(), copied, "{declared:?}");
+    }
+}
+
 /// The six release kinds this crate declares, against the browser's own corpus.
 ///
-/// The gate above is the one the two typed siblings offer: a kind either of them
-/// declares must be filed by the browser. The release kinds have no such
-/// declaration to be read off — the pinned `onevcs` and `onepipeline` predate
-/// every one of them and this node moves neither pin — so this is the gate
-/// available in its place, and it runs in the same direction: a kind this crate
-/// reads as a wire string and the browser has decided no category for is a record
-/// that reaches a reader as the default, which is the honest answer for a kind
-/// nobody has seen and the wrong one for a kind this crate names.
+/// The two gates above hold each kind to the library that declares it. This one
+/// runs in the other direction, at the seam no Rust type reaches: a kind this
+/// crate reads and the browser has decided no category for is a record that
+/// reaches a reader as the default, which is the honest answer for a kind nobody
+/// has seen and the wrong one for a kind this crate names.
 ///
 /// It is deliberately not a check that the *categories* agree. Which of the eleven
 /// a kind reads under is a decision the browser owns; that it has made one is what
@@ -1433,7 +1613,7 @@ fn the_browser_files_every_release_kind_this_crate_reads() {
     use onepipeline_ui::payload::{pipeline, vcs};
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("apps/dag-ui/src/features/timeline/event-category.test.tsx");
+        .join("packages/timeline-categories/src/index.test.ts");
     let source = fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
             "read {}: {err} — the suite that carries the corpus has moved, so this gate no \
@@ -1462,7 +1642,7 @@ fn the_browser_files_every_release_kind_this_crate_reads() {
     );
 }
 
-/// Every key of the `CORPUS` map in the browser suite's category tests.
+/// Every key of the `CORPUS` map in the category vocabulary's own tests.
 ///
 /// Parsed rather than matched as substrings so a kind named in that file's prose,
 /// or filed under some other table, cannot be mistaken for one the corpus holds.
@@ -1471,7 +1651,7 @@ fn the_browser_files_every_release_kind_this_crate_reads() {
 fn corpus_keys(source: &str) -> Vec<String> {
     let start = source
         .find("const CORPUS")
-        .unwrap_or_else(|| panic!("the browser suite declares no CORPUS to gate"));
+        .unwrap_or_else(|| panic!("the category vocabulary declares no CORPUS to gate"));
     source[start..]
         .lines()
         .skip(1)

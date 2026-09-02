@@ -122,6 +122,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `just check` runs the baseline comparison, which resolves this
+          # revision's base out of version control rather than out of a file. A
+          # shallow checkout of the released tag has neither `origin/main` nor
+          # `main`, so that resolution fails here for want of history rather than
+          # for anything the release got wrong.
+          fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -130,6 +137,7 @@ jobs:
         with:
           tool: just,nextest,cargo-llvm-cov
       - run: just bootstrap
+      # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] the sweep merge-to-main runs is not this path's. A Release created by hand in the GitHub UI is supported — this workflow's header says so — and it can name any commit, including one no push to `main` ever swept, while every job below publishes artifacts built from whatever it names. This is the only gate that commit meets.
       - run: just check
 
   upload:

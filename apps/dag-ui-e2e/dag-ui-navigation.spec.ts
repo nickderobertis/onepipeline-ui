@@ -7,11 +7,12 @@
 // the app, which is changing the thing under test rather than the test: this app came
 // over whole and its implementation is the spec (see apps/dag-ui/AGENTS.md), and these
 // are the journeys that would have to catch the regression.
-import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import {
   EVENT_CATEGORIES,
   eventCategoryLabel,
-} from "../src/features/timeline/event-category";
+} from "@onepipeline-ui/timeline-categories";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { graphNodes } from "./observatory-locators";
 import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";

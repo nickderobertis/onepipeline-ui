@@ -34,6 +34,13 @@ export default tseslint.config(
               sourceTag: "scope:app",
               onlyDependOnLibsWithTags: ["scope:shared"],
             },
+            // The journeys drive an app and must not import one: what they need
+            // of its vocabulary is a shared package both sides depend on, so a
+            // journey cannot be coupled to how the app spells its own internals.
+            {
+              sourceTag: "scope:e2e",
+              onlyDependOnLibsWithTags: ["scope:shared"],
+            },
           ],
         },
       ],

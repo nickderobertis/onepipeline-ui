@@ -10,7 +10,7 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "npx biome check packages/dag-model && npx eslint packages/dag-model"
+      "command": "npx biome check packages/dag-model && npx eslint --max-warnings 0 packages/dag-model"
     },
     "test": {
       "command": "npx vitest run --root packages/dag-model",

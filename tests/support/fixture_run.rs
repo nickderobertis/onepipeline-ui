@@ -23,6 +23,14 @@ use serde_json::{json, Map, Value};
 pub const RUN_ID: &str = "run-20260807-a1b2c3";
 /// A second run, so the list has more than one row to page and sort.
 pub const OTHER_RUN_ID: &str = "run-20260807-d4e5f6";
+/// The qualified onetaskgraph project the fixture runs were launched from.
+///
+/// `<source>:<project>` — what the engine records where it used to record a plan
+/// path. The plan's definition lives in that store; what a run executes is the
+/// graph projected from its own journal, so this names where the plan came from
+/// and this crate never re-reads it.
+pub const PLAN_PROJECT: &str = "authoring:contract-interface";
+
 /// The session the fixture run was launched from. Never served raw.
 pub const SESSION: &str = "claude-code-session-3f9a1c2e";
 /// The agent-graph session one node's dispatch ran under.
@@ -237,7 +245,14 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
         dir.join("launch.json"),
         pretty(&json!({
             "run_id": run,
-            "plan": "plan.json",
+            // The shape every run the engine launches now has: a plan's
+            // definition lives in the onetaskgraph store, and the launch record
+            // names the **project** it came from rather than a file. The runs
+            // this repository serves are overwhelmingly these, so this is the
+            // ordinary fixture; `write_launch_shapes` holds the four other
+            // shapes a reader of a real runs root still meets.
+            "project": PLAN_PROJECT,
+            "dir": "/a-recording-host/workspace",
             "graph": "graphs/dag-scope.yaml",
             "launcher": "claude-code",
             "session": SESSION,
@@ -1180,7 +1195,8 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
         dir.join("launch.json"),
         pretty(&json!({
             "run_id": run,
-            "plan": "plan.json",
+            "project": PLAN_PROJECT,
+            "dir": "/a-recording-host/workspace",
             "graph": "graphs/dag-scope.yaml",
             "launcher": "codex",
             "session": "codex-session-7f3a91c0",
@@ -2975,6 +2991,139 @@ pub fn write_launched(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The five launch-record shapes a real runs root holds, one run each.
+///
+/// A run's launch record is the first thing this server reads and the one thing
+/// that can stop it reading the run at all, and the shape of it has moved: the
+/// engine used to name a **plan file** and now names the onetaskgraph **project**
+/// the plan came from. Both spellings are on every host that has been running
+/// for a while, along with the two edges either side of them — a record written
+/// across the change that carries both, and one that carries neither because the
+/// launcher recorded no source at all.
+///
+/// The fifth is the rule the whole group is really about: a record carrying a
+/// key **this** build has no reading for. A reader that refuses one refuses every
+/// run a later engine launches, which is how a third of this host's runs went
+/// missing from the list rather than appearing in it wrong.
+///
+/// Checked in as fixtures rather than read off whatever the host happens to
+/// hold, so the property is a property of this tree. Returns the run ids in the
+/// order written, each paired with what its record says about where the plan came
+/// from.
+pub fn write_launch_shapes(root: &Path) -> Vec<(String, &'static str)> {
+    let shapes: [(&str, &str, Value); 5] = [
+        (
+            "launch-project-only",
+            "a plan-store project and no plan path",
+            json!({ "project": PLAN_PROJECT }),
+        ),
+        (
+            "launch-plan-only",
+            "a plan path and no project",
+            json!({ "plan": "plan.json" }),
+        ),
+        (
+            "launch-both",
+            "both, as a record written across the change carries",
+            json!({ "project": PLAN_PROJECT, "plan": "plan.json" }),
+        ),
+        ("launch-neither", "neither", json!({})),
+        (
+            "launch-unknown-key",
+            "a key this build has no reading for",
+            // Deliberately not a misspelling of a key this build *does* read: the
+            // thing under test is a record from a build that records more than
+            // this one knows about, which is every future engine.
+            json!({ "project": PLAN_PROJECT, "a_key_recorded_by_a_later_engine": 3 }),
+        ),
+    ];
+    shapes
+        .into_iter()
+        .map(|(run, shape, source)| {
+            let dir = root.join(run);
+            fs::create_dir_all(&dir).expect("the run directory");
+            let mut record = json!({
+                "run_id": run,
+                "dir": "/a-recording-host/workspace",
+                "graph": "graphs/dag-scope.yaml",
+                "launcher": "claude-code",
+                "session": SESSION,
+                "pid": 4290,
+                "host": "a-recording-host",
+                "started_at": START,
+                "heartbeat_interval": 1_800,
+                "adoptions": 0,
+            });
+            let fields = record.as_object_mut().expect("a mapping");
+            for (key, value) in source.as_object().expect("a mapping") {
+                fields.insert(key.clone(), value.clone());
+            }
+            fs::write(dir.join("launch.json"), pretty(&record)).expect("the launch record");
+            fs::write(
+                dir.join("events.jsonl"),
+                format!(
+                    "{}\n",
+                    json!({
+                        "v": 1,
+                        "ts": START,
+                        "stream": "a-recording-host-4290",
+                        "seq": 0,
+                        "source": "pipeline",
+                        "kind": "run-started",
+                        "labels": { "run_id": run },
+                        "payload": {},
+                        "artifacts": [],
+                    })
+                ),
+            )
+            .expect("the journal");
+            (run.to_owned(), shape)
+        })
+        .collect()
+}
+
+/// Rewrite a run's launch record into the shape an engine before the plan store
+/// wrote.
+///
+/// The record named a **plan file**, and nothing else: that engine's own
+/// `LaunchRecord` was `deny_unknown_fields` with a required `plan`, so a record
+/// naming a project — or carrying any key it had no field for — did not
+/// deserialize and the run was not readable at all. The runs on a long-lived host
+/// are still full of these, and the baseline comparison needs a store *both*
+/// builds can read, which is this shape and only this shape.
+///
+/// Written by rewriting what the fixtures wrote rather than by a second copy of
+/// each of them, so a fixture that grows a record grows it here too.
+pub fn make_launch_record_legacy(dir: &Path) {
+    /// The keys that engine's launch record declared. Anything else it refused.
+    const DECLARED: [&str; 13] = [
+        "run_id",
+        "plan",
+        "dir",
+        "graph",
+        "graph_run",
+        "node_graph",
+        "pr_author_graph",
+        "launcher",
+        "session",
+        "pid",
+        "host",
+        "started",
+        "started_at",
+    ];
+    const ALSO_DECLARED: [&str; 4] = ["heartbeat_interval", "dag_sets", "node_sets", "adoptions"];
+
+    let path = dir.join("launch.json");
+    let mut record: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    let fields = record.as_object_mut().expect("a mapping");
+    fields
+        .retain(|key, _| DECLARED.contains(&key.as_str()) || ALSO_DECLARED.contains(&key.as_str()));
+    fields.insert("plan".into(), json!("plan.json"));
+    fs::write(&path, pretty(&record)).expect("the launch record");
+}
+
 /// Define a named filter profile on a run's launch record.
 ///
 /// `onepipeline start --set filters.NAME=SPEC` forwards the override opaquely to
@@ -3334,6 +3483,7 @@ pub fn worker_report() -> String {
         input: Some(json!({ "file_path": "src/api.rs" })),
         output: None,
         index: 0,
+        tool_call_id: None,
     };
     let result = ToolEvent {
         kind: "tool_result".into(),
@@ -3341,6 +3491,7 @@ pub fn worker_report() -> String {
         input: None,
         output: Some(TOOL_OBSERVATION.into()),
         index: 1,
+        tool_call_id: None,
     };
     // The unrelayed turn's own call and what it returned, so a turn the journal
     // never opened is still served with what its tools did.
@@ -3350,6 +3501,7 @@ pub fn worker_report() -> String {
         input: Some(json!({ "file_path": "docs/contract.md" })),
         output: None,
         index: 0,
+        tool_call_id: None,
     };
     let unrelayed_result = ToolEvent {
         kind: "tool_result".into(),
@@ -3357,6 +3509,7 @@ pub fn worker_report() -> String {
         input: None,
         output: Some(UNRELAYED_OBSERVATION.into()),
         index: 1,
+        tool_call_id: None,
     };
     let gate_call = ToolEvent {
         kind: "tool_call".into(),
@@ -3364,6 +3517,7 @@ pub fn worker_report() -> String {
         input: Some(json!({ "command": "just gate" })),
         output: None,
         index: 0,
+        tool_call_id: None,
     };
     // A call the trace exposed no observation for, which is a different fact from
     // one that returned nothing: `output` is absent rather than empty.
@@ -3373,6 +3527,7 @@ pub fn worker_report() -> String {
         input: None,
         output: None,
         index: 1,
+        tool_call_id: None,
     };
     let agent_usage = |cost| Usage {
         input_tokens: Some(376),
@@ -3515,6 +3670,8 @@ pub fn worker_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(
@@ -3714,6 +3871,8 @@ pub fn reviewer_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(
@@ -3796,6 +3955,8 @@ pub fn lint_report() -> String {
         processes: Vec::new(),
         control: None,
         control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
         stopped_early: false,
     };
     format!(

@@ -31,9 +31,21 @@ use onepipeline_ui::contract::Release;
 use crate::stub_bin;
 
 /// The tasks that start the read API, and so cannot run before the sibling is
-/// provisioned: the crate's own suite, and the browser tier, whose Playwright
-/// journeys drive a real server over a fixture runs root.
-const SUITES_THAT_START_THE_READ_API: [&str; 2] = ["onepipeline-ui:test", "dag-ui:test"];
+/// provisioned: the crate's own suite, the baseline comparison, which starts two
+/// servers rather than one, and the browser tier, whose Playwright journeys drive
+/// a real server over a fixture runs root.
+///
+/// Three targets and not one, because each of them is a tier a reader can ask for
+/// by name — that is what having an edge of their own means — and a tier reached
+/// on its own is exactly the one whose provisioning nothing else has done.
+const SUITES_THAT_START_THE_READ_API: [&str; 3] = [
+    "onepipeline-ui:test",
+    "onepipeline-ui:test-baseline",
+    "dag-ui-e2e:test",
+];
+
+/// The targets those tasks are reached through, which is what Nx is asked for.
+const TIERS: &str = "test,test-baseline";
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 
@@ -281,13 +293,13 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
     // Nx would write the graph somewhere nobody is reading and exit happily.
     // `--graph=stdout` is the same document with no path to lose.
     let output = Command::new("just")
-        .args(["nx", "run-many", "-t", "test", "--graph=stdout"])
+        .args(["nx", "run-many", "-t", TIERS, "--graph=stdout"])
         .current_dir(repo_root())
         .output()
         .expect("just is on PATH");
     assert!(
         output.status.success(),
-        "Nx could not build the task graph for `test` ({}):\n{}{}",
+        "Nx could not build the task graph for `{TIERS}` ({}):\n{}{}",
         output.status,
         stderr(&output),
         String::from_utf8_lossy(&output.stdout)
@@ -297,8 +309,8 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
     for suite in SUITES_THAT_START_THE_READ_API {
         assert!(
             dependencies.contains_key(suite),
-            "{suite} is not in the graph `just test` runs; the list here names a \
-             project that no longer has a test target"
+            "{suite} is not in the graph `{TIERS}` runs; the list here names a \
+             project that no longer has that test target"
         );
         assert!(
             reaches(&dependencies, suite, PROVISIONING),

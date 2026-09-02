@@ -5,12 +5,16 @@ is the bar it is held to, not a tour of it.
 
 ## The bar is journeys, not a number
 
-There is no line-coverage floor here. `test` runs vitest and *both* Playwright
-configs — `playwright.config.ts` for the journeys and `isolation.config.ts` for
-what one run of that tier owes another — and a change to what a reader sees is
-not done until one of them drives it, in a browser, against a real
-`onepipeline-api serve` over a recorded run directory. Nothing between the browser
-and the read model is doubled.
+There is no line-coverage floor here, and `test` is components: it renders them,
+drives them, and starts nothing. A change to what a reader *sees* is not done
+until a journey drives it in a browser against the built bundle — those journeys
+are `apps/dag-ui-e2e`, a project of its own, because they drive this app rather
+than being part of it and are the one tier that starts a fleet of servers to do
+it. `check` runs both projects, so a change is held to both.
+
+What the journeys may reach of this app is `@onepipeline-ui/dag-ui/testing`, the
+export in `src/testing/`. Anything a journey needs from here goes through it
+rather than through a path into `src/`, so an internal move stays internal.
 
 `just dag-ui-screens` photographs every surface at every viewport in the matrix.
 It asserts nothing; it is how the operator sees a polish problem at a width

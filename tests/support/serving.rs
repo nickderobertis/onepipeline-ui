@@ -304,3 +304,44 @@ impl Drop for Serving {
         let _ = wait_or_kill(&mut self.child, STOP_DEADLINE);
     }
 }
+
+/// A serving process this build did not compile, over a runs root it does not
+/// own.
+///
+/// [`Serving`] is the shape every other journey needs: one binary, this build's,
+/// over a directory it created for the test. The baseline comparison needs
+/// neither — it starts the **base commit's** binary over the **same** directory
+/// this build's server is already reading, because a store served twice is the
+/// only way to ask whether the two served the same thing. So the two pieces
+/// `Serving` owns are the two this one deliberately borrows.
+pub struct ForeignServing {
+    child: Child,
+    /// The address the kernel gave it, read off its own first line of output.
+    pub address: SocketAddr,
+}
+
+impl ForeignServing {
+    /// Start `binary` over `root`, and wait until it names its port.
+    pub fn start(binary: &Path, root: &Path, environment: &[(&str, &str)]) -> Self {
+        let mut child = Command::new(binary)
+            .arg("serve")
+            .arg("--runs-root")
+            .arg(root)
+            .args(["--bind", "127.0.0.1:0"])
+            .args(["--poll-interval-ms", "50"])
+            .envs(environment.iter().copied())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap_or_else(|err| panic!("start {}: {err}", binary.display()));
+        let address = address_of(&mut child);
+        Self { child, address }
+    }
+}
+
+impl Drop for ForeignServing {
+    fn drop(&mut self) {
+        ask_to_stop(&mut self.child, Stop::Terminate);
+        let _ = wait_or_kill(&mut self.child, STOP_DEADLINE);
+    }
+}

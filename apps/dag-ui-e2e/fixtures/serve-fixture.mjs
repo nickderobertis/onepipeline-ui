@@ -24,7 +24,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -37,10 +37,17 @@ import {
   settleDashboard,
 } from "./runs.mjs";
 
-const REPO_ROOT = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../..",
-);
+/**
+ * What every directory this script may delete is named with.
+ *
+ * `playwright.config.ts` and the journeys make theirs with
+ * `mkdtempSync(join(tmpdir(), "dag-ui-e2e-…"))`, so this is the whole of what a
+ * `--workspace` may be — and the check below is what keeps a recursive delete
+ * inside this tier's own scratch rather than anywhere in a shared temp root.
+ */
+const WORKSPACE_PREFIX = "dag-ui-e2e-";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** Published beside the runs root so a spec names what this wrote, not a copy of it. */
 export const FIXTURE_FACTS_NAME = "fixture-facts.json";
@@ -126,9 +133,11 @@ function serverBinary() {
  * condition, not a stand-in for the API: it serves nothing and answers nothing, so the
  * app's own request stays pending exactly as it would against a wedged server.
  *
- * With `--refuse-port`, a second port is held bound but never listened on, so the
- * kernel refuses every connection to it — which merely leaving a port free cannot
- * promise, because a concurrent run's API server could take it.
+ * With `--refuse-port`, a second port is *taken* and every connection to it is
+ * dropped the moment it arrives. Taken rather than left free, because a free port
+ * is one a concurrent run's API server could bind, and this journey would then be
+ * quietly driving a reachable API; dropped rather than answered, because what the
+ * app must meet is a read that fails.
  */
 async function stall(port, refusePort) {
   // Said before anything is taken, because a line that only appears on success
@@ -144,10 +153,11 @@ async function stall(port, refusePort) {
   const held = [];
   if (refusePort !== undefined) {
     const reservation = createServer();
-    // Bound without listening: `listen` would accept, and accepting is the opposite
-    // of what this port is for. Node has no bind-only primitive, so the reservation
-    // listens and immediately destroys anything that arrives — a connection refused
-    // as far as the browser's first read is concerned.
+    // Node has no bind-only primitive, so this holds the port the only way a
+    // process can — by listening on it — and destroys whatever arrives before a
+    // byte is exchanged. What the browser meets is a connection that closes on
+    // it, which is a failed read either way; what matters is that nothing else on
+    // this host can take the port while the journey needs it unreachable.
     reservation.on("connection", (socket) => socket.destroy());
     await bound(reservation, refusePort, "refusing");
     held.push(reservation);
@@ -336,16 +346,22 @@ if (args.stall) {
   // And one this script is allowed to own. Absolute is not enough in front of a
   // recursive delete: `serve` removes the whole directory before rebuilding it,
   // so an absolute path that is somebody else's — a home directory, a source
-  // tree, `/` — is exactly the argument that must not be honoured. The temp root
-  // is the bound because `playwright.config.ts` makes every workspace with
-  // `mkdtempSync(join(tmpdir(), …))`, so nothing this may delete is ever outside
-  // it, and the temp root itself is not a workspace either.
+  // tree, `/` — is exactly the argument that must not be honoured.
+  //
+  // The bound is this tier's own directories rather than the temp root, which is
+  // shared with every other program on the host: a workspace is a *direct child*
+  // of the temp root named `dag-ui-e2e-…`, which is what every caller makes with
+  // `mkdtempSync`. Anything else under `/tmp` belongs to somebody, and a nested
+  // path would let one caller's argument delete inside another's workspace.
   const workspace = resolve(args.workspace);
   const temporary = resolve(tmpdir());
-  if (workspace === temporary || !workspace.startsWith(`${temporary}${sep}`)) {
+  const own =
+    dirname(workspace) === temporary &&
+    basename(workspace).startsWith(WORKSPACE_PREFIX);
+  if (!own) {
     die(
-      `'${args.workspace}' is not a directory under ${temporary}`,
-      "pass --workspace a fixture directory inside the temp root, as playwright.config.ts creates it",
+      `'${args.workspace}' is not a ${join(temporary, `${WORKSPACE_PREFIX}*`)} directory`,
+      "pass --workspace a fixture directory this tier made, as playwright.config.ts and the journeys create them",
     );
   }
   const runsRoot = join(workspace, "runs");

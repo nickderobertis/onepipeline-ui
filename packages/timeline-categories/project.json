@@ -1,0 +1,28 @@
+{
+  "name": "timeline-categories",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/timeline-categories/src",
+  "tags": ["scope:shared", "type:vocabulary"],
+  "targets": {
+    "build": {
+      "command": "npx tsc -p packages/timeline-categories/tsconfig.json --emitDeclarationOnly",
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "command": "npx biome check packages/timeline-categories && npx eslint --max-warnings 0 packages/timeline-categories"
+    },
+    "test": {
+      "command": "npx vitest run --root packages/timeline-categories"
+    },
+    "typecheck": {
+      "command": "npx tsc -p packages/timeline-categories/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "npx biome check --write --linter-enabled=false packages/timeline-categories"
+    },
+    "format-check": {
+      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/timeline-categories"
+    }
+  }
+}

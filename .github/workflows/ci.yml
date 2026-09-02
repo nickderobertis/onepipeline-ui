@@ -98,6 +98,13 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `check-cross` runs the `ensure_baseline::` journeys, which resolve
+          # the commit this branch forked from out of version control. A shallow
+          # checkout has neither `origin/main` nor `main`, so that resolution
+          # fails here for want of history rather than for anything this leg is
+          # asked to prove.
+          fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:

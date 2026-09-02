@@ -1,0 +1,9 @@
+{
+  "name": "@onepipeline-ui/timeline-categories",
+  "version": "0.0.0-workspace",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
