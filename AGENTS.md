@@ -233,6 +233,9 @@ fans one uniformly-named target across all of them.
 
 - The gate is strict: no warnings-only mode anywhere. A diagnostic is an error or
   a suppression with a written reason at the narrowest scope the tool allows.
+  Every tool is told so in the way it needs telling: clippy takes `-D warnings`,
+  rustdoc `RUSTDOCFLAGS`, and ESLint `--max-warnings 0`, which is the one of the
+  three that otherwise exits `0` with its findings printed.
 - **Coverage is enforced at 95% line coverage**; the gate fails below it. That
   is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend is held
   to its journeys rather than to a number.

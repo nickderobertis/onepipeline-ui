@@ -61,7 +61,7 @@
       ]
     },
     "lint": {
-      "command": "npx biome check apps/dag-ui-e2e && npx eslint apps/dag-ui-e2e"
+      "command": "npx biome check apps/dag-ui-e2e && npx eslint --max-warnings 0 apps/dag-ui-e2e"
     },
     "typecheck": {
       "command": "npx tsc -p apps/dag-ui-e2e/tsconfig.json --noEmit"

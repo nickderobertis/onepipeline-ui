@@ -23,7 +23,7 @@
       "cache": false
     },
     "lint": {
-      "command": "npx biome check apps/dag-ui && npx eslint apps/dag-ui"
+      "command": "npx biome check apps/dag-ui && npx eslint --max-warnings 0 apps/dag-ui"
     },
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts"

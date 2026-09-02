@@ -10,7 +10,7 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "npx biome check packages/dag-layout && npx eslint packages/dag-layout"
+      "command": "npx biome check packages/dag-layout && npx eslint --max-warnings 0 packages/dag-layout"
     },
     "test": {
       "command": "npx vitest run --root packages/dag-layout"

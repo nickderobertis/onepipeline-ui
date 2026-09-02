@@ -10,7 +10,7 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "npx biome check packages/timeline-categories && npx eslint packages/timeline-categories"
+      "command": "npx biome check packages/timeline-categories && npx eslint --max-warnings 0 packages/timeline-categories"
     },
     "test": {
       "command": "npx vitest run --root packages/timeline-categories"
