@@ -186,6 +186,15 @@ pub const UNNAMED_NODE_ID: &str = "unnamed";
 /// That run's node whose dispatch relayed no session at all, under a persona
 /// that is also a role: the one record it left stamps no member.
 pub const SILENT_NODE_ID: &str = "silent";
+/// That run's node whose member was supervised turn by turn and then settled, so
+/// the run holds **both** the report of the whole conversation and the journal
+/// records of the two parties that had it.
+///
+/// The one lane written the way a two-party dispatch of any length is really
+/// recorded: nine agent turns, each answered by a supervisor turn of its own that
+/// numbers itself from 1 alongside them. A transcript that read the report by the
+/// turn number over both sides served every one of those nine twice.
+pub const SUPERVISED_NODE_ID: &str = "supervised";
 
 /// The streams that run's members ran on, one per member.
 ///
@@ -194,7 +203,7 @@ pub const SILENT_NODE_ID: &str = "silent";
 /// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
 /// mints one — the pair has to agree or nothing joins a session to the records
 /// that opened and closed it.
-const LANE_STREAMS: [&str; 9] = [
+const LANE_STREAMS: [&str; 10] = [
     "node-scope-1786925520001-4311",
     "node-scope-1786925520002-4311",
     "node-scope-1786925520003-4311",
@@ -204,6 +213,7 @@ const LANE_STREAMS: [&str; 9] = [
     "node-scope-1786925520008-4311",
     "node-scope-1786925520009-4311",
     "node-scope-1786925520010-4311",
+    "node-scope-1786925520011-4311",
 ];
 /// The session the re-asked node's abandoned first attempt ran under.
 pub const RETRIED_FIRST_CONVERSATION_ID: &str = "node-scope-1786925520001-4311.worker";
@@ -225,6 +235,66 @@ pub const RECLAIMED_CONVERSATION_ID: &str = "node-scope-1786925520009-4311.worke
 /// The session the graph ran under a `reviewer`: a member `agentRoleSchema` has
 /// no word for, beside a persona that is the literal word `pr-author`.
 pub const UNNAMED_CONVERSATION_ID: &str = "node-scope-1786925520010-4311.reviewer";
+/// The session the supervised node ran under: the two-party member whose whole
+/// conversation the run holds a report of and whose two sides both relayed turns.
+pub const SUPERVISED_CONVERSATION_ID: &str = "node-scope-1786925520011-4311.worker";
+/// The artifact that session's settlement recorded for the report it stored.
+pub const SUPERVISED_REPORT_ARTIFACT: &str = "report-node-scope-1786925520011-4311";
+/// How many turns that dispatch really had — the number its report holds, the
+/// number its transcript serves, and the number counted beside its node.
+pub const SUPERVISED_TURNS: u64 = 9;
+/// How many of those turns the journal relayed a record for.
+///
+/// Fewer than the dispatch had, which is the ordinary case rather than a corner:
+/// a producer relays a `turn-started` for the turns it brackets and none for the
+/// ones it does not, so the report is the set of turns and the records are a
+/// sample of it. The three turns past this one are named by no envelope of the
+/// run and are served all the same.
+pub const SUPERVISED_RELAYED: u64 = 6;
+
+/// What the supervisor asked on the agent's `turn`, 1-based.
+///
+/// Distinct per turn on purpose: a reading that served one turn's prompt against
+/// another's, or the same turn twice, says so in the text rather than only in a
+/// count.
+#[must_use]
+pub fn supervised_prompt(turn: u64) -> String {
+    format!("Turn {turn}: carry the branch one step further, and say what you did.")
+}
+
+/// What the agent replied on that turn.
+#[must_use]
+pub fn supervised_reply(turn: u64) -> String {
+    format!("Turn {turn}: carried it, and the tree is clean.")
+}
+
+/// What one of the supervisor's own turns cost, and what it read.
+///
+/// Distinct from every figure on the agent's side and from the dispatch's total,
+/// so a reading that put the supervisor's accounting or its tool call on a turn
+/// of the transcript says which by the number it serves.
+pub const SUPERVISOR_INPUT_TOKENS: u64 = 61;
+pub const SUPERVISOR_COST: f64 = 0.02;
+pub const SUPERVISOR_TOOL_DETAIL: &str = "the branch the worker left";
+
+/// What one agent turn's own invocation cost, as its report attributes it: the
+/// turn's number in dollars, so no two turns and no total can be mistaken for
+/// each other.
+#[must_use]
+pub fn supervised_turn_cost(turn: u64) -> f64 {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "the turn count is single-digit, so every value here is exact in f64"
+    )]
+    {
+        turn as f64
+    }
+}
+
+/// What the whole supervised dispatch cost over both sides — the report's own
+/// top-level `usage`, which is no turn's and must never be served as one.
+pub const SUPERVISED_TOTAL_COST: f64 = 98.5;
+
 /// The run's own observer, recorded at no node and under no role word: the
 /// `monitor` member is the run's watching side, and it is served in the
 /// `orchestrator` lane it shares rather than as a member of its own.
@@ -1284,6 +1354,23 @@ pub fn write_lanes(root: &Path, run: &str) -> PathBuf {
     // Deliberately no `result.json`: a node of this run is still working, and the
     // SDK rewrites that document only when a driver closes out.
     fs::write(dir.join("events.jsonl"), lanes_journal(run, &plan)).expect("the journal");
+    // The supervised member's own report, retained the way the engine retains
+    // one: through `onepipeline::report::retain`, under the name
+    // `RunPaths::report_for` gives it. It is the whole of that session's
+    // transcript, and the two parties' relayed turns beside it are what the
+    // reading has to not double it against.
+    settle_member(
+        &dir,
+        &SettledMember {
+            stream: LANE_STREAMS[9],
+            node: SUPERVISED_NODE_ID,
+            member: "worker",
+            at: "2026-08-07T12:12:00.000Z",
+            artifact: SUPERVISED_REPORT_ARTIFACT,
+            report: &supervised_report(),
+        },
+        Produced::Report,
+    );
     dir
 }
 
@@ -1312,6 +1399,11 @@ fn lanes_plan() -> Value {
             },
             { "id": UNNAMED_NODE_ID, "persona": "docs-writer", "task": "## What\nBe stamped." },
             { "id": SILENT_NODE_ID, "persona": "check-in", "task": "## What\nSay nothing." },
+            {
+                "id": SUPERVISED_NODE_ID,
+                "persona": "engineer",
+                "task": "## What\nBe supervised, turn by turn.",
+            },
         ],
     })
 }
@@ -1914,7 +2006,122 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             json!({ "status": "failed", "outcome": "nothing-reported" }),
         );
 
+    // The dispatch a supervisor drove turn by turn and then settled. Both sides
+    // relay their own turns and both number them from 1, which is the pair every
+    // reading of this session has to join on. Its member stores a report of the
+    // whole conversation, retained by `write_lanes` through the published writer
+    // rather than written into this journal — so this is the one lane where the
+    // report-backed reading meets a two-party member's records.
+    let supervised = Lane {
+        run,
+        stream: LANE_STREAMS[9],
+        session: SUPERVISED_CONVERSATION_ID,
+        node: Some(SUPERVISED_NODE_ID),
+        member: "worker",
+        persona: "engineer",
+    };
+    driver.emit(
+        "2026-08-07T12:10:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": SUPERVISED_NODE_ID, "persona": "engineer" }),
+        json!({ "persona": "engineer" }),
+    );
+    supervised.started(&mut members, "2026-08-07T12:10:01.000Z");
+    for turn in 1..=SUPERVISED_RELAYED {
+        let opened = supervised_at(turn, 0);
+        supervised.opened(
+            &mut members,
+            &opened,
+            (turn, "assistant"),
+            (&supervised_prompt(turn), false),
+        );
+        supervised.called(
+            &mut members,
+            &supervised_at(turn, 1),
+            0,
+            ("Bash", "just check"),
+            Some(&format!("call-{turn}")),
+        );
+        supervised.said(
+            &mut members,
+            &supervised_at(turn, 2),
+            (turn, "assistant"),
+            (&supervised_reply(turn), false),
+        );
+        supervised.closed(
+            &mut members,
+            &supervised_at(turn, 3),
+            (turn, "assistant"),
+            json!({
+                "input_tokens": 1_000 + turn,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": 0.5,
+            }),
+            &opened,
+        );
+        // The supervisor's own invocation answering it: what it was asked is the
+        // reply above and what it says is the next prompt, so a reading that
+        // served it as a row of its own would put the agent's words on the user
+        // side of the conversation.
+        let supervising = supervised_at(turn, 4);
+        supervised.opened(
+            &mut members,
+            &supervising,
+            (turn, "user"),
+            (&supervised_reply(turn), false),
+        );
+        // A tool call the *supervisor* made, which is no agent turn's tool event.
+        supervised.called(
+            &mut members,
+            &supervised_at(turn, 5),
+            0,
+            ("Read", SUPERVISOR_TOOL_DETAIL),
+            None,
+        );
+        supervised.said(
+            &mut members,
+            &supervised_at(turn, 6),
+            (turn, "user"),
+            (&supervised_prompt(turn + 1), false),
+        );
+        supervised.closed(
+            &mut members,
+            &supervised_at(turn, 7),
+            (turn, "user"),
+            json!({
+                "input_tokens": SUPERVISOR_INPUT_TOKENS,
+                "output_tokens": 20,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": SUPERVISOR_COST,
+            }),
+            &supervising,
+        );
+    }
+    driver.emit(
+        "2026-08-07T12:12:01.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(SUPERVISED_NODE_ID),
+        json!({ "status": "done", "outcome": "shipped" }),
+    );
+
     merged(std::iter::once(driver).chain(members))
+}
+
+/// When one record of the supervised lane was written: ten seconds per agent
+/// turn, one per step inside it, so every record of that lane is ordered and no
+/// two share an instant.
+fn supervised_at(turn: u64, step: u64) -> String {
+    let seconds = turn * 10 + step;
+    format!(
+        "2026-08-07T12:{:02}:{:02}.000Z",
+        10 + seconds / 60,
+        seconds % 60
+    )
 }
 
 /// The repository every session of the lanes run publishes to.
@@ -3666,6 +3873,104 @@ pub fn worker_report() -> String {
                     }],
                 ),
             ],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// The onejudge report the supervised member stored: the whole conversation, as
+/// the settling member left it.
+///
+/// Built from `onejudge`'s own types, like every other report here, and holding
+/// [`SUPERVISED_TURNS`] turns — the number the transcript must serve, whatever
+/// the journal beside it relayed. Each turn is attributed its own invocation with
+/// its own cost, so a reading that served the dispatch's total on a turn, or one
+/// turn's figures on another, says which by the number it serves.
+#[must_use]
+pub fn supervised_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = |cost| Usage {
+        input_tokens: Some(2_000),
+        output_tokens: Some(200),
+        cache_read_tokens: Some(10_000),
+        cache_write_tokens: Some(100),
+        cost_usd: Some(cost),
+    };
+    let turns = || 1..=SUPERVISED_TURNS;
+    let messages = turns()
+        .flat_map(|turn| {
+            [
+                Message::user(supervised_prompt(turn)),
+                Message::assistant(supervised_reply(turn)),
+            ]
+        })
+        .collect();
+    let sessions = turns()
+        .map(|turn| SessionLink {
+            session_id: format!("01a01f4c-685b-75e2-8281-e8937fd2{turn:04}"),
+            role: TelemetryRole::Agent,
+            turn_index: u32::try_from(turn).expect("a single-digit turn count"),
+            started_at: supervised_at(turn, 0),
+            finished_at: Some(supervised_at(turn, 3)),
+            history_id: None,
+        })
+        .collect();
+    let attribution = turns()
+        .map(|turn| HarnessAttribution {
+            role: TelemetryRole::Agent,
+            turn_index: u32::try_from(turn).expect("a single-digit turn count"),
+            ran: Some("claude-code:default".into()),
+            fell_through: Vec::new(),
+            candidates: vec![CandidateAttempt {
+                harness: "claude-code".into(),
+                harness_id: "claude-code:default".into(),
+                variant: None,
+                model: None,
+                status: "ok".into(),
+                available: true,
+                ran: true,
+                failure_kind: None,
+                failure_kind_source: None,
+                exit_code: Some(0),
+                duration_ms: Some(turn * 1_000),
+                error: None,
+                session_id: None,
+                history_id: None,
+                usage: Some(usage(supervised_turn_cost(turn))),
+            }],
+            history_file: None,
+        })
+        .collect();
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript { messages },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: Some("the acceptance criteria were met".into()),
+        settled_reason: None,
+        // The whole dispatch's total over both sides, which is what no turn spent.
+        usage: Some(usage(SUPERVISED_TOTAL_COST)),
+        telemetry: Some(Telemetry {
+            wall_ms: 120_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 1_000,
+            sessions,
+            attribution,
         }),
         processes: Vec::new(),
         control: None,

@@ -1097,7 +1097,10 @@ fn is_turn_record(event: &Envelope) -> bool {
 /// counted here rather than leaving a node reading `1 turn` above fifty of them.
 ///
 /// Grouped **per session**, because a turn is numbered within its own session and
-/// a member's close must never reach across to another member's open.
+/// a member's close must never reach across to another member's open. The
+/// supervisor's own invocations are not counted, for the reason they are not
+/// served: they are the other half of the agent's turns rather than turns beside
+/// them, and counting them read a four-turn dispatch as an eight-turn one.
 ///
 /// A judge conversation adds nothing: it is a conversation of its own, and
 /// folding its report-bounded turns in would put the count one dispatch ahead of
@@ -2427,11 +2430,18 @@ impl<'a> TranscriptTurn<'a> {
 
 /// The rows one session's transcript serves, in the order it serves them.
 ///
-/// With no readable report, the session's records are the whole reading, in the
-/// order the journal relayed them. With one, the report is the set of turns:
-/// every turn it recorded is a row, ordered by the producer's 1-based number and
-/// joined to the relayed record that names that number — and a record naming no
-/// turn is not one. `src/AGENTS.md` holds why each half is that way.
+/// With no readable report, the session's own agent-side records are the whole
+/// reading, in the order the journal relayed them. With one, the report is the
+/// set of turns: every turn it recorded is a row, ordered by the producer's
+/// 1-based number and joined to the relayed record that names that number — and
+/// a record naming no turn is not one. `src/AGENTS.md` holds why each half is
+/// that way.
+///
+/// The number is enough to join on **because [`relayed_turns`] has already
+/// dropped the other party's records**: the two sides of a two-party member
+/// number their turns independently, so joining the report by the number alone
+/// over both sides matched each of the report's turns twice and served the
+/// agent's prompt and reply on the supervisor's row as well as its own.
 fn transcript_turns<'a>(
     records: &[&'a Envelope],
     reported: Option<&[ReportedTurn]>,
@@ -2918,19 +2928,42 @@ impl<'a> RelayedTurn<'a> {
 /// Summaries relayed before the session relayed any turn join the first turn it
 /// does relay: they were published from inside a turn whose start never reached
 /// the journal, and dropping them would lose the only record of it.
+///
+/// **Only the agent's own turns are rows of this transcript.** A two-party member
+/// relays both sides, and the supervisor's records are its own invocation: what
+/// it was *asked* is the reply it is answering and what it *said* is the next
+/// instruction, so serving one as a row put the agent's reply on the user side of
+/// a row of its own and doubled every count folded off this list. Its words reach
+/// a reader where they belong — as the `user` of the agent turn they opened — and
+/// a summary published from inside it is dropped rather than folded onto the
+/// agent turn before it, which would bill one party's tools to the other. See
+/// [`agent_turn`] for why a record naming no party is the agent's.
 fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<RelayedTurn<'a>> {
     let mut turns: Vec<RelayedTurn<'a>> = Vec::new();
     let mut open: Vec<&'a Envelope> = Vec::new();
+    // Whether the turn the producer last opened is one this transcript serves. A
+    // summary is published from inside the turn that precedes it, so this is what
+    // tells a tool call the agent made from one the supervisor made.
+    let mut inside_agent = true;
     for event in events.iter().copied() {
         if event.kind.0 == graph::TURN_ACTIVITY {
-            open.push(event);
+            if inside_agent {
+                open.push(event);
+            }
             continue;
         }
         if !is_turn_record(event) {
             continue;
         }
+        // Flushed on every turn record, the other party's included: the summaries
+        // held here were published from inside the turn before this one, and
+        // holding them across a supervisor's turn would land them one turn late.
         if let Some(turn) = turns.last_mut() {
             turn.summaries.append(&mut open);
+        }
+        inside_agent = agent_turn(event);
+        if !inside_agent {
+            continue;
         }
         match closes(&turns, event) {
             Some(at) => turns[at].completed = Some(event),
@@ -3108,14 +3141,24 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
     turns
 }
 
-/// Whether one turn record is the agent's own turn.
+/// Whether one turn record is a turn of this transcript — the agent's own.
 ///
 /// The party is read off the record rather than assumed, because a two-party
-/// member relays both sides' turns into one session: the supervisor's turns are
-/// turns of this transcript too, and what they said is not the transcript's
-/// reply.
-fn assistant_turn(event: &Envelope) -> bool {
-    event.payload.get(graph::ROLE).and_then(Value::as_str) == Some(graph::ASSISTANT_ROLE)
+/// member relays both sides' turns into one session. The agent's side is the
+/// transcript: its turns are the rows, its words are their replies, and the
+/// supervisor's own invocation beside it is not a turn a reader is shown — its
+/// instruction is the agent's last reply and its reply is the agent's next
+/// instruction, both of which reach a reader on the agent's turns already.
+///
+/// A record naming **no** party is the agent's. The producer that predates the
+/// party runs one side and relays it, so there is no other side for such a record
+/// to belong to — and refusing it would empty the transcript of every session
+/// recorded before that correction, which those runs still have to serve.
+fn agent_turn(event: &Envelope) -> bool {
+    match event.payload.get(graph::ROLE).and_then(Value::as_str) {
+        Some(role) => role == graph::ASSISTANT_ROLE,
+        None => true,
+    }
 }
 
 /// The turn one record belongs to, or `None` for a record that names none.
@@ -3233,7 +3276,7 @@ fn conversation_document(
                     // only the agent's words are a transcript's reply — the
                     // supervisor's reach a reader as the next turn's prompt,
                     // which is what it was asked rather than what it said.
-                    None => json!(relayed.filter(|_| event.is_some_and(assistant_turn)).and_then(LiveTurn::text)),
+                    None => json!(relayed.filter(|_| event.is_some_and(agent_turn)).and_then(LiveTurn::text)),
                 },
                 "durationMs": match ran {
                     Some(candidate) => json!(candidate.duration_ms),
