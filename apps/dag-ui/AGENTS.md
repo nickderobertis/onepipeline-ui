@@ -67,50 +67,36 @@ module both features need and neither owns belongs in `src/lib/` instead.
 
 ## What a live update costs the run list, and what makes a read stale
 
-Two rules in `useDagTelemetry`, both of them the fix for a defect that made this
-view unusable on a host where anything was running. Neither is visible from the
-code that would break them.
+Four rules `useDagTelemetry` keeps that nothing in the code that would break them
+says out loud.
 
-**An invalidation refreshes the row it names, and nothing else.** The stream is an
-invalidation channel: a frame names one run. Re-listing the first page in answer to
-one discards every page the reader scrolled to — twice a second on a busy host, so
-the list snapped back to the top and could not be paged at all. The refresh goes
-through the run-list route's `?select=`, whose three rulings are `docs/contract.md`'s
-and not this app's: a row it serves replaces the one held, a run named in `missing`
-has its row dropped, and a run the answer says nothing about is left alone, because
-a selection never surveys the runs root.
+**An invalidation refreshes the row it names.** The stream names one run; re-listing
+the first page for it discards every page the reader scrolled to. The refresh goes
+through the run-list route's `?select=`, whose rulings are `docs/contract.md`'s: a
+served row replaces the one held, a run named in `missing` loses its row, and a run
+the answer is silent about is left alone — a selection never surveys the runs root.
 
-**A read is discarded on what it is, never on when it started.** What makes two
-reads the same reading is the run, the timeline scope and the filter together; a
-read still current for that reading lands even though an invalidation arrived while
-it was in flight. Discarding on the effect instance instead is what made a live run
-impossible to open: with the server polling twice a second and a read of a big run
-taking twenty, every read was marked stale before it could land and the detail was
-never set. The same rule in the other direction is why a run the reader has moved
-away from is still discarded — the reading changed, so the read is not this one's.
-One reading is read at a time for the same reason: a stream that invalidates faster
-than the server answers would otherwise put forty reads of one run in flight, each
-making the next slower.
+**A read is discarded on what it is, never on when it started.** The run, the
+timeline scope and the filter together make a reading; a read still current for that
+reading lands even though an invalidation arrived while it was in flight. Discard on
+the effect instance instead and a run recording continuously can never be opened —
+every read is stale before the server answers. The same rule discards a read of a run
+the reader has moved away from. One reading is read at a time, so a stream that
+invalidates faster than the server answers cannot pile up reads of one run.
 
-**The opening snapshot re-reads nothing, and that is load-bearing.** The global
-stream opens with the whole run list, which is the state the view's first list read
-has just taken — so it seeds the list and does not ask for the open run to be read
-again. A *later* snapshot does: it means the stream dropped and came back, and a run
-that moved during the outage was never announced. Bumping on the opening one instead
-sets the run's detail twice within a frame of itself, and React Flow wipes a node's
-measured size whenever it is handed a new node object: a card is `visibility: hidden`
-until the resize observer measures it, and a wipe that lands in the same batch as
-that measurement leaves it hidden with nothing left to trigger a re-measure. The
-graph then draws nothing while the accessible node list beside it is complete —
-which is what the browser tier reports, intermittently, as a graph card that never
-arrived. Anything that makes the detail land twice in quick succession has that
-failure available to it.
+**The opening snapshot seeds the list and re-reads nothing.** It is the state the
+first list read has just taken. A *later* snapshot does re-read: the stream dropped
+and came back, and whatever moved during the outage was never announced. This is not
+only about waste — React Flow wipes a node's measured size whenever it is handed a
+new node object, and a card stays `visibility: hidden` until its resize observer
+measures it, so a second detail landing in the same batch as that measurement leaves
+the graph blank with the accessible node list beside it complete. **Anything that
+makes the detail land twice in quick succession has that failure available to it.**
 
-The one read failure this hook swallows — `run_not_found` on the **detail** route,
-a run swept between the read that listed it and the read that fetched it — is
-matched on the code and not the status, and the list route's `missing` does not
-retire it: that is a different route, and it says nothing about a detail read
-already out.
+**`run_not_found` on the detail route is swallowed, matched on the code and not the
+status** — a run swept between the read that listed it and the read that fetched it.
+The list route's `missing` does not retire it: different route, and it says nothing
+about a detail read already out.
 
 ## What the backend cannot answer
 

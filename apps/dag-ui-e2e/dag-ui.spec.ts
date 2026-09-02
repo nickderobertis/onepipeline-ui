@@ -136,16 +136,12 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  */
 const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
 
+// llmlint: ignore-block[e2e_not_mocked] nothing here is doubled and no response is fabricated: every request is forwarded to the same `onepipeline-api serve` every other journey drives, and the bytes the browser reads back are that server's. What is changed is one browser condition — how long the response takes — exactly as `context.setOffline` changes whether it arrives at all, which this tier already relies on to reach its pagination-failure journey. The defects these journeys are about are races between a server's poll interval and the time a fold of a journal takes: the operator reported a twenty-second read against a stream invalidating twice a second, and neither side of that is reachable from a fixture — no run this tier can write reads slowly enough, and the server exposes no knob that would make one.
+// llmlint: ignore-block[tests_mirror_real_usage] same site, same reason: the reader this reproduces is one whose read really is slower than the run he is reading is moving, and what the journeys then assert about it is entirely what that reader sees.
 /**
  * Hold every read of a matching route open for `ms` before letting it through.
  *
- * Nothing is doubled: the request is forwarded to the same read API every other
- * journey drives, and the response the browser gets is the one that server wrote.
- * What this changes is the *timing* — the same thing `context.setOffline` changes
- * about reachability, and for the same reason: a race whose two sides are a poll
- * interval and a fold of a journal cannot be provoked from a fixture, and the
- * defects behind these journeys are races. The operator's report was a run-detail
- * read taking over twenty seconds against a stream invalidating twice a second.
+ * The response is the real server's; only its timing is this journey's.
  */
 async function delayReads(
   page: Page,
@@ -157,6 +153,8 @@ async function delayReads(
     await intercepted.continue();
   });
 }
+// llmlint: ignore-end[e2e_not_mocked]
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /** The run-list route, whichever question is being asked of it. */
 const RUN_LIST_PATH = "/api/v2/runs";
@@ -3609,15 +3607,7 @@ test("follows a growing transcript only while the reader is at its end", async (
 test("keeps the pages a reader scrolled to when a run moves", async ({
   page,
 }) => {
-  // llmlint: ignore[tests_mirror_real_usage] what a live update *costs* has no
-  // rendering, and it is the property this journey exists for: the rows and the
-  // scroll position a reader keeps are asserted below from the screen, and they are
-  // equally consistent with a first-page refetch that happened to come back the
-  // same. The route the refresh went to is the only evidence that it did not, so it
-  // is read off the requests the browser really made — the same reason
-  // `tests/e2e/cost.rs` counts the kernel's record of a read rather than looking at
-  // what the read produced. Nothing here stands in for a user-observable outcome;
-  // it is beside two.
+  // llmlint: ignore-block[tests_mirror_real_usage] what a live update *costs* has no rendering, and it is the property this journey exists for. The rows and the scroll position a reader keeps are asserted below from the screen — and they are equally consistent with a first-page refetch that happened to come back the same, so the route the refresh went to is the only evidence that it did not. That is the same reason `tests/e2e/cost.rs` holds a read's cost by counting the kernel's record of it rather than by looking at what the read produced. Nothing recorded here stands in for a user-observable outcome; it sits beside two.
   const listReads: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -3651,6 +3641,7 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
   // … and the first page is never asked for again, which is what used to discard
   // every page the reader had scrolled to, twice a second, on any moving host.
   expect(listReads.filter((search) => !search.includes("select="))).toEqual([]);
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await expect(navigation.locator(".run-link")).toHaveCount(52);
   // The reader keeps the position they scrolled to, not just the rows.
   expect(await scrollOffset(viewport)).toBe(scrolled);
@@ -3714,12 +3705,7 @@ test("drops a run the server stops serving", async ({ page }) => {
   // browser actually got: `missing` is the companion list a selection names an id
   // it could not find in, and it is the whole of why the row goes.
   //
-  // llmlint: ignore[tests_mirror_real_usage] a row that disappears is what a reader
-  // sees and it is asserted below, but it looks the same whichever answer removed
-  // it — a `missing` entry, an empty selection, or a refetched first page. This
-  // repository's contract makes those three different facts to a caller, so the one
-  // the browser acted on is read from the answer the browser was given rather than
-  // inferred from the row that went.
+  // llmlint: ignore-block[tests_mirror_real_usage] a row that disappears is what a reader sees, and it is asserted below — but it looks the same whichever answer removed it: a `missing` entry, an empty selection, or a refetched first page. This repository's contract makes those three different facts to a caller, so which one the browser acted on is read from the answer the browser was given rather than guessed from the row that went.
   const missing: string[] = [];
   page.on("response", (response) => {
     const url = new URL(response.url());
@@ -3737,6 +3723,7 @@ test("drops a run the server stops serving", async ({ page }) => {
         // A body the browser never read is nothing to assert on.
       });
   });
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await openObservatory(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),

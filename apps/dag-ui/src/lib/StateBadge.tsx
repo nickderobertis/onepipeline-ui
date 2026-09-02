@@ -94,9 +94,9 @@ const DOT_TONE: Readonly<Record<StateTone, string>> = {
   info: "text-info",
 };
 
-const SETTLED = "success" as const;
-const LOST = "destructive" as const;
-const DEPENDENCY_DECIDED = "warning" as const;
+const SETTLED: StateTone = "success";
+const LOST: StateTone = "destructive";
+const DEPENDENCY_DECIDED: StateTone = "warning";
 
 /** Dependency-decided states warn; unfinished settled work reads as a lost outcome. */
 const NODE_TONE: Readonly<Record<DagNodeState, StateTone | undefined>> = {
