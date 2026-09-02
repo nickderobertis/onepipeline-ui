@@ -118,14 +118,6 @@ fn every_route_has_a_fixture() {
     }
 }
 
-/// Serve every route against a real recorded run and hold the result to the
-/// checked-in goldens.
-///
-/// The fixtures are not hand-written claims about the payloads: they are what
-/// this server made of the run directory in `tests/support/fixture_run.rs`,
-/// which is a directory the onepipeline SDK itself writes. A payload change is
-/// therefore a golden change in the same commit, and re-running with
-/// `UPDATE_CONTRACT_FIXTURES=1` is how that change is made deliberately.
 /// The fields schema 15 adds to a run-list payload, each optional and each
 /// absent unless there is something to report.
 ///
@@ -355,6 +347,14 @@ fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
     }
 }
 
+/// Serve every route against a real recorded run and hold the result to the
+/// checked-in goldens.
+///
+/// The fixtures are not hand-written claims about the payloads: they are what
+/// this server made of the run directory in `tests/support/fixture_run.rs`,
+/// which is a directory the onepipeline SDK itself writes. A payload change is
+/// therefore a golden change in the same commit, and re-running with
+/// `UPDATE_CONTRACT_FIXTURES=1` is how that change is made deliberately.
 #[test]
 fn every_route_serves_the_payload_its_golden_pins() {
     let root = tempfile::tempdir().expect("temp dir");

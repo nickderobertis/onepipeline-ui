@@ -8030,6 +8030,25 @@ fn a_selection_answers_the_runs_it_names_and_nothing_about_a_page() {
         "a selected row and a paged row describe the same run differently"
     );
 
+    // A run named twice is answered once. The bound below is checked against
+    // what was *asked for* rather than against what survives that, so naming one
+    // run fifty-one times is still a selection larger than a page.
+    let repeated = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={},{},{}",
+            fixture_run::RUN_ID,
+            fixture_run::OTHER_RUN_ID,
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    assert_eq!(
+        repeated["runs"].as_array().map(Vec::len),
+        Some(2),
+        "a run named twice was served twice: {repeated}"
+    );
+
     // **No cursor.** It answered exactly the runs named, so there is no next
     // page for a client to walk into.
     assert!(listed.get("next_cursor").is_none(), "{listed}");
@@ -8093,6 +8112,17 @@ fn a_selection_larger_than_a_page_is_refused_rather_than_truncated() {
     let named: Vec<String> = (0..=onepipeline_ui::contract::RUNS_PAGE_LIMIT)
         .map(|n| format!("run-20260807-{n:06}"))
         .collect();
+    // Repeats do not buy a caller room: the bound is on what was asked for, so a
+    // selection over the maximum is refused however few distinct runs it names.
+    let repeated = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={}",
+            vec![fixture_run::RUN_ID; named.len()].join(",")
+        ),
+    );
+    assert_eq!(repeated.status, 422);
+    assert_eq!(repeated.json()["error"]["code"], json!("invalid_request"));
     let refused = http::get(
         serving.address,
         &format!("/api/v2/runs?select={}", named.join(",")),

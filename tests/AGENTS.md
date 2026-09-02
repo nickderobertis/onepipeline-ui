@@ -36,6 +36,11 @@ time, because a CPU measurement on a host that also runs every dispatch is a
 property of the host and reproduces nowhere, while the work a read does is a
 property of the finished tree.
 
+They run behind `onepipeline-ui:test-cost` rather than under `test`, and the
+edge is about the tracer rather than the clock — seconds, not minutes. `check`
+runs it, so the pre-push bar still holds the bounds; a bare `just test` is spared
+a dependency nothing else here has.
+
 `tests/support/cost.rs` is how they are counted: the real binary, over a real
 runs root, on a real socket, with `strace` watching what it asks the kernel for.
 That is what makes the bound honest — it counts every byte the linked SDK reads

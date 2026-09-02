@@ -378,6 +378,8 @@ fn an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin() {
     // allowed to do. A tick is one listing of the runs root — which is what lets
     // a run that appeared since the last tick be noticed.
     let ticks = cost.listings_of(&root);
+    // A count of poll intervals inside a bounded wait this journey itself set,
+    // so the quotient is tens rather than anything a `usize` could lose.
     #[allow(clippy::cast_possible_truncation)]
     let due = (elapsed.as_millis() / u128::from(TRACED_POLL_MS)) as usize;
     assert!(

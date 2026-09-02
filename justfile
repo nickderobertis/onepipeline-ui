@@ -111,7 +111,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint typecheck build test test-baseline doc
+check: fmt-check lint typecheck build test test-baseline test-cost doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -190,6 +190,12 @@ test:
 test-baseline:
     @bash scripts/nx.sh run-many -t test-baseline
 
+# A recipe of its own for the reason `_crate-test-cost` gives: these need a
+# syscall tracer on the machine, and nothing else here does.
+# The bounds on what a read costs, which need `strace` installed.
+test-cost:
+    @bash scripts/nx.sh run-many -t test-cost
+
 # Build every project's docs with warnings denied.
 doc:
     @bash scripts/nx.sh run-many -t doc
@@ -209,16 +215,20 @@ _crate-lint:
 # 95% line coverage is the gate; lower it only with a documented reason in
 # AGENTS.md.
 #
-# The baseline comparison is the one thing this excludes, and `_crate-test-baseline`
-# below is where it runs. The two filters partition the suite — this one is `not`
-# what that one is — so every test runs under exactly one of them and the floor is
-# still measured over everything this target executes. `tests/e2e/ensure_baseline.rs`
-# holds both recipes to that partition, because a filter that drifted here would
-# leave the comparison running nowhere rather than failing.
-# The crate's test suite (contract + e2e) with coverage enforced, less the baseline.
+# Two tiers are excluded and each has a recipe of its own below: the baseline
+# comparison, which cannot run until another commit of this repository has been
+# compiled, and the cost journeys, which need a syscall tracer on the machine.
+# The three filters partition the suite — this one is `not` what the other two
+# are — so every test runs under exactly one of them and the floor is still
+# measured over everything this target executes.
+# `tests/e2e/ensure_baseline.rs` holds all three recipes to that partition,
+# because a filter that drifted here would leave a tier running nowhere rather
+# than failing.
+# The crate's test suite (contract + e2e) with coverage enforced, less the two
+# tiers that carry a cost of their own.
 _crate-test:
     @cargo llvm-cov nextest --locked --fail-under-lines 95 \
-      -E 'not test(/^baseline::/)' \
+      -E 'not test(/^baseline::/) and not test(/^cost::/)' \
       --status-level fail --final-status-level fail \
       || { echo "tests failed, or coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
 
@@ -237,12 +247,34 @@ _crate-test-baseline:
     @cargo nextest run --locked -E 'test(/^baseline::/)' --status-level fail --final-status-level fail
 # llmlint: ignore-end[diagnostics_error_or_absent]
 
+# The cost journeys, behind an edge of their own because they need something the
+# machine has to have rather than something the lockfile can pin: `strace`, which
+# is how they count what the server asks the kernel for. They are seconds rather
+# than minutes, so the edge is about that dependency and not about the clock — a
+# checkout without the tracer still runs every other tier.
+#
+# `check` runs this beside `test`, so the pre-push bar still holds the bounds; a
+# `test` run on its own is spared the dependency. Linux only, and the filter is a
+# no-op elsewhere because the suite is compiled away there.
+#
+# No coverage instrumentation: these journeys count syscalls rather than lines,
+# and the floor above is measured over the partition that excludes them.
+# The bounds on what a read costs — what `test` leaves out, and needs `strace`.
+# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own, on the terms `_crate-test-baseline` above states.
+_crate-test-cost:
+    @cargo nextest run --locked -E 'test(/^cost::/)' --status-level fail --final-status-level fail
+# llmlint: ignore-end[diagnostics_error_or_absent]
+
 # Build the docs with warnings denied (kept in the gate so doc links don't rot).
 _crate-doc:
     @RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked --quiet
 
 # Coverage instrumentation is measured on Linux only, so the cross-platform CI
 # legs run the same suite through this instead of `test`.
+#
+# The cost journeys are excluded for the reason `_crate-test-cost` gives — they
+# need a tracer the machine has to have — and the exclusion is a no-op on the two
+# platforms this recipe exists for, because that suite is compiled away there.
 #
 # The baseline comparison is excluded on the same terms coverage is. It asks
 # whether *this crate* still serves what the commit it forked from served, which
@@ -255,7 +287,7 @@ _crate-doc:
 # Full test suite without coverage instrumentation.
 # llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on. The cross-platform legs this recipe is for run `_crate-lint` beside it, so the deny reaches these tests on every platform the gate rules on.
 test-quick:
-    @cargo nextest run --locked -E 'not test(/^baseline::/)' --status-level fail
+    @cargo nextest run --locked -E 'not test(/^baseline::/) and not test(/^cost::/)' --status-level fail
 # llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Drives the compiled binary and the committed npm launcher — never a stub. The

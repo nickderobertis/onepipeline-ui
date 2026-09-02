@@ -471,12 +471,15 @@ impl ReadApi for RunStore {
 /// nothing changed.
 type Stamp = (u64, u64);
 
-/// What one journal's metadata says right now, or `(0, 0)` for a run that has
-/// recorded nothing.
+/// What one journal's metadata says right now, or `None` where there is no
+/// journal to describe.
 ///
-/// A directory entry whose journal cannot be described is not a run this stream
-/// announces: a plain file beside the runs never claimed to be one, and a run
-/// swept between the listing and the look is not a root to make a claim about.
+/// `None` is what makes a directory entry *not a run* to this stream: a plain
+/// file beside the runs never claimed to be one, and a run swept between the
+/// listing and the look is not a root to make a claim about. A run whose store
+/// this build cannot stat is on those same terms — it is announced once it has
+/// a journal, and the snapshot every connection opens with is what carries it
+/// until then.
 fn stamp_of(journal: &std::path::Path) -> Option<Stamp> {
     let about = std::fs::metadata(journal).ok()?;
     let modified = about

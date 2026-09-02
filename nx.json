@@ -32,6 +32,7 @@
     "build": { "cache": true, "inputs": ["default"] },
     "test": { "cache": true, "inputs": ["default"] },
     "test-baseline": { "cache": true, "inputs": ["default"] },
+    "test-cost": { "cache": true, "inputs": ["default"] },
     "test-isolation": { "cache": true, "inputs": ["default"] },
     "doc": { "cache": true, "inputs": ["default"] },
     "lint-llm-diff": {
@@ -52,6 +53,7 @@
         "build",
         "test",
         "test-baseline",
+        "test-cost",
         "test-isolation",
         "doc"
       ]
