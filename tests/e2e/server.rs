@@ -8293,3 +8293,41 @@ fn a_selection_naming_no_run_at_all_says_so() {
     let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
     assert_eq!(listed["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
 }
+
+#[test]
+fn a_run_directory_the_contract_cannot_name_is_reported_rather_than_listed() {
+    // A row's `run_id` is what a client turns straight back into
+    // `GET /api/v2/runs/{run}`, so a directory whose name this contract's own
+    // boundary refuses is not a run to point a reader at. The event stream has
+    // always applied that filter before announcing one; the list handed the id
+    // out anyway, and a client following it met the route's refusal instead of a
+    // run. Reported here rather than dropped, for the reason every other refused
+    // root is: an omission nobody is told about is a host that looks empty.
+    let unnameable = "a run with spaces";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, unnameable);
+    });
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+
+    let served: Vec<&str> = listed["runs"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("a run id"))
+        .collect();
+    assert_eq!(served, vec![fixture_run::RUN_ID], "{listed}");
+    let unreadable = listed["unreadable"].as_array().expect("the refused root");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    assert_eq!(unreadable[0]["path"], json!(unnameable), "{listed}");
+    assert!(
+        !unreadable[0]["reason"]
+            .as_str()
+            .expect("a reason")
+            .is_empty(),
+        "{listed}"
+    );
+    // And every id the list *did* serve is one the route beside it accepts.
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{}", served[0]));
+    assert_eq!(detail.status, 200);
+}

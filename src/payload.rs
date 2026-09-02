@@ -33,7 +33,7 @@ use time::OffsetDateTime;
 
 use crate::contract::{
     ArtifactId, Confined, ConversationId, DispatchId, NamedStore, NodeId, PathSegment,
-    ReferenceKind, StoreRoot, TIMELINE_SCHEMA_VERSION,
+    ReferenceKind, RunId, StoreRoot, TIMELINE_SCHEMA_VERSION,
 };
 use crate::filter::EventFilter;
 // The sibling's spending party is imported under a name of its own: this module
@@ -615,13 +615,24 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
 /// its nodes; the host reading behind [`crate::liveness`]; and the channel queue
 /// that reading consults for a run already gone quiet.
 ///
+/// `run` rather than the document's own `run_id`: a summary is read out of a
+/// directory under the runs root, and a client turns the id on this row straight
+/// back into `GET /api/v2/runs/{run}` — so what is served here is an id that
+/// route would accept, and a directory the contract's own boundary refuses never
+/// reaches this function at all.
+///
 /// `telemetry` is the run's clock — [`crate::telemetry::of_aggregate`] over the
 /// document the summary carries — or `None` when it could not be read, in which
 /// case every timing here is absent, which is what an unknown clock is.
 #[must_use]
-pub fn run_row(summary: &RunSummary, paths: &RunPaths, telemetry: Option<&RunTelemetry>) -> Value {
+pub fn run_row(
+    run: &RunId,
+    summary: &RunSummary,
+    paths: &RunPaths,
+    telemetry: Option<&RunTelemetry>,
+) -> Value {
     let mut row = Map::new();
-    row.insert("run_id".into(), json!(summary.run_id));
+    row.insert("run_id".into(), json!(run));
     row.insert("state".into(), json!(summary_state_word(summary)));
     row.insert("phase".into(), json!(summary_phase_word(summary)));
     row.insert(
@@ -646,7 +657,7 @@ pub fn run_row(summary: &RunSummary, paths: &RunPaths, telemetry: Option<&RunTel
         "node_counts".into(),
         json!(summary_node_counts(summary, paths)),
     );
-    row.insert("launch".into(), summary_launch(summary));
+    row.insert("launch".into(), summary_launch(run, summary));
     Value::Object(row)
 }
 
@@ -716,9 +727,9 @@ fn summary_node_counts(summary: &RunSummary, paths: &RunPaths) -> BTreeMap<Strin
 }
 
 /// The run's own attribution to the session that launched it, from its summary.
-fn summary_launch(summary: &RunSummary) -> Value {
+fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
     let mut record = Map::new();
-    record.insert("launch_id".into(), json!(summary.run_id));
+    record.insert("launch_id".into(), json!(run));
     record.insert("launcher".into(), json!(launcher_word(&summary.launcher)));
     if !summary.session.is_empty() {
         record.insert("session_key".into(), json!(session_key(&summary.session)));

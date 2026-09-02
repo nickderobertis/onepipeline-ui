@@ -340,7 +340,7 @@ fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
         let clock = onepipeline_ui::telemetry::of_aggregate(&id, &summary.timing).ok();
         assert!(clock.is_some(), "{shape}: the summary carries no clock");
         assert_eq!(
-            onepipeline_ui::payload::run_row(&summary, &paths, clock.as_ref()),
+            onepipeline_ui::payload::run_row(&id, &summary, &paths, clock.as_ref()),
             onepipeline_ui::payload::run_summary(&view, clock.as_ref()),
             "{shape}: the bounded reading and the fold describe different runs"
         );

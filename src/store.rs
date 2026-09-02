@@ -219,16 +219,47 @@ impl RunStore {
     /// Paid **only for a run the page serves**, which is the whole of what a
     /// page size can bound: reading each run's summary and ordering the runs by
     /// what those summaries say are per run and nothing else is.
-    fn row(&self, summary: &RunSummary) -> Value {
-        let paths = RunPaths::under(&self.root, &summary.run_id);
+    fn row(&self, run: &RunId, summary: &RunSummary) -> Value {
+        // Joined from the **validated** id rather than from the name the
+        // directory happened to have, so no raw `String` read off the filesystem
+        // reaches storage — the same rule every `{...}` a route interpolates
+        // crosses.
+        let paths = self.paths_of(run);
         // The row's clock, out of the document the summary carries rather than
         // out of a process started for this row. It still crosses this crate's
         // own telemetry boundary, so a document that does not add up leaves the
         // row's timings absent exactly as an unaskable sibling does.
-        let timing = RunId::try_from(summary.run_id.as_str())
-            .ok()
-            .and_then(|run| telemetry::of_aggregate(&run, &summary.timing).ok());
-        payload::run_row(summary, &paths, timing.as_ref())
+        let timing = telemetry::of_aggregate(run, &summary.timing).ok();
+        payload::run_row(run, summary, &paths, timing.as_ref())
+    }
+
+    /// The runs a listing can serve, and the roots it has to refuse.
+    ///
+    /// **A row's `run_id` is what a client turns straight back into
+    /// `GET /api/v2/runs/{run}`**, so a directory whose name this contract's own
+    /// boundary would reject is not a run to point a reader at — the event
+    /// stream has always applied that filter before announcing one, and a list
+    /// that served it anyway handed out an id the route beside it refuses.
+    /// Reported rather than dropped, on the same terms every other refused root
+    /// is: a run this API cannot serve is a fact about the root.
+    ///
+    /// No read: the summaries are already in hand, and this is a walk over their
+    /// names.
+    fn nameable(
+        summaries: Vec<RunSummary>,
+        refused: &mut Vec<Skipped>,
+    ) -> Vec<(RunId, RunSummary)> {
+        let mut serving = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            match RunId::try_from(summary.run_id.as_str()) {
+                Ok(run) => serving.push((run, summary)),
+                Err(why) => refused.push(Skipped {
+                    path: PathBuf::from(&summary.run_id),
+                    reason: format!("this API cannot serve a run under that name: {why}"),
+                }),
+            }
+        }
+        serving
     }
 
     /// The run roots a read refused, as the reader itself worded them.
@@ -271,26 +302,27 @@ impl RunStore {
     /// nothing more, and a run it does serve costs one row's worth of work.
     fn page(&self, query: &RunsQuery) -> Value {
         let listing = Listing::of(&self.root);
+        let mut skipped = listing.skipped;
+        let summaries = Self::nameable(listing.summaries, &mut skipped);
         // The cursor names the last row *served*, so resumption is positional in
         // this order rather than a comparison on the id: an id comparison would
         // skip or repeat rows the moment the order stopped being the id's.
         let resume = query.cursor.as_ref().map_or(0, |cursor| {
-            listing
-                .summaries
+            summaries
                 .iter()
-                .position(|summary| summary.run_id == cursor.as_str())
+                .position(|(run, _)| run == cursor)
                 .map_or(0, |index| index + 1)
         });
         let page = query.page();
         // One more than the page, and then stop: knowing whether a further row
         // exists is the whole of what the extra one is for, and reading past it
         // is what made a page of one cost more than a page of fifty.
-        let mut rows: Vec<&RunSummary> = Vec::new();
-        for summary in listing.summaries.iter().skip(resume) {
-            if !query.include_settled && Self::settled(summary) {
+        let mut rows: Vec<&(RunId, RunSummary)> = Vec::new();
+        for row in summaries.iter().skip(resume) {
+            if !query.include_settled && Self::settled(&row.1) {
                 continue;
             }
-            rows.push(summary);
+            rows.push(row);
             if rows.len() > page {
                 break;
             }
@@ -301,17 +333,21 @@ impl RunStore {
         let more = rows.len() > page;
         rows.truncate(page);
         let next = more
-            .then(|| rows.last().map(|summary| summary.run_id.clone()))
+            .then(|| rows.last().map(|(run, _)| run.clone()))
             .flatten();
         let mut payload = serde_json::Map::new();
         payload.insert(
             "runs".into(),
-            Value::Array(rows.into_iter().map(|summary| self.row(summary)).collect()),
+            Value::Array(
+                rows.into_iter()
+                    .map(|(run, summary)| self.row(run, summary))
+                    .collect(),
+            ),
         );
         if let Some(cursor) = next {
             payload.insert("next_cursor".into(), json!(cursor));
         }
-        if let Some(refused) = Self::unreadable(&listing.skipped) {
+        if let Some(refused) = Self::unreadable(&skipped) {
             payload.insert("unreadable".into(), refused);
         }
         Value::Object(payload)
@@ -341,13 +377,13 @@ impl RunStore {
     /// The runs root is never listed: each name is joined to it and opened, so a
     /// selection of one against a store of hundreds touches one run.
     fn selected(&self, selection: &RunSelection) -> Value {
-        let mut summaries: Vec<RunSummary> = Vec::new();
+        let mut summaries: Vec<(RunId, RunSummary)> = Vec::new();
         let mut missing: Vec<&RunId> = Vec::new();
         let mut skipped: Vec<Skipped> = Vec::new();
         for run in selection.named() {
             let paths = self.paths_of(run);
             match RunSummary::of(&paths) {
-                Ok(summary) => summaries.push(summary),
+                Ok(summary) => summaries.push((run.clone(), summary)),
                 // A run that is not there, and a run that is there and will not
                 // read, are two different facts to the caller: the first is the
                 // race a refresh loses, the second is a run this host is failing
@@ -366,16 +402,21 @@ impl RunStore {
         }
         // The same order a page is served in, so a client folding a refreshed row
         // back into its list never has to re-sort by a second rule.
-        summaries.sort_by(|left, right| {
+        summaries.sort_by(|(left_run, left), (right_run, right)| {
             right
                 .last_write_at
                 .cmp(&left.last_write_at)
-                .then_with(|| left.run_id.cmp(&right.run_id))
+                .then_with(|| left_run.cmp(right_run))
         });
         let mut payload = serde_json::Map::new();
         payload.insert(
             "runs".into(),
-            Value::Array(summaries.iter().map(|summary| self.row(summary)).collect()),
+            Value::Array(
+                summaries
+                    .iter()
+                    .map(|(run, summary)| self.row(run, summary))
+                    .collect(),
+            ),
         );
         if !missing.is_empty() {
             payload.insert(
