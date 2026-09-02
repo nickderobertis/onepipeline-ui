@@ -231,8 +231,24 @@ position in the transcript and the timeline numbers the same session by the same
 rule, so a kind admitted by one alone leaves a plotted moment pointing at the
 wrong turn.
 
+**And a turn record of the *other party* is not a row of the transcript.** A
+two-party member relays both sides into one session and each side numbers its own
+turns from 1, so `payload::relayed_turns` keeps the agent's records and drops the
+supervisor's: what the supervisor was asked is the agent's last reply, what it
+said is the agent's next instruction, and both already reach a reader on the
+agent's own turns. Serving its records as rows put the agent's reply on the user
+side of a row of its own — which is what an operator sees as the agent answering
+itself — and read every two-party dispatch at twice its length; against a stored
+report, whose turns are joined by the number, it matched each of the report's
+turns to both sides and served every one of them twice. `payload::agent_turn` is
+the predicate, and a record naming **no** party is the agent's: the producer that
+predates the party runs one side, so there is no other side for it to be.
+
 **A summary belongs to the turn record before it, not the one after it.**
-`oneagentgraph` opens a turn and *then* streams its activities.
+`oneagentgraph` opens a turn and *then* streams its activities. One published from
+inside the supervisor's own invocation belongs to no row and is dropped rather
+than folded onto the agent turn before it, which would bill one party's tools to
+the other.
 
 ## The report a settled member left, which is what a transcript is
 
@@ -264,7 +280,9 @@ Four joins, each the one the obvious alternative gets wrong:
 - **A session to its report, by `{stream}.{member}`**, which is how a session id
   is minted — so do not add a `session` label upstream for it.
 - **A turn to its measurements, by the producer's own `turn` number**, not by
-  position: a turn that called no tool relays no `turn-started`.
+  position: a turn that called no tool relays no `turn-started`. The number is
+  enough only because the rule above has already dropped the other party's
+  records; over both sides it matches twice.
 - **A figure to the turn that spent it, off the attribution candidate that
   `ran`**, never off the report's top-level `usage` — that is the dispatch's
   total over both sides, and would repeat on every turn.

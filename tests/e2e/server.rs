@@ -1273,6 +1273,7 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
             fixture_run::WORKING_NODE_ID,
             fixture_run::DIED_NODE_ID,
             fixture_run::RECLAIMED_NODE_ID,
+            fixture_run::SUPERVISED_NODE_ID,
         ],
         "{spans:?}"
     );
@@ -6895,6 +6896,199 @@ fn lane_transcript(serving: &Serving, session: &str) -> Vec<Value> {
         .clone()
 }
 
+/// Every turn of a settled two-party dispatch, alternating the supervisor's
+/// prompt with the agent's reply, for the whole of the conversation.
+///
+/// This is the reading an operator opens a run to do, and the one that was
+/// broken: the transcript is what the agent and its supervisor actually said to
+/// each other, and a reader who is shown one exchange and then silence — or the
+/// agent's own words back on the user side — cannot use it for that at all.
+///
+/// The count is asserted against the report itself rather than against a number
+/// written here, because the report is what the reading holds: three of these
+/// turns are named by no envelope of the run and a reading that served only the
+/// turns some record happened to name would drop them and still look ordered.
+#[test]
+fn a_settled_dispatch_serves_every_turn_of_the_conversation_it_really_had() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::SUPERVISED_CONVERSATION_ID);
+
+    // What the source holds: the settling member's own report, counted by the
+    // prompts it recorded.
+    let report: Value =
+        serde_json::from_str(&fixture_run::supervised_report()).expect("the stored report");
+    let recorded = report["transcript"]["messages"]
+        .as_array()
+        .expect("the report's transcript")
+        .iter()
+        .filter(|message| message["role"] == json!("user"))
+        .count();
+    assert_eq!(turns.len(), recorded, "{turns:?}");
+    assert!(
+        recorded > usize::try_from(fixture_run::SUPERVISED_RELAYED).expect("a small count"),
+        "the fixture no longer holds a turn the journal never named"
+    );
+
+    // And each of them is that turn: the prompt it answered, and the reply it
+    // wrote. Read in order, so a transcript that served one turn twice or two
+    // turns swapped fails on the text rather than only on the count.
+    for (index, turn) in turns.iter().enumerate() {
+        let number = u64::try_from(index + 1).expect("a small count");
+        assert_eq!(
+            turn["user"],
+            json!(fixture_run::supervised_prompt(number)),
+            "turn {number}: {turn}"
+        );
+        assert_eq!(
+            turn["assistant"],
+            json!(fixture_run::supervised_reply(number)),
+            "turn {number}: {turn}"
+        );
+    }
+
+    // The count beside the node is the same fold, so a reader who trusts it and
+    // then opens the transcript is not shown a different conversation.
+    let node = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::LANES_RUN_ID),
+    )
+    .json()["run"]["nodes"]
+        .as_array()
+        .expect("the rows")
+        .iter()
+        .find(|row| row["node"] == json!(fixture_run::SUPERVISED_NODE_ID))
+        .expect("the supervised node")
+        .clone();
+    assert_eq!(node["turns"], json!(turns.len()));
+}
+
+/// No party's words, tools or accounting are served against the other party.
+///
+/// A two-party member relays both sides into one session and both number their
+/// turns from 1. Reading the stored report by that number over both sides matched
+/// every turn twice — the second copy attributing the agent's prompt and reply to
+/// the supervisor — which is what an operator sees as the agent's reply appearing
+/// on the user side of the conversation.
+#[test]
+fn a_settled_two_party_dispatch_serves_nothing_of_its_supervisor_as_a_turn() {
+    let serving = lanes();
+    let turns = lane_transcript(&serving, fixture_run::SUPERVISED_CONVERSATION_ID);
+
+    let replies: Vec<Value> = turns.iter().map(|turn| turn["assistant"].clone()).collect();
+    for (index, turn) in turns.iter().enumerate() {
+        // The agent's reply is never served as anything's prompt — which is what
+        // the supervisor's own `turn-started` carries, because the reply is the
+        // message it was given to answer.
+        assert!(
+            !replies.contains(&turn["user"]),
+            "turn {index} is served a reply as its prompt: {turn}"
+        );
+        // Nor is the supervisor's own invocation billed to a turn of the
+        // transcript, nor its own tool call folded onto one.
+        assert_ne!(
+            turn["usage"]["costUsd"],
+            json!(fixture_run::SUPERVISOR_COST),
+            "turn {index}: {turn}"
+        );
+        assert_ne!(
+            turn["usage"]["inputTokens"],
+            json!(fixture_run::SUPERVISOR_INPUT_TOKENS),
+            "turn {index}: {turn}"
+        );
+        assert!(
+            !turn["tools"]
+                .as_array()
+                .expect("the turn's tool events")
+                .iter()
+                .any(|event| event["input"] == json!(fixture_run::SUPERVISOR_TOOL_DETAIL)),
+            "turn {index} is served the supervisor's own call: {turn}"
+        );
+        // And each turn is measured by its own invocation rather than by the
+        // dispatch's total over both sides.
+        let number = u64::try_from(index + 1).expect("a small count");
+        assert_eq!(
+            turn["usage"]["costUsd"],
+            json!(fixture_run::supervised_turn_cost(number)),
+            "turn {number}: {turn}"
+        );
+    }
+    assert!(
+        turns
+            .iter()
+            .all(|turn| turn["usage"]["costUsd"] != json!(fixture_run::SUPERVISED_TOTAL_COST)),
+        "the dispatch's own total is served on a turn: {turns:?}"
+    );
+}
+
+/// A dispatch the run holds no readable report for is read from its own journal
+/// records, and alternates exactly as a settled one does.
+///
+/// That reading is not a fallback nobody meets: a report exists only once a
+/// member settles, so it is the whole of what the live run an operator is
+/// watching has. It is joined by the pair of the turn number and the party, and
+/// the count it serves is the number of turns the *agent* took — the supervisor's
+/// own invocations beside them are the other half of those turns rather than
+/// turns of their own.
+#[test]
+fn a_dispatch_with_no_readable_report_alternates_its_own_records() {
+    let serving = lanes();
+    let session = fixture_run::WORKING_CONVERSATION_ID;
+    let turns = lane_transcript(&serving, session);
+
+    // What the source holds, read off the run's own journal rather than restated
+    // here: the distinct turns the agent's side of this session relayed.
+    let journal = fs::read_to_string(
+        serving
+            .runs
+            .path()
+            .join(fixture_run::LANES_RUN_ID)
+            .join("events.jsonl"),
+    )
+    .expect("the run's journal");
+    let mut relayed: Vec<u64> = journal
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|event| {
+            event["labels"]["session"] == json!(session)
+                && event["payload"]["role"] == json!("assistant")
+                && (event["kind"] == json!("turn-started")
+                    || event["kind"] == json!("turn-completed"))
+        })
+        .filter_map(|event| event["payload"]["turn"].as_u64())
+        .collect();
+    relayed.sort_unstable();
+    relayed.dedup();
+    assert!(!relayed.is_empty(), "the fixture relays no agent turn");
+    // Nothing of this session settled, so no report can be what it is read from.
+    assert!(
+        !journal.lines().any(|line| {
+            let event: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+            event["labels"]["member"] == json!("worker")
+                && event["stream"] == json!(session.split('.').next().expect("the stream"))
+                && (event["kind"] == json!("member-settled")
+                    || event["kind"] == json!("member-died"))
+        }),
+        "the session under test settled, so it is not the reading this journey drives"
+    );
+    assert_eq!(turns.len(), relayed.len(), "{turns:?}");
+
+    // The supervisor's words reach the reader as the prompt of the turn they
+    // opened, and its own turn is not a row: every row is the agent's, with the
+    // prompt it answered and the reply it wrote.
+    assert_eq!(turns[0]["user"], json!(fixture_run::WORKING_INSTRUCTION));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::WORKING_REPLY));
+    assert_eq!(
+        turns[1]["user"],
+        json!(fixture_run::WORKING_NEXT_INSTRUCTION)
+    );
+    assert_eq!(turns[1]["assistant"], json!(fixture_run::WORKING_CUT_REPLY));
+    let replies: Vec<Value> = turns.iter().map(|turn| turn["assistant"].clone()).collect();
+    assert!(
+        turns.iter().all(|turn| !replies.contains(&turn["user"])),
+        "a reply is served as a prompt: {turns:?}"
+    );
+}
+
 /// A dispatch still in flight is read from its own records, because nothing else
 /// holds it: a report exists only once a member settles.
 ///
@@ -6960,12 +7154,13 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
 ///
 /// So this drives the three surfaces that have to agree — the transcript, the
 /// count beside the node, and the timeline's own reference to a turn — over a
-/// session whose five relayed turn records describe three turns.
+/// session whose five relayed turn records on the agent's side describe two
+/// turns. The supervisor's own three records describe neither of them.
 #[test]
 fn one_turn_is_one_row_however_many_records_describe_it() {
     let serving = lanes();
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
-    assert_eq!(turns.len(), 3, "{turns:?}");
+    assert_eq!(turns.len(), 2, "{turns:?}");
 
     // No two of them stand over the same moment, which is what a plot of this
     // transcript draws as one span that cannot be reached under another.
@@ -7017,32 +7212,49 @@ fn one_turn_is_one_row_however_many_records_describe_it() {
 }
 
 /// A turn is joined to its own records by the **pair** the producer numbers it
-/// with, and never by the number alone.
+/// with, and never by the number alone — and the supervisor's side of that pair
+/// is not a row of the transcript at all.
 ///
 /// The two sides of a two-party member count their turns independently, so both
 /// of these are turn 1: the agent's, and the supervisor's answering it. A reading
 /// that joined on the number would put the supervisor's instruction and the
 /// supervisor's cost on the agent's turn, which is the one figure an operator
-/// deciding whether to let a dispatch keep running would act on.
+/// deciding whether to let a dispatch keep running would act on. And serving the
+/// supervisor's turn as a row of its own is the same defect wearing the other
+/// face: its instruction *is* the agent's reply, so the row it produced showed an
+/// operator the agent's words on the user side of the conversation.
 #[test]
 fn a_turn_is_joined_by_the_pair_the_producer_numbers_it_with() {
     let serving = lanes();
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
-    let supervising = turns
-        .iter()
-        .find(|turn| turn["usage"]["costUsd"] == json!(0.01))
-        .expect("the supervisor's own turn");
 
-    // What it was asked is the reply it is answering, and what it said is the
-    // next instruction rather than this transcript's reply: the agent's words are
-    // the transcript's, and the supervisor's reach a reader as the prompt of the
-    // turn they opened.
-    assert_eq!(supervising["user"], json!(fixture_run::WORKING_REPLY));
-    assert_eq!(supervising["assistant"], json!(null));
-    assert_eq!(supervising["usage"]["inputTokens"], json!(51));
-    // And nothing of it landed on the agent's turn of the same number.
+    // The supervisor's own invocation reaches a reader as the prompt of the turn
+    // it opened, and in no other way: not as a row, not as a reply, and not as a
+    // figure on the agent's turn of the same number.
+    assert!(
+        turns
+            .iter()
+            .all(|turn| turn["user"] != json!(fixture_run::WORKING_REPLY)),
+        "the agent's reply is served on the user side: {turns:?}"
+    );
+    assert!(
+        turns
+            .iter()
+            .all(|turn| turn["usage"]["inputTokens"] != json!(51)
+                && turn["usage"]["costUsd"] != json!(0.01)),
+        "the supervisor's own accounting is served against a turn: {turns:?}"
+    );
     assert_eq!(turns[0]["usage"]["inputTokens"], json!(4_210));
-    assert_ne!(turns[0]["user"], supervising["user"]);
+    assert_eq!(turns[0]["usage"]["costUsd"], json!(0.42));
+    // What the supervisor said, on the turn it opened rather than on one of its
+    // own: the transcript alternates its prompt with the agent's reply.
+    assert_eq!(turns[0]["user"], json!(fixture_run::WORKING_INSTRUCTION));
+    assert_eq!(turns[0]["assistant"], json!(fixture_run::WORKING_REPLY));
+    assert_eq!(
+        turns[1]["user"],
+        json!(fixture_run::WORKING_NEXT_INSTRUCTION)
+    );
+    assert_eq!(turns[1]["assistant"], json!(fixture_run::WORKING_CUT_REPLY));
 }
 
 /// An observation is paired with the call the producer says it answers.
@@ -7515,11 +7727,11 @@ fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
     let all = transcript("monitor");
     // The two kinds a turn is opened and answered by. Excluding them drops the
     // turn in flight from the listing — the run relayed nothing else for it — and
-    // leaves the two the producer also closed, which it relayed a `turn-completed`
+    // leaves the one the producer also closed, which it relayed a `turn-completed`
     // for.
     let listed = transcript(r#"{"exclude":[{"kind":"turn-started"},{"kind":"turn-message"}]}"#);
-    assert_eq!(all.len(), 3, "{all:?}");
-    assert_eq!(listed.len(), 2, "the listing narrowed: {listed:?}");
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert_eq!(listed.len(), 1, "the listing narrowed: {listed:?}");
     assert_eq!(
         listed[0]["assistant"],
         json!(fixture_run::WORKING_REPLY),
@@ -7528,7 +7740,7 @@ fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
     // Down to the id, which is the turn's place in the whole session rather than
     // in this reader's listing: an id that moved with a filter would name a
     // different turn than the transcript route serves under it.
-    assert_eq!(listed, all[..2].to_vec());
+    assert_eq!(listed, all[..1].to_vec());
 }
 
 /// What a turn only the report holds is stamped, statused and measured by, when
