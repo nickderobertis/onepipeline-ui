@@ -207,6 +207,31 @@ fn walk(value: &Value, at: String, found: &mut BTreeSet<String>) {
     }
 }
 
+/// The `onepipeline` this clone provisioned, as the older server must be handed it.
+///
+/// Read from the environment because that is how `_ensure-sibling` hands it over,
+/// and held to the path that recipe writes for the reason `baseline_binary` holds
+/// its own: what this names is a *program these journeys start*, and one that is
+/// anything but the provisioned sibling makes the comparison about two servers
+/// asking different CLIs for a run's clock. Empty when nothing named one, which is
+/// what a tier that provisioned nothing looks like and is passed through as such.
+fn provisioned_sibling() -> String {
+    let Some(named) = std::env::var_os(onepipeline_ui::telemetry::BINARY_ENV) else {
+        return String::new();
+    };
+    let provisioned = repository()
+        .join(".tools/bin")
+        .join(format!("onepipeline{}", std::env::consts::EXE_SUFFIX));
+    assert_eq!(
+        PathBuf::from(&named),
+        provisioned,
+        "{} names a path this clone does not provision to; run the \
+         `onepipeline-ui:ensure-sibling` target, which exports the one it writes",
+        onepipeline_ui::telemetry::BINARY_ENV
+    );
+    named.to_string_lossy().into_owned()
+}
+
 #[test]
 fn every_field_the_base_commit_served_is_served_by_this_build() {
     let base = base_commit();
@@ -217,7 +242,7 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
     // difference in what they serve is this crate's rather than the sibling's.
     // The document's own version has not moved across the adoption, so the older
     // binary reads the newer CLI's document exactly as this one does.
-    let sibling = std::env::var(onepipeline_ui::telemetry::BINARY_ENV).unwrap_or_default();
+    let sibling = provisioned_sibling();
     let older = ForeignServing::start(
         &baseline,
         serving.runs_root(),
