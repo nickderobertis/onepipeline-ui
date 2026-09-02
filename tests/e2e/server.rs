@@ -624,7 +624,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(7));
+    assert_eq!(body["timeline_schema_version"], json!(8));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
