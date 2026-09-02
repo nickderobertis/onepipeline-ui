@@ -32,7 +32,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(14), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(15), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -4465,13 +4465,18 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
     assert_eq!(timing["agent_model_ms"], json!(null));
     assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
 
-    // The row the operator arrives on says the same thing as the detail they open
-    // from it: one reading of the run, whether or not its clock could be read.
+    // **The row the operator arrives on does not need the sibling at all**, which
+    // is the whole of why a list of fifty rows is no longer fifty subprocesses:
+    // the run's own bounded summary carries the document that command prints, so
+    // a row's clock is read rather than fetched. The detail above is the one
+    // reading that still asks the process, and with it missing the two say
+    // different things about the same run — a misconfiguration the server also
+    // names on its own log, and the only state in which they can differ.
     let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
     let row = &listed["runs"][0];
     assert_eq!(row["run_id"], json!(fixture_run::RUN_ID));
-    assert_eq!(row["timing"]["wall_seconds"], json!(null), "{row}");
-    assert_eq!(row["timing"]["agent_seconds"], json!(null), "{row}");
+    assert_eq!(row["timing"]["wall_seconds"], json!(30), "{row}");
+    assert_eq!(row["timing"]["agent_seconds"], json!(13), "{row}");
     assert_eq!(row["node_counts"]["done"], json!(2), "a run all the same");
 
     // The rest of the payload is untouched: a run with no clock is still a run.
@@ -7110,7 +7115,7 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
     .json();
     // No field is added by this reading and no vocabulary moves for it, so the
     // envelope carrying it declares the version it already declared.
-    assert_eq!(served["telemetry_schema_version"], json!(14));
+    assert_eq!(served["telemetry_schema_version"], json!(15));
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
 
     let finished = &turns[0];

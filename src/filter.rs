@@ -439,6 +439,33 @@ impl FilterSpec {
         }
     }
 
+    /// Whether this spec narrows **nothing, for every run there could be**.
+    ///
+    /// The question an open stream asks before deciding whether a run that moved
+    /// has to be opened and read: a connection that narrowed nothing learns
+    /// everything it needs from the journal's own metadata, and one that did has
+    /// to look at what arrived. The browser's own **Detailed activity** setting
+    /// is exactly this case — it is the profile `monitor`, which is named rather
+    /// than derived so that the two settings a viewer switches between are two
+    /// profiles, and it admits every record.
+    ///
+    /// Answerable without a run for two of the three forms: an inline spec is
+    /// already resolved, and a built-in name resolves to the same filter for
+    /// every run because a launch-defined profile may not shadow one. The third
+    /// — a name a run's own launch defined — cannot be answered here, and
+    /// answers `false`: "it may narrow" is the reading that costs a read, and
+    /// the other way round would be a subscriber told about records its filter
+    /// excluded.
+    #[must_use]
+    pub fn admits_everything_for_every_run(&self) -> bool {
+        match &self.0 {
+            Spec::Inline(filter) => filter.admits_everything(),
+            Spec::Named(name) => {
+                Profile::named(name).is_some_and(|profile| profile.filter().admits_everything())
+            }
+        }
+    }
+
     /// The filter this spec is for one run, or why that run has no such profile.
     ///
     /// # Errors

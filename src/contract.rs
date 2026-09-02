@@ -64,7 +64,20 @@ pub const API_VERSION: u32 = 2;
 /// the way a type nothing writes declares them, so every served cost and token
 /// count was `null`. A client reading 13 sees the same fields it always did and
 /// reads a persona name where a prompt now is.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 14;
+///
+/// **Schema 15 is what the run list stops hiding.** The payload gains two
+/// optional companions to `runs` and `next_cursor` — `unreadable`, one entry per
+/// run root the reader refused, carrying that root's path and the reader's own
+/// reason for refusing it, and `missing`, the run ids a named selection asked
+/// about and did not find — and the route gains the [`RunSelection`] those ids
+/// come from. Both arrays are **absent** rather than empty when there is nothing
+/// to report, and every field 14 served is served with the same meaning, so a
+/// client written against 14 reads a 15 payload unchanged. The version moves
+/// because a client that has never seen `unreadable` is a client reading a run
+/// list that may be shorter than the host — which is exactly the silence this
+/// version ends: a run the API cannot serve is now reported rather than omitted,
+/// and a silent omission is indistinguishable from a server with nothing to say.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 15;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -451,6 +464,14 @@ pub struct RunsQuery {
     /// The `next_cursor` of the previous page; the list resumes after it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<RunId>,
+    /// The runs this request names, rather than the page it asks for.
+    ///
+    /// Absent for the ordinary listing, which is every request that came before
+    /// this parameter existed. Present, it decides the whole answer: the runs
+    /// named and no others, no cursor, and no settled filter — see
+    /// [`RunSelection`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<RunSelection>,
 }
 
 impl RunsQuery {
@@ -458,6 +479,91 @@ impl RunsQuery {
     #[must_use]
     pub fn page(&self) -> usize {
         self.limit.get()
+    }
+}
+
+/// A named-run selection: which runs `GET /api/v2/runs` answers about, rather
+/// than which page of them.
+///
+/// On the **existing** route rather than a new one, because the ordering rule a
+/// row is served in has to live in one place — a second route would be a second
+/// copy of it to drift. It answers the same row shape in the same order.
+///
+/// **Comma-separated, with no escaping rule.** A run id on this wire is already
+/// validated as a bare name — ASCII letters, digits, `-`, `_` and `.` — so a
+/// comma cannot occur inside one and there is nothing to escape.
+///
+/// Bounded by [`RUNS_PAGE_LIMIT`], the same maximum a page is clamped to, and a
+/// larger selection is **refused** rather than truncated: a caller that named
+/// sixty runs and was served fifty has no way to tell which ten it did not
+/// learn about, where a refusal says so.
+///
+/// Repeats are dropped, first mention winning, so a selection answers one row
+/// per run named. The bound is checked against what was *asked for* rather than
+/// against what survives that: sixty names is a request for sixty runs however
+/// many of them are the same one.
+///
+/// Constructed only through [`RunSelection::parse`] or [`TryFrom<Vec<RunId>>`],
+/// so a selection this server would not serve cannot be built and then read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<RunId>", into = "Vec<RunId>")]
+pub struct RunSelection(Vec<RunId>);
+
+impl RunSelection {
+    /// What separates two run ids in the query string.
+    pub const SEPARATOR: char = ',';
+
+    /// The selection `?select=` names, or the contract's refusal of what was
+    /// sent.
+    ///
+    /// # Errors
+    ///
+    /// [`ApiError::InvalidRunId`] for a name that is not a usable run id, and
+    /// [`ApiError::InvalidRequest`] for a selection naming nothing at all or
+    /// more runs than a page serves.
+    pub fn parse(raw: &str) -> Result<Self, ApiError> {
+        let named: Vec<RunId> = raw
+            .split(Self::SEPARATOR)
+            .map(RunId::try_from)
+            .collect::<Result<_, _>>()?;
+        Self::try_from(named)
+    }
+
+    /// The runs named, in the order they were named, each once.
+    #[must_use]
+    pub fn named(&self) -> &[RunId] {
+        &self.0
+    }
+}
+
+impl TryFrom<Vec<RunId>> for RunSelection {
+    type Error = ApiError;
+
+    fn try_from(named: Vec<RunId>) -> Result<Self, Self::Error> {
+        if named.is_empty() {
+            return Err(ApiError::InvalidRequest(
+                "select names no run; leave it off to list every run".to_owned(),
+            ));
+        }
+        if named.len() > RUNS_PAGE_LIMIT {
+            return Err(ApiError::InvalidRequest(format!(
+                "select names {} runs, and this route serves at most {RUNS_PAGE_LIMIT}",
+                named.len()
+            )));
+        }
+        let mut once: Vec<RunId> = Vec::with_capacity(named.len());
+        for run in named {
+            if !once.contains(&run) {
+                once.push(run);
+            }
+        }
+        Ok(Self(once))
+    }
+}
+
+impl From<RunSelection> for Vec<RunId> {
+    fn from(selection: RunSelection) -> Self {
+        selection.0
     }
 }
 

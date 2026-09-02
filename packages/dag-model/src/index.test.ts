@@ -9,6 +9,7 @@ import {
   parseRunTimeline,
   planTaskSchema,
   runDetailSchema,
+  runListSchema,
   runSummarySchema,
   runTelemetrySchema,
   sessionLinkSchema,
@@ -96,7 +97,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 14,
+    telemetry_schema_version: 15,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -130,7 +131,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 14,
+    telemetry_schema_version: 15,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -149,6 +150,59 @@ test("reads the launching session off the list row it is served on", () => {
   ).toBe(false);
 });
 
+test("reads the run roots the server refused, and the selection it could not find", () => {
+  const row = {
+    run_id: "run-1",
+    state: "running",
+    phase: "agent",
+    last_event: "node-started",
+    timing_quality: "complete",
+    linkage_quality: "native",
+    timing,
+    node_counts: { running: 1 },
+  };
+  // A refused run root is reported rather than dropped: a list that silently
+  // omitted it is indistinguishable from a host with nothing running.
+  const refused = parseRunList({
+    api_version: 2,
+    telemetry_schema_version: 15,
+    observed_at: "2026-07-26T12:00:00Z",
+    runs: [row],
+    unreadable: [{ path: "/runs/run-9", reason: "no launch record" }],
+  });
+  expect(refused.unreadable?.[0]?.reason).toBe("no launch record");
+  // And a run a `?select=` named that is no longer there is named, not omitted.
+  const selected = parseRunList({
+    api_version: 2,
+    telemetry_schema_version: 15,
+    observed_at: "2026-07-26T12:00:00Z",
+    runs: [row],
+    missing: ["run-swept"],
+  });
+  expect(selected.missing).toEqual(["run-swept"]);
+  expect(selected.next_cursor).toBeUndefined();
+  // Both are absent on the ordinary listing, which is what every client written
+  // before schema 15 reads.
+  expect(
+    parseRunList({
+      api_version: 2,
+      telemetry_schema_version: 15,
+      observed_at: "2026-07-26T12:00:00Z",
+      runs: [row],
+    }).unreadable,
+  ).toBeUndefined();
+  // A refusal that names no reason is not one a reader can act on.
+  expect(
+    runListSchema.safeParse({
+      api_version: 2,
+      telemetry_schema_version: 15,
+      observed_at: "2026-07-26T12:00:00Z",
+      runs: [row],
+      unreadable: [{ path: "/runs/run-9", reason: "" }],
+    }).success,
+  ).toBe(false);
+});
+
 test("accepts a run that has recorded no last event, and still rejects a blank one", () => {
   const eventless = {
     run_id: "run-2",
@@ -162,7 +216,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 14,
+    telemetry_schema_version: 15,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -297,7 +351,7 @@ describe("boundary failures", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 14,
+        telemetry_schema_version: 15,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -314,7 +368,7 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 14,
+      telemetry_schema_version: 15,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       graph: { node_states: { build: "paused" } },

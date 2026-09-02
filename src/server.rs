@@ -31,7 +31,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::ReadApi;
 use crate::contract::{
     routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, PageLimit, RunId, RunQuery,
-    RunsQuery, TimelineQuery, TimelineScope,
+    RunSelection, RunsQuery, TimelineQuery, TimelineScope,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -351,10 +351,19 @@ fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
         None => None,
         Some(value) => Some(RunId::try_from(value.as_str())?),
     };
+    // Parsed here, at the boundary, so a name that is not a usable run id and a
+    // selection larger than a page are both refused before a run is opened —
+    // and so no raw `String` reaches storage, on the same terms every other
+    // `{...}` this server interpolates crosses.
+    let select = match raw.get("select") {
+        None => None,
+        Some(value) => Some(RunSelection::parse(value)?),
+    };
     Ok(RunsQuery {
         include_settled: flag(raw, "include_settled", false)?,
         limit,
         cursor,
+        select,
     })
 }
 

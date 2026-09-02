@@ -121,6 +121,14 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = "0.1"
 
+# The one system call this crate makes that `std` has no door onto: signal `0`
+# at a recorded driver pid, which asks whether that process could still be there
+# without delivering anything. `src/liveness.rs` is the only caller and states
+# why the question is asked at all, and what a platform this cannot be asked on
+# answers instead.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 assert_cmd = "2"
 libc = "0.2"
