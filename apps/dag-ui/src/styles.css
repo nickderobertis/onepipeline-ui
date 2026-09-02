@@ -151,24 +151,17 @@ p {
   text-transform: uppercase;
 }
 
-.run-groups section + section {
-  margin-top: 24px;
-}
-
-.run-groups h2 {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 8px;
+/* One flat list, ordered by last activity: the session a run was launched from is a
+   tag on its own row rather than a heading the list is broken into. */
+.run-list-status {
+  padding: 8px;
   color: var(--muted-foreground);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
 }
 
 .run-link {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 14px;
+  grid-template-columns: minmax(0, 1fr) 14px;
   align-items: center;
   width: 100%;
   gap: 7px;
@@ -206,9 +199,10 @@ p {
   white-space: nowrap;
 }
 
-/* The run's own nodes, counted over the same statuses the graph paints. It spans the
-   whole row so the run id above it keeps its width. */
-.run-link-counts {
+/* The run's own state, then its nodes counted over the same statuses the graph
+   paints. Both span the whole row so the run id above them keeps its width. */
+.run-link-counts,
+.run-link-tag {
   grid-column: 1 / -1;
   overflow: hidden;
   font-size: 10px;
@@ -217,13 +211,17 @@ p {
   white-space: nowrap;
 }
 
-.live-dot {
-  flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 100%;
-  background: var(--info);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--info) 18%, transparent);
+.run-link-tag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  letter-spacing: 0.02em;
+}
+
+/* The halo a still-moving run's mark carries. It takes the mark's own colour —
+   which is the run's state — so the two readings the mark holds cannot disagree. */
+.run-dot[data-live="true"] {
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent);
 }
 
 .workspace {

@@ -62,6 +62,11 @@ export interface DagTelemetryState {
   readonly refresh: () => Promise<void>;
   readonly loadMore: () => Promise<void>;
   readonly hasMore: boolean;
+  /**
+   * Whether the next page is on its way, so the list can say it is loading rather
+   * than looking like a list that has simply stopped at its end.
+   */
+  readonly loadingMore: boolean;
 }
 
 export function useDagTelemetry(
@@ -86,6 +91,8 @@ export function useDagTelemetry(
   const [error, setError] = useState<Error>();
   //: Bumped whenever the selected run's reads must be taken again.
   const [revision, setRevision] = useState(0);
+  //: Whether the next page of the run list is on its way, so the list can say so.
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const runId =
     list === undefined
@@ -101,14 +108,38 @@ export function useDagTelemetry(
   useEffect(() => {
     selected.current = runId;
   }, [runId]);
+  /**
+   * Which reading is on screen — the run, the timeline scope and the attention it
+   * is being read under, together — so a failed read can tell whether the reader
+   * is still looking at what it was reading.
+   */
+  const viewing = useRef<string | undefined>(undefined);
+  /**
+   * The reading currently being read, and whether something moved while it was
+   * being read. One reading is read at a time: a stream can invalidate faster than
+   * the server can answer, and a run whose detail has never arrived must not be
+   * starved by re-asking for it before the last ask has landed.
+   */
+  const reads = useRef<{ key: string; again: boolean } | undefined>(undefined);
 
   const loadList = useCallback(async () => {
     setList(await client.listRuns(true));
   }, [client]);
+  /**
+   * The cursor a page read is out for, so the scroll that asked for it can fire as
+   * often as a scroll fires without asking for the same page twice.
+   *
+   * Cleared however the read ends, so the reader who scrolls again after a failed
+   * page gets the retry that failure invites.
+   */
+  const paging = useRef<string | undefined>(undefined);
   const loadMore = useCallback(async () => {
-    if (list?.next_cursor === undefined) return;
+    const cursor = list?.next_cursor;
+    if (cursor === undefined || paging.current === cursor) return;
+    paging.current = cursor;
+    setLoadingMore(true);
     try {
-      const next = await client.listRuns(true, list.next_cursor);
+      const next = await client.listRuns(true, cursor);
       setList((current) =>
         current === undefined
           ? next
@@ -126,8 +157,51 @@ export function useDagTelemetry(
       setError(undefined);
     } catch (caught) {
       setError(asError(caught));
+    } finally {
+      paging.current = undefined;
+      setLoadingMore(false);
     }
   }, [client, list]);
+
+  /**
+   * Refresh the one row an invalidation named, and nothing else.
+   *
+   * This is what the run-list route's named selection is for: refetching the first
+   * page instead discards every page the reader had scrolled to, and on a host
+   * where anything is moving that happened twice a second — which is why the list
+   * snapped back to the top and could not be scrolled past its first page at all.
+   *
+   * The three answers are the server's rather than this reader's guesses. A row it
+   * serves replaces the one held for that run, or joins the list at the top when
+   * none is held — the list is ordered by last activity and a run that just moved
+   * has the most recent. A run named in `missing` no longer exists, so its row
+   * goes. A run the answer says nothing about is left exactly as it is: a selection
+   * never surveys the runs root, so silence about a run is not a statement that it
+   * went away.
+   */
+  const refreshRow = useCallback(
+    async (runId: string) => {
+      const answer = await client.selectRuns([runId]);
+      setList((current) => {
+        if (current === undefined) return current;
+        if (answer.missing?.includes(runId) === true) {
+          return {
+            ...current,
+            runs: current.runs.filter((run) => run.run_id !== runId),
+          };
+        }
+        const row = answer.runs.find((run) => run.run_id === runId);
+        if (row === undefined) return current;
+        return {
+          ...current,
+          runs: current.runs.some((run) => run.run_id === runId)
+            ? current.runs.map((run) => (run.run_id === runId ? row : run))
+            : [row, ...current.runs],
+        };
+      });
+    },
+    [client],
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -145,9 +219,9 @@ export function useDagTelemetry(
   useEffect(() => {
     if (runId === undefined) {
       setRecord(undefined);
+      reads.current = undefined;
       return;
     }
-    let active = true;
     // Keep what is already on screen while the same run is re-read; drop it the
     // moment a different run is selected, so no view renders one run's detail
     // under another's name.
@@ -159,6 +233,8 @@ export function useDagTelemetry(
       candidate.runId === runId &&
       candidate.timelineScope === timelineScopeKey &&
       candidate.filter === filter;
+    const key = readingKeyOf(runId, timelineScopeKey, filter);
+    viewing.current = key;
     setRecord((current) => {
       if (current !== undefined && reading(current)) return current;
       // The detail already on screen is carried over only when it describes the
@@ -178,39 +254,79 @@ export function useDagTelemetry(
         ...(reusable === undefined ? {} : { detail: reusable }),
       };
     });
-    const amend = (change: (current: RunRecord) => RunRecord) => {
-      if (!active) return;
-      setRecord((current) =>
-        current !== undefined && reading(current) ? change(current) : current,
+    // A read is discarded on what it *is* — the run, the scope and the attention it
+    // was taken under — and never on when it was started. A read still current for
+    // this reading lands even though an invalidation arrived while it was in
+    // flight, which is the half of the livelock this side owns: on a run recording
+    // continuously, every read used to be marked stale by the next poll tick before
+    // the server could answer it, so the detail was never set and the view sat on
+    // "Loading execution history…" for as long as the run kept moving.
+    const amend = (change: (previous: RunRecord) => RunRecord) => {
+      setRecord((previous) =>
+        previous !== undefined && reading(previous)
+          ? change(previous)
+          : previous,
       );
     };
-    void client
-      .getRun(runId, { includeConversations: false, filter })
-      .then((detail) => {
-        amend((current) => ({ ...current, detail }));
-        if (active) setError(undefined);
-      })
-      .catch(ignoreRemovedRun)
-      .catch((caught: unknown) => {
-        if (active) setError(asError(caught));
-      });
-    if (timelineScope !== undefined)
-      void client
-        .getTimeline(runId, timelineScope.nodeId, filter)
-        .then((timeline) =>
-          amend((current) => ({
-            ...current,
-            timeline,
-            timelineError: undefined,
-          })),
-        )
-        .catch(ignoreRemovedRun)
-        .catch((caught: unknown) =>
-          amend((current) => ({ ...current, timelineError: asError(caught) })),
-        );
-    return () => {
-      active = false;
+    // And an error is reported only while this reading is the one on screen, so a
+    // read the reader has already moved away from cannot raise a banner about a run
+    // they are no longer looking at.
+    const report = (set: () => void) => {
+      if (viewing.current === key) set();
     };
+    // Starting a second read of a reading already being read is the other half of
+    // the livelock: with the poll at half a second and the read taking twenty, that
+    // is forty reads in flight for one run, each of them making the next slower. So
+    // an invalidation that arrives mid-read is remembered rather than obeyed, and
+    // obeyed once the read it arrived during has landed.
+    const outstanding = reads.current;
+    if (outstanding?.key === key) {
+      outstanding.again = true;
+      return;
+    }
+    const take = () => {
+      reads.current = { key, again: false };
+      const settled = () => {
+        const state = reads.current;
+        if (state?.key !== key) return;
+        if (state.again) {
+          take();
+          return;
+        }
+        reads.current = undefined;
+      };
+      const detail = client
+        .getRun(runId, { includeConversations: false, filter })
+        .then((read) => {
+          amend((previous) => ({ ...previous, detail: read }));
+          report(() => setError(undefined));
+        })
+        .catch(ignoreRemovedRun)
+        .catch((caught: unknown) => {
+          report(() => setError(asError(caught)));
+        });
+      const timeline =
+        timelineScope === undefined
+          ? Promise.resolve()
+          : client
+              .getTimeline(runId, timelineScope.nodeId, filter)
+              .then((read) =>
+                amend((previous) => ({
+                  ...previous,
+                  timeline: read,
+                  timelineError: undefined,
+                })),
+              )
+              .catch(ignoreRemovedRun)
+              .catch((caught: unknown) =>
+                amend((previous) => ({
+                  ...previous,
+                  timelineError: asError(caught),
+                })),
+              );
+      void Promise.all([detail, timeline]).then(settled, settled);
+    };
+    take();
   }, [
     client,
     runId,
@@ -235,7 +351,12 @@ export function useDagTelemetry(
         }
         const invalidated = invalidatedRunId(event);
         if (invalidated === undefined) return;
-        void loadList().catch((caught: unknown) => setError(asError(caught)));
+        // One row for one invalidation. The first page is not refetched: doing so
+        // threw away every page the reader had scrolled to, so a list on a host
+        // with anything moving snapped back to the top before it could be read.
+        void refreshRow(invalidated).catch((caught: unknown) =>
+          setError(asError(caught)),
+        );
         // Only the run being looked at is re-read: another run's progress changes
         // its row in the list and nothing else that is on screen.
         if (invalidated === selected.current)
@@ -246,7 +367,7 @@ export function useDagTelemetry(
       },
     });
     return () => subscription.close();
-  }, [client, loadList, refresh]);
+  }, [client, refreshRow, refresh]);
 
   useEffect(() => {
     if (runId === undefined) {
@@ -280,7 +401,7 @@ export function useDagTelemetry(
 
   // A record read for a run that is no longer selected, or under an attention the
   // reader has since changed, is not this reading's record.
-  const current =
+  const shown =
     record !== undefined && record.runId === runId && record.filter === filter
       ? record
       : undefined;
@@ -288,9 +409,9 @@ export function useDagTelemetry(
     () => ({
       list,
       runId,
-      detail: current?.detail,
-      timeline: current?.timeline,
-      timelineError: current?.timelineError,
+      detail: shown?.detail,
+      timeline: shown?.timeline,
+      timelineError: shown?.timelineError,
       loading,
       lastUpdated,
       activity,
@@ -298,17 +419,19 @@ export function useDagTelemetry(
       refresh,
       loadMore,
       hasMore: list?.next_cursor !== undefined,
+      loadingMore,
     }),
     [
       list,
       runId,
-      current,
+      shown,
       loading,
       lastUpdated,
       activity,
       error,
       refresh,
       loadMore,
+      loadingMore,
     ],
   );
 }
@@ -323,11 +446,32 @@ export function useDagTelemetry(
  * is one too, and it is a reading the viewer asked for and did not get. Swallowed
  * on the status alone, it would leave them looking at the previous reading with
  * nothing saying the switch did nothing.
+ *
+ * The run-list route naming a requested id in `missing` rather than failing does
+ * **not** retire this. That is a different route: `missing` is how the *list* learns
+ * a row has gone, and it says nothing about the run-**detail** read this catches,
+ * which still answers `404 run_not_found` for a run swept between the read that
+ * listed it and the read that fetched it. The two reads race by construction — the
+ * detail read is already out when the selection answers — so without this the
+ * operator is shown a telemetry banner for a race the next list already resolved.
  */
 function ignoreRemovedRun(caught: unknown): void {
   if (caught instanceof TelemetryClientError && caught.code === "run_not_found")
     return;
   throw caught;
+}
+
+/**
+ * What makes two reads of one run the same reading: the run, the timeline scope and
+ * the attention. `\u0000` separates them because no run id, scope or filter name can
+ * hold one, so no two different readings can spell one key.
+ */
+function readingKeyOf(
+  runId: string,
+  timelineScope?: string,
+  filter?: string,
+): string {
+  return [runId, timelineScope ?? "", filter ?? ""].join("\u0000");
 }
 
 /** The run an invalidation event names, or `undefined` when it names none. */

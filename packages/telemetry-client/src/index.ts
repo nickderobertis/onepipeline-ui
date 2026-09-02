@@ -114,6 +114,32 @@ export class TelemetryClient {
   }
 
   /**
+   * The rows for exactly the runs named, in the order the list serves them.
+   *
+   * What it is for: an invalidation names the run that moved, and refreshing that
+   * one row must cost one row — so a live view never has to refetch the first page
+   * and throw away the pages a reader scrolled to.
+   *
+   * It is a selection rather than a page, so nothing paging is sent with it: the
+   * server refuses `include_settled`, `limit` and `cursor` beside it, answers no
+   * cursor, and names the runs it could not find in `missing` rather than failing.
+   * A comma separates the ids and needs no escaping — a run id on this wire is a
+   * bare name — which is exactly why one carrying a comma is refused here rather
+   * than being sent as two.
+   */
+  async selectRuns(runIds: readonly string[]): Promise<RunList> {
+    if (runIds.length === 0)
+      throw new TelemetryClientError("Invalid selection");
+    for (const runId of runIds) {
+      requireOpaqueId(runId, "run ID");
+      if (runId.includes(",")) throw new TelemetryClientError("Invalid run ID");
+    }
+    const url = this.#url(API_V2_PATHS.runs);
+    url.searchParams.set(API_V2_QUERY.select, runIds.join(","));
+    return this.#request(url, runListSchema.parse);
+  }
+
+  /**
    * One run's detail.
    *
    * `includeConversations: false` asks the server for no transcripts, which it

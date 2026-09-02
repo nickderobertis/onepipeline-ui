@@ -21,11 +21,12 @@ export function StateBadge({
   readonly className?: string;
   readonly state: string;
 }) {
+  const tone = stateTone(state);
   return (
     <Badge
       className={cn(
         "gap-1.5 tracking-[.03em] uppercase",
-        TONE[state],
+        tone && BADGE_TONE[tone],
         className,
       )}
       variant="outline"
@@ -42,12 +43,63 @@ export function StateBadge({
   );
 }
 
-const SETTLED = "border-success bg-success-surface text-success";
-const LOST = "border-destructive bg-destructive-surface text-destructive";
-const DEPENDENCY_DECIDED = "border-warning bg-warning-surface text-warning";
+/**
+ * What a run or node state means, before anything decides how to paint it.
+ *
+ * One table, read by everything that colours a state: the badge above and the run
+ * list's own marker, which carries a row's state as the colour of its dot. Two
+ * tables would let the same word read as finished in one place and lost in the
+ * other.
+ */
+export type StateTone = "success" | "destructive" | "warning" | "info";
+
+/** The tone a state reads as, or `undefined` for a word no table holds. */
+export function stateTone(state: string): StateTone | undefined {
+  return TONE[state];
+}
+
+/**
+ * The dot a surface paints a state with, for a surface that also says the word —
+ * the run list's rows, where colour is the second reading of a status and never
+ * the only one. A state with no tone still gets a mark rather than an invisible
+ * one.
+ *
+ * The tone lands as `currentColor` and the fill as `bg-current`, so anything drawn
+ * around the dot — the halo a live row gives it — is the same colour without a
+ * second table saying which.
+ */
+export const stateDotClass = (state: string): string => {
+  const tone = stateTone(state);
+  return cn(
+    "size-2 shrink-0 rounded-full bg-current",
+    tone === undefined ? "text-muted-foreground" : DOT_TONE[tone],
+  );
+};
+
+const BADGE_TONE: Readonly<Record<StateTone, string>> = {
+  success: "border-success bg-success-surface text-success",
+  destructive: "border-destructive bg-destructive-surface text-destructive",
+  warning: "border-warning bg-warning-surface text-warning",
+  info: "border-info bg-info-surface text-info",
+};
+
+/**
+ * Written out rather than composed, because Tailwind reads these files for the
+ * classes it generates and never sees one built from a variable at runtime.
+ */
+const DOT_TONE: Readonly<Record<StateTone, string>> = {
+  success: "text-success",
+  destructive: "text-destructive",
+  warning: "text-warning",
+  info: "text-info",
+};
+
+const SETTLED = "success" as const;
+const LOST = "destructive" as const;
+const DEPENDENCY_DECIDED = "warning" as const;
 
 /** Dependency-decided states warn; unfinished settled work reads as a lost outcome. */
-const NODE_TONE: Readonly<Record<DagNodeState, string | undefined>> = {
+const NODE_TONE: Readonly<Record<DagNodeState, StateTone | undefined>> = {
   blocked: DEPENDENCY_DECIDED,
   cancelled: LOST,
   done: SETTLED,
@@ -57,7 +109,7 @@ const NODE_TONE: Readonly<Record<DagNodeState, string | undefined>> = {
   // neither lost nor decided by a dependency — it reads as held, like `waiting`.
   parked: undefined,
   pending: undefined,
-  running: "border-info bg-info-surface text-info",
+  running: "info",
   skipped: DEPENDENCY_DECIDED,
   unknown: undefined,
   waiting: undefined,
@@ -72,7 +124,7 @@ const NODE_TONE: Readonly<Record<DagNodeState, string | undefined>> = {
  * as one tone. A word no table holds — `driver-dead`, `undriven` — is shown untoned
  * rather than relabelled: it is a real state with no outcome in it.
  */
-const TONE: Readonly<Record<string, string | undefined>> = {
+const TONE: Readonly<Record<string, StateTone | undefined>> = {
   ...NODE_TONE,
   complete: NODE_TONE.done,
   settled: NODE_TONE.done,

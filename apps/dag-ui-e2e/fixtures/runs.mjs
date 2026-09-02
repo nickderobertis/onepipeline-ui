@@ -1959,6 +1959,33 @@ export function recordActivity(root, name, detail) {
   );
 }
 
+/**
+ * Keep the live run recording, for as long as it is asked to.
+ *
+ * What every other writer here cannot do: a run that is *still moving* while a
+ * reader is opening it. The server invalidates a subscriber when the journal it is
+ * watching has grown since the last poll, so a single append raises one
+ * invalidation and a reader is never overtaken by one. This appends `count` records
+ * `intervalMs` apart, which is what makes a stream invalidate faster than a read of
+ * that run can complete — the state an operator's thirty-node graph is in the whole
+ * time they are trying to open it.
+ *
+ * Records the same bounded tool summary `recordActivity` does, so what lands in the
+ * journal is still only what `oneagentgraph` could have written.
+ */
+export async function churnLive(root, count, intervalMs) {
+  if (!Number.isInteger(count) || count < 1 || count > 1000) {
+    throw new Error(`a churn is 1 to 1000 records, not '${count}'`);
+  }
+  if (!Number.isInteger(intervalMs) || intervalMs < 1 || intervalMs > 5000) {
+    throw new Error(`a churn interval is 1 to 5000 ms, not '${intervalMs}'`);
+  }
+  for (let index = 0; index < count; index += 1) {
+    recordActivity(root, "Read", `churn record ${index + 1} of ${count}`);
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 /** Record turns onto the live dashboard's worker session until it has `turns`. */
 export function growTranscript(root, turns) {
   const dir = join(root, LIVE_RUN);

@@ -2,9 +2,10 @@
 // dag-ui-navigation.spec.ts: every region, control and reading asserted on here is
 // reached by role or by text — graph cards and metric tiles through
 // `observatory-locators.ts`, which asks for them by the accessible names the app now
-// gives them. What is left is the copied markup's own structural containers, a
-// `section` grouping a session's runs among them, which carry no accessible name and
-// no role to ask for. Naming those is a change to the app this app was imported
+// gives them. What is left is the copied markup's own structural containers — the run
+// list's rows among them, counted by class where the assertion is how many there are
+// rather than which — which carry no accessible name and no role to ask for. Naming
+// those is a change to the app this app was imported
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
 import { execFileSync, spawn } from "node:child_process";
@@ -22,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { z } from "zod";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -60,13 +62,6 @@ async function openObservatory(
 ): Promise<void> {
   await page.goto(path);
   await expect(page.getByText("DAG Observatory")).toBeVisible();
-}
-
-/** The navigation group holding `runId`, whichever launching session it belongs to. */
-function sessionGroup(page: Page, runId: string): Locator {
-  return page
-    .locator("section")
-    .filter({ has: page.getByRole("button", { name: RegExp(runId) }) });
 }
 
 /**
@@ -140,6 +135,66 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  * journey spawns has to be independent of where that left `process.cwd()`.
  */
 const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
+
+/**
+ * Hold every read of a matching route open for `ms` before letting it through.
+ *
+ * Nothing is doubled: the request is forwarded to the same read API every other
+ * journey drives, and the response the browser gets is the one that server wrote.
+ * What this changes is the *timing* — the same thing `context.setOffline` changes
+ * about reachability, and for the same reason: a race whose two sides are a poll
+ * interval and a fold of a journal cannot be provoked from a fixture, and the
+ * defects behind these journeys are races. The operator's report was a run-detail
+ * read taking over twenty seconds against a stream invalidating twice a second.
+ */
+async function delayReads(
+  page: Page,
+  route: RegExp,
+  ms: number,
+): Promise<void> {
+  await page.route(route, async (intercepted) => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    await intercepted.continue();
+  });
+}
+
+/** The run-list route, whichever question is being asked of it. */
+const RUN_LIST_PATH = "/api/v2/runs";
+
+/** How far a scrolling region has been scrolled, in pixels from its top. */
+const scrollOffset = (locator: Locator): Promise<number> =>
+  locator.evaluate((element) => element.scrollTop);
+
+/** One run's detail read, and never the timeline or the list beside it. */
+const RUN_DETAIL_READ = /\/api\/v2\/runs\/[^/?]+(\?|$)/;
+/** The run list, page or selection alike. */
+const RUN_LIST_READ = /\/api\/v2\/runs(\?|$)/;
+
+/**
+ * Keep the live run recording for `seconds`, without waiting for it.
+ *
+ * The server invalidates a subscriber when the journal it watches has grown since
+ * the last poll, so one append raises one invalidation and nothing a journey does
+ * synchronously can outpace a read. This leaves the run moving while the journey
+ * asserts against it, which is the state an operator's graph is actually in.
+ */
+function churnLiveRun(seconds: number): { stop: () => void } {
+  const interval = 120;
+  const child = spawn(
+    process.execPath,
+    [
+      FIXTURE_COMMAND,
+      "--workspace",
+      FIXTURE_WORKSPACE,
+      "--churn-live",
+      String(Math.ceil((seconds * 1000) / interval)),
+      "--churn-interval",
+      String(interval),
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] },
+  );
+  return { stop: () => child.kill() };
+}
 
 /**
  * Run the fixture command over a workspace and wait for it to finish.
@@ -1975,20 +2030,30 @@ test("renders a graph whose node depends on another run", async ({ page }) => {
   );
 });
 
-test("navigates historical DAGs grouped by their launching session", async ({
+test("navigates historical DAGs from one list tagged by launching session", async ({
   page,
 }) => {
   await openObservatory(page);
-  await expect(page.getByText(/Codex session/)).toBeVisible();
-  await expect(page.getByText(/Claude session/)).toBeVisible();
+  await expect(page.getByText(/Codex session/).first()).toBeVisible();
+  await expect(page.getByText(/Claude session/).first()).toBeVisible();
 
   // Every row states the run's own state and whether it is still moving, so the list
   // is readable without opening a run.
   const liveRow = page.getByRole("button", { name: RegExp(runs().live) });
+  const historyRow = page.getByRole("button", { name: RegExp(runs().history) });
   await expect(liveRow).toContainText("active");
-  await expect(
-    page.getByRole("button", { name: RegExp(runs().history) }),
-  ).toContainText("settled");
+  await expect(historyRow).toContainText("settled");
+
+  // The state is carried a second time by the colour of the row's mark, and never
+  // by that colour alone: an active run and a settled one are two different tones,
+  // and both rows say the word as well.
+  const markColor = (row: Locator) =>
+    row.locator(".run-dot").evaluate((mark) => getComputedStyle(mark).color);
+  expect(await markColor(liveRow)).toBe(await tokenColor(page, "--info"));
+  expect(await markColor(historyRow)).toBe(await tokenColor(page, "--success"));
+  // And it is that mark rather than a pill of its own: the row keeps its width for
+  // the run id, which is the one thing a list has to be identifiable from.
+  await expect(liveRow.locator('[data-slot="badge"]')).toHaveCount(0);
 
   // The live marker is a bare dot, so it carries a name of its own and repeats it on
   // hover rather than leaving colour to say the only thing that distinguishes it.
@@ -1996,6 +2061,10 @@ test("navigates historical DAGs grouped by their launching session", async ({
   await expect(liveMarker).toBeVisible();
   await liveMarker.hover();
   await expect(page.getByRole("tooltip")).toContainText("Live");
+  // The settled row's mark carries its own name too, for the same reason.
+  await expect(
+    historyRow.getByRole("img", { name: "Historical" }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(graphNodes(page, "done")).toContainText("archive");
@@ -2019,6 +2088,24 @@ test("loads another run-list page when navigation reaches the end", async ({
   await navigation.locator("[data-radix-scroll-area-viewport]").hover();
   await page.mouse.wheel(0, 10_000);
   await expect(navigation.locator(".run-link")).toHaveCount(52);
+});
+
+test("says the next run-list page is loading while it is", async ({ page }) => {
+  // Held open long enough for a reader to see it: a list that reaches its end and
+  // shows nothing is a list that looks like it has simply stopped, which is what
+  // an operator who could not scroll past the first page was looking at.
+  await delayReads(page, RUN_LIST_READ, 1_500);
+  await page.goto("/?view=graph");
+  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  await expect(navigation.locator(".run-link")).toHaveCount(50);
+
+  await navigation.locator("[data-radix-scroll-area-viewport]").hover();
+  await page.mouse.wheel(0, 10_000);
+  await expect(navigation.getByText("Loading more runs…")).toBeVisible();
+  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  // And it stops saying so once the page has arrived, rather than announcing a
+  // read that is over.
+  await expect(navigation.getByText("Loading more runs…")).toHaveCount(0);
 });
 
 /**
@@ -2274,60 +2361,58 @@ test("reads every recorded moment as words rather than as its stamp", async ({
   );
 });
 
-test("gathers every run of one launching session under it", async ({
+test("tags every run of one launching session with it, in one flat list", async ({
   page,
 }) => {
   await openObservatory(page);
+  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  // One list, ordered by what moved last. Nothing gathers the rows into sections,
+  // because a grouping outranks that order: the run an operator came to look at
+  // stops being at the top, and on a host with fifty of them stops being on the
+  // first page at all.
+  await expect(navigation.locator(".run-link").first()).toBeVisible();
+  await expect(navigation.getByRole("heading", { level: 2 })).toHaveCount(0);
+  await expect(navigation.locator("section")).toHaveCount(0);
+
   // Three of the served runs record the same launch id, as one planner session
-  // driving several graphs does. They belong to one group, not one group each.
-  const codex = page
-    .locator("section")
-    .filter({ has: page.getByRole("heading", { name: /Codex session/ }) });
-  await expect(
-    page.getByRole("heading", { name: /Codex session/ }),
-  ).toHaveCount(1);
-  await expect(codex.getByRole("button")).toHaveCount(3);
-  await expect(codex).toContainText(runs().live);
-  await expect(codex).toContainText(runs().sibling);
-  await expect(codex).toContainText(runs().busy);
-
-  // Both are reachable from that one group.
-  await codex.getByRole("button", { name: RegExp(runs().sibling) }).click();
-  await expect(graphNodes(page, "running")).toContainText("sibling");
-});
-
-test("groups a run with no recorded launch as unattributed", async ({
-  page,
-}) => {
-  await openObservatory(page);
-  // Wait for the attributed groups first: until a run's detail arrives it has no
-  // transcript to attribute, so every group reads as unattributed for that moment.
-  await expect(page.getByText(/Codex session/)).toBeVisible();
+  // driving several graphs does. Each of the three carries that session as a tag on
+  // its own row rather than sharing a heading with the others.
+  for (const runId of [runs().live, runs().sibling, runs().busy]) {
+    await expect(
+      navigation.getByRole("button", { name: RegExp(runId) }),
+    ).toContainText(/Codex session · /);
+  }
   // The claude launch has no protected provenance record at all — the state every
   // launch reaches once that short-lived record expires — and its run is still
   // named by the session that launched it, from what the run directory recorded.
-  await expect(page.getByText(/Claude session/)).toBeVisible();
+  await expect(page.getByText(/Claude session/).first()).toBeVisible();
+
+  await navigation
+    .getByRole("button", { name: RegExp(runs().sibling) })
+    .click();
+  await expect(graphNodes(page, "running")).toContainText("sibling");
+});
+
+test("tags a run with no recorded launch as unattributed", async ({ page }) => {
+  await openObservatory(page);
+  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  await expect(page.getByText(/Codex session/).first()).toBeVisible();
   // The server serves this run with no launch join and no transcripts at all; it
-  // still has to be reachable rather than dropped from the navigation. Every
-  // unattributed run gets its own group, so name this run's group rather than the
-  // only one — and it reads as honestly unattributed, not as an unknown session.
+  // still has to be reachable rather than dropped from the navigation, and it reads
+  // as honestly unattributed rather than as an unknown session.
   await expect(
-    sessionGroup(page, runs().unattributed).getByRole("heading", {
-      name: /Unattributed/,
-    }),
-  ).toBeVisible();
+    navigation.getByRole("button", { name: RegExp(runs().unattributed) }),
+  ).toContainText("Unattributed");
   // A run recorded before attribution reached the run directory, whose protected
   // record is gone too: nothing can name its session, so it is named by the launch
   // it did record rather than pooled with the runs that recorded nothing at all.
   await expect(
-    sessionGroup(page, runs().eventless).getByRole("heading", {
-      name: new RegExp(
-        `Unattributed launch · ${runs().eventless.slice(0, 8)}…`,
-      ),
-    }),
-  ).toBeVisible();
+    navigation.getByRole("button", { name: RegExp(runs().eventless) }),
+  ).toContainText(`Unattributed launch · ${runs().eventless.slice(0, 8)}…`);
 
-  await page.getByRole("button", { name: RegExp(runs().unattributed) }).click();
+  await navigation
+    .getByRole("button", { name: RegExp(runs().unattributed) })
+    .click();
   await expect(graphNodes(page, "running")).toContainText("orphan");
   await expect(page.getByText("Continue unattributed work")).toHaveCount(0);
 });
@@ -3124,6 +3209,16 @@ test("refuses a change no recorded run could have held", () => {
       "is not a tool name",
     ],
     [["--grow-worker-session", "many"], "is not a turn count"],
+    [["--churn-live", "5"], "needs --churn-interval"],
+    [["--churn-interval", "50"], "needs --churn-live"],
+    [
+      ["--churn-live", "many", "--churn-interval", "50"],
+      "a churn is 1 to 1000 records",
+    ],
+    [
+      ["--churn-live", "5", "--churn-interval", "0"],
+      "a churn interval is 1 to 5000 ms",
+    ],
     [["--remove-run", "../etc"], "is not a usable run id"],
     [["--stall", "--refuse-port", "no"], "is not a port"],
     // Two changes in one invocation: the dispatch is a chain, so the second
@@ -3510,7 +3605,115 @@ test("follows a growing transcript only while the reader is at its end", async (
   expect((await detailScroll(page)).top).toBe(0);
 });
 
+test("keeps the pages a reader scrolled to when a run moves", async ({
+  page,
+}) => {
+  const listReads: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === RUN_LIST_PATH) listReads.push(url.search);
+  });
+  await page.goto("/?view=graph");
+  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
+  await expect(navigation.locator(".run-link")).toHaveCount(50);
+  await viewport.hover();
+  await page.mouse.wheel(0, 10_000);
+  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  const scrolled = await scrollOffset(viewport);
+  expect(scrolled).toBeGreaterThan(0);
+
+  // A run moves for real: one appended record the server's own poll notices.
+  listReads.length = 0;
+  changeServedRuns(["--record-activity", "Grep", "one row moved"]);
+
+  // The row that moved is refreshed by naming it, so the reading costs one row …
+  await expect
+    .poll(() =>
+      listReads.some((search) => search.includes(`select=${runs().live}`)),
+    )
+    .toBe(true);
+  // … and the first page is never asked for again, which is what used to discard
+  // every page the reader had scrolled to, twice a second, on any moving host.
+  expect(listReads.filter((search) => !search.includes("select="))).toEqual([]);
+  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  // The reader keeps the position they scrolled to, not just the rows.
+  expect(await scrollOffset(viewport)).toBe(scrolled);
+});
+
+test("opens a run that is recording faster than a read of it completes", async ({
+  page,
+}) => {
+  // Two seconds a read against a stream invalidating twice a second, held for
+  // twenty: the operator's own report, at a scale a journey can wait out.
+  test.slow();
+  await delayReads(page, RUN_DETAIL_READ, 2_000);
+  const churn = churnLiveRun(20);
+  try {
+    await page.goto(`/?run=${runs().live}&view=graph`);
+    await expect(page.getByText("Loading execution history…")).toBeVisible();
+
+    // Every read of this run is invalidated before it lands. It still lands: a read
+    // that is current for the run, the scope and the attention it was taken under is
+    // not discarded merely because something moved while it was in flight, and no
+    // second read of it is started to make the first one slower. Bounded well inside
+    // the churn, so a detail that only arrives once the run stops moving fails here.
+    await expect(graphNodes(page).first()).toBeVisible({ timeout: 8_000 });
+    await expect(graphNodes(page, "done")).toContainText("dashboard");
+    await expect(page.getByText("Loading execution history…")).toHaveCount(0);
+  } finally {
+    churn.stop();
+  }
+});
+
+test("never renders one run's detail under another run's name", async ({
+  page,
+}) => {
+  await delayReads(page, RUN_DETAIL_READ, 2_000);
+  // The read the reader is about to move away from, so this journey asserts on a
+  // stale read that has actually landed rather than on one that may not have.
+  const staleRead = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith(`/runs/${runs().live}`),
+  );
+  await page.goto(`/?run=${runs().live}&view=graph`);
+  await expect(page.getByText("Loading execution history…")).toBeVisible();
+
+  await page.getByRole("button", { name: RegExp(runs().history) }).click();
+  await staleRead;
+
+  // Letting a still-current read land is not the same as letting any read land: the
+  // run the reader moved away from is a different reading, and its detail is
+  // discarded rather than drawn under the name of the run they are on.
+  await expect(graphNodes(page, "done")).toContainText("archive");
+  await expect(
+    page.getByRole("heading", { name: runs().history }),
+  ).toBeVisible();
+  await expect(graphNodes(page).filter({ hasText: "dashboard" })).toHaveCount(
+    0,
+  );
+});
+
 test("drops a run the server stops serving", async ({ page }) => {
+  // What the server said about the run that went away, read off the answer the
+  // browser actually got: `missing` is the companion list a selection names an id
+  // it could not find in, and it is the whole of why the row goes.
+  const missing: string[] = [];
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname !== RUN_LIST_PATH || !url.searchParams.has("select"))
+      return;
+    void response
+      .json()
+      .then((body: unknown) => {
+        const answer = z
+          .object({ missing: z.array(z.string()).optional() })
+          .safeParse(body);
+        if (answer.success) missing.push(...(answer.data.missing ?? []));
+      })
+      .catch(() => {
+        // A body the browser never read is nothing to assert on.
+      });
+  });
   await openObservatory(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
@@ -3521,6 +3724,7 @@ test("drops a run the server stops serving", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
   ).toHaveCount(0);
+  await expect.poll(() => missing).toContain(runs().history);
   await expect(
     page.getByRole("button", { name: RegExp(runs().live) }),
   ).toBeVisible();
