@@ -93,6 +93,10 @@ export function RunNavigation({
                         still moving. Neither is left to colour alone — the state is
                         spelled out on the line below, and the mark keeps a name of
                         its own rather than relying on the hover-only tooltip. */}
+                    {/* Not animated, deliberately: a page of fifty rows is a page
+                        of fifty still-moving runs on this host, and fifty looping
+                        animations cost the browser enough to starve the graph
+                        beside them. The halo is what a live mark carries. */}
                     {live ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
