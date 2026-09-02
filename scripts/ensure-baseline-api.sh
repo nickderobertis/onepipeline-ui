@@ -29,24 +29,41 @@ cd "$root" || {
 # *deletes and writes* at it, so it is checked to the one place this repository
 # provisions rather than trusted: a caller that could name any path could have
 # this script remove a file of its own choosing, and the recipe exports exactly
-# one value. Compared as a whole path rather than by prefix — a prefix test
-# admits `.tools/bin/../../something` — and the name is the one the justfile
-# derives from the platform, read back rather than restated.
+# one value.
+#
+# Checked as a directory and a whole file name rather than as one string, because
+# a path is not its spelling and the two sides of this comparison are written by
+# different programs: `just` hands over a native path — a Windows runner exports
+# `C:\Users\RUNNER~1\...\.tools/bin\...` where the `pwd` below says
+# `/c/Users/runneradmin/...` — and macOS resolves `$TMPDIR` through `/private` on
+# one side and not the other. A string test refused the very path the recipe
+# exports on both cross-platform legs, so `-ef` asks the filesystem which
+# directory each name reaches instead. The file name is still compared whole: a
+# directory test on its own would admit `.tools/bin/../../something`.
 binary="${ONEPIPELINE_UI_BASELINE_BIN:-}"
 [ -n "$binary" ] || {
   echo "ensure-baseline: ONEPIPELINE_UI_BASELINE_BIN is unset" >&2
   echo "ACTION: run 'just _ensure-baseline' rather than this script directly" >&2
   exit 2
 }
-provisioned="$root/.tools/bin/onepipeline-api-baseline"
-case "$binary" in
-  "$provisioned" | "$provisioned.exe") : ;;
-  *)
-    echo "ensure-baseline: ONEPIPELINE_UI_BASELINE_BIN is '$binary', which is not this clone's provisioning path" >&2
-    echo "ACTION: run 'just _ensure-baseline', which exports the one path this script writes" >&2
-    exit 2
-    ;;
-esac
+# Made before the comparison rather than after it, because an unprovisioned clone
+# has no `.tools/bin` for `-ef` to reach and every path would read as somewhere
+# else. Derived from `$root`, so nothing the caller passed decides what is
+# created.
+provisioned_dir="$root/.tools/bin"
+mkdir -p "$provisioned_dir" || {
+  echo "ensure-baseline: could not create '$provisioned_dir' to provision into" >&2
+  echo "ACTION: check the checkout is writable — a container run as root can leave it unwritable — and retry" >&2
+  exit 1
+}
+name="$(basename -- "$binary")"
+directory="$(dirname -- "$binary")"
+if { [ "$name" != "onepipeline-api-baseline" ] && [ "$name" != "onepipeline-api-baseline.exe" ]; } ||
+  ! [ "$directory" -ef "$provisioned_dir" ]; then
+  echo "ensure-baseline: ONEPIPELINE_UI_BASELINE_BIN is '$binary', which is not this clone's provisioning path" >&2
+  echo "ACTION: run 'just _ensure-baseline', which exports the one path this script writes" >&2
+  exit 2
+fi
 stamp="$binary.commit"
 
 # The commit this branch forked from. `origin/main` first and `main` after it: a

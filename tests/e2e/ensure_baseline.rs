@@ -21,7 +21,7 @@
 //! reads.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
@@ -204,6 +204,23 @@ impl Fixture {
         command.output().expect("just is on PATH")
     }
 
+    /// The script on its own, provisioning to a path of the caller's choosing.
+    ///
+    /// Driven at the script rather than through the recipe, because the recipe is
+    /// where the one value comes from: `just` *exports* the path, so nothing a
+    /// caller hands `just` reaches this guard. What can is somebody running the
+    /// script directly, which is who its refusal's own ACTION line addresses.
+    fn run_script_provisioning_to(&self, binary: &Path) -> Output {
+        Command::new("bash")
+            .arg("scripts/ensure-baseline-api.sh")
+            .current_dir(self.dir.path())
+            .env("PATH", &self.search_path)
+            .env("CARGO_CALLS", self.dir.path().join("cargo-calls"))
+            .env("ONEPIPELINE_UI_BASELINE_BIN", binary)
+            .output()
+            .expect("bash is on PATH")
+    }
+
     /// Everything the recipe asked `cargo` for, in order.
     fn calls(&self) -> String {
         fs::read_to_string(self.dir.path().join("cargo-calls")).unwrap_or_default()
@@ -344,36 +361,71 @@ fn a_provisioning_path_outside_this_clone_is_refused() {
     // installing, so a caller that could name any path could have the recipe
     // remove a file of its own choosing. The recipe exports exactly one value,
     // and anything else is refused rather than written to.
-    // Driven at the script rather than through the recipe, because the recipe is
-    // where the one value comes from: `just` *exports* the path, so a caller
-    // cannot reach this guard through it. What can is a caller running the script
-    // directly, which is exactly who the refusal's own ACTION line is addressed
-    // to.
     let fixture = Fixture::new();
-    let elsewhere = fixture.dir.path().join("somewhere-else");
+    let another_directory = fixture.dir.path().join("elsewhere");
+    fs::create_dir_all(&another_directory).expect("a directory that is not the clone's");
+    // Two shapes, because the guard asks two questions and either alone lets a
+    // path through. The file name is compared whole — a directory test on its own
+    // admits `.tools/bin/../../something` — and the directory has to be the one
+    // this clone provisions, which is the only thing that refuses the *right*
+    // name written somewhere the caller chose.
+    for elsewhere in [
+        fixture.dir.path().join("somewhere-else"),
+        another_directory.join(provisioned()),
+    ] {
+        let refused = fixture.run_script_provisioning_to(&elsewhere);
 
-    let refused = Command::new("bash")
-        .arg("scripts/ensure-baseline-api.sh")
-        .current_dir(fixture.dir.path())
-        .env("PATH", &fixture.search_path)
-        .env("CARGO_CALLS", fixture.dir.path().join("cargo-calls"))
-        .env("ONEPIPELINE_UI_BASELINE_BIN", &elsewhere)
-        .output()
-        .expect("bash is on PATH");
+        assert_eq!(
+            refused.status.code(),
+            Some(2),
+            "{elsewhere:?}: {}",
+            stderr(&refused)
+        );
+        assert!(
+            stderr(&refused).contains("not this clone's provisioning path"),
+            "the refusal does not say why it stopped for {elsewhere:?}:\n{}",
+            stderr(&refused)
+        );
+        assert!(
+            !elsewhere.exists(),
+            "the refused path {elsewhere:?} was written to anyway"
+        );
+        assert!(
+            fixture.calls().is_empty(),
+            "the recipe built a server for a path it was going to refuse"
+        );
+    }
+}
 
-    assert_eq!(refused.status.code(), Some(2), "{}", stderr(&refused));
-    assert!(
-        stderr(&refused).contains("not this clone's provisioning path"),
-        "the refusal does not say why it stopped:\n{}",
-        stderr(&refused)
-    );
-    assert!(
-        !elsewhere.exists(),
-        "the refused path was written to anyway"
-    );
-    assert!(
-        fixture.calls().is_empty(),
-        "the recipe built a server for a path it was going to refuse"
+/// The provisioning path is a place on disk, not one spelling of one.
+///
+/// The two sides of that guard are written by different programs, and they do not
+/// agree how to spell a directory they both mean: `just` hands over a native path
+/// where the script's own shell says something else, which on a Windows runner is
+/// `C:\Users\RUNNER~1\...` against `/c/Users/runneradmin/...` and on macOS is
+/// `$TMPDIR` with and without `/private`. Comparing them as strings refused the
+/// one path the recipe exports, and it did so on the cross-platform legs alone —
+/// invisible from a Linux tree, where the two spellings happen to coincide.
+#[test]
+fn the_provisioning_path_is_accepted_however_it_is_spelled() {
+    let fixture = Fixture::new();
+    // The same directory by another name. A real cross-platform run reaches it
+    // through a drive letter or a symlinked `$TMPDIR` rather than through `..`,
+    // neither of which a Linux tree can spell — what is portable is that the
+    // filesystem, and not the string, decides.
+    let spelled_otherwise = fixture
+        .dir
+        .path()
+        .join(".tools/bin/../bin")
+        .join(provisioned());
+
+    let provisioning = fixture.run_script_provisioning_to(&spelled_otherwise);
+
+    assert!(provisioning.status.success(), "{}", stderr(&provisioning));
+    assert_eq!(
+        fs::read_to_string(fixture.binary()).expect("the provisioned server"),
+        AT_THE_BASE,
+        "the script accepted the path but provisioned somewhere the suite does not read"
     );
 }
 
