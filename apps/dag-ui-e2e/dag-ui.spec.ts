@@ -37,7 +37,7 @@ import {
   OFFLINE_UI_URL,
   STALLED_UI_URL,
 } from "./playwright.config";
-import { PHONE } from "./viewports";
+import { DESKTOP, PHONE } from "./viewports";
 
 /**
  * The DAG Observatory driven end to end against a real `onepipeline-api serve`
@@ -588,6 +588,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   // operator still has to be able to read as absent rather than as missing.
   await expect(page.getByRole("list", { name: "Timeline legend" })).toHaveText(
     [
+      "Queued",
       "Worker",
       "Judge",
       "Lint",
@@ -2039,6 +2040,21 @@ test("keeps a node of hundreds of recorded sessions scannable", async ({
     .getByRole("button", { name: "Collapse timeline" })
     .click();
 
+  // The reading of those two hundred sessions is three things: the first, the last,
+  // and one control naming how many are behind it and what they are. Opening it puts
+  // the middle back exactly where it stood.
+  const reading = page.getByRole("region", { name: "Node transcript" });
+  const collapsed = reading.getByRole("button", {
+    name: /^Show \d+ more dispatch events$/,
+  });
+  await expect(collapsed).toHaveAttribute("aria-expanded", "false");
+  await collapsed.click();
+  await expect(
+    reading.getByRole("button", {
+      name: /^Collapse \d+ more dispatch events$/,
+    }),
+  ).toHaveAttribute("aria-expanded", "true");
+
   // And one long session's own turns are handed out a page at a time in the panel,
   // so opening it does not render thirty of them at once either.
   await page
@@ -2059,6 +2075,225 @@ test("keeps a node of hundreds of recorded sessions scannable", async ({
     .getByRole("button", { name: /Show more of 30 turns/ })
     .click();
   await expect(itemDetail(page)).toContainText("Swept batch 7 (29)");
+});
+
+/** The node view's reading: one row per recorded activity, in order. */
+const reading = (page: Page): Locator =>
+  page.getByRole("region", { name: "Node transcript" });
+
+/** Every row of that reading currently drawn. */
+const readingRows = (page: Page): Locator => reading(page).getByRole("article");
+
+test("reads a node's records as a log rather than as a stack of cards", async ({
+  page,
+}) => {
+  // The shape this is about: thirty-node graphs whose journals run to tens of
+  // thousands of records, read through this list. At a card each, most of the
+  // scrolling is spent on the space between the rows.
+  const { dense_node, dense_records } = fixture().collapse;
+  // The matrix's desktop entry, which the navigation journeys and the gallery are
+  // already held to, and named rather than inherited: how many rows fit is a
+  // property of a stated size, and the runner's own default is not one this
+  // repository declares anywhere.
+  await page.setViewportSize(DESKTOP);
+  await openObservatory(page, `/?run=${runs().busy}&node=${dense_node}`);
+  await expect(readingRows(page).first()).toBeVisible();
+  // Opened, so what is counted is the run of uniform rows itself rather than the
+  // three things that stand for it.
+  await reading(page)
+    .getByRole("button", { name: /^Show \d+ more criterion-checked events$/ })
+    .click();
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(dense_records);
+
+  const region = await reading(page).boundingBox();
+  if (region === null) throw new Error("the reading has no bounds to read");
+  const boxes = await readingRows(page).evaluateAll((rows) =>
+    rows.map((row) => {
+      const box = row.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom };
+    }),
+  );
+  const onScreen = boxes.filter(
+    (box) => box.top >= region.y && box.bottom <= region.y + region.height,
+  );
+  // Twenty is what an operator can hold in their head at once, and it is what this
+  // list has to be able to put in front of them without a scroll.
+  expect(onScreen.length).toBeGreaterThanOrEqual(20);
+});
+
+test("collapses a run of near-identical records and puts it back", async ({
+  page,
+}) => {
+  const { threshold, narrow_node, wide_node } = fixture().collapse;
+  // One short of the boundary is read in full: three of a kind are three things,
+  // and hiding any of them would be hiding a record for no gain.
+  await openObservatory(page, `/?run=${runs().busy}&node=${narrow_node}`);
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(threshold - 1);
+  await expect(
+    reading(page).getByRole("button", { name: /more criterion-checked/ }),
+  ).toHaveCount(0);
+
+  // At the boundary the middle goes behind one control, and the first and the last
+  // stay in full — which is what says where the run began and where it ended.
+  await openObservatory(page, `/?run=${runs().busy}&node=${wide_node}`);
+  const control = reading(page).getByRole("button", {
+    name: `Show ${threshold - 2} more criterion-checked events`,
+  });
+  await expect(control).toBeVisible();
+  await expect(control).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(2);
+
+  // The keyboard reaches it and works it: the count and the kind are the control's
+  // own words, so a reader who cannot see the ellipsis is told what is behind it.
+  await control.focus();
+  await expect(control).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(threshold);
+  const back = reading(page).getByRole("button", {
+    name: `Collapse ${threshold - 2} more criterion-checked events`,
+  });
+  await expect(back).toHaveAttribute("aria-expanded", "true");
+  await back.click();
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(2);
+});
+
+test("collapses every kind of run the same way and at the same count", async ({
+  page,
+}) => {
+  const { threshold, narrow_node, wide_node } = fixture().collapse;
+  // The two kinds of row this list can hold a run of: dispatched sessions, which
+  // are spans, and journal records, which are moments. A reader meets one
+  // collapsing behaviour here rather than one per kind, so both are asked the same
+  // questions on the same corpus.
+  for (const kind of ["dispatch", "criterion-checked"]) {
+    await openObservatory(page, `/?run=${runs().busy}&node=${narrow_node}`);
+    await expect(readingRows(page).first()).toBeVisible();
+    await expect(
+      reading(page).getByRole("button", {
+        name: RegExp(`more ${kind} events`),
+      }),
+    ).toHaveCount(0);
+
+    await openObservatory(page, `/?run=${runs().busy}&node=${wide_node}`);
+    const control = reading(page).getByRole("button", {
+      name: `Show ${threshold - 2} more ${kind} events`,
+    });
+    await expect(control).toBeVisible();
+    await expect(control).toHaveAttribute("aria-expanded", "false");
+    await control.click();
+    await expect(
+      reading(page).getByRole("button", {
+        name: `Collapse ${threshold - 2} more ${kind} events`,
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
+  }
+});
+
+test("draws what a ready node was waiting for as spans of its own", async ({
+  page,
+}) => {
+  const queue = fixture().queue;
+  await openObservatory(page, `/?run=${runs().live}&node=${queue.behind_node}`);
+  // One span per hold: the engine writes one when the hold begins and again each
+  // time what is ahead of the node changes, so a node behind three running nodes
+  // that finish one at a time is three successive spans naming three shrinking
+  // sets — not one bar naming whatever was ahead of it first.
+  for (const ahead of queue.ahead) {
+    await expect(
+      reading(page).getByRole("article", {
+        name: `Queued behind ${ahead.join(", ")}`,
+      }),
+    ).toHaveCount(1);
+  }
+  // And the queue clears before the dispatch it was holding: the last of them ends
+  // where the run said the hold cleared, and the session opens after that.
+  const stamps = await reading(page)
+    .getByRole("article")
+    .evaluateAll((rows) =>
+      rows.map((row) => row.getAttribute("aria-label") ?? ""),
+    );
+  const last = stamps.indexOf(
+    `Queued behind ${queue.ahead.at(-1)?.join(", ")}`,
+  );
+  const dispatched = stamps.findIndex((label) => label.startsWith("Worker ("));
+  expect(last).toBeGreaterThanOrEqual(0);
+  expect(dispatched).toBeGreaterThan(last);
+
+  // The plot draws it in a lane of its own, so the gap that used to read as the
+  // harness having done nothing is now the queue it really was.
+  await expect(
+    timeline(page)
+      .getByRole("button", { name: /^Queued behind / })
+      .first(),
+  ).toBeVisible();
+});
+
+test("tells the reasons a node was not running apart from one another", async ({
+  page,
+}) => {
+  const queue = fixture().queue;
+  await openObservatory(page, `/?run=${runs().live}&node=${queue.held_node}`);
+  // Held by two things at once — a dependency that has not settled and a decision
+  // point holding the subtree — reads as two things, which is what tells it from
+  // the hold beside it that is only one of them.
+  const both = reading(page).getByRole("article", {
+    name: `Queued waiting on approval and held by decision ${queue.decision_reference}`,
+  });
+  await expect(both).toHaveCount(1);
+  const alone = reading(page).getByRole("article", {
+    name: `Queued held by decision ${queue.decision_reference}`,
+  });
+  await expect(alone).toHaveCount(1);
+
+  // A reason that is not concurrency is drawn as the reason it is, and opening the
+  // span says so in words rather than leaving it to the label.
+  await alone.getByRole("button").click();
+  await expect(itemDetail(page)).toContainText("Waiting on");
+  await expect(itemDetail(page)).toContainText(
+    `held by decision ${queue.decision_reference}`,
+  );
+  // Nothing said this hold cleared, so it is still open rather than closed at an
+  // instant the app invented.
+  await expect(itemDetail(page)).toContainText("Still running");
+
+  // And a node the run said nothing at all about is given no span at all: the gap
+  // it shows is the gap it always showed, because a span drawn from a guess cannot
+  // be told from one the run recorded.
+  await openObservatory(page, `/?run=${runs().live}&node=${queue.quiet_node}`);
+  await expect(
+    page.getByText("This node has no recorded timeline yet."),
+  ).toBeVisible();
+
+  // The two reasons no other node here carries: a sibling's release nobody has
+  // published, and a reason written by an engine newer than this app. The second is
+  // the one that matters most — the vocabulary is the engine's, so a reason this
+  // build has no wording for still has to reach the reader as its own reason rather
+  // than as a hold with nothing in it.
+  const holds = fixture().holds;
+  await openObservatory(
+    page,
+    `/?run=${runs().busy}&node=${holds.adopting_node}`,
+  );
+  await expect(
+    reading(page).getByRole("article", {
+      name: `Queued awaiting the release of ${holds.awaits}`,
+    }),
+  ).toHaveCount(1);
+  await expect(
+    reading(page).getByRole("article", {
+      name: `Queued held by ${holds.unread_kind}`,
+    }),
+  ).toHaveCount(1);
 });
 
 test("reports a node whose recorded work the run has not written yet", async ({
@@ -2694,12 +2929,17 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
   await idle.hover();
   await expect(page.getByRole("tooltip")).toContainText("Lane: idle");
 
-  // A node the run never reached is that same reading for its whole life.
-  const queued = graphRow(page, "queued");
-  await expect(queued.getByRole("button", { name: /^Idle · / })).toHaveCount(1);
-  await expect(queued.getByRole("button", { name: /^queued · / })).toHaveCount(
-    0,
+  // A node the run never reached is that same reading for its whole life. Not
+  // `queued`, which the scheduler *did* reach and record a hold for: a node the run
+  // has said nothing at all about is the reading this is about, and the two are
+  // different states.
+  const followup = graphRow(page, "followup");
+  await expect(followup.getByRole("button", { name: /^Idle · / })).toHaveCount(
+    1,
   );
+  await expect(
+    followup.getByRole("button", { name: /^followup · / }),
+  ).toHaveCount(0);
 
   // A gap too narrow to see is not drawn at all. This run's journal is written in
   // one pass, so `foundation` verified and published milliseconds apart inside a
@@ -2713,7 +2953,7 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
   // How much of its life each row spent working, and how much it did not, is on the
   // row rather than left to be measured off the plot.
   await expect(
-    graphRowCard(page, "queued").locator(".graph-row-facts"),
+    graphRowCard(page, "followup").locator(".graph-row-facts"),
   ).toHaveText(/^0ms recorded · \d+m \d+s idle$/);
 });
 
@@ -2958,7 +3198,7 @@ test("keeps the timeline's clock readable when its lanes outgrow the view", asyn
     );
 
   // The laptop the layout is designed against, the compact size below its breakpoint,
-  // and the phone the matrix ends at: ten lanes and a reading do not both fit the
+  // and the phone the matrix ends at: eleven lanes and a reading do not both fit the
   // last two at any share of them, so the viewports state different things about the
   // expanded plot. The collapsed one they all state the same thing about.
   for (const viewport of [
@@ -2971,7 +3211,7 @@ test("keeps the timeline's clock readable when its lanes outgrow the view", asyn
     await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
     // The view an operator lands on is never cut: the collapsed plot is one line, and
     // the region holds it and its clock whole at every width — including the one
-    // whose ten lane names wrap the legend onto a second row.
+    // whose eleven lane names wrap the legend onto a second row.
     expect(await overflowing()).toBe(false);
     expect(await clipped()).toBe(0);
 

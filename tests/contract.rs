@@ -589,8 +589,83 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
     assert_eq!(TELEMETRY_SCHEMA_VERSION, 15);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
+    // The timeline's own meaning moves on its own, so the document names it on its
+    // own: a bump nobody wrote a paragraph for is a payload a client is told
+    // nothing about.
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 8);
+    assert!(
+        contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
+        "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
+    );
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
+}
+
+/// The queued span the timeline serves is the one `docs/contract.md` describes.
+///
+/// The document is the source of truth and this is the direction that is checked:
+/// a span kind, or a field on it, that reaches the wire without reaching the
+/// document is a promise nobody wrote down. Driven off a real run store recorded
+/// with the engine's own hold records rather than off a list restated here, so a
+/// field added to the projection and not to the prose fails here.
+#[test]
+fn the_contract_describes_the_queued_span_and_every_field_it_carries() {
+    let root = tempfile::tempdir().expect("temp dir");
+    fixture_run::write_held(root.path(), fixture_run::HELD_RUN_ID);
+    let runs_root: onepipeline_ui::cli::RunsRoot = root
+        .path()
+        .to_str()
+        .expect("utf-8 path")
+        .parse()
+        .expect("a readable runs root");
+    let store = RunStore::new(&runs_root);
+    let served = store
+        .timeline(
+            &RunId::try_from(fixture_run::HELD_RUN_ID).expect("valid"),
+            &TimelineQuery {
+                scope: TimelineScope::Run,
+                filter: None,
+            },
+        )
+        .expect("the held run serves");
+    let spans: Vec<&Value> = served.payload["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == json!("queued"))
+        .collect();
+    assert!(!spans.is_empty(), "the held run served no queued span");
+
+    let contract = contract_text();
+    assert!(
+        contract.contains("`queued`"),
+        "docs/contract.md does not name the `queued` span kind"
+    );
+    // Every field a served hold carries, and every field of every reason on it.
+    let mut named: Vec<String> = Vec::new();
+    for span in spans {
+        named.push("reasons".to_owned());
+        for reason in span["reasons"].as_array().expect("reasons") {
+            named.extend(
+                reason
+                    .as_object()
+                    .expect("a reason")
+                    .keys()
+                    .map(ToOwned::to_owned),
+            );
+        }
+        if let Some(reason) = span["reasons"][0]["kind"].as_str() {
+            named.push(reason.to_owned());
+        }
+    }
+    named.sort();
+    named.dedup();
+    for field in named {
+        assert!(
+            contract.contains(&format!("`{field}`")),
+            "docs/contract.md does not name `{field}`, which a served queued span carries"
+        );
+    }
 }
 
 /// The two versions move independently, and the browser client carries a copy of

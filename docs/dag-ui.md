@@ -244,7 +244,7 @@ Escape key. It is a **timeline over a transcript**, both projected from
 
 - the **timeline** is pinned across the full width and opens as one compact line
   showing what dominated each moment. Expanding gives every category a row:
-  Worker, Judge, Lint, Orchestrator, Check-in, PR author, Verification,
+  Queued, Worker, Judge, Lint, Orchestrator, Check-in, PR author, Verification,
   Publication, Lock waits, Human wait. Those are the served `agent_role`,
   `transport_role` and span-kind vocabulary rendered as words — an operator never
   reads a served identifier such as `rollup` or `pr-drafting`, and the span kinds
@@ -262,13 +262,33 @@ Escape key. It is a **timeline over a transcript**, both projected from
   expanded lanes always span the same window, so a moment does not move when the
   view is collapsed. An aggregate is plotted at the total it carries, not across
   the window its records happened to fall in. The compact line is sized to fit
-  whole at every width, because it is the view a node opens on. Ten expanded lanes
-  and a reading fit no viewport shorter than the laptop the layout is designed
+  whole at every width, because it is the view a node opens on. Eleven expanded
+  lanes and a reading fit no viewport shorter than the laptop the layout is designed
   against, so below that the region scrolls: the axis is painted inside the plot's
   own clipping box, so it cannot be pinned above that fold, and collapsing is the
   one-click way back to it.
-- the **transcript** below it is the long-form reading: one item per span and
-  event, in order, each with its summary inline. Scrolling it moves the
+- **Queued** is the lane a gap used to be. The engine records why a node it has not
+  settled is not running, and timeline schema 8 serves those holds as spans of their
+  own — so the stretch between a node becoming ready and its dispatch says what was
+  ahead of it rather than reading as the harness having done nothing. A hold is
+  written when it begins and again when what holds the node changes, so a node
+  behind three running nodes that finish one at a time draws as three successive
+  spans naming three shrinking sets. The row is named from the served `reasons`
+  rather than from a sentence the server wrote: one phrase per thing holding it,
+  joined, so a node held by a dependency *and* a decision point reads as two things
+  where a node held by one reads as one. A run recorded before the engine wrote any
+  of this draws the gap it always drew — nothing is inferred from a late dispatch.
+- the **transcript** below it is the reading: one **line** per span and event, in
+  order, each carrying its category, its name and its recorded facts on that line —
+  a rich log line rather than a card, because a thirty-node graph's journal is tens
+  of thousands of records and at a card each most of the scrolling is whitespace.
+  Where four or more consecutive rows share a kind the middle collapses: the first
+  and the last stay in full, and between them one control names how many are behind
+  it and what they are, `aria-expanded` says which way it goes, and it puts them
+  back. **One rule for every kind of row** — a run of dispatched sessions and a run
+  of journal records collapse at the same count and are presented the same way, so a
+  reader learns the behaviour once (`GROUP_THRESHOLD` in
+  `features/timeline/timeline-model.ts`). Scrolling it moves the
   timeline's cursor and clicking a segment or a marker scrolls and focuses its
   item; both directions are the package's `useTimelineScrollSync`. The selection
   is in the address, so an item stays bookmarkable.

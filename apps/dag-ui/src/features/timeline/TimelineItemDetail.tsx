@@ -37,6 +37,7 @@ import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
 import {
   dispatchRoleLabel,
+  holdReasonLabel,
   LLMLINT_TRANSPORT,
   type TimelineRow,
 } from "./timeline-model";
@@ -655,6 +656,7 @@ function Recorded({
     row.rowKind === "span" && row.span.count !== undefined
       ? `${row.span.count} records`
       : undefined;
+  const held = (row.rowKind === "span" ? row.span.reasons : undefined) ?? [];
   return (
     <>
       <dl className="facts">
@@ -693,6 +695,16 @@ function Recorded({
           <div>
             <dt>Aggregated</dt>
             <dd>{rollup}</dd>
+          </div>
+        )}
+        {/* Why the loop was not running this node, one term per thing holding it
+            at that moment. Listed rather than joined into the row's own phrase,
+            because this is where a reader who wants the whole set — the three
+            nodes that were ahead of it, by name — comes to read it. */}
+        {held.length > 0 && (
+          <div>
+            <dt>Waiting on</dt>
+            <dd>{held.map(holdReasonLabel).join(" and ")}</dd>
           </div>
         )}
         <div>

@@ -150,6 +150,13 @@ export const TELEMETRY_SCHEMA_VERSION = 15;
  * machine and a node held on a **person** draw as the same row with the same word
  * on it — and the reader with something to go and do cannot tell that they have it.
  *
+ * `8` is where a ready node says what it was waiting for. A server on `7` serves
+ * the interval between a node becoming ready and its dispatch as empty space,
+ * which reads as the harness having done nothing — when the node was queued behind
+ * the operator's own other work. No `queued` span and no `reasons` array exist
+ * under `7`, so a reader on `8` meeting a run recorded then sees the same gap it
+ * always showed rather than an invented span.
+ *
  * `6` is where a span says what one lane was doing, and when. A server on `5`
  * gives every `dispatch` span of a node the node's own bounds and every `rollup`
  * the node's dispatch and settlement, so a node dispatched three times draws three
@@ -173,7 +180,7 @@ export const TELEMETRY_SCHEMA_VERSION = 15;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 7;
+export const TIMELINE_SCHEMA_VERSION = 8;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -971,6 +978,7 @@ export const timelineSpanKindSchema = z.enum([
   "conflict-resolution",
   "human-wait",
   "rollup",
+  "queued",
 ]);
 /**
  * Which part of its loop the launched orchestrator is in. Derived by the server from
@@ -1151,6 +1159,26 @@ export const timelineIntervalSchema = openObject({
   ended_at: timestamp,
 });
 /**
+ * One reason the loop was not running a node it had not settled, off a `queued` span.
+ *
+ * `kind` is an **open** string on the terms `timelineEventSchema.kind` is: the
+ * vocabulary is `onepipeline`'s, released on its own schedule, so a reason a later
+ * engine writes has to reach a reader as its own distinct reason — refusing it would
+ * turn a node held by two things into a timeline this client will not render at all.
+ * The four that engine writes today are `dependencies` (`blocking`), `concurrency`
+ * (`ahead`, `limit`), `decision` (`reference`) and `release` (`awaiting`); every
+ * field beside `kind` is present exactly where the record carried it, because a
+ * field defaulted here would be this client inventing what no record said.
+ */
+export const timelineHoldReasonSchema = openObject({
+  kind: z.string().min(1),
+  blocking: z.array(z.string().min(1)).min(1).optional(),
+  ahead: z.array(z.string().min(1)).min(1).optional(),
+  limit: counter.optional(),
+  reference: z.string().min(1).optional(),
+  awaiting: z.array(z.string().min(1)).min(1).optional(),
+});
+/**
  * One interval of recorded work. `ended_at` is null for work the recorded stream
  * never closed — an in-flight run, not an error — and `parent_id` links spans into
  * the tree the recorded nesting implies. `count`, `total_duration_ms` and
@@ -1185,6 +1213,26 @@ export const timelineSpanSchema = openObject({
     artifact_id: z.string().optional(),
   }).optional(),
   phase: supervisoryPhaseSchema.optional(),
+  /**
+   * Why the loop was not running this node: one entry per thing holding it at that
+   * moment, so a node held by more than one is told apart from a node held by one
+   * from the array alone.
+   *
+   * Keyed to the `queued` kind below, unlike `redirection` and `release` on an
+   * event. Those two are paired with a *journal* kind, which the journal owns and
+   * this parser may not close over; a span's kind is this contract's own closed
+   * vocabulary, so "a hold belongs to a hold span" is an invariant this side owns
+   * and may hold a server to.
+   */
+  reasons: z.array(timelineHoldReasonSchema).min(1).optional(),
+}).superRefine((span, context) => {
+  if (span.reasons !== undefined && span.kind !== "queued") {
+    context.addIssue({
+      code: "custom",
+      path: ["reasons"],
+      message: "only a queued span carries the reasons a node was held",
+    });
+  }
 });
 export const artifactContentSchema = openObject({
   id: z.string().min(1),
@@ -1304,6 +1352,7 @@ export type SupervisoryPhase = z.infer<typeof supervisoryPhaseSchema>;
 export type TimelineReference = z.infer<typeof timelineReferenceSchema>;
 export type TimelineEvent = z.infer<typeof timelineEventSchema>;
 export type TimelineInterval = z.infer<typeof timelineIntervalSchema>;
+export type TimelineHoldReason = z.infer<typeof timelineHoldReasonSchema>;
 export type TimelineSpan = z.infer<typeof timelineSpanSchema>;
 export type RunTimeline = z.infer<typeof runTimelineSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;

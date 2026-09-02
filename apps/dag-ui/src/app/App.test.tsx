@@ -159,6 +159,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         .getAllByRole("listitem")
         .map((item) => item.textContent),
     ).toEqual([
+      "Queued",
       "Worker",
       "Judge",
       "Lint",

@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "timeline_schema_version": 7,
+  "timeline_schema_version": 8,
   "observed_at": "2026-07-19T00:10:00+00:00",
   "run_id": "demo",
   "spans": [

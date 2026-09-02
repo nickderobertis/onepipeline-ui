@@ -139,7 +139,20 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 15;
 /// version exists to have fixed. A node held on a **person** is the one a reader
 /// has to be able to pick out, and it is picked out by the `action` that entry
 /// carries and no automated entry does.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 7;
+/// **Schema 8 draws what a ready node was waiting for.** Under 7 the interval
+/// between a node becoming ready and its dispatch was empty — which reads as the
+/// harness having done nothing, when what really happened is that the node was
+/// queued behind the operator's own other work. A node the engine recorded a hold
+/// for now serves a **`queued`** span per hold, carrying `reasons`: one entry per
+/// thing holding it at that moment, each naming its `kind` and that kind's own
+/// fields. Because the engine writes a hold on transition only, a node behind
+/// three running nodes serves three successive spans naming three shrinking sets,
+/// ending where the hold cleared and the dispatch followed. Additive exactly as
+/// `release` was in 7 — every other span and every event is byte-for-byte what 7
+/// served — and a run recorded before the engine wrote any of this serves no
+/// `queued` span at all, because a span drawn from a guess cannot be told from one
+/// the run recorded.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 8;
 
 /// The largest run-list page any request can ask for.
 ///
