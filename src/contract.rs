@@ -452,8 +452,51 @@ pub struct EventFrame {
 /// and filtering surface the copied frontend already reads, kept here so the
 /// server's answer is bounded whatever a caller asks for; see AGENTS.md for the
 /// amendment they are proposed under.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RunsQuery {
+    /// A page of the whole list, in the order most recent activity leads.
+    Page(RunsPage),
+    /// The runs this request **named**, and no others.
+    ///
+    /// A variant rather than a field beside the paging, because the two are
+    /// answers to different questions and each one's fields mean nothing to the
+    /// other: a selection answers exactly the runs named, with no cursor and no
+    /// settled filter. Carried together they would be a request whose halves
+    /// disagree about what was asked, and something would have to decide which
+    /// half won — silently, on every request that sent both.
+    Selected(RunSelection),
+}
+
+impl Default for RunsQuery {
+    fn default() -> Self {
+        Self::Page(RunsPage::default())
+    }
+}
+
+impl RunsQuery {
+    /// The page this query asks for, or `None` when it names runs instead.
+    #[must_use]
+    pub fn paging(&self) -> Option<&RunsPage> {
+        match self {
+            Self::Page(page) => Some(page),
+            Self::Selected(_) => None,
+        }
+    }
+
+    /// The runs this query named, or `None` when it asks for a page.
+    #[must_use]
+    pub fn selection(&self) -> Option<&RunSelection> {
+        match self {
+            Self::Selected(selection) => Some(selection),
+            Self::Page(_) => None,
+        }
+    }
+}
+
+/// Which page of the run list to serve.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct RunsQuery {
+pub struct RunsPage {
     /// Whether to list runs whose graph has completed. Off by default: the list
     /// is a supervision surface, and finished work is not what needs attention.
     #[serde(default)]
@@ -464,20 +507,12 @@ pub struct RunsQuery {
     /// The `next_cursor` of the previous page; the list resumes after it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<RunId>,
-    /// The runs this request names, rather than the page it asks for.
-    ///
-    /// Absent for the ordinary listing, which is every request that came before
-    /// this parameter existed. Present, it decides the whole answer: the runs
-    /// named and no others, no cursor, and no settled filter — see
-    /// [`RunSelection`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub select: Option<RunSelection>,
 }
 
-impl RunsQuery {
+impl RunsPage {
     /// The page size this query actually gets: never zero, never unbounded.
     #[must_use]
-    pub fn page(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.limit.get()
     }
 }

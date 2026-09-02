@@ -31,7 +31,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::ReadApi;
 use crate::contract::{
     routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, PageLimit, RunId, RunQuery,
-    RunSelection, RunsQuery, TimelineQuery, TimelineScope,
+    RunSelection, RunsPage, RunsQuery, TimelineQuery, TimelineScope,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -367,16 +367,29 @@ fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
     // selection larger than a page are both refused before a run is opened —
     // and so no raw `String` reaches storage, on the same terms every other
     // `{...}` this server interpolates crosses.
-    let select = match raw.get("select") {
-        None => None,
-        Some(value) => Some(RunSelection::parse(value)?),
+    let Some(select) = raw.get("select") else {
+        return Ok(RunsQuery::Page(RunsPage {
+            include_settled: flag(raw, "include_settled", false)?,
+            limit,
+            cursor,
+        }));
     };
-    Ok(RunsQuery {
-        include_settled: flag(raw, "include_settled", false)?,
-        limit,
-        cursor,
-        select,
-    })
+    // A selection answers exactly the runs it names, so a paging parameter sent
+    // beside one is a request whose two halves disagree about what was asked.
+    // Refused rather than resolved: serving the selection and dropping the rest
+    // would leave a caller who asked for the second page of three named runs
+    // reading the first three as though that were the answer.
+    let paging: Vec<&str> = ["include_settled", "limit", "cursor"]
+        .into_iter()
+        .filter(|name| raw.contains_key(*name))
+        .collect();
+    if !paging.is_empty() {
+        return Err(ApiError::InvalidRequest(format!(
+            "select answers the runs it names, so it takes no {}",
+            paging.join(", ")
+        )));
+    }
+    Ok(RunsQuery::Selected(RunSelection::parse(select)?))
 }
 
 /// `?scope=run`, or `?scope=node&node=ID`. The pair is parsed into the variant

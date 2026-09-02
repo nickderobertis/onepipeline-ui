@@ -8142,6 +8142,32 @@ fn a_selection_larger_than_a_page_is_refused_rather_than_truncated() {
     let crafted = http::get(serving.address, "/api/v2/runs?select=../elsewhere");
     assert_eq!(crafted.status, 422);
     assert_eq!(crafted.json()["error"]["code"], json!("invalid_run_id"));
+
+    // A selection answers exactly the runs it names, so a paging parameter sent
+    // beside one is a request whose two halves disagree about what was asked.
+    // Refused rather than resolved: serving the selection and dropping the rest
+    // would leave a caller who asked for a second page of named runs reading the
+    // first as though it were the answer.
+    for paging in [
+        "limit=1",
+        "cursor=run-20260807-a1b2c3",
+        "include_settled=true",
+    ] {
+        let both = http::get(
+            serving.address,
+            &format!("/api/v2/runs?select={}&{paging}", fixture_run::RUN_ID),
+        );
+        assert_eq!(both.status, 422, "{paging}");
+        let body = both.json();
+        assert_eq!(body["error"]["code"], json!("invalid_request"), "{paging}");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .expect("a message")
+                .contains(paging.split('=').next().expect("a parameter name")),
+            "the refusal does not name what it would not take: {body}"
+        );
+    }
 }
 
 #[test]
@@ -8336,4 +8362,51 @@ fn a_run_directory_the_contract_cannot_name_is_reported_rather_than_listed() {
     // And every id the list *did* serve is one the route beside it accepts.
     let detail = http::get(serving.address, &format!("/api/v2/runs/{}", served[0]));
     assert_eq!(detail.status, 200);
+}
+
+#[test]
+fn a_quiet_run_with_a_surface_nobody_has_read_is_waiting_rather_than_parked() {
+    // A run holding a question is *waiting*, not parked: the loop that would be
+    // writing is deliberately holding a subtree back until somebody answers, and
+    // a run reported undriven there sends an operator to intervene in work whose
+    // next move is already sitting in their own queue.
+    //
+    // **This is the one reading that differs from the sibling's**, and the
+    // difference is deliberate. `src/liveness.rs` states it in full: the engine
+    // asks whether an outstanding surface is *blocking*, which lives in the
+    // channel rather than in the store and is not a question this crate can put
+    // to it, so this asks the wider one the run's own summary can answer — any
+    // surface sent and not consumed. That errs toward "still working", the
+    // direction the sibling's own reading errs in for every input it cannot
+    // read.
+    let quiet = Serving::start(|root| {
+        fixture_run::write_launched(root, fixture_run::RUN_ID);
+    });
+    let parked = http::get(quiet.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(
+        parked["state"],
+        json!("parked"),
+        "a launch that has written nothing since is not being driven: {parked}"
+    );
+
+    let asked = Serving::start(|root| {
+        let dir = fixture_run::write_launched(root, fixture_run::RUN_ID);
+        // Sent, and never consumed: no `planner-surfaced` follows it.
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({ "kind": "decision", "message": "which way?", "blocking": true }),
+        );
+    });
+    let waiting = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(
+        waiting["state"],
+        json!("active"),
+        "a run whose question nobody has read reads as abandoned: {waiting}"
+    );
+    // And nothing else moved with it: this run has recorded no graph, so what it
+    // is *doing* is `starting` whoever is waiting on whom. The surface changes
+    // how the run is being driven, which is the question `state` answers.
+    assert_eq!(waiting["phase"], parked["phase"], "{waiting}");
+    assert_eq!(parked["phase"], json!("starting"), "{parked}");
 }

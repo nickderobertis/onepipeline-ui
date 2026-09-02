@@ -117,6 +117,18 @@ pub fn driver(summary: &RunSummary) -> DriverLiveness {
 /// **non-blocking**. The sibling reads that run `PARKED` and this reads it
 /// `ACTIVE`. Nothing else in this module can differ, which is why the drift gate
 /// this module's header names covers every other state and not that one.
+/// `tests/e2e/server.rs`'s
+/// `a_quiet_run_with_a_surface_nobody_has_read_is_waiting_rather_than_parked`
+/// pins what this server serves there, so the difference is a decision on the
+/// record rather than one nobody would notice moving.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the other source cannot be
+// reached to gate against: the sibling's half of this reading is `channel::ChannelState`,
+// which is `pub(crate)` in every published version, and restating the channel's file layout
+// here would put a second source of truth for it in the wrong repository — the thing a drift
+// gate exists to prevent, arriving as the fix for one. Every other state of this restatement
+// *is* gated, over nine run shapes, by the check this module's header names; this one arm is
+// the residue, its direction is chosen to err the way the sibling errs, and `src/AGENTS.md`
+// carries publishing that reading as the proposal that closes it.
 fn decision_outstanding(summary: &RunSummary) -> bool {
     summary.awaiting_human_action || summary.surfaces_queued > summary.surfaces_read
 }

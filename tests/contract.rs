@@ -24,7 +24,7 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
     EventsQuery, Health, HealthStatus, NodeId, PageLimit, ReferenceKind, Release, RunId, RunQuery,
-    RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT,
+    RunsPage, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT,
     TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
@@ -190,10 +190,10 @@ fn every_field_the_run_list_served_before_is_served_with_the_same_value() {
         .parse()
         .expect("a readable runs root");
     let served = RunStore::new(&runs_root)
-        .runs(&RunsQuery {
+        .runs(&RunsQuery::Page(RunsPage {
             include_settled: true,
-            ..RunsQuery::default()
-        })
+            ..RunsPage::default()
+        }))
         .expect("the run list serves");
     let mut served: Value = serde_json::to_value(&served).expect("the envelope serializes");
     served["observed_at"] = Value::String(OBSERVED_AT.to_owned());
@@ -392,10 +392,10 @@ fn every_route_serves_the_payload_its_golden_pins() {
     let served: [(&str, Value); 6] = [
         (
             "runs.json",
-            enveloped(store.runs(&RunsQuery {
+            enveloped(store.runs(&RunsQuery::Page(RunsPage {
                 include_settled: true,
-                ..RunsQuery::default()
-            })),
+                ..RunsPage::default()
+            }))),
         ),
         (
             "run.json",
@@ -984,14 +984,18 @@ fn a_run_list_query_cannot_carry_a_page_size_outside_the_bound() {
     for (asked, served) in [("0", 1), ("100000", RUNS_PAGE_LIMIT), ("10", 10)] {
         let query: RunsQuery =
             serde_json::from_str(&format!(r#"{{"limit":{asked}}}"#)).expect("parse the query");
-        assert_eq!(query.page(), served, "limit={asked}");
+        assert_eq!(
+            query.paging().map(RunsPage::size),
+            Some(served),
+            "limit={asked}"
+        );
     }
     // And it goes back out as the number it actually serves, not the one asked
     // for: a client reading its own query back has to see the page it will get.
-    let query = RunsQuery {
+    let query = RunsQuery::Page(RunsPage {
         limit: PageLimit::clamping(100_000),
-        ..RunsQuery::default()
-    };
+        ..RunsPage::default()
+    });
     let encoded: Value = serde_json::to_value(&query).expect("serialize the query");
     assert_eq!(encoded["limit"], serde_json::json!(RUNS_PAGE_LIMIT));
 }

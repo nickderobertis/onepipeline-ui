@@ -49,8 +49,8 @@ use crate::api::ReadApi;
 use crate::cli::RunsRoot;
 use crate::contract::{
     ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, Release,
-    RunId, RunQuery, RunSelection, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
-    TELEMETRY_SCHEMA_VERSION,
+    RunId, RunQuery, RunSelection, RunsPage, RunsQuery, SseEvent, TimelineQuery, TimelineScope,
+    API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
@@ -304,7 +304,7 @@ impl RunStore {
     /// made independent of how many runs the root holds. What it *is* independent
     /// of is everything else: a run the page does not serve costs its summary and
     /// nothing more, and a run it does serve costs one row's worth of work.
-    fn page(&self, query: &RunsQuery) -> Value {
+    fn page(&self, query: &RunsPage) -> Value {
         let listing = Listing::of(&self.root);
         let mut skipped = listing.skipped;
         let summaries = self.nameable(listing.summaries, &mut skipped);
@@ -317,7 +317,7 @@ impl RunStore {
                 .position(|(run, _)| run == cursor)
                 .map_or(0, |index| index + 1)
         });
-        let page = query.page();
+        let page = query.size();
         // One more than the page, and then stop: knowing whether a further row
         // exists is the whole of what the extra one is for, and reading past it
         // is what made a page of one cost more than a page of fifty.
@@ -436,9 +436,9 @@ impl RunStore {
 
     /// The run list one request asked for: the runs it named, or a page of them.
     fn run_list(&self, query: &RunsQuery) -> Value {
-        match &query.select {
-            Some(selection) => self.selected(selection),
-            None => self.page(query),
+        match query {
+            RunsQuery::Selected(selection) => self.selected(selection),
+            RunsQuery::Page(page) => self.page(page),
         }
     }
 }
@@ -781,10 +781,10 @@ impl Iterator for Frames {
             self.baseline = self.opening_baseline();
             self.transcripts = self.transcript_digest();
             self.activity = self.activity();
-            let snapshot = RunStore::envelope(self.store.run_list(&RunsQuery {
+            let snapshot = RunStore::envelope(self.store.run_list(&RunsQuery::Page(RunsPage {
                 include_settled: true,
-                ..RunsQuery::default()
-            }));
+                ..RunsPage::default()
+            })));
             let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
             return Some(self.frame(SseEvent::Snapshot, data));
         }
