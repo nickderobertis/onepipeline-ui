@@ -188,15 +188,58 @@ fn process_may_be_live(pid: NonZeroU32) -> bool {
     std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
-/// The same question on a platform this crate does not probe processes on.
+/// The same question on Windows, which has no signal to send.
 ///
-/// **Unanswered rather than answered `false`.** The sibling settles it with
-/// `OpenProcess`, and this crate links no Windows API to ask with; an
-/// unanswerable probe resolves toward live for the same reason every other one
-/// here does, so a run reads as driven rather than as abandoned. The cost is
-/// that a Windows host serving a run whose driver died reports it `active` until
-/// the run goes quiet past the parked threshold, which then reports it `parked`.
-#[cfg(not(unix))]
+/// A process handle becomes signalled when — and **only** when — the process has
+/// terminated, so opening one for `SYNCHRONIZE` and waiting zero milliseconds on
+/// it settles the question without touching the process. Asked that way rather
+/// than through `GetExitCodeProcess`, whose "still running" answer is the
+/// sentinel `STILL_ACTIVE` — which is also the exit code `259` of a process that
+/// really did exit.
+///
+/// The asymmetry is the unix arm's: `false` is a proof of absence and every
+/// other answer resolves toward live. `ERROR_INVALID_PARAMETER` is what a pid
+/// that never existed earns; a permission refusal means the process is there and
+/// is somebody else's, and anything else is a question this host cannot answer.
+///
+/// **This is the sibling's own probe, spelled the same way**, and that is the
+/// point rather than a coincidence: `tests/contract.rs`'s drift gate serves a
+/// run whose recorded driver is gone through both readings and compares the
+/// rows, so an arm here that answered the question differently — including by
+/// declining to ask it — is a listing that contradicts the detail beside it on
+/// that platform alone.
+#[cfg(windows)]
+fn process_may_be_live(pid: NonZeroU32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+
+    // SAFETY: `OpenProcess` borrows nothing; it returns a null handle on failure
+    // and a handle this function closes exactly once on success.
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid.get()) };
+    if handle.is_null() {
+        return std::io::Error::last_os_error().raw_os_error()
+            != i32::try_from(ERROR_INVALID_PARAMETER).ok();
+    }
+    // SAFETY: `handle` is the live handle opened above, and a zero timeout
+    // returns immediately rather than waiting on it.
+    let waited = unsafe { WaitForSingleObject(handle, 0) };
+    // SAFETY: the handle came from `OpenProcess` above and is closed once.
+    unsafe { CloseHandle(handle) };
+    // `WAIT_OBJECT_0` is the one proof of absence: `WAIT_TIMEOUT` is a process
+    // still running, and `WAIT_FAILED` is a question this host cannot answer.
+    waited != WAIT_OBJECT_0
+}
+
+/// The same question on a platform this crate can probe no processes on.
+///
+/// **Unanswered rather than answered `false`**, which is where every other
+/// unreadable input here resolves: a run reads as driven rather than as
+/// abandoned. Neither platform the gate rules on takes this arm — unix sends
+/// signal `0` and Windows waits on a process handle — so nothing this repository
+/// ships reads a live driver as dead for want of a way to ask.
+#[cfg(not(any(unix, windows)))]
 fn process_may_be_live(_pid: NonZeroU32) -> bool {
     true
 }

@@ -129,6 +129,20 @@ tokio-stream = "0.1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The same question where there is no signal to send. A Windows process handle
+# is signalled when — and only when — the process has ended, so opening one and
+# waiting zero milliseconds on it is the whole probe. Linked rather than left
+# unanswered because the sibling answers it: `tests/contract.rs`'s drift gate
+# compares both readings of a run whose driver is gone, and a platform that
+# reported such a run still driving would serve a row the fold contradicts.
+# Held at the version the SDK's own requirement resolves to, so one copy of this
+# library is linked rather than two.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 assert_cmd = "2"
 libc = "0.2"
