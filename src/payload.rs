@@ -25,7 +25,7 @@ use oneharness_core::io::history;
 use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::plan::{Node, Plan};
-use onepipeline::views::{liveness_word, RunView};
+use onepipeline::views::{liveness_word, RunPaths, RunSummary, RunView};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -33,7 +33,7 @@ use time::OffsetDateTime;
 
 use crate::contract::{
     ArtifactId, Confined, ConversationId, DispatchId, NamedStore, NodeId, PathSegment,
-    ReferenceKind, StoreRoot, TIMELINE_SCHEMA_VERSION,
+    ReferenceKind, RunId, StoreRoot, TIMELINE_SCHEMA_VERSION,
 };
 use crate::filter::EventFilter;
 // The sibling's spending party is imported under a name of its own: this module
@@ -564,7 +564,16 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
-/// One run, as `GET /api/v2/runs` lists it.
+/// One run, as `GET /api/v2/runs` lists it, out of a **fold** of its journal.
+///
+/// **No route serves this.** [`run_row`] is what a listing serves, out of the
+/// run's bounded summary document, and this is the reading it is held equal to:
+/// `tests/contract.rs`'s `a_row_read_from_the_summary_is_the_row_a_fold_produces`
+/// serves the same run directories both ways and compares the two rows field by
+/// field. Every derivation here reaches the SDK's own fold — `liveness_word`,
+/// the projection's statuses, the run's recorded result — so a row read the
+/// bounded way that stopped agreeing with the run is a failing test rather than
+/// a row an operator has to disbelieve.
 ///
 /// `telemetry` is what the sibling aggregated for this run, or `None` when it
 /// could not be asked — in which case every timing the row carries is absent,
@@ -589,6 +598,143 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
     Value::Object(summary)
+}
+
+/// The same row, read from the run's **bounded summary** rather than from a fold
+/// of its journal.
+///
+/// This is what `GET /api/v2/runs` serves. `RunSummary` is one fixed-size
+/// document per run, kept current by whatever appends to that run's journal, so
+/// a row costs the same read whether the run recorded ten records or ten
+/// million — which is the whole reason a listing stopped being proportional to
+/// the store behind it.
+///
+/// Three things are read beside it, and each is bounded and paid **only for a
+/// row that is served**: the run's own recorded result, for the run whose
+/// journal this host cannot fold and whose result is then the only account of
+/// its nodes; the host reading behind [`crate::liveness`]; and the channel queue
+/// that reading consults for a run already gone quiet.
+///
+/// `run` rather than the document's own `run_id`: a summary is read out of a
+/// directory under the runs root, and a client turns the id on this row straight
+/// back into `GET /api/v2/runs/{run}` — so what is served here is an id that
+/// route would accept, and a directory the contract's own boundary refuses never
+/// reaches this function at all.
+///
+/// `telemetry` is the run's clock — [`crate::telemetry::of_aggregate`] over the
+/// document the summary carries — or `None` when it could not be read, in which
+/// case every timing here is absent, which is what an unknown clock is.
+#[must_use]
+pub fn run_row(
+    run: &RunId,
+    summary: &RunSummary,
+    paths: &RunPaths,
+    telemetry: Option<&RunTelemetry>,
+) -> Value {
+    let mut row = Map::new();
+    row.insert("run_id".into(), json!(run));
+    row.insert("state".into(), json!(summary_state_word(summary)));
+    row.insert("phase".into(), json!(summary_phase_word(summary)));
+    row.insert(
+        "last_event".into(),
+        summary
+            .last_event_kind
+            .as_ref()
+            .map_or(Value::Null, |kind| json!(kind)),
+    );
+    if let Some(at) = summary.last_write_at {
+        row.insert("last_progress_at".into(), json!(at / 1_000));
+    }
+    row.insert(
+        "timing_quality".into(),
+        json!(summary_timing_quality(summary)),
+    );
+    row.insert("linkage_quality".into(), json!("labelled"));
+    // Nothing in a run's records measures a tool call's own interval, so what
+    // the fold contributes to a row's timing is nothing at all — see `Measured`.
+    row.insert("timing".into(), timing(telemetry, &Measured::default()));
+    row.insert(
+        "node_counts".into(),
+        json!(summary_node_counts(summary, paths)),
+    );
+    row.insert("launch".into(), summary_launch(run, summary));
+    Value::Object(row)
+}
+
+/// How the run is being driven, as one lowercase word, from its summary.
+fn summary_state_word(summary: &RunSummary) -> String {
+    crate::liveness::word(summary)
+        .to_lowercase()
+        .replace(' ', "-")
+}
+
+/// Which part of its loop the run is in, from its summary.
+///
+/// The same ordering [`phase_word`] reads off a fold, over the same facts: the
+/// summary counts the projection's own statuses and carries every other input by
+/// name.
+fn summary_phase_word(summary: &RunSummary) -> &'static str {
+    if summary.stop_recorded {
+        return "finished";
+    }
+    if summary.node_counts.is_empty() {
+        return "starting";
+    }
+    if crate::liveness::graph_complete(summary) {
+        return "settled";
+    }
+    if summary.decisions_pending > 0 || summary.awaiting_human_action {
+        return "deciding";
+    }
+    if summary.surfaces_queued > summary.surfaces_read {
+        return "surfacing";
+    }
+    if summary.node_counts.contains_key("running") {
+        return "dispatching";
+    }
+    "waiting"
+}
+
+/// How completely the run's own clock is accounted for, from its summary.
+fn summary_timing_quality(summary: &RunSummary) -> &'static str {
+    if summary.event_count == 0 {
+        "legacy"
+    } else if summary.stop_recorded || crate::liveness::graph_complete(summary) {
+        "complete"
+    } else {
+        "partial"
+    }
+}
+
+/// Each status word to the number of nodes carrying it, from the summary.
+///
+/// **The run's own recorded result is the whole account for a run whose graph
+/// nothing folded** — a run this host cannot read a journal for records its
+/// nodes nowhere else — so an empty count falls back to it, exactly as
+/// [`recorded_statuses`] does for a node the graph does not name. A run whose
+/// graph the summary counted is counted from the summary alone: those counts are
+/// the projection's own statuses, which is what the graph payload renders from,
+/// so a row and the graph it opens cannot describe different graphs.
+fn summary_node_counts(summary: &RunSummary, paths: &RunPaths) -> BTreeMap<String, u64> {
+    if !summary.node_counts.is_empty() {
+        return summary.node_counts.clone();
+    }
+    let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+    for (_, recorded) in recorded_result_at(paths) {
+        *counts.entry(recorded.status).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// The run's own attribution to the session that launched it, from its summary.
+fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
+    let mut record = Map::new();
+    record.insert("launch_id".into(), json!(run));
+    record.insert("launcher".into(), json!(launcher_word(&summary.launcher)));
+    if !summary.session.is_empty() {
+        record.insert("session_key".into(), json!(session_key(&summary.session)));
+    }
+    Value::Object(record)
 }
 
 /// Every node's status as the run itself last wrote it, in the run's own words.
@@ -649,7 +795,16 @@ fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
 
 /// Every node the run's own recorded result has an entry for, in its words.
 fn recorded_result(view: &RunView) -> Vec<(String, Recorded)> {
-    read_json(&view.paths.result())
+    recorded_result_at(&view.paths)
+}
+
+/// The same, located by the run's paths alone.
+///
+/// A row read from the bounded summary has no view to ask, and this document is
+/// the one account a run whose journal nothing folded has of its nodes — so the
+/// read is separated from the fold rather than duplicated beside it.
+fn recorded_result_at(paths: &RunPaths) -> Vec<(String, Recorded)> {
+    read_json(&paths.result())
         .and_then(|result| result["nodes"].as_array().cloned())
         .unwrap_or_default()
         .iter()

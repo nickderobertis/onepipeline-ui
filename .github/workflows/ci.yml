@@ -63,6 +63,15 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
+      # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
+      # what a read may do to a runs root — the bug that made one open subscriber
+      # cost a core — and they count operations from the kernel's own record of
+      # the server rather than from a clock, because a CPU figure taken on a
+      # loaded runner is a property of the runner. They are Linux-only and this
+      # is the leg that runs them; they fail with this instruction rather than
+      # skipping, because a cost bound nothing measured is a bound nobody has.
+      - name: Install the syscall tracer the cost journeys count with
+        run: sudo apt-get update && sudo apt-get install -y strace
       - name: Bootstrap
         run: just bootstrap
       # The browser tier is in this sweep, and has to be: it is the only proof the

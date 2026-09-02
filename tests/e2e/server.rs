@@ -32,7 +32,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(14), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(15), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -4465,13 +4465,18 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
     assert_eq!(timing["agent_model_ms"], json!(null));
     assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
 
-    // The row the operator arrives on says the same thing as the detail they open
-    // from it: one reading of the run, whether or not its clock could be read.
+    // **The row the operator arrives on does not need the sibling at all**, which
+    // is the whole of why a list of fifty rows is no longer fifty subprocesses:
+    // the run's own bounded summary carries the document that command prints, so
+    // a row's clock is read rather than fetched. The detail above is the one
+    // reading that still asks the process, and with it missing the two say
+    // different things about the same run — a misconfiguration the server also
+    // names on its own log, and the only state in which they can differ.
     let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
     let row = &listed["runs"][0];
     assert_eq!(row["run_id"], json!(fixture_run::RUN_ID));
-    assert_eq!(row["timing"]["wall_seconds"], json!(null), "{row}");
-    assert_eq!(row["timing"]["agent_seconds"], json!(null), "{row}");
+    assert_eq!(row["timing"]["wall_seconds"], json!(30), "{row}");
+    assert_eq!(row["timing"]["agent_seconds"], json!(13), "{row}");
     assert_eq!(row["node_counts"]["done"], json!(2), "a run all the same");
 
     // The rest of the payload is untouched: a run with no clock is still a run.
@@ -7110,7 +7115,7 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
     .json();
     // No field is added by this reading and no vocabulary moves for it, so the
     // envelope carrying it declares the version it already declared.
-    assert_eq!(served["telemetry_schema_version"], json!(14));
+    assert_eq!(served["telemetry_schema_version"], json!(15));
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
 
     let finished = &turns[0];
@@ -7894,4 +7899,514 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
     assert_eq!(turns[3]["status"], json!("unknown"));
     assert_eq!(turns[3]["usage"], json!({}), "{:?}", turns[3]);
     assert_eq!(turns[3]["assistant"], json!("Closed."));
+}
+
+#[test]
+fn a_run_that_appears_after_the_stream_opened_is_announced_without_reopening_it() {
+    // The stream learns which runs exist from the runs root, on every tick, and
+    // never from the set its opening snapshot saw. That is what stops the cost
+    // bounds this stream is held to being met by a subscriber that stopped
+    // looking: a run started while a browser tab was open is exactly the run its
+    // operator is waiting for.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    let snapshot = stream.next_frame().expect("a snapshot");
+    assert_eq!(
+        snapshot.json()["runs"].as_array().map(Vec::len),
+        Some(1),
+        "the run that appears below is not there yet"
+    );
+
+    fixture_run::write(serving.runs_root(), fixture_run::OTHER_RUN_ID);
+
+    let changed = stream.next_frame().expect("the new run is noticed");
+    assert_eq!(changed.event, "run.changed");
+    assert_eq!(changed.json()["run_id"], json!(fixture_run::OTHER_RUN_ID));
+
+    // And it is a run the client can then go and read, which is the whole point
+    // of announcing it.
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::OTHER_RUN_ID),
+    );
+    assert_eq!(detail.status, 200);
+}
+
+#[test]
+fn a_run_root_that_cannot_be_read_is_reported_rather_than_omitted() {
+    // A third of a host's runs went missing without anybody noticing, because a
+    // run root the reader refused was dropped in the read. A list that is
+    // silently short is indistinguishable from a host with nothing running.
+    let refused = "run-20260807-unreadable";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        // A directory that claims to be a run and is not one: the launch record
+        // every reader needs is not a record at all.
+        let dir = root.join(refused);
+        std::fs::create_dir_all(&dir).expect("the run directory");
+        std::fs::write(dir.join("launch.json"), "{ this is not a launch record")
+            .expect("the launch record");
+    });
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+
+    let served: Vec<&str> = listed["runs"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("a run id"))
+        .collect();
+    assert_eq!(served, vec![fixture_run::RUN_ID], "{listed}");
+
+    let unreadable = listed["unreadable"].as_array().expect("the refused roots");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    let entry = &unreadable[0];
+    assert!(
+        entry["path"].as_str().expect("a path").ends_with(refused),
+        "the refusal names the directory it is about: {entry}"
+    );
+    assert!(
+        !entry["reason"].as_str().expect("a reason").is_empty(),
+        "a refusal a reader cannot act on: {entry}"
+    );
+
+    // And a root with nothing to refuse carries no such array at all, which is
+    // what every client written before this field reads.
+    let clean = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let listed = http::get(clean.address, "/api/v2/runs?include_settled=true").json();
+    assert!(
+        listed.get("unreadable").is_none(),
+        "a list with nothing to report carries an empty array: {listed}"
+    );
+}
+
+#[test]
+fn a_selection_answers_the_runs_it_names_and_nothing_about_a_page() {
+    // The refresh an invalidation frame is for: the frame names the run that
+    // moved, and this is how one row is refetched rather than the first page.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+    });
+    let listed = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={},{}",
+            fixture_run::OTHER_RUN_ID,
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+
+    // The same row shape as a page serves, in the same order — most recent
+    // activity first, ties on the id — whatever order the ids were named in.
+    let served: Vec<&str> = listed["runs"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("a run id"))
+        .collect();
+    assert_eq!(
+        served,
+        vec![fixture_run::RUN_ID, fixture_run::OTHER_RUN_ID],
+        "{listed}"
+    );
+    let page = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row_of = |body: &serde_json::Value, run: &str| {
+        body["runs"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["run_id"] == json!(run))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not on this list: {body}"))
+    };
+    assert_eq!(
+        row_of(&listed, fixture_run::RUN_ID),
+        row_of(&page, fixture_run::RUN_ID),
+        "a selected row and a paged row describe the same run differently"
+    );
+
+    // A run named twice is answered once. The bound below is checked against
+    // what was *asked for* rather than against what survives that, so naming one
+    // run fifty-one times is still a selection larger than a page.
+    let repeated = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={},{},{}",
+            fixture_run::RUN_ID,
+            fixture_run::OTHER_RUN_ID,
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    assert_eq!(
+        repeated["runs"].as_array().map(Vec::len),
+        Some(2),
+        "a run named twice was served twice: {repeated}"
+    );
+
+    // **No cursor.** It answered exactly the runs named, so there is no next
+    // page for a client to walk into.
+    assert!(listed.get("next_cursor").is_none(), "{listed}");
+    // And nothing was refused, so nothing is reported as refused.
+    assert!(listed.get("unreadable").is_none(), "{listed}");
+    assert!(listed.get("missing").is_none(), "{listed}");
+}
+
+#[test]
+fn a_selection_names_the_run_it_could_not_find_rather_than_omitting_it() {
+    // Removal is a normal race: the frame that named the run arrived before the
+    // sweep that took it away. A shorter list would leave a client diffing to
+    // discover that, and a refusal would fail a refresh of the runs that *are*
+    // there.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let gone = "run-20260807-sweptaway";
+    let listed = http::get(
+        serving.address,
+        &format!("/api/v2/runs?select={},{gone}", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(
+        listed["runs"].as_array().map(Vec::len),
+        Some(1),
+        "the run that is there is still served: {listed}"
+    );
+    assert_eq!(listed["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(listed["missing"], json!([gone]), "{listed}");
+}
+
+#[test]
+fn a_selection_serves_a_settled_run_the_page_would_have_hidden() {
+    // `include_settled` decides what a *page* is worth listing. A caller that
+    // named a run wants that run, and a settled row that cannot be refreshed
+    // reads as a stale view of a run that has in fact finished.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let page = http::get(serving.address, "/api/v2/runs").json();
+    assert_eq!(
+        page["runs"].as_array().map(Vec::len),
+        Some(0),
+        "the fixture run has settled, so a page hides it: {page}"
+    );
+    let selected = http::get(
+        serving.address,
+        &format!("/api/v2/runs?select={}", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(selected["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(selected["runs"][0]["state"], json!("settled"));
+}
+
+#[test]
+fn a_selection_larger_than_a_page_is_refused_rather_than_truncated() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let named: Vec<String> = (0..=onepipeline_ui::contract::RUNS_PAGE_LIMIT)
+        .map(|n| format!("run-20260807-{n:06}"))
+        .collect();
+    // Repeats do not buy a caller room: the bound is on what was asked for, so a
+    // selection over the maximum is refused however few distinct runs it names.
+    let repeated = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={}",
+            vec![fixture_run::RUN_ID; named.len()].join(",")
+        ),
+    );
+    assert_eq!(repeated.status, 422);
+    assert_eq!(repeated.json()["error"]["code"], json!("invalid_request"));
+    let refused = http::get(
+        serving.address,
+        &format!("/api/v2/runs?select={}", named.join(",")),
+    );
+    assert_eq!(refused.status, 422);
+    let body = refused.json();
+    assert_eq!(body["error"]["code"], json!("invalid_request"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains(&onepipeline_ui::contract::RUNS_PAGE_LIMIT.to_string()),
+        "the refusal does not say what the maximum is: {body}"
+    );
+    // And a name that is not a usable run id is refused at the same boundary,
+    // before anything under the runs root is opened.
+    let crafted = http::get(serving.address, "/api/v2/runs?select=../elsewhere");
+    assert_eq!(crafted.status, 422);
+    assert_eq!(crafted.json()["error"]["code"], json!("invalid_run_id"));
+
+    // A selection answers exactly the runs it names, so a paging parameter sent
+    // beside one is a request whose two halves disagree about what was asked.
+    // Refused rather than resolved: serving the selection and dropping the rest
+    // would leave a caller who asked for a second page of named runs reading the
+    // first as though it were the answer.
+    for paging in [
+        "limit=1",
+        "cursor=run-20260807-a1b2c3",
+        "include_settled=true",
+    ] {
+        let both = http::get(
+            serving.address,
+            &format!("/api/v2/runs?select={}&{paging}", fixture_run::RUN_ID),
+        );
+        assert_eq!(both.status, 422, "{paging}");
+        let body = both.json();
+        assert_eq!(body["error"]["code"], json!("invalid_request"), "{paging}");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .expect("a message")
+                .contains(paging.split('=').next().expect("a parameter name")),
+            "the refusal does not name what it would not take: {body}"
+        );
+    }
+}
+
+#[test]
+fn a_rows_clock_and_the_details_are_one_reading() {
+    // Two readings of one run's clock, and this is what holds them together: the
+    // row's comes from the aggregate the run's summary carries, read in this
+    // process, and the detail's comes from `onepipeline telemetry` over the same
+    // run. They are the same document by the sibling's design, and a release of
+    // it that made them disagree would be a list and a detail an operator sees
+    // different numbers on.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let row = http::get(serving.address, "/api/v2/runs?include_settled=true").json()["runs"][0]
+        ["timing"]
+        .clone();
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json()["run"]["timing"]
+        .clone();
+    assert!(
+        !row["wall_ms"].is_null(),
+        "the sibling that aggregates this run's telemetry did not answer, so this journey is \
+         comparing two absences — run `just bootstrap`"
+    );
+    for lane in [
+        "agent_seconds",
+        "judge_seconds",
+        "llmlint_seconds",
+        "gate_seconds",
+        "publication_wait_seconds",
+        "lock_wait_seconds",
+        "setup_seconds",
+        "scheduling_seconds",
+        "wall_seconds",
+        "wall_ms",
+        "unattributed_ms",
+    ] {
+        assert_eq!(
+            row[lane], detail[lane],
+            "the row and the detail disagree about {lane}: {row} against {detail}"
+        );
+    }
+}
+
+#[test]
+fn a_selection_tells_a_run_it_could_not_read_from_one_that_is_gone() {
+    // Two different facts to a caller refreshing a row: the run went away
+    // between the frame that named it and the refetch, which is a race and
+    // normal; or the run is right there and this host is failing to serve it,
+    // which is not. Reported on separate lists so a client is not left guessing
+    // which of the two it met.
+    let refused = "run-20260807-unreadable";
+    let gone = "run-20260807-sweptaway";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        let dir = root.join(refused);
+        std::fs::create_dir_all(&dir).expect("the run directory");
+        std::fs::write(dir.join("launch.json"), "{ this is not a launch record")
+            .expect("the launch record");
+    });
+    let listed = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={},{refused},{gone}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+
+    assert_eq!(listed["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(listed["runs"].as_array().map(Vec::len), Some(1), "{listed}");
+    assert_eq!(listed["missing"], json!([gone]), "{listed}");
+    let unreadable = listed["unreadable"].as_array().expect("the refused root");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    assert!(
+        unreadable[0]["path"]
+            .as_str()
+            .expect("a path")
+            .ends_with(refused),
+        "{listed}"
+    );
+    assert!(
+        !unreadable[0]["reason"]
+            .as_str()
+            .expect("a reason")
+            .is_empty(),
+        "{listed}"
+    );
+}
+
+#[test]
+fn runs_that_last_moved_at_the_same_instant_are_ordered_by_their_ids() {
+    // The order has to be **total**, or a page boundary lands somewhere
+    // different on every read and a client walking the cursor skips or repeats a
+    // row. Recording the same instant is the ordinary case rather than a corner
+    // one: a host that launched a batch has a dozen runs stamped alike.
+    let serving = Serving::start(|root| {
+        // Written in the order that would come back if nothing sorted them.
+        for run in [
+            "run-20260807-ccccc3",
+            "run-20260807-aaaaa1",
+            "run-20260807-bbbbb2",
+        ] {
+            fixture_run::write(root, run);
+        }
+    });
+    let body = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let ids: Vec<&str> = body["runs"]
+        .as_array()
+        .expect("runs is an array")
+        .iter()
+        .filter_map(|run| run["run_id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "run-20260807-aaaaa1",
+            "run-20260807-bbbbb2",
+            "run-20260807-ccccc3"
+        ],
+        "runs stamped at one instant came back in no particular order"
+    );
+}
+
+#[test]
+fn a_selection_naming_no_run_at_all_says_so() {
+    // `?select=` with nothing after it is a caller asking about no runs. Refused
+    // as that rather than as a run whose id happens to be empty, because the
+    // second answer — "invalid run id: must not be empty" — is addressed to
+    // somebody who wrote no id at all and leaves them looking for a typo.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let refused = http::get(serving.address, "/api/v2/runs?select=");
+    assert_eq!(refused.status, 422);
+    let body = refused.json();
+    assert_eq!(body["error"]["code"], json!("invalid_request"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("names no run"),
+        "the refusal does not say what was wrong with it: {body}"
+    );
+    // And the ordinary listing is still what leaving it off asks for.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    assert_eq!(listed["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
+}
+
+#[test]
+fn a_run_directory_the_contract_cannot_name_is_reported_rather_than_listed() {
+    // A row's `run_id` is what a client turns straight back into
+    // `GET /api/v2/runs/{run}`, so a directory whose name this contract's own
+    // boundary refuses is not a run to point a reader at. The event stream has
+    // always applied that filter before announcing one; the list handed the id
+    // out anyway, and a client following it met the route's refusal instead of a
+    // run. Reported here rather than dropped, for the reason every other refused
+    // root is: an omission nobody is told about is a host that looks empty.
+    let unnameable = "a run with spaces";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, unnameable);
+    });
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+
+    let served: Vec<&str> = listed["runs"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("a run id"))
+        .collect();
+    assert_eq!(served, vec![fixture_run::RUN_ID], "{listed}");
+    let unreadable = listed["unreadable"].as_array().expect("the refused root");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    assert!(
+        unreadable[0]["path"]
+            .as_str()
+            .expect("a path")
+            .ends_with(unnameable),
+        "the refusal names the directory it is about: {listed}"
+    );
+    assert!(
+        !unreadable[0]["reason"]
+            .as_str()
+            .expect("a reason")
+            .is_empty(),
+        "{listed}"
+    );
+    // And every id the list *did* serve is one the route beside it accepts.
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{}", served[0]));
+    assert_eq!(detail.status, 200);
+}
+
+#[test]
+fn a_quiet_run_with_a_surface_nobody_has_read_is_waiting_rather_than_parked() {
+    // A run holding a question is *waiting*, not parked: the loop that would be
+    // writing is deliberately holding a subtree back until somebody answers, and
+    // a run reported undriven there sends an operator to intervene in work whose
+    // next move is already sitting in their own queue.
+    //
+    // **This is the one reading that differs from the sibling's**, and the
+    // difference is deliberate. `src/liveness.rs` states it in full: the engine
+    // asks whether an outstanding surface is *blocking*, which lives in the
+    // channel rather than in the store and is not a question this crate can put
+    // to it, so this asks the wider one the run's own summary can answer — any
+    // surface sent and not consumed. That errs toward "still working", the
+    // direction the sibling's own reading errs in for every input it cannot
+    // read.
+    let quiet = Serving::start(|root| {
+        fixture_run::write_launched(root, fixture_run::RUN_ID);
+    });
+    let parked = http::get(quiet.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(
+        parked["state"],
+        json!("parked"),
+        "a launch that has written nothing since is not being driven: {parked}"
+    );
+
+    let asked = Serving::start(|root| {
+        let dir = fixture_run::write_launched(root, fixture_run::RUN_ID);
+        // Sent, and never consumed: no `planner-surfaced` follows it.
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({ "kind": "decision", "message": "which way?", "blocking": true }),
+        );
+    });
+    let waiting = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(
+        waiting["state"],
+        json!("active"),
+        "a run whose question nobody has read reads as abandoned: {waiting}"
+    );
+    // And nothing else moved with it: this run has recorded no graph, so what it
+    // is *doing* is `starting` whoever is waiting on whom. The surface changes
+    // how the run is being driven, which is the question `state` answers.
+    assert_eq!(waiting["phase"], parked["phase"], "{waiting}");
+    assert_eq!(parked["phase"], json!("starting"), "{parked}");
 }

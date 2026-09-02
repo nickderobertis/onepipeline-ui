@@ -32,6 +32,21 @@
       "command": "just _crate-test",
       "dependsOn": ["ensure-sibling"]
     },
+    "test-cost": {
+      "command": "just _crate-test-cost",
+      "dependsOn": ["ensure-sibling"],
+      "inputs": [
+        "apiServerSurface",
+        "{projectRoot}/tests/e2e/main.rs",
+        "{projectRoot}/tests/e2e/cost.rs",
+        "{projectRoot}/tests/support/cost.rs",
+        "{projectRoot}/tests/support/fixture_run.rs",
+        "{projectRoot}/tests/support/http.rs",
+        "{projectRoot}/tests/support/serving.rs",
+        "{projectRoot}/justfile",
+        "sharedGlobals"
+      ]
+    },
     "test-baseline": {
       "command": "just _crate-test-baseline",
       "dependsOn": ["ensure-sibling", "ensure-baseline"],

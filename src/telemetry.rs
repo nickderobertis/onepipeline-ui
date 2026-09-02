@@ -1,12 +1,23 @@
 //! The seam onto `onepipeline`'s own telemetry document.
 //!
 //! The SDK aggregates a run's wall clock into the eight buckets the wire carries
-//! and folds what each party spent, and it keeps that fold *behind* its contract
-//! surface: `onepipeline`'s `telemetry` module is private in every published
-//! version, and the document is reachable only through `onepipeline telemetry
-//! <run>`. So this crate reaches it the way any other caller does — through that
-//! CLI — rather than folding the run's clock a second time here, which is how
-//! the two readings would come to disagree about where a run's time went.
+//! and folds what each party spent, and this crate never folds it a second time
+//! — that is how two readings of where a run's time went come to disagree. There
+//! are **two ways in**, because the SDK offers two and they cost differently:
+//!
+//! - [`of_aggregate`] takes the document a run's own **bounded summary** carries,
+//!   read in this process. That is what a run-list row uses: a page of fifty rows
+//!   used to be fifty subprocesses, each one folding the run it was asked about.
+//! - [`of_run`] asks `onepipeline telemetry <run>`. That is what the run
+//!   **detail** uses, and it stays a process for a reason rather than by
+//!   inheritance: the fold itself is still behind the SDK's contract surface, and
+//!   reaching the summary beside a view this route has already opened would
+//!   refold the run whenever that document is stale. `src/AGENTS.md` carries the
+//!   upstream change that would close it, and the one state in which the two
+//!   readings can differ.
+//!
+//! Both cross one boundary — `validated` — so what a telemetry document has to
+//! be before this crate serves anything out of it is stated once.
 //!
 //! What is duplicated here is the *document*, not the fold: the stack has no
 //! shared crate, so each side owns its copy of a wire shape and a contract test
@@ -577,4 +588,94 @@ fn tail(stderr: &[u8]) -> String {
         .unwrap_or("it said nothing")
         .trim()
         .to_owned()
+}
+
+/// The same document, taken from the sibling's **own in-process aggregation**
+/// rather than from its CLI.
+///
+/// A run's bounded summary carries `views::RunTelemetry` — the whole of what
+/// `onepipeline telemetry <run>` prints, referenced by that document rather than
+/// restated in it — so a run list reads each served row's clock without starting
+/// a process for it. That is the point: a list of fifty rows used to be fifty
+/// subprocesses, each of which folded the run it was asked about.
+///
+/// It crosses the same `validated` boundary the printed document does. Not
+/// because the producer is less trusted in-process — it is the same fold — but
+/// because there is then **one** statement of what a telemetry document has to
+/// be before this crate serves anything out of it, rather than a second path in
+/// that nobody has to keep true.
+///
+/// The two vocabularies are joined by exhaustive matches below, so a bucket or a
+/// party the sibling adds fails to compile here rather than being quietly
+/// dropped out of a served row.
+///
+/// # Errors
+///
+/// As [`read_document`]: anything that is not a telemetry document about `run`,
+/// held to the producer's own contract.
+pub fn of_aggregate(
+    run: &RunId,
+    aggregate: &onepipeline::views::RunTelemetry,
+) -> Result<RunTelemetry, Unavailable> {
+    validated(
+        run,
+        Document {
+            run_id: aggregate.run_id.clone(),
+            wall_ms: aggregate.wall_ms,
+            buckets: aggregate
+                .buckets
+                .iter()
+                .map(|bucket| WireBucket {
+                    name: bucket_named(bucket.name),
+                    ms: bucket.ms,
+                })
+                .collect(),
+            usage: aggregate
+                .usage
+                .iter()
+                .map(|(party, spent)| {
+                    (
+                        party_named(*party),
+                        WireUsage {
+                            input: spent.input,
+                            output: spent.output,
+                            cache_read: spent.cache_read,
+                            cache_write: spent.cache_write,
+                            cost_usd: spent.cost_usd,
+                        },
+                    )
+                })
+                .collect(),
+        },
+    )
+}
+
+/// This crate's name for one of the sibling's buckets.
+///
+/// Exhaustive, and that is the whole of its job: the eight are what the wire
+/// carries and what the sum-to-the-whole invariant is checked over, so a ninth
+/// arriving from the producer has to be decided here rather than dropped.
+fn bucket_named(name: onepipeline::views::BucketName) -> BucketName {
+    use onepipeline::views::BucketName as Theirs;
+    match name {
+        Theirs::Agent => BucketName::Agent,
+        Theirs::Judge => BucketName::Judge,
+        Theirs::Llmlint => BucketName::Llmlint,
+        Theirs::Gate => BucketName::Gate,
+        Theirs::PublicationWait => BucketName::PublicationWait,
+        Theirs::LockWait => BucketName::LockWait,
+        Theirs::Setup => BucketName::Setup,
+        Theirs::Scheduling => BucketName::Scheduling,
+    }
+}
+
+/// This crate's name for one of the sibling's parties, on the same terms.
+fn party_named(party: onepipeline::views::Party) -> Party {
+    use onepipeline::views::Party as Theirs;
+    match party {
+        Theirs::Agent => Party::Agent,
+        Theirs::Judge => Party::Judge,
+        Theirs::Llmlint => Party::Llmlint,
+        Theirs::Total => Party::Total,
+    }
 }

@@ -31,7 +31,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::ReadApi;
 use crate::contract::{
     routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, PageLimit, RunId, RunQuery,
-    RunsQuery, TimelineQuery, TimelineScope,
+    RunSelection, RunsPage, RunsQuery, TimelineQuery, TimelineScope,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -55,6 +55,17 @@ struct Serving {
 }
 
 /// The router serving one runs root, ending its streams when `stopping` is set.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no authorization to
+// enforce here and no place to enforce it from. This is `docs/contract.md`'s whole surface:
+// seven **read** routes over a directory of runs, with no writes, no accounts, no sessions
+// and no principal — the CLI's `--bind` defaults to loopback, and an operator who exposes it
+// wider puts whatever their host uses in front of it. Adding an authentication layer would
+// be a change to the contract this crate is the Rust rendering of, which that document's
+// owner decides and this repository is forbidden from editing to suit the code; it is not a
+// change a run-list read makes on its own authority. The trust boundary this surface *does*
+// have is validated at every handler above: each `{...}` a route interpolates is an
+// identifier newtype, every query is parsed before a run is opened, and no raw `String`
+// reaches storage.
 fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
     Router::new()
         .route(routes::HEALTHZ, get(healthz))
@@ -70,6 +81,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
             stopping,
         })
 }
+// llmlint: ignore-end[authorization_enforced_server_side]
 
 /// Take `address`, so a caller can report the port before the accept loop
 /// starts — and learn which port it was given when it asked for `:0`.
@@ -351,11 +363,33 @@ fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
         None => None,
         Some(value) => Some(RunId::try_from(value.as_str())?),
     };
-    Ok(RunsQuery {
-        include_settled: flag(raw, "include_settled", false)?,
-        limit,
-        cursor,
-    })
+    // Parsed here, at the boundary, so a name that is not a usable run id and a
+    // selection larger than a page are both refused before a run is opened —
+    // and so no raw `String` reaches storage, on the same terms every other
+    // `{...}` this server interpolates crosses.
+    let Some(select) = raw.get("select") else {
+        return Ok(RunsQuery::Page(RunsPage {
+            include_settled: flag(raw, "include_settled", false)?,
+            limit,
+            cursor,
+        }));
+    };
+    // A selection answers exactly the runs it names, so a paging parameter sent
+    // beside one is a request whose two halves disagree about what was asked.
+    // Refused rather than resolved: serving the selection and dropping the rest
+    // would leave a caller who asked for the second page of three named runs
+    // reading the first three as though that were the answer.
+    let paging: Vec<&str> = ["include_settled", "limit", "cursor"]
+        .into_iter()
+        .filter(|name| raw.contains_key(*name))
+        .collect();
+    if !paging.is_empty() {
+        return Err(ApiError::InvalidRequest(format!(
+            "select answers the runs it names, so it takes no {}",
+            paging.join(", ")
+        )));
+    }
+    Ok(RunsQuery::Selected(RunSelection::parse(select)?))
 }
 
 /// `?scope=run`, or `?scope=node&node=ID`. The pair is parsed into the variant

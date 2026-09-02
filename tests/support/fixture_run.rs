@@ -4435,3 +4435,77 @@ pub fn write_malformed_releases(root: &Path, run: &str) -> PathBuf {
     fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
     dir
 }
+
+/// A **later** instant than anything a fixture records, so a record appended
+/// after one sorts last in merge order rather than in among what is already
+/// there.
+const AFTERWARDS: &str = "2026-08-07T13:00:00.000Z";
+
+/// Append `records` bulky relayed envelopes to a run's journal, each carrying
+/// `bytes` of prose, and answer how long the journal then is.
+///
+/// For the journeys that count what a read costs: the whole question there is
+/// whether a listing's cost grows with what a run has recorded, and the only
+/// honest way to ask it is to record a great deal. Real envelopes, in the shape
+/// the producer relays them, appended the way an appender appends — so what a
+/// reader does with them is what it does with a run that really is that large.
+///
+/// The record count and the instant are the caller's to keep **fixed** while the
+/// size varies: two runs whose journals differ only in bytes have summaries that
+/// differ only in the length that document records for the journal, which is
+/// what lets a journey compare what reading each of them cost.
+pub fn inflate(root: &Path, run: &str, records: usize, bytes: usize) -> u64 {
+    let journal = root.join(run).join("events.jsonl");
+    let mut text = fs::read_to_string(&journal).unwrap_or_default();
+    for seq in 0..records {
+        text.push_str(
+            &json!({
+                "v": 1,
+                "ts": AFTERWARDS,
+                "stream": format!("{run}-bulk"),
+                "seq": seq,
+                "source": "agentgraph",
+                "kind": "turn-activity",
+                "labels": {
+                    "run_id": run,
+                    "node": NODE_ID,
+                    "member": "worker",
+                    "session": CONVERSATION_ID,
+                },
+                "payload": {
+                    "kind": "tool",
+                    "name": "read",
+                    "detail": "x".repeat(bytes),
+                },
+                "artifacts": [],
+            })
+            .to_string(),
+        );
+        text.push('\n');
+    }
+    fs::write(&journal, &text).expect("the journal");
+    text.len() as u64
+}
+
+/// Write the run's **summary document**, the way the engine writes one.
+///
+/// A run recorded by the current engine has one already — its journal's writer
+/// keeps it current a record at a time — and a run a fixture writes by hand does
+/// not. This is the SDK's own read-and-cache path, which is the same derivation
+/// the appender runs, so a run summarised this way is a run with a summary and
+/// not a stand-in for one.
+pub fn summarize(root: &Path, run: &str) {
+    let paths = RunPaths::under(root, run);
+    onepipeline::views::RunSummary::of(&paths)
+        .unwrap_or_else(|err| panic!("summarise {run}: {err}"));
+}
+
+/// How long a run's summary document is, in bytes.
+///
+/// What a listing reads for a run it does not serve, and the number a journey
+/// holds that read to exactly.
+pub fn summary_len(root: &Path, run: &str) -> u64 {
+    fs::metadata(RunPaths::under(root, run).summary())
+        .expect("the run has a summary")
+        .len()
+}

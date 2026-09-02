@@ -116,8 +116,17 @@ export const API_V2_FILTER_PROFILES = {
  * than the run's total. Every field was already declared here and is already
  * rendered — a server on `13` fills none of them and puts a persona name where
  * the prompt belongs, which is why the literal moves with the server.
+ *
+ * `15` is what the run list stops hiding. The payload gains two optional
+ * companions to `runs` and `next_cursor` — `unreadable`, one entry per run root
+ * the server refused with that root's path and its own reason, and `missing`,
+ * the run ids a named `?select=` asked about and did not find — and both are
+ * absent rather than empty when there is nothing to report. Every field `14`
+ * served is served with the same meaning, so nothing rendered here changes; the
+ * literal moves because a client that has never seen `unreadable` is one reading
+ * a run list that may be shorter than the host it is about.
  */
-export const TELEMETRY_SCHEMA_VERSION = 14;
+export const TELEMETRY_SCHEMA_VERSION = 15;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -421,12 +430,46 @@ export const runSummarySchema = openObject({
   launch: runLaunchSchema.optional(),
 });
 
+/**
+ * A run root the server refused, as it reported it.
+ *
+ * `reason` is the *reader's* own wording and is rendered rather than
+ * reinterpreted: the server states, once, why it would not serve that directory,
+ * and a second wording here would be a second thing to keep true. What a reader
+ * needs from it is that the directory exists and is not on the list — because a
+ * run root silently dropped is indistinguishable from a host with nothing
+ * running, which is how a third of a host's runs once went missing unnoticed.
+ */
+export const unreadableRunRootSchema = openObject({
+  path: z.string().min(1),
+  reason: z.string().min(1),
+});
+export type UnreadableRunRoot = z.infer<typeof unreadableRunRootSchema>;
+
 export const runListSchema = openObject({
   api_version: z.literal(2),
   telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
   runs: z.array(runSummarySchema),
   next_cursor: z.string().min(1).optional(),
+  /**
+   * The run roots the server could not read, absent when it refused none.
+   *
+   * Optional because it is additive at schema 15 and because absent is the
+   * ordinary answer — a list with no `unreadable` is a list of everything the
+   * host holds.
+   */
+  unreadable: z.array(unreadableRunRootSchema).optional(),
+  /**
+   * The run ids a `?select=` named and the server did not find, absent when it
+   * found them all.
+   *
+   * Only ever present on the answer to a selection: a run that went away between
+   * the invalidation naming it and the refetch asking for it is a normal race,
+   * and a caller that asked about a run by name has to be told it is gone rather
+   * than handed a shorter list to diff.
+   */
+  missing: z.array(z.string().min(1)).optional(),
   provider_health: providerHealthSchema.optional(),
 });
 

@@ -6,7 +6,10 @@
 //! identifiers, queries — [`api::ReadApi`] is the trait one method per route,
 //! [`store::RunStore`] implements it over a runs root through the SDK's
 //! [`views`](onepipeline::views), and [`server`] is the axum router that serves
-//! it. `tests/contract.rs` holds the types to the contract text and
+//! it. [`liveness`] is the one reading in here that restates one of the SDK's,
+//! because the bounded document a listing reads carries that reading's inputs
+//! and the SDK publishes no entry point that takes them; its own header names
+//! the check that fails when the two drift apart. `tests/contract.rs` holds the types to the contract text and
 //! `tests/e2e/` drives the compiled binary over real HTTP.
 //!
 //! Payloads are carried as [`serde_json::Value`] on purpose. Anything the API
@@ -25,6 +28,7 @@ pub mod cli;
 pub mod contract;
 pub mod error;
 pub mod filter;
+pub mod liveness;
 pub mod payload;
 pub mod server;
 pub mod store;

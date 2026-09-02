@@ -1,13 +1,33 @@
 //! The SDK-backed read store: [`ReadApi`] over one runs root.
 //!
-//! Every read here goes through the onepipeline SDK's [`RunView`], which opens a
-//! run's launch record, its merged event store, and the fold of that store. This
-//! module adds the run-list paging, the not-found decisions, and the polling
-//! loop behind the event stream; the payloads themselves are
-//! [`crate::payload`]'s projection of what the SDK read.
+//! **Every read is proportional to what was asked for, and this module is where
+//! that is decided.** The SDK offers two readings of a run and they cost
+//! different things: [`RunView`] opens the launch record and folds the run's
+//! whole merged event store into memory, and [`RunSummary`] is one fixed-size
+//! document per run kept current by whatever appends to that run's journal. A
+//! **detail** costs the first; a **listing** and an open **stream** must never.
 //!
-//! Nothing here writes. Reading takes no lock the engine's single writer needs,
-//! which is what lets the server run beside the engine's own reconcile loop.
+//! What that rules out, because every one of them was true here:
+//!
+//! - A run list that surveyed the root — every run opened and folded — and then
+//!   sliced a page off the result, so asking for one row cost more than asking
+//!   for fifty.
+//! - A route about one named run that surveyed the root to find it, so a small
+//!   transcript took as long as the gigabytes beside it.
+//! - A subscriber whose every poll tick re-surveyed the root to compute change
+//!   tokens, which is one core, continuously, per connection, emitting nothing.
+//!   A tick now costs one listing of the root and one metadata lookup per run,
+//!   and opens nothing until a run's journal has actually moved.
+//! - A process started per served row to read that row's clock. The summary
+//!   carries the run's aggregate timing, which is what the process was fetching.
+//!
+//! Reads take no lock the engine's single writer needs, which is what lets the
+//! server run beside the engine's own reconcile loop. Nothing here writes — but
+//! the SDK's summary read is a cache: a run whose document is missing or stale
+//! is folded once and the fold written back beside the run, best-effort, so the
+//! *next* reader of that run pays a bounded read. That is the SDK's own design
+//! and the reason a store full of runs recorded by an older build is slow on its
+//! first listing and cheap on every one after it.
 //!
 //! Filtering is resolved here, once per read: `?filter=` is matched against the
 //! run being served — a built-in profile, one its launch config defined, or an
@@ -22,15 +42,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use onepipeline::views::{RunView, Survey};
+use onepipeline::views::{Listing, RunPaths, RunSummary, RunView, Skipped};
 use serde_json::{json, Value};
 
 use crate::api::ReadApi;
 use crate::cli::RunsRoot;
 use crate::contract::{
     ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, Release,
-    RunId, RunQuery, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION,
-    TELEMETRY_SCHEMA_VERSION,
+    RunId, RunQuery, RunSelection, RunsPage, RunsQuery, SseEvent, TimelineQuery, TimelineScope,
+    API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
@@ -141,22 +161,24 @@ impl RunStore {
         document
     }
 
-    /// Every readable run under the root, oldest id first.
+    /// Where one run's state lives under this root.
     ///
-    /// The survey's `skipped` — the run roots it could not read — is deliberately
-    /// dropped here, which is what the SDK's own listing did before it carried
-    /// them. Serving a refused root as a fact rather than as an absence is a
-    /// change to what this API reports, not to what pinning the SDK costs.
-    fn views(&self) -> Vec<RunView> {
-        Survey::of(&self.root).views
+    /// Joined from a **validated** run id, which is the whole of why a raw
+    /// `String` never reaches here: the id is a bare name by the time it is one
+    /// of these, so this join cannot leave the root.
+    fn paths_of(&self, run: &RunId) -> RunPaths {
+        RunPaths::under(&self.root, run.as_str())
     }
 
-    /// One run, or the not-found this route serves for it.
+    /// One run, folded — **and nothing else opened**.
+    ///
+    /// Opened by name rather than searched for in a survey of the root, which is
+    /// what made every route about one run cost the whole store: a transcript
+    /// that is not large took a long time because the survey behind it was
+    /// gigabytes. A run this build cannot read is the same answer to a caller as
+    /// a run that is not there, and both are this route's not-found.
     fn view(&self, run: &RunId) -> Result<RunView, ApiError> {
-        self.views()
-            .into_iter()
-            .find(|view| view.paths.run == run.as_str())
-            .ok_or_else(|| ApiError::RunNotFound(run.clone()))
+        RunView::open(&self.paths_of(run)).map_err(|_| ApiError::RunNotFound(run.clone()))
     }
 
     /// Wrap a payload in the schema-version envelope every route serves.
@@ -169,15 +191,14 @@ impl RunStore {
         }
     }
 
-    /// Whether a run's graph has completed.
+    /// Whether this run's graph has completed, from its bounded summary.
     ///
     /// Every node it recorded settled `done`. Under rounds this also had to ask
     /// whether the open round had closed; execution is continuous and there is no
     /// such flag — a graph whose every node is done has nothing left to
     /// dispatch, which is the whole of what completion is now.
-    fn settled(view: &RunView) -> bool {
-        let statuses = view.state.statuses();
-        !statuses.is_empty() && statuses.values().all(|status| status.as_str() == "done")
+    fn settled(summary: &RunSummary) -> bool {
+        crate::liveness::graph_complete(summary)
     }
 
     /// The filter one request asked for, resolved against the run it is reading.
@@ -193,62 +214,232 @@ impl RunStore {
         }
     }
 
+    /// One row, and the bounded reads it costs.
+    ///
+    /// Paid **only for a run the page serves**, which is the whole of what a
+    /// page size can bound: reading each run's summary and ordering the runs by
+    /// what those summaries say are per run and nothing else is.
+    fn row(&self, run: &RunId, summary: &RunSummary) -> Value {
+        // Joined from the **validated** id rather than from the name the
+        // directory happened to have, so no raw `String` read off the filesystem
+        // reaches storage — the same rule every `{...}` a route interpolates
+        // crosses.
+        let paths = self.paths_of(run);
+        // The row's clock, out of the document the summary carries rather than
+        // out of a process started for this row. It still crosses this crate's
+        // own telemetry boundary, so a document that does not add up leaves the
+        // row's timings absent exactly as an unaskable sibling does.
+        let timing = telemetry::of_aggregate(run, &summary.timing).ok();
+        payload::run_row(run, summary, &paths, timing.as_ref())
+    }
+
+    /// The runs a listing can serve, and the roots it has to refuse.
+    ///
+    /// **A row's `run_id` is what a client turns straight back into
+    /// `GET /api/v2/runs/{run}`**, so a directory whose name this contract's own
+    /// boundary would reject is not a run to point a reader at — the event
+    /// stream has always applied that filter before announcing one, and a list
+    /// that served it anyway handed out an id the route beside it refuses.
+    /// Reported rather than dropped, on the same terms every other refused root
+    /// is: a run this API cannot serve is a fact about the root.
+    ///
+    /// No read: the summaries are already in hand, and this is a walk over their
+    /// names.
+    fn nameable(
+        &self,
+        summaries: Vec<RunSummary>,
+        refused: &mut Vec<Skipped>,
+    ) -> Vec<(RunId, RunSummary)> {
+        let mut serving = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            match RunId::try_from(summary.run_id.as_str()) {
+                Ok(run) => serving.push((run, summary)),
+                // The directory rather than the bare name, because that is what
+                // `unreadable` carries for every other refused root and a client
+                // reading the two together must not have to tell them apart.
+                Err(why) => refused.push(Skipped {
+                    path: self.root.join(&summary.run_id),
+                    reason: format!("this API cannot serve a run under that name: {why}"),
+                }),
+            }
+        }
+        serving
+    }
+
+    /// The run roots a read refused, as the reader itself worded them.
+    ///
+    /// Never a second wording: a refusal restated here is a second thing to keep
+    /// true, and the one the SDK gives is the one an operator can act on. Absent
+    /// rather than empty when nothing was refused, so a client written before
+    /// this array reads exactly what it read before.
+    fn unreadable(skipped: &[Skipped]) -> Option<Value> {
+        (!skipped.is_empty()).then(|| {
+            Value::Array(
+                skipped
+                    .iter()
+                    .map(|root| {
+                        json!({
+                            "path": root.path.to_string_lossy(),
+                            "reason": root.reason,
+                        })
+                    })
+                    .collect(),
+            )
+        })
+    }
+
     /// The run list as one page, with the cursor the next page resumes from.
     ///
     /// Ordered by most recent progress, newest first, because that is the order a
     /// reader arrives in: a client takes the first row as the run to open, and the
-    /// run that moved last is the one an operator came to look at. The SDK orders
-    /// its own listing by run id instead, so this is one of the presentation-worthy
-    /// computations AGENTS.md proposes moving into it. Ties break on the id, so the
-    /// order is total and a page boundary lands in the same place on every read.
-    fn run_list(&self, query: &RunsQuery) -> Value {
-        let views = self.views();
-        let mut ordered: Vec<&RunView> = views.iter().collect();
-        ordered.sort_by(|left, right| {
-            right
-                .state
-                .last_write_at
-                .cmp(&left.state.last_write_at)
-                .then_with(|| left.paths.run.cmp(&right.paths.run))
-        });
+    /// run that moved last is the one an operator came to look at. Ties break on
+    /// the id, so the order is total and a page boundary lands in the same place
+    /// on every read. That is the SDK's own [`Listing`] order — the summary
+    /// stores `last_write_at` to make it answerable without a fold — rather than
+    /// a second sort taken over a survey.
+    ///
+    /// **What the page size bounds, exactly.** Answering "the most recently
+    /// active N" needs every run's last activity, and that lives one fixed-size
+    /// document per run with no root-level index above it — so the cost cannot be
+    /// made independent of how many runs the root holds. What it *is* independent
+    /// of is everything else: a run the page does not serve costs its summary and
+    /// nothing more, and a run it does serve costs one row's worth of work.
+    fn page(&self, query: &RunsPage) -> Value {
+        let listing = Listing::of(&self.root);
+        let mut skipped = listing.skipped;
+        let summaries = self.nameable(listing.summaries, &mut skipped);
         // The cursor names the last row *served*, so resumption is positional in
         // this order rather than a comparison on the id: an id comparison would
         // skip or repeat rows the moment the order stopped being the id's.
         let resume = query.cursor.as_ref().map_or(0, |cursor| {
-            ordered
+            summaries
                 .iter()
-                .position(|view| view.paths.run == cursor.as_str())
+                .position(|(run, _)| run == cursor)
                 .map_or(0, |index| index + 1)
         });
-        let mut rows: Vec<&RunView> = Vec::new();
-        for view in ordered.into_iter().skip(resume) {
-            if !query.include_settled && Self::settled(view) {
+        let page = query.size();
+        // One more than the page, and then stop: knowing whether a further row
+        // exists is the whole of what the extra one is for, and reading past it
+        // is what made a page of one cost more than a page of fifty.
+        let mut rows: Vec<&(RunId, RunSummary)> = Vec::new();
+        for row in summaries.iter().skip(resume) {
+            if !query.include_settled && Self::settled(&row.1) {
                 continue;
             }
-            rows.push(view);
+            rows.push(row);
+            if rows.len() > page {
+                break;
+            }
         }
-        let page = query.page();
         // The cursor is the last row *served*, so the next page resumes after
         // it: naming the first unserved row instead would skip it, because the
         // filter above is what the cursor is compared against.
         let more = rows.len() > page;
         rows.truncate(page);
         let next = more
-            .then(|| rows.last().map(|view| view.paths.run.clone()))
+            .then(|| rows.last().map(|(run, _)| run.clone()))
             .flatten();
         let mut payload = serde_json::Map::new();
         payload.insert(
             "runs".into(),
             Value::Array(
                 rows.into_iter()
-                    .map(|view| payload::run_summary(view, self.telemetry(view).as_deref()))
+                    .map(|(run, summary)| self.row(run, summary))
                     .collect(),
             ),
         );
         if let Some(cursor) = next {
             payload.insert("next_cursor".into(), json!(cursor));
         }
+        if let Some(refused) = Self::unreadable(&skipped) {
+            payload.insert("unreadable".into(), refused);
+        }
         Value::Object(payload)
+    }
+
+    /// The runs a request **named**, and nothing else read.
+    ///
+    /// The reason this is on the run-list route rather than a route of its own:
+    /// the order a row is served in is one rule, and a second route would be a
+    /// second copy of it. The reason it exists at all: an invalidation frame
+    /// names the run that moved, and refreshing that one row must not cost what
+    /// refetching the first page costs — so the stream stays an invalidation
+    /// channel rather than becoming a second, disagreeing copy of run state, and
+    /// one extra round trip is the price of that property.
+    ///
+    /// Three rulings, each deliberate:
+    ///
+    /// - A named run that is **no longer there** is named on `missing` beside
+    ///   the ordinary rows. Removal is a normal race rather than an error, and a
+    ///   silent omission is indistinguishable from a server with nothing to say.
+    /// - **No cursor.** It answers exactly the runs named, and the count is
+    ///   bounded where the selection is parsed.
+    /// - **The settled filter is not applied.** A caller that names a run wants
+    ///   that run, and a settled row that cannot be refreshed reads as a stale
+    ///   view.
+    ///
+    /// The runs root is never listed: each name is joined to it and opened, so a
+    /// selection of one against a store of hundreds touches one run.
+    fn selected(&self, selection: &RunSelection) -> Value {
+        let mut summaries: Vec<(RunId, RunSummary)> = Vec::new();
+        let mut missing: Vec<&RunId> = Vec::new();
+        let mut skipped: Vec<Skipped> = Vec::new();
+        for run in selection.named() {
+            let paths = self.paths_of(run);
+            match RunSummary::of(&paths) {
+                Ok(summary) => summaries.push((run.clone(), summary)),
+                // A run that is not there, and a run that is there and will not
+                // read, are two different facts to the caller: the first is the
+                // race a refresh loses, the second is a run this host is failing
+                // to serve. They are reported apart for that reason.
+                Err(refusal) => {
+                    if paths.exists() {
+                        skipped.push(Skipped {
+                            path: paths.dir,
+                            reason: refusal.to_string(),
+                        });
+                    } else {
+                        missing.push(run);
+                    }
+                }
+            }
+        }
+        // The same order a page is served in, so a client folding a refreshed row
+        // back into its list never has to re-sort by a second rule.
+        summaries.sort_by(|(left_run, left), (right_run, right)| {
+            right
+                .last_write_at
+                .cmp(&left.last_write_at)
+                .then_with(|| left_run.cmp(right_run))
+        });
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            "runs".into(),
+            Value::Array(
+                summaries
+                    .iter()
+                    .map(|(run, summary)| self.row(run, summary))
+                    .collect(),
+            ),
+        );
+        if !missing.is_empty() {
+            payload.insert(
+                "missing".into(),
+                Value::Array(missing.into_iter().map(|run| json!(run)).collect()),
+            );
+        }
+        if let Some(refused) = Self::unreadable(&skipped) {
+            payload.insert("unreadable".into(), refused);
+        }
+        Value::Object(payload)
+    }
+
+    /// The run list one request asked for: the runs it named, or a page of them.
+    fn run_list(&self, query: &RunsQuery) -> Value {
+        match query {
+            RunsQuery::Selected(selection) => self.selected(selection),
+            RunsQuery::Page(page) => self.page(page),
+        }
     }
 }
 
@@ -314,6 +505,67 @@ impl ReadApi for RunStore {
     }
 }
 
+/// One run's **cheap** change stamp: what the journal's own metadata says, with
+/// no byte of it read.
+///
+/// The pair the SDK holds its own summary document fresh against, and for the
+/// reasons it gives: the journal is append-only, so a length that moved is a
+/// record nothing has seen — and a store rewritten to the same size, healed of a
+/// torn tail or edited by hand, is one whose modification time moved. A single
+/// metadata lookup answers both, which is the whole cost of a tick on which
+/// nothing changed.
+///
+/// Named fields rather than a pair of numbers: both are `u64` and both come off
+/// one `metadata` call, so a tuple is two values one edit could swap — and a
+/// stamp comparing a length against an instant matches nothing and wakes every
+/// subscriber on every tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    /// How long the journal is.
+    len: u64,
+    /// When it was last written, in milliseconds since the epoch.
+    modified_ms: u64,
+}
+
+/// What one journal's metadata says right now, or `None` where there is no
+/// journal to describe.
+///
+/// `None` is what makes a directory entry *not a run* to this stream: a plain
+/// file beside the runs never claimed to be one, and a run swept between the
+/// listing and the look is not a root to make a claim about. A run whose store
+/// this build cannot stat is on those same terms — it is announced once it has
+/// a journal, and the snapshot every connection opens with is what carries it
+/// until then.
+fn stamp_of(journal: &std::path::Path) -> Option<Stamp> {
+    let about = std::fs::metadata(journal).ok()?;
+    let modified_ms = about
+        .modified()
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        });
+    Some(Stamp {
+        len: about.len(),
+        modified_ms,
+    })
+}
+
+/// One run as an open connection is tracking it.
+struct Watched {
+    /// The run, as a client would refetch it.
+    run: RunId,
+    /// What its journal's metadata said at the last tick.
+    stamp: Stamp,
+    /// The change token over the records this connection **admitted**, for a
+    /// connection whose filter can narrow something.
+    ///
+    /// `None` for every other connection, which needs none: a filter that
+    /// admits everything moves exactly when the journal does, so the stamp above
+    /// is the whole answer and no run is ever opened to compute one.
+    signature: Option<Signature>,
+}
+
 /// One connection's frames: a fresh snapshot, then the invalidations that follow
 /// it, forever, until the consumer stops pulling.
 ///
@@ -332,7 +584,7 @@ pub struct Frames {
     spec: Option<FilterSpec>,
     cursor: u64,
     opened: bool,
-    baseline: Vec<(RunId, Signature)>,
+    baseline: Vec<Watched>,
     transcripts: Option<String>,
     activity: Option<Vec<Value>>,
     pending: std::collections::VecDeque<(SseEvent, Value)>,
@@ -395,25 +647,91 @@ impl Frames {
         self
     }
 
-    /// The runs this connection watches, and their change tokens.
+    /// Whether this connection's filter can narrow anything at all.
+    ///
+    /// The question that decides what a tick costs. A connection that narrows
+    /// nothing — every unfiltered one, and every one on the browser's
+    /// **Detailed activity** setting — is answered entirely by the journals'
+    /// metadata and opens no run at any point. One that can narrow something has
+    /// to look at what arrived, and pays that for **the runs that moved** rather
+    /// than for the root.
+    fn narrows(&self) -> bool {
+        self.spec
+            .as_ref()
+            .is_some_and(|spec| !spec.admits_everything_for_every_run())
+    }
+
+    /// The runs this connection watches, and their journals' change stamps.
+    ///
+    /// **One listing of the runs root, and one metadata lookup per run.** No
+    /// open, no read, no second lookup and no process — which is what makes a
+    /// tick on which nothing changed free, and what a subscriber used to spend a
+    /// core on: this was a survey of the whole root, twice a second, per
+    /// connection, to compute tokens that were nearly always the same ones.
+    ///
+    /// The listing is what lets a run that **appeared** since the last tick be
+    /// noticed, and a run that went away be missed — so neither needs the run
+    /// set the opening snapshot saw.
     ///
     /// Keyed by [`RunId`] rather than by the directory name: every frame below
     /// hands this back as the `run_id` a client refetches the run with, so a
     /// directory the contract's own boundary would refuse is one this stream
     /// must not announce as a run to go and read.
-    fn signatures(&self) -> Vec<(RunId, Signature)> {
-        self.store
-            .views()
-            .iter()
-            .filter(|view| {
-                self.watched
-                    .as_ref()
-                    .is_none_or(|run| view.paths.run == run.as_str())
-            })
-            .filter_map(|view| {
-                RunId::try_from(view.paths.run.as_str())
-                    .ok()
-                    .map(|run| (run, self.signature_of(view)))
+    fn stamps(&self) -> Vec<(RunId, Stamp)> {
+        let Ok(entries) = std::fs::read_dir(&self.store.root) else {
+            return Vec::new();
+        };
+        let mut watching: Vec<(RunId, Stamp)> = Vec::new();
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Ok(run) = RunId::try_from(name.as_str()) else {
+                continue;
+            };
+            if self.watched.as_ref().is_some_and(|watched| *watched != run) {
+                continue;
+            }
+            let paths = RunPaths::under(&self.store.root, &name);
+            if let Some(stamp) = stamp_of(&paths.journal()) {
+                watching.push((run, stamp));
+            }
+        }
+        watching.sort_by(|left, right| left.0.cmp(&right.0));
+        watching
+    }
+
+    /// One run's change token over the records this connection admitted.
+    ///
+    /// The fuller read, paid for **one run that moved** rather than for the
+    /// root. `None` for a run this build cannot open, which is not a run this
+    /// connection can say anything about.
+    fn signature_of_run(&self, run: &RunId) -> Option<Signature> {
+        let view = self.store.view(run).ok()?;
+        Some(self.signature_of(&view))
+    }
+
+    /// What this connection knows about the runs it watches, at the moment it
+    /// opens.
+    ///
+    /// Stamps alone for a connection that narrows nothing, which is the same
+    /// cost as every tick after it. A connection that **can** narrow reads each
+    /// run once here, and that read is the whole of what such a subscription
+    /// costs beyond an unfiltered one: with nothing to compare the admitted
+    /// records against, the first movement of every run would announce — and a
+    /// reader who narrowed their attention would be woken by exactly the records
+    /// they excluded.
+    fn opening_baseline(&self) -> Vec<Watched> {
+        let narrows = self.narrows();
+        self.stamps()
+            .into_iter()
+            .map(|(run, stamp)| {
+                let signature = narrows.then(|| self.signature_of_run(&run)).flatten();
+                Watched {
+                    run,
+                    stamp,
+                    signature,
+                }
             })
             .collect()
     }
@@ -460,13 +778,13 @@ impl Iterator for Frames {
     fn next(&mut self) -> Option<EventFrame> {
         if !self.opened {
             self.opened = true;
-            self.baseline = self.signatures();
+            self.baseline = self.opening_baseline();
             self.transcripts = self.transcript_digest();
             self.activity = self.activity();
-            let snapshot = RunStore::envelope(self.store.run_list(&RunsQuery {
+            let snapshot = RunStore::envelope(self.store.run_list(&RunsQuery::Page(RunsPage {
                 include_settled: true,
-                ..RunsQuery::default()
-            }));
+                ..RunsPage::default()
+            })));
             let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
             return Some(self.frame(SseEvent::Snapshot, data));
         }
@@ -480,14 +798,45 @@ impl Iterator for Frames {
             }
             self.since_conversation_poll += self.store.poll;
 
-            let current = self.signatures();
-            for (run, token) in &current {
-                let known = self
-                    .baseline
-                    .iter()
-                    .find(|(name, _)| name == run)
-                    .map(|(_, token)| token);
-                if known != Some(token) {
+            let narrows = self.narrows();
+            let mut current: Vec<Watched> = Vec::new();
+            for (run, stamp) in self.stamps() {
+                let known = self.baseline.iter().find(|watched| watched.run == run);
+                if let Some(known) = known {
+                    if known.stamp == stamp {
+                        // Nothing was appended to this run's journal, so nothing
+                        // about it is opened or read — whatever this connection
+                        // is filtering for. This is the tick that used to cost a
+                        // fold of the whole store and now costs the lookup that
+                        // has already happened.
+                        current.push(Watched {
+                            run,
+                            stamp,
+                            signature: known.signature,
+                        });
+                        continue;
+                    }
+                }
+                // The journal moved, or this run is new to this connection. What
+                // that means to *this* subscriber is the only thing worth a read,
+                // and it is a read of this run rather than of the root.
+                let signature = if narrows {
+                    self.signature_of_run(&run)
+                } else {
+                    None
+                };
+                let moved = match known {
+                    // A filtered connection is asking about the events it
+                    // admitted, so a run whose only new records this connection
+                    // excluded has not moved as far as this subscriber is
+                    // concerned and is not announced.
+                    Some(known) if narrows => known.signature != signature,
+                    Some(_) => true,
+                    // A run that appeared since this connection opened, which is
+                    // news to it whatever it is filtering for.
+                    None => true,
+                };
+                if moved {
                     // The run that moved, and nothing else: the client refetches
                     // its detail. There is no round to name here, and naming the
                     // event count instead would be this stream restating state it
@@ -498,7 +847,7 @@ impl Iterator for Frames {
                     // because a turn reported from inside itself has something in
                     // flight to say, and a client watching it is told rather than
                     // left to refetch a detail that does not carry it.
-                    if self.watched.as_ref() == Some(run) {
+                    if self.watched.as_ref() == Some(&run) {
                         let latest = self.activity();
                         if latest.is_some() && latest != self.activity {
                             self.activity.clone_from(&latest);
@@ -509,11 +858,16 @@ impl Iterator for Frames {
                         }
                     }
                 }
+                current.push(Watched {
+                    run,
+                    stamp,
+                    signature,
+                });
             }
-            for (run, _) in &self.baseline {
-                if !current.iter().any(|(name, _)| name == run) {
+            for watched in &self.baseline {
+                if !current.iter().any(|current| current.run == watched.run) {
                     self.pending
-                        .push_back((SseEvent::RunRemoved, json!({ "run_id": run })));
+                        .push_back((SseEvent::RunRemoved, json!({ "run_id": watched.run })));
                 }
             }
             self.baseline = current;

@@ -38,7 +38,7 @@ use crate::stub_bin;
 /// provisions nothing for it, and this target runs the comparison alone. What that
 /// split can break is the comparison running *nowhere*, which is why
 /// [`the_gate_runs_the_comparison_beside_the_rest_of_the_suite`] and
-/// [`the_two_test_recipes_partition_the_suite`] are here beside it.
+/// [`the_test_recipes_partition_the_suite`] are here beside it.
 const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui:test-baseline"];
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
@@ -746,30 +746,51 @@ fn the_comparison_is_keyed_by_every_module_it_reads() {
     }
 }
 
-/// Every test runs under exactly one of the two recipes the split leaves.
+/// Every test runs under exactly one of the recipes the splits leave.
 ///
-/// The filters are two halves of one partition — `_crate-test` is `not` what
-/// `_crate-test-baseline` is — and they are written in two places, so nothing but
-/// this holds them to each other. Either half drifting alone is silent: widen the
-/// exclusion and tests stop running under the coverage floor, narrow the inclusion
-/// and the comparison stops running at all.
+/// Two tiers sit behind edges of their own because each carries something the
+/// rest of the suite does not: the baseline comparison needs another commit of
+/// this repository compiled, and the cost journeys need a syscall tracer on the
+/// machine. The filters are the halves of one partition — `_crate-test` is `not`
+/// what the other two are — and they are written in three places, so nothing but
+/// this holds them to each other. Either side drifting alone is silent: widen the
+/// exclusion and tests stop running under the coverage floor, narrow an inclusion
+/// and a whole tier is declared for and runs nowhere.
+// llmlint: ignore-block[tests_mirror_real_usage] there is no command surface to drive here:
+// the property is that three *declarations* in one file partition one name space, and the
+// only way to observe it through the recipes would be to run all three tiers and see which
+// tests executed — which means compiling the base commit's server and provisioning a syscall
+// tracer to learn something about two strings. Asking `cargo nextest` what each filter
+// selects would be the real interface, and is refused for a different reason: a nested cargo
+// inside a running suite contends for the target-directory lock, which is a hang rather than
+// a verdict. Every other test in this module drives the real recipe.
 #[test]
-fn the_two_test_recipes_partition_the_suite() {
+fn the_test_recipes_partition_the_suite() {
     let recipes = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
-    let selection = "test(/^baseline::/)";
-    let covered = format!("-E 'not {selection}'");
-    let compared = format!("-E '{selection}'");
+    let split: [(&str, &str); 2] = [
+        ("test(/^baseline::/)", "onepipeline-ui:test-baseline"),
+        ("test(/^cost::/)", "onepipeline-ui:test-cost"),
+    ];
+    let excluded: Vec<String> = split
+        .iter()
+        .map(|(selection, _)| format!("not {selection}"))
+        .collect();
+    let covered = format!("-E '{}'", excluded.join(" and "));
     assert!(
         recipes.contains(&covered),
-        "`_crate-test` does not exclude the baseline journeys with `{covered}`, so the \
-         floor is measured over a suite that needs the base commit's server"
+        "`_crate-test` does not exclude the split-out tiers with `{covered}`, so the floor \
+         is measured over a suite that needs what those tiers need"
     );
-    assert!(
-        recipes.contains(&compared),
-        "no recipe selects the baseline journeys with `{compared}`, so the comparison \
-         `onepipeline-ui:test-baseline` is declared for runs nowhere"
-    );
+    for (selection, target) in split {
+        let selects = format!("-E '{selection}'");
+        assert!(
+            recipes.contains(&selects),
+            "no recipe selects that tier with `{selects}`, so `{target}` is declared for \
+             and runs nowhere"
+        );
+    }
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /// The recipe writes where the suite reads, and neither restates the other's path.
 #[test]

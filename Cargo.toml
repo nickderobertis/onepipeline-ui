@@ -109,7 +109,7 @@ oneharness-core = "0.12.2"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
 onejudge = "0.7"
-onepipeline = "=0.18.3"
+onepipeline = "=0.19.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -120,6 +120,28 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = "0.1"
+
+# The one system call this crate makes that `std` has no door onto: signal `0`
+# at a recorded driver pid, which asks whether that process could still be there
+# without delivering anything. `src/liveness.rs` is the only caller and states
+# why the question is asked at all, and what a platform this cannot be asked on
+# answers instead.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# The same question where there is no signal to send. A Windows process handle
+# is signalled when — and only when — the process has ended, so opening one and
+# waiting zero milliseconds on it is the whole probe. Linked rather than left
+# unanswered because the sibling answers it: `tests/contract.rs`'s drift gate
+# compares both readings of a run whose driver is gone, and a platform that
+# reported such a run still driving would serve a row the fold contradicts.
+# Held at the version the SDK's own requirement resolves to, so one copy of this
+# library is linked rather than two.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 assert_cmd = "2"

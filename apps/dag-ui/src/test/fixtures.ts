@@ -63,7 +63,7 @@ const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 14,
+  telemetry_schema_version: 15,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -191,7 +191,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 14,
+    telemetry_schema_version: 15,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {

@@ -801,6 +801,8 @@ const EXPECTED_GLYPH: Readonly<Record<string, string>> = {
   "criterion-checked": "lucide-shield-check",
   "lock-wait": "lucide-hourglass", // contention
   "release-wait": "lucide-hourglass",
+  "node-held": "lucide-hourglass",
+  "node-unheld": "lucide-hourglass",
   "release-arrived": "lucide-git-pull-request", // publication
   "release-adopted": "lucide-git-pull-request",
   "Redirected into the running turn": "lucide-rotate-ccw", // recovery
@@ -970,6 +972,23 @@ test("draws every category a record can be as a glyph of its own", async ({
   // kind filed under a neighbour would still be drawn, and drawn apart from the
   // verification it belongs with.
   expect(await glyphName(checked)).toBe(await glyphName(named("gate-verdict")));
+  // And the pair the engine writes when it is *not* running a node it has not
+  // settled: read as the contention a reader scanning for why nothing is moving
+  // came with, rather than as a lifecycle step of the node they are about. Two
+  // kinds no word of the scheme reached until the engine declared them, so this
+  // is where a browser meets one rather than only a unit corpus.
+  for (const held of ["node-held", "node-unheld"]) {
+    const marker = named(held).first();
+    await expect(marker).toBeVisible();
+    expect(await glyphName(marker)).toBe(expectedGlyph(held));
+    // Drawn as the wait beside it, because one category is one drawing — and this
+    // node really does wait on its lock more than once, so the comparison is
+    // against the first of them.
+    expect(await glyphName(marker)).toBe(
+      await glyphName(named("lock-wait").first()),
+    );
+  }
+
   // And said in words for the reader who does not read glyphs.
   await checked.hover();
   await expect(page.getByTestId("timeline-popover")).toContainText(

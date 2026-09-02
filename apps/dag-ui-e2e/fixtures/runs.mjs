@@ -1027,6 +1027,31 @@ function writeLiveRun(root) {
       answer: "match",
     },
   );
+  // The loop's own account of why a node it has not settled is not running, and
+  // the record that says the hold cleared. Written in the engine's own shape —
+  // one entry per reason holding it at once, under `reasons`, and what was let
+  // go under `released` — so a reader meets what a real store carries: this node
+  // waited behind the concurrency limit while two others ran.
+  journal.advance(1).emit(
+    "pipeline",
+    "node-held",
+    { ...run, node: "remote-open" },
+    {
+      reasons: [
+        { kind: "concurrency", ahead: ["foundation", "dashboard"], limit: 2 },
+      ],
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-unheld",
+    { ...run, node: "remote-open" },
+    {
+      released: [
+        { kind: "concurrency", ahead: ["foundation", "dashboard"], limit: 2 },
+      ],
+    },
+  );
   journal.advance(1).emit(
     "pipeline",
     "node-settled",
