@@ -3609,6 +3609,15 @@ test("follows a growing transcript only while the reader is at its end", async (
 test("keeps the pages a reader scrolled to when a run moves", async ({
   page,
 }) => {
+  // llmlint: ignore[tests_mirror_real_usage] what a live update *costs* has no
+  // rendering, and it is the property this journey exists for: the rows and the
+  // scroll position a reader keeps are asserted below from the screen, and they are
+  // equally consistent with a first-page refetch that happened to come back the
+  // same. The route the refresh went to is the only evidence that it did not, so it
+  // is read off the requests the browser really made — the same reason
+  // `tests/e2e/cost.rs` counts the kernel's record of a read rather than looking at
+  // what the read produced. Nothing here stands in for a user-observable outcome;
+  // it is beside two.
   const listReads: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -3704,6 +3713,13 @@ test("drops a run the server stops serving", async ({ page }) => {
   // What the server said about the run that went away, read off the answer the
   // browser actually got: `missing` is the companion list a selection names an id
   // it could not find in, and it is the whole of why the row goes.
+  //
+  // llmlint: ignore[tests_mirror_real_usage] a row that disappears is what a reader
+  // sees and it is asserted below, but it looks the same whichever answer removed
+  // it — a `missing` entry, an empty selection, or a refetched first page. This
+  // repository's contract makes those three different facts to a caller, so the one
+  // the browser acted on is read from the answer the browser was given rather than
+  // inferred from the row that went.
   const missing: string[] = [];
   page.on("response", (response) => {
     const url = new URL(response.url());
