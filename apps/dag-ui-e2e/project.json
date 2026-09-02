@@ -7,7 +7,25 @@
   "implicitDependencies": ["dag-ui"],
   "targets": {
     "test": {
-      "command": "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts && npx playwright test --config apps/dag-ui-e2e/isolation.config.ts",
+      "command": "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts",
+      "inputs": ["default", "apiServerSurface"],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build-api-server"
+        },
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        }
+      ]
+    },
+    "test-isolation": {
+      "command": "npx playwright test --config apps/dag-ui-e2e/isolation.config.ts",
       "inputs": ["default", "apiServerSurface"],
       "dependsOn": [
         {
