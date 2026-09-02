@@ -136,8 +136,20 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  */
 const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
 
-// llmlint: ignore-block[e2e_not_mocked] nothing here is doubled and no response is fabricated: every request is forwarded to the same `onepipeline-api serve` every other journey drives, and the bytes the browser reads back are that server's. What is changed is one browser condition — how long the response takes — exactly as `context.setOffline` changes whether it arrives at all, which this tier already relies on to reach its pagination-failure journey. The defects these journeys are about are races between a server's poll interval and the time a fold of a journal takes: the operator reported a twenty-second read against a stream invalidating twice a second, and neither side of that is reachable from a fixture — no run this tier can write reads slowly enough, and the server exposes no knob that would make one.
-// llmlint: ignore-block[tests_mirror_real_usage] same site, same reason: the reader this reproduces is one whose read really is slower than the run he is reading is moving, and what the journeys then assert about it is entirely what that reader sees.
+/** The run-list route, whichever question is being asked of it. */
+const RUN_LIST_PATH = "/api/v2/runs";
+
+/** How far a scrolling region has been scrolled, in pixels from its top. */
+const scrollOffset = (locator: Locator): Promise<number> =>
+  locator.evaluate((element) => element.scrollTop);
+
+/** One run's detail read, and never the timeline or the list beside it. */
+const RUN_DETAIL_READ = /\/api\/v2\/runs\/[^/?]+(\?|$)/;
+/** The run list, page or selection alike. */
+const RUN_LIST_READ = /\/api\/v2\/runs(\?|$)/;
+
+// llmlint: ignore-block[e2e_not_mocked] the three helpers below are one construct with one reason: nothing is doubled and no response is fabricated. Every request is forwarded to the same `onepipeline-api serve` every other journey drives, and every byte the browser reads back — including both refusals — is that server's own. What each changes is a condition on the way there, exactly as `context.setOffline` changes whether a request arrives at all, which this tier already relies on to reach its pagination-failure journey: `delayReads` changes how long the answer takes, `sweepDuringRead` takes the run off the served root before forwarding, and `readUnderProfile` asks for a reading the app has no control for. None of the three is reachable from a fixture — the defects behind them are races between a server's poll interval and the time a fold of a journal takes (the operator reported a twenty-second read against a stream invalidating twice a second), no run this tier can write reads slowly enough, and the browser's own toolbar offers only the two profiles every run answers to.
+// llmlint: ignore-block[tests_mirror_real_usage] same three sites, same reason: each reproduces a reader who really is in that position — a read slower than the run is moving, a run swept while it was being opened, a reading the run has no profile for — and what the journeys then assert about each is entirely what that reader sees on screen.
 /**
  * Hold every read of a matching route open for `ms` before letting it through.
  *
@@ -153,20 +165,80 @@ async function delayReads(
     await intercepted.continue();
   });
 }
+
+/**
+ * Take `runId` off the served root while the browser's first read of it is in
+ * flight, then forward that read.
+ *
+ * The race the detail route's one swallowed failure is about, made to happen: the
+ * run was there when the list named it and gone by the time the read of it reached
+ * the server. The removal is the fixture's own, the refusal is the server's own
+ * `404 run_not_found`, and this journey writes neither.
+ *
+ * Resolves to what the interception saw, so a journey can say the read really was
+ * taken after the run had gone rather than passing on a read that beat it.
+ */
+function sweepDuringRead(page: Page, runId: string): { swept: () => boolean } {
+  let swept = false;
+  void page.route(RUN_DETAIL_READ, async (intercepted) => {
+    const read = new URL(intercepted.request().url());
+    if (!swept && read.pathname.endsWith(`/${runId}`)) {
+      swept = true;
+      changeServedRuns(["--remove-run", runId]);
+    }
+    await intercepted.continue();
+  });
+  return { swept: () => swept };
+}
+
+/**
+ * Ask for every run-detail read under `profile`.
+ *
+ * The browser's own toolbar offers `planner` and `monitor`, which every run answers
+ * to, so a reading a run has no profile for cannot be asked for from the app — and
+ * that refusal is the other half of what the detail route's swallow must not cover.
+ * The name is put on the request the app was going to make anyway; what comes back
+ * is the server's own `404 unknown_filter_profile`.
+ */
+async function readUnderProfile(page: Page, profile: string): Promise<void> {
+  await page.route(RUN_DETAIL_READ, async (intercepted) => {
+    const read = new URL(intercepted.request().url());
+    read.searchParams.set("filter", profile);
+    await intercepted.continue({ url: read.toString() });
+  });
+}
 // llmlint: ignore-end[e2e_not_mocked]
 // llmlint: ignore-end[tests_mirror_real_usage]
 
-/** The run-list route, whichever question is being asked of it. */
-const RUN_LIST_PATH = "/api/v2/runs";
-
-/** How far a scrolling region has been scrolled, in pixels from its top. */
-const scrollOffset = (locator: Locator): Promise<number> =>
-  locator.evaluate((element) => element.scrollTop);
-
-/** One run's detail read, and never the timeline or the list beside it. */
-const RUN_DETAIL_READ = /\/api\/v2\/runs\/[^/?]+(\?|$)/;
-/** The run list, page or selection alike. */
-const RUN_LIST_READ = /\/api\/v2\/runs(\?|$)/;
+/**
+ * Watch, for the whole of a journey, whether a failure banner is ever on screen —
+ * not whether one is on screen now.
+ *
+ * The property one of the journeys below is about is that the reader is *never*
+ * shown a failure, and a snapshot cannot say that: the banner it must not raise
+ * would be cleared again by the next stream frame, half a second later, so a check
+ * taken after that frame cannot tell a banner that was raised from one that never
+ * was. This watches the same document the reader is looking at, from before the
+ * first paint.
+ */
+async function watchForBanners(page: Page): Promise<() => Promise<number>> {
+  await page.addInitScript(() => {
+    const seen = { total: 0 };
+    (window as unknown as { __banners: { total: number } }).__banners = seen;
+    new MutationObserver(() => {
+      if (document.querySelector('[role="alert"]') !== null) seen.total += 1;
+      // `document` rather than `document.documentElement`: an init script runs
+      // before there is an element to observe, and `observe` on nothing watches
+      // nothing — which reports every journey as having raised no banner.
+    }).observe(document, { childList: true, subtree: true });
+  });
+  return () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __banners?: { total: number } }).__banners
+          ?.total ?? 0,
+    );
+}
 
 /**
  * Keep the live run recording for `seconds`, without waiting for it.
@@ -3123,6 +3195,26 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
   await expect(banner).toContainText("Live telemetry issue");
 });
 
+test("reports a reading the served run has no profile for", async ({
+  page,
+}) => {
+  // The other half of the detail route's one swallowed failure. That swallow is
+  // matched on the code and never on the status, because `404` is no longer only
+  // the swept-run race: a filter naming a profile the run does not have is one too,
+  // and it is a reading the viewer asked for and did not get. Swallowed on the
+  // status, it would leave them looking at the previous reading with nothing said.
+  await readUnderProfile(page, "auditor");
+  await page.goto(`/?run=${runs().live}&view=graph`);
+
+  const banner = page.getByRole("alert");
+  await expect(banner).toContainText("Live telemetry issue");
+  // In the server's own words, naming the reading it refused — an operator who
+  // cannot see which reading was refused cannot tell it from a wedged read.
+  await expect(banner).toContainText('"auditor" is not a filter profile');
+  // And nothing is drawn under the name of a reading that was never served.
+  await expect(page.getByText("Loading execution history…")).toBeVisible();
+});
+
 // The remaining journeys change what the server is serving, so they run last and in
 // order: each one leaves the fixture advanced for the ones after it.
 
@@ -3698,6 +3790,36 @@ test("never renders one run's detail under another run's name", async ({
   await expect(graphNodes(page).filter({ hasText: "dashboard" })).toHaveCount(
     0,
   );
+});
+
+test("stays quiet when the run it is opening is swept out from under it", async ({
+  page,
+}) => {
+  // The one read failure that is not a failure, driven end to end: the run is on
+  // the list the browser was served and off the root by the time the read of it
+  // reaches the server, so what answers is that server's own `404 run_not_found`.
+  // The next list is what resolves the race, and a banner about it would describe
+  // the race rather than anything the reader can act on.
+  const swept = runs().outcomes;
+  const banners = await watchForBanners(page);
+  const sweep = sweepDuringRead(page, swept);
+
+  await page.goto(`/?run=${swept}&view=graph`);
+
+  // The row goes, which is the whole of what the reader is told about it.
+  await expect(
+    page
+      .getByRole("navigation", { name: "DAG runs" })
+      .getByRole("button", { name: RegExp(swept) }),
+  ).toHaveCount(0);
+  // And the reader lands on a run the server still serves rather than on the one
+  // that went away.
+  await expect(graphNodeList(page).getByRole("button").first()).toBeVisible();
+  // The read really was taken after the run had gone — a read that beat the
+  // removal would have proven nothing about the refusal this journey is for.
+  expect(sweep.swept()).toBe(true);
+  // Nothing was ever shown to fail.
+  expect(await banners()).toBe(0);
 });
 
 test("drops a run the server stops serving", async ({ page }) => {

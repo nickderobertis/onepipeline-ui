@@ -88,7 +88,23 @@ export function useDagTelemetry(
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>();
   const [activity, setActivity] = useState<readonly LiveActivity[]>([]);
-  const [error, setError] = useState<Error>();
+  /**
+   * A reading this view asked for and did not get, and a live stream that is not
+   * delivering — held apart because they are answered by different things.
+   *
+   * They used to be one slot that every arriving frame cleared, on the reasoning
+   * that a frame means the stream recovered. It does; it says nothing about
+   * whether the reading the viewer asked for can be served. A run-scoped stream
+   * opens with a frame of its own within a few tens of milliseconds of the detail
+   * read beside it, so a refused reading — a filter naming a profile the run does
+   * not have, say — raised its banner and had it wiped before anybody could read
+   * it. So a frame clears the stream's error alone.
+   *
+   * A **served read** clears both, and that direction is deliberate: a server that
+   * answered a read is reachable, which is what the stream's error was about.
+   */
+  const [readError, setReadError] = useState<Error>();
+  const [streamError, setStreamError] = useState<Error>();
   //: Bumped whenever the selected run's reads must be taken again.
   const [revision, setRevision] = useState(0);
   //: Whether the next page of the run list is on its way, so the list can say so.
@@ -124,6 +140,13 @@ export function useDagTelemetry(
   //: Whether the global stream has already handed this view a snapshot.
   const opened = useRef(false);
 
+  /** What a read that the server answered says: this reading is served, and it is
+   *  reachable. */
+  const served = useCallback(() => {
+    setReadError(undefined);
+    setStreamError(undefined);
+  }, []);
+
   const loadList = useCallback(async () => {
     setList(await client.listRuns(true));
   }, [client]);
@@ -156,14 +179,14 @@ export function useDagTelemetry(
               ],
             },
       );
-      setError(undefined);
+      served();
     } catch (caught) {
-      setError(asError(caught));
+      setReadError(asError(caught));
     } finally {
       paging.current = undefined;
       setLoadingMore(false);
     }
-  }, [client, list]);
+  }, [client, list, served]);
 
   /**
    * Refresh the one row an invalidation named, and nothing else.
@@ -209,13 +232,13 @@ export function useDagTelemetry(
   const open = useCallback(async () => {
     try {
       await loadList();
-      setError(undefined);
+      served();
     } catch (caught) {
-      setError(asError(caught));
+      setReadError(asError(caught));
     } finally {
       setLoading(false);
     }
-  }, [loadList]);
+  }, [loadList, served]);
 
   /**
    * The reader asking for the whole reading to be taken again.
@@ -313,11 +336,11 @@ export function useDagTelemetry(
         .getRun(runId, { includeConversations: false, filter })
         .then((read) => {
           amend((previous) => ({ ...previous, detail: read }));
-          report(() => setError(undefined));
+          report(served);
         })
         .catch(ignoreRemovedRun)
         .catch((caught: unknown) => {
-          report(() => setError(asError(caught)));
+          report(() => setReadError(asError(caught)));
         });
       const timeline =
         timelineScope === undefined
@@ -357,7 +380,8 @@ export function useDagTelemetry(
         setLastUpdated(new Date().toISOString());
         // Every connection — including one the browser reopened after a drop —
         // opens with a snapshot, so an arriving event means the stream recovered.
-        setError(undefined);
+        // It means nothing about a reading this view asked for and did not get.
+        setStreamError(undefined);
         if (event.event === "snapshot") {
           setList(parseRunList(event.data));
           // The **opening** snapshot is the state the first list read has just
@@ -374,7 +398,7 @@ export function useDagTelemetry(
         // threw away every page the reader had scrolled to, so a list on a host
         // with anything moving snapped back to the top before it could be read.
         void refreshRow(invalidated).catch((caught: unknown) =>
-          setError(asError(caught)),
+          setReadError(asError(caught)),
         );
         // Only the run being looked at is re-read: another run's progress changes
         // its row in the list and nothing else that is on screen.
@@ -382,7 +406,7 @@ export function useDagTelemetry(
           setRevision((current) => current + 1);
       },
       onError: (caught) => {
-        setError(asError(caught));
+        setStreamError(asError(caught));
       },
     });
     return () => subscription.close();
@@ -398,7 +422,7 @@ export function useDagTelemetry(
       filter,
       onEvent: (event) => {
         setLastUpdated(new Date().toISOString());
-        setError(undefined);
+        setStreamError(undefined);
         // The global stream owns the complete run list. A run-scoped snapshot is
         // intentionally partial and must never replace it.
         if (event.event === "snapshot") return;
@@ -413,7 +437,7 @@ export function useDagTelemetry(
         )
           setRevision((current) => current + 1);
       },
-      onError: (caught) => setError(asError(caught)),
+      onError: (caught) => setStreamError(asError(caught)),
     });
     return () => subscription.close();
   }, [client, runId, filter]);
@@ -434,7 +458,9 @@ export function useDagTelemetry(
       loading,
       lastUpdated,
       activity,
-      error,
+      // The refused reading first: it is the one the viewer asked for, and it is
+      // the one they can do something about.
+      error: readError ?? streamError,
       refresh,
       loadMore,
       hasMore: list?.next_cursor !== undefined,
@@ -447,7 +473,8 @@ export function useDagTelemetry(
       loading,
       lastUpdated,
       activity,
-      error,
+      readError,
+      streamError,
       refresh,
       loadMore,
       loadingMore,
