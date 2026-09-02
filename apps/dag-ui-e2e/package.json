@@ -3,9 +3,8 @@
   "version": "0.0.0-workspace",
   "private": true,
   "type": "module",
-  "//": "sibling dependencies are `*`, never `workspace:*`: npm 11 exits EUNSUPPORTEDPROTOCOL on `npm ci`, which is how scripts/workspace-install.sh installs this repository, and normalises the protocol out of the lockfile besides. tests/packaging.rs fails the build on it.",
+  "//": "sibling dependencies are `*`, never `workspace:*`: npm 11.17.0 exits EUNSUPPORTEDPROTOCOL on `npm install` and on `npm ci`, which is how scripts/workspace-install.sh installs this repository, and normalises the protocol out of package-lock.json besides. tests/packaging.rs fails the build on it.",
   "dependencies": {
-    "@onepipeline-ui/dag-ui": "*",
     "@onepipeline-ui/timeline-categories": "*",
     "zod": "4.1.12"
   },

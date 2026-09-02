@@ -1462,8 +1462,9 @@ fn the_published_smoke_is_triggered_by_the_workflow_that_actually_releases() {
 ///
 /// npm's own `workspace:` protocol is the obvious spelling of "the sibling in
 /// this repository", and it is the one thing these manifests may not use: npm
-/// 11.17.0 refuses it outright — `npm ci` exits `EUNSUPPORTEDPROTOCOL,
-/// Unsupported URL Type "workspace:"` — and `npm ci` is what
+/// 11.17.0 refuses it outright — `npm install` and `npm ci` both exit
+/// `EUNSUPPORTEDPROTOCOL, Unsupported URL Type "workspace:"`, measured from a
+/// manifest and a lockfile regenerated together — and `npm ci` is what
 /// `scripts/workspace-install.sh` runs, in a fresh clone, ahead of every tier.
 /// npm also normalises the protocol out of `package-lock.json`, so a manifest
 /// carrying it and a lockfile that cannot are drift by construction.

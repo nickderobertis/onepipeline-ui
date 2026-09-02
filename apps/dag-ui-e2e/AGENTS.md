@@ -21,12 +21,13 @@ can ask for without paying for the rest; `check` pays for all of it.
 
 ## Reaching the app
 
-The dependency on it is `"*"`, as every sibling dependency in this workspace is,
-and not the `workspace:*` protocol. That is measured rather than preferred: npm
-11.17.0 refuses it here — `npm ci` exits `EUNSUPPORTEDPROTOCOL, Unsupported URL
-Type "workspace:"` — and `npm ci` is how `scripts/workspace-install.sh` installs
-this repository. npm also normalises the protocol out of `package-lock.json`, so
-a manifest carrying it and a lockfile that cannot are drift by construction.
+Sibling dependencies here are `"*"`, as every one in this workspace is, and never
+the `workspace:*` protocol. That is measured rather than preferred: npm 11.17.0
+refuses it outright — both `npm install` and `npm ci` exit
+`EUNSUPPORTEDPROTOCOL, Unsupported URL Type "workspace:"`, from a manifest and a
+lockfile regenerated together — and `npm ci` is how `scripts/workspace-install.sh`
+provisions this repository. `tests/packaging.rs` fails the build on the protocol
+so the next reader learns that before their clone installs nothing.
 
 Not at all, and that is the point: what a journey needs of the app's vocabulary
 comes from `@onepipeline-ui/timeline-categories`, the shared package both this
