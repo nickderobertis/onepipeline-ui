@@ -1,5 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -73,4 +75,134 @@ describe("the config Vite really loads", () => {
       "DAG_UI_API_URL names ftp: and the read API is served over http or https",
     );
   }, 30_000);
+});
+
+/** A port the kernel says is free, for a server this test is about to start. */
+function freePort(): Promise<number> {
+  return new Promise((resolve) => {
+    const held = createServer();
+    held.listen(0, "127.0.0.1", () => {
+      const { port } = held.address() as AddressInfo;
+      held.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Read `url` once the server behind it is answering, or fail saying what the
+ * server said instead.
+ *
+ * A connection refused is "not started yet" and nothing else here can tell those
+ * apart, so the deadline is what separates a slow start from a server that never
+ * came up — and everything it printed goes into the failure, because a Vite that
+ * refused its config prints the reason and then this would otherwise report only
+ * that nothing answered.
+ */
+async function readThrough(url: string, said: string[]): Promise<Response> {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      return await fetch(url);
+    } catch (refused) {
+      if (Date.now() > deadline) {
+        throw new Error(`nothing answered ${url}: ${said.join("")}`, {
+          cause: refused,
+        });
+      }
+      await new Promise((wait) => setTimeout(wait, 100));
+    }
+  }
+}
+
+/** The app's own directory, which every invocation here runs from. */
+const app = join(import.meta.dirname, "../..");
+
+/**
+ * A server that answers `/healthz` and records the path each request arrived on.
+ *
+ * The recording is the assertion: what a proxy target's *path* does is decide
+ * what the API is asked for, and the only place that is observable is at the API.
+ */
+function recordingApi(): Promise<{
+  port: number;
+  asked: string[];
+  close: () => void;
+}> {
+  const asked: string[] = [];
+  const api = createServer((request, response) => {
+    asked.push(request.url ?? "");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"status":"ok"}');
+  });
+  return new Promise((resolve) => {
+    api.listen(0, "127.0.0.1", () => {
+      resolve({
+        port: (api.address() as AddressInfo).port,
+        asked,
+        close: () => api.close(),
+      });
+    });
+  });
+}
+
+describe("the proxy the config really builds", () => {
+  // The refusals above stop Vite; this is the other half — what a value this
+  // accepts does to a read the browser makes. Driven through the dev server
+  // rather than `preview` because the two are handed the same `proxy` object and
+  // this one needs no bundle built to start.
+  //
+  // The default is not driven here: proving it would mean binding 127.0.0.1:8765
+  // itself, and on a host where somebody is already serving their own runs there
+  // that is either a refused bind or somebody else's server answering. What can
+  // drift about it is the literal, and `tests/contract.rs` reconciles that against
+  // `onepipeline_ui::cli::default_bind`.
+  it("sends a read to the origin it was given, and never to its path", async () => {
+    const api = await recordingApi();
+    // Chosen here rather than read back out of Vite's own output: a readiness
+    // check that parses a subprocess's stdout is waiting on a log line, and the
+    // question this needs answered is whether the proxy is serving yet. Asking
+    // the port that is what polling it below does.
+    const uiPort = await freePort();
+    const ui = spawn(
+      "npx",
+      [
+        "vite",
+        "--config",
+        "vite.config.ts",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(uiPort),
+        "--strictPort",
+      ],
+      {
+        cwd: app,
+        env: {
+          ...process.env,
+          // A path nothing should ever see: a proxy target carrying one would
+          // prepend it to every read, and the API would answer none of them.
+          DAG_UI_API_URL: `http://127.0.0.1:${api.port}/a/path/nobody/asked/for`,
+        },
+      },
+    );
+    const said: string[] = [];
+    ui.stdout.on("data", (chunk: Buffer) => said.push(chunk.toString()));
+    ui.stderr.on("data", (chunk: Buffer) => said.push(chunk.toString()));
+
+    try {
+      const answered = await readThrough(
+        `http://127.0.0.1:${uiPort}/healthz`,
+        said,
+      );
+      expect(answered.status).toBe(200);
+      expect(await answered.json()).toEqual({ status: "ok" });
+      // The whole claim: the path on the target was dropped, so the API was asked
+      // for what the browser asked for.
+      expect(api.asked).toEqual(["/healthz"]);
+    } finally {
+      // Started here, so signalled here — by the handle, never by a pattern.
+      ui.kill();
+      api.close();
+    }
+  }, 60_000);
 });
