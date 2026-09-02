@@ -2,7 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-import { readApiTarget } from "./src/lib/api-target";
+import { readApiTarget } from "./src/lib/api-target.js";
 
 const apiTarget = readApiTarget();
 
