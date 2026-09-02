@@ -28,12 +28,14 @@ Type "workspace:"` — and `npm ci` is how `scripts/workspace-install.sh` instal
 this repository. npm also normalises the protocol out of `package-lock.json`, so
 a manifest carrying it and a lockfile that cannot are drift by construction.
 
-Through `@onepipeline-ui/dag-ui/testing` and nothing else. A journey importing
-`../src/...` reaches into another project's files, which
-`@nx/enforce-module-boundaries` refuses and which would make every internal move
-of the app a change to the journeys. What that export carries is the category
-vocabulary, because it is the one thing a journey must not restate: a journey
-holding its own copy passes while the app grows a category nobody draws.
+Not at all, and that is the point: what a journey needs of the app's vocabulary
+comes from `@onepipeline-ui/timeline-categories`, the shared package both this
+project and the app depend on. A journey importing `../src/...` reaches into
+another project's files, which `@nx/enforce-module-boundaries` refuses and which
+would make every internal move of the app a change to the journeys — and reaching
+for the app's own package instead is the same coupling with a nicer spelling. The
+vocabulary is what a journey must not restate: a journey holding its own copy of
+`EVENT_CATEGORIES` passes while the app grows a category nobody draws.
 
 ## Reading a tier that would not start
 

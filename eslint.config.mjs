@@ -24,16 +24,7 @@ export default tseslint.config(
         "error",
         {
           enforceBuildableLibDependency: true,
-          // The app's own public test-support export, and the only import path
-          // here that names an application. `dag-ui-e2e` drives the built app and
-          // has to hold the vocabulary the app draws from — `EVENT_CATEGORIES` is
-          // what "one record of every category is drawn" is counted against, and a
-          // journey with its own copy of it passes while the app grows a category
-          // nobody draws. Exactly this path, so nothing else about the app becomes
-          // importable: the rule that apps are not libraries still holds for every
-          // other file in it, and `apps/dag-ui/package.json` publishes no other
-          // entry point.
-          allow: ["@onepipeline-ui/dag-ui/testing"],
+          allow: [],
           depConstraints: [
             {
               sourceTag: "scope:shared",
@@ -41,6 +32,13 @@ export default tseslint.config(
             },
             {
               sourceTag: "scope:app",
+              onlyDependOnLibsWithTags: ["scope:shared"],
+            },
+            // The journeys drive an app and must not import one: what they need
+            // of its vocabulary is a shared package both sides depend on, so a
+            // journey cannot be coupled to how the app spells its own internals.
+            {
+              sourceTag: "scope:e2e",
               onlyDependOnLibsWithTags: ["scope:shared"],
             },
           ],

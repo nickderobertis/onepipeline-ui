@@ -11,7 +11,7 @@
 import {
   EVENT_CATEGORIES,
   eventCategoryLabel,
-} from "@onepipeline-ui/dag-ui/testing";
+} from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { graphNodes } from "./observatory-locators";

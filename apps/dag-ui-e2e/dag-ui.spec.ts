@@ -20,7 +20,7 @@ import {
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { EVENT_CATEGORIES } from "@onepipeline-ui/dag-ui/testing";
+import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import {

@@ -1492,7 +1492,7 @@ fn the_browser_files_every_kind_those_libraries_declare() {
     use oneagentgraph::event::EventKind;
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("apps/dag-ui/src/features/timeline/event-category.test.tsx");
+        .join("packages/timeline-categories/src/index.test.ts");
     let source = fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
             "read {}: {err} — the suite that carries the corpus has moved, so this gate no \
@@ -1613,7 +1613,7 @@ fn the_browser_files_every_release_kind_this_crate_reads() {
     use onepipeline_ui::payload::{pipeline, vcs};
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("apps/dag-ui/src/features/timeline/event-category.test.tsx");
+        .join("packages/timeline-categories/src/index.test.ts");
     let source = fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
             "read {}: {err} — the suite that carries the corpus has moved, so this gate no \
@@ -1642,7 +1642,7 @@ fn the_browser_files_every_release_kind_this_crate_reads() {
     );
 }
 
-/// Every key of the `CORPUS` map in the browser suite's category tests.
+/// Every key of the `CORPUS` map in the category vocabulary's own tests.
 ///
 /// Parsed rather than matched as substrings so a kind named in that file's prose,
 /// or filed under some other table, cannot be mistaken for one the corpus holds.
@@ -1651,7 +1651,7 @@ fn the_browser_files_every_release_kind_this_crate_reads() {
 fn corpus_keys(source: &str) -> Vec<String> {
     let start = source
         .find("const CORPUS")
-        .unwrap_or_else(|| panic!("the browser suite declares no CORPUS to gate"));
+        .unwrap_or_else(|| panic!("the category vocabulary declares no CORPUS to gate"));
     source[start..]
         .lines()
         .skip(1)
