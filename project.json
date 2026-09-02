@@ -28,7 +28,6 @@
     "lint": {
       "command": "just _crate-lint"
     },
-    // llmlint: ignore[expensive_tests_stay_behind_their_own_edge] the expense is already behind its own edge: `ensure-baseline` is a target of its own, and `scripts/ensure-baseline-api.sh` no-ops on a stamp naming the base already built, so an unrelated change pays nothing. The edge is declared here because the suite reads the artifact and must be able to require it — and the sibling edge beside it provisions a CLI at the same cost for the same reason. Splitting the journeys into a target of their own would not save the gate that build, since `check` would run that target too; it would only let `just test` pass against no baseline at all, which is the one failure `tests/e2e/baseline.rs` exists to prevent.
     "test": {
       "command": "just _crate-test",
       "dependsOn": ["ensure-sibling", "ensure-baseline"]
