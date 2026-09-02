@@ -21,6 +21,7 @@ import {
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { API_V2_PATHS } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -136,17 +137,26 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  */
 const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
 
-/** The run-list route, whichever question is being asked of it. */
-const RUN_LIST_PATH = "/api/v2/runs";
+/**
+ * The run-list route, whichever question is being asked of it.
+ *
+ * Read from the packages' own declaration of it rather than spelled again here: a
+ * journey that carried its own copy would keep passing against a route the app no
+ * longer calls.
+ */
+const RUN_LIST_PATH = API_V2_PATHS.runs;
 
 /** How far a scrolling region has been scrolled, in pixels from its top. */
 const scrollOffset = (locator: Locator): Promise<number> =>
   locator.evaluate((element) => element.scrollTop);
 
-/** One run's detail read, and never the timeline or the list beside it. */
-const RUN_DETAIL_READ = /\/api\/v2\/runs\/[^/?]+(\?|$)/;
-/** The run list, page or selection alike. */
-const RUN_LIST_READ = /\/api\/v2\/runs(\?|$)/;
+/**
+ * One run's detail read, and never the timeline or the list beside it; and the run
+ * list, page or selection alike. Both are built from the route above, so there is
+ * one declaration of it in this file and none of it in this repository.
+ */
+const RUN_DETAIL_READ = new RegExp(`${RUN_LIST_PATH}/[^/?]+(\\?|$)`);
+const RUN_LIST_READ = new RegExp(`${RUN_LIST_PATH}(\\?|$)`);
 
 // llmlint: ignore-block[e2e_not_mocked] the three helpers below are one construct with one reason: nothing is doubled and no response is fabricated. Every request is forwarded to the same `onepipeline-api serve` every other journey drives, and every byte the browser reads back — including both refusals — is that server's own. What each changes is a condition on the way there, exactly as `context.setOffline` changes whether a request arrives at all, which this tier already relies on to reach its pagination-failure journey: `delayReads` changes how long the answer takes, `sweepDuringRead` takes the run off the served root before forwarding, and `readUnderProfile` asks for a reading the app has no control for. None of the three is reachable from a fixture — the defects behind them are races between a server's poll interval and the time a fold of a journal takes (the operator reported a twenty-second read against a stream invalidating twice a second), no run this tier can write reads slowly enough, and the browser's own toolbar offers only the two profiles every run answers to.
 // llmlint: ignore-block[tests_mirror_real_usage] same three sites, same reason: each reproduces a reader who really is in that position — a read slower than the run is moving, a run swept while it was being opened, a reading the run has no profile for — and what the journeys then assert about each is entirely what that reader sees on screen.
@@ -224,6 +234,9 @@ async function readUnderProfile(page: Page, profile: string): Promise<void> {
 async function watchForBanners(page: Page): Promise<() => Promise<number>> {
   await page.addInitScript(() => {
     const seen = { total: 0 };
+    // An init script's only way to hand something back to the journey is a
+    // property on `window`, which has no declared member for one — so the
+    // assertion is what says this property exists, on the way in and the way out.
     (window as unknown as { __banners: { total: number } }).__banners = seen;
     new MutationObserver(() => {
       if (document.querySelector('[role="alert"]') !== null) seen.total += 1;
@@ -234,9 +247,11 @@ async function watchForBanners(page: Page): Promise<() => Promise<number>> {
   });
   return () =>
     page.evaluate(
+      // Optional on the way out: a page that navigated before the script ran has
+      // no counter, and reading that as "none seen" would be a silent pass.
       () =>
         (window as unknown as { __banners?: { total: number } }).__banners
-          ?.total ?? 0,
+          ?.total ?? -1,
     );
 }
 
@@ -3203,7 +3218,9 @@ test("reports a reading the served run has no profile for", async ({
   // the swept-run race: a filter naming a profile the run does not have is one too,
   // and it is a reading the viewer asked for and did not get. Swallowed on the
   // status, it would leave them looking at the previous reading with nothing said.
+  // llmlint: ignore-block[tests_mirror_real_usage] there is no UI surface for this and there must not be: the toolbar offers the two profiles every run answers to, so the only 404 the detail route serves that is *not* the swept-run race cannot be asked for from the app at all. The request is the one the app was going to make, with the one parameter changed that names the reading; everything asserted below is what the reader is then shown.
   await readUnderProfile(page, "auditor");
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await page.goto(`/?run=${runs().live}&view=graph`);
 
   const banner = page.getByRole("alert");
