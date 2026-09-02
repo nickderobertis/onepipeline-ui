@@ -117,6 +117,15 @@ impl Fixture {
                 panic!("copy {name} into the scratch tree: {error}");
             });
         }
+        // The marker stands in for a compiled binary, so nothing may rewrite its
+        // bytes on the way out of version control — and `git archive` below is
+        // exactly a way out of it. Declared here rather than left to the host,
+        // because whether anything rewrites them is the host's own git
+        // configuration: the Windows runners this suite runs on install git with
+        // `core.autocrlf=true`, which turned the recipe's own output into a tree
+        // the comparison read as a different one, on that leg alone.
+        fs::write(root.join(".gitattributes"), format!("{MARKER} -text\n"))
+            .expect("the scratch tree's attributes");
         fs::write(root.join(MARKER), AT_THE_BASE).expect("the base commit's marker");
 
         let git = |arguments: &[&str]| {
@@ -136,6 +145,13 @@ impl Fixture {
         git(&["init", "--initial-branch=main", "--quiet"]);
         git(&["config", "user.email", "suite@example.invalid"]);
         git(&["config", "user.name", "the suite"]);
+        // The conversion the attribute above exempts the marker from, turned on
+        // for this scratch repository whatever the host's own setting is. It is
+        // the Windows runners' default and it is off on every other host here, so
+        // without it the exemption is unreachable from the platforms this suite
+        // is developed on — which is how three journeys came to fail on that leg
+        // and none here.
+        git(&["config", "core.autocrlf", "true"]);
         git(&["add", "-A"]);
         git(&["commit", "--quiet", "-m", "the base commit"]);
         let base = git(&["rev-parse", "HEAD"]);
