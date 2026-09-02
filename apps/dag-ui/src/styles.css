@@ -657,8 +657,12 @@ p {
      and takes the pinned timeline with it. */
   overscroll-behavior: contain;
   width: 100%;
-  gap: 10px;
-  padding: 18px 24px 24px;
+  /* A log, not a stack of cards: the gap is the hairline between two lines rather
+     than the margin around two blocks. Thirty nodes' journals run to tens of
+     thousands of records, and at a card's worth of whitespace each an operator
+     spends their scrolling on the space between the rows. */
+  gap: 2px;
+  padding: 8px 16px 12px;
   align-content: start;
 }
 
@@ -676,28 +680,82 @@ p {
   width: min(100%, 1100px);
   margin-inline: auto;
   scroll-margin-top: 190px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: var(--card);
 }
 
+/* The row a reader is on and the row they opened, told apart from the rest by tone
+   rather than by space: there is no space left to tell them apart with. */
+.transcript-item:hover {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
 .transcript-item[data-selected="true"] {
   border-color: var(--primary);
 }
+
+/* One line, and everything the row carries on it: what kind of record it is, what
+   it is called, and the facts it was recorded with. The name takes the space that
+   is left and is cut with an ellipsis rather than wrapped, because a row that wraps
+   is two rows and the count this list is drawn for is rows on a screen. */
 .transcript-item button {
-  display: grid;
+  display: flex;
   width: 100%;
-  gap: 4px;
-  padding: 14px 16px;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 8px;
   border: 0;
   background: transparent;
   color: inherit;
+  font-size: 12px;
+  line-height: 18px;
   text-align: left;
   cursor: pointer;
+}
+.transcript-item button > strong {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .transcript-facts {
   color: var(--muted-foreground);
   font-size: 11px;
+}
+.transcript-item .transcript-facts {
+  overflow: hidden;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The middle of a collapsed run, standing exactly where the rows it holds stood.
+   Its words are the control's own — the count and the kind — so the ellipsis beside
+   them is decoration rather than the only thing that says anything. */
+.transcript-collapsed {
+  width: min(100%, 1100px);
+  margin: 0 auto;
+}
+.transcript-collapsed button {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.transcript-collapsed button:hover {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  color: var(--foreground);
 }
 
 /* The category glyph sits on the eyebrow's own baseline rather than above it: it is
@@ -706,8 +764,17 @@ p {
    the transcript because every other eyebrow in the app is words alone. */
 .transcript-item .eyebrow {
   display: flex;
+  overflow: hidden;
+  /* A fixed share of the line, so the eyebrows of consecutive rows line their names
+     up in a column: a log is scanned down the second field, and a ragged one is
+     read a row at a time. */
+  width: 11ch;
+  flex: none;
   align-items: center;
-  gap: 5px;
+  margin-bottom: 0;
+  gap: 4px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The other half of the column above: a column that cannot grow makes the token
@@ -726,8 +793,8 @@ p {
   display: grid;
   width: min(100%, 1100px);
   margin-inline: auto;
-  gap: 10px;
-  padding: 12px 12px 14px;
+  gap: 2px;
+  padding: 6px 8px 8px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--muted) 45%, transparent);

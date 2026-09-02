@@ -446,6 +446,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   // operator still has to be able to read as absent rather than as missing.
   await expect(page.getByRole("list", { name: "Timeline legend" })).toHaveText(
     [
+      "Queued",
       "Worker",
       "Judge",
       "Lint",

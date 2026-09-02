@@ -643,7 +643,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 7,
+      timeline_schema_version: 8,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -824,7 +824,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 7,
+        timeline_schema_version: 8,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

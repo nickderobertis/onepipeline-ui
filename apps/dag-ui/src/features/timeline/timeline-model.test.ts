@@ -2,6 +2,7 @@ import { parseRunTimeline } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { busyTimeline, LIVE_RUN, runTimeline } from "../../test/fixtures";
 import {
+  collapseLabel,
   compactTimelineItems,
   compactTimelineMarkers,
   type DispatchRole,
@@ -12,6 +13,9 @@ import {
   nodeTimeline,
   nodeTimelineV2,
   pathTo,
+  spanAsRow,
+  type TimelineRow,
+  transcriptEntries,
 } from "./timeline-model";
 
 const timeline = parseRunTimeline(runTimeline(LIVE_RUN));
@@ -172,8 +176,151 @@ describe("one node's slice of the run timeline", () => {
     const group = busy.rows.find(({ rowKind }) => rowKind === "group");
     expect(group?.label).toBe("203 × dispatch");
     expect(group?.children).toHaveLength(203);
-    expect(busy.rows.length).toBeLessThan(GROUP_THRESHOLD);
+    // What the reader is handed where those two hundred and three stood is three
+    // things: the first, one control naming the rest, and the last.
+    const reading = transcriptEntries(busy.rows, new Set());
+    expect(
+      reading.find(({ entryKind }) => entryKind === "collapse"),
+    ).toMatchObject({ hidden: 201, expanded: false });
+    expect(reading.length).toBeLessThan(20);
     expect(busy.total).toBeGreaterThan(200);
+  });
+
+  /** A run of `count` identical rows of `kind`, as a node's own span carries them. */
+  const runOf = (
+    kind: string,
+    count: number,
+    shape: "event" | "span",
+  ): TimelineRow[] => {
+    const fixture = parseRunTimeline(runTimeline(LIVE_RUN));
+    const node = fixture.spans.find(({ id }) => id === "node-dashboard");
+    if (node === undefined) throw new Error("fixture lost the dashboard node");
+    node.events = Array.from({ length: count }, (_, index) => ({
+      id: `${kind}-${index}`,
+      kind,
+      at: `2026-07-26T12:${String(index).padStart(2, "0")}:00.000Z`,
+      node_id: "dashboard",
+    }));
+    fixture.spans = fixture.spans.filter(
+      (span) => span.node_id !== "dashboard" || span.id === "node-dashboard",
+    );
+    if (shape === "span")
+      fixture.spans.push(
+        ...Array.from({ length: count }, (_, index) => ({
+          id: `verification-${index}`,
+          kind: "verification" as const,
+          label: `check-${index}`,
+          parent_id: "node-dashboard",
+          node_id: "dashboard",
+          started_at: `2026-07-26T13:${String(index).padStart(2, "0")}:00.000Z`,
+          ended_at: `2026-07-26T13:${String(index).padStart(2, "0")}:30.000Z`,
+          events: [],
+        })),
+      );
+    return nodeTimeline(fixture, "dashboard").rows;
+  };
+
+  test("collapses a run of journal records on the rule it collapses spans by", () => {
+    // The boundary, from both sides, for the two kinds of row this list holds. One
+    // rule, one count: a reader learns this behaviour once.
+    for (const shape of ["event", "span"] as const) {
+      const kind = shape === "event" ? "turn-activity" : "verification";
+      const short = runOf(kind, GROUP_THRESHOLD - 1, shape);
+      expect(short.filter(({ rowKind }) => rowKind === "group")).toHaveLength(
+        0,
+      );
+      const long = runOf(kind, GROUP_THRESHOLD, shape);
+      const group = long.find(({ rowKind }) => rowKind === "group");
+      expect(group, `a run of ${GROUP_THRESHOLD} ${kind} did not collapse`);
+      expect(group?.children).toHaveLength(GROUP_THRESHOLD);
+      // And what is then shown is the same shape either way: the first in full,
+      // one control naming how many are behind it and what they are, the last in
+      // full.
+      const reading = transcriptEntries(long, new Set());
+      const shown = reading.filter(
+        (entry) => entry.entryKind === "row" && entry.row.kind === kind,
+      );
+      expect(shown).toHaveLength(2);
+      const control = reading.find(
+        (entry) => entry.entryKind === "collapse" && entry.group.kind === kind,
+      );
+      expect(control).toMatchObject({
+        hidden: GROUP_THRESHOLD - 2,
+        expanded: false,
+      });
+      expect(collapseLabel(GROUP_THRESHOLD - 2, kind)).toBe(
+        `${GROUP_THRESHOLD - 2} more ${kind} events`,
+      );
+    }
+  });
+
+  test("puts the middle of a collapsed run back when the reader opens it", () => {
+    const rows = runOf("turn-activity", 6, "event");
+    const group = rows.find(({ rowKind }) => rowKind === "group");
+    if (group === undefined) throw new Error("the run did not collapse");
+    const closed = transcriptEntries(rows, new Set());
+    expect(
+      closed.filter(
+        (entry) =>
+          entry.entryKind === "row" && entry.row.kind === "turn-activity",
+      ),
+    ).toHaveLength(2);
+    const open = transcriptEntries(rows, new Set([group.id]));
+    expect(
+      open.filter(
+        (entry) =>
+          entry.entryKind === "row" && entry.row.kind === "turn-activity",
+      ),
+    ).toHaveLength(6);
+    expect(open.find((entry) => entry.entryKind === "collapse")).toMatchObject({
+      expanded: true,
+      hidden: 4,
+    });
+  });
+
+  test("names a queued span for everything that was holding the node", () => {
+    const behind = spanAsRow({
+      id: "queued.dashboard.4",
+      kind: "queued",
+      label: "dashboard",
+      started_at: "2026-07-26T11:00:00.000Z",
+      ended_at: "2026-07-26T11:05:00.000Z",
+      node_id: "dashboard",
+      events: [],
+      reasons: [{ kind: "concurrency", ahead: ["foundation", "publish"] }],
+    });
+    expect(behind.displayKind).toBe("Queued");
+    expect(behind.displayLabel).toBe("Queued behind foundation, publish");
+    // Two reasons at once read as two things, which is what tells this hold from
+    // one the run recorded a single reason for.
+    const both = spanAsRow({
+      id: "queued.dashboard.9",
+      kind: "queued",
+      label: "dashboard",
+      started_at: "2026-07-26T11:05:00.000Z",
+      ended_at: null,
+      node_id: "dashboard",
+      events: [],
+      reasons: [
+        { kind: "dependencies", blocking: ["foundation"] },
+        { kind: "decision", reference: "surface:7" },
+      ],
+    });
+    expect(both.displayLabel).toBe(
+      "Queued waiting on foundation and held by decision surface:7",
+    );
+    // A reason a later engine writes is still named rather than drawn as nothing.
+    const later = spanAsRow({
+      id: "queued.dashboard.11",
+      kind: "queued",
+      label: "dashboard",
+      started_at: "2026-07-26T11:06:00.000Z",
+      ended_at: null,
+      node_id: "dashboard",
+      events: [],
+      reasons: [{ kind: "budget" }],
+    });
+    expect(later.displayLabel).toBe("Queued held by budget");
   });
 
   test("names lifecycle steps and distinguishes a retried worker dispatch", () => {
@@ -236,6 +383,7 @@ describe("one node's slice of the run timeline", () => {
   test("projects intervals into deterministic lanes and journals into markers", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
     expect(projected.lanes.map(({ label }) => label)).toEqual([
+      "Queued",
       "Worker",
       "Judge",
       "Lint",

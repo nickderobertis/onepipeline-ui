@@ -7,6 +7,7 @@ import type {
   AgentRole,
   RunTimeline,
   TimelineEvent,
+  TimelineHoldReason,
   TimelineSpan,
   TimelineSpanKind,
 } from "@onepipeline-ui/dag-model";
@@ -23,8 +24,18 @@ import { MarkerReading } from "./item-reading";
  * a node that dispatched two hundred sessions is a row rather than two hundred.
  */
 
-/** Siblings of one kind collapse into a group once a run reaches this many. */
-export const GROUP_THRESHOLD = 8;
+/**
+ * Consecutive siblings of one kind collapse into a group once a run reaches this
+ * many.
+ *
+ * **One rule for every kind of row.** A run of dispatch spans and a run of
+ * `turn-activity` records are the same problem — near-identical rows burying the
+ * one that matters — so they collapse at the same count and are presented the same
+ * way, and a reader learns the behaviour once. Four is where a run stops being
+ * scannable at the row height this list is drawn at: three of a kind read as three
+ * things, and the fourth is where the eye starts skipping.
+ */
+export const GROUP_THRESHOLD = 4;
 
 /**
  * One onejudge dispatch: the agent session and the judge and lint sessions that
@@ -98,6 +109,11 @@ const EMPTY: NodeTimeline = { rows: [], total: 0 };
  * never shown a category the journal has no record of.
  */
 const LANE_LABELS = {
+  // First, because it is what happened before anything else on the node, and
+  // because `compactTimelineItems` reads this order as priority: where a queued
+  // span shares a moment with anything, why nothing was running is the answer the
+  // reader opened the node for.
+  queued: "Queued",
   worker: "Worker",
   judge: "Judge",
   lint: "Lint",
@@ -140,6 +156,9 @@ const LANE_BY_SPAN_KIND: Readonly<Record<TimelineSpanKind, LaneId | null>> = {
   // it is unblocking rather than as a category an operator has to learn.
   "conflict-resolution": "publication",
   "human-wait": "human-wait",
+  // Why the loop was not running the node: real recorded time, in a lane of its
+  // own rather than as the empty space it used to be drawn as.
+  queued: "queued",
   rollup: "lock-waits",
 };
 
@@ -206,6 +225,12 @@ export interface NodeTimelineV2 {
   readonly lanes: readonly TimelineLane[];
   /** Every row this node recorded, flattened into the order they are read in. */
   readonly rows: readonly TimelineRow[];
+  /**
+   * The same rows with their nesting intact, which is what the reading is drawn
+   * from: a collapsed run is a group row holding the members it stands for, and
+   * flattening it away loses which rows the control speaks for.
+   */
+  readonly tree: readonly TimelineRow[];
 }
 
 /**
@@ -356,7 +381,11 @@ export function nodeTimelineV2(
       },
     ];
   });
-  const markers = plottedRows.flatMap((row): TimelineMarker<TimelineRow>[] =>
+  // Markers come off *every* row rather than off the plotted ones: a journal record
+  // inside a collapsed run is still a moment the run recorded, and dropping its pin
+  // would take the plot's account of that moment away with the reading's. The plot
+  // stays bounded by `compactTimelineMarkers`, which is what bounds it anyway.
+  const markers = rows.flatMap((row): TimelineMarker<TimelineRow>[] =>
     row.rowKind === "event"
       ? [
           {
@@ -389,7 +418,78 @@ export function nodeTimelineV2(
       ? { ...item, end: recorded, duration: recorded - item.start }
       : item,
   );
-  return { items: plotted, markers, lanes: NODE_LANES, rows };
+  return { items: plotted, markers, lanes: NODE_LANES, rows, tree: projected };
+}
+
+/** One thing the reading draws: a row, or the control standing for a collapsed run. */
+export type TranscriptEntry =
+  | { readonly entryKind: "row"; readonly row: TimelineRow }
+  | {
+      readonly entryKind: "collapse";
+      /** The group the control speaks for; its `count` is the whole run. */
+      readonly group: TimelineRow;
+      /** How many rows the control is standing in for — the run less its ends. */
+      readonly hidden: number;
+      readonly expanded: boolean;
+    };
+
+/**
+ * The reading, in the order it is read, with each collapsed run standing as its
+ * first row, one control, and its last row.
+ *
+ * The first and the last are shown **in full** because they are what says where the
+ * run began and where it ended — which is the reading a run of two hundred
+ * near-identical rows otherwise buries. The control between them carries the count
+ * and the kind as text, and expanding it puts the middle back exactly where it was.
+ *
+ * `expanded` is the reader's own state and is passed in rather than held here: the
+ * projection is a pure function of what was served, and which runs a reader has
+ * opened is not something the run recorded.
+ */
+export function transcriptEntries(
+  rows: readonly TimelineRow[],
+  expanded: ReadonlySet<string>,
+): readonly TranscriptEntry[] {
+  const seen = new Set<string>();
+  const entries: TranscriptEntry[] = [];
+  const visit = (nested: readonly TimelineRow[]) => {
+    for (const row of nested) {
+      if (row.rowKind === "group") {
+        const open = expanded.has(row.id);
+        const members = row.children;
+        const first = members.at(0);
+        const last = members.at(-1);
+        if (first !== undefined) visit([first]);
+        entries.push({
+          entryKind: "collapse",
+          group: row,
+          hidden: Math.max(members.length - 2, 0),
+          expanded: open,
+        });
+        if (open) visit(members.slice(1, -1));
+        if (last !== undefined && last !== first) visit([last]);
+        continue;
+      }
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        entries.push({ entryKind: "row", row });
+      }
+      visit(row.children);
+    }
+  };
+  visit(rows);
+  return entries;
+}
+
+/**
+ * What one collapse control says: how many rows it stands for, and what they are.
+ *
+ * The same sentence whatever the run is made of — a run of journal records and a
+ * run of dispatch spans read identically but for the kind each names — because the
+ * reader meets one collapsing behaviour here rather than two.
+ */
+export function collapseLabel(hidden: number, kind: string): string {
+  return `${hidden} more ${kind} events`;
 }
 
 function flattenRows(
@@ -640,9 +740,15 @@ function eventRow(event: TimelineEvent): TimelineRow {
 }
 
 /**
- * Collapse each run of consecutive same-kind span siblings into one row once it is
- * long enough to stop being scannable. Order is preserved: a group stands exactly
- * where the spans it holds stood.
+ * Collapse each run of consecutive same-kind siblings into one row once it is long
+ * enough to stop being scannable. Order is preserved: a group stands exactly where
+ * the rows it holds stood.
+ *
+ * A run of journal records collapses on the same rule a run of spans does, because
+ * a reader meets one collapsing behaviour in this timeline rather than two — see
+ * {@link GROUP_THRESHOLD}. What the reader is then shown is
+ * {@link transcriptEntries}: the first and the last in full, and the middle behind
+ * one control that says how many there are and what they are.
  */
 function group(rows: readonly TimelineRow[]): TimelineRow[] {
   const grouped: TimelineRow[] = [];
@@ -650,8 +756,7 @@ function group(rows: readonly TimelineRow[]): TimelineRow[] {
     const first = rows[index];
     if (first === undefined) continue;
     let end = index;
-    while (end + 1 < rows.length && sameKindSpan(first, rows[end + 1]))
-      end += 1;
+    while (end + 1 < rows.length && sameKind(first, rows[end + 1])) end += 1;
     const run = rows.slice(index, end + 1);
     const last = run.at(-1);
     if (run.length < GROUP_THRESHOLD || last === undefined) {
@@ -694,6 +799,45 @@ function displayKind(
 }
 
 /**
+ * What one thing holding a node reads as, in the words the engine recorded it with.
+ *
+ * Composed from the served entry rather than from a sentence the server wrote, so
+ * the reader meets the same shrinking set the engine did — "behind migrate,
+ * backfill" and then "behind backfill" — and so a hold with two entries reads as
+ * two things rather than as one longer phrase. A `kind` this build has no wording
+ * for is still named: the vocabulary is the engine's, and a reason it added is a
+ * reason a reader has to be told about rather than one to draw as nothing.
+ */
+export function holdReasonLabel(reason: TimelineHoldReason): string {
+  const named = (ids: readonly string[] | undefined) => (ids ?? []).join(", ");
+  switch (reason.kind) {
+    case "concurrency":
+      return reason.ahead === undefined
+        ? "behind the work already running"
+        : `behind ${named(reason.ahead)}`;
+    case "dependencies":
+      return `waiting on ${named(reason.blocking)}`;
+    case "decision":
+      return `held by decision ${reason.reference ?? "nobody named"}`;
+    case "release":
+      return `awaiting the release of ${named(reason.awaiting)}`;
+    default:
+      return `held by ${reason.kind}`;
+  }
+}
+
+/**
+ * Everything holding a node at one recorded moment, as one phrase.
+ *
+ * Joined with "and" rather than listed, because that is what tells a node held by
+ * two things from a node held by one at a glance — which is the reading the
+ * `reasons` array exists to make possible.
+ */
+export function holdLabel(reasons: readonly TimelineHoldReason[]): string {
+  return reasons.map(holdReasonLabel).join(" and ");
+}
+
+/**
  * How the operator names one recorded activity: its category, then the session or
  * artifact it was. A judge session says Judge and says which session it was, which is
  * the pair a reader needs to tell three concurrent sessions apart.
@@ -701,6 +845,10 @@ function displayKind(
 function spanLabel(span: TimelineSpan, role: DispatchRole | undefined): string {
   if (span.kind === "step")
     return span.label ? `Lifecycle: ${span.label}` : "Lifecycle step";
+  // A queue is named for what it was waiting for and never for the node it held:
+  // "Queued" alone is the empty space this span replaced, said in a word.
+  if (span.kind === "queued")
+    return `Queued ${holdLabel(span.reasons ?? [])}`.trim();
   const kind = displayKind(span, role);
   if (span.kind === "rollup") return `${kind}: ${span.count ?? 0} recorded`;
   if (!span.label || span.label === kind) return kind;
@@ -780,14 +928,19 @@ function supervises(role: DispatchRole | undefined): boolean {
   return role !== undefined && OPENS_DISPATCH[role] === false;
 }
 
-function sameKindSpan(
-  first: TimelineRow,
-  next: TimelineRow | undefined,
-): boolean {
+/**
+ * Whether two consecutive rows belong to the same run.
+ *
+ * The **kind** is the whole of it, and both halves of the pair have to be the same
+ * sort of row: two `dispatch` spans are a run, two `turn-activity` records are a
+ * run, and a span beside a record is not. A group is never a member of another
+ * one — the collapse has already happened there.
+ */
+function sameKind(first: TimelineRow, next: TimelineRow | undefined): boolean {
   return (
     next !== undefined &&
-    first.rowKind === "span" &&
-    next.rowKind === "span" &&
+    first.rowKind !== "group" &&
+    next.rowKind === first.rowKind &&
     first.kind === next.kind
   );
 }
