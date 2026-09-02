@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.4...v0.6.5) - 2026-09-02
+
+### Added
+
+- *(deps)* adopt the engine release this host runs, and its siblings ([#42](https://github.com/nickderobertis/onepipeline-ui/pull/42))
+
+### Fixed
+
+- *(payload)* serve a two-party dispatch's transcript as the agent's turns ([#44](https://github.com/nickderobertis/onepipeline-ui/pull/44))
+
 ## [0.6.4](https://github.com/nickderobertis/onepipeline-ui/compare/v0.6.3...v0.6.4) - 2026-08-29
 
 ### Changed
