@@ -95,7 +95,9 @@ tar -xf "$archive" -C "$work" || {
   echo "ACTION: free space on the filesystem holding \$TMPDIR ($(df -Ph "$work" | awk 'NR==2 {print $4}') free), check it is writable, and retry" >&2
   exit 1
 }
-rm -f "$archive"
+# The archive is not removed here: it sits inside the temporary tree the `EXIT`
+# trap already deletes, and a cleanup of its own would be one more command that
+# can fail with nothing useful to say about it.
 
 # The base commit's own lockfile decides its dependency graph, and this process's
 # environment must not reach in and redirect where it is built.

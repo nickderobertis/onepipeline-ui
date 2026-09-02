@@ -37,8 +37,8 @@
       "dependsOn": ["ensure-sibling", "ensure-baseline"],
       "inputs": [
         "apiServerSurface",
-        "servedGoldens",
-        "{projectRoot}/tests/**/*",
+        "{projectRoot}/tests/e2e/**/*",
+        "{projectRoot}/tests/support/**/*",
         "{projectRoot}/justfile",
         "sharedGlobals",
         { "runtime": "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main" }

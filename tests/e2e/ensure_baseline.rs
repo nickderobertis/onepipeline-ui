@@ -176,7 +176,6 @@ impl Fixture {
         }
     }
 
-    /// Where the recipe provisions to.
     fn binary(&self) -> PathBuf {
         self.dir.path().join(".tools/bin").join(provisioned())
     }
@@ -188,7 +187,6 @@ impl Fixture {
             .join(format!("{}.commit", provisioned()))
     }
 
-    /// Run the recipe the way the `ensure-baseline` target runs it.
     fn run(&self) -> Output {
         self.run_with(&[])
     }
