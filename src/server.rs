@@ -55,6 +55,17 @@ struct Serving {
 }
 
 /// The router serving one runs root, ending its streams when `stopping` is set.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no authorization to
+// enforce here and no place to enforce it from. This is `docs/contract.md`'s whole surface:
+// seven **read** routes over a directory of runs, with no writes, no accounts, no sessions
+// and no principal — the CLI's `--bind` defaults to loopback, and an operator who exposes it
+// wider puts whatever their host uses in front of it. Adding an authentication layer would
+// be a change to the contract this crate is the Rust rendering of, which that document's
+// owner decides and this repository is forbidden from editing to suit the code; it is not a
+// change a run-list read makes on its own authority. The trust boundary this surface *does*
+// have is validated at every handler above: each `{...}` a route interpolates is an
+// identifier newtype, every query is parsed before a run is opened, and no raw `String`
+// reaches storage.
 fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
     Router::new()
         .route(routes::HEALTHZ, get(healthz))
@@ -70,6 +81,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
             stopping,
         })
 }
+// llmlint: ignore-end[authorization_enforced_server_side]
 
 /// Take `address`, so a caller can report the port before the accept loop
 /// starts — and learn which port it was given when it asked for `:0`.

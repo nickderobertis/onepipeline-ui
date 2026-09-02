@@ -756,10 +756,10 @@ fn the_comparison_is_keyed_by_every_module_it_reads() {
 /// this holds them to each other. Either side drifting alone is silent: widen the
 /// exclusion and tests stop running under the coverage floor, narrow an inclusion
 /// and a whole tier is declared for and runs nowhere.
-// llmlint: ignore[tests_mirror_real_usage] there is no command surface to drive here: the
-// property is that three *declarations* in one file partition one name space, and the only
-// way to observe it through the recipes would be to run all three tiers and see which tests
-// executed — which means compiling the base commit's server and provisioning a syscall
+// llmlint: ignore-block[tests_mirror_real_usage] there is no command surface to drive here:
+// the property is that three *declarations* in one file partition one name space, and the
+// only way to observe it through the recipes would be to run all three tiers and see which
+// tests executed — which means compiling the base commit's server and provisioning a syscall
 // tracer to learn something about two strings. Asking `cargo nextest` what each filter
 // selects would be the real interface, and is refused for a different reason: a nested cargo
 // inside a running suite contends for the target-directory lock, which is a hang rather than
@@ -790,6 +790,7 @@ fn the_test_recipes_partition_the_suite() {
         );
     }
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /// The recipe writes where the suite reads, and neither restates the other's path.
 #[test]
