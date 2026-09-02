@@ -3356,7 +3356,18 @@ function stageBinary(path: string): void {
   try {
     linkSync(API_BINARY, path);
   } catch (caught) {
-    if ((caught as NodeJS.ErrnoException).code !== "EXDEV") throw caught;
+    // Narrowed rather than asserted: `catch` binds `unknown`, and the one thing
+    // that distinguishes the cross-device refusal from a real failure to stage
+    // the binary is the `code` Node puts on its own errors. Anything else — a
+    // missing binary, an unwritable destination — is rethrown, because a copy
+    // would fail for that reason too and report it a second time.
+    if (
+      !(caught instanceof Error) ||
+      !("code" in caught) ||
+      caught.code !== "EXDEV"
+    ) {
+      throw caught;
+    }
     copyFileSync(API_BINARY, path);
   }
 }
