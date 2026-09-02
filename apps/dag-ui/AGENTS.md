@@ -92,6 +92,20 @@ One reading is read at a time for the same reason: a stream that invalidates fas
 than the server answers would otherwise put forty reads of one run in flight, each
 making the next slower.
 
+**The opening snapshot re-reads nothing, and that is load-bearing.** The global
+stream opens with the whole run list, which is the state the view's first list read
+has just taken — so it seeds the list and does not ask for the open run to be read
+again. A *later* snapshot does: it means the stream dropped and came back, and a run
+that moved during the outage was never announced. Bumping on the opening one instead
+sets the run's detail twice within a frame of itself, and React Flow wipes a node's
+measured size whenever it is handed a new node object: a card is `visibility: hidden`
+until the resize observer measures it, and a wipe that lands in the same batch as
+that measurement leaves it hidden with nothing left to trigger a re-measure. The
+graph then draws nothing while the accessible node list beside it is complete —
+which is what the browser tier reports, intermittently, as a graph card that never
+arrived. Anything that makes the detail land twice in quick succession has that
+failure available to it.
+
 The one read failure this hook swallows — `run_not_found` on the **detail** route,
 a run swept between the read that listed it and the read that fetched it — is
 matched on the code and not the status, and the list route's `missing` does not

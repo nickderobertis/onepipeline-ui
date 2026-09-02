@@ -121,6 +121,8 @@ export function useDagTelemetry(
    * starved by re-asking for it before the last ask has landed.
    */
   const reads = useRef<{ key: string; again: boolean } | undefined>(undefined);
+  //: Whether the global stream has already handed this view a snapshot.
+  const opened = useRef(false);
 
   const loadList = useCallback(async () => {
     setList(await client.listRuns(true));
@@ -203,7 +205,8 @@ export function useDagTelemetry(
     [client],
   );
 
-  const refresh = useCallback(async () => {
+  /** The first list this view takes, which asks for nothing to be read again. */
+  const open = useCallback(async () => {
     try {
       await loadList();
       setError(undefined);
@@ -212,8 +215,19 @@ export function useDagTelemetry(
     } finally {
       setLoading(false);
     }
-    setRevision((current) => current + 1);
   }, [loadList]);
+
+  /**
+   * The reader asking for the whole reading to be taken again.
+   *
+   * It bumps the revision, which `open` deliberately does not: asking for a re-read
+   * before the first read has happened takes the run's detail twice within a frame
+   * of itself, for a payload that cannot have changed.
+   */
+  const refresh = useCallback(async () => {
+    await open();
+    setRevision((current) => current + 1);
+  }, [open]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `revision` is not read by this effect — it is what asks for the same run to be read again, which is how a refresh and a live invalidation reach the server at all. Dropping it would leave the view showing the read it took first.
   useEffect(() => {
@@ -337,7 +351,7 @@ export function useDagTelemetry(
   ]);
 
   useEffect(() => {
-    void refresh();
+    void open();
     const subscription = client.subscribe({
       onEvent: (event) => {
         setLastUpdated(new Date().toISOString());
@@ -346,7 +360,12 @@ export function useDagTelemetry(
         setError(undefined);
         if (event.event === "snapshot") {
           setList(parseRunList(event.data));
-          setRevision((current) => current + 1);
+          // The **opening** snapshot is the state the first list read has just
+          // taken, so nothing about the open run is read again for it. A later one
+          // means the stream dropped and came back, and a run that moved during
+          // that outage was never announced — so that run is read again.
+          if (opened.current) setRevision((current) => current + 1);
+          opened.current = true;
           return;
         }
         const invalidated = invalidatedRunId(event);
@@ -367,7 +386,7 @@ export function useDagTelemetry(
       },
     });
     return () => subscription.close();
-  }, [client, refreshRow, refresh]);
+  }, [client, refreshRow, open]);
 
   useEffect(() => {
     if (runId === undefined) {
