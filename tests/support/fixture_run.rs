@@ -3430,6 +3430,239 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The run id of the queued-holds fixture below.
+pub const HELD_RUN_ID: &str = "run-20260807-4b5c6d";
+/// The node that sat behind three running nodes until each of them finished.
+pub const HELD_BEHIND_NODE_ID: &str = "behind";
+/// The three that were ahead of it, in the order they cleared.
+pub const HELD_AHEAD: [&str; 3] = ["migrate", "backfill", "verify"];
+/// The node held by two things at once, and then by a release alone.
+pub const HELD_MANY_NODE_ID: &str = "many-ways";
+/// The decision point holding that node's subtree, as the engine spells one.
+pub const HELD_DECISION_REFERENCE: &str = "surface:7";
+/// The release it is still waiting on when the run's records stop.
+pub const HELD_RELEASE_DEP: &str = "sdk";
+/// The node whose hold record names no reason this build can read.
+pub const HELD_UNREADABLE_NODE_ID: &str = "unreadable";
+
+/// A run whose scheduler recorded *why* each node it was not running was not
+/// running.
+///
+/// Written to be read as queued spans. `behind` is the shape the operator opens a
+/// timeline to see: it became ready at once and then sat behind three dispatches
+/// that finished one at a time, so the engine wrote a hold when it began and again
+/// each time what was ahead of it changed — three records naming three shrinking
+/// sets, then the release, then the dispatch. `many-ways` is the other half: held
+/// by an unsettled dependency *and* a decision point at the same moment, then by a
+/// release alone, and still held when the records stop. `unreadable` is a hold
+/// whose entries name nothing at all, which is what a reason a later engine writes
+/// looks like from here.
+pub fn write_held(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4251,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "name": "held",
+        "concurrency": 3,
+        "tasks": [
+            { "id": HELD_AHEAD[0], "persona": "worker", "task": "## What\nMigrate it." },
+            { "id": HELD_AHEAD[1], "persona": "worker", "task": "## What\nBackfill it." },
+            { "id": HELD_AHEAD[2], "persona": "worker", "task": "## What\nVerify it." },
+            {
+                "id": HELD_BEHIND_NODE_ID,
+                "persona": "worker",
+                "task": "## What\nRun once the queue clears.",
+            },
+            {
+                "id": HELD_MANY_NODE_ID,
+                "persona": "worker",
+                "deps": [HELD_AHEAD[0]],
+                "task": "## What\nWait on more than one thing.",
+            },
+            {
+                "id": HELD_UNREADABLE_NODE_ID,
+                "persona": "worker",
+                "task": "## What\nBe held for a reason this build cannot read.",
+            },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+
+    let stream = "a-recording-host-4251";
+    let at = |node: &str| json!({ "run_id": run, "node": node });
+    let concurrency = |ahead: &[&str]| json!({ "kind": "concurrency", "ahead": ahead, "limit": 3 });
+    let mut journal = Journal::new(stream);
+    journal.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        json!({ "plan": plan }),
+    );
+    for (index, node) in HELD_AHEAD.iter().enumerate() {
+        journal
+            .emit(
+                &format!("2026-08-07T12:00:0{}.000Z", index + 1),
+                "pipeline",
+                "node-ready",
+                at(node),
+                json!({}),
+            )
+            .emit(
+                &format!("2026-08-07T12:00:0{}.500Z", index + 1),
+                "pipeline",
+                "node-dispatched",
+                json!({ "run_id": run, "node": node, "persona": "worker" }),
+                json!({}),
+            );
+    }
+    // Ready with the run already at its concurrency, so the loop says so — and
+    // says it again each time one of the three ahead of it finishes, because what
+    // is holding it changed. Nothing is written on the passes in between.
+    journal
+        .emit(
+            "2026-08-07T12:00:04.000Z",
+            "pipeline",
+            "node-ready",
+            at(HELD_BEHIND_NODE_ID),
+            json!({}),
+        )
+        .emit(
+            "2026-08-07T12:00:04.100Z",
+            "pipeline",
+            "node-held",
+            at(HELD_BEHIND_NODE_ID),
+            json!({ "reasons": [concurrency(&HELD_AHEAD)] }),
+        )
+        // The dependency and the decision holding the other node at the same
+        // moment: two entries in one record, because clearing either leaves the
+        // other, and one record per reason would leave a reader joining them.
+        .emit(
+            "2026-08-07T12:00:04.200Z",
+            "pipeline",
+            "node-held",
+            at(HELD_MANY_NODE_ID),
+            json!({
+                "reasons": [
+                    { "kind": "dependencies", "blocking": [HELD_AHEAD[0]] },
+                    { "kind": "decision", "reference": HELD_DECISION_REFERENCE },
+                ],
+            }),
+        )
+        // Three holds nothing here can read: one whose entry names no kind at
+        // all, one whose kind is blank — a producer that wrote the field and left
+        // it empty said nothing rather than said something empty — and one that
+        // carries no `reasons` at all.
+        .emit(
+            "2026-08-07T12:00:04.300Z",
+            "pipeline",
+            "node-held",
+            at(HELD_UNREADABLE_NODE_ID),
+            json!({ "reasons": [{ "why": "a word this build has no reading for" }] }),
+        )
+        .emit(
+            "2026-08-07T12:00:04.400Z",
+            "pipeline",
+            "node-held",
+            at(HELD_UNREADABLE_NODE_ID),
+            json!({ "reasons": [{ "kind": "   ", "ahead": ["migrate"] }] }),
+        )
+        .emit(
+            "2026-08-07T12:00:04.500Z",
+            "pipeline",
+            "node-held",
+            at(HELD_UNREADABLE_NODE_ID),
+            json!({}),
+        )
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_AHEAD[0]),
+            json!({ "status": "done" }),
+        )
+        .emit(
+            "2026-08-07T12:00:10.100Z",
+            "pipeline",
+            "node-held",
+            at(HELD_BEHIND_NODE_ID),
+            json!({ "reasons": [concurrency(&HELD_AHEAD[1..])] }),
+        )
+        // Its dependency settled and the decision was answered, and what is left
+        // is one release nobody has published: held by one thing where it was
+        // held by two.
+        .emit(
+            "2026-08-07T12:00:10.200Z",
+            "pipeline",
+            "node-held",
+            at(HELD_MANY_NODE_ID),
+            // The blank entry beside it is a producer that wrote an id and left it
+            // empty; it names nothing to wait on and is not served as one.
+            json!({ "reasons": [{ "kind": "release", "awaiting": [HELD_RELEASE_DEP, ""] }] }),
+        )
+        .emit(
+            "2026-08-07T12:00:20.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_AHEAD[1]),
+            json!({ "status": "done" }),
+        )
+        .emit(
+            "2026-08-07T12:00:20.100Z",
+            "pipeline",
+            "node-held",
+            at(HELD_BEHIND_NODE_ID),
+            json!({ "reasons": [concurrency(&HELD_AHEAD[2..])] }),
+        )
+        .emit(
+            "2026-08-07T12:00:30.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_AHEAD[2]),
+            json!({ "status": "done" }),
+        )
+        // The queue cleared, and the dispatch follows it directly.
+        .emit(
+            "2026-08-07T12:00:30.100Z",
+            "pipeline",
+            "node-unheld",
+            at(HELD_BEHIND_NODE_ID),
+            json!({ "released": [concurrency(&HELD_AHEAD[2..])] }),
+        )
+        .emit(
+            "2026-08-07T12:00:30.200Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": HELD_BEHIND_NODE_ID, "persona": "worker" }),
+            json!({}),
+        )
+        .emit(
+            "2026-08-07T12:00:40.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_BEHIND_NODE_ID),
+            json!({ "status": "done" }),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    dir
+}
+
 /// The run id of the recorded-only fixture below.
 pub const RECORDED_ONLY_RUN_ID: &str = "run-20260807-9f8e7d";
 

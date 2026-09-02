@@ -40,6 +40,58 @@ export const BUSY_LONG_TURNS = 30;
 /** More than one API page of cheap records, so paging is the real cursor boundary. */
 export const PAGE_RUNS = 44;
 
+/**
+ * How many consecutive rows of one kind the reading collapses at.
+ *
+ * Declared here because the corpus is written *around* it — one node records one
+ * short of it and one records exactly it — and a journey that asserts the boundary
+ * reads the same number rather than a literal of its own.
+ */
+export const COLLAPSE_THRESHOLD = 4;
+/** The node that records one short of that, of everything. */
+export const NARROW_NODE = "narrow";
+/** The node that records exactly it, of everything. */
+export const WIDE_NODE = "wide";
+/** The node whose reading is a long list of uniform rows and nothing else. */
+export const DENSE_NODE = "dense";
+/** The node held on a release nobody had published, and then for a reason this build has no wording for. */
+export const ADOPTING_NODE = "adopting";
+/** What it was waiting for the release of. */
+export const ADOPTING_AWAITS = "sdk";
+/**
+ * A hold reason written by an engine newer than the app reading it.
+ *
+ * The engine owns that vocabulary and releases on its own schedule, so a corpus of
+ * only recognised reasons can never put a reader in the state a real store will:
+ * a node held by two things where the app can name one, reading as held by one.
+ * This is the entry that does — and a journey asserts the app names it rather than
+ * quietly drawing a hold with nothing in it.
+ */
+export const UNREAD_HOLD_KIND = "budget";
+/** How many of them: comfortably more than a screen's worth at any supported size. */
+export const DENSE_RECORDS = 40;
+
+/** The node the live run's scheduler held behind other work before dispatching it. */
+export const QUEUE_BEHIND_NODE = "remote-open";
+/**
+ * What was ahead of it each time the engine wrote a hold for it.
+ *
+ * A hold is written when it begins and again whenever what holds the node
+ * *changes*, so three nodes finishing one at a time are three records naming three
+ * shrinking sets — which is the shape the timeline draws as successive spans.
+ */
+export const QUEUE_AHEAD = [
+  ["foundation", "dashboard", "local-direct"],
+  ["dashboard", "local-direct"],
+  ["local-direct"],
+];
+/** The node held for reasons that are not concurrency, and never released. */
+export const QUEUE_HELD_NODE = "queued";
+/** The decision point holding that node's subtree, as the engine spells one. */
+export const QUEUE_DECISION_REFERENCE = "surface:1";
+/** A node the run has said nothing at all about, which is not the same state. */
+export const QUEUE_QUIET_NODE = "followup";
+
 /** The change request the live run's first node published. */
 export const FOUNDATION_PR = "https://example.invalid/changes/12";
 /** The commit it merged as. No url beside it: the host owns that and records none. */
@@ -907,6 +959,32 @@ function writeLiveRun(root) {
       { status: "done", outcome: "merged", branch: "feature/local-direct" },
     );
 
+  // Before any of it, the queue. The loop's own account of why a node it has not
+  // settled is not running, written in the engine's own shape: one entry per reason
+  // holding it at once under `reasons`, and what was let go under `released`. The
+  // engine writes a hold when it begins and again whenever what holds the node
+  // *changes*, so this node sitting behind three running nodes that finish one at a
+  // time is three records naming three shrinking sets — which is what a real store
+  // carries and what the timeline draws as three successive spans.
+  for (const ahead of QUEUE_AHEAD) {
+    journal
+      .advance(2)
+      .emit(
+        "pipeline",
+        "node-held",
+        { ...run, node: QUEUE_BEHIND_NODE },
+        { reasons: [{ kind: "concurrency", ahead, limit: 3 }] },
+      );
+  }
+  journal.advance(2).emit(
+    "pipeline",
+    "node-unheld",
+    { ...run, node: QUEUE_BEHIND_NODE },
+    {
+      released: [{ kind: "concurrency", ahead: QUEUE_AHEAD.at(-1), limit: 3 }],
+    },
+  );
+
   // The publication the operator's own bar is read from: the repository's pre-push
   // hook ran, the host is running the checks branch protection requires, and the
   // change is still open behind them. Every record here is one `onevcs` emits.
@@ -1025,31 +1103,6 @@ function writeLiveRun(root) {
       file: "docs/contract.md",
       expected: "feature/remote-open",
       answer: "match",
-    },
-  );
-  // The loop's own account of why a node it has not settled is not running, and
-  // the record that says the hold cleared. Written in the engine's own shape —
-  // one entry per reason holding it at once, under `reasons`, and what was let
-  // go under `released` — so a reader meets what a real store carries: this node
-  // waited behind the concurrency limit while two others ran.
-  journal.advance(1).emit(
-    "pipeline",
-    "node-held",
-    { ...run, node: "remote-open" },
-    {
-      reasons: [
-        { kind: "concurrency", ahead: ["foundation", "dashboard"], limit: 2 },
-      ],
-    },
-  );
-  journal.advance(1).emit(
-    "pipeline",
-    "node-unheld",
-    { ...run, node: "remote-open" },
-    {
-      released: [
-        { kind: "concurrency", ahead: ["foundation", "dashboard"], limit: 2 },
-      ],
     },
   );
   journal.advance(1).emit(
@@ -1372,6 +1425,31 @@ function writeLiveRun(root) {
     { ...run, node: "approval" },
     { status: "waiting" },
   );
+  // And what that surface is holding, from the held node's own side. Two reasons at
+  // once — the dependency that has not settled and the decision point holding the
+  // subtree — and then one, when the dependency settles and the decision is all that
+  // is left. Nothing says either hold cleared, because neither has: this node is
+  // still queued where the records stop.
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-held",
+      { ...run, node: QUEUE_HELD_NODE },
+      {
+        reasons: [
+          { kind: "dependencies", blocking: ["approval"] },
+          { kind: "decision", reference: QUEUE_DECISION_REFERENCE },
+        ],
+      },
+    )
+    .advance(2)
+    .emit(
+      "pipeline",
+      "node-held",
+      { ...run, node: QUEUE_HELD_NODE },
+      { reasons: [{ kind: "decision", reference: QUEUE_DECISION_REFERENCE }] },
+    );
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
     node: "obsolete",
@@ -1788,6 +1866,26 @@ function writeBusyRun(root) {
         persona: "worker",
         task: "## What\nWork a node that dispatches many sessions.\n\n## Acceptance criteria\nEvery session settles",
       },
+      {
+        id: NARROW_NODE,
+        persona: "worker",
+        task: `## What\nRecord ${COLLAPSE_THRESHOLD - 1} of everything.\n\n## Acceptance criteria\nNothing collapses`,
+      },
+      {
+        id: WIDE_NODE,
+        persona: "worker",
+        task: `## What\nRecord ${COLLAPSE_THRESHOLD} of everything.\n\n## Acceptance criteria\nEvery kind collapses`,
+      },
+      {
+        id: DENSE_NODE,
+        persona: "worker",
+        task: `## What\nBe judged against ${DENSE_RECORDS} criteria.\n\n## Acceptance criteria\nEvery one of them is read`,
+      },
+      {
+        id: ADOPTING_NODE,
+        persona: "worker",
+        task: "## What\nAdopt the published sibling.\n\n## Acceptance criteria\nThe adopted version is the released one",
+      },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
@@ -1818,6 +1916,105 @@ function writeBusyRun(root) {
       );
     }
   }
+  // The boundary the reading collapses at, from both sides and for both kinds of
+  // row this list can hold. One node records one short of it and the other records
+  // exactly it, each as a run of dispatched sessions and a run of journal records,
+  // so a journey can ask whether the two kinds behave the same without holding two
+  // different runs side by side.
+  for (const [node, count] of [
+    [NARROW_NODE, COLLAPSE_THRESHOLD - 1],
+    [WIDE_NODE, COLLAPSE_THRESHOLD],
+  ]) {
+    journal.advance(1).emit("pipeline", "node-dispatched", {
+      ...run,
+      node,
+      persona: "worker",
+    });
+    for (let index = 0; index < count; index += 1) {
+      const session = `${node}-${index}`;
+      journal.advance(1);
+      relayTurn(
+        journal,
+        { ...run, node, persona: "worker", session },
+        session,
+        `Check ${index} of ${node}.`,
+        `Checked ${index} of ${node}`,
+      );
+    }
+    // The engine reading this node's acceptance criteria off the branch it settled
+    // on: one record per criterion, which is a run of near-identical rows whenever a
+    // node's bar has more than a couple of lines in it.
+    for (let index = 0; index < count; index += 1) {
+      journal.advance(1).emit(
+        "pipeline",
+        "criterion-checked",
+        { ...run, node },
+        {
+          criterion: `criterion ${index} of ${node}`,
+          file: "docs/contract.md",
+          expected: `literal ${index}`,
+          answer: "match",
+        },
+      );
+    }
+  }
+  // A node whose bar is long: one `criterion-checked` per criterion, which is a
+  // list of uniform rows and the shape the reading's density is read off. Nothing
+  // else is recorded against it, so what a journey counts is rows of one kind.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: DENSE_NODE,
+    persona: "worker",
+  });
+  for (let index = 0; index < DENSE_RECORDS; index += 1) {
+    journal.advance(1).emit(
+      "pipeline",
+      "criterion-checked",
+      { ...run, node: DENSE_NODE },
+      {
+        criterion: `criterion ${index}`,
+        file: "docs/contract.md",
+        expected: `literal ${index}`,
+        answer: "match",
+      },
+    );
+  }
+  // A node held for reasons that are neither concurrency nor a dependency: the
+  // release of a sibling nobody has published yet, and then a reason written by an
+  // engine newer than the app reading it. Both are real states of a run — the first
+  // is what `release-wait` is the other half of, and the second is what every hold
+  // looks like from a build one release behind.
+  journal
+    .advance(1)
+    .emit("pipeline", "node-ready", { ...run, node: ADOPTING_NODE }, {});
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-held",
+      { ...run, node: ADOPTING_NODE },
+      { reasons: [{ kind: "release", awaiting: [ADOPTING_AWAITS] }] },
+    )
+    .advance(2)
+    .emit(
+      "pipeline",
+      "node-held",
+      { ...run, node: ADOPTING_NODE },
+      { reasons: [{ kind: UNREAD_HOLD_KIND, ceiling: 4 }] },
+    )
+    .advance(2)
+    .emit(
+      "pipeline",
+      "node-unheld",
+      { ...run, node: ADOPTING_NODE },
+      { released: [{ kind: UNREAD_HOLD_KIND, ceiling: 4 }] },
+    )
+    .advance(1)
+    .emit("pipeline", "node-dispatched", {
+      ...run,
+      node: ADOPTING_NODE,
+      persona: "worker",
+    });
   journal.write();
 }
 
@@ -1857,6 +2054,25 @@ export function facts() {
     },
     foundation_pr: FOUNDATION_PR,
     unfiled_kind: UNFILED_KIND,
+    collapse: {
+      threshold: COLLAPSE_THRESHOLD,
+      narrow_node: NARROW_NODE,
+      wide_node: WIDE_NODE,
+      dense_node: DENSE_NODE,
+      dense_records: DENSE_RECORDS,
+    },
+    holds: {
+      adopting_node: ADOPTING_NODE,
+      awaits: ADOPTING_AWAITS,
+      unread_kind: UNREAD_HOLD_KIND,
+    },
+    queue: {
+      behind_node: QUEUE_BEHIND_NODE,
+      ahead: QUEUE_AHEAD,
+      held_node: QUEUE_HELD_NODE,
+      decision_reference: QUEUE_DECISION_REFERENCE,
+      quiet_node: QUEUE_QUIET_NODE,
+    },
     sessions: {
       worker: WORKER_SESSION,
       lint: LINT_SESSION,

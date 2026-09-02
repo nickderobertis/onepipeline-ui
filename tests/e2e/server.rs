@@ -624,7 +624,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(7));
+    assert_eq!(body["timeline_schema_version"], json!(8));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -926,6 +926,227 @@ fn the_run_timeline_covers_the_run_and_the_nodes_under_it() {
                 span["node_id"].as_str().expect("a node")
             ))
         );
+    }
+}
+
+/// A server over the run whose scheduler recorded why each node was waiting.
+fn held() -> Serving {
+    Serving::start(|root| {
+        fixture_run::write_held(root, fixture_run::HELD_RUN_ID);
+        // Beside it, a run recorded before the engine wrote any of those records:
+        // the same server, the same request, and the gap it always showed.
+        fixture_run::write(root, fixture_run::RUN_ID);
+    })
+}
+
+/// One node's spans of that run, at the scope an operator opens the node in.
+fn held_node_spans(serving: &Serving, node: &str) -> Vec<Value> {
+    http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={node}",
+            fixture_run::HELD_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone()
+}
+
+/// Every `queued` span among those served, in the order the run recorded them.
+fn queued_spans(spans: &[Value]) -> Vec<&Value> {
+    spans
+        .iter()
+        .filter(|span| span["kind"] == "queued")
+        .collect()
+}
+
+#[test]
+fn a_node_behind_running_work_is_served_a_span_per_hold_the_engine_recorded() {
+    let serving = held();
+    let spans = held_node_spans(&serving, fixture_run::HELD_BEHIND_NODE_ID);
+    let queued = queued_spans(&spans);
+
+    // Three holds, because three times the answer to "what is ahead of it"
+    // changed — and not one bar naming whatever was ahead of it first.
+    assert_eq!(queued.len(), 3, "{spans:?}");
+    let ahead: Vec<Vec<&str>> = queued
+        .iter()
+        .map(|span| {
+            span["reasons"][0]["ahead"]
+                .as_array()
+                .expect("the dispatches ahead of it")
+                .iter()
+                .map(|node| node.as_str().expect("a node id"))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        ahead,
+        vec![
+            fixture_run::HELD_AHEAD.to_vec(),
+            fixture_run::HELD_AHEAD[1..].to_vec(),
+            fixture_run::HELD_AHEAD[2..].to_vec(),
+        ],
+        "{queued:?}"
+    );
+    for span in &queued {
+        assert_eq!(span["reasons"][0]["kind"], json!("concurrency"));
+        assert_eq!(span["reasons"][0]["limit"], json!(3));
+        assert_eq!(
+            span["parent_id"],
+            json!(format!("node.{}", fixture_run::HELD_BEHIND_NODE_ID))
+        );
+        assert_eq!(
+            span["node_id"],
+            json!(fixture_run::HELD_BEHIND_NODE_ID),
+            "{span}"
+        );
+    }
+
+    // Each closes where the next one opens, and the last one closes where the
+    // hold cleared — which is a tenth of a second before the dispatch.
+    let bounds: Vec<(&str, &str)> = queued
+        .iter()
+        .map(|span| {
+            (
+                span["started_at"].as_str().expect("a start"),
+                span["ended_at"].as_str().expect("an end"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        bounds,
+        vec![
+            ("2026-08-07T12:00:04.100Z", "2026-08-07T12:00:10.100Z"),
+            ("2026-08-07T12:00:10.100Z", "2026-08-07T12:00:20.100Z"),
+            ("2026-08-07T12:00:20.100Z", "2026-08-07T12:00:30.100Z"),
+        ]
+    );
+    let dispatch = spans
+        .iter()
+        .find(|span| span["kind"] == "dispatch")
+        .map(|span| span["started_at"].clone());
+    assert!(
+        dispatch.is_none() || dispatch.as_ref().and_then(Value::as_str) > Some(bounds[2].1),
+        "the queue cleared after the dispatch it was holding: {spans:?}"
+    );
+}
+
+#[test]
+fn a_node_held_by_more_than_one_thing_names_each_of_them() {
+    let serving = held();
+    let spans = held_node_spans(&serving, fixture_run::HELD_MANY_NODE_ID);
+    let queued = queued_spans(&spans);
+    assert_eq!(queued.len(), 2, "{spans:?}");
+
+    // Two reasons in one span: an unsettled dependency and the decision point
+    // holding the subtree, each with its own kind's own fields, so a reader tells
+    // "held by two things" from "held by one" off the array alone.
+    let both = queued[0]["reasons"].as_array().expect("the reasons");
+    assert_eq!(both.len(), 2, "{}", queued[0]);
+    assert_eq!(
+        both[0],
+        json!({ "kind": "dependencies", "blocking": [fixture_run::HELD_AHEAD[0]] })
+    );
+    assert_eq!(
+        both[1],
+        json!({ "kind": "decision", "reference": fixture_run::HELD_DECISION_REFERENCE })
+    );
+
+    // And then one: a release nobody has published, which is neither of the
+    // other two and is drawn as neither.
+    assert_eq!(
+        queued[1]["reasons"],
+        json!([{ "kind": "release", "awaiting": [fixture_run::HELD_RELEASE_DEP] }])
+    );
+    // Nothing said the hold cleared, so the span is left open rather than closed
+    // at an instant this crate invented.
+    assert_eq!(queued[1]["ended_at"], Value::Null, "{}", queued[1]);
+}
+
+#[test]
+fn a_hold_whose_reasons_this_build_cannot_read_is_served_as_no_span_at_all() {
+    let serving = held();
+    let spans = held_node_spans(&serving, fixture_run::HELD_UNREADABLE_NODE_ID);
+    assert!(
+        queued_spans(&spans).is_empty(),
+        "a hold naming nothing was drawn as an explanation: {spans:?}"
+    );
+    // The same server, the same run: a hold this build *can* read is a span, so
+    // the absence above is this crate declining to draw one rather than nothing
+    // being drawn at all.
+    assert!(
+        !queued_spans(&held_node_spans(&serving, fixture_run::HELD_BEHIND_NODE_ID)).is_empty(),
+        "no queued span was served for any node, so this proves nothing"
+    );
+    // The record itself is still an event of the node, so the reader who wants it
+    // has it — it is only the *span* that is withheld.
+    let node = span_named(
+        &spans,
+        &format!("node.{}", fixture_run::HELD_UNREADABLE_NODE_ID),
+    );
+    assert!(
+        node["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .any(|event| event["kind"] == "node-held"),
+        "{node}"
+    );
+}
+
+#[test]
+fn a_run_recorded_before_the_engine_wrote_a_hold_is_served_with_no_invented_span() {
+    let serving = held();
+    // The run beside it on the same server does record holds and is served them,
+    // so what follows is about the historical store rather than about a server
+    // that draws no queued span for anything.
+    assert!(
+        !queued_spans(&held_node_spans(&serving, fixture_run::HELD_BEHIND_NODE_ID)).is_empty(),
+        "no queued span was served for any node, so this proves nothing"
+    );
+    for scope in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let body = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?{scope}", fixture_run::RUN_ID),
+        )
+        .json();
+        let spans = body["spans"].as_array().expect("spans");
+        assert!(
+            queued_spans(spans).is_empty(),
+            "a run that recorded no hold was served one: {spans:?}"
+        );
+        assert!(
+            spans.iter().all(|span| span.get("reasons").is_none()),
+            "a span that is not a hold carries hold reasons: {spans:?}"
+        );
+    }
+}
+
+#[test]
+fn the_run_scope_timeline_carries_every_nodes_queue_under_that_node() {
+    let serving = held();
+    let spans = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::HELD_RUN_ID
+        ),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .clone();
+    let queued = queued_spans(&spans);
+    assert_eq!(queued.len(), 5, "{spans:?}");
+    for span in &queued {
+        let node = span["node_id"].as_str().expect("a node");
+        assert_eq!(span["parent_id"], json!(format!("node.{node}")), "{span}");
     }
 }
 

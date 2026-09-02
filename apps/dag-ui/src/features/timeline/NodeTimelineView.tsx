@@ -47,13 +47,17 @@ import { EventCategoryIcon } from "./event-category";
 import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
+  collapseLabel,
   compactTimelineItems,
   compactTimelineMarkers,
   type DispatchGroup,
   findRow,
   nodeTimeline,
   nodeTimelineV2,
+  pathTo,
   type TimelineRow,
+  type TranscriptEntry,
+  transcriptEntries,
 } from "./timeline-model";
 
 /**
@@ -298,13 +302,40 @@ function NodeExecution({
     () => nodeTimelineV2(timeline, node.id),
     [timeline, node.id],
   );
+  // Which collapsed runs the reader has opened. Held here rather than in the
+  // projection because it is the reader's own state: what the run recorded is the
+  // same either way.
+  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  // A row the address names is a row the reader asked for, so the run holding it
+  // opens whether or not they opened it themselves — otherwise a bookmarked
+  // moment inside a collapsed run lands on a reading that does not contain it.
+  const selectedRun = useMemo(() => {
+    if (selectedItemId === undefined) return undefined;
+    return pathTo(projection.tree, selectedItemId).find(
+      (row) => row.rowKind === "group",
+    )?.id;
+  }, [projection.tree, selectedItemId]);
+  const openNow = useMemo(
+    () =>
+      selectedRun === undefined
+        ? openRuns
+        : new Set<string>([...openRuns, selectedRun]),
+    [openRuns, selectedRun],
+  );
+  const reading = useMemo(
+    () => transcriptEntries(projection.tree, openNow),
+    [projection.tree, openNow],
+  );
   const entries = useMemo(
     () =>
-      projection.rows.map((row) => ({
-        id: row.id,
-        time: Date.parse(row.startedAt),
-      })),
-    [projection.rows],
+      reading.flatMap((entry) =>
+        entry.entryKind === "row"
+          ? [{ id: entry.row.id, time: Date.parse(entry.row.startedAt) }]
+          : [],
+      ),
+    [reading],
   );
   const sync = useTimelineScrollSync(entries);
   const [expanded, setExpanded] = useState(false);
@@ -374,25 +405,40 @@ function NodeExecution({
         className="node-transcript"
         ref={sync.containerRef}
       >
-        {transcriptRuns(projection.rows).map((entry) => {
-          const items = entry.rows.map((row) => (
-            <TranscriptItem
-              key={row.id}
-              onOpen={select}
-              register={sync.register}
-              row={row}
-              selected={row.id === selectedItemId}
-            />
-          ));
-          return entry.dispatch === undefined ? (
-            <Fragment key={entry.id}>{items}</Fragment>
+        {transcriptRuns(reading).map((run) => {
+          const items = run.entries.map((entry) =>
+            entry.entryKind === "row" ? (
+              <TranscriptItem
+                key={entry.row.id}
+                onOpen={select}
+                register={sync.register}
+                row={entry.row}
+                selected={entry.row.id === selectedItemId}
+              />
+            ) : (
+              <CollapsedRun
+                entry={entry}
+                key={`collapse-${entry.group.id}`}
+                onToggle={() =>
+                  setOpenRuns((open) => {
+                    const next = new Set(open);
+                    if (next.has(entry.group.id)) next.delete(entry.group.id);
+                    else next.add(entry.group.id);
+                    return next;
+                  })
+                }
+              />
+            ),
+          );
+          return run.dispatch === undefined ? (
+            <Fragment key={run.id}>{items}</Fragment>
           ) : (
             <section
-              aria-label={entry.dispatch.label}
+              aria-label={run.dispatch.label}
               className="transcript-dispatch"
-              key={entry.id}
+              key={run.id}
             >
-              <h3>{entry.dispatch.label}</h3>
+              <h3>{run.dispatch.label}</h3>
               {items}
             </section>
           );
@@ -442,26 +488,62 @@ function timeRange(
  *
  * The rows of a dispatch arrive consecutively — the projection lists an agent session
  * and then the sessions recorded inside it — so a run of them is a group, and every
- * other row is a group of one.
+ * other row is a group of one. A collapse control travels with the run it stands
+ * for, so opening one inside a dispatch does not tear the dispatch in two.
  */
-function transcriptRuns(rows: readonly TimelineRow[]): readonly {
+function transcriptRuns(reading: readonly TranscriptEntry[]): readonly {
   readonly id: string;
   readonly dispatch?: DispatchGroup;
-  readonly rows: readonly TimelineRow[];
+  readonly entries: readonly TranscriptEntry[];
 }[] {
-  const runs: { id: string; dispatch?: DispatchGroup; rows: TimelineRow[] }[] =
-    [];
-  for (const row of rows) {
+  const runs: {
+    id: string;
+    dispatch?: DispatchGroup;
+    entries: TranscriptEntry[];
+  }[] = [];
+  for (const entry of reading) {
+    const subject = entry.entryKind === "row" ? entry.row : entry.group;
     const open = runs.at(-1);
     if (
-      row.dispatch !== undefined &&
+      subject.dispatch !== undefined &&
       open?.dispatch !== undefined &&
-      open.dispatch.id === row.dispatch.id
+      open.dispatch.id === subject.dispatch.id
     )
-      open.rows.push(row);
-    else runs.push({ id: row.id, dispatch: row.dispatch, rows: [row] });
+      open.entries.push(entry);
+    else
+      runs.push({
+        id: subject.id,
+        dispatch: subject.dispatch,
+        entries: [entry],
+      });
   }
   return runs;
+}
+
+/**
+ * The middle of a collapsed run, and the one control that puts it back.
+ *
+ * The count and the kind are the button's own words rather than a shape beside it,
+ * so a reader who cannot see the ellipsis is told exactly what is behind it and how
+ * much of it there is. `aria-expanded` is what says which way the control goes, and
+ * it is the same button both ways: one thing to find, one thing to press.
+ */
+function CollapsedRun({
+  entry,
+  onToggle,
+}: {
+  readonly entry: Extract<TranscriptEntry, { entryKind: "collapse" }>;
+  readonly onToggle: () => void;
+}) {
+  const named = collapseLabel(entry.hidden, entry.group.kind);
+  return (
+    <p className="transcript-collapsed">
+      <button aria-expanded={entry.expanded} onClick={onToggle} type="button">
+        <span aria-hidden="true">…</span>
+        {entry.expanded ? `Collapse ${named}` : `Show ${named}`}
+      </button>
+    </p>
+  );
 }
 
 function TranscriptItem({

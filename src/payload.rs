@@ -4471,6 +4471,7 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
                 && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
         });
         spans.extend(waiting_span(view, settled, &node_id, node));
+        spans.extend(queued_spans(&mine, &node_id, node));
         spans.extend(role_rollups(&mine, &node_id, node));
         spans.extend(kept_spans(view, &mine, &node_id, node));
     }
@@ -4862,6 +4863,141 @@ fn waiting_span(
     }))
 }
 
+/// Which of the loop's two hold records one envelope is.
+///
+/// Both bound a span — a hold that changed opens the next one and closes the one
+/// before it, and the clearance closes the last — so what separates them is not
+/// *whether* they matter but which end they are. A `bool` here read as neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldMark {
+    /// `node-held`: the loop is not running this node, and these are the reasons.
+    Held,
+    /// `node-unheld`: the hold cleared.
+    Cleared,
+}
+
+/// Why the loop was not running this node, drawn as the spans it recorded.
+///
+/// The engine writes `node-held` when a hold **begins** and again whenever what
+/// the node is held by **changes**, and `node-unheld` when it clears — never on a
+/// pass where a node is held by what it was already held by. Those transitions are
+/// what makes the queue legible: a node behind three running nodes is held first
+/// by all three, then by the two that are left, then by the last, and then it
+/// dispatches. So each record opens a span that closes at the next record of
+/// either kind, and the last one closes at the `node-unheld` — which is why a
+/// reader meets three successive spans naming three shrinking sets rather than one
+/// bar naming whatever was ahead of it first.
+///
+/// A node still held serves the last span with a null `ended_at`, on the rule every
+/// unclosed span here is served by. **A run recorded before the engine wrote any of
+/// this serves no queued span at all**: the gap it shows today is the gap it goes
+/// on showing, because a span inferred from a dispatch that came late would be
+/// indistinguishable from one the run actually recorded.
+fn queued_spans(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<Value> {
+    let marks: Vec<(usize, &Envelope, HoldMark)> = events
+        .iter()
+        .filter_map(|(index, event)| {
+            if event.source != Source::Pipeline {
+                return None;
+            }
+            match PipelineKind::from_wire(&event.kind) {
+                Some(PipelineKind::NodeHeld) => Some((*index, *event, HoldMark::Held)),
+                Some(PipelineKind::NodeUnheld) => Some((*index, *event, HoldMark::Cleared)),
+                _ => None,
+            }
+        })
+        .collect();
+    let mut spans: Vec<Value> = Vec::new();
+    for (position, (index, event, mark)) in marks.iter().enumerate() {
+        if *mark != HoldMark::Held {
+            continue;
+        }
+        let reasons = hold_reasons(event.payload.get("reasons"));
+        // A record whose every entry this build could not read says nothing a
+        // reader can act on, and a span carrying no reason would draw the empty
+        // interval back as an explanation nobody wrote.
+        if reasons.is_empty() {
+            continue;
+        }
+        let mut span = Map::new();
+        // Keyed by the record that opened it, because a node is held several
+        // times over and the *hold* is what each span identifies.
+        span.insert("id".into(), json!(format!("queued.{node}.{index}")));
+        span.insert("kind".into(), json!("queued"));
+        span.insert("label".into(), json!(node));
+        span.insert("started_at".into(), json!(event.ts));
+        span.insert(
+            "ended_at".into(),
+            marks
+                .get(position + 1)
+                .map_or(Value::Null, |(_, next, _)| json!(next.ts)),
+        );
+        span.insert("parent_id".into(), json!(parent));
+        span.insert("node_id".into(), json!(node));
+        span.insert("reasons".into(), Value::Array(reasons));
+        span.insert("events".into(), json!(Vec::<Value>::new()));
+        spans.push(Value::Object(span));
+    }
+    spans
+}
+
+/// The `reasons` array one hold record carried, as the wire serves it.
+///
+/// `kind` is the one thing an entry must carry and it is served **open**, on the
+/// terms a timeline event's own `kind` is: the vocabulary is the engine's and it
+/// is released on its own schedule, so a reason a later engine writes reaches a
+/// reader as its own distinct reason rather than being dropped — which is what
+/// keeps "held by two things" from reading as "held by one". Every other field is
+/// served exactly where the record carried one this build could read, on the same
+/// discipline [`release_facts`] keeps: nothing here is defaulted, because a field
+/// filled in here would be this crate saying something no record did.
+///
+/// The four the engine writes today are `dependencies` (`blocking`, the
+/// dependencies that have not settled), `concurrency` (`ahead`, the dispatches in
+/// flight, and the run's `limit`), `decision` (`reference`, the decision point
+/// holding the subtree) and `release` (`awaiting`, the dependencies whose releases
+/// have not happened). What a decision or a release *is* stays on the
+/// `decision-pending` and `release-wait` records beside it; these name only which
+/// one holds the node.
+fn hold_reasons(reasons: Option<&Value>) -> Vec<Value> {
+    let Some(entries) = reasons.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    entries.iter().filter_map(hold_reason).collect()
+}
+
+/// One entry of that array, or `None` for one that names no reason at all.
+fn hold_reason(entry: &Value) -> Option<Value> {
+    let entry = entry.as_object()?;
+    let mut reason = Map::new();
+    reason.insert(
+        "kind".into(),
+        json!(non_empty(entry.get("kind").and_then(Value::as_str))?),
+    );
+    for key in ["blocking", "ahead", "awaiting"] {
+        let named: Vec<Value> = entry
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| non_empty(id.as_str()))
+                    .map(|id| json!(id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !named.is_empty() {
+            reason.insert(key.to_owned(), Value::Array(named));
+        }
+    }
+    if let Some(limit) = entry.get("limit").and_then(Value::as_u64) {
+        reason.insert("limit".into(), json!(limit));
+    }
+    if let Some(reference) = non_empty(entry.get("reference").and_then(Value::as_str)) {
+        reason.insert("reference".into(), json!(reference));
+    }
+    Some(Value::Object(reason))
+}
+
 /// What a node kept: one span per artifact it stored, and the branch it published.
 fn kept_spans(
     view: &RunView,
@@ -5065,6 +5201,7 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     });
 
     spans.extend(waiting_span(view, settled, &node_id, node));
+    spans.extend(queued_spans(&events, &node_id, node));
 
     // The evidence the node kept and the branch it published: both sit inside
     // the dispatch they were recorded during, so both are appended after it.
