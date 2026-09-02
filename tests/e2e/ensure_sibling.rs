@@ -41,7 +41,7 @@ use crate::stub_bin;
 const SUITES_THAT_START_THE_READ_API: [&str; 3] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-baseline",
-    "dag-ui:test-browser",
+    "dag-ui-e2e:test-browser",
 ];
 
 /// The targets those tasks are reached through, which is what Nx is asked for.

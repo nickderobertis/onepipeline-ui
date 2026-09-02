@@ -5,31 +5,18 @@ is the bar it is held to, not a tour of it.
 
 ## The bar is journeys, not a number
 
-There is no line-coverage floor here. A change to what a reader sees is not done
-until a journey drives it, in a browser, against the **built bundle** and a real
-`onepipeline-api serve` over a recorded run directory — the artifact the
-`onepipeline-ui` npm package ships, served by `vite preview`, because a dev server
-is not what any reader ever loads — `playwright.config.ts` for the journeys and
-`isolation.config.ts` for what one run of that tier owes another. Nothing between
-the browser and the read model is doubled.
+There is no line-coverage floor here. `test` is this project's whole tier and it
+is components: what a reader *sees* is held by `dag-ui-e2e`, whose own AGENTS.md
+states that bar, and a change to a surface is not done until a journey there
+drives it in a browser against the built bundle.
 
-Between them is `test-integration`, which starts a real Vite over the real config
-and no browser. Three tiers, split on what each starts: the components start
-nothing, this starts a server, the journeys start five.
+The split is what each tier starts. This one starts nothing and answers in
+seconds; the journeys start five servers and take minutes. `check` depends on
+both, so only somebody asking for one by name is spared the other.
 
-Those two configs are `test-browser` and the components are `test`, because the
-first starts five servers and takes minutes and the second takes seconds: a
-reader iterating on a component should not pay for the fleet. `check` runs both,
-so nothing is spared the journeys except somebody who asked for the unit tier by
-name.
-
-They are targets of this project rather than a project of their own, and that is
-not for want of trying: the journeys import the app's own source — the category
-scheme they hold to — and the Playwright config that chose this run's ports, and
-`@nx/enforce-module-boundaries` refuses both across a project line. A project of
-their own means an npm-scope alias for the app's source and the configs moved in
-beside them, which is a change to how the frontend is imported rather than to how
-it is tested.
+What the journeys may reach of this app is `@onepipeline-ui/dag-ui/testing`, the
+export in `src/testing/`. Anything a journey needs from here goes through it
+rather than through a path into `src/`, so an internal move stays internal.
 
 `just dag-ui-screens` photographs every surface at every viewport in the matrix.
 It asserts nothing; it is how the operator sees a polish problem at a width

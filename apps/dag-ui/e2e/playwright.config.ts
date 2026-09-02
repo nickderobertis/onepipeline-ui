@@ -23,6 +23,15 @@ import { z } from "zod";
 const LOOPBACK = "127.0.0.1";
 
 /**
+ * The app these journeys drive, which is where every server below runs from.
+ *
+ * The journeys are a project of their own and this config sits with them, one
+ * directory below the app: the servers still start in the app, because that is
+ * where its `vite.config.ts`, its built bundle and the fixture script are.
+ */
+const APP = join(import.meta.dirname, "..");
+
+/**
  * Everything one run of this tier must not share with another: its ports and the
  * fixture directory its servers build.
  *
@@ -136,12 +145,15 @@ export const STALLED_UI_URL = `http://${LOOPBACK}:${session.stalledUi}`;
 export const FIXTURE_WORKSPACE = session.workspace;
 
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: ".",
   // The gallery lives beside the journeys because it drives the same surfaces against
   // the same stack, but it asserts nothing and writes images; `screenshots.config.ts`
   // selects it, and `just dag-ui-screens` is when it runs.
-  testIgnore: "**/*.screens.spec.ts",
-  globalTeardown: "./e2e/global-teardown.ts",
+  // The gallery asserts nothing and `isolation/` runs *this* config rather than
+  // being run by it; both would otherwise be selected, since the journeys and
+  // they now share a directory.
+  testIgnore: ["**/*.screens.spec.ts", "isolation/**"],
+  globalTeardown: "./global-teardown.ts",
   /**
    * Budgeted for this host rather than inherited. Every wait here crosses the browser,
    * the dev server, the axum server and a disk read, and this host runs live agent dispatches
@@ -183,6 +195,7 @@ export default defineConfig({
   webServer: [
     {
       name: "fixture-api",
+      cwd: APP,
       command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
       url: `http://${LOOPBACK}:${session.api}/healthz`,
       reuseExistingServer: false,
@@ -191,6 +204,7 @@ export default defineConfig({
     },
     {
       name: "ui",
+      cwd: APP,
       command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.ui} --strictPort`,
       url: `http://${LOOPBACK}:${session.ui}`,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.api}` },
@@ -200,6 +214,7 @@ export default defineConfig({
     },
     {
       name: "stalled-api",
+      cwd: APP,
       command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
       /**
        * Readiness is what this server says, because it is the one server here that
@@ -223,6 +238,7 @@ export default defineConfig({
     },
     {
       name: "stalled-ui",
+      cwd: APP,
       command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.stalledUi} --strictPort`,
       url: STALLED_UI_URL,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.stalledApi}` },
@@ -232,6 +248,7 @@ export default defineConfig({
     },
     {
       name: "offline-ui",
+      cwd: APP,
       command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.offlineUi} --strictPort`,
       url: OFFLINE_UI_URL,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.offlineApi}` },

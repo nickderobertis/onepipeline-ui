@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { VIEWPORTS } from "../../e2e/viewports";
 import { EVENT_CATEGORIES } from "../features/timeline/event-category";
 import { repoFile } from "./repo-file";
 
@@ -16,9 +15,13 @@ import { repoFile } from "./repo-file";
  * all watching it. Prose cannot be derived from a declaration at runtime, so this is
  * what ties them together.
  *
- * `SURFACES` is read as text rather than imported: it is declared inside a Playwright
- * spec, and importing that under vitest would pull a browser test runner into a unit
- * test to read eight strings out of it.
+ * Both are read as text rather than imported, and for two reasons that arrive at the
+ * same place: `SURFACES` is declared inside a Playwright spec, and importing that
+ * under vitest would pull a browser test runner into a unit test to read eight
+ * strings out of it; and both files belong to `dag-ui-e2e`, a project of its own,
+ * whose files this one may no more reach into than a journey may reach into `src/`.
+ * What is asserted is the same either way — the declaration these tables are drawn
+ * from — because reading a declaration as text is still reading the declaration.
  */
 
 /**
@@ -75,9 +78,17 @@ describe("docs/dag-ui.md", () => {
   const documentation = repoFile("docs/dag-ui.md");
 
   it("tabulates exactly the viewport matrix the gallery captures at", () => {
+    // Every `sized(width, height)` the matrix declares, in the order it declares
+    // them, named the way that helper names them.
+    const declared = [
+      ...repoFile("apps/dag-ui/e2e/viewports.ts").matchAll(
+        /^ {2}sized\((\d+), (\d+)\),$/gm,
+      ),
+    ].map(([, width, height]) => `${width}x${height}`);
+    expect(declared.length).toBeGreaterThan(0);
     expect(
       tableKeys(documentation, "| Viewport | What it stands for |"),
-    ).toEqual(VIEWPORTS.map(({ name }) => name));
+    ).toEqual(declared);
   });
 
   it("states the number of categories a journal marker is drawn as", () => {

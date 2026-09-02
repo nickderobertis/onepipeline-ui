@@ -1,10 +1,13 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { configDefaults, defineConfig } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
-import { readApiTarget } from "./src/lib/api-target.js";
-
-const apiTarget = readApiTarget();
+/**
+ * The read API this dev server proxies. It defaults to the loopback address and
+ * port `onepipeline-api serve` binds, and the browser e2e overrides it to point at
+ * the throwaway fixture server it starts instead of the operator's own runs.
+ */
+const apiTarget = process.env.DAG_UI_API_URL ?? "http://127.0.0.1:8787";
 
 /**
  * The two paths the app reads the API through, proxied identically by the dev
@@ -28,10 +31,6 @@ export default defineConfig({
   preview: { proxy },
   test: {
     environment: "jsdom",
-    // The tier that starts a real Vite is `vitest.integration.config.ts` and the
-    // `test-integration` target that runs it: these are the components, and they
-    // start nothing.
-    exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: true,

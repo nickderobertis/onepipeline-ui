@@ -3,6 +3,9 @@
   "version": "0.0.0-workspace",
   "private": true,
   "type": "module",
+  "exports": {
+    "./testing": "./src/testing/index.ts"
+  },
   "scripts": {
     "dev": "vite"
   },

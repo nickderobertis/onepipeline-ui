@@ -111,7 +111,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint typecheck build test test-baseline test-integration test-browser doc
+check: fmt-check lint typecheck build test test-baseline test-browser doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -196,12 +196,6 @@ test-baseline:
 # Every project's browser journeys.
 test-browser:
     @bash scripts/nx.sh run-many -t test-browser
-
-# The tier between the two: no browser, but a real server started per test. Its
-# own edge for the same reason as the two above.
-# Every project's integration tests.
-test-integration:
-    @bash scripts/nx.sh run-many -t test-integration
 
 # Build every project's docs with warnings denied.
 doc:

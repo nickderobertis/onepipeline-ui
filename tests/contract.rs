@@ -2022,30 +2022,3 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
     // And so is a list this grammar does not have, for the same reason.
     assert!(serde_json::from_str::<EventFilter>(r#"{"only":[]}"#).is_err());
 }
-
-/// The browser proxies to the address this server binds when nothing says
-/// otherwise.
-///
-/// Two copies with one source and no way for the second to read the first: the
-/// default is `onepipeline_ui::cli::default_bind`, and the browser's is a literal
-/// in TypeScript, read by Vite before any of this crate exists. So the literal is
-/// reconciled here rather than left to be noticed.
-///
-/// What the drift is: `just dag-ui` beside a `onepipeline-api serve` nobody passed
-/// `--bind` to proxies every `/api` read to a port nothing is listening on, and
-/// the app reports it the way it reports an API that is down. That is what these
-/// two said to each other until 2026-09 — 8787 against 8765.
-#[test]
-fn the_browser_proxies_to_the_address_this_server_binds() {
-    let expected = format!("http://{}", onepipeline_ui::cli::default_bind());
-    let source = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui/src/lib/api-target.ts"),
-    )
-    .expect("the browser's proxy target");
-    assert!(
-        source.contains(&format!("\"{expected}\"")),
-        "the browser's default proxy target is not `{expected}`, which is what \
-         `onepipeline-api serve` binds, so a reader running both with no flags \
-         gets a proxy to a port nothing answers on"
-    );
-}

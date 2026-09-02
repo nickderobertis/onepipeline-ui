@@ -28,24 +28,8 @@
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts"
     },
-    "test-integration": {
-      "command": "cd apps/dag-ui && npx vitest run --config vitest.integration.config.ts"
-    },
-    "test-browser": {
-      "command": "cd apps/dag-ui && npx playwright test --config playwright.config.ts && npx playwright test --config isolation.config.ts",
-      "inputs": ["default", "apiServerSurface"],
-      "dependsOn": [
-        "build",
-        "build-api-server",
-        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" }
-      ]
-    },
     "typecheck": {
       "command": "npx tsc -p apps/dag-ui/tsconfig.json --noEmit"
-    },
-    "bootstrap": {
-      "command": "cd apps/dag-ui && npx playwright install chromium",
-      "dependsOn": ["build", "build-api-server"]
     },
     "format": {
       "command": "npx biome check --write --linter-enabled=false apps/dag-ui"

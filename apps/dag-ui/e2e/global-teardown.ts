@@ -1,5 +1,5 @@
 import { rmSync } from "node:fs";
-import { FIXTURE_WORKSPACE } from "../playwright.config";
+import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
  * Remove the fixture directory this run made for itself, and say which one.

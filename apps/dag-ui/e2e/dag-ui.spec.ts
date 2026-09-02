@@ -19,13 +19,8 @@ import {
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { EVENT_CATEGORIES } from "@onepipeline-ui/dag-ui/testing";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import {
-  FIXTURE_WORKSPACE,
-  OFFLINE_UI_URL,
-  STALLED_UI_URL,
-} from "../playwright.config";
-import { EVENT_CATEGORIES } from "../src/features/timeline/event-category";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -33,6 +28,11 @@ import {
   metric as metricTile,
   metrics as metricTiles,
 } from "./observatory-locators";
+import {
+  FIXTURE_WORKSPACE,
+  OFFLINE_UI_URL,
+  STALLED_UI_URL,
+} from "./playwright.config";
 import { PHONE } from "./viewports";
 
 /**
@@ -137,6 +137,16 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  * the server is serving, and the ones that ask it to serve and are refused before
  * it can. `env` is empty unless a case is about what the command reads from it.
  */
+/**
+ * The fixture command, named absolutely.
+ *
+ * These journeys are launched from the workspace root — Playwright resolves a
+ * relative `--config` against the nearest `package.json` rather than against the
+ * working directory, so the tier names its config from the root and every path a
+ * journey spawns has to be independent of where that left `process.cwd()`.
+ */
+const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
+
 function invokeFixture(
   args: string[],
   workspace = FIXTURE_WORKSPACE,
@@ -144,7 +154,7 @@ function invokeFixture(
 ): void {
   execFileSync(
     process.execPath,
-    ["e2e/fixtures/serve-fixture.mjs", "--workspace", workspace, ...args],
+    [FIXTURE_COMMAND, "--workspace", workspace, ...args],
     { stdio: ["ignore", "inherit", "pipe"], env: { ...process.env, ...env } },
   );
 }
@@ -3160,10 +3170,14 @@ test("refuses to serve when the read API has not been built", () => {
 
 /**
  * The binary `dag-ui:build-api-server` built, which this run is already being served
- * through. Resolved against the working directory the tier runs from, as the fixture
- * path in `invokeFixture` is.
+ * through. Named from this file rather than from the working directory, for the
+ * reason `FIXTURE_COMMAND` is: the tier is launched from the workspace root, and a
+ * path that counted directories up from there named one outside the checkout.
  */
-const API_BINARY = resolve("../../target/debug/onepipeline-api");
+const API_BINARY = resolve(
+  import.meta.dirname,
+  "../../../target/debug/onepipeline-api",
+);
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
 function holdPort(port: number): Promise<() => void> {
@@ -3196,7 +3210,7 @@ test("says which ports the stall server took, and refuses one it cannot", async 
   const stalling = spawn(
     process.execPath,
     [
-      "e2e/fixtures/serve-fixture.mjs",
+      FIXTURE_COMMAND,
       "--stall",
       "--port",
       String(port),
@@ -3327,13 +3341,7 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
     const port = await freePort();
     const served = spawn(
       process.execPath,
-      [
-        "e2e/fixtures/serve-fixture.mjs",
-        "--workspace",
-        workspace,
-        "--port",
-        String(port),
-      ],
+      [FIXTURE_COMMAND, "--workspace", workspace, "--port", String(port)],
       {
         stdio: ["ignore", "inherit", "inherit"],
         env: { ...process.env, CARGO_TARGET_DIR: target },
