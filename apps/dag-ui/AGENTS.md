@@ -65,6 +65,39 @@ the node view by design. Split apart, one of them has to reach into the other's
 internals, which is the coupling the feature boundary exists to prevent. A
 module both features need and neither owns belongs in `src/lib/` instead.
 
+## What a live update costs the run list, and what makes a read stale
+
+Two rules in `useDagTelemetry`, both of them the fix for a defect that made this
+view unusable on a host where anything was running. Neither is visible from the
+code that would break them.
+
+**An invalidation refreshes the row it names, and nothing else.** The stream is an
+invalidation channel: a frame names one run. Re-listing the first page in answer to
+one discards every page the reader scrolled to — twice a second on a busy host, so
+the list snapped back to the top and could not be paged at all. The refresh goes
+through the run-list route's `?select=`, whose three rulings are `docs/contract.md`'s
+and not this app's: a row it serves replaces the one held, a run named in `missing`
+has its row dropped, and a run the answer says nothing about is left alone, because
+a selection never surveys the runs root.
+
+**A read is discarded on what it is, never on when it started.** What makes two
+reads the same reading is the run, the timeline scope and the filter together; a
+read still current for that reading lands even though an invalidation arrived while
+it was in flight. Discarding on the effect instance instead is what made a live run
+impossible to open: with the server polling twice a second and a read of a big run
+taking twenty, every read was marked stale before it could land and the detail was
+never set. The same rule in the other direction is why a run the reader has moved
+away from is still discarded — the reading changed, so the read is not this one's.
+One reading is read at a time for the same reason: a stream that invalidates faster
+than the server answers would otherwise put forty reads of one run in flight, each
+making the next slower.
+
+The one read failure this hook swallows — `run_not_found` on the **detail** route,
+a run swept between the read that listed it and the read that fetched it — is
+matched on the code and not the status, and the list route's `missing` does not
+retire it: that is a different route, and it says nothing about a detail read
+already out.
+
 ## What the backend cannot answer
 
 Some of the client's model has no record behind it. A surface needing one of

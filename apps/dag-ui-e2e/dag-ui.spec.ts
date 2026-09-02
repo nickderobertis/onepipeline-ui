@@ -2061,10 +2061,6 @@ test("navigates historical DAGs from one list tagged by launching session", asyn
   await expect(liveMarker).toBeVisible();
   await liveMarker.hover();
   await expect(page.getByRole("tooltip")).toContainText("Live");
-  // The settled row's mark carries its own name too, for the same reason.
-  await expect(
-    historyRow.getByRole("img", { name: "Historical" }),
-  ).toBeVisible();
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(graphNodes(page, "done")).toContainText("archive");
@@ -3053,23 +3049,28 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   // The run list is the other surface that states an outcome, and `settled` — the
   // word this executor's own CLI prints — is a state the package's badge does not
   // know at all.
-  const runBadge = (runId: string): Locator =>
-    page
-      .getByRole("button", { name: RegExp(runId) })
-      .locator('[data-slot="badge"]');
-  await expect(runBadge(runs().history)).toHaveCSS(
+  const runRow = (runId: string): Locator =>
+    page.getByRole("button", { name: RegExp(runId) });
+  const runMark = (runId: string): Locator => runRow(runId).locator(".run-dot");
+  await expect(runRow(runs().history)).toContainText("settled");
+  await expect(runMark(runs().history)).toHaveCSS(
     "color",
     await tokenColor(page, "--success"),
   );
-  await expect(runBadge(runs().live)).toHaveCSS(
+  await expect(runRow(runs().live)).toContainText("active");
+  await expect(runMark(runs().live)).toHaveCSS(
     "color",
     await tokenColor(page, "--info"),
   );
   // A run's state is an open string in the read contract, and the sibling run's
   // driver is gone without a result having been recorded — a real state with no
-  // outcome in it. The list says the word and stops there rather than colouring it.
-  await expect(runBadge(runs().sibling)).toHaveText("driver-dead");
-  await expect(runBadge(runs().sibling)).toHaveCSS("color", neutral);
+  // outcome in it. The list says the word and paints its mark with no meaning in
+  // it rather than borrowing one of the tones above.
+  await expect(runRow(runs().sibling)).toContainText("driver-dead");
+  await expect(runMark(runs().sibling)).toHaveCSS(
+    "color",
+    await tokenColor(page, "--muted-foreground"),
+  );
 
   // And the canvas says the same things on its own surfaces, out of the same tokens
   // rather than the hex values it used to carry. `waiting` is blocked work, the one
@@ -3625,7 +3626,12 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
 
   // A run moves for real: one appended record the server's own poll notices.
   listReads.length = 0;
-  changeServedRuns(["--record-activity", "Grep", "one row moved"]);
+  changeServedRuns([
+    "--record-activity",
+    "Grep",
+    "--activity-detail",
+    "one row moved",
+  ]);
 
   // The row that moved is refreshed by naming it, so the reading costs one row …
   await expect
@@ -3658,8 +3664,9 @@ test("opens a run that is recording faster than a read of it completes", async (
     // not discarded merely because something moved while it was in flight, and no
     // second read of it is started to make the first one slower. Bounded well inside
     // the churn, so a detail that only arrives once the run stops moving fails here.
-    await expect(graphNodes(page).first()).toBeVisible({ timeout: 8_000 });
-    await expect(graphNodes(page, "done")).toContainText("dashboard");
+    await expect(
+      graphNodeList(page).getByRole("button", { name: /^dashboard: / }),
+    ).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText("Loading execution history…")).toHaveCount(0);
   } finally {
     churn.stop();
