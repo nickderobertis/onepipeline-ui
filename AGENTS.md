@@ -100,9 +100,13 @@ journeys sit behind an edge of their own for the same reason**:
 `onepipeline-ui:test` runs everything else under the coverage floor, and the two
 nextest filters are one partition, so every test runs under exactly one of them.
 `check` depends on both — the gate's verdict covers the comparison, and only a
-`just test` on its own is spared the second server. What that split can break is
-the comparison running *nowhere*, so `tests/e2e/ensure_baseline.rs` holds all
-three of those to each other: the edge, the `check` aggregate, and the partition.
+`just test` on its own is spared the second server. Its inputs are narrowed to
+what can change what it compares: the served API surface, the crate's own tests,
+and — as a **runtime** input, because no file states it — the commit this branch
+forked from, so a rebase re-runs the comparison while a change to a document or
+the frontend replays its verdict. What that split can break is the comparison
+running *nowhere*, so `tests/e2e/ensure_baseline.rs` holds every part of it to
+the others: the edge, the `check` aggregate, the partition, and that baseline key.
 The binary
 is stamped with the commit it was built from and the journeys refuse a stamp that
 names anything but this branch's base, because a stale server answers every

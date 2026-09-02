@@ -429,6 +429,48 @@ fn the_gate_runs_the_comparison_beside_the_rest_of_the_suite() {
     }
 }
 
+/// The comparison is re-run when the commit it compares against moves.
+///
+/// `test-baseline` is cached on a narrow set of inputs, so a change to a document,
+/// a workflow or the frontend replays its verdict instead of paying for the
+/// comparison — which is the whole point of it having an edge of its own. What no
+/// file input can state is which commit this branch forked from: a rebase moves the
+/// baseline while touching none of them, and a replayed verdict would then be about
+/// a commit this branch no longer forks from. The runtime input is what closes that,
+/// and this holds it to the resolution the journeys themselves use rather than to a
+/// second reading of it.
+#[test]
+fn the_comparison_is_keyed_by_the_commit_it_compares_against() {
+    let project: Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("project.json")).expect("the project definition"),
+    )
+    .expect("the project definition parses");
+    let resolution = project["targets"]["test-baseline"]["inputs"]
+        .as_array()
+        .expect("the comparison declares its inputs")
+        .iter()
+        .find_map(|input| input.get("runtime")?.as_str())
+        .expect("the comparison declares a runtime input naming its baseline");
+
+    let resolved = Command::new("sh")
+        .arg("-c")
+        .arg(resolution)
+        .current_dir(repo_root())
+        .output()
+        .expect("the runtime input runs");
+    assert!(
+        resolved.status.success(),
+        "the runtime input `{resolution}` failed in this checkout: {}",
+        String::from_utf8_lossy(&resolved.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&resolved.stdout).trim(),
+        crate::baseline::base_commit(),
+        "the comparison is cached against a commit that is not the one it compares \
+         against, so a moved base would replay a verdict about the old one"
+    );
+}
+
 /// Every test runs under exactly one of the two recipes the split leaves.
 ///
 /// The filters are two halves of one partition — `_crate-test` is `not` what

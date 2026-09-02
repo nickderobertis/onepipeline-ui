@@ -80,11 +80,22 @@ trap 'rm -rf "$work"' EXIT
 # into the `.git` directory every other checkout of this repository shares, and
 # an interrupted run would leave a registration behind for somebody else to trip
 # over. A plain tree needs no cleanup but its own.
-git archive --format=tar "$base" | tar -x -C "$work" || {
-  echo "ensure-baseline: could not lay out the tree at $base" >&2
-  echo "ACTION: fetch that commit and retry" >&2
+# Written out and then extracted, rather than piped, so each half reports its
+# own failure: reading the commit out of this repository and writing its tree to
+# disk fail for unrelated reasons and are fixed by unrelated actions, and a pipe
+# reports whichever one it was as the same sentence.
+archive="$work/baseline-tree.tar"
+git archive --format=tar --output="$archive" "$base" || {
+  echo "ensure-baseline: could not read the tree at $base out of this repository" >&2
+  echo "ACTION: fetch that commit ('git fetch origin main') and retry" >&2
   exit 1
 }
+tar -xf "$archive" -C "$work" || {
+  echo "ensure-baseline: read the tree at $base but could not write it into $work" >&2
+  echo "ACTION: free space on the filesystem holding \$TMPDIR ($(df -Ph "$work" | awk 'NR==2 {print $4}') free), check it is writable, and retry" >&2
+  exit 1
+}
+rm -f "$archive"
 
 # The base commit's own lockfile decides its dependency graph, and this process's
 # environment must not reach in and redirect where it is built.

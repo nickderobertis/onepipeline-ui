@@ -72,7 +72,7 @@ fn git(arguments: &[&str]) -> Option<String> {
 /// the same commit. Not `HEAD~`, which is this branch's previous commit rather
 /// than its base, and would compare a change against itself the moment the branch
 /// carried two.
-fn base_commit() -> String {
+pub(crate) fn base_commit() -> String {
     ["origin/main", "main"]
         .into_iter()
         .find_map(|reference| git(&["merge-base", "HEAD", reference]))

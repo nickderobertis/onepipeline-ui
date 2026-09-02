@@ -34,7 +34,15 @@
     },
     "test-baseline": {
       "command": "just _crate-test-baseline",
-      "dependsOn": ["ensure-sibling", "ensure-baseline"]
+      "dependsOn": ["ensure-sibling", "ensure-baseline"],
+      "inputs": [
+        "apiServerSurface",
+        "servedGoldens",
+        "{projectRoot}/tests/**/*",
+        "{projectRoot}/justfile",
+        "sharedGlobals",
+        { "runtime": "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main" }
+      ]
     },
     "doc": {
       "command": "just _crate-doc"

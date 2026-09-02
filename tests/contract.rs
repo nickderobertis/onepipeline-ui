@@ -1167,7 +1167,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         kind: graph::TOOL_RESULT.into(),
         name: None,
         detail: "2 passed; 0 failed".into(),
-        truncated: false,
+        // Both bound flags set, because that library skips either when it is
+        // false: read off an activity that cut nothing, this gate would name
+        // neither field, and a rename of one would pass it unchanged.
+        truncated: true,
         output: Some("2 passed; 0 failed".into()),
         output_truncated: true,
         tool_call_id: Some("call-1".into()),
@@ -1186,6 +1189,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
             graph::KIND,
             graph::NAME,
             graph::DETAIL,
+            graph::TRUNCATED,
             graph::OUTPUT,
             graph::OUTPUT_TRUNCATED,
             graph::TOOL_CALL_ID,
