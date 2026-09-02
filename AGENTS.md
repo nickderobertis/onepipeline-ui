@@ -98,9 +98,8 @@ to a workflow, a script or a document must not rebuild a second server. **The
 journeys sit behind an edge of their own for the same reason**, so that nothing
 but the comparison pays for the comparison. Splitting a tier out that way is what
 lets it run *nowhere*, and caching one is what lets it replay a verdict about a
-commit this branch no longer forks from — no file says which commit that is.
-`tests/e2e/ensure_baseline.rs` fails the build on both, and is where the
-arrangement is written down. The binary
+commit this branch no longer forks from — no file says which commit that is, and
+no reading of the payload can tell you it was the wrong one. The binary
 is stamped with the commit it was built from and the journeys refuse a stamp that
 names anything but this branch's base, because a stale server answers every
 request and reports that nothing was dropped between a pair it was never asked

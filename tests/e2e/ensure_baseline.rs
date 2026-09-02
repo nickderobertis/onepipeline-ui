@@ -469,6 +469,47 @@ fn the_comparison_is_keyed_by_the_commit_it_compares_against() {
     );
 }
 
+/// Every module the comparison reads is one of the files it is keyed on.
+///
+/// Its inputs are the modules that decide what it compares rather than the whole
+/// suite, so a contract test or an unrelated journey no longer invalidates a
+/// verdict it cannot change. What that costs is a list: a helper the comparison
+/// starts reading and nobody adds here is one whose edits replay a stale verdict,
+/// silently and in the direction of passing. So the list is read back off the
+/// journeys themselves.
+#[test]
+fn the_comparison_is_keyed_by_every_module_it_reads() {
+    let project: Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("project.json")).expect("the project definition"),
+    )
+    .expect("the project definition parses");
+    let keyed: Vec<String> = project["targets"]["test-baseline"]["inputs"]
+        .as_array()
+        .expect("the comparison declares its inputs")
+        .iter()
+        .filter_map(|input| input.as_str().map(str::to_owned))
+        .collect();
+
+    let journeys = repo_root().join("tests/e2e/baseline.rs");
+    let read = fs::read_to_string(&journeys).expect("the comparison's own source");
+    let modules = read
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("use crate::"))
+        .filter_map(|rest| rest.split([':', ';', '{', ' ']).next())
+        .filter(|module| !module.is_empty());
+    // The journeys and the file that declares them as a module, then everything
+    // they reach for: all of it has to be keyed, or an edit to it replays.
+    for module in ["baseline", "main"].into_iter().chain(modules) {
+        assert!(
+            keyed
+                .iter()
+                .any(|input| input.ends_with(&format!("/{module}.rs"))),
+            "`onepipeline-ui:test-baseline` is not keyed on `{module}`, which the \
+             comparison reads, so an edit to it would replay the verdict before it"
+        );
+    }
+}
+
 /// Every test runs under exactly one of the two recipes the split leaves.
 ///
 /// The filters are two halves of one partition — `_crate-test` is `not` what
