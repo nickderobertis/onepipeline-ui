@@ -8268,3 +8268,28 @@ fn runs_that_last_moved_at_the_same_instant_are_ordered_by_their_ids() {
         "runs stamped at one instant came back in no particular order"
     );
 }
+
+#[test]
+fn a_selection_naming_no_run_at_all_says_so() {
+    // `?select=` with nothing after it is a caller asking about no runs. Refused
+    // as that rather than as a run whose id happens to be empty, because the
+    // second answer — "invalid run id: must not be empty" — is addressed to
+    // somebody who wrote no id at all and leaves them looking for a typo.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let refused = http::get(serving.address, "/api/v2/runs?select=");
+    assert_eq!(refused.status, 422);
+    let body = refused.json();
+    assert_eq!(body["error"]["code"], json!("invalid_request"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("names no run"),
+        "the refusal does not say what was wrong with it: {body}"
+    );
+    // And the ordinary listing is still what leaving it off asks for.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    assert_eq!(listed["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
+}

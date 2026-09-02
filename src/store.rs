@@ -469,7 +469,18 @@ impl ReadApi for RunStore {
 /// torn tail or edited by hand, is one whose modification time moved. A single
 /// metadata lookup answers both, which is the whole cost of a tick on which
 /// nothing changed.
-type Stamp = (u64, u64);
+///
+/// Named fields rather than a pair of numbers: both are `u64` and both come off
+/// one `metadata` call, so a tuple is two values one edit could swap — and a
+/// stamp comparing a length against an instant matches nothing and wakes every
+/// subscriber on every tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    /// How long the journal is.
+    len: u64,
+    /// When it was last written, in milliseconds since the epoch.
+    modified_ms: u64,
+}
 
 /// What one journal's metadata says right now, or `None` where there is no
 /// journal to describe.
@@ -482,14 +493,17 @@ type Stamp = (u64, u64);
 /// until then.
 fn stamp_of(journal: &std::path::Path) -> Option<Stamp> {
     let about = std::fs::metadata(journal).ok()?;
-    let modified = about
+    let modified_ms = about
         .modified()
         .ok()
         .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |since| {
             u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
         });
-    Some((about.len(), modified))
+    Some(Stamp {
+        len: about.len(),
+        modified_ms,
+    })
 }
 
 /// One run as an open connection is tracking it.

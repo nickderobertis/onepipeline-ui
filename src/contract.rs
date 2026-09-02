@@ -522,11 +522,27 @@ impl RunSelection {
     /// [`ApiError::InvalidRequest`] for a selection naming nothing at all or
     /// more runs than a page serves.
     pub fn parse(raw: &str) -> Result<Self, ApiError> {
+        // `?select=` with nothing after it is a caller asking about no runs, not
+        // a caller naming a run whose id happens to be empty — and the two are
+        // told apart here, because the second reading answers "invalid run id:
+        // must not be empty" to somebody who wrote no id at all.
+        if raw.is_empty() {
+            return Err(Self::names_nothing());
+        }
         let named: Vec<RunId> = raw
             .split(Self::SEPARATOR)
             .map(RunId::try_from)
             .collect::<Result<_, _>>()?;
         Self::try_from(named)
+    }
+
+    /// The refusal a selection naming no run at all is answered with.
+    ///
+    /// One wording for the two ways in — the query string, and a deserialized
+    /// [`RunsQuery`] — because a caller has no way to tell which of them it
+    /// crossed.
+    fn names_nothing() -> ApiError {
+        ApiError::InvalidRequest("select names no run; leave it off to list every run".to_owned())
     }
 
     /// The runs named, in the order they were named, each once.
@@ -541,9 +557,7 @@ impl TryFrom<Vec<RunId>> for RunSelection {
 
     fn try_from(named: Vec<RunId>) -> Result<Self, Self::Error> {
         if named.is_empty() {
-            return Err(ApiError::InvalidRequest(
-                "select names no run; leave it off to list every run".to_owned(),
-            ));
+            return Err(Self::names_nothing());
         }
         if named.len() > RUNS_PAGE_LIMIT {
             return Err(ApiError::InvalidRequest(format!(
