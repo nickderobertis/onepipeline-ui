@@ -50,6 +50,8 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "completion-requested": "lifecycle",
   "concurrent-acknowledged": "contention",
   "quiet-worker": "contention",
+  "node-held": "contention",
+  "node-unheld": "contention",
   "criterion-checked": "verification",
   "cross-dag-satisfied": "lifecycle",
   "upstream-modified": "lifecycle",

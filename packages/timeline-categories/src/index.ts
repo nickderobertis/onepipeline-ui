@@ -108,7 +108,11 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // a lock and a node held on a dependency's release are the same thing to a
     // reader scanning for why nothing is moving. It sits before the publications so
     // `release-wait` reads as the wait it is rather than as the release it is for.
-    ["contention", ["lock", "concurrent", "quiet", "wait"]],
+    // `held` and `unheld` are the engine's own account of why a node it has not
+    // settled is not running — one reason per entry — which is the same question a
+    // reader scanning for contention came with, so they read here rather than as a
+    // lifecycle step of the node they are about.
+    ["contention", ["lock", "concurrent", "quiet", "wait", "held", "unheld"]],
     // `check` and `checks` are both here because the producers spell the same act
     // both ways — `onevcs` writes one `change-check` per check it observed, the
     // older unattributed records a single `pr-checks-observed` — and a word is
