@@ -954,7 +954,7 @@ fn held_node_spans(serving: &Serving, node: &str) -> Vec<Value> {
         .clone()
 }
 
-/// Every `queued` span of one node, in the order the run recorded them.
+/// Every `queued` span among those served, in the order the run recorded them.
 fn queued_spans(spans: &[Value]) -> Vec<&Value> {
     spans
         .iter()

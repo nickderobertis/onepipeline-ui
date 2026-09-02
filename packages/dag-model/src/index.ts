@@ -1204,12 +1204,25 @@ export const timelineSpanSchema = openObject({
   }).optional(),
   phase: supervisoryPhaseSchema.optional(),
   /**
-   * Why the loop was not running this node, on a `queued` span and on no other:
-   * one entry per thing holding it at that moment, so a node held by more than one
-   * is told apart from a node held by one from the array alone. Not *keyed* on the
-   * kind here, for the reason `redirection` and `release` are not keyed on theirs.
+   * Why the loop was not running this node: one entry per thing holding it at that
+   * moment, so a node held by more than one is told apart from a node held by one
+   * from the array alone.
+   *
+   * Keyed to the `queued` kind below, unlike `redirection` and `release` on an
+   * event. Those two are paired with a *journal* kind, which the journal owns and
+   * this parser may not close over; a span's kind is this contract's own closed
+   * vocabulary, so "a hold belongs to a hold span" is an invariant this side owns
+   * and may hold a server to.
    */
   reasons: z.array(timelineHoldReasonSchema).min(1).optional(),
+}).superRefine((span, context) => {
+  if (span.reasons !== undefined && span.kind !== "queued") {
+    context.addIssue({
+      code: "custom",
+      path: ["reasons"],
+      message: "only a queued span carries the reasons a node was held",
+    });
+  }
 });
 export const artifactContentSchema = openObject({
   id: z.string().min(1),

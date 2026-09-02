@@ -682,6 +682,62 @@ describe("run timeline", () => {
     expect(timeline.spans[2]?.parent_id).toBe("dispatch-worker-1");
   });
 
+  test("reads a queued span's reasons, and refuses them anywhere else", () => {
+    const queued = {
+      id: "queued.api.4",
+      kind: "queued",
+      label: "api",
+      started_at: "2026-07-26T12:00:01Z",
+      ended_at: "2026-07-26T12:00:09Z",
+      parent_id: "node-1-api",
+      node_id: "api",
+      events: [],
+      reasons: [
+        { kind: "concurrency", ahead: ["build", "migrate"], limit: 2 },
+        { kind: "decision", reference: "surface:7" },
+      ],
+    };
+    const timeline = parseRunTimeline({
+      api_version: 2,
+      timeline_schema_version: 8,
+      observed_at: "2026-07-26T12:00:00Z",
+      run_id: "demo",
+      spans: [span, queued],
+    });
+    // Two reasons at once, each with its own kind's own fields: what tells a node
+    // held by two things from a node held by one.
+    expect(timeline.spans[1]?.reasons).toHaveLength(2);
+    expect(timeline.spans[1]?.reasons?.[0]?.ahead).toEqual([
+      "build",
+      "migrate",
+    ]);
+    expect(timeline.spans[1]?.reasons?.[1]?.reference).toBe("surface:7");
+    // A reason a later engine writes is read rather than refused: the vocabulary
+    // is that engine's, and dropping an entry would turn held-by-two into
+    // held-by-one.
+    expect(
+      parseRunTimeline({
+        api_version: 2,
+        timeline_schema_version: 8,
+        observed_at: "2026-07-26T12:00:00Z",
+        run_id: "demo",
+        spans: [{ ...queued, reasons: [{ kind: "budget" }] }],
+      }).spans[0]?.reasons?.[0]?.kind,
+    ).toBe("budget");
+    // But a hold on something that is not a hold span is not a payload this client
+    // renders: the span vocabulary is this contract's own and closed, so the
+    // pairing is an invariant it owns rather than a producer's to redefine.
+    expect(() =>
+      parseRunTimeline({
+        api_version: 2,
+        timeline_schema_version: 8,
+        observed_at: "2026-07-26T12:00:00Z",
+        run_id: "demo",
+        spans: [{ ...queued, id: "node-1-api", kind: "node" }],
+      }),
+    ).toThrow(/queued span/);
+  });
+
   test("carries the redirection a turn-interrupted or a context edit was", () => {
     const redirected = timelineEventSchema.parse({
       id: "e9",
