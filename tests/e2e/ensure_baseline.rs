@@ -62,11 +62,19 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// What the two servers are called before the platform has its say.
+///
+/// The provisioned one and the one a build leaves behind are different files with
+/// one suffix between them, so the suffix is derived once and each name is that
+/// derivation over its own stem.
+const PROVISIONED_STEM: &str = "onepipeline-api-baseline";
+const BUILT_STEM: &str = "onepipeline-api";
+
 /// The name the platform gives the provisioned server, derived here and by the
 /// justfile separately — a literal in one of the two would drift into a probe
 /// that matches nothing on the platform it is wrong for, and a rebuild every run.
 fn provisioned() -> String {
-    format!("onepipeline-api-baseline{}", std::env::consts::EXE_SUFFIX)
+    format!("{PROVISIONED_STEM}{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// A scratch git repository carrying the real recipe and the real script, with a
@@ -81,6 +89,18 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::building(std::env::consts::EXE_SUFFIX)
+    }
+
+    /// A fixture whose stand-in build leaves its binary under `executable_suffix`.
+    ///
+    /// The suffix is a parameter rather than always this platform's because the
+    /// script takes the built binary's name off the *destination* while the build
+    /// gives it whatever the platform gives it — two derivations that agree on
+    /// every real host and can only be told apart by driving a suffix this host
+    /// does not have. [`the_build_is_installed_from_where_a_suffixed_platform_leaves_it`]
+    /// is what drives it; every other journey takes this platform's.
+    fn building(executable_suffix: &str) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let root = dir.path();
         fs::copy(repo_root().join("justfile"), root.join("justfile")).expect("copy the justfile");
@@ -148,23 +168,30 @@ impl Fixture {
             "cargo",
             // Records what it was asked for, and writes where a real build would
             // leave its binary — copying the laid-out tree's own marker, so the
-            // provisioned server says which commit it was built from.
-            "#!/usr/bin/env bash\n\
-             set -eu\n\
-             printf '%s\\n' \"$*\" >> \"$CARGO_CALLS\"\n\
-             manifest=\"\"; target=\"\"\n\
-             while [ \"$#\" -gt 0 ]; do\n\
-               case \"$1\" in\n\
-                 --manifest-path) manifest=\"$2\"; shift 2 ;;\n\
-                 --target-dir) target=\"$2\"; shift 2 ;;\n\
-                 *) shift ;;\n\
-               esac\n\
-             done\n\
-             [ -n \"$target\" ] && [ -n \"$manifest\" ] || exit 1\n\
-             [ \"${BUILD_STATUS:-0}\" = 0 ] || exit \"$BUILD_STATUS\"\n\
-             mkdir -p \"$target/debug\"\n\
-             cp \"$(dirname \"$manifest\")/which-tree.txt\" \"$target/debug/onepipeline-api\"\n\
-             chmod +x \"$target/debug/onepipeline-api\"\n",
+            // provisioned server says which commit it was built from. Under the
+            // platform's own suffix, because that is the file `cargo` leaves and
+            // the file the script then looks for; a bare name here is one the
+            // script cannot find on any platform that has a suffix, which is a
+            // failure no host without one can reach.
+            &format!(
+                "#!/usr/bin/env bash\n\
+                 set -eu\n\
+                 printf '%s\\n' \"$*\" >> \"$CARGO_CALLS\"\n\
+                 manifest=\"\"; target=\"\"\n\
+                 while [ \"$#\" -gt 0 ]; do\n\
+                   case \"$1\" in\n\
+                     --manifest-path) manifest=\"$2\"; shift 2 ;;\n\
+                     --target-dir) target=\"$2\"; shift 2 ;;\n\
+                     *) shift ;;\n\
+                   esac\n\
+                 done\n\
+                 [ -n \"$target\" ] && [ -n \"$manifest\" ] || exit 1\n\
+                 [ \"${{BUILD_STATUS:-0}}\" = 0 ] || exit \"$BUILD_STATUS\"\n\
+                 mkdir -p \"$target/debug\"\n\
+                 cp \"$(dirname \"$manifest\")/which-tree.txt\" \"$target/debug/{built}\"\n\
+                 chmod +x \"$target/debug/{built}\"\n",
+                built = format!("{BUILT_STEM}{executable_suffix}"),
+            ),
         );
         // llmlint: ignore-end[tests_mirror_real_usage]
         // llmlint: ignore-end[e2e_not_mocked]
@@ -426,6 +453,40 @@ fn the_provisioning_path_is_accepted_however_it_is_spelled() {
         fs::read_to_string(fixture.binary()).expect("the provisioned server"),
         AT_THE_BASE,
         "the script accepted the path but provisioned somewhere the suite does not read"
+    );
+}
+
+/// The install reads the build where a platform that suffixes its executables
+/// leaves it.
+///
+/// Three parties name one file and each derives the suffix its own way: the
+/// justfile gives the destination the platform's, the script takes the built
+/// binary's from that destination, and the build gives its output whatever the
+/// platform gives it. On a host with no suffix all three are the empty string, so
+/// a stand-in that wrote the bare name agreed with everything here and disagreed
+/// with `cargo` on Windows — where the script looked for `onepipeline-api.exe`
+/// and the build had left `onepipeline-api`, taking down three journeys on that
+/// leg alone and none here. Driving the suffixed shape is the only way that
+/// disagreement is reachable from a platform that has no suffix of its own; it is
+/// [`the_provisioning_path_is_accepted_however_it_is_spelled`]'s reason, for the
+/// other half of the same file name.
+#[test]
+fn the_build_is_installed_from_where_a_suffixed_platform_leaves_it() {
+    const SUFFIXED: &str = ".exe";
+    let fixture = Fixture::building(SUFFIXED);
+    let destination = fixture
+        .dir
+        .path()
+        .join(".tools/bin")
+        .join(format!("{PROVISIONED_STEM}{SUFFIXED}"));
+
+    let provisioning = fixture.run_script_provisioning_to(&destination);
+
+    assert!(provisioning.status.success(), "{}", stderr(&provisioning));
+    assert_eq!(
+        fs::read_to_string(&destination).expect("the provisioned server"),
+        AT_THE_BASE,
+        "the script installed something other than the tree the build laid out"
     );
 }
 
