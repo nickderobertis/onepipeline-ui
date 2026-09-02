@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.7.1...v0.7.2) - 2026-09-02
+
+### Added
+
+- *(run-list)* one flat list, a row refreshed by name, and a live run that opens ([#52](https://github.com/nickderobertis/onepipeline-ui/pull/52))
+
 ## [0.7.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.7.0...v0.7.1) - 2026-09-02
 
 ### Added
