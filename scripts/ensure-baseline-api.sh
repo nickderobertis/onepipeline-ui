@@ -19,7 +19,11 @@ root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)" || {
   echo "ACTION: restore the checkout's directory layout and retry" >&2
   exit 1
 }
-cd "$root"
+cd "$root" || {
+  echo "ensure-baseline: located the repository at '$root' but could not enter it" >&2
+  echo "ACTION: check the checkout's permissions on that directory and retry" >&2
+  exit 1
+}
 
 # Where to provision to. It arrives from the environment and this script then
 # *deletes and writes* at it, so it is checked to the one place this repository

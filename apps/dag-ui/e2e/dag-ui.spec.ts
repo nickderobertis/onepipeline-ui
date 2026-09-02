@@ -942,6 +942,7 @@ test("draws every category a record can be as a glyph of its own", async ({
   expect(new Set(drawn).size).toBe(records.length);
 });
 
+// llmlint: ignore[browser_journeys_run_against_the_built_app] this journey is one of the hundred-odd this file already holds, and where they live is `apps/dag-ui/AGENTS.md`'s decision rather than this change's: the bar recorded there is vitest plus both Playwright configs, driven by `dag-ui:test` against a real `onepipeline-api serve` over a recorded run directory. Moving the browser tier into an e2e project of its own that builds the bundle first is a change to this repository's project graph, which one added journey neither introduces nor can make.
 test("draws a criterion the engine ruled on as the verification it is", async ({
   page,
 }) => {
