@@ -33,6 +33,7 @@
     "test": { "cache": true, "inputs": ["default"] },
     "test-baseline": { "cache": true, "inputs": ["default"] },
     "test-browser": { "cache": true, "inputs": ["default"] },
+    "test-integration": { "cache": true, "inputs": ["default"] },
     "doc": { "cache": true, "inputs": ["default"] },
     "lint-llm-diff": {
       "cache": true,
@@ -53,6 +54,7 @@
         "test",
         "test-baseline",
         "test-browser",
+        "test-integration",
         "doc"
       ]
     }

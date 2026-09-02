@@ -82,6 +82,9 @@ function freePort(): Promise<number> {
   return new Promise((resolve) => {
     const held = createServer();
     held.listen(0, "127.0.0.1", () => {
+      // An `AddressInfo` and not a string or null: `address()` types the three
+      // shapes a server can have, and a TCP listener that has bound — which is
+      // what this callback means — is always the first.
       const { port } = held.address() as AddressInfo;
       held.close(() => resolve(port));
     });
@@ -137,6 +140,8 @@ function recordingApi(): Promise<{
   return new Promise((resolve) => {
     api.listen(0, "127.0.0.1", () => {
       resolve({
+        // The same three shapes and the same reason: this reads inside `listen`'s
+        // callback, so the address is a bound TCP one.
         port: (api.address() as AddressInfo).port,
         asked,
         close: () => api.close(),

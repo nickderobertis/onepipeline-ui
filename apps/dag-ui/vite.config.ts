@@ -1,6 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 import { readApiTarget } from "./src/lib/api-target.js";
 
@@ -28,6 +28,10 @@ export default defineConfig({
   preview: { proxy },
   test: {
     environment: "jsdom",
+    // The tier that starts a real Vite is `vitest.integration.config.ts` and the
+    // `test-integration` target that runs it: these are the components, and they
+    // start nothing.
+    exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: true,

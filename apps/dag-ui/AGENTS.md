@@ -13,6 +13,10 @@ is not what any reader ever loads — `playwright.config.ts` for the journeys an
 `isolation.config.ts` for what one run of that tier owes another. Nothing between
 the browser and the read model is doubled.
 
+Between them is `test-integration`, which starts a real Vite over the real config
+and no browser. Three tiers, split on what each starts: the components start
+nothing, this starts a server, the journeys start five.
+
 Those two configs are `test-browser` and the components are `test`, because the
 first starts five servers and takes minutes and the second takes seconds: a
 reader iterating on a component should not pay for the fleet. `check` runs both,
