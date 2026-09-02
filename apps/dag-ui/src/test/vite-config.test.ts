@@ -8,6 +8,11 @@ async function loadConfig(target: string | undefined): Promise<unknown> {
   vi.resetModules();
   if (target === undefined) delete process.env.DAG_UI_API_URL;
   else process.env.DAG_UI_API_URL = target;
+  // The module's own type is not what is under test and cannot be trusted here
+  // anyway: `vi.resetModules()` is what makes each call read the environment
+  // afresh, and what comes back is whatever that evaluation produced — including,
+  // for the cases below, a rejection. Read as a default export of something, and
+  // narrowed by the case that needs a shape.
   const loaded = (await import("../../vite.config")) as { default: unknown };
   return loaded.default;
 }
@@ -32,6 +37,11 @@ describe("the config every Vite server here loads", () => {
   it("proxies both read paths to the origin of what was named", async () => {
     // A path on the target would be prepended to every read and answered by
     // nothing, so what the proxy is given is the origin.
+    // Narrowed to the two fields this asserts on rather than to Vite's own
+    // `UserConfig`: `defineConfig` returns a union that also admits a function and
+    // a promise, so reading `server.proxy` off it needs a narrowing either way,
+    // and stating the shape the assertions need keeps this test from claiming
+    // anything about the rest of the config.
     const config = (await loadConfig(
       "http://127.0.0.1:45751/ignored/path",
     )) as {
