@@ -2457,9 +2457,11 @@ test("tags every run of one launching session with it, in one flat list", async 
   await expect(navigation.getByRole("heading", { level: 2 })).toHaveCount(0);
   await expect(navigation.locator("section")).toHaveCount(0);
 
-  // Three of the served runs record the same launch id, as one planner session
-  // driving several graphs does. Each of the three carries that session as a tag on
-  // its own row rather than sharing a heading with the others.
+  // Three of the served runs record the same launching *session*, as one planner
+  // session driving several graphs does — each of them minting a launch id of its
+  // own, which is why the tag is read off the session rather than off the launch.
+  // Each of the three carries that session as a tag on its own row rather than
+  // sharing a heading with the others.
   for (const runId of [runs().live, runs().sibling, runs().busy]) {
     await expect(
       navigation.getByRole("button", { name: RegExp(runId) }),

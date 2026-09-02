@@ -1754,12 +1754,13 @@ function writeEventlessRun(
 ) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
-  // The paging runs are launched by the *other* session: the codex group is the one
-  // a journey counts, and forty-odd paging runs under it would make that count a
-  // page size. The named eventless run records a launch whose launcher is outside
-  // the closed vocabulary a client switches on and no session at all — every run
-  // launched before the launcher was detected reads that way — so it is grouped by
-  // the launch it does know rather than pooled with the runs that recorded none.
+  // The paging runs are launched by the *other* session: the codex session is the
+  // one a journey counts tagged rows for, and forty-odd paging runs carrying it
+  // would make that count a page size. The named eventless run records a launch
+  // whose launcher is outside the closed vocabulary a client switches on and no
+  // session at all — every run launched before the launcher was detected reads that
+  // way — so its tag is the launch it does know rather than one shared name pooling
+  // it with the runs that recorded none.
   writeJson(
     join(dir, "launch.json"),
     launch(runId, launcher, session, stamp(HISTORIC), 4248),
