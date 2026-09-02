@@ -940,36 +940,26 @@ test("draws every category a record can be as a glyph of its own", async ({
   // plot with one fewer category in it, and a reader scanning it cannot tell which
   // of the two they are looking at.
   expect(new Set(drawn).size).toBe(records.length);
-});
 
-// llmlint: ignore[browser_journeys_run_against_the_built_app] this journey is one of the hundred-odd this file already holds, and where they live is `apps/dag-ui/AGENTS.md`'s decision rather than this change's: the bar recorded there is vitest plus both Playwright configs, driven by `dag-ui:test` against a real `onepipeline-api serve` over a recorded run directory. Moving the browser tier into an e2e project of its own that builds the bundle first is a change to this repository's project graph, which one added journey neither introduces nor can make.
-test("draws a criterion the engine ruled on as the verification it is", async ({
-  page,
-}) => {
-  // The last thing the engine does before settling a node is read its acceptance
-  // criteria off the branch, and it records one of these per criterion. The kind
-  // is filed by name rather than by a word in it — `checked` is not `check` — so a
-  // reader meets it drawn as a verification or drawn as nothing in particular, and
-  // the difference is only visible here.
+  // The same claim for a kind the scheme files by *name* rather than by a word in
+  // it: `criterion-checked` is one acceptance criterion ruled on, and `checked` is
+  // not `check`, so nothing but the exception table puts it with the verifications.
+  // Read here rather than in a journey of its own because it is one more record on
+  // a node this one already opens, and the servers are already up.
   await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
-  const marker = (named: string): Locator =>
+  const named = (kind: string): Locator =>
     timeline(page).getByRole("button", {
-      name: `${named}, marker`,
+      name: `${kind}, marker`,
       exact: true,
     });
-
-  const checked = marker("criterion-checked");
+  const checked = named("criterion-checked");
   await expect(checked).toBeVisible();
   expect(await glyphName(checked)).toBe(expectedGlyph("criterion-checked"));
-  // Drawn as the gate verdict on the same node is, which is the claim a reader
-  // makes of the plot: these two are the same kind of moment. A kind filed under
-  // some neighbouring category would still be drawn, and would be drawn apart from
-  // the verification it belongs with.
-  expect(await glyphName(checked)).toBe(
-    await glyphName(marker("gate-verdict")),
-  );
-  // And said in words for the reader who does not read glyphs: the reading a hover
-  // paints names the category the record was filed under.
+  // Drawn as the gate verdict beside it, because one category is one drawing: a
+  // kind filed under a neighbour would still be drawn, and drawn apart from the
+  // verification it belongs with.
+  expect(await glyphName(checked)).toBe(await glyphName(named("gate-verdict")));
+  // And said in words for the reader who does not read glyphs.
   await checked.hover();
   await expect(page.getByTestId("timeline-popover")).toContainText(
     "Verification",
