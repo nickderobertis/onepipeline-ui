@@ -26,6 +26,26 @@ build speaks a different document version and is refused, which would leave ever
 run served with no clock at all. `every_route_serves_the_payload_its_golden_pins`
 fails with that instruction rather than quietly pinning goldens full of nulls.
 
+## What a read costs is a test, not a benchmark
+
+`tests/e2e/cost.rs` holds the bounds on what this server may do to a runs root:
+what a run list may read, what a route about one named run may touch, what an
+idle subscriber may do per tick. They are counted in **operations** — bytes read,
+files opened, metadata looked up, processes started — rather than in elapsed
+time, because a CPU measurement on a host that also runs every dispatch is a
+property of the host and reproduces nowhere, while the work a read does is a
+property of the finished tree.
+
+`tests/support/cost.rs` is how they are counted: the real binary, over a real
+runs root, on a real socket, with `strace` watching what it asks the kernel for.
+That is what makes the bound honest — it counts every byte the linked SDK reads
+without a line of this crate being involved, which is exactly where the cost
+these journeys exist to hold down used to live. Linux only, and compiled away
+elsewhere rather than skipped, so no leg ever reports a bound as held when
+nothing measured it. One request is told from another by a **marker**: a real
+request naming a run id the store cannot hold, which leaves a self-identifying
+landmark in the trace and needs no clock to line two records up.
+
 `tests/support/http.rs` is hand-rolled for the same reason. A client library
 would decide what a non-2xx means and how much of a stream to buffer, and both
 are what the journeys assert.

@@ -73,12 +73,26 @@ and because nothing else recovers *why* the tooling is what it is.
 
 `just --list` is the index; do not hand-roll equivalents. **`just gate` is the
 pre-push bar.** `just bootstrap` also provisions the `onepipeline` CLI at the
-version the lock pins its library to, into `.tools/`: the read API asks it for
-each run's telemetry document, the two speak a versioned document, and a
-mismatched pair serves every run with no clock at all. `/healthz` reports that
+version the lock pins its library to, into `.tools/`: a run **detail** asks it
+for that run's telemetry document, the two speak a versioned document, and a
+mismatched pair serves every opened run with no clock at all. A run *list* no
+longer asks it at all — the bounded summary each run carries holds the same
+document, which is why fifty rows are no longer fifty processes — so the two
+surfaces can differ on a host missing the sibling, and `src/AGENTS.md` records
+that state and the upstream change that removes it. `/healthz` reports that
 release from `onepipeline::VERSION`, so a host pinning the engine that writes a
 run store and this reader of it separately can *prove* the two match rather than
 assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
+
+**One tier needs a tool no lockfile can pin: `strace`.** `tests/e2e/cost.rs`
+holds the bounds on what a read may do to a runs root — the defect that made one
+open subscriber cost a core — and it counts operations from the kernel's own
+record of the running server rather than from a clock, because a CPU figure
+taken on a host that also runs every dispatch is a property of the host. It is
+Linux-only and compiled away elsewhere, and where it does run it **fails**
+rather than skips when the tracer is missing: a cost bound nothing measured is a
+bound nobody has. `ci.yml`'s gate job installs it; a Linux checkout without it
+is told what to install by the failure itself.
 
 **The tier that needs that CLI provisions it; `bootstrap` is not the only path to
 it.** Everything else a tier needs lands in a user-wide cache that outlives any

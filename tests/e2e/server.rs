@@ -8158,3 +8158,49 @@ fn a_rows_clock_and_the_details_are_one_reading() {
         );
     }
 }
+
+#[test]
+fn a_selection_tells_a_run_it_could_not_read_from_one_that_is_gone() {
+    // Two different facts to a caller refreshing a row: the run went away
+    // between the frame that named it and the refetch, which is a race and
+    // normal; or the run is right there and this host is failing to serve it,
+    // which is not. Reported on separate lists so a client is not left guessing
+    // which of the two it met.
+    let refused = "run-20260807-unreadable";
+    let gone = "run-20260807-sweptaway";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        let dir = root.join(refused);
+        std::fs::create_dir_all(&dir).expect("the run directory");
+        std::fs::write(dir.join("launch.json"), "{ this is not a launch record")
+            .expect("the launch record");
+    });
+    let listed = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs?select={},{refused},{gone}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+
+    assert_eq!(listed["runs"][0]["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(listed["runs"].as_array().map(Vec::len), Some(1), "{listed}");
+    assert_eq!(listed["missing"], json!([gone]), "{listed}");
+    let unreadable = listed["unreadable"].as_array().expect("the refused root");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    assert!(
+        unreadable[0]["path"]
+            .as_str()
+            .expect("a path")
+            .ends_with(refused),
+        "{listed}"
+    );
+    assert!(
+        !unreadable[0]["reason"]
+            .as_str()
+            .expect("a reason")
+            .is_empty(),
+        "{listed}"
+    );
+}

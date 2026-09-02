@@ -22,10 +22,35 @@ anything new here is a proposal to make upstream first.
   The *schema* is still the SDK's `plan::Plan`; only the read is this crate's.
   Republishing a loader beside the path is the proposal.
 - **The eight-way timing breakdown, and the per-party usage.** Both are the
-  SDK's own fold and neither is recomputed here — but its `telemetry` module is
-  private, so the document is read through `onepipeline telemetry <run>` rather
-  than imported. `src/telemetry.rs` owns that seam; making the fold importable is
-  the proposal, and a server would then read it without starting a process.
+  SDK's own fold and neither is recomputed here. **A run-list row now reads it
+  without starting anything**: the SDK's bounded summary document carries a whole
+  `views::RunTelemetry`, so `telemetry::of_aggregate` takes that document through
+  this crate's own validation and a page of fifty rows is no longer fifty
+  subprocesses. What is still fetched by process is the **detail** route's, and
+  only because the alternative costs more than it saves — asking for the summary
+  beside a view this route has already folded would refold the run whenever that
+  document is stale. So `onepipeline telemetry <run>` remains the seam
+  `src/telemetry.rs` owns, and there is one state in which a row and the detail
+  opened from it disagree: a host where that sibling is missing or refuses, where
+  the row carries the clock and the detail carries none. The server names that on
+  its own log, and `a_rows_clock_and_the_details_are_one_reading` holds the two
+  together everywhere else. The proposal that closes it is the same one as
+  before, narrowed: publish the *fold* — `telemetry::of_run` over a view a caller
+  already holds — so the detail reads what it has rather than asking a process
+  for it.
+- **How a run is being driven, over the bounded document.** `views::liveness`
+  takes a `RunState`, which is the fold of a run's whole merged store — and the
+  entire point of the summary is that a listing never takes one. The summary
+  carries every input that reading needs and the SDK publishes no entry point
+  over them, so `src/liveness.rs` restates it, held to `views::liveness_word` by
+  `tests/contract.rs`'s `a_row_read_from_the_summary_is_the_row_a_fold_produces`
+  over nine run shapes. **The proposal is `views::liveness_of(&RunSummary)`**, and
+  with it that module becomes a call. One half of the reading cannot be restated
+  at all: whether a *blocking surface* is outstanding is `channel::ChannelState`,
+  which is crate-private, so this asks the wider question the summary can answer
+  — any surface a planner has not consumed — which errs toward "still working",
+  the direction the SDK's own reading errs in for every input it cannot read.
+  Publishing that queue, or `decision_outstanding` over a summary, closes it.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
   from the pair. Execution is continuous, so the pair is the whole of what
@@ -33,10 +58,11 @@ anything new here is a proposal to make upstream first.
   any run has.
 - **An opaque session key.** The raw launching session id may be sensitive and is
   never served, so runs are grouped by a digest of it.
-- **The run list's order.** `RunStore::run_list` orders by most recent progress,
-  newest first, because a client opens the first row and an operator came to look
-  at the run that moved last. `onepipeline runs` orders by run id, so the two
-  listings disagree about what leads.
+- **The run list's order.** `RunStore::page` serves the SDK's own `Listing`
+  order — most recent progress first, ties on the id — which the summary document
+  stores `last_write_at` to make answerable without a fold. `onepipeline runs`
+  orders by run id, so the two listings still disagree about what leads; the
+  ordering itself is no longer this crate's to compute.
 - **A verification record from stored evidence.** onepipeline's event vocabulary
   names no verification, so `payload::evidence` reads one out of what a node
   *kept*: each `ArtifactRef` on one of its events, with the verdict and bounded

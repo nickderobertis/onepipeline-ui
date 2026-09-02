@@ -156,17 +156,18 @@ impl Cost {
             .count()
     }
 
-    /// How many programs this server started, not counting itself.
+    /// How many programs this server started.
     ///
-    /// The traced process's own `execve` is the one strace records before the
-    /// server exists at all; every other one is a process the server started.
+    /// The server's own `execve` is dropped where the trace is read rather than
+    /// subtracted here: a count that took one off every slice would report the
+    /// first process a *request* started as no process at all, which is exactly
+    /// the thing these journeys are about.
     #[must_use]
     pub fn processes_started(&self) -> usize {
         self.ops
             .iter()
             .filter(|op| matches!(op, Op::Exec(_)))
             .count()
-            .saturating_sub(1)
     }
 
     /// Everything done between two landmarks: after the last mention of `from`
@@ -238,6 +239,9 @@ pub struct Traced {
     /// The runs root it is serving, kept alive for as long as it is.
     pub runs: TempDir,
     traces: TempDir,
+    /// The server's own program, so its own `execve` is not counted as a
+    /// process it started.
+    binary: PathBuf,
 }
 
 /// How often a traced server re-reads the runs root, unless a journey says
@@ -284,7 +288,7 @@ impl Traced {
             .args(["-e", &format!("trace={TRACED}")])
             .arg("-o")
             .arg(traces.path().join("trace"))
-            .arg(binary)
+            .arg(&binary)
             .arg("serve")
             .arg("--runs-root")
             .arg(runs.path())
@@ -300,6 +304,7 @@ impl Traced {
             address,
             runs,
             traces,
+            binary,
         }
     }
 
@@ -341,7 +346,7 @@ impl Traced {
             "the traced server did not stop cleanly: {status}"
         );
         Cost {
-            ops: read_trace(self.traces.path()),
+            ops: read_trace(self.traces.path(), &self.binary),
         }
     }
 }
@@ -370,7 +375,7 @@ fn require_strace() {
 /// puts a landmark after work that came before it and a journey counting from
 /// that landmark measures nothing. They are merged on the instant strace stamps
 /// each line with instead.
-fn read_trace(dir: &Path) -> Vec<Op> {
+fn read_trace(dir: &Path, binary: &Path) -> Vec<Op> {
     let mut stamped: Vec<(f64, Op)> = Vec::new();
     for entry in std::fs::read_dir(dir)
         .expect("the trace directory")
@@ -390,7 +395,13 @@ fn read_trace(dir: &Path) -> Vec<Op> {
         }
     }
     stamped.sort_by(|left, right| left.0.total_cmp(&right.0));
-    stamped.into_iter().map(|(_, op)| op).collect()
+    stamped
+        .into_iter()
+        .map(|(_, op)| op)
+        // The server becoming itself is not a process it started. Nothing else
+        // in this stack execs this binary, so naming it is the whole filter.
+        .filter(|op| !matches!(op, Op::Exec(program) if Path::new(program) == binary))
+        .collect()
 }
 
 /// One traced line as the operation it records, or `None` for anything else —

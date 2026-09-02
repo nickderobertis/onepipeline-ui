@@ -1,12 +1,23 @@
 //! The seam onto `onepipeline`'s own telemetry document.
 //!
 //! The SDK aggregates a run's wall clock into the eight buckets the wire carries
-//! and folds what each party spent, and it keeps that fold *behind* its contract
-//! surface: `onepipeline`'s `telemetry` module is private in every published
-//! version, and the document is reachable only through `onepipeline telemetry
-//! <run>`. So this crate reaches it the way any other caller does — through that
-//! CLI — rather than folding the run's clock a second time here, which is how
-//! the two readings would come to disagree about where a run's time went.
+//! and folds what each party spent, and this crate never folds it a second time
+//! — that is how two readings of where a run's time went come to disagree. There
+//! are **two ways in**, because the SDK offers two and they cost differently:
+//!
+//! - [`of_aggregate`] takes the document a run's own **bounded summary** carries,
+//!   read in this process. That is what a run-list row uses: a page of fifty rows
+//!   used to be fifty subprocesses, each one folding the run it was asked about.
+//! - [`of_run`] asks `onepipeline telemetry <run>`. That is what the run
+//!   **detail** uses, and it stays a process for a reason rather than by
+//!   inheritance: the fold itself is still behind the SDK's contract surface, and
+//!   reaching the summary beside a view this route has already opened would
+//!   refold the run whenever that document is stale. `src/AGENTS.md` carries the
+//!   upstream change that would close it, and the one state in which the two
+//!   readings can differ.
+//!
+//! Both cross one boundary — `validated` — so what a telemetry document has to
+//! be before this crate serves anything out of it is stated once.
 //!
 //! What is duplicated here is the *document*, not the fold: the stack has no
 //! shared crate, so each side owns its copy of a wire shape and a contract test
@@ -588,7 +599,7 @@ fn tail(stderr: &[u8]) -> String {
 /// a process for it. That is the point: a list of fifty rows used to be fifty
 /// subprocesses, each of which folded the run it was asked about.
 ///
-/// It crosses the same [`validated`] boundary the printed document does. Not
+/// It crosses the same `validated` boundary the printed document does. Not
 /// because the producer is less trusted in-process — it is the same fold — but
 /// because there is then **one** statement of what a telemetry document has to
 /// be before this crate serves anything out of it, rather than a second path in
