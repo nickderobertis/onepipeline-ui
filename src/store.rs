@@ -246,6 +246,7 @@ impl RunStore {
     /// No read: the summaries are already in hand, and this is a walk over their
     /// names.
     fn nameable(
+        &self,
         summaries: Vec<RunSummary>,
         refused: &mut Vec<Skipped>,
     ) -> Vec<(RunId, RunSummary)> {
@@ -253,8 +254,11 @@ impl RunStore {
         for summary in summaries {
             match RunId::try_from(summary.run_id.as_str()) {
                 Ok(run) => serving.push((run, summary)),
+                // The directory rather than the bare name, because that is what
+                // `unreadable` carries for every other refused root and a client
+                // reading the two together must not have to tell them apart.
                 Err(why) => refused.push(Skipped {
-                    path: PathBuf::from(&summary.run_id),
+                    path: self.root.join(&summary.run_id),
                     reason: format!("this API cannot serve a run under that name: {why}"),
                 }),
             }
@@ -303,7 +307,7 @@ impl RunStore {
     fn page(&self, query: &RunsQuery) -> Value {
         let listing = Listing::of(&self.root);
         let mut skipped = listing.skipped;
-        let summaries = Self::nameable(listing.summaries, &mut skipped);
+        let summaries = self.nameable(listing.summaries, &mut skipped);
         // The cursor names the last row *served*, so resumption is positional in
         // this order rather than a comparison on the id: an id comparison would
         // skip or repeat rows the moment the order stopped being the id's.

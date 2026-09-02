@@ -8319,7 +8319,13 @@ fn a_run_directory_the_contract_cannot_name_is_reported_rather_than_listed() {
     assert_eq!(served, vec![fixture_run::RUN_ID], "{listed}");
     let unreadable = listed["unreadable"].as_array().expect("the refused root");
     assert_eq!(unreadable.len(), 1, "{listed}");
-    assert_eq!(unreadable[0]["path"], json!(unnameable), "{listed}");
+    assert!(
+        unreadable[0]["path"]
+            .as_str()
+            .expect("a path")
+            .ends_with(unnameable),
+        "the refusal names the directory it is about: {listed}"
+    );
     assert!(
         !unreadable[0]["reason"]
             .as_str()
