@@ -6,8 +6,10 @@ is the bar it is held to, not a tour of it.
 ## The bar is journeys, not a number
 
 There is no line-coverage floor here. A change to what a reader sees is not done
-until a journey drives it, in a browser, against a real `onepipeline-api serve`
-over a recorded run directory — `playwright.config.ts` for the journeys and
+until a journey drives it, in a browser, against the **built bundle** and a real
+`onepipeline-api serve` over a recorded run directory — the artifact the
+`onepipeline-ui` npm package ships, served by `vite preview`, because a dev server
+is not what any reader ever loads — `playwright.config.ts` for the journeys and
 `isolation.config.ts` for what one run of that tier owes another. Nothing between
 the browser and the read model is doubled.
 

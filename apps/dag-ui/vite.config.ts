@@ -9,17 +9,26 @@ import { defineConfig } from "vitest/config";
  */
 const apiTarget = process.env.DAG_UI_API_URL ?? "http://127.0.0.1:8787";
 
+/**
+ * The two paths the app reads the API through, proxied identically by the dev
+ * server and by `vite preview`. Declared once and used by both: the journeys drive
+ * the built bundle through `preview`, so a path proxied for one and not the other
+ * is a read that works while a developer watches it and fails in the tier.
+ */
+const proxy = {
+  "/api": apiTarget,
+  "/healthz": apiTarget,
+};
+
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react(), tailwindcss()],
   build: { outDir: "dist", emptyOutDir: true },
   server: {
     port: 4173,
-    proxy: {
-      "/api": apiTarget,
-      "/healthz": apiTarget,
-    },
+    proxy,
   },
+  preview: { proxy },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],

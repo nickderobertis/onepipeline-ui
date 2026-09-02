@@ -175,7 +175,9 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Every project's test suite; the crate's enforces its coverage floor.
+# Every project's unit and contract tests: the crate's suite under its coverage
+# floor, and the frontend's components. The two tiers that start servers are
+# `test-baseline` and `test-browser`, and `check` runs all three.
 test:
     @bash scripts/nx.sh run-many -t test
 
@@ -260,8 +262,11 @@ _crate-doc:
 test-quick:
     @cargo nextest run --locked -E 'not test(/^baseline::/)' --status-level fail
 
-# Drives the compiled binary and the committed npm launcher — never a stub.
-# The end-to-end journeys in isolation (also run by `test`/`check`).
+# Drives the compiled binary and the committed npm launcher — never a stub. The
+# whole e2e binary, which is `test` and `test-baseline` together: that split is
+# about what the gate provisions for which tier, and reaching for the journeys
+# themselves should not have to know it.
+# The end-to-end journeys in isolation (all of them, unlike `test`).
 test-e2e: _ensure-baseline
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 

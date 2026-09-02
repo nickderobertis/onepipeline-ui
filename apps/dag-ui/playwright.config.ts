@@ -162,7 +162,8 @@ export default defineConfig({
   /**
    * Every timeout below is a *readiness* budget: how long a process may take to bind
    * its port, not how long it may take to exist. So no command here may build
-   * anything. The read API the fixture server serves through is built by
+   * anything — which is why the three UI origins are `vite preview` over a bundle
+   * `dag-ui:build` already produced, and not a `vite build` of their own. The read API the fixture server serves through is built by
    * `dag-ui:build-api-server`, which `dag-ui:test` and `dag-ui:bootstrap` depend on;
    * `serve-fixture.mjs` finds that binary and refuses in milliseconds when it is
    * absent. A compile here is a wait whose length is the runner's and whatever else
@@ -189,7 +190,7 @@ export default defineConfig({
     },
     {
       name: "ui",
-      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.ui} --strictPort`,
+      command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.ui} --strictPort`,
       url: `http://${LOOPBACK}:${session.ui}`,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.api}` },
       reuseExistingServer: false,
@@ -221,7 +222,7 @@ export default defineConfig({
     },
     {
       name: "stalled-ui",
-      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.stalledUi} --strictPort`,
+      command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.stalledUi} --strictPort`,
       url: STALLED_UI_URL,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.stalledApi}` },
       reuseExistingServer: false,
@@ -230,7 +231,7 @@ export default defineConfig({
     },
     {
       name: "offline-ui",
-      command: `npx vite --config vite.config.ts --host ${LOOPBACK} --port ${session.offlineUi} --strictPort`,
+      command: `npx vite preview --config vite.config.ts --host ${LOOPBACK} --port ${session.offlineUi} --strictPort`,
       url: OFFLINE_UI_URL,
       env: { DAG_UI_API_URL: `http://${LOOPBACK}:${session.offlineApi}` },
       reuseExistingServer: false,
