@@ -3176,7 +3176,7 @@ test("refuses to serve when the read API has not been built", () => {
  */
 const API_BINARY = resolve(
   import.meta.dirname,
-  "../../../target/debug/onepipeline-api",
+  "../../target/debug/onepipeline-api",
 );
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */

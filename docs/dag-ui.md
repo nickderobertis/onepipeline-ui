@@ -439,7 +439,7 @@ just dag-ui-screens
 views through the real telemetry client with only the browser's `fetch` and
 `EventSource` replaced. Playwright then drives the built user journeys in a real
 browser against a real `onepipeline-api serve` process:
-`apps/dag-ui/e2e/fixtures/runs.mjs` writes a throwaway run directory in the SDK's
+`apps/dag-ui-e2e/fixtures/runs.mjs` writes a throwaway run directory in the SDK's
 own on-disk shape — a launch record, a plan, the run's own recorded result, and
 the merged event store — `serve-fixture.mjs` serves it through the compiled binary,
 and `playwright.config.ts` starts both that server and Vite. Nothing between the

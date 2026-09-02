@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { defineConfig } from "@playwright/test";
 import { z } from "zod";
 
@@ -23,13 +23,16 @@ import { z } from "zod";
 const LOOPBACK = "127.0.0.1";
 
 /**
- * The app these journeys drive, which is where every server below runs from.
+ * The app these journeys drive, which is where the Vite origins below run from:
+ * that is where its `vite.config.ts` and the bundle `dag-ui:build` produced are.
  *
- * The journeys are a project of their own and this config sits with them, one
- * directory below the app: the servers still start in the app, because that is
- * where its `vite.config.ts`, its built bundle and the fixture script are.
+ * The fixture servers are named from this project instead, because the script
+ * they run belongs to the journeys rather than to the app.
  */
-const APP = join(import.meta.dirname, "..");
+const APP = join(import.meta.dirname, "../dag-ui");
+
+/** The fixture server this project owns, named from this file. */
+const SERVE_FIXTURE = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
 
 /**
  * Everything one run of this tier must not share with another: its ports and the
@@ -48,6 +51,27 @@ const APP = join(import.meta.dirname, "..");
  * reads that back instead of choosing again.
  */
 const port = z.number().int().min(1).max(65535);
+/**
+ * The fixture directory, confined to the shape this tier makes for itself.
+ *
+ * `e2e/global-teardown.ts` removes this path recursively, and it arrives through
+ * the environment — which every worker inherits and anything else could set. A
+ * length check would let one that named a checkout be deleted by the run that
+ * read it, so what is accepted is what `mkdtempSync` below produces and nothing
+ * else: a directory of this host's temporary directory, named by this tier.
+ */
+const FIXTURE_PREFIX = join(tmpdir(), "dag-ui-e2e-fixture-");
+const fixtureWorkspace = z
+  .string()
+  .startsWith(
+    FIXTURE_PREFIX,
+    `a fixture workspace is a ${FIXTURE_PREFIX}* directory`,
+  )
+  .refine((path) => !path.slice(FIXTURE_PREFIX.length).includes(sep), {
+    message:
+      "a fixture workspace is that directory itself, not a path under it",
+  });
+
 const sessionSchema = z.object({
   api: port,
   ui: port,
@@ -55,7 +79,7 @@ const sessionSchema = z.object({
   offlineUi: port,
   stalledApi: port,
   stalledUi: port,
-  workspace: z.string().min(1),
+  workspace: fixtureWorkspace,
 });
 type Session = z.infer<typeof sessionSchema>;
 
@@ -105,7 +129,7 @@ function chooseSession(): Session {
     offlineUi,
     stalledApi,
     stalledUi,
-    workspace: mkdtempSync(join(tmpdir(), "dag-ui-e2e-fixture-")),
+    workspace: mkdtempSync(FIXTURE_PREFIX),
   };
 }
 
@@ -177,7 +201,7 @@ export default defineConfig({
    * anything. That is why the three UI origins are `vite preview` over a bundle
    * `dag-ui:build` already produced rather than a `vite build` of their own, and
    * why the read API the fixture server serves through is built by
-   * `dag-ui:build-api-server`. `dag-ui:test-browser` depends on both of them, and
+   * `dag-ui:build-api-server`. `dag-ui-e2e:test` depends on both of them, and
    * `serve-fixture.mjs` finds that binary and refuses in milliseconds when it is
    * absent. A compile here is a wait whose length is the runner's and whatever else
    * holds the cargo lock, and Playwright can only report it as a server that would
@@ -196,7 +220,7 @@ export default defineConfig({
     {
       name: "fixture-api",
       cwd: APP,
-      command: `node e2e/fixtures/serve-fixture.mjs --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
+      command: `node ${SERVE_FIXTURE} --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
       url: `http://${LOOPBACK}:${session.api}/healthz`,
       reuseExistingServer: false,
       stdout: "pipe",
@@ -215,7 +239,7 @@ export default defineConfig({
     {
       name: "stalled-api",
       cwd: APP,
-      command: `node e2e/fixtures/serve-fixture.mjs --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
+      command: `node ${SERVE_FIXTURE} --stall --port ${session.stalledApi} --refuse-port ${session.offlineApi}`,
       /**
        * Readiness is what this server says, because it is the one server here that
        * answers nothing when it is working — an accepted connection is all a

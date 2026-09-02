@@ -33,7 +33,7 @@ gallery="$(mktemp -d "$gallery_root/gallery-XXXXXXXX")" || {
 }
 status=0
 # llmlint: ignore[tool_output_is_signal] Playwright's per-capture progress is what tells the operator which surfaces have been photographed while the tier runs.
-(cd "$repo_root" && DAG_UI_SCREENSHOT_DIR="$gallery" npx playwright test --config apps/dag-ui/e2e/screenshots.config.ts "$@") || status=$?
+(cd "$repo_root" && DAG_UI_SCREENSHOT_DIR="$gallery" npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts "$@") || status=$?
 
 if [ "$status" -eq 0 ]; then
     echo "dag-ui-screens: gallery at $gallery/index.html"

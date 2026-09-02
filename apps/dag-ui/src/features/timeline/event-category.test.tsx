@@ -157,7 +157,7 @@ function drawing(category: EventCategory): string {
  * `src/test/dag-ui-doc.test.ts` takes of the gallery's surface list.
  */
 function servedStore(): { kinds: readonly string[]; unknown: string } {
-  const source = repoFile("apps/dag-ui/e2e/fixtures/runs.mjs");
+  const source = repoFile("apps/dag-ui-e2e/fixtures/runs.mjs");
   // A kind is written either as the literal it is or as a constant that module
   // declares, and both reach the store, so both are read here.
   const declared = new Map(

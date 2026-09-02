@@ -111,7 +111,7 @@ _ensure-tool tool:
 # and is what stops the full sweep and the affected sweep from ever covering
 # different tiers.
 # Full deterministic quality gate, every project.
-check: fmt-check lint typecheck build test test-baseline test-browser doc
+check: fmt-check lint typecheck build test test-baseline doc
     @bash scripts/nx.sh run-many -t check
     @echo "check: ok"
 
@@ -175,9 +175,10 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Every project's unit and contract tests: the crate's suite under its coverage
-# floor, and the frontend's components. The two tiers that start servers are
-# `test-baseline` and `test-browser`, and `check` runs all three.
+# Every project's own test target: the crate's suite under its coverage floor, the
+# frontend's components, and the browser journeys, which are a project of their
+# own. `test-baseline` is the one tier outside this, because it is the one that
+# needs another commit of this repository compiled first.
 test:
     @bash scripts/nx.sh run-many -t test
 
@@ -188,14 +189,6 @@ test:
 # The baseline comparison, which needs the base commit's server provisioned.
 test-baseline:
     @bash scripts/nx.sh run-many -t test-baseline
-
-# The browser journeys, which start five servers between them and take minutes
-# where the unit tiers take seconds. Behind an edge of their own for the reason
-# the baseline comparison is: what a reader iterating on a component owes is the
-# tier that reads components, and `check` and `gate` run both regardless.
-# Every project's browser journeys.
-test-browser:
-    @bash scripts/nx.sh run-many -t test-browser
 
 # Build every project's docs with warnings denied.
 doc:

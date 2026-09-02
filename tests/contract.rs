@@ -1456,7 +1456,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
 /// the fixture's copy fails here until it follows.
 #[test]
 fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui/e2e/fixtures/runs.mjs");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/fixtures/runs.mjs");
     let source = fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
             "read {}: {err} — the fixture that carries the copy has moved, so this gate no \

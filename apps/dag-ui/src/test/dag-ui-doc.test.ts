@@ -81,7 +81,7 @@ describe("docs/dag-ui.md", () => {
     // Every `sized(width, height)` the matrix declares, in the order it declares
     // them, named the way that helper names them.
     const declared = [
-      ...repoFile("apps/dag-ui/e2e/viewports.ts").matchAll(
+      ...repoFile("apps/dag-ui-e2e/viewports.ts").matchAll(
         /^ {2}sized\((\d+), (\d+)\),$/gm,
       ),
     ].map(([, width, height]) => `${width}x${height}`);
@@ -102,7 +102,7 @@ describe("docs/dag-ui.md", () => {
 
   it("tabulates exactly the surfaces the gallery photographs", () => {
     const declared = [
-      ...repoFile("apps/dag-ui/e2e/gallery.screens.spec.ts").matchAll(
+      ...repoFile("apps/dag-ui-e2e/gallery.screens.spec.ts").matchAll(
         /^ {4}name: "([^"]+)",$/gm,
       ),
     ].map(([, name]) => name);

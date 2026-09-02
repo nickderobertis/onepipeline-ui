@@ -41,11 +41,11 @@ use crate::stub_bin;
 const SUITES_THAT_START_THE_READ_API: [&str; 3] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-baseline",
-    "dag-ui-e2e:test-browser",
+    "dag-ui-e2e:test",
 ];
 
 /// The targets those tasks are reached through, which is what Nx is asked for.
-const TIERS: &str = "test,test-baseline,test-browser";
+const TIERS: &str = "test,test-baseline";
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 

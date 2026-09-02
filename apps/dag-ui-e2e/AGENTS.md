@@ -1,4 +1,4 @@
-# apps/dag-ui/e2e/AGENTS.md
+# apps/dag-ui-e2e/AGENTS.md
 
 The journeys that drive the DAG Observatory, and the tier that runs them. The app
 itself is `apps/dag-ui`; this is a project of its own because these drive the
@@ -13,7 +13,7 @@ real `onepipeline-api serve` over a recorded run directory. Nothing between the
 browser and the read model is doubled. A dev server is not what any reader loads,
 and a bundle can differ from what Vite serves unbuilt.
 
-`test-browser` is the only tier here, and it is the only one in this repository
+`test` is the only tier here, and it is the only one in this repository
 that starts five servers: that is why it is an edge of its own rather than part of
 the app's `test`, which runs components in seconds. `check` depends on both, so
 the gate rules on the journeys and only somebody asking for one tier by name is
@@ -37,7 +37,7 @@ server nor the reason, and it starts them one at a time. So every entry carries 
 the first server that printed nothing is the one being waited for.**
 
 Every server runs from the app directory (`cwd`), because that is where its
-`vite.config.ts`, its built bundle and `e2e/fixtures/serve-fixture.mjs` are.
+`vite.config.ts`, its built bundle and `fixtures/serve-fixture.mjs` are.
 Nothing in that readiness window may build: the bundle and the API binary are
-`test-browser`'s dependencies, and a compile there is reported only as a server
+this project's `test` dependencies, and a compile there is reported only as a server
 that would not start.

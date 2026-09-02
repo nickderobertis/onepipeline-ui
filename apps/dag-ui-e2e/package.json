@@ -1,0 +1,13 @@
+{
+  "name": "@onepipeline-ui/dag-ui-e2e",
+  "version": "0.0.0-workspace",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@onepipeline-ui/dag-ui": "*",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0"
+  }
+}

@@ -5,14 +5,12 @@ is the bar it is held to, not a tour of it.
 
 ## The bar is journeys, not a number
 
-There is no line-coverage floor here. `test` is this project's whole tier and it
-is components: what a reader *sees* is held by `dag-ui-e2e`, whose own AGENTS.md
-states that bar, and a change to a surface is not done until a journey there
-drives it in a browser against the built bundle.
-
-The split is what each tier starts. This one starts nothing and answers in
-seconds; the journeys start five servers and take minutes. `check` depends on
-both, so only somebody asking for one by name is spared the other.
+There is no line-coverage floor here, and `test` is components: it renders them,
+drives them, and starts nothing. A change to what a reader *sees* is not done
+until a journey drives it in a browser against the built bundle — those journeys
+are `apps/dag-ui-e2e`, a project of its own, because they drive this app rather
+than being part of it and are the one tier that starts a fleet of servers to do
+it. `check` runs both projects, so a change is held to both.
 
 What the journeys may reach of this app is `@onepipeline-ui/dag-ui/testing`, the
 export in `src/testing/`. Anything a journey needs from here goes through it

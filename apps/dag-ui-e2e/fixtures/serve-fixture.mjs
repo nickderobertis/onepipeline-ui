@@ -37,10 +37,7 @@ import {
   settleDashboard,
 } from "./runs.mjs";
 
-const REPO_ROOT = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../..",
-);
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** Published beside the runs root so a spec names what this wrote, not a copy of it. */
 export const FIXTURE_FACTS_NAME = "fixture-facts.json";

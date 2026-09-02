@@ -1,0 +1,52 @@
+{
+  "name": "dag-ui-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/dag-ui-e2e",
+  "tags": ["scope:e2e", "type:e2e"],
+  "implicitDependencies": ["dag-ui"],
+  "targets": {
+    "test": {
+      "command": "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts && npx playwright test --config apps/dag-ui-e2e/isolation.config.ts",
+      "inputs": ["default", "apiServerSurface"],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build-api-server"
+        },
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        }
+      ]
+    },
+    "lint": {
+      "command": "npx biome check apps/dag-ui-e2e && npx eslint apps/dag-ui-e2e"
+    },
+    "typecheck": {
+      "command": "npx tsc -p apps/dag-ui-e2e/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "npx biome check --write --linter-enabled=false apps/dag-ui-e2e"
+    },
+    "format-check": {
+      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui-e2e"
+    },
+    "bootstrap": {
+      "command": "npx playwright install chromium",
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build-api-server"
+        }
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}
