@@ -131,13 +131,6 @@ async function tokenColor(page: Page, token: string): Promise<string> {
 }
 
 /**
- * Run the fixture command over a workspace and wait for it to finish.
- *
- * Every invocation this file makes goes through here — the ones that change what
- * the server is serving, and the ones that ask it to serve and are refused before
- * it can. `env` is empty unless a case is about what the command reads from it.
- */
-/**
  * The fixture command, named absolutely.
  *
  * These journeys are launched from the workspace root — Playwright resolves a
@@ -147,6 +140,13 @@ async function tokenColor(page: Page, token: string): Promise<string> {
  */
 const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
 
+/**
+ * Run the fixture command over a workspace and wait for it to finish.
+ *
+ * Every invocation this file makes goes through here — the ones that change what
+ * the server is serving, and the ones that ask it to serve and are refused before
+ * it can. `env` is empty unless a case is about what the command reads from it.
+ */
 function invokeFixture(
   args: string[],
   workspace = FIXTURE_WORKSPACE,

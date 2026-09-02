@@ -21,6 +21,13 @@ spared the other.
 
 ## Reaching the app
 
+The dependency on it is `"*"`, as every sibling dependency in this workspace is,
+and not the `workspace:*` protocol. That is measured rather than preferred: npm
+11.17.0 refuses it here — `npm ci` exits `EUNSUPPORTEDPROTOCOL, Unsupported URL
+Type "workspace:"` — and `npm ci` is how `scripts/workspace-install.sh` installs
+this repository. npm also normalises the protocol out of `package-lock.json`, so
+a manifest carrying it and a lockfile that cannot are drift by construction.
+
 Through `@onepipeline-ui/dag-ui/testing` and nothing else. A journey importing
 `../src/...` reaches into another project's files, which
 `@nx/enforce-module-boundaries` refuses and which would make every internal move
