@@ -13,18 +13,11 @@ real `onepipeline-api serve` over a recorded run directory. Nothing between the
 browser and the read model is doubled. A dev server is not what any reader loads,
 and a bundle can differ from what Vite serves unbuilt.
 
-`test` is the journeys. `test-isolation` is the one check that *runs* the tier
-rather than being run by it — it launches two whole tiers at once to prove they
-stay out of each other's way — so it sits behind an edge of its own: at two
-fleets of five servers it costs more than everything else here together, and
-nothing but that question needs it. `check` runs both.
-
-`test` is the only tier here that a reader iterates on, and it is the only one in
-this repository
-that starts five servers: that is why it is an edge of its own rather than part of
-the app's `test`, which runs components in seconds. `check` depends on both, so
-the gate rules on the journeys and only somebody asking for one tier by name is
-spared the other.
+`test` is the journeys, and `test-isolation` is the one check that *runs* the
+tier rather than being run by it: it launches two whole tiers at once to prove
+they stay out of each other's way, which costs more than everything else here
+together and answers one question nothing else asks. Each edge is what a reader
+can ask for without paying for the rest; `check` pays for all of it.
 
 ## Reaching the app
 
