@@ -3,11 +3,12 @@
   "version": "0.0.0-workspace",
   "private": true,
   "type": "module",
-  "//": "sibling dependencies are `*`, never `workspace:*`: npm 11.17.0 exits EUNSUPPORTEDPROTOCOL on `npm install` and on `npm ci`, which is how scripts/workspace-install.sh installs this repository, and normalises the protocol out of package-lock.json besides. tests/packaging.rs fails the build on it.",
+  "//": "llmlint: ignore-block[projects_stay_in_one_js_workspace] the `workspace:*` protocol this rule prescribes does not install here: npm 11.17.0 exits EUNSUPPORTEDPROTOCOL, Unsupported URL Type \"workspace:\" on `npm install` and on `npm ci` \u2014 measured with a lockfile regenerated for the protocol, so it is not a manifest/lock mismatch \u2014 and `npm ci` is what `scripts/workspace-install.sh` runs to provision every clone, ahead of every tier. `*` beside a `workspaces` entry already resolves to the sibling and nothing else. `tests/packaging.rs::no_manifest_names_a_sibling_with_a_protocol_this_npm_refuses` fails the build on the protocol so this cannot drift back.",
   "dependencies": {
     "@onepipeline-ui/timeline-categories": "*",
     "zod": "4.1.12"
   },
+  "//end": "llmlint: ignore-end[projects_stay_in_one_js_workspace]",
   "devDependencies": {
     "@playwright/test": "1.62.0"
   }
