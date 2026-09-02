@@ -614,13 +614,16 @@ p {
    working area — still bounded, because the reading it is read against is the other
    half of the view and must not be squeezed to nothing.
    The share is what the whole lane vocabulary needs on the laptop the layout is
-   designed against, so that reading fits without scrolling at all. A shorter viewport
+   designed against, so that reading fits without scrolling at all. It moved from
+   72% when the queue a ready node sat in became a lane of its own: the vocabulary
+   is eleven lanes now, and the share has to be what the vocabulary needs rather
+   than what it needed once. A shorter viewport
    cannot hold ten lanes and a reading at once whatever share is named, so its region
    scrolls; the axis is painted inside the plot's own clipping box and cannot be
    pinned above that fold, so reaching the clock there is a scroll rather than a
    given. Collapsing is the other way back to it, and it is one click. */
 .node-execution[data-expanded="true"] {
-  grid-template-rows: fit-content(72%) minmax(0, 1fr);
+  grid-template-rows: fit-content(80%) minmax(0, 1fr);
 }
 
 .node-timeline-sticky {
@@ -703,7 +706,7 @@ p {
   width: 100%;
   align-items: baseline;
   gap: 8px;
-  padding: 2px 8px;
+  padding: 1px 8px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -743,7 +746,7 @@ p {
   width: 100%;
   align-items: baseline;
   gap: 8px;
-  padding: 2px 8px;
+  padding: 1px 8px;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -1346,9 +1349,14 @@ button.graph-row-name {
      It was three quarters until the header gained the reading that says whether the
      node can be corrected. Two badges and the node's own facts do not share one row
      at 390px, so the header takes a row more here than anywhere else — and three
-     quarters of what it then left was 17px short of the collapsed line. */
-  .node-execution {
-    grid-template-rows: fit-content(80%) minmax(0, 1fr);
+     quarters of what it then left was 17px short of the collapsed line. Four fifths
+     was 20px short of it once the queue a ready node sat in became a lane of its
+     own: eleven names take a sixth row here where ten took five. Both states take
+     the same share at this width, because expanding must never make the plot's
+     ceiling *lower* than the line it opens from. */
+  .node-execution,
+  .node-execution[data-expanded="true"] {
+    grid-template-rows: fit-content(86%) minmax(0, 1fr);
   }
 
   /* Wrapping earns its extra row between this width and the breakpoint above, where

@@ -23,6 +23,34 @@ const fixtureSchema = z.object({
   foundation_pr: z.string().min(1),
   /** The one kind the store holds that this build has no category rule for. */
   unfiled_kind: z.string().min(1),
+  /**
+   * The boundary the reading collapses a run of consecutive rows at, and the two
+   * nodes the corpus is written around it: one records one short of it and one
+   * records exactly it, each as a run of dispatched sessions and a run of journal
+   * records.
+   */
+  collapse: z.object({
+    threshold: z.number().int().min(2),
+    narrow_node: z.string().min(1),
+    wide_node: z.string().min(1),
+    /** A node whose reading is a long list of uniform rows and nothing else. */
+    dense_node: z.string().min(1),
+    dense_records: z.number().int().min(20),
+  }),
+  /**
+   * What the live run's scheduler recorded about the nodes it was not running:
+   * the node it held behind other work and what was ahead of it each time that
+   * changed, the node held for reasons that are not concurrency, and a node the
+   * run said nothing at all about — which is the state a queued span must never
+   * be invented for.
+   */
+  queue: z.object({
+    behind_node: z.string().min(1),
+    ahead: z.array(z.array(z.string().min(1)).min(1)).min(2),
+    held_node: z.string().min(1),
+    decision_reference: z.string().min(1),
+    quiet_node: z.string().min(1),
+  }),
   remote_open_pr: z.string().min(1),
   foundation_commit: z.string().min(1),
   /**

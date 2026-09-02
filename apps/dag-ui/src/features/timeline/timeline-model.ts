@@ -562,9 +562,13 @@ export function nodeTimeline(
       .map((span) => spanRow(span, children)),
     ...orphanEvents(timeline.spans, ids, nodeId),
   ].sort(byStart);
-  // Grouping makes alternating worker/judge streams consecutive worker groups; run
-  // the density cap again so hundreds of full conversations remain bounded.
-  const rows = group(groupDispatches(labelWorkerRetries(group(top))));
+  // Collapsed *after* the sessions of one dispatch have been gathered under the
+  // agent session that opened them, and not before. A node that dispatched once
+  // records its worker, the judge over it and its lint run as five consecutive
+  // siblings, which is a run of one kind by every rule here — collapsing first hid
+  // an ordinary single dispatch behind a control, and left `groupDispatches` a
+  // group row it could nest nothing inside.
+  const rows = group(groupDispatches(labelWorkerRetries(top)));
   return { span: own, rows, total: count(rows) };
 }
 
