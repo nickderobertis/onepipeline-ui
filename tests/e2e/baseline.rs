@@ -196,6 +196,7 @@ fn walk(value: &Value, at: String, found: &mut BTreeSet<String>) {
     }
 }
 
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] this journey builds nothing: it starts two already-provisioned binaries over one runs root. The expense the rule is about — compiling the base commit's dependency graph — is behind `onepipeline-ui:ensure-baseline`, whose script no-ops on a stamp naming the base already built, so an unrelated change pays nothing. The edge from the broad `test` target to it is an invariant this suite enforces rather than an oversight: `ensure_baseline::every_suite_that_serves_the_baseline_depends_on_the_provisioning` fails the build when a suite that serves the baseline does not declare it, because a publication clone is fresh and such a suite would pass against no baseline at all. A target of its own would not save the gate that build — `check` would run it too — it would only delete that guard.
 #[test]
 fn every_field_the_base_commit_served_is_served_by_this_build() {
     let base = base_commit();
@@ -280,6 +281,7 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
     );
 }
 
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] this journey builds nothing: it starts two already-provisioned binaries over one runs root. The expense the rule is about — compiling the base commit's dependency graph — is behind `onepipeline-ui:ensure-baseline`, whose script no-ops on a stamp naming the base already built, so an unrelated change pays nothing. The edge from the broad `test` target to it is an invariant this suite enforces rather than an oversight: `ensure_baseline::every_suite_that_serves_the_baseline_depends_on_the_provisioning` fails the build when a suite that serves the baseline does not declare it, because a publication clone is fresh and such a suite would pass against no baseline at all. A target of its own would not save the gate that build — `check` would run it too — it would only delete that guard.
 #[test]
 fn the_runs_the_base_commit_could_not_read_are_read_now() {
     // The other direction, and the one the adoption is *for*. The comparison
