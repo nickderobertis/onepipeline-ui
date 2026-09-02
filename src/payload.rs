@@ -2941,13 +2941,17 @@ impl<'a> RelayedTurn<'a> {
 fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<RelayedTurn<'a>> {
     let mut turns: Vec<RelayedTurn<'a>> = Vec::new();
     let mut open: Vec<&'a Envelope> = Vec::new();
-    // Whether the turn the producer last opened is one this transcript serves. A
-    // summary is published from inside the turn that precedes it, so this is what
-    // tells a tool call the agent made from one the supervisor made.
-    let mut inside_agent = true;
+    // The turn record a summary arriving now was published from inside, which is
+    // the last one the producer relayed — and `None` until it has relayed any, so
+    // a summary that arrived before the session's first turn record still joins
+    // it. Kept as the record rather than as a flag read off it, because it is
+    // what says *whose* turn the summary was published from.
+    let mut published_from: Option<&'a Envelope> = None;
     for event in events.iter().copied() {
         if event.kind.0 == graph::TURN_ACTIVITY {
-            if inside_agent {
+            // The supervisor's own tool calls are not the agent's turn's, and
+            // there is no row of its own for them to land on.
+            if published_from.is_none_or(agent_turn) {
                 open.push(event);
             }
             continue;
@@ -2961,8 +2965,8 @@ fn relayed_turns<'a>(events: &[&'a Envelope]) -> Vec<RelayedTurn<'a>> {
         if let Some(turn) = turns.last_mut() {
             turn.summaries.append(&mut open);
         }
-        inside_agent = agent_turn(event);
-        if !inside_agent {
+        published_from = Some(event);
+        if !agent_turn(event) {
             continue;
         }
         match closes(&turns, event) {
@@ -3154,6 +3158,15 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
 /// party runs one side and relays it, so there is no other side for such a record
 /// to belong to — and refusing it would empty the transcript of every session
 /// recorded before that correction, which those runs still have to serve.
+// llmlint: ignore[invalid_states_unrepresentable] the closed vocabulary is
+// `oneagentgraph::event::Party`, and it belongs to the producer: that library
+// publishes the field as a `String` on purpose — "that is the shape the wire has
+// and a consumer reads" — mints one only where it writes a record, and exposes no
+// parse back. There is no type at this pin to parse into, and declaring one here
+// would be this crate owning a record's vocabulary, which `AGENTS.md` forbids in
+// as many words; `graph::ASSISTANT_ROLE` is that type's own spelling and
+// `tests/contract.rs` holds it to the producer's declaration. It is the same
+// answer `turn_key` below already carries for the same field.
 fn agent_turn(event: &Envelope) -> bool {
     match event.payload.get(graph::ROLE).and_then(Value::as_str) {
         Some(role) => role == graph::ASSISTANT_ROLE,
