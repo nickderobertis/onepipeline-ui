@@ -18,6 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use onepipeline::views::{RunPaths, RunSummary, RunView};
 use onepipeline_ui::api::ReadApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
@@ -28,7 +29,7 @@ use onepipeline_ui::contract::{
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[path = "support/fixture_run.rs"]
 mod fixture_run;
@@ -125,6 +126,235 @@ fn every_route_has_a_fixture() {
 /// which is a directory the onepipeline SDK itself writes. A payload change is
 /// therefore a golden change in the same commit, and re-running with
 /// `UPDATE_CONTRACT_FIXTURES=1` is how that change is made deliberately.
+/// The fields schema 15 adds to a run-list payload, each optional and each
+/// absent unless there is something to report.
+///
+/// Named here because the gate below has to be able to tell "a field this change
+/// added" from "a field that appeared without anyone deciding to add it", which
+/// is the whole difference between an additive version and a broken one.
+const ADDED_AT_15: [&str; 2] = ["unreadable", "missing"];
+
+/// Every leaf of `expected` that `served` does not carry with the same value.
+///
+/// Field by field rather than a whole-document comparison, because what is being
+/// asked is not "are these the same document" — the gate above already asks that
+/// — but "is every field a client already reads still there, still meaning what
+/// it meant". A whole-document comparison answers both at once and says which
+/// only by printing two payloads at a reader.
+fn fields_missing_from(expected: &Value, served: &Value, at: &str) -> Vec<String> {
+    match expected {
+        Value::Object(fields) => fields
+            .iter()
+            .flat_map(|(key, value)| {
+                let path = if at.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{at}.{key}")
+                };
+                match served.get(key) {
+                    Some(found) => fields_missing_from(value, found, &path),
+                    None => vec![format!("{path} is gone")],
+                }
+            })
+            .collect(),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .flat_map(|(index, item)| {
+                let path = format!("{at}[{index}]");
+                match served.get(index) {
+                    Some(found) => fields_missing_from(item, found, &path),
+                    None => vec![format!("{path} is gone")],
+                }
+            })
+            .collect(),
+        leaf if leaf == served => Vec::new(),
+        leaf => vec![format!("{at} was {leaf} and is now {served}")],
+    }
+}
+
+/// **A client written against the previous payload reads what this build
+/// serves.**
+///
+/// The run list is the payload this change moves, and what it owes every client
+/// already reading it is that nothing was taken away and nothing changed
+/// meaning. Asserted field by field against the checked-in golden, and then in
+/// the other direction: the only keys the served payload has that the golden's
+/// own shape does not are the ones this version declares it adds, so a field
+/// that appeared without anybody deciding to is a failure rather than a
+/// surprise a client discovers.
+///
+/// The envelope's schema version is the one thing that *did* move, and it is
+/// checked as such rather than compared.
+#[test]
+fn every_field_the_run_list_served_before_is_served_with_the_same_value() {
+    let root = tempfile::tempdir().expect("temp dir");
+    fixture_run::write(root.path(), fixture_run::RUN_ID);
+    fixture_run::write(root.path(), fixture_run::OTHER_RUN_ID);
+    let runs_root: onepipeline_ui::cli::RunsRoot = root
+        .path()
+        .to_str()
+        .expect("utf-8 path")
+        .parse()
+        .expect("a readable runs root");
+    let served = RunStore::new(&runs_root)
+        .runs(&RunsQuery {
+            include_settled: true,
+            ..RunsQuery::default()
+        })
+        .expect("the run list serves");
+    let mut served: Value = serde_json::to_value(&served).expect("the envelope serializes");
+    served["observed_at"] = Value::String(OBSERVED_AT.to_owned());
+
+    let golden: Value = serde_json::from_str(&read_fixture("runs.json")).expect("runs.json");
+    let gone = fields_missing_from(&golden, &served, "");
+    assert!(
+        gone.is_empty(),
+        "the run list no longer serves what it served: {gone:?}"
+    );
+
+    // And the other direction, so an addition is a decision rather than a
+    // discovery. Only the envelope's top level is checked: every field *inside*
+    // a row was compared above, and a row this version adds nothing to cannot
+    // grow one without the golden growing it too.
+    let added: Vec<&String> = served
+        .as_object()
+        .expect("an envelope")
+        .keys()
+        .filter(|key| golden.get(key).is_none())
+        .collect();
+    for key in &added {
+        assert!(
+            ADDED_AT_15.contains(&key.as_str()),
+            "the run list grew a field nothing declared: {key}"
+        );
+    }
+
+    assert_eq!(golden["api_version"], json!(API_VERSION));
+    assert_eq!(
+        golden["telemetry_schema_version"],
+        json!(TELEMETRY_SCHEMA_VERSION),
+        "the golden and the constant disagree about which schema this is"
+    );
+}
+
+/// Every run shape this suite can write, for the gate below.
+///
+/// Named rather than one representative run: the two readings agree trivially on
+/// a settled run and the states they could come apart on are the awkward ones —
+/// a run whose journal nothing can fold, one stopped mid-flight, one whose
+/// driver is a process on *this* host, one that has recorded nothing but its
+/// launch.
+type RunShape = (&'static str, fn(&Path) -> String);
+
+/// Where the run each shape writes lives, once written.
+fn shapes() -> Vec<RunShape> {
+    vec![
+        ("a settled run", |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+            fixture_run::RUN_ID.to_owned()
+        }),
+        ("a run still being driven", |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::RUN_ID.to_owned()
+        }),
+        ("a run that recorded only its launch", |root| {
+            fixture_run::write_launched(root, fixture_run::RUN_ID);
+            fixture_run::RUN_ID.to_owned()
+        }),
+        ("a run with no journal to fold", |root| {
+            fixture_run::write_recorded_only(root, fixture_run::RECORDED_ONLY_RUN_ID);
+            fixture_run::RECORDED_ONLY_RUN_ID.to_owned()
+        }),
+        ("a run stopped mid-flight", |root| {
+            fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
+            fixture_run::RUN_ID.to_owned()
+        }),
+        ("a preserved run", |root| {
+            fixture_run::write_preserved(root, fixture_run::RUN_ID);
+            fixture_run::RUN_ID.to_owned()
+        }),
+        ("a run whose lanes were measured", |root| {
+            fixture_run::write_lanes(root, fixture_run::RUN_ID);
+            fixture_run::RUN_ID.to_owned()
+        }),
+        // The two that reach the pid probe at all: a launch record naming any
+        // other host resolves toward live without asking the process table.
+        ("a run this very process is driving", |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            driven_by(root, fixture_run::RUN_ID, std::process::id());
+            fixture_run::RUN_ID.to_owned()
+        }),
+        ("a run whose driver on this host is gone", |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            // Above the kernel's own maximum on every platform this runs on, so
+            // it is a pid nothing can be holding.
+            driven_by(root, fixture_run::RUN_ID, 0x7FFF_FFF0);
+            fixture_run::RUN_ID.to_owned()
+        }),
+    ]
+}
+
+/// Rewrite a run's launch record to name a driver on **this** host.
+///
+/// The host is asked of the reading under test rather than of this test, because
+/// the whole question the probe answers is whether the recorded host is the one
+/// doing the reading — and a second way of naming it here would be a gate that
+/// passed while the two disagreed.
+fn driven_by(root: &Path, run: &str, pid: u32) {
+    let record = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
+            .expect("the launch record is json");
+    let fields = launch.as_object_mut().expect("a mapping");
+    fields.insert("pid".into(), serde_json::json!(pid));
+    fields.insert(
+        "host".into(),
+        serde_json::json!(onepipeline_ui::liveness::hostname()),
+    );
+    fs::write(
+        &record,
+        format!("{}\n", serde_json::to_string_pretty(&launch).expect("json")),
+    )
+    .expect("rewrite the launch record");
+}
+
+/// **The row a listing serves is the row a fold produces.**
+///
+/// This is the check `src/liveness.rs` is written against. That module restates
+/// a reading the SDK owns — how a run is being driven — because the SDK's own
+/// entry point takes the fold that a bounded listing exists in order not to
+/// take. A restatement with nothing holding it to its original is a row an
+/// operator has to disbelieve, so both readings are run over the same run
+/// directories and compared field by field: `payload::run_row` out of the
+/// bounded summary, and `payload::run_summary` out of `RunView::open` and the
+/// SDK's own `liveness_word`.
+///
+/// One telemetry document is handed to both, because where a row's clock comes
+/// from is not what this gate is about — the two readings of *that* are held
+/// together end to end, over a real process, by
+/// `tests/e2e/server.rs`'s `a_rows_clock_and_the_details_are_one_reading`.
+#[test]
+fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
+    for (shape, write) in shapes() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let run = write(root.path());
+        let paths = RunPaths::under(root.path(), &run);
+        // Taken first, because this is the read that folds and caches for a run
+        // whose summary is not there — which is every run a fixture writes.
+        let summary = RunSummary::of(&paths).unwrap_or_else(|err| panic!("{shape}: {err}"));
+        let view = RunView::open(&paths).unwrap_or_else(|err| panic!("{shape}: {err}"));
+        let id = RunId::try_from(run.as_str()).expect("a usable run id");
+        let clock = onepipeline_ui::telemetry::of_aggregate(&id, &summary.timing).ok();
+        assert!(clock.is_some(), "{shape}: the summary carries no clock");
+        assert_eq!(
+            onepipeline_ui::payload::run_row(&summary, &paths, clock.as_ref()),
+            onepipeline_ui::payload::run_summary(&view, clock.as_ref()),
+            "{shape}: the bounded reading and the fold describe different runs"
+        );
+    }
+}
+
 #[test]
 fn every_route_serves_the_payload_its_golden_pins() {
     let root = tempfile::tempdir().expect("temp dir");

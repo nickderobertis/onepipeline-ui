@@ -135,7 +135,13 @@ fn now_millis() -> u64 {
 /// The environment first and `/etc/hostname` after it, which is how the sibling
 /// resolves it: a run recorded on a host that names itself one way and read back
 /// on one that names itself another must not have its driver probed by pid.
-fn hostname() -> String {
+///
+/// Public because the drift gate this module's header names has to be able to
+/// *write* a run recorded on this host, which is the only way the pid probe
+/// below is reached at all — a launch record naming any other host resolves
+/// toward live without asking.
+#[must_use]
+pub fn hostname() -> String {
     for key in ["HOSTNAME", "COMPUTERNAME"] {
         if let Ok(value) = std::env::var(key) {
             if !value.is_empty() {

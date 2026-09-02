@@ -4,7 +4,9 @@
 //! Nothing here is stubbed. `baseline` serves one runs root through the binary
 //! this branch forked from and through this one, comparing what each answered;
 //! `ensure_baseline` drives the recipe that provisions the first of those two;
-//! `cli` spawns the real binary as a subprocess and
+//! `cost` counts what the real binary asks the kernel for while it serves, which
+//! is how the bounds on what a read costs are held; `cli` spawns the real binary
+//! as a subprocess and
 //! asserts on its exit code, stdout, and stderr; `server` starts that binary on
 //! a real port over a directory the onepipeline SDK itself writes and reads the
 //! bytes it serves; `packaging` assembles the real npm packages with
@@ -28,6 +30,7 @@
 
 mod baseline;
 mod cli;
+mod cost;
 mod ensure_baseline;
 mod ensure_sibling;
 mod lint_llm_diff;
@@ -47,6 +50,8 @@ mod report_workflow_failure;
 mod semver_check;
 mod server;
 
+#[path = "../support/cost.rs"]
+mod cost_support;
 #[path = "../support/fixture_run.rs"]
 mod fixture_run;
 #[path = "../support/harness_history.rs"]
