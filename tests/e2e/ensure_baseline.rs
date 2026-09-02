@@ -469,6 +469,73 @@ fn the_comparison_is_keyed_by_the_commit_it_compares_against() {
     );
 }
 
+/// Every leg that runs the gate checks out the history the gate resolves.
+///
+/// [`the_comparison_is_keyed_by_the_commit_it_compares_against`] reads version
+/// control rather than a file, and `test-quick` deliberately does not exclude
+/// `ensure_baseline::` from the cross-platform legs — these journeys stub the
+/// build and are as platform-sensitive as any other recipe here. What that costs
+/// is a checkout: at `actions/checkout`'s default depth there is no `origin/main`
+/// and no `main`, so the resolution fails for want of history on a runner that
+/// got nothing wrong. That failure is loud but unreadable — a red macOS leg
+/// naming a git object — and it is invisible from here, because every local tree
+/// has the refs it wants.
+#[test]
+fn every_leg_running_the_gate_checks_out_the_history_it_resolves() {
+    let workflow =
+        fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("the CI workflow");
+    let mut legs = 0_usize;
+    for (job, block) in jobs_in(&workflow) {
+        if !block.contains("run: just check") {
+            continue;
+        }
+        legs += 1;
+        assert!(
+            block.contains("fetch-depth: 0"),
+            "the `{job}` job runs the gate over a shallow checkout, which resolves \
+             neither `origin/main` nor `main`, so every journey that reads the base \
+             commit fails there for want of history"
+        );
+    }
+    assert!(
+        legs > 0,
+        "no job in ci.yml runs a `just check` recipe, so this is guarding nothing"
+    );
+}
+
+/// The workflow's job ids, each paired with the block that follows it.
+///
+/// A YAML parser would be a dependency for one assertion, and the shape being
+/// read is a fixed two-level one: job ids are the keys indented by exactly two
+/// spaces under the top-level `jobs:`.
+fn jobs_in(workflow: &str) -> Vec<(String, String)> {
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    let mut inside = false;
+    for line in workflow.lines() {
+        if !line.starts_with([' ', '\t', '#']) && !line.is_empty() {
+            inside = line.starts_with("jobs:");
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        match line
+            .strip_prefix("  ")
+            .filter(|rest| !rest.starts_with([' ', '#']))
+            .and_then(|rest| rest.strip_suffix(':'))
+        {
+            Some(id) => jobs.push((id.to_owned(), String::new())),
+            None => {
+                if let Some((_, block)) = jobs.last_mut() {
+                    block.push_str(line);
+                    block.push('\n');
+                }
+            }
+        }
+    }
+    jobs
+}
+
 /// Every module the comparison reads is one of the files it is keyed on.
 ///
 /// Its inputs are the modules that decide what it compares rather than the whole
