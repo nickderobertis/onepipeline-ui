@@ -585,3 +585,80 @@ fn a_run_detail_asks_its_sibling_once_per_run_rather_than_once_per_request() {
         "the second read of an unmoved run started the sibling again"
     );
 }
+
+#[test]
+fn a_subscriber_whose_filter_narrows_nothing_pays_nothing_to_narrow_it() {
+    // The browser's **Detailed activity** setting is a named profile rather than
+    // an absence, so the ordinary subscription arrives filtered. If a filter cost
+    // a read whether or not it could narrow anything, that setting would fold
+    // every run in the root at the moment a tab opened — which is the defect
+    // these bounds exist to remove, arriving by another door.
+    //
+    // A filter that *can* narrow does pay, once, and the price is exact: with
+    // nothing to compare the admitted records against, the first movement of
+    // every run would announce and a reader who narrowed their attention would
+    // be woken by the very records they excluded. What neither pays is a tick.
+    let measured: Vec<(&str, u64, u64)> = ["monitor", "planner"]
+        .into_iter()
+        .map(|profile| {
+            let serving = Traced::start(|root| {
+                for n in 0..3 {
+                    let run = nth_run(n);
+                    fixture_run::write(root, &run);
+                    fixture_run::inflate(root, &run, BULK_RECORDS, 5_000);
+                    fixture_run::summarize(root, &run);
+                }
+            });
+            let root = serving.runs_root().to_path_buf();
+            let journals: Vec<std::path::PathBuf> = (0..3)
+                .map(|n| root.join(nth_run(n)).join("events.jsonl"))
+                .collect();
+            let opening = serving.mark("marker-filtered-open");
+            let mut stream = http::stream(
+                serving.address,
+                &format!("/api/v2/events?filter={profile}"),
+                None,
+            );
+            assert_eq!(
+                stream.next_frame().expect("a snapshot").event,
+                "snapshot",
+                "a filtered connection opens with a snapshot too"
+            );
+            let idle = serving.mark("marker-filtered-idle");
+            assert!(stream
+                .frame_within(Duration::from_millis(TRACED_POLL_MS * 5))
+                .is_none());
+            drop(stream);
+            let cost = serving.finish();
+            let folded = |taken: &crate::cost_support::Cost| -> u64 {
+                journals.iter().map(|at| taken.under(at).bytes).sum()
+            };
+            (
+                profile,
+                folded(&cost.between(&opening, &idle)),
+                folded(&cost.since(&idle)),
+            )
+        })
+        .collect();
+
+    let narrows_nothing = measured[0];
+    let can_narrow = measured[1];
+    assert_eq!(
+        narrows_nothing.1, 0,
+        "a subscription on `{}` folded {} bytes of journal to open, and it narrows nothing",
+        narrows_nothing.0, narrows_nothing.1
+    );
+    assert!(
+        can_narrow.1 > 0,
+        "a subscription on `{}` read no journal to open, so it has nothing to compare its \
+         admitted records against and will announce every first movement",
+        can_narrow.0
+    );
+    for (profile, _, per_tick) in measured {
+        assert_eq!(
+            per_tick, 0,
+            "a `{profile}` subscription read {per_tick} bytes of journal while nothing \
+             recorded anything"
+        );
+    }
+}
