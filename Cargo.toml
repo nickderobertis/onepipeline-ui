@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 rust-version = "1.88"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
