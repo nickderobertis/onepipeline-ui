@@ -8204,3 +8204,37 @@ fn a_selection_tells_a_run_it_could_not_read_from_one_that_is_gone() {
         "{listed}"
     );
 }
+
+#[test]
+fn runs_that_last_moved_at_the_same_instant_are_ordered_by_their_ids() {
+    // The order has to be **total**, or a page boundary lands somewhere
+    // different on every read and a client walking the cursor skips or repeats a
+    // row. Recording the same instant is the ordinary case rather than a corner
+    // one: a host that launched a batch has a dozen runs stamped alike.
+    let serving = Serving::start(|root| {
+        // Written in the order that would come back if nothing sorted them.
+        for run in [
+            "run-20260807-ccccc3",
+            "run-20260807-aaaaa1",
+            "run-20260807-bbbbb2",
+        ] {
+            fixture_run::write(root, run);
+        }
+    });
+    let body = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let ids: Vec<&str> = body["runs"]
+        .as_array()
+        .expect("runs is an array")
+        .iter()
+        .filter_map(|run| run["run_id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "run-20260807-aaaaa1",
+            "run-20260807-bbbbb2",
+            "run-20260807-ccccc3"
+        ],
+        "runs stamped at one instant came back in no particular order"
+    );
+}
