@@ -1,19 +1,40 @@
 //! What this branch's base commit served, served again.
 //!
-//! Adopting an engine eleven minors ahead moves a great deal under this crate at
-//! once, and the failure mode that would not show up anywhere else is a *quiet*
-//! one: a field that stopped being served because the record it was read from
-//! moved, on a route whose golden nobody thought to look at. A fixture cannot
-//! catch that, because a fixture is editable by the change it is meant to hold —
-//! so the baseline here is read from version control.
+//! A change that moves what a payload is *read from* — an engine adoption, a
+//! record's shape, a repair to how a conversation is assembled — moves a great
+//! deal under this crate at once, and the failure mode that would not show up
+//! anywhere else is a *quiet* one: a field that stopped being served because the
+//! record it was read from moved, on a route whose golden nobody thought to look
+//! at. A fixture cannot catch that, because a fixture is editable by the change
+//! it is meant to hold — so the baseline here is read from version control.
+//!
+//! **What these journeys assert is a property of the pair, not of any one
+//! change.** An earlier form of them asserted the movement a particular branch
+//! made: that `/healthz` reported a *different* release than its base, and that
+//! four launch-record shapes went from unreadable to readable. Both held while
+//! that adoption was a branch and could not hold once it *became* the base,
+//! because there is then no movement left to assert — so they passed on the
+//! change request and failed on `main` forever after. Nothing here may name a
+//! release, a shape or a count that one commit introduced; what is asserted is
+//! only that this build serves what its base served, whatever that was.
 //!
 //! The journeys start the base commit's own `onepipeline-api` beside this build's
 //! over **one** runs root and ask both the same questions. What they compare is
 //! what the criterion is about: every route the older binary answered is answered
 //! now, and every field it served on each of them is served now. Values are
 //! deliberately not compared — repairing what a conversation is *read from* is
-//! the whole point of the adoption, and a value that improved is a change this
-//! branch's own record states rather than one a comparison should refuse.
+//! the whole point of changes like these, and a value that improved is a change
+//! a branch's own record states rather than one a comparison should refuse.
+//!
+//! **`/healthz` is no exception to that, and must not be made one.** It names the
+//! engine the binary links, so the two sides report the same release on a branch
+//! that did not move the SDK pin and different ones on a branch that did — which
+//! makes either an equality or an inequality here a statement about *one* branch,
+//! failing on every other. What the served release must be is
+//! `server::healthz_answers_without_reading_run_storage`, against
+//! `onepipeline::VERSION`, and `contract::the_health_body_round_trips_and_names_the_release_this_crate_links`
+//! against the golden that moves with the pin. The comparison here owes that
+//! route only what it owes every other: the fields.
 //!
 //! **Neither journey builds anything.** Compiling another commit's whole
 //! dependency graph is the expensive half of this, and it lives behind the
@@ -317,19 +338,6 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
                 "{path}: the base commit answered it and this build does not: {}",
                 after.body
             );
-            if path == routes::HEALTHZ {
-                // The one response whose *value* is meant to have moved: it names
-                // the engine the binary links, which is the whole subject of this
-                // branch.
-                assert_eq!(before.json()["status"], after.json()["status"]);
-                assert_ne!(
-                    before.json()["onepipeline_version"],
-                    after.json()["onepipeline_version"],
-                    "the adoption did not move the release /healthz reports"
-                );
-                compared += 1;
-                continue;
-            }
             let dropped: Vec<String> = fields(&before.json())
                 .difference(&fields(&after.json()))
                 .cloned()
@@ -363,12 +371,24 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
 }
 
 #[test]
-fn the_runs_the_base_commit_could_not_read_are_read_now() {
-    // The other direction, and the one the adoption is *for*. The comparison
-    // above asks that nothing was dropped; this asks what was gained, against the
-    // same baseline and over the same five launch-record shapes — because "a run
-    // that used to be invisible is visible" is a claim about two builds, and no
-    // fixture on this branch can make it about anything but one.
+fn every_run_the_base_commit_listed_is_listed_now() {
+    // The comparison above shares one store whose every launch record has been
+    // rewritten into the shape the base commit's engine could read, because a
+    // record either side refuses is a run neither serves and two empty lists
+    // agree about nothing. So it never asks the other question an operator
+    // depends on: that a record written the way the engine writes one *today*
+    // still reaches the list, and still opens, on both sides. This does, over the
+    // five shapes `write_launch_shapes` holds — the plan path the engine used to
+    // name, the project it names now, both across the change, neither, and a key
+    // recorded by a build later than this one.
+    //
+    // What each of those shapes must serve *this* build is
+    // `server::every_launch_record_shape_this_reader_must_accept_is_listed`,
+    // which is where a claim about one build belongs. This one is only about the
+    // pair, and it is the whole of what the pair can be asked here: which shapes
+    // the older side reads is a property of the engine that side links, so a
+    // journey naming them would be stating one release's answer as a permanent
+    // fact and would fail on the branch after the one that moved it.
     let base = base_commit();
     let baseline = baseline_binary(&base);
 
@@ -389,32 +409,30 @@ fn the_runs_the_base_commit_could_not_read_are_read_now() {
     let before = listed(older.address);
     let after = listed(serving.address);
 
-    // Every shape, now. Exactly one of them then — the plan path and nothing else:
-    // that engine's launch record *required* a plan and refused every key it had
-    // no field for, so even the record written across the change, which names a
-    // plan path as well as a project, did not deserialize.
-    for (run, shape) in &shapes {
-        assert!(after.contains(run), "{shape} is not listed: {after:?}");
-    }
-    assert_eq!(
-        before,
-        ["launch-plan-only"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<String>>(),
-        "the base commit read a shape this journey says it could not, so the gap this branch \
-         closes is not the gap being measured"
+    assert!(
+        !before.is_empty(),
+        "the base commit lists none of the {} shapes written here, so this journey is \
+         holding this build to nothing",
+        shapes.len()
     );
-    assert_eq!(
-        after.difference(&before).count(),
-        4,
-        "four of the five shapes were invisible at {base} and are served now: {after:?}"
+    let dropped: Vec<&String> = before.difference(&after).collect();
+    assert!(
+        dropped.is_empty(),
+        "{dropped:?} were listed at {base} and are not now: {after:?}"
     );
 
-    // And they are not merely rows: each opens, which is what an operator does
-    // with the run they came looking for.
-    for run in after.difference(&before) {
-        let response = http::get(serving.address, &format!("/api/v2/runs/{run}"));
-        assert_eq!(response.status, 200, "{run}: {}", response.body);
+    // And they are not merely rows: each one the base commit opened opens now,
+    // which is what an operator does with the run they came looking for.
+    for run in &before {
+        let path = format!("/api/v2/runs/{run}");
+        if http::get(older.address, &path).status != 200 {
+            continue;
+        }
+        let response = http::get(serving.address, &path);
+        assert_eq!(
+            response.status, 200,
+            "{run} opened at {base} and does not now: {}",
+            response.body
+        );
     }
 }
