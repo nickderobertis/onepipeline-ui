@@ -191,7 +191,7 @@ describe("one node's slice of the run timeline", () => {
     kind: string,
     count: number,
     shape: "event" | "span",
-  ): TimelineRow[] => {
+  ): readonly TimelineRow[] => {
     const fixture = parseRunTimeline(runTimeline(LIVE_RUN));
     const node = fixture.spans.find(({ id }) => id === "node-dashboard");
     if (node === undefined) throw new Error("fixture lost the dashboard node");
