@@ -1011,6 +1011,22 @@ function writeLiveRun(root) {
         { identity: IDENTITY, elapsed: waited, queue_position: position },
       );
   }
+  // The engine reading this node's own acceptance criteria off the branch it is
+  // about to settle, which is the last thing it does before settling: one
+  // criterion named a file and a literal, and the branch holds it. A record the
+  // engine emits per criterion per settlement, so a reader meets these beside a
+  // node's verdict rather than in place of it.
+  journal.advance(1).emit(
+    "pipeline",
+    "criterion-checked",
+    { ...run, node: "remote-open" },
+    {
+      criterion: "the published change names the branch it was cut from",
+      file: "docs/contract.md",
+      expected: "feature/remote-open",
+      answer: "match",
+    },
+  );
   journal.advance(1).emit(
     "pipeline",
     "node-settled",

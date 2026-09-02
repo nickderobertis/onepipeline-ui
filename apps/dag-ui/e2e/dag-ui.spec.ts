@@ -787,6 +787,7 @@ const EXPECTED_GLYPH: Readonly<Record<string, string>> = {
   "change-merged": "lucide-git-pull-request",
   "hand-over": "lucide-user-round-check", // human
   "gate-verdict": "lucide-shield-check", // verification
+  "criterion-checked": "lucide-shield-check",
   "lock-wait": "lucide-hourglass", // contention
   "release-wait": "lucide-hourglass",
   "release-arrived": "lucide-git-pull-request", // publication
@@ -939,6 +940,39 @@ test("draws every category a record can be as a glyph of its own", async ({
   // plot with one fewer category in it, and a reader scanning it cannot tell which
   // of the two they are looking at.
   expect(new Set(drawn).size).toBe(records.length);
+});
+
+test("draws a criterion the engine ruled on as the verification it is", async ({
+  page,
+}) => {
+  // The last thing the engine does before settling a node is read its acceptance
+  // criteria off the branch, and it records one of these per criterion. The kind
+  // is filed by name rather than by a word in it — `checked` is not `check` — so a
+  // reader meets it drawn as a verification or drawn as nothing in particular, and
+  // the difference is only visible here.
+  await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
+  const marker = (named: string): Locator =>
+    timeline(page).getByRole("button", {
+      name: `${named}, marker`,
+      exact: true,
+    });
+
+  const checked = marker("criterion-checked");
+  await expect(checked).toBeVisible();
+  expect(await glyphName(checked)).toBe(expectedGlyph("criterion-checked"));
+  // Drawn as the gate verdict on the same node is, which is the claim a reader
+  // makes of the plot: these two are the same kind of moment. A kind filed under
+  // some neighbouring category would still be drawn, and would be drawn apart from
+  // the verification it belongs with.
+  expect(await glyphName(checked)).toBe(
+    await glyphName(marker("gate-verdict")),
+  );
+  // And said in words for the reader who does not read glyphs: the reading a hover
+  // paints names the category the record was filed under.
+  await checked.hover();
+  await expect(page.getByTestId("timeline-popover")).toContainText(
+    "Verification",
+  );
 });
 
 test("scrolls the transcript to the journal record a marker names", async ({
