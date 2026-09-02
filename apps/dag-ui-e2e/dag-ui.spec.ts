@@ -220,6 +220,7 @@ async function readUnderProfile(page: Page, profile: string): Promise<void> {
 // llmlint: ignore-end[e2e_not_mocked]
 // llmlint: ignore-end[tests_mirror_real_usage]
 
+// llmlint: ignore-block[tests_mirror_real_usage] what this observes IS the user-facing interface — `[role="alert"]`, the same accessible surface every other journey here asserts on — and no app internal is read: the `window` property is only how an init script hands a count back to a journey, which has no other channel. What it buys is continuity rather than access: the property one journey below is about is that a banner is *never* raised, and the banner it must not raise is cleared again by the next stream frame half a second later, so a snapshot taken after that frame cannot tell a banner that was raised from one that never was.
 /**
  * Watch, for the whole of a journey, whether a failure banner is ever on screen —
  * not whether one is on screen now.
@@ -254,6 +255,7 @@ async function watchForBanners(page: Page): Promise<() => Promise<number>> {
           ?.total ?? -1,
     );
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /**
  * Keep the live run recording for `seconds`, without waiting for it.
@@ -3832,6 +3834,7 @@ test("stays quiet when the run it is opening is swept out from under it", async 
   // And the reader lands on a run the server still serves rather than on the one
   // that went away.
   await expect(graphNodeList(page).getByRole("button").first()).toBeVisible();
+  // llmlint: ignore[tests_mirror_real_usage] this is the journey's precondition rather than an assertion about the app: it says the removal really did land before the read reached the server, so the `404 run_not_found` this journey is for was actually served. A read that beat the sweep satisfies every user-visible assertion here and proves nothing, and "the read raced" has no user-visible surface by construction — the flag is the fixture's record of its own timing, not the app's state.
   // The read really was taken after the run had gone — a read that beat the
   // removal would have proven nothing about the refusal this journey is for.
   expect(sweep.swept()).toBe(true);
