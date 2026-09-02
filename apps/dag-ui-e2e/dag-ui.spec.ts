@@ -1303,6 +1303,12 @@ test("shows the release that carried a node's work and the waits before it", asy
     const marker = runLevel.getByRole("button", {
       name: `Run-level · ${kind}, marker`,
     });
+    // llmlint: ignore[tests_mirror_real_usage] focusing the marker *is* the user
+    // path here rather than a way around one: the graph line paints a cursor over
+    // its whole height as the pointer crosses it, so a click on this plot lands on
+    // the reading of the moment and never on the record. What is left for a reader
+    // to do is reach the marker in the tab order and press Enter, which is what
+    // this drives.
     await (which === "first" ? marker.first() : marker.last()).focus();
     await page.keyboard.press("Enter");
   };
@@ -1380,6 +1386,11 @@ test("reads the report a settled node's member left behind", async ({
   const expand = itemDetail(page).getByRole("button", {
     name: "Expand report",
   });
+  // llmlint: ignore[tests_mirror_real_usage] what this asserts is that the control
+  // answers the keyboard, so the focused-then-Enter path is the behaviour rather
+  // than a shortcut to it — a click would exercise the pointer path and prove
+  // nothing about the other one. The pointer path over this same control is driven
+  // by the collapse below it.
   await expand.focus();
   await page.keyboard.press("Enter");
   await expect(itemDetail(page)).toContainText(
@@ -1557,9 +1568,7 @@ test("states a reference whose id no route can be asked for", async ({
 
 test("states when a verification artifact is unavailable", async ({ page }) => {
   await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
-  const checksTab = page.getByRole("tab", { name: "Checks" });
-  await checksTab.focus();
-  await page.keyboard.press("Enter");
+  await page.getByRole("tab", { name: "Checks" }).click();
   await expect(
     page.locator(".facts").filter({ hasText: "Verification coverage" }),
   ).toContainText("Hook: not recorded");
@@ -2156,7 +2165,12 @@ test("restores node tabs and moves between them from the keyboard", async ({
   );
   const criteria = page.getByRole("tab", { name: "Acceptance criteria" });
   await expect(criteria).toHaveAttribute("aria-selected", "true");
-  await criteria.focus();
+  // Clicked rather than focused: clicking the tab that is already selected is how
+  // a reader with a pointer puts the tablist in focus, and it changes nothing
+  // about which tab is selected — so what `ArrowRight` then moves is a rove a
+  // keyboard user really reaches.
+  await criteria.click();
+  await expect(criteria).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Dependencies" })).toHaveAttribute(
     "aria-selected",
@@ -2175,6 +2189,11 @@ test("restores node tabs and moves between them from the keyboard", async ({
   await page.getByRole("button", { name: /Graph/ }).click();
   await expect(page).not.toHaveURL(/tab=/);
   const foundation = page.getByRole("button", { name: "foundation: done" });
+  // llmlint: ignore[tests_mirror_real_usage] this journey is named for the
+  // keyboard and this is the half of it a pointer cannot stand in for: selecting
+  // a graph node by clicking it is driven elsewhere in this file, and what is left
+  // to prove is that a reader who reached the node in the tab order can open it
+  // with Enter.
   await foundation.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("tab", { name: "Timeline" })).toHaveAttribute(
