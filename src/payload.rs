@@ -3158,21 +3158,24 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
 /// party runs one side and relays it, so there is no other side for such a record
 /// to belong to — and refusing it would empty the transcript of every session
 /// recorded before that correction, which those runs still have to serve.
-// llmlint: ignore[invalid_states_unrepresentable] the closed vocabulary is
+// llmlint: ignore-block[invalid_states_unrepresentable] the closed vocabulary is
 // `oneagentgraph::event::Party`, and it belongs to the producer: that library
 // publishes the field as a `String` on purpose — "that is the shape the wire has
 // and a consumer reads" — mints one only where it writes a record, and exposes no
-// parse back. There is no type at this pin to parse into, and declaring one here
+// parse back, so there is no type at this pin to parse into. Declaring one here
 // would be this crate owning a record's vocabulary, which `AGENTS.md` forbids in
 // as many words; `graph::ASSISTANT_ROLE` is that type's own spelling and
 // `tests/contract.rs` holds it to the producer's declaration. It is the same
-// answer `turn_key` below already carries for the same field.
+// answer `turn_key` below already carries for the same field, and an unrecognised
+// party is not an invalid state here — it is a party this transcript has no rows
+// for, which is what a reading that cannot know the producer's next word owes it.
 fn agent_turn(event: &Envelope) -> bool {
     match event.payload.get(graph::ROLE).and_then(Value::as_str) {
         Some(role) => role == graph::ASSISTANT_ROLE,
         None => true,
     }
 }
+// llmlint: ignore-end[invalid_states_unrepresentable]
 
 /// The turn one record belongs to, or `None` for a record that names none.
 ///
