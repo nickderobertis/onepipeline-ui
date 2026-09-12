@@ -172,6 +172,12 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
 const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // Asking a run to complete is a boundary of the run, not a plan being edited.
   "completion-requested": "lifecycle",
+  // A command the run accepted that committed nothing a reader folds — a finding
+  // raised to the planner's surface, or a completion requested — is the planner
+  // and the run talking, which is what the rest of that line is. Neither of its
+  // words names a rule, and `edit-committed`, the other half of the same split,
+  // is filed under the edit it made rather than under the exchange.
+  "command-accepted": "planning",
   // The PR body could not be drafted, which is a fact about the publication.
   "body-not-drafted": "publication",
   // One acceptance criterion ruled on. `checked` is not `check`, and a word is

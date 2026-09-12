@@ -24,8 +24,10 @@
 //! Reads take no lock the engine's single writer needs, which is what lets the
 //! server run beside the engine's own reconcile loop. Nothing here writes — but
 //! the SDK's summary read is a cache: a run whose document is missing or stale
-//! is folded once and the fold written back beside the run, best-effort, so the
-//! *next* reader of that run pays a bounded read. That is the SDK's own design
+//! is folded once and the fold written back beside the run, best-effort — the
+//! summary this store reads and the checkpoint the engine's own next fold
+//! resumes from — so the *next* reader of that run pays a bounded read. That is
+//! the SDK's own design
 //! and the reason a store full of runs recorded by an older build is slow on its
 //! first listing and cheap on every one after it.
 //!

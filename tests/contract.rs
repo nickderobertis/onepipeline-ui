@@ -1431,6 +1431,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         instruction: "re-run the gate".into(),
         instruction_truncated: true,
         started_at: "2026-08-07T12:00:00.000Z".into(),
+        origin: None,
     })
     .expect("the opening serializes");
     let declared: Vec<&str> = started
@@ -1455,6 +1456,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
         text: "the gate is green".into(),
         truncated: true,
+        origin: None,
     })
     .expect("the message serializes");
     let declared: Vec<&str> = message
@@ -1713,16 +1715,24 @@ fn the_report_spells_its_two_role_vocabularies_the_way_this_crate_reads_them() {
     );
 }
 
-/// The `context` edit whose delivery this crate serves, against the SDK's own
+/// The manager note whose delivery this crate serves, against the SDK's own
 /// declaration of it.
 ///
 /// `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private
 /// module, so the compiled operation an `edit-committed` carries is read as the
 /// wire strings that library writes — the same terms as the `onevcs` vocabulary,
 /// and for the same reason. What *is* public beside it is the submitted
-/// `channel::Command`, and it is what fixes the two words the operation's
-/// `delivery` can hold: `live` is the mode a planner asks for and `next` is the
-/// mode that refuses it, so a rename there is a rename of what this crate reads.
+/// `channel::Command` and the `note::Reached` disposition the compiled
+/// `note-delivered` operation flattens in, and between them they fix every word
+/// this crate reads a delivery off: `live` is the mode a planner asks for and
+/// `next` the mode that declines the running turn, and `reached` is the run's
+/// own account of which party took the note — or that none did, which is the
+/// one disposition that means the note is still owed to a later dispatch.
+///
+/// The `context` op those words used to arrive on is **gone** from the
+/// submitted vocabulary — `note` is the one manager-note op — while the
+/// `context-added` operation it compiled to is still folded by the engine, and
+/// still read here, because the runs that recorded one are still opened.
 ///
 /// Making that module public is the proposal recorded in `src/AGENTS.md`; until
 /// it lands, this plus the goldens written from a real reconciler's records is
@@ -1730,31 +1740,68 @@ fn the_report_spells_its_two_role_vocabularies_the_way_this_crate_reads_them() {
 #[test]
 fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
     use onepipeline::channel::{Command, Deliver};
+    use onepipeline::note::{Addressee, NoteText, Reached};
 
     let submitted = |deliver: Deliver| {
-        serde_json::to_value(Command::Context {
+        serde_json::to_value(Command::Note {
             id: "docs".into(),
-            note: "and the control field".into(),
+            addressee: Addressee::Worker,
+            text: "and the control field"
+                .parse::<NoteText>()
+                .expect("a usable note"),
+            criterion: None,
             deliver,
+            persist: true,
         })
         .expect("the command serializes")
     };
-    // The shape `tests/support/fixture_run.rs` writes onto an `edit-committed`.
+    // The shape `tests/support/fixture_run.rs` writes onto an `edit-committed`:
+    // a note that says nothing about delivery attempts the running turn and is
+    // carried forward where none took it, and the wire omits both defaults.
     assert_eq!(
-        submitted(Deliver::Auto),
-        serde_json::json!({ "op": "context", "id": "docs", "note": "and the control field" }),
-        "an edit that says nothing about delivery is the edit the table always described"
-    );
-    assert_eq!(
-        submitted(Deliver::Live)["deliver"],
-        serde_json::json!("live"),
-        "the word a delivered note's `delivery` is recorded as"
+        submitted(Deliver::Live),
+        serde_json::json!({
+            "op": "note",
+            "id": "docs",
+            "addressee": "worker",
+            "text": "and the control field",
+        }),
+        "a note that says nothing about delivery is the default the SDK documents"
     );
     assert_eq!(
         submitted(Deliver::Next)["deliver"],
         serde_json::json!("next"),
         "the mode that only ever defers, which is the other half of the pair"
     );
+
+    // The disposition a `note-delivered` operation carries, flattened onto the
+    // operation under the `reached` tag: the four a conversation read, and the
+    // one that says the note is owed to the node's next dispatch. Each is held
+    // to the word the fixture writes and `payload::edits` reads.
+    let reached = |reached: Reached| {
+        serde_json::to_value(reached).expect("the disposition serializes")["reached"].clone()
+    };
+    for (disposition, word, read) in [
+        (Reached::Queued, "queued", true),
+        (Reached::Worker, "worker", true),
+        (Reached::Supervisor, "supervisor", true),
+        (
+            Reached::JudgedWith {
+                completion_reason: "the note settled it".into(),
+            },
+            "judged-with",
+            true,
+        ),
+        (Reached::Carried, "carried", false),
+    ] {
+        assert_eq!(
+            disposition.a_conversation_read_it(),
+            read,
+            "`{word}` is read as {} by the SDK's own reading",
+            if read { "delivered" } else { "still owed" }
+        );
+        assert_eq!(reached(disposition), serde_json::json!(word));
+    }
 }
 
 /// The browser fixture writes tool summaries a real member could have written,
