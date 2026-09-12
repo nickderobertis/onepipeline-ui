@@ -1571,7 +1571,7 @@ enum TurnState {
 /// This is the read-side answer to the question `onepipeline`'s reconciler
 /// answers by pulling the lever: it keeps a `TurnAddress` per in-flight dispatch,
 /// read off the sibling's relayed envelopes with the latest winning, and a
-/// `context` note goes into a running turn only when there is one. A read surface
+/// manager's note goes into a running turn only when there is one. A read surface
 /// must not pull that lever — serving a run would then interrupt it — so what it
 /// has instead is the same stream the engine reads the address from, plus the
 /// record of every interrupt anybody has already pulled.
