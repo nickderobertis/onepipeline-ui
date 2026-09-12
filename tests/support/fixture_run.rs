@@ -114,6 +114,9 @@ pub const DEFERRED_NOTE: &str = "measure the cold start too";
 /// The note the *monitor* left, under its own narrower op allowlist. Its author
 /// is what tells an observer's self-applied fix from the planner's decision.
 pub const MONITOR_NOTE: &str = "the benchmark node has been quiet for a while";
+/// The note the planner sent through the engine that links here, whose edit
+/// records which party took it.
+pub const WORKER_NOTE: &str = "the control field is documented; now the schema version";
 /// A note still owed to a node's next dispatch. A `context` note carries exactly
 /// one dispatch and is consumed on delivery, so only a node that has not been
 /// dispatched since still carries one.
@@ -2514,10 +2517,15 @@ fn live_plan() -> Value {
 fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut seq = 0;
+    // The envelope version the next record is stamped with. Every record here
+    // carries the version the runs on disk do, which the linked engine reads
+    // whole, except the ones only that engine has ever written — those are
+    // stamped with its own number, and the setting is put back afterwards.
+    let version = std::cell::Cell::new(1);
     let mut emit = |at: &str, source: &str, kind: &str, labels: Value, payload: Value| {
         lines.push(
             json!({
-                "v": 1,
+                "v": version.get(),
                 "ts": at,
                 "stream": "a-recording-host-4243",
                 "seq": seq,
@@ -3086,6 +3094,55 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             }],
         }),
     );
+    // The same lever as the engine that links here pulls it. `context` is gone
+    // from the submitted vocabulary and `note` is the one manager-note op, and
+    // what its edit compiles to says which *party* of the running conversation
+    // took the note rather than only that one did: the record `oneagentgraph`
+    // relays is the same `turn-interrupted` as above, and the operation is a
+    // `note-delivered` carrying the disposition in the engine's own word. Both
+    // shapes sit in one store, because a store outlives the engine that wrote
+    // into it.
+    emit(
+        "2026-08-07T12:00:51.500Z",
+        "agentgraph",
+        "turn-interrupted",
+        json!({
+            "run_id": run,
+            "node": REDIRECTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({ "member": "worker", "delivered": true, "input_bytes": WORKER_NOTE.len() }),
+    );
+    version.set(onepipeline::event::ENVELOPE_VERSION);
+    emit(
+        "2026-08-07T12:00:51.600Z",
+        "pipeline",
+        "edit-committed",
+        json!({ "run_id": run }),
+        json!({
+            "author": "planner",
+            // `deliver` and `persist` are absent because both are at their
+            // defaults, which is what the sibling's own `Command` omits: attempt
+            // the running turn, and carry the note forward where none took it.
+            "command": {
+                "op": "note",
+                "id": REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": WORKER_NOTE,
+            },
+            "operations": [{
+                "kind": "note-delivered",
+                "node": REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": WORKER_NOTE,
+                "reached": "worker",
+            }],
+            "operation_kinds": ["note-delivered"],
+        }),
+    );
+    version.set(1);
     // The third in-flight node, and the trap: its *earlier* dispatch settled with
     // a onejudge report naming no controllable turn, and this is a *fresh* turn
     // in a *re-asked* dispatch. `provider.control` is asked for per run and the

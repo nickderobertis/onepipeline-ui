@@ -3490,6 +3490,85 @@ fn a_redirected_turn_is_a_record_on_the_nodes_own_timeline() {
         delivery(fixture_run::UNCONTROLLED_NODE_ID)["delivery"],
         json!("deferred")
     );
+
+    // The engine that links here records the same fact as a `note-delivered`,
+    // and says more: which party of the running conversation took the note. It
+    // is served under the same pair a client already reads, with the engine's
+    // own word beside it.
+    let noted = edits
+        .iter()
+        .find(|event| event["at"] == json!("2026-08-07T12:00:51.600Z"))
+        .expect("the planner's note through the linked engine is an edit on the run's row");
+    assert_eq!(
+        noted["redirection"],
+        json!({
+            "reached": "worker",
+            "delivered": true,
+            "delivery": "live",
+            "node_id": fixture_run::REDIRECTED_NODE_ID,
+        }),
+        "{noted}"
+    );
+    assert_eq!(noted["author"], json!("planner"));
+}
+
+/// A note no turn took is still owed to the node, and the engine's word for that
+/// is `carried`: the one disposition that reads as not delivered.
+///
+/// Driven on its own because it is the disposition the default `note` produces
+/// between two dispatches, and the one a planner reads to decide whether to
+/// send the correction again — served as `delivered: true` it would say the
+/// note had been read when nobody has.
+#[test]
+fn a_note_carried_to_the_next_dispatch_is_served_as_not_yet_delivered() {
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "pipeline",
+            "edit-committed",
+            json!({ "run_id": fixture_run::RUN_ID }),
+            json!({
+                "author": "planner",
+                "command": {
+                    "op": "note",
+                    "id": fixture_run::UNCONTROLLED_NODE_ID,
+                    "addressee": "worker",
+                    "text": "x",
+                    "deliver": "next",
+                },
+                "operations": [{
+                    "kind": "note-delivered",
+                    "node": fixture_run::UNCONTROLLED_NODE_ID,
+                    "addressee": "worker",
+                    "text": "x",
+                    "reached": "carried",
+                }],
+                "operation_kinds": ["note-delivered"],
+            }),
+        );
+    });
+    let carried = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+        .expect("the appended edit");
+    assert_eq!(
+        carried["redirection"],
+        json!({
+            "reached": "carried",
+            "delivered": false,
+            "delivery": "deferred",
+            "node_id": fixture_run::UNCONTROLLED_NODE_ID,
+        }),
+        "{carried}"
+    );
 }
 
 /// Every answer `node_control` can give, each driven from a run that produces it.
@@ -3731,6 +3810,60 @@ fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
         unknown.get("redirection").is_none(),
         "a delivery word outside the pair is not relayed for a client to fail on: {unknown}"
     );
+
+    // The same rule for the engine's newer record: `reached` is a closed set on
+    // its own type, so a word outside it — or none at all — is a record this
+    // build cannot read rather than a note that did not land.
+    for (label, reached) in [
+        ("a word outside the set", json!("somebody")),
+        ("no disposition at all", Value::Null),
+    ] {
+        let mut operation = json!({
+            "kind": "note-delivered",
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "addressee": "worker",
+            "text": "x",
+        });
+        if !reached.is_null() {
+            operation["reached"] = reached;
+        }
+        let serving = Serving::start(|root| {
+            let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::append_relayed(
+                &dir,
+                "pipeline",
+                "edit-committed",
+                json!({ "run_id": fixture_run::RUN_ID }),
+                json!({
+                    "author": "planner",
+                    "command": {
+                        "op": "note",
+                        "id": fixture_run::REDIRECTED_NODE_ID,
+                        "addressee": "worker",
+                        "text": "x",
+                    },
+                    "operations": [operation],
+                    "operation_kinds": ["note-delivered"],
+                }),
+            );
+        });
+        let unreadable = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+        )
+        .json()["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+            .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+            .expect("the appended edit is still on the run's timeline");
+        assert_eq!(unreadable["kind"], json!("edit-committed"));
+        assert!(
+            unreadable.get("redirection").is_none(),
+            "{label} is not relayed for a client to fail on: {unreadable}"
+        );
+    }
 }
 
 /// A redirection is published from inside a turn, so it is not a turn.

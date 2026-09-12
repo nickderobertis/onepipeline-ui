@@ -1010,12 +1010,17 @@ export const timelineReferenceSchema = openObject({
  * `oneagentgraph`'s `turn-interrupted` adds the member it addressed, the bytes it
  * offered, and — exactly when the turn did not take them — why; `onepipeline`'s
  * `edit-committed` adds `delivery`, its own word for where the note ended up, and the
- * node it was for. `reason` is never carried beside a delivered redirection, so one
- * can never be read as having had a reason it failed.
+ * node it was for — and, where the engine recorded which party of the running
+ * conversation took the note, `reached`, whose one word for nobody is `carried`.
+ * `reason` is never carried beside a delivered redirection, so one can never be
+ * read as having had a reason it failed.
  */
 export const redirectionSchema = openObject({
   delivered: z.boolean(),
   delivery: z.enum(["live", "deferred"]).optional(),
+  reached: z
+    .enum(["queued", "worker", "supervisor", "judged-with", "carried"])
+    .optional(),
   member: z.string().min(1).optional(),
   input_bytes: counter.optional(),
   reason: z.string().min(1).optional(),
