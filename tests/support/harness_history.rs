@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use oneharness_core::domain::history::HistoryLabels;
 use oneharness_core::domain::mode::PermissionMode;
 use oneharness_core::domain::report::RunResult;
+use oneharness_core::domain::signals::FailureKind;
 use oneharness_core::io::history::HistoryWriter;
 use serde_json::json;
 
@@ -49,13 +50,50 @@ impl Recorded {
     }
 }
 
+/// What the harness said about the model it ran a turn under, and whether it
+/// ran the turn at all.
+///
+/// The three shapes the linked `oneharness` records, in its own terms. A turn
+/// that ran carries the model it was asked for and, where the harness's protocol
+/// names one before a token is spent, the model the harness itself said it
+/// would run under; a path that reports none records none rather than copying
+/// the requested one. And where the two differ the turn is **refused** — the
+/// `model_mismatch` kind, on a run that spent nothing — which is the one record
+/// this reader could not read at all before it linked the core that writes it.
+#[derive(Debug, Clone, Copy)]
+pub enum Model<'a> {
+    /// The harness reported the model it would run under, and it was the one
+    /// asked for.
+    Observed(&'a str),
+    /// The harness's path reports no model of its own.
+    Unreported,
+    /// The harness reported it would run under `observed` when `requested` was
+    /// asked for, and oneharness refused the turn.
+    Refused {
+        requested: &'a str,
+        observed: &'a str,
+    },
+}
+
 /// Record one harness invocation into the store at `dir`, exactly as a
 /// oneharness run records itself.
 ///
 /// `name` is the session's human-meaningful name, `prompt` what the invocation
 /// was asked, and `text` the final assistant text it reported — the three fields
-/// a reader opens a transcript to read.
+/// a reader opens a transcript to read. The harness reported no model of its
+/// own; [`record_under`] is the same with the model the harness reported.
 pub fn record(dir: &Path, name: &str, prompt: &str, text: &str) -> Recorded {
+    record_under(dir, name, prompt, text, Model::Unreported)
+}
+
+/// [`record`], with what the harness said about the model it ran under.
+pub fn record_under(
+    dir: &Path,
+    name: &str,
+    prompt: &str,
+    text: &str,
+    model: Model<'_>,
+) -> Recorded {
     // The directory the harness ran in. oneharness canonicalizes it and slugs
     // the result into the store's project layer, so it has to be a real one.
     let project = dir.join("project");
@@ -68,13 +106,14 @@ pub fn record(dir: &Path, name: &str, prompt: &str, text: &str) -> Recorded {
     )
     .expect("open the history store");
     let history_id = writer.begin_run();
+    let result = result(prompt, text, model);
     writer
         .append_streamed(
             history_id,
             PermissionMode::Default,
-            Some("a-model"),
+            result.model.as_deref(),
             prompt,
-            &result(prompt, text),
+            &result,
             &BTreeSet::new(),
         )
         .expect("append the run oneharness had");
@@ -104,9 +143,19 @@ fn named(path: &Path) -> String {
 ///
 /// Built as the document that library serializes and parsed back into its own
 /// type, so a field it renames or requires fails here rather than producing a
-/// store the reader silently makes nothing of.
-fn result(prompt: &str, text: &str) -> RunResult {
-    serde_json::from_value(json!({
+/// store the reader silently makes nothing of. The refusal is spelled with that
+/// library's own `FailureKind`, so the token this store carries is the one the
+/// linked contract declares and not a copy of it.
+fn result(prompt: &str, text: &str, model: Model<'_>) -> RunResult {
+    let (requested, observed, refused) = match model {
+        Model::Observed(model) => (model, Some(model), false),
+        Model::Unreported => ("a-model", None, false),
+        Model::Refused {
+            requested,
+            observed,
+        } => (requested, Some(observed), true),
+    };
+    let mut result = json!({
         "harness": "claude-code",
         "variant": "alternate",
         "harness_id": "claude-code:alternate",
@@ -114,7 +163,8 @@ fn result(prompt: &str, text: &str) -> RunResult {
         "available": true,
         "status": "ok",
         "prompt": Option::<String>::None,
-        "model": "a-model",
+        "model": requested,
+        "observed_model": observed,
         "exit_code": 0,
         "duration_ms": 4_200,
         "telemetry": Option::<String>::None,
@@ -142,6 +192,23 @@ fn result(prompt: &str, text: &str) -> RunResult {
         "stdout": "",
         "stderr": "",
         "error": Option::<String>::None,
-    }))
-    .expect("the run result oneharness normalizes")
+    });
+    if refused {
+        // Refused before the turn started: no exit code, no text, nothing
+        // spent, and the classified kind beside the harness's own words for
+        // which model it would have run under.
+        result["status"] = json!("nonzero");
+        result["exit_code"] = json!(Option::<i32>::None);
+        result["text"] = json!(Option::<String>::None);
+        result["text_source"] = json!(Option::<String>::None);
+        result["usage"] = json!({});
+        result["usage_source"] = json!(Option::<String>::None);
+        result["failure_kind"] = json!(FailureKind::ModelMismatch);
+        result["failure_kind_source"] = json!("jsonrpc:codex-app-server");
+        result["error"] = json!(format!(
+            "codex would run this turn under \"{}\"",
+            observed.unwrap_or_default()
+        ));
+    }
+    serde_json::from_value(result).expect("the run result oneharness normalizes")
 }

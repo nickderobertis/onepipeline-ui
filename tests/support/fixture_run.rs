@@ -3947,6 +3947,11 @@ pub const UNRELAYED_MODEL: &str = "claude-opus-5";
 /// have come from its own attribution.
 pub const UNRELAYED_COST: f64 = 3.07;
 pub const UNRELAYED_MS: u64 = 2_600;
+/// The model the first turn's chain asked its first candidate for, and the one
+/// that candidate reported it would run under instead — the difference is the
+/// refusal the chain fell through on.
+pub const REQUESTED_MODEL: &str = "gpt-5.6-sol";
+pub const OBSERVED_MODEL: &str = "gpt-6-astra";
 
 /// The onejudge report the settled run's worker member stored, built from that
 /// library's own types.
@@ -3969,9 +3974,11 @@ pub const UNRELAYED_MS: u64 = 2_600;
 /// spring is driven from.
 #[must_use]
 pub fn worker_report() -> String {
+    use oneharness_core::domain::fallback::FallThroughReason;
+    use oneharness_core::domain::signals::FailureKind;
     use onejudge::{
-        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
-        Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
+        CandidateAttempt, FellThrough, HarnessAttribution, Message, PartyTelemetry, Report,
+        SessionLink, Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
     };
 
     let call = ToolEvent {
@@ -4057,18 +4064,32 @@ pub fn worker_report() -> String {
         history_id: None,
         usage: Some(usage),
     };
-    // The identity the chain fell through before the one that ran. It reports a
-    // duration of its own, which is how long finding out took and is not the
-    // turn's, so a reading that took the first candidate rather than the one that
-    // ran would serve this number.
-    let fell_through = CandidateAttempt {
+    // The identity the chain fell through before the one that ran: the harness
+    // reported it would run the turn under a model other than the one asked
+    // for, and oneharness refused the turn before a token was spent rather than
+    // silently spending the other model. Both halves are the linked contract's
+    // own words — the kind it classifies the refusal as, and the reason the
+    // chain records falling through — and neither is restated here. It reports
+    // a duration of its own, which is how long finding out took and is not the
+    // turn's, so a reading that took the first candidate rather than the one
+    // that ran would serve this number.
+    let refused = CandidateAttempt {
+        model: Some(REQUESTED_MODEL.to_owned()),
+        status: "nonzero".into(),
         ran: false,
-        available: false,
-        status: "unavailable".into(),
+        failure_kind: Some(FailureKind::ModelMismatch.as_str().to_owned()),
+        failure_kind_source: Some("jsonrpc:codex-app-server".into()),
         exit_code: None,
         duration_ms: Some(4_364),
+        error: Some(format!(
+            "codex would run this turn under \"{OBSERVED_MODEL}\""
+        )),
         usage: None,
-        ..ran("claude-code", 0, agent_usage(0.0))
+        ..ran("codex", 0, agent_usage(0.0))
+    };
+    let fell_through = FellThrough {
+        harness: "codex".into(),
+        reason: FallThroughReason::ModelMismatch.as_str().to_owned(),
     };
     // Read off the candidate rather than named twice, or the judge's attribution
     // would carry the agent's identity and no reading could tell them apart.
@@ -4136,11 +4157,14 @@ pub fn worker_report() -> String {
                 history_id: None,
             }],
             attribution: vec![
-                attributed(
-                    TelemetryRole::Agent,
-                    1,
-                    vec![fell_through, ran("claude-code", 900, agent_usage(29.71))],
-                ),
+                HarnessAttribution {
+                    fell_through: vec![fell_through],
+                    ..attributed(
+                        TelemetryRole::Agent,
+                        1,
+                        vec![refused, ran("claude-code", 900, agent_usage(29.71))],
+                    )
+                },
                 attributed(
                     TelemetryRole::Judge,
                     1,

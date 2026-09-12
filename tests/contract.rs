@@ -1804,6 +1804,85 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
     }
 }
 
+/// Every classified failure and every fall-through reason the fixture reports
+/// carry is a word the linked `oneharness` contract declares.
+///
+/// `onejudge` types a candidate's `failure_kind` and a fall-through's `reason`
+/// as strings — they are oneharness's own tokens, copied through — so a fixture
+/// could spell one that no release of that library has ever written and every
+/// journey over it would still pass. This holds each word the reports here
+/// carry to the enumeration `oneharness-core` publishes: `FailureKind::ALL`, the
+/// closed set the report schema names, and `FallThroughReason`, which is what a
+/// reason has to read back as. The refusal that made this crate move its pin —
+/// `model_mismatch`, and `model-mismatch` on the chain that fell through it —
+/// is asserted to be among them by name, because a set that silently lost it
+/// would be the previous release again.
+#[test]
+fn the_failure_kinds_and_fall_through_reasons_the_fixtures_carry_are_oneharnesss_own() {
+    use oneharness_core::domain::fallback::FallThroughReason;
+    use oneharness_core::domain::signals::FailureKind;
+
+    let declared: Vec<&str> = FailureKind::ALL.iter().map(|kind| kind.as_str()).collect();
+    assert!(
+        declared.contains(&FailureKind::ModelMismatch.as_str()),
+        "the linked core does not classify a model mismatch: {declared:?}"
+    );
+    assert_eq!(FailureKind::ModelMismatch.as_str(), "model_mismatch");
+    assert_eq!(FallThroughReason::ModelMismatch.as_str(), "model-mismatch");
+    assert_eq!(
+        serde_json::to_value(FallThroughReason::ModelMismatch).expect("serializes"),
+        serde_json::json!(FallThroughReason::ModelMismatch.as_str()),
+        "the reason a chain records is the word the enum spells"
+    );
+
+    let mut kinds_seen = 0;
+    let mut reasons_seen = 0;
+    // The two reports built from `onejudge`'s own types; the third fixture
+    // report is a partial document that carries no attribution at all.
+    for (name, report) in [
+        ("worker_report", fixture_run::worker_report()),
+        ("supervised_report", fixture_run::supervised_report()),
+    ] {
+        let report: onejudge::Report =
+            serde_json::from_str(&report).unwrap_or_else(|err| panic!("{name} parses: {err}"));
+        for entry in report
+            .telemetry
+            .as_ref()
+            .map(|telemetry| telemetry.attribution.as_slice())
+            .unwrap_or_default()
+        {
+            for kind in entry
+                .candidates
+                .iter()
+                .filter_map(|candidate| candidate.failure_kind.as_deref())
+            {
+                kinds_seen += 1;
+                assert!(
+                    declared.contains(&kind),
+                    "{name} classifies a candidate `{kind}`, which oneharness does not: \
+                     {declared:?}"
+                );
+            }
+            for fell in &entry.fell_through {
+                reasons_seen += 1;
+                serde_json::from_value::<FallThroughReason>(serde_json::json!(fell.reason))
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "{name} records a fall-through reason `{}` oneharness does not \
+                             declare: {err}",
+                            fell.reason
+                        )
+                    });
+            }
+        }
+    }
+    assert!(
+        kinds_seen > 0 && reasons_seen > 0,
+        "no fixture report carries a classified failure or a fall-through, so this gate \
+         holds nothing to the contract"
+    );
+}
+
 /// The browser fixture writes tool summaries a real member could have written,
 /// which means it carries a copy of the bound `oneagentgraph` bounds one to.
 ///

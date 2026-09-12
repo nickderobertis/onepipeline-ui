@@ -2814,6 +2814,30 @@ fn ran_candidate(
         .find(|candidate| candidate.ran)
 }
 
+/// A turn's `unknown` map with the chain of identities its invocation was
+/// attributed to added, where the report attributes one.
+///
+/// Served whole and verbatim — `onejudge`'s own `HarnessAttribution`, by that
+/// library's own derives — on the field this wire already carries a producer's
+/// records on. The turn's `harness`, `model`, `status` and `failureKind` are
+/// read off the candidate that **ran**, and a chain that fell through before it
+/// is a fact those fields cannot carry: the identity that refused, the reason
+/// it fell through and the kind oneharness classified are on the candidates
+/// and the `fell_through` entries beside it and nowhere else. A model the
+/// harness refused to run a turn under — `model_mismatch` on the candidate, and
+/// `model-mismatch` as the fall-through's reason — is exactly that fact, and it
+/// reaches a reader here or not at all. Nothing is restated: the words are the
+/// linked contract's, serialized by it.
+fn with_attribution(
+    mut unknown: Map<String, Value>,
+    entry: Option<&judge::HarnessAttribution>,
+) -> Map<String, Value> {
+    if let Some(chain) = entry.and_then(|entry| serde_json::to_value(entry).ok()) {
+        unknown.insert("attribution".into(), chain);
+    }
+    unknown
+}
+
 /// The chain of identities one side's `turn` invocation recorded, or `None` where
 /// the report attributes none to it.
 ///
@@ -3478,7 +3502,11 @@ fn conversation_document(
                     Some(candidate) => json!(candidate.duration_ms),
                     None => json!(relayed.and_then(LiveTurn::duration_ms)),
                 },
-                "failureKind": Value::Null,
+                // oneharness's own classified reason for the invocation that
+                // ran, where the report attributes one — the same reading the
+                // judge's turns get. A turn the journal alone describes has no
+                // candidate to read one off.
+                "failureKind": ran.and_then(|candidate| candidate.failure_kind.clone()),
                 "finishedAt": match bounds {
                     Some(link) => json!(link.finished_at),
                     None => json!(relayed.and_then(LiveTurn::finished_at)),
@@ -3524,7 +3552,15 @@ fn conversation_document(
                     Some(turn) => Value::Array(turn.tools.clone()),
                     None => Value::Array(live_tools(turn.map_or(&[], |turn| &turn.summaries))),
                 },
-                "unknown": relayed.map(LiveTurn::cut).unwrap_or_default(),
+                "unknown": with_attribution(
+                    relayed.map(LiveTurn::cut).unwrap_or_default(),
+                    numbered
+                        .and_then(|turn| u32::try_from(turn).ok())
+                        .zip(reported)
+                        .and_then(|(turn, report)| {
+                            attributed(report, judge::TelemetryRole::Agent, turn)
+                        }),
+                ),
                 "usage": match ran {
                     Some(candidate) => candidate_usage(candidate.usage.as_ref()),
                     // The record that closed this turn: a turn's cost is
@@ -3769,7 +3805,7 @@ fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::Sess
         // Nothing: `turn-activity` is relayed per *relayed* session and the judge
         // relays none, so no run holds a tool call of the judge's.
         "tools": Vec::<Value>::new(),
-        "unknown": Map::new(),
+        "unknown": with_attribution(Map::new(), entry),
         "usage": candidate_usage(ran.and_then(|candidate| candidate.usage.as_ref())),
         "user": "",
     })

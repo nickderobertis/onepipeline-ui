@@ -320,6 +320,20 @@ Four joins, each the one the obvious alternative gets wrong:
 A report absent, uncopied or unreadable is "the report says nothing", never "the
 session recorded nothing".
 
+**The chain a turn's invocation fell through is served whole, and verbatim.** A
+turn's `harness`, `model`, `status` and `failureKind` are read off the candidate
+that ran, and the identities the chain tried before it — with the reason each
+fell through and the kind oneharness classified — are on no field of that shape.
+So `payload::with_attribution` puts the report's own `HarnessAttribution` for the
+turn on its `unknown` map, serialized by `onejudge`'s own derives, rather than
+restating any of it: the failure kinds and fall-through reasons are
+`oneharness-core`'s closed sets, and `tests/contract.rs` holds every word the
+fixture reports carry to those enumerations. The refusal that made this crate
+move its pins reaches a reader that way and no other — a harness that would have
+run a turn under a model other than the one asked for is refused before a token
+is spent, as `model_mismatch` on the candidate and `model-mismatch` on the
+fall-through.
+
 **And it is the whole of what any run holds about the judge that supervised the
 dispatch.** A plan node dispatches one graph member — `worker`, in
 `graphs/node-scope.yaml` — and the judge runs *inside* onejudge, so nothing
