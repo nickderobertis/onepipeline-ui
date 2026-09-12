@@ -1993,6 +1993,132 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
     );
 }
 
+/// A session's record is served with the model the harness itself said it
+/// would run under, and with the refusal oneharness answered when that was not
+/// the model asked for.
+///
+/// The three shapes the linked `oneharness` writes, each recorded through its
+/// own writer and read back through the same library: a turn whose harness
+/// reported its model, one whose path reports none, and one the harness would
+/// have run under a different model than requested — which is refused before a
+/// token is spent, as the `model_mismatch` kind beside both names. The third is
+/// the record this server could not read at all under the core it linked
+/// before: a kind that core did not declare made the whole line unreadable, and
+/// a store holding one served `404` for the transcript of a turn that was
+/// refused for the one reason an operator most needs to see.
+#[test]
+fn a_session_record_carries_the_model_the_harness_reported_and_the_refusal_it_gave() {
+    use crate::harness_history::Model;
+    const REQUESTED: &str = "gpt-5.6-sol";
+    const OBSERVED: &str = "gpt-6-astra";
+
+    let store = tempfile::tempdir().expect("the oneharness history store");
+    let reported = harness_history::record_under(
+        store.path(),
+        "a worker whose harness names its model",
+        "land the wire contract",
+        "the route table is landed",
+        Model::Observed(REQUESTED),
+    );
+    let unreported = harness_history::record_under(
+        store.path(),
+        "a worker on a path that names none",
+        "land the wire contract",
+        "the route table is landed",
+        Model::Unreported,
+    );
+    let refused = harness_history::record_under(
+        store.path(),
+        "a worker refused the model it was told",
+        "land the wire contract",
+        "",
+        Model::Refused {
+            requested: REQUESTED,
+            observed: OBSERVED,
+        },
+    );
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        for session in [&reported, &unreported, &refused] {
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: HARNESS_STREAM,
+                    node: fixture_run::NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&session.dir),
+                    history_project: &session.project,
+                    history_session: &session.session,
+                    history_id: &session.history_id,
+                    bytes: session.bytes(),
+                },
+            );
+        }
+    });
+    let served = |session: &harness_history::Recorded| -> Value {
+        let response = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/{}",
+                fixture_run::RUN_ID,
+                session.history_id
+            ),
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = response.json();
+        assert_eq!(body["kind"], json!("oneharness_session"));
+        assert_eq!(body["truncated"], json!(false));
+        let content: Value =
+            serde_json::from_str(body["content"].as_str().expect("content")).expect("the record");
+        assert_eq!(
+            content["history_id"],
+            json!(session.history_id),
+            "{content}"
+        );
+        content
+    };
+
+    // The harness named its model, and it was the one asked for.
+    let content = served(&reported);
+    assert_eq!(content["model"], json!(REQUESTED), "{content}");
+    assert_eq!(content["observed_model"], json!(REQUESTED), "{content}");
+    assert_eq!(content["failure_kind"], json!(null), "{content}");
+    assert_eq!(content["text"], json!("the route table is landed"));
+
+    // A path that reports no model records none — absent from the record, and
+    // served absent rather than as the requested one copied over.
+    let content = served(&unreported);
+    assert!(
+        content.get("observed_model").is_none(),
+        "a model the harness never reported is not invented for it: {content}"
+    );
+    assert_eq!(content["failure_kind"], json!(null), "{content}");
+
+    // The refusal: both names, the classified kind in the linked contract's
+    // own token, and no text, because no turn ran.
+    let content = served(&refused);
+    assert_eq!(content["model"], json!(REQUESTED), "{content}");
+    assert_eq!(content["observed_model"], json!(OBSERVED), "{content}");
+    assert_eq!(
+        content["failure_kind"],
+        json!(oneharness_core::domain::signals::FailureKind::ModelMismatch),
+        "{content}"
+    );
+    assert_eq!(
+        content["failure_kind"],
+        json!("model_mismatch"),
+        "{content}"
+    );
+    assert_eq!(content["status"], json!("nonzero"), "{content}");
+    assert_eq!(content["text"], json!(null), "{content}");
+    assert!(
+        content["error"]
+            .as_str()
+            .is_some_and(|error| error.contains(OBSERVED)),
+        "the harness's own words for the model it would have used: {content}"
+    );
+}
+
 /// Reading one takes no lock and writes nothing under the store.
 ///
 /// `oneharness_core` offers a lookup that reconciles the store's index under an
@@ -3490,6 +3616,85 @@ fn a_redirected_turn_is_a_record_on_the_nodes_own_timeline() {
         delivery(fixture_run::UNCONTROLLED_NODE_ID)["delivery"],
         json!("deferred")
     );
+
+    // The engine that links here records the same fact as a `note-delivered`,
+    // and says more: which party of the running conversation took the note. It
+    // is served under the same pair a client already reads, with the engine's
+    // own word beside it.
+    let noted = edits
+        .iter()
+        .find(|event| event["at"] == json!("2026-08-07T12:00:51.600Z"))
+        .expect("the planner's note through the linked engine is an edit on the run's row");
+    assert_eq!(
+        noted["redirection"],
+        json!({
+            "reached": "worker",
+            "delivered": true,
+            "delivery": "live",
+            "node_id": fixture_run::REDIRECTED_NODE_ID,
+        }),
+        "{noted}"
+    );
+    assert_eq!(noted["author"], json!("planner"));
+}
+
+/// A note no turn took is still owed to the node, and the engine's word for that
+/// is `carried`: the one disposition that reads as not delivered.
+///
+/// Driven on its own because it is the disposition the default `note` produces
+/// between two dispatches, and the one a planner reads to decide whether to
+/// send the correction again — served as `delivered: true` it would say the
+/// note had been read when nobody has.
+#[test]
+fn a_note_carried_to_the_next_dispatch_is_served_as_not_yet_delivered() {
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "pipeline",
+            "edit-committed",
+            json!({ "run_id": fixture_run::RUN_ID }),
+            json!({
+                "author": "planner",
+                "command": {
+                    "op": "note",
+                    "id": fixture_run::UNCONTROLLED_NODE_ID,
+                    "addressee": "worker",
+                    "text": "x",
+                    "deliver": "next",
+                },
+                "operations": [{
+                    "kind": "note-delivered",
+                    "node": fixture_run::UNCONTROLLED_NODE_ID,
+                    "addressee": "worker",
+                    "text": "x",
+                    "reached": "carried",
+                }],
+                "operation_kinds": ["note-delivered"],
+            }),
+        );
+    });
+    let carried = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json()["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+        .expect("the appended edit");
+    assert_eq!(
+        carried["redirection"],
+        json!({
+            "reached": "carried",
+            "delivered": false,
+            "delivery": "deferred",
+            "node_id": fixture_run::UNCONTROLLED_NODE_ID,
+        }),
+        "{carried}"
+    );
 }
 
 /// Every answer `node_control` can give, each driven from a run that produces it.
@@ -3731,6 +3936,60 @@ fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
         unknown.get("redirection").is_none(),
         "a delivery word outside the pair is not relayed for a client to fail on: {unknown}"
     );
+
+    // The same rule for the engine's newer record: `reached` is a closed set on
+    // its own type, so a word outside it — or none at all — is a record this
+    // build cannot read rather than a note that did not land.
+    for (label, reached) in [
+        ("a word outside the set", json!("somebody")),
+        ("no disposition at all", Value::Null),
+    ] {
+        let mut operation = json!({
+            "kind": "note-delivered",
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "addressee": "worker",
+            "text": "x",
+        });
+        if !reached.is_null() {
+            operation["reached"] = reached;
+        }
+        let serving = Serving::start(|root| {
+            let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::append_relayed(
+                &dir,
+                "pipeline",
+                "edit-committed",
+                json!({ "run_id": fixture_run::RUN_ID }),
+                json!({
+                    "author": "planner",
+                    "command": {
+                        "op": "note",
+                        "id": fixture_run::REDIRECTED_NODE_ID,
+                        "addressee": "worker",
+                        "text": "x",
+                    },
+                    "operations": [operation],
+                    "operation_kinds": ["note-delivered"],
+                }),
+            );
+        });
+        let unreadable = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+        )
+        .json()["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+            .find(|event| event["at"] == json!("2026-08-07T12:01:00.000Z"))
+            .expect("the appended edit is still on the run's timeline");
+        assert_eq!(unreadable["kind"], json!("edit-committed"));
+        assert!(
+            unreadable.get("redirection").is_none(),
+            "{label} is not relayed for a client to fail on: {unreadable}"
+        );
+    }
 }
 
 /// A redirection is published from inside a turn, so it is not a turn.
@@ -5680,10 +5939,21 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
             assert_eq!(turn["usage"][absent], json!(null), "{turn}");
             assert_ne!(turn["usage"][absent], json!(0), "{turn}");
         }
-        // And nothing the report keys to the *agent* reaches a judge turn.
+        // And nothing the report keys to the *agent* reaches a judge turn — the
+        // chain of identities it carries is the judge side's own.
         assert_ne!(turn["durationMs"], json!(2_800), "{turn}");
         assert_ne!(turn["usage"]["costUsd"], json!(0.11), "{turn}");
         assert_ne!(turn["usage"]["inputTokens"], json!(400), "{turn}");
+        assert_eq!(
+            turn["unknown"]["attribution"]["role"],
+            json!("judge"),
+            "{turn}"
+        );
+        assert_eq!(
+            turn["unknown"]["attribution"]["ran"],
+            json!("codex:judge"),
+            "{turn}"
+        );
     }
 
     // No text against a judge turn, because the report keys none to one.
@@ -5727,6 +5997,232 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
     assert_eq!(closing["usage"], json!({}));
 }
 
+/// A turn carries the chain of identities its invocation was attributed to, in
+/// the report's own words: the harness that refused to run it under a model
+/// other than the one asked for, why the chain fell through it, and the one
+/// that ran.
+///
+/// The fixture's first turn is exactly the refusal the linked `oneharness`
+/// answers — the harness reported it would serve a different model than the
+/// requested one, and the turn was refused before a token was spent rather
+/// than silently spent on the other model. Both halves of that record are
+/// served as the report holds them: the `model_mismatch` kind on the candidate
+/// and the `model-mismatch` reason on the fall-through, beside the model that
+/// was asked for and the one the harness named instead. A reading that served
+/// only the candidate that ran would show a turn that ran on `claude-code` and
+/// nothing of the model it was refused under.
+#[test]
+fn a_turn_serves_the_chain_its_invocation_fell_through_and_the_model_it_was_refused() {
+    let serving = two_runs();
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+
+    let chain = &turns[0]["unknown"]["attribution"];
+    assert_eq!(chain["role"], json!("agent"), "{chain}");
+    assert_eq!(chain["turn_index"], json!(1), "{chain}");
+    assert_eq!(chain["ran"], json!("claude-code:default"), "{chain}");
+    assert_eq!(
+        chain["fell_through"],
+        json!([{
+            "harness": "codex",
+            "reason": oneharness_core::domain::fallback::FallThroughReason::ModelMismatch,
+        }]),
+        "the reason the chain fell through, in the linked contract's own word: {chain}"
+    );
+    assert_eq!(chain["fell_through"][0]["reason"], json!("model-mismatch"));
+    let refused = &chain["candidates"][0];
+    assert_eq!(refused["harness"], json!("codex"));
+    assert_eq!(refused["ran"], json!(false));
+    assert_eq!(
+        refused["failure_kind"],
+        json!(oneharness_core::domain::signals::FailureKind::ModelMismatch),
+        "{refused}"
+    );
+    assert_eq!(
+        refused["failure_kind"],
+        json!("model_mismatch"),
+        "{refused}"
+    );
+    assert_eq!(refused["model"], json!(fixture_run::REQUESTED_MODEL));
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| error.contains(fixture_run::OBSERVED_MODEL)),
+        "the model the harness said it would run under instead: {refused}"
+    );
+    assert_eq!(chain["candidates"][1]["ran"], json!(true));
+    // The turn's own identity and clock are still the candidate that ran, and
+    // it was refused nothing.
+    assert_eq!(turns[0]["durationMs"], json!(900));
+    assert_eq!(turns[0]["failureKind"], json!(null));
+
+    // A turn whose chain fell through nothing carries no fall-through at all —
+    // the report omits an empty one, and so does this — while its attribution
+    // is still served.
+    let direct = &turns[1]["unknown"]["attribution"];
+    assert_eq!(direct["ran"], json!("claude-code:default"), "{direct}");
+    assert!(direct.get("fell_through").is_none(), "{direct}");
+}
+
+/// The classified reason oneharness gave for the invocation that **ran** a
+/// turn is served as that turn's `failureKind`, as it always was for the
+/// judge's turns.
+///
+/// A candidate can run and still be classified: the one kind that appears on
+/// a `status: ok` run is a harness that only deferred a builtin tool call and
+/// did no useful work. Served `null` on every agent turn, a reader had the
+/// judge's account of such a failure and never the worker's.
+#[test]
+fn a_turn_whose_invocation_was_classified_serves_the_kind_oneharness_gave_it() {
+    use oneharness_core::domain::signals::FailureKind;
+    const STREAM: &str = "node-scope-1786925518777-3163334";
+    const SESSION: &str = "node-scope-1786925518777-3163334.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        // The one turn, as the producer opened it, so the session is one the
+        // run lists; what the report says about it is the whole of the reading.
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "instruction": "Land the wire contract.",
+                "started_at": "2026-08-07T12:01:00.000Z",
+            }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:01.000Z",
+                artifact: "report-node-scope-1786925518777-3163334",
+                report: &classified_report(FailureKind::ToolDeferred),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    let turns = turns["conversation"]["turns"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the transcript: {turns}"))
+        .clone();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(
+        turns[0]["failureKind"],
+        json!(FailureKind::ToolDeferred.as_str()),
+        "{}",
+        turns[0]
+    );
+    assert_eq!(turns[0]["harness"], json!("oneagentgraph"));
+    assert_eq!(turns[0]["durationMs"], json!(4_200));
+    assert_eq!(
+        turns[0]["unknown"]["attribution"]["candidates"][0]["failure_kind"],
+        json!("tool_deferred"),
+        "{}",
+        turns[0]
+    );
+}
+
+/// A report whose one turn ran on a candidate oneharness classified `kind`,
+/// on a `status: ok` run — the shape a deferred tool call leaves.
+fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, Telemetry,
+        TelemetryRole, Transcript, Usage,
+    };
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Land the wire contract."),
+                Message::assistant("I would run the gate, but the tool call was deferred."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: None,
+        settled_reason: Some("the harness deferred the tool call".into()),
+        usage: None,
+        telemetry: Some(Telemetry {
+            wall_ms: 9_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 10,
+            sessions: Vec::new(),
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Agent,
+                turn_index: 1,
+                ran: Some("claude-code:default".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "claude-code".into(),
+                    harness_id: "claude-code:default".into(),
+                    variant: None,
+                    model: None,
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: Some(kind.as_str().to_owned()),
+                    failure_kind_source: Some("json:result".into()),
+                    exit_code: Some(0),
+                    duration_ms: Some(4_200),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(Usage {
+                        input_tokens: Some(11),
+                        output_tokens: Some(22),
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        cost_usd: Some(2.5),
+                    }),
+                }],
+                history_file: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
 /// A dispatch's own transcript is left as the earlier steps made it, and carries
 /// nothing the report recorded against the judge.
 #[test]
@@ -5760,13 +6256,22 @@ fn a_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
     assert_eq!(turns[0]["user"], json!(fixture_run::FIRST_PROMPT));
     assert_eq!(turns[0]["assistant"], json!(fixture_run::FIRST_REPLY));
     assert_eq!(turns[0]["durationMs"], json!(900));
-    // And none of the figures its report attributes to the judge instead.
+    // And none of the figures its report attributes to the judge instead — nor
+    // the judge's chain of identities, which is the one other thing the report
+    // keys to a turn: what rides on an agent turn's `unknown` is the agent's own
+    // attribution and nothing else.
     for turn in &turns {
         assert_ne!(turn["durationMs"], json!(70), "{turn}");
         assert_ne!(turn["durationMs"], json!(60), "{turn}");
         assert_ne!(turn["usage"]["inputTokens"], json!(79_341), "{turn}");
         assert_ne!(turn["usage"]["costUsd"], json!(9.75), "{turn}");
-        assert_eq!(turn["unknown"], json!({}), "{turn}");
+        let unknown = turn["unknown"].as_object().expect("a map");
+        assert!(unknown.keys().all(|key| key == "attribution"), "{turn}");
+        assert_eq!(
+            turn["unknown"]["attribution"]["role"],
+            json!("agent"),
+            "{turn}"
+        );
     }
     // That report records no judge turn, so there is no second conversation to
     // open beside it — a verdict alone does not make one.
@@ -5801,7 +6306,15 @@ fn a_dispatchs_own_transcript_gains_no_judge_figure_beside_it() {
         assert_eq!(turn["startedAt"], json!(null), "{turn}");
         assert_eq!(turn["finishedAt"], json!(null), "{turn}");
         assert_ne!(turn["usage"]["inputTokens"], json!(51_204), "{turn}");
-        assert_eq!(turn["unknown"], json!({}), "{turn}");
+        // The member's own chain, and not the judge's: the transport is the
+        // judge's, and the attribution it carries is still the agent side's.
+        let unknown = turn["unknown"].as_object().expect("a map");
+        assert!(unknown.keys().all(|key| key == "attribution"), "{turn}");
+        assert_eq!(
+            turn["unknown"]["attribution"]["role"],
+            json!("agent"),
+            "{turn}"
+        );
     }
 }
 
@@ -7695,9 +8208,12 @@ fn a_session_with_both_a_report_and_live_records_is_served_from_the_report() {
     assert_eq!(turns[1]["user"], json!(PROMPT));
     assert_eq!(turns[1]["assistant"], json!(null));
     // Nothing of the live reading beside either of them: no flag saying a text
-    // the report holds whole was cut.
+    // the report holds whole was cut. What the map carries is the report's own
+    // attribution of the turn, which is the report's reading and not the live
+    // one.
     for turn in &turns {
-        assert_eq!(turn["unknown"], json!({}), "{turn}");
+        let unknown = turn["unknown"].as_object().expect("a map");
+        assert!(unknown.keys().all(|key| key == "attribution"), "{turn}");
     }
 }
 

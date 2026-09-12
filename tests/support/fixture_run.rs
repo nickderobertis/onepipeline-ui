@@ -114,6 +114,9 @@ pub const DEFERRED_NOTE: &str = "measure the cold start too";
 /// The note the *monitor* left, under its own narrower op allowlist. Its author
 /// is what tells an observer's self-applied fix from the planner's decision.
 pub const MONITOR_NOTE: &str = "the benchmark node has been quiet for a while";
+/// The note the planner sent through the engine that links here, whose edit
+/// records which party took it.
+pub const WORKER_NOTE: &str = "the control field is documented; now the schema version";
 /// A note still owed to a node's next dispatch. A `context` note carries exactly
 /// one dispatch and is consumed on delivery, so only a node that has not been
 /// dispatched since still carries one.
@@ -2514,10 +2517,15 @@ fn live_plan() -> Value {
 fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut seq = 0;
+    // The envelope version the next record is stamped with. Every record here
+    // carries the version the runs on disk do, which the linked engine reads
+    // whole, except the ones only that engine has ever written — those are
+    // stamped with its own number, and the setting is put back afterwards.
+    let version = std::cell::Cell::new(1);
     let mut emit = |at: &str, source: &str, kind: &str, labels: Value, payload: Value| {
         lines.push(
             json!({
-                "v": 1,
+                "v": version.get(),
                 "ts": at,
                 "stream": "a-recording-host-4243",
                 "seq": seq,
@@ -3086,6 +3094,55 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             }],
         }),
     );
+    // The same lever as the engine that links here pulls it. `context` is gone
+    // from the submitted vocabulary and `note` is the one manager-note op, and
+    // what its edit compiles to says which *party* of the running conversation
+    // took the note rather than only that one did: the record `oneagentgraph`
+    // relays is the same `turn-interrupted` as above, and the operation is a
+    // `note-delivered` carrying the disposition in the engine's own word. Both
+    // shapes sit in one store, because a store outlives the engine that wrote
+    // into it.
+    emit(
+        "2026-08-07T12:00:51.500Z",
+        "agentgraph",
+        "turn-interrupted",
+        json!({
+            "run_id": run,
+            "node": REDIRECTED_NODE_ID,
+            "member": "worker",
+            "persona": "worker",
+            "session": REDIRECTED_CONVERSATION_ID,
+        }),
+        json!({ "member": "worker", "delivered": true, "input_bytes": WORKER_NOTE.len() }),
+    );
+    version.set(onepipeline::event::ENVELOPE_VERSION);
+    emit(
+        "2026-08-07T12:00:51.600Z",
+        "pipeline",
+        "edit-committed",
+        json!({ "run_id": run }),
+        json!({
+            "author": "planner",
+            // `deliver` and `persist` are absent because both are at their
+            // defaults, which is what the sibling's own `Command` omits: attempt
+            // the running turn, and carry the note forward where none took it.
+            "command": {
+                "op": "note",
+                "id": REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": WORKER_NOTE,
+            },
+            "operations": [{
+                "kind": "note-delivered",
+                "node": REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": WORKER_NOTE,
+                "reached": "worker",
+            }],
+            "operation_kinds": ["note-delivered"],
+        }),
+    );
+    version.set(1);
     // The third in-flight node, and the trap: its *earlier* dispatch settled with
     // a onejudge report naming no controllable turn, and this is a *fresh* turn
     // in a *re-asked* dispatch. `provider.control` is asked for per run and the
@@ -3890,6 +3947,11 @@ pub const UNRELAYED_MODEL: &str = "claude-opus-5";
 /// have come from its own attribution.
 pub const UNRELAYED_COST: f64 = 3.07;
 pub const UNRELAYED_MS: u64 = 2_600;
+/// The model the first turn's chain asked its first candidate for, and the one
+/// that candidate reported it would run under instead — the difference is the
+/// refusal the chain fell through on.
+pub const REQUESTED_MODEL: &str = "gpt-5.6-sol";
+pub const OBSERVED_MODEL: &str = "gpt-6-astra";
 
 /// The onejudge report the settled run's worker member stored, built from that
 /// library's own types.
@@ -3912,9 +3974,11 @@ pub const UNRELAYED_MS: u64 = 2_600;
 /// spring is driven from.
 #[must_use]
 pub fn worker_report() -> String {
+    use oneharness_core::domain::fallback::FallThroughReason;
+    use oneharness_core::domain::signals::FailureKind;
     use onejudge::{
-        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
-        Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
+        CandidateAttempt, FellThrough, HarnessAttribution, Message, PartyTelemetry, Report,
+        SessionLink, Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
     };
 
     let call = ToolEvent {
@@ -4000,18 +4064,32 @@ pub fn worker_report() -> String {
         history_id: None,
         usage: Some(usage),
     };
-    // The identity the chain fell through before the one that ran. It reports a
-    // duration of its own, which is how long finding out took and is not the
-    // turn's, so a reading that took the first candidate rather than the one that
-    // ran would serve this number.
-    let fell_through = CandidateAttempt {
+    // The identity the chain fell through before the one that ran: the harness
+    // reported it would run the turn under a model other than the one asked
+    // for, and oneharness refused the turn before a token was spent rather than
+    // silently spending the other model. Both halves are the linked contract's
+    // own words — the kind it classifies the refusal as, and the reason the
+    // chain records falling through — and neither is restated here. It reports
+    // a duration of its own, which is how long finding out took and is not the
+    // turn's, so a reading that took the first candidate rather than the one
+    // that ran would serve this number.
+    let refused = CandidateAttempt {
+        model: Some(REQUESTED_MODEL.to_owned()),
+        status: "nonzero".into(),
         ran: false,
-        available: false,
-        status: "unavailable".into(),
+        failure_kind: Some(FailureKind::ModelMismatch.as_str().to_owned()),
+        failure_kind_source: Some("jsonrpc:codex-app-server".into()),
         exit_code: None,
         duration_ms: Some(4_364),
+        error: Some(format!(
+            "codex would run this turn under \"{OBSERVED_MODEL}\""
+        )),
         usage: None,
-        ..ran("claude-code", 0, agent_usage(0.0))
+        ..ran("codex", 0, agent_usage(0.0))
+    };
+    let fell_through = FellThrough {
+        harness: "codex".into(),
+        reason: FallThroughReason::ModelMismatch.as_str().to_owned(),
     };
     // Read off the candidate rather than named twice, or the judge's attribution
     // would carry the agent's identity and no reading could tell them apart.
@@ -4079,11 +4157,14 @@ pub fn worker_report() -> String {
                 history_id: None,
             }],
             attribution: vec![
-                attributed(
-                    TelemetryRole::Agent,
-                    1,
-                    vec![fell_through, ran("claude-code", 900, agent_usage(29.71))],
-                ),
+                HarnessAttribution {
+                    fell_through: vec![fell_through],
+                    ..attributed(
+                        TelemetryRole::Agent,
+                        1,
+                        vec![refused, ran("claude-code", 900, agent_usage(29.71))],
+                    )
+                },
                 attributed(
                     TelemetryRole::Judge,
                     1,

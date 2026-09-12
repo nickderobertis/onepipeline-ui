@@ -42,6 +42,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-settled": "lifecycle",
   "boundary-retried": "recovery",
   "edit-committed": "repository",
+  "command-accepted": "planning",
   "planner-surface-queued": "planning",
   "planner-surfaced": "planning",
   "planner-replied": "planning",

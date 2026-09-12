@@ -1431,6 +1431,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         instruction: "re-run the gate".into(),
         instruction_truncated: true,
         started_at: "2026-08-07T12:00:00.000Z".into(),
+        origin: None,
     })
     .expect("the opening serializes");
     let declared: Vec<&str> = started
@@ -1455,6 +1456,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
         text: "the gate is green".into(),
         truncated: true,
+        origin: None,
     })
     .expect("the message serializes");
     let declared: Vec<&str> = message
@@ -1713,16 +1715,24 @@ fn the_report_spells_its_two_role_vocabularies_the_way_this_crate_reads_them() {
     );
 }
 
-/// The `context` edit whose delivery this crate serves, against the SDK's own
+/// The manager note whose delivery this crate serves, against the SDK's own
 /// declaration of it.
 ///
 /// `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private
 /// module, so the compiled operation an `edit-committed` carries is read as the
 /// wire strings that library writes — the same terms as the `onevcs` vocabulary,
 /// and for the same reason. What *is* public beside it is the submitted
-/// `channel::Command`, and it is what fixes the two words the operation's
-/// `delivery` can hold: `live` is the mode a planner asks for and `next` is the
-/// mode that refuses it, so a rename there is a rename of what this crate reads.
+/// `channel::Command` and the `note::Reached` disposition the compiled
+/// `note-delivered` operation flattens in, and between them they fix every word
+/// this crate reads a delivery off: `live` is the mode a planner asks for and
+/// `next` the mode that declines the running turn, and `reached` is the run's
+/// own account of which party took the note — or that none did, which is the
+/// one disposition that means the note is still owed to a later dispatch.
+///
+/// The `context` op those words used to arrive on is **gone** from the
+/// submitted vocabulary — `note` is the one manager-note op — while the
+/// `context-added` operation it compiled to is still folded by the engine, and
+/// still read here, because the runs that recorded one are still opened.
 ///
 /// Making that module public is the proposal recorded in `src/AGENTS.md`; until
 /// it lands, this plus the goldens written from a real reconciler's records is
@@ -1730,30 +1740,146 @@ fn the_report_spells_its_two_role_vocabularies_the_way_this_crate_reads_them() {
 #[test]
 fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
     use onepipeline::channel::{Command, Deliver};
+    use onepipeline::note::{Addressee, NoteText, Reached};
 
     let submitted = |deliver: Deliver| {
-        serde_json::to_value(Command::Context {
+        serde_json::to_value(Command::Note {
             id: "docs".into(),
-            note: "and the control field".into(),
+            addressee: Addressee::Worker,
+            text: "and the control field"
+                .parse::<NoteText>()
+                .expect("a usable note"),
+            criterion: None,
             deliver,
+            persist: true,
         })
         .expect("the command serializes")
     };
-    // The shape `tests/support/fixture_run.rs` writes onto an `edit-committed`.
+    // The shape `tests/support/fixture_run.rs` writes onto an `edit-committed`:
+    // a note that says nothing about delivery attempts the running turn and is
+    // carried forward where none took it, and the wire omits both defaults.
     assert_eq!(
-        submitted(Deliver::Auto),
-        serde_json::json!({ "op": "context", "id": "docs", "note": "and the control field" }),
-        "an edit that says nothing about delivery is the edit the table always described"
-    );
-    assert_eq!(
-        submitted(Deliver::Live)["deliver"],
-        serde_json::json!("live"),
-        "the word a delivered note's `delivery` is recorded as"
+        submitted(Deliver::Live),
+        serde_json::json!({
+            "op": "note",
+            "id": "docs",
+            "addressee": "worker",
+            "text": "and the control field",
+        }),
+        "a note that says nothing about delivery is the default the SDK documents"
     );
     assert_eq!(
         submitted(Deliver::Next)["deliver"],
         serde_json::json!("next"),
         "the mode that only ever defers, which is the other half of the pair"
+    );
+
+    // The disposition a `note-delivered` operation carries, flattened onto the
+    // operation under the `reached` tag: the four a conversation read, and the
+    // one that says the note is owed to the node's next dispatch. Each is held
+    // to the word the fixture writes and `payload::edits` reads.
+    let reached = |reached: Reached| {
+        serde_json::to_value(reached).expect("the disposition serializes")["reached"].clone()
+    };
+    for (disposition, word, read) in [
+        (Reached::Queued, "queued", true),
+        (Reached::Worker, "worker", true),
+        (Reached::Supervisor, "supervisor", true),
+        (
+            Reached::JudgedWith {
+                completion_reason: "the note settled it".into(),
+            },
+            "judged-with",
+            true,
+        ),
+        (Reached::Carried, "carried", false),
+    ] {
+        assert_eq!(
+            disposition.a_conversation_read_it(),
+            read,
+            "`{word}` is read as {} by the SDK's own reading",
+            if read { "delivered" } else { "still owed" }
+        );
+        assert_eq!(reached(disposition), serde_json::json!(word));
+    }
+}
+
+/// Every classified failure and every fall-through reason the fixture reports
+/// carry is a word the linked `oneharness` contract declares.
+///
+/// `onejudge` types a candidate's `failure_kind` and a fall-through's `reason`
+/// as strings — they are oneharness's own tokens, copied through — so a fixture
+/// could spell one that no release of that library has ever written and every
+/// journey over it would still pass. This holds each word the reports here
+/// carry to the enumeration `oneharness-core` publishes: `FailureKind::ALL`, the
+/// closed set the report schema names, and `FallThroughReason`, which is what a
+/// reason has to read back as. The refusal that made this crate move its pin —
+/// `model_mismatch`, and `model-mismatch` on the chain that fell through it —
+/// is asserted to be among them by name, because a set that silently lost it
+/// would be the previous release again.
+#[test]
+fn the_failure_kinds_and_fall_through_reasons_the_fixtures_carry_are_oneharnesss_own() {
+    use oneharness_core::domain::fallback::FallThroughReason;
+    use oneharness_core::domain::signals::FailureKind;
+
+    let declared: Vec<&str> = FailureKind::ALL.iter().map(|kind| kind.as_str()).collect();
+    assert!(
+        declared.contains(&FailureKind::ModelMismatch.as_str()),
+        "the linked core does not classify a model mismatch: {declared:?}"
+    );
+    assert_eq!(FailureKind::ModelMismatch.as_str(), "model_mismatch");
+    assert_eq!(FallThroughReason::ModelMismatch.as_str(), "model-mismatch");
+    assert_eq!(
+        serde_json::to_value(FallThroughReason::ModelMismatch).expect("serializes"),
+        serde_json::json!(FallThroughReason::ModelMismatch.as_str()),
+        "the reason a chain records is the word the enum spells"
+    );
+
+    let mut kinds_seen = 0;
+    let mut reasons_seen = 0;
+    // The two reports built from `onejudge`'s own types; the third fixture
+    // report is a partial document that carries no attribution at all.
+    for (name, report) in [
+        ("worker_report", fixture_run::worker_report()),
+        ("supervised_report", fixture_run::supervised_report()),
+    ] {
+        let report: onejudge::Report =
+            serde_json::from_str(&report).unwrap_or_else(|err| panic!("{name} parses: {err}"));
+        for entry in report
+            .telemetry
+            .as_ref()
+            .map(|telemetry| telemetry.attribution.as_slice())
+            .unwrap_or_default()
+        {
+            for kind in entry
+                .candidates
+                .iter()
+                .filter_map(|candidate| candidate.failure_kind.as_deref())
+            {
+                kinds_seen += 1;
+                assert!(
+                    declared.contains(&kind),
+                    "{name} classifies a candidate `{kind}`, which oneharness does not: \
+                     {declared:?}"
+                );
+            }
+            for fell in &entry.fell_through {
+                reasons_seen += 1;
+                serde_json::from_value::<FallThroughReason>(serde_json::json!(fell.reason))
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "{name} records a fall-through reason `{}` oneharness does not \
+                             declare: {err}",
+                            fell.reason
+                        )
+                    });
+            }
+        }
+    }
+    assert!(
+        kinds_seen > 0 && reasons_seen > 0,
+        "no fixture report carries a classified failure or a fall-through, so this gate \
+         holds nothing to the contract"
     );
 }
 

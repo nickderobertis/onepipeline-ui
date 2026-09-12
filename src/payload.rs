@@ -372,19 +372,32 @@ pub mod pipeline {
 ///
 /// The SDK declares `edits::Operation` and `edits::Delivery` in a private module,
 /// so — like the `onevcs` vocabulary above and unlike `oneagentgraph`'s — the wire
-/// is the only declaration a consumer can reach. What is gated instead is the
-/// *submitted* command: `onepipeline::channel::Command` is public, so
-/// `tests/contract.rs` holds this crate's reading of a `context` edit to that
-/// library's own type, and `tests/support/fixture_run.rs` writes the operations as
-/// the reconciler compiles them.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.18.3 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
+/// is the only declaration a consumer can reach. What is gated instead is what
+/// is public beside it: the *submitted* `onepipeline::channel::Command`, and the
+/// `onepipeline::note::Reached` disposition a `note-delivered` operation flattens
+/// in, so `tests/contract.rs` holds this crate's reading of a note's delivery to
+/// that library's own types, and `tests/support/fixture_run.rs` writes the
+/// operations as the reconciler compiles them.
+///
+/// Two operations say where a note went, because two engines wrote them. The
+/// `context` op compiled to [`CONTEXT_ADDED`] and is gone from the submitted
+/// vocabulary; the `note` op that replaced it compiles to [`NOTE_DELIVERED`].
+/// The engine still folds the older one and so does this crate — a run that
+/// recorded a `context-added` is still a run an operator opens.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.27.2 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
 mod edits {
     /// The compiled mutations one accepted edit became.
     pub const OPERATIONS: &str = "operations";
     /// The tag each operation is discriminated by.
     pub const KIND: &str = "kind";
-    /// `{node, note, delivery}` — a planner note reached a node.
+    /// `{node, note, delivery}` — a planner note reached a node, as the removed
+    /// `context` op recorded it. Nothing writes this any more; runs that hold
+    /// one are still read.
     pub const CONTEXT_ADDED: &str = "context-added";
+    /// `{node, addressee, text, criterion?, reached, completion_reason?}` — a
+    /// manager's note was delivered into a node's live conversation, or carried
+    /// to that node's next dispatch because no turn of it took the note.
+    pub const NOTE_DELIVERED: &str = "note-delivered";
     /// The node the note was for.
     pub const NODE: &str = "node";
     /// Where the note actually went: [`LIVE`] or [`DEFERRED`].
@@ -394,6 +407,18 @@ mod edits {
     /// Onto the node's next dispatch. Also what a record written before delivery
     /// had modes means, which is why an absent `delivery` reads as this one.
     pub const DEFERRED: &str = "deferred";
+    /// Which party of the conversation took a delivered note — the tag
+    /// `onepipeline::note::Reached` is flattened onto a [`NOTE_DELIVERED`] under.
+    pub const REACHED: &str = "reached";
+    /// The one disposition that means nobody read the note: it was carried to
+    /// the node's next dispatch. Every other word that enum spells is a party
+    /// of the running conversation having taken it — `queued` included, because
+    /// the turn that opens next is that same conversation's.
+    pub const CARRIED: &str = "carried";
+    /// The words a delivered note's `reached` can carry, in the SDK's own order.
+    /// Closed, as the enum is: a word outside it is a record this build cannot
+    /// read and is dropped rather than relayed for a client to fail on.
+    pub const REACHED_WORDS: [&str; 5] = ["queued", "worker", "supervisor", "judged-with", CARRIED];
 }
 
 /// The party a record names as its own, when it names one this crate serves.
@@ -1546,7 +1571,7 @@ enum TurnState {
 /// This is the read-side answer to the question `onepipeline`'s reconciler
 /// answers by pulling the lever: it keeps a `TurnAddress` per in-flight dispatch,
 /// read off the sibling's relayed envelopes with the latest winning, and a
-/// `context` note goes into a running turn only when there is one. A read surface
+/// manager's note goes into a running turn only when there is one. A read surface
 /// must not pull that lever — serving a run would then interrupt it — so what it
 /// has instead is the same stream the engine reads the address from, plus the
 /// record of every interrupt anybody has already pulled.
@@ -2789,6 +2814,30 @@ fn ran_candidate(
         .find(|candidate| candidate.ran)
 }
 
+/// A turn's `unknown` map with the chain of identities its invocation was
+/// attributed to added, where the report attributes one.
+///
+/// Served whole and verbatim — `onejudge`'s own `HarnessAttribution`, by that
+/// library's own derives — on the field this wire already carries a producer's
+/// records on. The turn's `harness`, `model`, `status` and `failureKind` are
+/// read off the candidate that **ran**, and a chain that fell through before it
+/// is a fact those fields cannot carry: the identity that refused, the reason
+/// it fell through and the kind oneharness classified are on the candidates
+/// and the `fell_through` entries beside it and nowhere else. A model the
+/// harness refused to run a turn under — `model_mismatch` on the candidate, and
+/// `model-mismatch` as the fall-through's reason — is exactly that fact, and it
+/// reaches a reader here or not at all. Nothing is restated: the words are the
+/// linked contract's, serialized by it.
+fn with_attribution(
+    mut unknown: Map<String, Value>,
+    entry: Option<&judge::HarnessAttribution>,
+) -> Map<String, Value> {
+    if let Some(chain) = entry.and_then(|entry| serde_json::to_value(entry).ok()) {
+        unknown.insert("attribution".into(), chain);
+    }
+    unknown
+}
+
 /// The chain of identities one side's `turn` invocation recorded, or `None` where
 /// the report attributes none to it.
 ///
@@ -3453,7 +3502,11 @@ fn conversation_document(
                     Some(candidate) => json!(candidate.duration_ms),
                     None => json!(relayed.and_then(LiveTurn::duration_ms)),
                 },
-                "failureKind": Value::Null,
+                // oneharness's own classified reason for the invocation that
+                // ran, where the report attributes one — the same reading the
+                // judge's turns get. A turn the journal alone describes has no
+                // candidate to read one off.
+                "failureKind": ran.and_then(|candidate| candidate.failure_kind.clone()),
                 "finishedAt": match bounds {
                     Some(link) => json!(link.finished_at),
                     None => json!(relayed.and_then(LiveTurn::finished_at)),
@@ -3499,7 +3552,15 @@ fn conversation_document(
                     Some(turn) => Value::Array(turn.tools.clone()),
                     None => Value::Array(live_tools(turn.map_or(&[], |turn| &turn.summaries))),
                 },
-                "unknown": relayed.map(LiveTurn::cut).unwrap_or_default(),
+                "unknown": with_attribution(
+                    relayed.map(LiveTurn::cut).unwrap_or_default(),
+                    numbered
+                        .and_then(|turn| u32::try_from(turn).ok())
+                        .zip(reported)
+                        .and_then(|(turn, report)| {
+                            attributed(report, judge::TelemetryRole::Agent, turn)
+                        }),
+                ),
                 "usage": match ran {
                     Some(candidate) => candidate_usage(candidate.usage.as_ref()),
                     // The record that closed this turn: a turn's cost is
@@ -3744,7 +3805,7 @@ fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::Sess
         // Nothing: `turn-activity` is relayed per *relayed* session and the judge
         // relays none, so no run holds a tool call of the judge's.
         "tools": Vec::<Value>::new(),
-        "unknown": Map::new(),
+        "unknown": with_attribution(Map::new(), entry),
         "usage": candidate_usage(ran.and_then(|candidate| candidate.usage.as_ref())),
         "user": "",
     })
@@ -4057,22 +4118,29 @@ fn turn_ids(view: &RunView, transcripts: &Transcripts<'_>) -> Vec<Option<Turn>> 
 ///   for **every** interrupt, delivered or not, and says which member was
 ///   addressed, how many bytes were offered, and — exactly when the running turn
 ///   did not take them — why it did not.
-/// - `onepipeline`'s `edit-committed` carries the compiled `context-added`
-///   operation, whose `delivery` is that library's own word for where the note
-///   ended up: into the running turn, or onto the node's next dispatch.
+/// - `onepipeline`'s `edit-committed` carries the compiled operation a note
+///   became: a `note-delivered`, whose `reached` is that library's own word for
+///   which party of the running conversation took the note — or `carried`, the
+///   one word that says none did and it rides the node's next dispatch — or,
+///   on a run an older engine recorded, a `context-added`, whose `delivery`
+///   said the same thing as a pair: into the running turn, or onto the next
+///   dispatch.
 ///
-/// `delivered` is the field both fill, because it is the one thing a reader of a
-/// turn that changed behaviour is asking: did this note reach the turn that was
-/// running. `reason` is carried only beside a `false`, which is the discipline
-/// `TurnInterrupted` itself keeps — a served redirection can never be read as
-/// having had a reason to fail.
+/// `delivered` is the field all three fill, because it is the one thing a reader
+/// of a turn that changed behaviour is asking: did this note reach the turn that
+/// was running. `delivery` is served for both of the engine's records, so a
+/// client reads one pair whichever engine wrote the run, and `reached` beside it
+/// where the record named a party. `reason` is carried only beside a `false`,
+/// which is the discipline `TurnInterrupted` itself keeps — a served redirection
+/// can never be read as having had a reason to fail.
 ///
-/// Both readings are validated before anything is served, and a record that
-/// fails either is served as **no redirection at all** rather than as a
+/// Every reading is validated before anything is served, and a record that
+/// fails one is served as **no redirection at all** rather than as a
 /// redirection that did not land: `delivered` is required on the sibling's own
-/// type, and `delivery` is a closed pair. A malformed record read as `false`
-/// would tell a planner their note is still owed to a node it may already have
-/// reached, which is worse than the record being absent.
+/// type, `delivery` is a closed pair and `reached` a closed set. A malformed
+/// record read as `false` would tell a planner their note is still owed to a
+/// node it may already have reached, which is worse than the record being
+/// absent.
 fn redirection(event: &Envelope) -> Option<Value> {
     let mut record = Map::new();
     match (event.source, event.kind.0.as_str()) {
@@ -4114,19 +4182,37 @@ fn redirection(event: &Envelope) -> Option<Value> {
         (Source::Pipeline, _)
             if PipelineKind::from_wire(&event.kind) == Some(PipelineKind::EditCommitted) =>
         {
-            let context = context_added(event)?;
-            // Absent is `deferred`, which is what a record written before
-            // delivery had modes means and the only thing those records did. A
-            // word outside the pair is a record this build cannot read, and is
-            // dropped rather than relayed for a client to fail on.
-            let delivery = match context.get(edits::DELIVERY).and_then(Value::as_str) {
-                None | Some(edits::DEFERRED) => edits::DEFERRED,
-                Some(edits::LIVE) => edits::LIVE,
-                Some(_) => return None,
+            let (kind, note) = note_operation(event)?;
+            let delivery = match kind {
+                // Absent is `deferred`, which is what a record written before
+                // delivery had modes means and the only thing those records
+                // did. A word outside the pair is a record this build cannot
+                // read, and is dropped rather than relayed for a client to fail
+                // on.
+                edits::CONTEXT_ADDED => match note.get(edits::DELIVERY).and_then(Value::as_str) {
+                    None | Some(edits::DEFERRED) => edits::DEFERRED,
+                    Some(edits::LIVE) => edits::LIVE,
+                    Some(_) => return None,
+                },
+                // The disposition is required on the sibling's own type and
+                // closed there, so a record naming none, or a word outside the
+                // set, is one this build cannot read.
+                _ => {
+                    let reached = note
+                        .get(edits::REACHED)
+                        .and_then(Value::as_str)
+                        .filter(|word| edits::REACHED_WORDS.contains(word))?;
+                    record.insert("reached".into(), json!(reached));
+                    if reached == edits::CARRIED {
+                        edits::DEFERRED
+                    } else {
+                        edits::LIVE
+                    }
+                }
             };
             record.insert("delivered".into(), json!(delivery == edits::LIVE));
             record.insert("delivery".into(), json!(delivery));
-            if let Some(node) = non_empty(context.get(edits::NODE).and_then(Value::as_str)) {
+            if let Some(node) = non_empty(note.get(edits::NODE).and_then(Value::as_str)) {
                 record.insert("node_id".into(), json!(node));
             }
         }
@@ -4276,22 +4362,28 @@ fn delivered(event: &Envelope) -> Option<bool> {
     event.payload.get(graph::DELIVERED)?.as_bool()
 }
 
-/// The `context-added` operation one `edit-committed` compiled to, if it did.
+/// The operation carrying a note that one `edit-committed` compiled to, if it
+/// did, with the kind it was found under.
 ///
 /// The first is the whole of it: the reconciler emits one `edit-committed` per
-/// submitted command, and only a `context` command compiles to this operation.
+/// submitted command, and only a note compiles to either of these operations.
 /// The note itself is deliberately not read — it is the planner's prose, it is
 /// bounded by nothing this crate can promise, and what a reader of the timeline
 /// is asking is *whether* the turn took it rather than what it said.
-fn context_added(event: &Envelope) -> Option<&Map<String, Value>> {
+fn note_operation(event: &Envelope) -> Option<(&'static str, &Map<String, Value>)> {
     event
         .payload
         .get(edits::OPERATIONS)?
         .as_array()?
         .iter()
         .filter_map(Value::as_object)
-        .find(|operation| {
-            operation.get(edits::KIND).and_then(Value::as_str) == Some(edits::CONTEXT_ADDED)
+        .find_map(|operation| {
+            let kind = match operation.get(edits::KIND).and_then(Value::as_str)? {
+                edits::CONTEXT_ADDED => edits::CONTEXT_ADDED,
+                edits::NOTE_DELIVERED => edits::NOTE_DELIVERED,
+                _ => return None,
+            };
+            Some((kind, operation))
         })
 }
 

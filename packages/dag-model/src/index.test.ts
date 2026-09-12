@@ -769,6 +769,32 @@ describe("run timeline", () => {
         redirection: { delivered: false, delivery: "soon" },
       }).success,
     ).toBe(false);
+    // The engine's own word for which party took a note rides beside the pair,
+    // and its one word for nobody reads as not delivered. A word outside its
+    // closed set is refused on the same terms as a third delivery mode.
+    expect(
+      timelineEventSchema.parse({
+        id: "e10",
+        kind: "edit-committed",
+        at: "2026-07-26T12:00:06Z",
+        redirection: {
+          reached: "carried",
+          delivered: false,
+          delivery: "deferred",
+          node_id: "api",
+        },
+      }).redirection?.reached,
+    ).toBe("carried");
+    expect(
+      timelineEventSchema.safeParse({
+        ...redirected,
+        redirection: {
+          reached: "nobody",
+          delivered: false,
+          delivery: "deferred",
+        },
+      }).success,
+    ).toBe(false);
     // An ordinary record carries none, and is still a valid event.
     expect(
       timelineEventSchema.parse({
