@@ -112,6 +112,26 @@ const fixtureSchema = z.object({
     unaskable_harness_session: z.string().min(1),
   }),
   harness_session_text: z.string().min(1),
+  /**
+   * The history run's settled session whose report a panel of two judges decided
+   * on: the node it ran at, its id, the id of the turn the decisions belong to, and
+   * the decisions themselves in the panel's order.
+   */
+  judged: z.object({
+    node: z.string().min(1),
+    session: z.string().min(1),
+    turn: z.string().min(1),
+    decisions: z
+      .array(
+        z.object({
+          judge: z.string().min(1),
+          kind: z.string().min(1),
+          decision: z.string().min(1),
+          reason: z.string().min(1),
+        }),
+      )
+      .length(2),
+  }),
 });
 
 export type FixtureFacts = z.infer<typeof fixtureSchema>;

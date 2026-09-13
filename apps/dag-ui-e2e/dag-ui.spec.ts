@@ -1581,6 +1581,47 @@ test("reads the report a settled node's member left behind", async ({
 });
 
 /**
+ * What each judge of a stacked panel decided, read beneath the turn it decided on.
+ *
+ * The transcript is the report the settled member stored, and the decisions are
+ * that report's own: one line per judge directly under the turn they judged, in
+ * the panel's order — and nothing under the turn beside it, which no judge decided
+ * on.
+ */
+test("reads each judge's decision beneath the turn it judged", async ({
+  page,
+}) => {
+  const { judged } = fixture();
+  await openObservatory(
+    page,
+    `/?run=${runs().history}&node=${judged.node}&event=dispatch.${judged.session}`,
+  );
+
+  const turn = itemDetail(page).getByRole("article", {
+    name: `Turn ${judged.turn} from oneagentgraph`,
+  });
+  await expect(turn).toBeVisible();
+  // The element straight after the turn, so the decisions read as part of that
+  // turn rather than as the opening of the next one.
+  const beneath = turn.locator("xpath=following-sibling::*[1]");
+  await expect(beneath).toHaveAccessibleName(`Judges on turn ${judged.turn}`);
+  await expect(beneath.getByRole("listitem")).toHaveText(
+    judged.decisions.map(
+      ({ judge, kind, decision, reason }) =>
+        `${judge} (${kind}) ${decision} — ${reason}`,
+    ),
+  );
+
+  // The conversation's other turn was decided on by nobody, and carries nothing.
+  await expect(
+    itemDetail(page).getByRole("article", { name: /^Turn / }),
+  ).toHaveCount(2);
+  await expect(
+    itemDetail(page).getByRole("list", { name: /^Judges on turn / }),
+  ).toHaveCount(1);
+});
+
+/**
  * The two readings of what an agent did, from one node's timeline: the turns the
  * run relayed, and the oneharness conversation behind them.
  *

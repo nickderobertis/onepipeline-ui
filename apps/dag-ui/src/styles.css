@@ -929,6 +929,23 @@ p {
   font-size: 11px;
 }
 
+/* One line per judge beneath the turn it decided on: who, as what, then what it
+   decided and why. Muted like every other note in the panel, so the conversation
+   stays what is read first. */
+.judge-decisions {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 10px;
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  list-style: none;
+}
+
+.judge-decision-who {
+  font-family: var(--font-mono);
+}
+
 /* One row per thing a node is held on, and per version an adoption wrote. A list
    marker would say nothing the row does not: each opens with what it is, and what
    separates them is the space between. */

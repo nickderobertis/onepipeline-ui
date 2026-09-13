@@ -3953,6 +3953,29 @@ pub const UNRELAYED_MS: u64 = 2_600;
 pub const REQUESTED_MODEL: &str = "gpt-5.6-sol";
 pub const OBSERVED_MODEL: &str = "gpt-6-astra";
 
+/// The agent turn [`worker_report`]'s stacked panel recorded its decisions on.
+///
+/// The second of three, so decisions served on the first turn, the last, or every
+/// row are each told apart by the row they land on.
+pub const JUDGED_TURN: usize = 2;
+/// That panel's two judges, as `(label, kind, decision, reason)` in the panel's
+/// list order: one continued — which is why the report holds a third turn — and
+/// one completed.
+pub const PANEL_DECISIONS: [(&str, &str, onejudge::Decision, &str); 2] = [
+    (
+        "reviewer",
+        "oneharness",
+        onejudge::Decision::Continue,
+        "the gate ran, but nothing says what the contract now serves",
+    ),
+    (
+        "lint",
+        "llmlint",
+        onejudge::Decision::Done,
+        "llmlint found nothing to raise over the diff",
+    ),
+];
+
 /// The onejudge report the settled run's worker member stored, built from that
 /// library's own types.
 ///
@@ -3977,8 +4000,9 @@ pub fn worker_report() -> String {
     use oneharness_core::domain::fallback::FallThroughReason;
     use oneharness_core::domain::signals::FailureKind;
     use onejudge::{
-        CandidateAttempt, FellThrough, HarnessAttribution, Message, PartyTelemetry, Report,
-        SessionLink, Telemetry, TelemetryRole, ToolEvent, Transcript, Usage,
+        CandidateAttempt, FellThrough, HarnessAttribution, JudgeDecision, JudgedTurn, Message,
+        PartyTelemetry, Report, SessionLink, Telemetry, TelemetryRole, ToolEvent, Transcript,
+        Usage,
     };
 
     let call = ToolEvent {
@@ -4103,6 +4127,7 @@ pub fn worker_report() -> String {
         fell_through: Vec::new(),
         candidates,
         history_file: None,
+        judge: None,
     };
 
     let report = Report {
@@ -4123,6 +4148,18 @@ pub fn worker_report() -> String {
         assessment: None,
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
+        judge_decisions: vec![JudgedTurn {
+            turn: JUDGED_TURN,
+            decisions: PANEL_DECISIONS
+                .iter()
+                .map(|(judge, kind, decision, reason)| JudgeDecision {
+                    judge: (*judge).to_owned(),
+                    kind: (*kind).to_owned(),
+                    decision: *decision,
+                    reason: (*reason).to_owned(),
+                })
+                .collect(),
+        }],
         // The whole dispatch's total over both sides, which is what no turn
         // spent: 29.71 + 1.51 + 3.07 + 9.75 + 9.75.
         usage: Some(Usage {
@@ -4155,6 +4192,7 @@ pub fn worker_report() -> String {
                 started_at: "2026-08-07T12:00:03.000Z".into(),
                 finished_at: Some("2026-08-07T12:00:03.900Z".into()),
                 history_id: None,
+                judge: None,
             }],
             attribution: vec![
                 HarnessAttribution {
@@ -4240,6 +4278,7 @@ pub fn supervised_report() -> String {
             started_at: supervised_at(turn, 0),
             finished_at: Some(supervised_at(turn, 3)),
             history_id: None,
+            judge: None,
         })
         .collect();
     let attribution = turns()
@@ -4266,6 +4305,7 @@ pub fn supervised_report() -> String {
                 usage: Some(usage(supervised_turn_cost(turn))),
             }],
             history_file: None,
+            judge: None,
         })
         .collect();
 
@@ -4276,6 +4316,7 @@ pub fn supervised_report() -> String {
         assessment: None,
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
+        judge_decisions: Vec::new(),
         // The whole dispatch's total over both sides, which is what no turn spent.
         usage: Some(usage(SUPERVISED_TOTAL_COST)),
         telemetry: Some(Telemetry {
@@ -4402,6 +4443,7 @@ pub fn reviewer_report() -> String {
             usage: Some(judge_usage.clone()),
         }],
         history_file: None,
+        judge: None,
     };
     let observed = |turn: usize| SessionLink {
         session_id: format!("01a01f5{turn}-6168-72d1-b946-2251794e2fce"),
@@ -4410,6 +4452,7 @@ pub fn reviewer_report() -> String {
         started_at: JUDGE_BOUNDS[turn - 1].0.to_owned(),
         finished_at: Some(JUDGE_BOUNDS[turn - 1].1.to_owned()),
         history_id: None,
+        judge: None,
     };
     let report = Report {
         schema_version: onejudge::SCHEMA_VERSION,
@@ -4445,6 +4488,7 @@ pub fn reviewer_report() -> String {
         assessment: Some(JUDGE_ASSESSMENT.to_owned()),
         completion_reason: Some("the change is approved".into()),
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 3_000,
@@ -4482,6 +4526,7 @@ pub fn reviewer_report() -> String {
                         usage: Some(usage),
                     }],
                     history_file: None,
+                    judge: None,
                 },
                 judged(1, 500),
                 judged(2, 400),
@@ -4536,6 +4581,7 @@ pub fn lint_report() -> String {
         assessment: None,
         completion_reason: None,
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 600,
@@ -4569,6 +4615,7 @@ pub fn lint_report() -> String {
                     usage: Some(usage),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),

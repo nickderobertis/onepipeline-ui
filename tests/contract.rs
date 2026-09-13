@@ -587,7 +587,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 15);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 16);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1386,6 +1386,37 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         "a delivered redirection has no reason it did not land: {delivered}"
     );
 
+    // The `judge-decided` payload, as that library writes it: the four words a
+    // transcript row's `judges` entry is read from, and the worker turn it joins by.
+    let decided = serde_json::to_value(oneagentgraph::event::JudgeDecided {
+        turn: 2,
+        judge: "reviewer".into(),
+        kind: "oneharness".into(),
+        decision: onejudge::Decision::Continue.as_str().into(),
+        reason: "the tests are missing".into(),
+    })
+    .expect("the decision serializes");
+    let declared: Vec<&str> = decided
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            graph::TURN,
+            graph::JUDGE,
+            graph::KIND,
+            graph::DECISION,
+            graph::REASON
+        ]
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::JudgeDecided),
+        graph::JUDGE_DECIDED
+    );
+
     // The `turn-completed` payload, as that library writes it: every key this
     // crate reads off one is a field of it. What is *in* the usage is asserted
     // below, against the type that writes it.
@@ -1947,6 +1978,7 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         EventKind::TurnActivity,
         EventKind::TurnMessage,
         EventKind::TurnCompleted,
+        EventKind::JudgeDecided,
         EventKind::TurnInterrupted,
         EventKind::MemberHeartbeat,
         EventKind::FallbackAdvanced,
@@ -1966,6 +1998,7 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         | EventKind::TurnActivity
         | EventKind::TurnMessage
         | EventKind::TurnCompleted
+        | EventKind::JudgeDecided
         | EventKind::TurnInterrupted
         | EventKind::MemberHeartbeat
         | EventKind::FallbackAdvanced

@@ -329,6 +329,20 @@ pub mod graph {
     /// A tool event's position within its turn, which is what an observation is
     /// joined by where no identity was published.
     pub const INDEX: &str = "index";
+
+    /// `{turn, judge, kind, decision, reason}` — one judge of a stacked panel
+    /// decided on one worker turn, published once per judge per supervisor turn.
+    ///
+    /// It names no session, so it is joined to the conversation it belongs to the
+    /// way a settlement is — by `{stream}.{member}` — and to the row by [`TURN`],
+    /// which is the worker's own turn number. Every key is a field of
+    /// `oneagentgraph::event::JudgeDecided`, and `tests/contract.rs` holds each to
+    /// it.
+    pub const JUDGE_DECIDED: &str = "judge-decided";
+    /// The judge's label within its panel, on a [`JUDGE_DECIDED`].
+    pub const JUDGE: &str = "judge";
+    /// What that judge decided, in onejudge's own spelling.
+    pub const DECISION: &str = "decision";
 }
 
 /// The release kinds `onepipeline` writes about a node's own dependencies, as the
@@ -384,7 +398,7 @@ pub mod pipeline {
 /// vocabulary; the `note` op that replaced it compiles to [`NOTE_DELIVERED`].
 /// The engine still folds the older one and so does this crate — a run that
 /// recorded a `context-added` is still a run an operator opens.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.27.2 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.29.0 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
 mod edits {
     /// The compiled mutations one accepted edit became.
     pub const OPERATIONS: &str = "operations";
@@ -2684,16 +2698,77 @@ struct ReportedTurn {
 /// Returned rather than consumed here because it is also the moment the report
 /// was written, which is the only stamp [`judge_conclusion`] can carry.
 fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
-    view.events.iter().find(|event| {
-        event.source == Source::Agentgraph
-            && event.kind.0 == graph::MEMBER_SETTLED
-            && event
-                .labels
-                .extra
-                .get(graph::MEMBER)
-                .and_then(Value::as_str)
-                .is_some_and(|member| format!("{}.{member}", event.stream) == session)
-    })
+    view.events
+        .iter()
+        .find(|event| event.kind.0 == graph::MEMBER_SETTLED && spells_session(event, session))
+}
+
+/// Whether one relayed record belongs to `session` by the rule a session id is
+/// minted by, `{stream}.{member}` — the join for every record that carries no
+/// `session` label of its own.
+fn spells_session(event: &Envelope, session: &str) -> bool {
+    event.source == Source::Agentgraph
+        && event
+            .labels
+            .extra
+            .get(graph::MEMBER)
+            .and_then(Value::as_str)
+            .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+}
+
+/// Each judge's decision on one session's agent turns, keyed by the turn number
+/// they judged.
+///
+/// From the stored report where the run holds one, and from the session's own
+/// [`graph::JUDGE_DECIDED`] records where it does not — the precedence every
+/// other field of a row keeps, for the same reason. A report's entries are
+/// `onejudge`'s own `JudgeDecision`, serialized by that library's derives; a
+/// relayed record is read field by field, and one missing any of the four words
+/// is not a decision this crate can state, so it is dropped rather than served
+/// with a hole. Either way the order is the one recorded, which is the panel's.
+fn judge_decisions(
+    view: &RunView,
+    session: &str,
+    report: Option<&judge::Report>,
+) -> BTreeMap<u64, Vec<Value>> {
+    let mut decided: BTreeMap<u64, Vec<Value>> = BTreeMap::new();
+    if let Some(report) = report {
+        for judged in &report.judge_decisions {
+            let Ok(turn) = u64::try_from(judged.turn) else {
+                continue;
+            };
+            decided.entry(turn).or_default().extend(
+                judged
+                    .decisions
+                    .iter()
+                    .filter_map(|decision| serde_json::to_value(decision).ok()),
+            );
+        }
+        return decided;
+    }
+    let relayed = view
+        .events
+        .iter()
+        .filter(|event| event.kind.0 == graph::JUDGE_DECIDED && spells_session(event, session));
+    for event in relayed {
+        let word = |key: &str| event.payload.get(key).and_then(Value::as_str);
+        let (Some(turn), Some(judge), Some(kind), Some(decision), Some(reason)) = (
+            event.payload.get(graph::TURN).and_then(Value::as_u64),
+            word(graph::JUDGE),
+            word(graph::KIND),
+            word(graph::DECISION),
+            word(graph::REASON),
+        ) else {
+            continue;
+        };
+        decided.entry(turn).or_default().push(json!({
+            "judge": judge,
+            "kind": kind,
+            "decision": decision,
+            "reason": reason,
+        }));
+    }
+    decided
 }
 
 /// The report one settlement stored, refused unless the contract it was written
@@ -2803,12 +2878,13 @@ fn reported_index(turns: &[ReportedTurn], turn: u64) -> Option<usize> {
 /// side — the report's top-level `usage` is the whole dispatch's total over both
 /// of them. The candidates beside the one that ran are identities the chain fell
 /// through, and none of them happened.
-fn ran_candidate(
-    report: &judge::Report,
+fn ran_candidate<'r>(
+    report: &'r judge::Report,
     role: judge::TelemetryRole,
     turn: u32,
-) -> Option<&judge::CandidateAttempt> {
-    attributed(report, role, turn)?
+    judge: Option<&str>,
+) -> Option<&'r judge::CandidateAttempt> {
+    attributed(report, role, turn, judge)?
         .candidates
         .iter()
         .find(|candidate| candidate.ran)
@@ -2845,17 +2921,28 @@ fn with_attribution(
 /// its sessions and its attribution on the *pair* of a side and a turn number,
 /// and the two sides number their turns independently — so a lookup by index
 /// alone reads one side's invocation as the other's.
-fn attributed(
-    report: &judge::Report,
+///
+/// **And the judge is asked for too.** A stacked panel runs every judge on the
+/// same supervisor turn, so its invocations share a side and a number and differ
+/// only by the `judge` label onejudge stamps on each — a lookup by the pair alone
+/// hands every judge the first judge's model, usage and chain. The label is
+/// absent on the agent's records and on a panel of one, and absent matches absent.
+fn attributed<'r>(
+    report: &'r judge::Report,
     role: judge::TelemetryRole,
     turn: u32,
-) -> Option<&judge::HarnessAttribution> {
+    judge: Option<&str>,
+) -> Option<&'r judge::HarnessAttribution> {
     report
         .telemetry
         .as_ref()?
         .attribution
         .iter()
-        .find(|attribution| attribution.role == role && attribution.turn_index == turn)
+        .find(|attribution| {
+            attribution.role == role
+                && attribution.turn_index == turn
+                && attribution.judge.as_deref() == judge
+        })
 }
 
 /// The wall-clock bounds one **agent** turn's invocation was observed between.
@@ -3433,6 +3520,9 @@ fn conversation_document(
         Some(_) => BTreeMap::new(),
         None => live_transcript(&transcript.records),
     };
+    // What each judge of a stacked panel decided, over the whole store rather than
+    // the reader's listing, for the reason every other figure on a row is.
+    let decided = judge_decisions(view, session, reported);
     // Which turn records the reader's filter admitted, named the way one record is
     // named in a merged store. It decides which turns are **listed** and nothing
     // else: every turn below is grouped and read from the session's whole record
@@ -3482,12 +3572,12 @@ fn conversation_document(
                 .and_then(|turn| u32::try_from(turn).ok())
                 .zip(reported)
                 .and_then(|(turn, report)| {
-                    ran_candidate(report, judge::TelemetryRole::Agent, turn)
+                    ran_candidate(report, judge::TelemetryRole::Agent, turn, None)
                 });
             let bounds = numbered
                 .zip(reported)
                 .and_then(|(turn, report)| agent_session(report, turn));
-            json!({
+            let mut served = json!({
                 "assistant": match recorded {
                     // Explicitly absent rather than empty: the report holds this
                     // turn and it recorded no reply.
@@ -3558,7 +3648,7 @@ fn conversation_document(
                         .and_then(|turn| u32::try_from(turn).ok())
                         .zip(reported)
                         .and_then(|(turn, report)| {
-                            attributed(report, judge::TelemetryRole::Agent, turn)
+                            attributed(report, judge::TelemetryRole::Agent, turn, None)
                         }),
                 ),
                 "usage": match ran {
@@ -3589,7 +3679,19 @@ fn conversation_document(
                         .unwrap_or_default()
                         .to_owned(),
                 },
-            })
+            });
+            // The decisions on the turn they judged, and no key at all on a turn
+            // nothing decided on — a dispatch judged by a bare provider records
+            // none, and is served exactly as it was before panels existed.
+            if let (Some(judges), Value::Object(fields)) = (
+                numbered
+                    .and_then(|turn| decided.get(&turn))
+                    .filter(|judges| !judges.is_empty()),
+                &mut served,
+            ) {
+                fields.insert("judges".into(), Value::Array(judges.clone()));
+            }
+            served
         })
         .collect();
     let mut attribution = Map::new();
@@ -3718,7 +3820,12 @@ fn judge_conversation(
     // what this field is for.
     let mut harnesses: Vec<Value> = Vec::new();
     for link in &links {
-        let Some(ran) = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index) else {
+        let Some(ran) = ran_candidate(
+            report,
+            judge::TelemetryRole::Judge,
+            link.turn_index,
+            link.judge.as_deref(),
+        ) else {
             continue;
         };
         let named = json!(ran.harness);
@@ -3781,8 +3888,18 @@ fn judge_session(session: &str) -> String {
 /// One judge turn: bounded and measured, and not transcribed — see
 /// `src/AGENTS.md` for why no text may be keyed to one.
 fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::SessionLink) -> Value {
-    let entry = attributed(report, judge::TelemetryRole::Judge, link.turn_index);
-    let ran = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index);
+    let entry = attributed(
+        report,
+        judge::TelemetryRole::Judge,
+        link.turn_index,
+        link.judge.as_deref(),
+    );
+    let ran = ran_candidate(
+        report,
+        judge::TelemetryRole::Judge,
+        link.turn_index,
+        link.judge.as_deref(),
+    );
     json!({
         "assistant": Value::Null,
         "durationMs": ran.and_then(|candidate| candidate.duration_ms),

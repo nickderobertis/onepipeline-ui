@@ -19,6 +19,55 @@ import { join } from "node:path";
 export const LIVE_RUN = "dag-ui-live";
 /** A settled run, so the navigation has a second launching session to group. */
 export const HISTORY_RUN = "dag-ui-history";
+/**
+ * The history run's settled worker session, spelled `{stream}.{member}` because
+ * that is how a session is joined to the report its settlement stored.
+ */
+const JUDGED_SESSION = `a-recording-host-${HISTORY_RUN}.worker`;
+/** The artifact id that session's settlement recorded for its report. */
+const JUDGED_REPORT_ARTIFACT = `report-a-recording-host-${HISTORY_RUN}`;
+/**
+ * What a stacked panel of two judges decided on that session's second turn, in the
+ * panel's list order and onejudge's own words.
+ */
+const JUDGED_DECISIONS = [
+  {
+    judge: "reviewer",
+    kind: "oneharness",
+    decision: "continue",
+    reason: "the archive exists, but nothing says where it went",
+  },
+  {
+    judge: "lint",
+    kind: "llmlint",
+    decision: "done",
+    reason: "llmlint found nothing to raise over the diff",
+  },
+];
+/**
+ * The report that session's member stored: two turns, the second of which no
+ * record relayed, and the panel's decisions on it — a schema-12 onejudge report,
+ * which is what the read API links.
+ */
+const JUDGED_REPORT = `${JSON.stringify(
+  {
+    schema_version: 12,
+    transcript: {
+      messages: [
+        { role: "user", content: "Archive the release." },
+        { role: "assistant", content: "Archived the release" },
+        { role: "user", content: "Say where the archive went." },
+        { role: "assistant", content: "The archive is under releases/." },
+      ],
+    },
+    completion_reason: "the archive exists and says where it is",
+    judge_decisions: [{ turn: 2, decisions: JUDGED_DECISIONS }],
+    control: null,
+    supervisor_control: null,
+  },
+  null,
+  2,
+)}\n`;
 /** A settled run holding the outcomes only a recorded result carries. */
 export const OUTCOMES_RUN = "dag-ui-outcomes";
 /** A run whose result was recorded with no authoritative journal behind it. */
@@ -1535,6 +1584,41 @@ function writeHistoryRun(root) {
     "Archive the release.",
     "Archived the release",
   );
+  // The worker the panel judged: one turn relayed, and a settlement whose report
+  // holds both turns and what each judge decided on the second.
+  journal.advance(1);
+  relayTurn(
+    journal,
+    {
+      ...run,
+      node: "archive",
+      member: "worker",
+      persona: "worker",
+      session: JUDGED_SESSION,
+    },
+    JUDGED_SESSION,
+    "Archive the release.",
+    "Archived the release",
+  );
+  const settled = journal.advance(1).lines.length;
+  journal.emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "archive", member: "worker", persona: "worker" },
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: "the archive exists and says where it is",
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [
+      {
+        id: JUDGED_REPORT_ARTIFACT,
+        kind: "report",
+        bytes: JUDGED_REPORT.length,
+      },
+    ],
+  );
   journal
     .advance(4)
     .emit(
@@ -1544,6 +1628,7 @@ function writeHistoryRun(root) {
       { status: "done", outcome: "merged" },
     );
   journal.write();
+  retainReport(dir, journal.stream, settled, JUDGED_REPORT);
 }
 
 /**
@@ -2114,6 +2199,14 @@ export function facts() {
       unaskable_harness_session: UNASKABLE_HARNESS_SESSION,
     },
     harness_session_text: HARNESS_SESSION_TEXT,
+    judged: {
+      node: "archive",
+      session: JUDGED_SESSION,
+      // The transcript numbers its rows from zero, so the report's second turn is
+      // served under `.1`.
+      turn: `${JUDGED_SESSION}.1`,
+      decisions: JUDGED_DECISIONS,
+    },
   };
 }
 

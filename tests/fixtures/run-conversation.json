@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 15,
+  "telemetry_schema_version": 16,
   "observed_at": "2026-08-07T12:00:00Z",
   "conversation": {
     "canContinue": false,
@@ -157,7 +157,21 @@
           "cacheWriteTokens": 356,
           "costUsd": 1.51
         },
-        "user": "Run the repository's gate once, end to end."
+        "user": "Run the repository's gate once, end to end.",
+        "judges": [
+          {
+            "judge": "reviewer",
+            "kind": "oneharness",
+            "decision": "continue",
+            "reason": "the gate ran, but nothing says what the contract now serves"
+          },
+          {
+            "judge": "lint",
+            "kind": "llmlint",
+            "decision": "done",
+            "reason": "llmlint found nothing to raise over the diff"
+          }
+        ]
       },
       {
         "assistant": "It serves the transcript the dispatch really had.",

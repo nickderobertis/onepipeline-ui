@@ -194,6 +194,30 @@ function Body({
   return <Recorded reference={reference} row={row} />;
 }
 
+/**
+ * What each judge of a stacked panel decided on one turn: one line per judge,
+ * beneath the turn it decided on, in the panel's own order.
+ *
+ * Nothing at all for a turn no judge decided on, which is every turn of a dispatch
+ * a bare provider judged. Named for the turn it belongs to, so a reader moving by
+ * landmark hears which turn the decisions are about.
+ */
+function JudgeDecisions({ turn }: { readonly turn: Turn }) {
+  if (turn.judges === undefined || turn.judges.length === 0) return null;
+  return (
+    <ul aria-label={`Judges on turn ${turn.id}`} className="judge-decisions">
+      {turn.judges.map((decision) => (
+        <li key={decision.judge}>
+          <span className="judge-decision-who">
+            {decision.judge} ({decision.kind})
+          </span>{" "}
+          {decision.decision} — {decision.reason}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** A dispatched session: the turn that was opened, or the whole conversation. */
 function Session({
   row,
@@ -278,6 +302,7 @@ function Session({
                   ref={(element) => sync.register(turn.id, element)}
                 >
                   <TurnCard author={{ label: author }} turn={turn} />
+                  <JudgeDecisions turn={turn} />
                 </div>
               ))}
             </div>

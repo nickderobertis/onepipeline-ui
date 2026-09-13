@@ -32,7 +32,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(15), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(16), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -6172,6 +6172,7 @@ fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> Str
         assessment: None,
         completion_reason: None,
         settled_reason: Some("the harness deferred the tool call".into()),
+        judge_decisions: Vec::new(),
         usage: None,
         telemetry: Some(Telemetry {
             wall_ms: 9_000,
@@ -6208,6 +6209,7 @@ fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> Str
                     }),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),
@@ -6599,6 +6601,7 @@ fn unclosed_judge_report() -> String {
         fell_through: Vec::new(),
         candidates: vec![candidate(ms)],
         history_file: None,
+        judge: None,
     };
     let mut assessment = String::new();
     while assessment.len() <= VERBOSE_ASSESSMENT_BYTES {
@@ -6633,6 +6636,7 @@ fn unclosed_judge_report() -> String {
         assessment: Some(assessment),
         completion_reason: None,
         settled_reason: Some("a streaming sink asked to stop".into()),
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 12_000,
@@ -6650,6 +6654,7 @@ fn unclosed_judge_report() -> String {
                     started_at: "2026-08-07T12:01:00.000Z".into(),
                     finished_at: Some("2026-08-07T12:01:02.000Z".into()),
                     history_id: None,
+                    judge: None,
                 },
                 // The end nobody observed, which leaves the lane open.
                 SessionLink {
@@ -6659,6 +6664,7 @@ fn unclosed_judge_report() -> String {
                     started_at: "2026-08-07T12:01:05.000Z".into(),
                     finished_at: None,
                     history_id: None,
+                    judge: None,
                 },
             ],
             // One attribution for two links: the second invocation reported a
@@ -7276,6 +7282,7 @@ fn unanswered_report(prompt: &str) -> String {
         assessment: None,
         completion_reason: None,
         settled_reason: Some("the supervisor named no next instruction".into()),
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 9_000,
@@ -7306,6 +7313,7 @@ fn unanswered_report(prompt: &str) -> String {
                     usage: Some(usage),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),
@@ -7443,6 +7451,419 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
     assert_eq!(tools[1]["index"], json!(1));
 }
 
+/// What each judge of a stacked panel decided is served on the turn it judged,
+/// and on no other.
+///
+/// The report is read back through the artifact route first, so this journey
+/// cannot go on passing after the stored document has stopped being a schema-12
+/// report carrying two judges' decisions. The transcript is then read off the
+/// conversation route and off the detail beside it, which are one fold.
+#[test]
+fn each_judge_of_a_stacked_panel_is_served_on_the_turn_it_judged() {
+    let serving = two_runs();
+
+    let stored = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            fixture_run::WORKER_REPORT_ARTIFACT
+        ),
+    )
+    .json();
+    assert_eq!(stored["truncated"], json!(false), "{stored}");
+    let report: Value = serde_json::from_str(stored["content"].as_str().expect("the bytes"))
+        .expect("the stored report parses");
+    assert_eq!(report["schema_version"], json!(12), "{report}");
+    let judged = report["judge_decisions"]
+        .as_array()
+        .expect("the report's judge decisions");
+    assert_eq!(judged.len(), 1, "{report}");
+    assert_eq!(judged[0]["decisions"].as_array().map(Vec::len), Some(2));
+
+    let expected: Vec<Value> = fixture_run::PANEL_DECISIONS
+        .iter()
+        .map(|(judge, kind, decision, reason)| {
+            json!({
+                "judge": judge,
+                "kind": kind,
+                "decision": decision.as_str(),
+                "reason": reason,
+            })
+        })
+        .collect();
+    let conversation = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    )
+    .json();
+    let detail = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?include_conversations=true",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    let listed = detail["conversations"]
+        .as_array()
+        .expect("the detail's transcripts")
+        .iter()
+        .find(|listed| listed["conversation"]["id"] == json!(fixture_run::CONVERSATION_ID))
+        .expect("the worker's transcript in the detail")
+        .clone();
+
+    for served in [&conversation, &listed] {
+        let turns = served["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript");
+        assert_eq!(turns.len(), 3, "{served}");
+        for (index, turn) in turns.iter().enumerate() {
+            if index + 1 == fixture_run::JUDGED_TURN {
+                assert_eq!(turn["user"], json!(fixture_run::SECOND_PROMPT), "{turn}");
+                assert_eq!(turn["judges"], json!(expected), "{turn}");
+            } else {
+                assert!(
+                    turn.get("judges").is_none(),
+                    "turn {} carries decisions made on another turn: {turn}",
+                    index + 1
+                );
+            }
+        }
+    }
+}
+
+/// A journal carrying a `judge-decided` is read by every route that reads a
+/// member's records, and each of them serves the record rather than refusing it.
+///
+/// The session has no settlement, so its row reads the decision off the journal
+/// rather than off a report; and the record is the run's last, so the listing,
+/// the detail and the stream's opening snapshot each name it as what the run
+/// last did.
+#[test]
+fn a_journal_carrying_a_judges_decision_is_served_by_every_route() {
+    /// The member whose session has no settlement on the relaying stream, so
+    /// nothing but the journal can say what its judges decided.
+    const MEMBER: &str = "engineer";
+    const SESSION: &str = "a-recording-host-4243.engineer";
+    const REASON: &str = "the dashboard renders, but nothing reads it at phone width";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let labels = json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::SHIP_NODE_ID,
+            "member": MEMBER,
+            "persona": MEMBER,
+        });
+        let mut opened = labels.clone();
+        opened["session"] = json!(SESSION);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            opened,
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "instruction": "Build the dashboard view.",
+                "started_at": "2026-08-07T12:01:00.000Z",
+            }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "judge-decided",
+            labels,
+            json!({
+                "turn": 1,
+                "judge": "reviewer",
+                "kind": "oneharness",
+                "decision": "continue",
+                "reason": REASON,
+            }),
+        );
+    });
+    let decided = json!([{
+        "judge": "reviewer",
+        "kind": "oneharness",
+        "decision": "continue",
+        "reason": REASON,
+    }]);
+
+    for (template, path) in every_route_over(fixture_run::RUN_ID, SESSION, "artifact-long-log") {
+        if template == onepipeline_ui::contract::routes::EVENTS {
+            let mut stream = http::stream(serving.address, &path, None);
+            assert_eq!(stream.status, 200, "{path}");
+            let snapshot = stream.frames(1).remove(0).json();
+            let row = snapshot["runs"]
+                .as_array()
+                .expect("the snapshot's rows")
+                .iter()
+                .find(|row| row["run_id"] == json!(fixture_run::RUN_ID))
+                .cloned()
+                .unwrap_or_else(|| panic!("{path} names the run: {snapshot}"));
+            assert_eq!(row["last_event"], json!("judge-decided"), "{path}: {row}");
+            continue;
+        }
+        let response = http::get(serving.address, &path);
+        assert_eq!(response.status, 200, "{path}: {}", response.body);
+        if template == onepipeline_ui::contract::routes::HEALTHZ {
+            continue;
+        }
+        let body = response.json();
+        assert_enveloped(&body);
+        match template {
+            onepipeline_ui::contract::routes::RUNS => {
+                let row = body["runs"]
+                    .as_array()
+                    .expect("the rows")
+                    .iter()
+                    .find(|row| row["run_id"] == json!(fixture_run::RUN_ID))
+                    .cloned()
+                    .unwrap_or_else(|| panic!("{path} lists the run: {body}"));
+                assert_eq!(row["last_event"], json!("judge-decided"), "{path}: {row}");
+            }
+            onepipeline_ui::contract::routes::RUN => {
+                assert_eq!(body["run"]["last_event"], json!("judge-decided"), "{path}");
+                let listed = body["conversations"]
+                    .as_array()
+                    .expect("the detail's transcripts")
+                    .iter()
+                    .find(|listed| listed["conversation"]["id"] == json!(SESSION))
+                    .cloned()
+                    .unwrap_or_else(|| panic!("{path} lists the session: {body}"));
+                assert_eq!(
+                    listed["conversation"]["turns"][0]["judges"], decided,
+                    "{path}"
+                );
+            }
+            onepipeline_ui::contract::routes::RUN_TIMELINE => {
+                let listed = body["spans"]
+                    .as_array()
+                    .expect("the spans")
+                    .iter()
+                    .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+                    .any(|event| event["kind"] == json!("judge-decided"));
+                assert!(listed, "{path} lists the decision: {body}");
+            }
+            onepipeline_ui::contract::routes::RUN_CONVERSATION => {
+                let turns = body["conversation"]["turns"]
+                    .as_array()
+                    .expect("the transcript");
+                assert_eq!(turns.len(), 1, "a decision is not a turn: {body}");
+                assert_eq!(turns[0]["judges"], decided, "{path}");
+            }
+            // An artifact is a producer's bytes and never a listing of events:
+            // what this route owes a run carrying the record is not to refuse it.
+            _ => {}
+        }
+    }
+}
+
+/// Each judge of a stacked panel, as `(label, harness, model, cost)`, in the
+/// order its telemetry is listed — the reviewer first, so a reading that joined a
+/// judge row on its side and turn alone would find the reviewer's for both.
+const STACKED_JUDGES: [(&str, &str, &str, f64); 2] = [
+    ("reviewer", "codex", "gpt-5-codex", 0.5),
+    ("lint", "claude-code", "claude-opus-5", 1.25),
+];
+
+/// Each judge of a stacked panel is served its own invocation, not the first
+/// judge's.
+///
+/// A panel runs every judge on one supervisor turn, so their session rows and
+/// attributions share a side and a turn number and differ only by onejudge's
+/// `judge` label. The same report keeps a supervisor turn whose decision list is
+/// empty, which the worker's transcript must serve as no `judges` at all.
+#[test]
+fn each_judge_of_a_stacked_panel_is_served_its_own_invocation() {
+    const STREAM: &str = "node-scope-1786925519888-3163888";
+    const SESSION: &str = "node-scope-1786925519888-3163888.worker";
+    const ARTIFACT: &str = "report-node-scope-1786925519888-3163888";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "worker",
+                "session": SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:01:09.000Z",
+                artifact: ARTIFACT,
+                report: &stacked_panel_report(),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+    let conversation = |id: &str| {
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/conversations/{id}", fixture_run::RUN_ID),
+        )
+        .json()
+    };
+
+    let judged = conversation(&format!("{SESSION}.judge"));
+    let turns = judged["conversation"]["turns"]
+        .as_array()
+        .expect("the judge's turns");
+    // One bounded turn per judge's invocation, and the conclusion after them.
+    assert_eq!(turns.len(), STACKED_JUDGES.len() + 1, "{judged}");
+    for (turn, (label, harness, model, cost)) in turns.iter().zip(STACKED_JUDGES) {
+        assert_eq!(turn["model"], json!(model), "{label}: {turn}");
+        assert_eq!(
+            turn["harness"],
+            json!(format!("{harness}:default")),
+            "{label}: {turn}"
+        );
+        assert_eq!(turn["usage"]["costUsd"], json!(cost), "{label}: {turn}");
+        assert_eq!(
+            turn["unknown"]["attribution"]["judge"],
+            json!(label),
+            "{label}: {turn}"
+        );
+    }
+    assert_eq!(
+        judged["conversation"]["harnesses"],
+        json!(["codex", "claude-code"]),
+        "{judged}"
+    );
+
+    // The stored report does keep a decision list for the worker's turn, and it is
+    // empty — which the transcript serves as no `judges` key rather than `[]`.
+    let stored = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/artifacts/{ARTIFACT}", fixture_run::RUN_ID),
+    )
+    .json();
+    let report: Value = serde_json::from_str(stored["content"].as_str().expect("the bytes"))
+        .expect("the stored report parses");
+    assert_eq!(
+        report["judge_decisions"],
+        json!([{ "turn": 1, "decisions": [] }])
+    );
+    let worker = conversation(SESSION);
+    let rows = worker["conversation"]["turns"]
+        .as_array()
+        .expect("the worker's turns");
+    assert_eq!(rows.len(), 1, "{worker}");
+    assert!(rows[0].get("judges").is_none(), "{worker}");
+}
+
+/// A report from a panel of [`STACKED_JUDGES`], both judging the worker's one
+/// turn, with a decision list for that turn that recorded nothing.
+fn stacked_panel_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, JudgedTurn, Message, PartyTelemetry, Report,
+        SessionLink, Telemetry, TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = |cost| Usage {
+        input_tokens: Some(64),
+        output_tokens: Some(12),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        cost_usd: Some(cost),
+    };
+    let sessions = STACKED_JUDGES
+        .iter()
+        .enumerate()
+        .map(|(index, (label, ..))| SessionLink {
+            session_id: format!("01a03f4c-685b-75e2-8281-e8937fd20d4{index}"),
+            role: TelemetryRole::Judge,
+            turn_index: 1,
+            started_at: format!("2026-08-07T12:01:0{index}.000Z"),
+            finished_at: Some(format!("2026-08-07T12:01:0{}.500Z", index + 2)),
+            history_id: None,
+            judge: Some((*label).to_owned()),
+        })
+        .collect();
+    let attribution = STACKED_JUDGES
+        .iter()
+        .map(|(label, harness, model, cost)| HarnessAttribution {
+            role: TelemetryRole::Judge,
+            turn_index: 1,
+            ran: Some(format!("{harness}:default")),
+            fell_through: Vec::new(),
+            candidates: vec![CandidateAttempt {
+                harness: (*harness).to_owned(),
+                harness_id: format!("{harness}:default"),
+                variant: None,
+                model: Some((*model).to_owned()),
+                status: "ok".into(),
+                available: true,
+                ran: true,
+                failure_kind: None,
+                failure_kind_source: None,
+                exit_code: Some(0),
+                duration_ms: Some(1_500),
+                error: None,
+                session_id: None,
+                history_id: None,
+                usage: Some(usage(*cost)),
+            }],
+            history_file: None,
+            judge: Some((*label).to_owned()),
+        })
+        .collect();
+
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Archive the release."),
+                Message::assistant("Archived the release."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: Some("every judge completed".into()),
+        settled_reason: None,
+        judge_decisions: vec![JudgedTurn {
+            turn: 1,
+            decisions: Vec::new(),
+        }],
+        usage: Some(usage(1.75)),
+        telemetry: Some(Telemetry {
+            wall_ms: 6_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry::default(),
+            orchestration_ms: 40,
+            sessions,
+            attribution,
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
 /// When [`transcript_of`]'s member settled, which is the only instant any run
 /// holds for a turn its report kept and no bound was observed for.
 const REPORT_SETTLED_AT: &str = "2026-08-07T12:01:05.000Z";
@@ -7517,6 +7938,7 @@ fn report_of(messages: &[(&str, &str)]) -> String {
         assessment: None,
         completion_reason: None,
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: None,
         telemetry: Some(Telemetry {
             wall_ms: 1_000,
@@ -7849,7 +8271,7 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
     .json();
     // No field is added by this reading and no vocabulary moves for it, so the
     // envelope carrying it declares the version it already declared.
-    assert_eq!(served["telemetry_schema_version"], json!(15));
+    assert_eq!(served["telemetry_schema_version"], json!(16));
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
 
     let finished = &turns[0];
@@ -8529,6 +8951,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
         assessment: None,
         completion_reason: None,
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: None,
         telemetry: Some(Telemetry {
             wall_ms: 9_000,
@@ -8543,6 +8966,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                     started_at: OPENED.into(),
                     finished_at: Some(CLOSED.into()),
                     history_id: None,
+                    judge: None,
                 },
                 // Observed opening and never observed closing, which the contract
                 // spells as a `null` finish rather than as a malformed bound.
@@ -8553,6 +8977,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                     started_at: REOPENED.into(),
                     finished_at: None,
                     history_id: None,
+                    judge: None,
                 },
             ],
             attribution: vec![HarnessAttribution {
@@ -8584,6 +9009,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                     }),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),

@@ -97,7 +97,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 15,
+    telemetry_schema_version: 16,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -131,7 +131,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 15,
+    telemetry_schema_version: 16,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -165,7 +165,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   // omitted it is indistinguishable from a host with nothing running.
   const refused = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 15,
+    telemetry_schema_version: 16,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [row],
     unreadable: [{ path: "/runs/run-9", reason: "no launch record" }],
@@ -174,7 +174,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   // And a run a `?select=` named that is no longer there is named, not omitted.
   const selected = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 15,
+    telemetry_schema_version: 16,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [row],
     missing: ["run-swept"],
@@ -186,7 +186,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 15,
+      telemetry_schema_version: 16,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [row],
     }).unreadable,
@@ -195,7 +195,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   expect(
     runListSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 15,
+      telemetry_schema_version: 16,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [row],
       unreadable: [{ path: "/runs/run-9", reason: "" }],
@@ -216,7 +216,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 15,
+    telemetry_schema_version: 16,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -351,7 +351,7 @@ describe("boundary failures", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 15,
+        telemetry_schema_version: 16,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -368,7 +368,7 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 15,
+      telemetry_schema_version: 16,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       graph: { node_states: { build: "paused" } },

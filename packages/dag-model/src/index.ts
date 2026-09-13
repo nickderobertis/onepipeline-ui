@@ -135,8 +135,15 @@ export const API_V2_FILTER_PROFILES = {
  * served is served with the same meaning, so nothing rendered here changes; the
  * literal moves because a client that has never seen `unreadable` is one reading
  * a run list that may be shorter than the host it is about.
+ *
+ * `16` is what each judge of a stacked panel decided. A conversation turn a panel
+ * judged gains `judges`, one `{judge, kind, decision, reason}` per judge in the
+ * panel's order, and absent rather than empty on a turn nothing decided on. Every
+ * field `15` served is served with the same meaning; the literal moves because a
+ * client that has never seen `judges` shows a panel's dispatch as though no judge
+ * had said anything about any of its turns.
  */
-export const TELEMETRY_SCHEMA_VERSION = 15;
+export const TELEMETRY_SCHEMA_VERSION = 16;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -845,6 +852,18 @@ export const conversationToolEventSchema = openObject({
   output: z.string().nullable().optional(),
 });
 /**
+ * What one judge of a stacked panel decided on the turn it is served on: its label
+ * within the panel, its provider kind, the decision in onejudge's own spelling, and
+ * its own reason. Words rather than enums, because every one of them is a
+ * producer's vocabulary released on its own schedule.
+ */
+export const conversationJudgeDecisionSchema = openObject({
+  judge: z.string(),
+  kind: z.string(),
+  decision: z.string(),
+  reason: z.string(),
+});
+/**
  * `timestamp` is when the record was *written*, which is when the turn finished.
  * The five optional timing fields are the turn's own measurements, present exactly
  * when the history record carried them: a harness that measures no wall interval
@@ -857,6 +876,8 @@ export const conversationTurnSchema = openObject({
   finishedAt: timestamp.nullable().optional(),
   harness: z.string(),
   id: z.string(),
+  /** Each judge's decision on this turn; absent on a turn no judge decided on. */
+  judges: z.array(conversationJudgeDecisionSchema).optional(),
   model: z.string().nullable(),
   modelMs: usageValue.optional(),
   reasoning: z.string().nullable(),
