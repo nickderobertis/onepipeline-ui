@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.7.2...v0.7.3) - 2026-09-13
+
+### Added
+
+- *(deps)* adopt the engine and onejudge releases that stack judges, and serve each judge's decision ([#56](https://github.com/nickderobertis/onepipeline-ui/pull/56))
+
+### Fixed
+
+- *(deps)* link the engine and sibling releases that run a controlled codex turn under its own model ([#54](https://github.com/nickderobertis/onepipeline-ui/pull/54))
+
 ## [0.7.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.7.1...v0.7.2) - 2026-09-02
 
 ### Added
