@@ -7451,6 +7451,221 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
     assert_eq!(tools[1]["index"], json!(1));
 }
 
+/// What each judge of a stacked panel decided is served on the turn it judged,
+/// and on no other.
+///
+/// The report is read back through the artifact route first, so this journey
+/// cannot go on passing after the stored document has stopped being a schema-12
+/// report carrying two judges' decisions. The transcript is then read off the
+/// conversation route and off the detail beside it, which are one fold.
+#[test]
+fn each_judge_of_a_stacked_panel_is_served_on_the_turn_it_judged() {
+    let serving = two_runs();
+
+    let stored = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            fixture_run::WORKER_REPORT_ARTIFACT
+        ),
+    )
+    .json();
+    assert_eq!(stored["truncated"], json!(false), "{stored}");
+    let report: Value = serde_json::from_str(stored["content"].as_str().expect("the bytes"))
+        .expect("the stored report parses");
+    assert_eq!(report["schema_version"], json!(12), "{report}");
+    let judged = report["judge_decisions"]
+        .as_array()
+        .expect("the report's judge decisions");
+    assert_eq!(judged.len(), 1, "{report}");
+    assert_eq!(judged[0]["decisions"].as_array().map(Vec::len), Some(2));
+
+    let expected: Vec<Value> = fixture_run::PANEL_DECISIONS
+        .iter()
+        .map(|(judge, kind, decision, reason)| {
+            json!({
+                "judge": judge,
+                "kind": kind,
+                "decision": decision.as_str(),
+                "reason": reason,
+            })
+        })
+        .collect();
+    let conversation = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::CONVERSATION_ID
+        ),
+    )
+    .json();
+    let detail = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?include_conversations=true",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json();
+    let listed = detail["conversations"]
+        .as_array()
+        .expect("the detail's transcripts")
+        .iter()
+        .find(|listed| listed["conversation"]["id"] == json!(fixture_run::CONVERSATION_ID))
+        .expect("the worker's transcript in the detail")
+        .clone();
+
+    for served in [&conversation, &listed] {
+        let turns = served["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript");
+        assert_eq!(turns.len(), 3, "{served}");
+        for (index, turn) in turns.iter().enumerate() {
+            if index + 1 == fixture_run::JUDGED_TURN {
+                assert_eq!(turn["user"], json!(fixture_run::SECOND_PROMPT), "{turn}");
+                assert_eq!(turn["judges"], json!(expected), "{turn}");
+            } else {
+                assert!(
+                    turn.get("judges").is_none(),
+                    "turn {} carries decisions made on another turn: {turn}",
+                    index + 1
+                );
+            }
+        }
+    }
+}
+
+/// A journal carrying a `judge-decided` is read by every route that reads a
+/// member's records, and each of them serves the record rather than refusing it.
+///
+/// The session has no settlement, so its row reads the decision off the journal
+/// rather than off a report; and the record is the run's last, so the listing,
+/// the detail and the stream's opening snapshot each name it as what the run
+/// last did.
+#[test]
+fn a_journal_carrying_a_judges_decision_is_served_by_every_route() {
+    /// The member whose session has no settlement on the relaying stream, so
+    /// nothing but the journal can say what its judges decided.
+    const MEMBER: &str = "engineer";
+    const SESSION: &str = "a-recording-host-4243.engineer";
+    const REASON: &str = "the dashboard renders, but nothing reads it at phone width";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        let labels = json!({
+            "run_id": fixture_run::RUN_ID,
+            "node": fixture_run::SHIP_NODE_ID,
+            "member": MEMBER,
+            "persona": MEMBER,
+        });
+        let mut opened = labels.clone();
+        opened["session"] = json!(SESSION);
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            opened,
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "instruction": "Build the dashboard view.",
+                "started_at": "2026-08-07T12:01:00.000Z",
+            }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "judge-decided",
+            labels,
+            json!({
+                "turn": 1,
+                "judge": "reviewer",
+                "kind": "oneharness",
+                "decision": "continue",
+                "reason": REASON,
+            }),
+        );
+    });
+    let decided = json!([{
+        "judge": "reviewer",
+        "kind": "oneharness",
+        "decision": "continue",
+        "reason": REASON,
+    }]);
+
+    for (template, path) in every_route_over(fixture_run::RUN_ID, SESSION, "artifact-long-log") {
+        if template == onepipeline_ui::contract::routes::EVENTS {
+            let mut stream = http::stream(serving.address, &path, None);
+            assert_eq!(stream.status, 200, "{path}");
+            let snapshot = stream.frames(1).remove(0).json();
+            let row = snapshot["runs"]
+                .as_array()
+                .expect("the snapshot's rows")
+                .iter()
+                .find(|row| row["run_id"] == json!(fixture_run::RUN_ID))
+                .cloned()
+                .unwrap_or_else(|| panic!("{path} names the run: {snapshot}"));
+            assert_eq!(row["last_event"], json!("judge-decided"), "{path}: {row}");
+            continue;
+        }
+        let response = http::get(serving.address, &path);
+        assert_eq!(response.status, 200, "{path}: {}", response.body);
+        if template == onepipeline_ui::contract::routes::HEALTHZ {
+            continue;
+        }
+        let body = response.json();
+        assert_enveloped(&body);
+        match template {
+            onepipeline_ui::contract::routes::RUNS => {
+                let row = body["runs"]
+                    .as_array()
+                    .expect("the rows")
+                    .iter()
+                    .find(|row| row["run_id"] == json!(fixture_run::RUN_ID))
+                    .cloned()
+                    .unwrap_or_else(|| panic!("{path} lists the run: {body}"));
+                assert_eq!(row["last_event"], json!("judge-decided"), "{path}: {row}");
+            }
+            onepipeline_ui::contract::routes::RUN => {
+                assert_eq!(body["run"]["last_event"], json!("judge-decided"), "{path}");
+                let listed = body["conversations"]
+                    .as_array()
+                    .expect("the detail's transcripts")
+                    .iter()
+                    .find(|listed| listed["conversation"]["id"] == json!(SESSION))
+                    .cloned()
+                    .unwrap_or_else(|| panic!("{path} lists the session: {body}"));
+                assert_eq!(
+                    listed["conversation"]["turns"][0]["judges"],
+                    decided,
+                    "{path}"
+                );
+            }
+            onepipeline_ui::contract::routes::RUN_TIMELINE => {
+                let listed = body["spans"]
+                    .as_array()
+                    .expect("the spans")
+                    .iter()
+                    .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+                    .any(|event| event["kind"] == json!("judge-decided"));
+                assert!(listed, "{path} lists the decision: {body}");
+            }
+            onepipeline_ui::contract::routes::RUN_CONVERSATION => {
+                let turns = body["conversation"]["turns"]
+                    .as_array()
+                    .expect("the transcript");
+                assert_eq!(turns.len(), 1, "a decision is not a turn: {body}");
+                assert_eq!(turns[0]["judges"], decided, "{path}");
+            }
+            // An artifact is a producer's bytes and never a listing of events:
+            // what this route owes a run carrying the record is not to refuse it.
+            _ => {}
+        }
+    }
+}
+
 /// When [`transcript_of`]'s member settled, which is the only instant any run
 /// holds for a turn its report kept and no bound was observed for.
 const REPORT_SETTLED_AT: &str = "2026-08-07T12:01:05.000Z";

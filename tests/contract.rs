@@ -1386,6 +1386,37 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         "a delivered redirection has no reason it did not land: {delivered}"
     );
 
+    // The `judge-decided` payload, as that library writes it: the four words a
+    // transcript row's `judges` entry is read from, and the worker turn it joins by.
+    let decided = serde_json::to_value(oneagentgraph::event::JudgeDecided {
+        turn: 2,
+        judge: "reviewer".into(),
+        kind: "oneharness".into(),
+        decision: onejudge::Decision::Continue.as_str().into(),
+        reason: "the tests are missing".into(),
+    })
+    .expect("the decision serializes");
+    let declared: Vec<&str> = decided
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            graph::TURN,
+            graph::JUDGE,
+            graph::KIND,
+            graph::DECISION,
+            graph::REASON
+        ]
+    );
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::JudgeDecided),
+        graph::JUDGE_DECIDED
+    );
+
     // The `turn-completed` payload, as that library writes it: every key this
     // crate reads off one is a field of it. What is *in* the usage is asserted
     // below, against the type that writes it.

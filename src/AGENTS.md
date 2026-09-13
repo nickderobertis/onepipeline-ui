@@ -356,6 +356,18 @@ Three constraints on that reading, each because the obvious alternative is worse
   field this wire already carries a producer's own record on. No field is added
   and neither closed role vocabulary moves, because both already carry `judge`.
 
+**What each judge of a stacked panel decided is keyed to the turn it judged, and
+served on that row.** A report's `judge_decisions` holds one entry per supervisor
+turn, numbered by the agent turn that supervisor turn judged — the number every
+join above already uses — so `payload::judge_decisions` puts each judge's
+`JudgeDecision`, serialized by onejudge's own derives, on that agent turn's row as
+`judges` and on no other. Not on the judge's own conversation: a judge turn is
+bounded rather than transcribed, and nothing keys one of its rows to a panel
+member's decision. Where the run holds no report, the session's `judge-decided`
+records fill the same field, joined the way a settlement is — `{stream}.{member}`,
+because they carry no `session` label — and they are never turns:
+`payload::is_turn_record` does not admit them.
+
 ## The live half, which is the only half a running dispatch has
 
 A report exists once a member settles and a member that dies never writes one, so
