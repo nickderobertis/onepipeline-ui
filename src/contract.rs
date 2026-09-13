@@ -77,7 +77,16 @@ pub const API_VERSION: u32 = 2;
 /// list that may be shorter than the host — which is exactly the silence this
 /// version ends: a run the API cannot serve is now reported rather than omitted,
 /// and a silent omission is indistinguishable from a server with nothing to say.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 15;
+///
+/// **Schema 16 is what each judge of a stacked panel decided.** A conversation
+/// turn a panel judged gains `judges`, one `{judge, kind, decision, reason}` per
+/// judge in the panel's order, read from the stored report's `judge_decisions` or,
+/// for a session with no report, from its `judge-decided` records. It is absent
+/// rather than empty on a turn nothing decided on, and every field 15 served is
+/// served with the same meaning. The version moves because a client that has
+/// never seen `judges` reads a stacked panel's dispatch as though no judge had
+/// said anything about any turn of it.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 16;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///

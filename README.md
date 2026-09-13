@@ -21,7 +21,7 @@ GET /api/v2/events                    # SSE; fresh snapshot per connection
 ```
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (10), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (16), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy

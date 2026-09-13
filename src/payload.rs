@@ -2878,12 +2878,13 @@ fn reported_index(turns: &[ReportedTurn], turn: u64) -> Option<usize> {
 /// side — the report's top-level `usage` is the whole dispatch's total over both
 /// of them. The candidates beside the one that ran are identities the chain fell
 /// through, and none of them happened.
-fn ran_candidate(
-    report: &judge::Report,
+fn ran_candidate<'r>(
+    report: &'r judge::Report,
     role: judge::TelemetryRole,
     turn: u32,
-) -> Option<&judge::CandidateAttempt> {
-    attributed(report, role, turn)?
+    judge: Option<&str>,
+) -> Option<&'r judge::CandidateAttempt> {
+    attributed(report, role, turn, judge)?
         .candidates
         .iter()
         .find(|candidate| candidate.ran)
@@ -2920,17 +2921,28 @@ fn with_attribution(
 /// its sessions and its attribution on the *pair* of a side and a turn number,
 /// and the two sides number their turns independently — so a lookup by index
 /// alone reads one side's invocation as the other's.
-fn attributed(
-    report: &judge::Report,
+///
+/// **And the judge is asked for too.** A stacked panel runs every judge on the
+/// same supervisor turn, so its invocations share a side and a number and differ
+/// only by the `judge` label onejudge stamps on each — a lookup by the pair alone
+/// hands every judge the first judge's model, usage and chain. The label is
+/// absent on the agent's records and on a panel of one, and absent matches absent.
+fn attributed<'r>(
+    report: &'r judge::Report,
     role: judge::TelemetryRole,
     turn: u32,
-) -> Option<&judge::HarnessAttribution> {
+    judge: Option<&str>,
+) -> Option<&'r judge::HarnessAttribution> {
     report
         .telemetry
         .as_ref()?
         .attribution
         .iter()
-        .find(|attribution| attribution.role == role && attribution.turn_index == turn)
+        .find(|attribution| {
+            attribution.role == role
+                && attribution.turn_index == turn
+                && attribution.judge.as_deref() == judge
+        })
 }
 
 /// The wall-clock bounds one **agent** turn's invocation was observed between.
@@ -3560,7 +3572,7 @@ fn conversation_document(
                 .and_then(|turn| u32::try_from(turn).ok())
                 .zip(reported)
                 .and_then(|(turn, report)| {
-                    ran_candidate(report, judge::TelemetryRole::Agent, turn)
+                    ran_candidate(report, judge::TelemetryRole::Agent, turn, None)
                 });
             let bounds = numbered
                 .zip(reported)
@@ -3636,7 +3648,7 @@ fn conversation_document(
                         .and_then(|turn| u32::try_from(turn).ok())
                         .zip(reported)
                         .and_then(|(turn, report)| {
-                            attributed(report, judge::TelemetryRole::Agent, turn)
+                            attributed(report, judge::TelemetryRole::Agent, turn, None)
                         }),
                 ),
                 "usage": match ran {
@@ -3808,7 +3820,12 @@ fn judge_conversation(
     // what this field is for.
     let mut harnesses: Vec<Value> = Vec::new();
     for link in &links {
-        let Some(ran) = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index) else {
+        let Some(ran) = ran_candidate(
+            report,
+            judge::TelemetryRole::Judge,
+            link.turn_index,
+            link.judge.as_deref(),
+        ) else {
             continue;
         };
         let named = json!(ran.harness);
@@ -3871,8 +3888,18 @@ fn judge_session(session: &str) -> String {
 /// One judge turn: bounded and measured, and not transcribed — see
 /// `src/AGENTS.md` for why no text may be keyed to one.
 fn judge_turn(id: &str, index: usize, report: &judge::Report, link: &judge::SessionLink) -> Value {
-    let entry = attributed(report, judge::TelemetryRole::Judge, link.turn_index);
-    let ran = ran_candidate(report, judge::TelemetryRole::Judge, link.turn_index);
+    let entry = attributed(
+        report,
+        judge::TelemetryRole::Judge,
+        link.turn_index,
+        link.judge.as_deref(),
+    );
+    let ran = ran_candidate(
+        report,
+        judge::TelemetryRole::Judge,
+        link.turn_index,
+        link.judge.as_deref(),
+    );
     json!({
         "assistant": Value::Null,
         "durationMs": ran.and_then(|candidate| candidate.duration_ms),

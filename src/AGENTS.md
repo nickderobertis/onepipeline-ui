@@ -368,6 +368,14 @@ records fill the same field, joined the way a settlement is — `{stream}.{membe
 because they carry no `session` label — and they are never turns:
 `payload::is_turn_record` does not admit them.
 
+**A judge row is joined by its label as well as its side and turn.** A stacked
+panel runs every judge on the same supervisor turn, so their `telemetry.sessions`
+rows and attributions share a `role` and a `turn_index` and differ only by the
+`judge` label onejudge 0.10 stamps on each. `payload::attributed` asks for that
+label, and absent matches absent — the agent's records and a panel of one carry
+none — so each judge's row is served its own model, usage and chain rather than
+the first judge's.
+
 ## The live half, which is the only half a running dispatch has
 
 A report exists once a member settles and a member that dies never writes one, so
