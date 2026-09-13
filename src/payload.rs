@@ -384,7 +384,7 @@ pub mod pipeline {
 /// vocabulary; the `note` op that replaced it compiles to [`NOTE_DELIVERED`].
 /// The engine still folds the older one and so does this crate — a run that
 /// recorded a `context-added` is still a run an operator opens.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.27.2 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.29.0 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
 mod edits {
     /// The compiled mutations one accepted edit became.
     pub const OPERATIONS: &str = "operations";

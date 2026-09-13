@@ -4103,6 +4103,7 @@ pub fn worker_report() -> String {
         fell_through: Vec::new(),
         candidates,
         history_file: None,
+        judge: None,
     };
 
     let report = Report {
@@ -4123,6 +4124,7 @@ pub fn worker_report() -> String {
         assessment: None,
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
+        judge_decisions: Vec::new(),
         // The whole dispatch's total over both sides, which is what no turn
         // spent: 29.71 + 1.51 + 3.07 + 9.75 + 9.75.
         usage: Some(Usage {
@@ -4155,6 +4157,7 @@ pub fn worker_report() -> String {
                 started_at: "2026-08-07T12:00:03.000Z".into(),
                 finished_at: Some("2026-08-07T12:00:03.900Z".into()),
                 history_id: None,
+                judge: None,
             }],
             attribution: vec![
                 HarnessAttribution {
@@ -4240,6 +4243,7 @@ pub fn supervised_report() -> String {
             started_at: supervised_at(turn, 0),
             finished_at: Some(supervised_at(turn, 3)),
             history_id: None,
+            judge: None,
         })
         .collect();
     let attribution = turns()
@@ -4266,6 +4270,7 @@ pub fn supervised_report() -> String {
                 usage: Some(usage(supervised_turn_cost(turn))),
             }],
             history_file: None,
+            judge: None,
         })
         .collect();
 
@@ -4276,6 +4281,7 @@ pub fn supervised_report() -> String {
         assessment: None,
         completion_reason: Some("the acceptance criteria were met".into()),
         settled_reason: None,
+        judge_decisions: Vec::new(),
         // The whole dispatch's total over both sides, which is what no turn spent.
         usage: Some(usage(SUPERVISED_TOTAL_COST)),
         telemetry: Some(Telemetry {
@@ -4402,6 +4408,7 @@ pub fn reviewer_report() -> String {
             usage: Some(judge_usage.clone()),
         }],
         history_file: None,
+        judge: None,
     };
     let observed = |turn: usize| SessionLink {
         session_id: format!("01a01f5{turn}-6168-72d1-b946-2251794e2fce"),
@@ -4410,6 +4417,7 @@ pub fn reviewer_report() -> String {
         started_at: JUDGE_BOUNDS[turn - 1].0.to_owned(),
         finished_at: Some(JUDGE_BOUNDS[turn - 1].1.to_owned()),
         history_id: None,
+        judge: None,
     };
     let report = Report {
         schema_version: onejudge::SCHEMA_VERSION,
@@ -4445,6 +4453,7 @@ pub fn reviewer_report() -> String {
         assessment: Some(JUDGE_ASSESSMENT.to_owned()),
         completion_reason: Some("the change is approved".into()),
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 3_000,
@@ -4482,6 +4491,7 @@ pub fn reviewer_report() -> String {
                         usage: Some(usage),
                     }],
                     history_file: None,
+                    judge: None,
                 },
                 judged(1, 500),
                 judged(2, 400),
@@ -4536,6 +4546,7 @@ pub fn lint_report() -> String {
         assessment: None,
         completion_reason: None,
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 600,
@@ -4569,6 +4580,7 @@ pub fn lint_report() -> String {
                     usage: Some(usage),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),

@@ -381,7 +381,7 @@ closing a turn by proximity would bill one turn for all of them.
 
 **This vocabulary is declared, and is gated against its declaration.** The
 `oneagentgraph` linked here is whichever one the pinned `onepipeline` resolves, and
-0.3 publishes `TurnStarted`, `TurnMessage`, `TurnCompleted` and `TurnActivity` as
+0.4 publishes `TurnStarted`, `TurnMessage`, `TurnCompleted` and `TurnActivity` as
 types — so every name in `payload::graph` but one is a field or a variant
 `tests/contract.rs` holds the copy to. The one that is not is `TOOL_RESULT`: a
 call's kind is the producing harness's own word, served through verbatim, so that

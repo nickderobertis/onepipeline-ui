@@ -1947,6 +1947,7 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         EventKind::TurnActivity,
         EventKind::TurnMessage,
         EventKind::TurnCompleted,
+        EventKind::JudgeDecided,
         EventKind::TurnInterrupted,
         EventKind::MemberHeartbeat,
         EventKind::FallbackAdvanced,
@@ -1966,6 +1967,7 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         | EventKind::TurnActivity
         | EventKind::TurnMessage
         | EventKind::TurnCompleted
+        | EventKind::JudgeDecided
         | EventKind::TurnInterrupted
         | EventKind::MemberHeartbeat
         | EventKind::FallbackAdvanced

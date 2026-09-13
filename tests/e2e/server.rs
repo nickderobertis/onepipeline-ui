@@ -6172,6 +6172,7 @@ fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> Str
         assessment: None,
         completion_reason: None,
         settled_reason: Some("the harness deferred the tool call".into()),
+        judge_decisions: Vec::new(),
         usage: None,
         telemetry: Some(Telemetry {
             wall_ms: 9_000,
@@ -6208,6 +6209,7 @@ fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> Str
                     }),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),
@@ -6599,6 +6601,7 @@ fn unclosed_judge_report() -> String {
         fell_through: Vec::new(),
         candidates: vec![candidate(ms)],
         history_file: None,
+        judge: None,
     };
     let mut assessment = String::new();
     while assessment.len() <= VERBOSE_ASSESSMENT_BYTES {
@@ -6633,6 +6636,7 @@ fn unclosed_judge_report() -> String {
         assessment: Some(assessment),
         completion_reason: None,
         settled_reason: Some("a streaming sink asked to stop".into()),
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 12_000,
@@ -6650,6 +6654,7 @@ fn unclosed_judge_report() -> String {
                     started_at: "2026-08-07T12:01:00.000Z".into(),
                     finished_at: Some("2026-08-07T12:01:02.000Z".into()),
                     history_id: None,
+                    judge: None,
                 },
                 // The end nobody observed, which leaves the lane open.
                 SessionLink {
@@ -6659,6 +6664,7 @@ fn unclosed_judge_report() -> String {
                     started_at: "2026-08-07T12:01:05.000Z".into(),
                     finished_at: None,
                     history_id: None,
+                    judge: None,
                 },
             ],
             // One attribution for two links: the second invocation reported a
@@ -7276,6 +7282,7 @@ fn unanswered_report(prompt: &str) -> String {
         assessment: None,
         completion_reason: None,
         settled_reason: Some("the supervisor named no next instruction".into()),
+        judge_decisions: Vec::new(),
         usage: Some(usage.clone()),
         telemetry: Some(Telemetry {
             wall_ms: 9_000,
@@ -7306,6 +7313,7 @@ fn unanswered_report(prompt: &str) -> String {
                     usage: Some(usage),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),
@@ -7517,6 +7525,7 @@ fn report_of(messages: &[(&str, &str)]) -> String {
         assessment: None,
         completion_reason: None,
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: None,
         telemetry: Some(Telemetry {
             wall_ms: 1_000,
@@ -8529,6 +8538,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
         assessment: None,
         completion_reason: None,
         settled_reason: None,
+        judge_decisions: Vec::new(),
         usage: None,
         telemetry: Some(Telemetry {
             wall_ms: 9_000,
@@ -8543,6 +8553,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                     started_at: OPENED.into(),
                     finished_at: Some(CLOSED.into()),
                     history_id: None,
+                    judge: None,
                 },
                 // Observed opening and never observed closing, which the contract
                 // spells as a `null` finish rather than as a malformed bound.
@@ -8553,6 +8564,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                     started_at: REOPENED.into(),
                     finished_at: None,
                     history_id: None,
+                    judge: None,
                 },
             ],
             attribution: vec![HarnessAttribution {
@@ -8584,6 +8596,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                     }),
                 }],
                 history_file: None,
+                judge: None,
             }],
         }),
         processes: Vec::new(),

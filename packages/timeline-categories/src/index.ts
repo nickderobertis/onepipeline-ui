@@ -184,6 +184,14 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // matched whole — and adding it to the verification rule would be adding a
   // word that names this kind and no other, which is what this table is for.
   "criterion-checked": "verification",
+  // One judge of a stacked panel ruling on one worker turn — the same act as a
+  // criterion checked, one turn at a time. `decided` is not `decision`, and a word
+  // is matched whole.
+  "judge-decided": "verification",
+  // A manager's note reaching a party of a running conversation is the planner and
+  // the run talking. Neither `note` nor `shown` names a rule, and a rule naming
+  // either would name this kind and no other.
+  "note-shown": "planning",
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
