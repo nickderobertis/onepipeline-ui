@@ -101,7 +101,9 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     ],
     ["failure", ["failed", "died", "rejected", "exceeded", "conflict"]],
     ["human", ["human"]],
-    ["planning", ["planner", "decision"]],
+    // `note` is a manager's note reaching a running conversation — the planner and
+    // the run talking, whichever party of the conversation it reached.
+    ["planning", ["planner", "decision", "note"]],
     // `lock-wait` alone is most of the records this store holds, so what a reader sees
     // most is this category — kept apart from the sessions for exactly that reason.
     // `wait` is the word itself rather than any one producer's kind: a node held on
@@ -117,7 +119,12 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // both ways — `onevcs` writes one `change-check` per check it observed, the
     // older unattributed records a single `pr-checks-observed` — and a word is
     // matched whole, so one spelling does not reach the other.
-    ["verification", ["verification", "gate", "check", "checks", "coverage"]],
+    // `judge` is a judge ruling on the work — one judge of a stacked panel deciding on
+    // one turn is a verification of that turn, the same act as a gate's verdict.
+    [
+      "verification",
+      ["verification", "gate", "check", "checks", "coverage", "judge"],
+    ],
     // `release` joins this line rather than opening a twelfth category: publishing a
     // crate and merging the change that will be in it are one act to a reader
     // scanning a run, and a glyph they had to learn to tell apart would be the
@@ -184,14 +191,6 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // matched whole — and adding it to the verification rule would be adding a
   // word that names this kind and no other, which is what this table is for.
   "criterion-checked": "verification",
-  // One judge of a stacked panel ruling on one worker turn — the same act as a
-  // criterion checked, one turn at a time. `decided` is not `decision`, and a word
-  // is matched whole.
-  "judge-decided": "verification",
-  // A manager's note reaching a party of a running conversation is the planner and
-  // the run talking. Neither `note` nor `shown` names a rule, and a rule naming
-  // either would name this kind and no other.
-  "note-shown": "planning",
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
