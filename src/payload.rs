@@ -118,13 +118,20 @@ pub struct DeclaredMembers {
 /// grammar. Parsing at this boundary is what keeps the two in step: a word a
 /// record declares that the grammar refuses is dropped here, so no session is
 /// ever served a role the client would refuse the whole payload over.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
 pub struct MemberName(String);
 
 impl MemberName {
     /// The name as the graph spelled it.
     fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl std::fmt::Display for MemberName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -157,13 +164,17 @@ impl DeclaredMembers {
         }
     }
 
-    /// Whether some graph of this run declared a member called `word`.
-    fn names(&self, word: &str) -> bool {
-        self.names.iter().any(|name| name.as_str() == word)
+    /// The member some graph of this run declared under `word`, if one did.
+    ///
+    /// What comes back is the declared name rather than the record's word: the
+    /// two are equal, and the one that has been through the grammar is the one
+    /// a caller may serve.
+    fn named(&self, word: &str) -> Option<&MemberName> {
+        self.names.iter().find(|name| name.as_str() == word)
     }
 
     /// The semantic role one record's session ran under.
-    fn role_of<'e>(&self, event: &'e Envelope) -> Option<&'e str> {
+    fn role_of(&self, event: &Envelope) -> Option<&MemberName> {
         self.agent_role(member_label(event), event.labels.persona.as_deref())
     }
 
@@ -177,11 +188,11 @@ impl DeclaredMembers {
     /// Only a session that stamped no member is read by a persona — its own
     /// record's first, and the dispatch's where its record carried none — and a
     /// dispatch that relayed nothing at all is read by the dispatch alone.
-    fn role_of_dispatched<'e>(
+    fn role_of_dispatched(
         &self,
-        first: Option<&'e Envelope>,
-        dispatched: &'e Envelope,
-    ) -> Option<&'e str> {
+        first: Option<&Envelope>,
+        dispatched: &Envelope,
+    ) -> Option<&MemberName> {
         let Some(first) = first else {
             return self.role_of(dispatched);
         };
@@ -215,10 +226,10 @@ impl DeclaredMembers {
     /// stamped no member at all, which is what a `node-dispatched` is — and it
     /// is served only where a declaration names its word as a member, never
     /// through a list of persona words kept here.
-    fn agent_role<'e>(&self, member: Option<&'e str>, persona: Option<&'e str>) -> Option<&'e str> {
+    fn agent_role(&self, member: Option<&str>, persona: Option<&str>) -> Option<&MemberName> {
         match member {
-            Some(member) => self.names(member).then_some(member),
-            None => persona.filter(|persona| self.names(persona)),
+            Some(member) => self.named(member),
+            None => persona.and_then(|persona| self.named(persona)),
         }
     }
 }
@@ -5403,9 +5414,12 @@ fn kept_spans(
 /// it stands for. No events, no references, no bodies — a reader who wants those
 /// opens the node.
 ///
-/// The category is the *pair* and not either half of it, which is what tells a
-/// lint run from the worker whose semantic role it borrows: both are `worker`
-/// work, and only the transport half says which of them ran.
+/// The category is the *pair* and not either half of it: the party that ran
+/// the sessions and the member word the run's graph declared them as. On this
+/// host the lint member is its own word under its own transport, and a session
+/// that ran under one member's word on another party's transport — the pair
+/// under which a lint side used to borrow the worker's word — is still told
+/// apart from the worker by the transport half alone.
 fn role_rollups(
     events: &[(usize, &Envelope)],
     parent: &str,
@@ -5500,17 +5514,17 @@ enum Reach {
 /// them: the transport-and-semantic pair that names it, the earliest start
 /// among them, and how far their ends have got.
 struct Category<'r> {
-    /// The party that ran the sessions and the member word the run recorded
-    /// for them — borrowed from the record that stamped it, because the word
-    /// is the run's own and this crate keeps no copy of it.
-    pair: (Party, &'r str),
+    /// The party that ran the sessions and the member the run's graph declared
+    /// them as — borrowed from the run's declarations, because the word is the
+    /// run's own and this crate keeps no copy of it.
+    pair: (Party, &'r MemberName),
     count: usize,
     started: Moment,
     reach: Reach,
 }
 
 impl<'r> Category<'r> {
-    fn of(pair: (Party, &'r str), started: Moment, ended: Option<Moment>) -> Self {
+    fn of(pair: (Party, &'r MemberName), started: Moment, ended: Option<Moment>) -> Self {
         Self {
             pair,
             count: 1,

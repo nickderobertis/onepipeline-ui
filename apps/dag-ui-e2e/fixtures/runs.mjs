@@ -518,6 +518,32 @@ class Journal {
   write() {
     writeFileSync(this.path, `${this.lines.join("\n")}\n`);
   }
+
+  /**
+   * Several streams as one store, in the order the SDK's own reader merges them:
+   * `(ts, stream, seq)`. A graph run writes on a stream of its own, so a run whose
+   * observer graph and node graph both relayed is two journals merged into one.
+   */
+  static writeMerged(path, journals) {
+    const lines = journals.flatMap((journal) =>
+      journal.lines.map((line, seq) => ({
+        line,
+        key: [JSON.parse(line).ts, journal.stream, seq],
+      })),
+    );
+    lines.sort((left, right) =>
+      left.key[0] === right.key[0]
+        ? left.key[1] === right.key[1]
+          ? left.key[2] - right.key[2]
+          : left.key[1] < right.key[1]
+            ? -1
+            : 1
+        : left.key[0] < right.key[0]
+          ? -1
+          : 1,
+    );
+    writeFileSync(path, `${lines.map(({ line }) => line).join("\n")}\n`);
+  }
 }
 
 /** Append one event to a journal an already-running server is serving. */
@@ -2316,51 +2342,71 @@ function writeNamedRun(root) {
     })),
   };
   writeJson(join(dir, "plan.json"), plan);
-  const stream = streamOf(NAMED_RUN);
+  // Two graph runs, each on a stream of its own, each with a record of its own
+  // declaring what it ran: the observer graph the launch record names, and the
+  // node graph the nodes' dispatches relayed on.
+  const observerStream = `dag-scope-${NAMED_RUN}`;
+  const nodeStream = `node-scope-${NAMED_RUN}`;
   writeJson(join(dir, "launch.json"), {
     ...launch(NAMED_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4250),
     graph: "graphs/watch.yaml",
     // The `oneagentgraph` run the observer graph is, as the engine records it:
     // what the server reads the observer's declared members off.
-    graph_run: stream,
-    observer_runs: [stream],
+    graph_run: observerStream,
+    observer_runs: [observerStream],
   });
-  const journal = new Journal(dir, stream, HISTORIC);
-  journal.runId = NAMED_RUN;
-  declareGraph(root, stream, NAMED_ROLES);
-  journal.emit("pipeline", "run-started", run, { plan });
+  declareGraph(root, observerStream, NAMED_ROLES.slice(0, 2));
+  declareGraph(root, nodeStream, NAMED_ROLES.slice(2));
+  const driver = new Journal(dir, streamOf(NAMED_RUN), HISTORIC);
+  driver.emit("pipeline", "run-started", run, { plan });
   // The observers, at no node, `ticker` first: the order the run relayed them is
   // the order the payload serves them, and it is the reverse of the alphabet.
-  for (const member of ["ticker", "sentinel"]) {
-    journal.advance(1);
+  const observers = new Journal(dir, observerStream, HISTORIC);
+  observers.runId = NAMED_RUN;
+  for (const member of NAMED_ROLES.slice(0, 2)) {
+    observers.advance(1);
     relayTurn(
-      journal,
-      { ...run, member, persona: member, session: `${stream}.${member}` },
-      `${stream}.${member}`,
+      observers,
+      {
+        ...run,
+        member,
+        persona: member,
+        session: `${observerStream}.${member}`,
+      },
+      `${observerStream}.${member}`,
       `Watch the run as ${member}.`,
       `${member} is watching`,
     );
   }
+  // The nodes, after the observers: the first ran the node graph's two members
+  // in the order it declared them, the second ran `drafter` again.
+  const nodes = new Journal(dir, nodeStream, HISTORIC);
+  nodes.runId = NAMED_RUN;
+  driver.advance(10);
   const [both, again] = NAMED_NODES;
   for (const [node, members] of [
-    [both, ["reviser", "drafter"]],
-    [again, ["drafter"]],
+    [both, NAMED_ROLES.slice(2)],
+    [again, [NAMED_ROLES.at(-1)]],
   ]) {
-    journal
+    driver
       .advance(1)
       .emit("pipeline", "node-dispatched", { ...run, node, persona: "poet" });
+    // The two clocks are one: the sessions run inside the dispatch that opened
+    // them and the settlement follows the last of them.
+    nodes.at = driver.at;
     for (const member of members) {
       const session = `${node}-${member}`;
-      journal.advance(1);
+      nodes.advance(1);
       relayTurn(
-        journal,
+        nodes,
         { ...run, node, member, persona: "poet", session },
         session,
         `Work on ${node} as ${member}.`,
         `${member} worked on ${node}`,
       );
     }
-    journal
+    driver.at = nodes.at;
+    driver
       .advance(1)
       .emit(
         "pipeline",
@@ -2369,7 +2415,7 @@ function writeNamedRun(root) {
         { status: "done", outcome: "drafted" },
       );
   }
-  journal.write();
+  Journal.writeMerged(join(dir, "events.jsonl"), [driver, observers, nodes]);
 }
 
 /** Write every run this fixture serves, oldest first. */
