@@ -269,7 +269,7 @@ export const WORKER_SESSION = "engineer-dashboard";
 export const FOUNDATION_SESSION = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
 /** The judge over that dispatch: the worker's own word under the judge transport. */
 export const JUDGE_SESSION = "you-are-a-strict-careful-evaluator";
-/** The lint member's session: the worker's own role under another transport. */
+/** The lint member's session: the `llmlint` member the host's graph declares. */
 export const LINT_SESSION = "llmlint-dashboard";
 export const CHECK_IN_SESSION = "5d2e4f18-9c3a-4b66-82bb-7e4f3a1c8d25";
 /** The run's own driving session, recorded at no node. */

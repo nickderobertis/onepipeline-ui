@@ -987,8 +987,10 @@ export function holdLabel(reasons: readonly TimelineHoldReason[]): string {
 
 /**
  * How the operator names one recorded activity: its category, then the session or
- * artifact it was. A judge session says Judge and says which session it was, which is
- * the pair a reader needs to tell three concurrent sessions apart.
+ * artifact it was. A judge session says `worker · judge` — the member it
+ * supervised and the transport that tells it from that member's own session — and
+ * says which session it was, which is the pair a reader needs to tell three
+ * concurrent sessions apart.
  */
 function spanLabel(
   span: TimelineSpan,
