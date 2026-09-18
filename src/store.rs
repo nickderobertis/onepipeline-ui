@@ -207,12 +207,15 @@ impl RunStore {
     ///
     /// A request naming none is served everything, which is what an unfiltered
     /// read has always been. A name is resolved against the run's own profiles,
-    /// so `planner` and `monitor` answer for every run and a launch-defined name
+    /// so `planner` and `detailed` answer for every run and a launch-defined name
     /// answers only for the run that defined it.
     fn resolve(view: &RunView, spec: Option<&FilterSpec>) -> Result<EventFilter, ApiError> {
         match spec {
             None => Ok(EventFilter::default()),
-            Some(spec) => spec.resolve(&LaunchProfiles::of(&view.launch.dag_sets)),
+            Some(spec) => spec.resolve(&LaunchProfiles::of(
+                &view.launch.dag_sets,
+                &view.launch.filters,
+            )),
         }
     }
 

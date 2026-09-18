@@ -643,7 +643,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 8,
+      timeline_schema_version: 9,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -699,7 +699,7 @@ describe("run timeline", () => {
     };
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 8,
+      timeline_schema_version: 9,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [span, queued],
@@ -718,7 +718,7 @@ describe("run timeline", () => {
     expect(
       parseRunTimeline({
         api_version: 2,
-        timeline_schema_version: 8,
+        timeline_schema_version: 9,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [{ ...queued, reasons: [{ kind: "budget" }] }],
@@ -730,7 +730,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 2,
-        timeline_schema_version: 8,
+        timeline_schema_version: 9,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [{ ...queued, id: "node-1-api", kind: "node" }],
@@ -906,7 +906,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 8,
+        timeline_schema_version: 9,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

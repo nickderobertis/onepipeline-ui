@@ -3,15 +3,17 @@
 //!
 //! The grammar is the one `onevcs`, `oneagentgraph`, and `onepipeline` already
 //! read — `include`/`exclude` matcher lists over the envelope's addressing, with
-//! `exclude` winning and an absent `include` admitting everything. Like the
-//! envelope itself it is **duplicated per repository by design**: there is no
-//! shared util crate in this stack, so each consumer owns its copy and
-//! `tests/contract.rs` holds this one to `oneagentgraph`'s published type.
+//! `exclude` winning and an absent `include` admitting everything. The three of
+//! them now read it through one implementation, `onemessagebus-agent`'s, which
+//! each re-exports; this crate keeps its own copy of the grammar because a read
+//! API asks a different question of it (which envelopes a *response* carries,
+//! per request) and `tests/contract.rs` holds the copy to the bus's own matcher
+//! document rather than to a second reading of the wire.
 //!
 //! What is this crate's own is where a filter comes from. On the CLI a producer
 //! is told once, at launch, what to put on its stream. A read API is asked per
 //! request by a reader who did not launch the run, so the filter arrives as a
-//! query parameter — a **named profile** (`planner`, `monitor`, or one the run's
+//! query parameter — a **named profile** (`planner`, `detailed`, or one the run's
 //! own launch config defined) or an inline spec — and is resolved against the
 //! run being read.
 //!
@@ -22,7 +24,7 @@
 
 use std::collections::BTreeMap;
 
-use onepipeline::event::{Envelope, Labels, Source};
+use onepipeline::event::{Envelope, Labels, Phase, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -82,6 +84,12 @@ pub struct Matcher {
     /// run of characters including none and every other character is itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// The phase the envelope was stamped at, by exact equality: the agent
+    /// envelope's one reserved dimension, which `onevcs` stamps on a change's
+    /// records and `onepipeline` relays as stamped. An envelope carrying none
+    /// matches no phase a matcher asks for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<Phase>,
     /// The `run_id` label the envelope was stamped with, by exact equality.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -106,11 +114,16 @@ impl EventFilter {
     /// an empty `include` admits everything.
     #[must_use]
     pub fn allows(&self, event: &Envelope) -> bool {
-        let (source, kind, labels) = (event.source, event.kind.0.as_str(), &event.labels);
+        let (source, kind, phase, labels) = (
+            event.source,
+            event.kind.0.as_str(),
+            event.dimensions.phase,
+            &event.labels,
+        );
         if self
             .exclude
             .iter()
-            .any(|matcher| matcher.matches(source, kind, labels))
+            .any(|matcher| matcher.matches(source, kind, phase, labels))
         {
             return false;
         }
@@ -118,7 +131,7 @@ impl EventFilter {
             || self
                 .include
                 .iter()
-                .any(|matcher| matcher.matches(source, kind, labels))
+                .any(|matcher| matcher.matches(source, kind, phase, labels))
     }
 
     /// Whether this filter admits every envelope, whatever a run recorded.
@@ -177,7 +190,7 @@ impl Matcher {
     }
 
     /// Whether every field this matcher names holds of the envelope.
-    fn matches(&self, source: Source, kind: &str, labels: &Labels) -> bool {
+    fn matches(&self, source: Source, kind: &str, phase: Option<Phase>, labels: &Labels) -> bool {
         if self.source.is_some_and(|named| named != source) {
             return false;
         }
@@ -188,16 +201,17 @@ impl Matcher {
         {
             return false;
         }
-        // `member` has no typed slot on this envelope — `oneagentgraph` declares
-        // one and `onepipeline` does not, and the merged store carries both — so
-        // it is read off the extras alone, which is exactly where the producer
-        // stamps it. Everything else has a slot, and [`stamped`] falls back to
-        // the extras for each of them anyway.
+        if self.phase.is_some_and(|named| Some(named) != phase) {
+            return false;
+        }
+        // Every reserved label has a typed slot on the bus's envelope, `member`
+        // included, and [`stamped`] falls back to the extras for each of them
+        // anyway — which is where a producer that predates the slot stamped it.
         let typed = [
             labels.run_id.as_deref(),
             labels.node.as_deref(),
             labels.step.as_deref(),
-            None,
+            labels.member.as_deref(),
             labels.persona.as_deref(),
         ];
         // A label the envelope never stamped is `None`, which no asked-for value
@@ -214,7 +228,7 @@ impl Matcher {
 
     /// Whether this matcher could match anything; see [`EventFilter::validate`].
     fn check(&self) -> Result<(), String> {
-        let mut named = usize::from(self.source.is_some());
+        let mut named = usize::from(self.source.is_some()) + usize::from(self.phase.is_some());
         for (field, asked) in
             std::iter::once(("kind", self.kind.as_deref())).chain(self.labels_asked())
         {
@@ -230,7 +244,7 @@ impl Matcher {
         if named == 0 {
             return Err(
                 "a matcher naming no field matches every event — name at least one of \
-                        `source`, `kind`, `run_id`, `node`, `step`, `member`, or `persona`"
+                        `source`, `kind`, `phase`, `run_id`, `node`, `step`, `member`, or `persona`"
                     .to_owned(),
             );
         }
@@ -291,9 +305,10 @@ fn glob(pattern: &str, text: &str) -> bool {
 /// with.
 ///
 /// Two, because there are two attentions and the CLI already gives its readers
-/// exactly these: the planner decides, and the monitor watches. A reader picks
-/// one by name rather than restating a spec, so the browser and the CLI narrow
-/// to the same thing under the same word.
+/// exactly these: the planner decides, and an observer reads the detail. A
+/// reader picks one by name rather than restating a spec, so the browser and the
+/// CLI narrow to the same thing under the same word — the engine's own
+/// `planner` and `detailed`, which it ships under those names and no alias.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Profile {
     /// **Decisions only.** `onepipeline`'s own vocabulary is a closed set and it
@@ -303,13 +318,15 @@ pub enum Profile {
     /// Everything a sibling relays is the *activity* those decisions are made
     /// about, and none of it is a decision.
     Planner,
-    /// **Detailed activity**: the whole merged stream, all three sources. The
-    /// monitor persona's own contract is that it reads the detailed stream and
-    /// compares activity against the run's goal, so its profile narrows nothing
-    /// — it is named rather than derived so that asking for it is a statement of
-    /// intent a reader can see beside the other, and so the view's two settings
-    /// are two profiles rather than a profile and an absence.
-    Monitor,
+    /// **Detailed activity**: the whole merged stream, all three sources. An
+    /// observer's whole job is to read the detail and compare activity against
+    /// the run's goal, so this profile narrows nothing — it is named rather than
+    /// derived so that asking for it is a statement of intent a reader can see
+    /// beside the other, and so the view's two settings are two profiles rather
+    /// than a profile and an absence. The engine named it `monitor` until it
+    /// stopped naming an observer member at all; a run whose launch defined a
+    /// profile under that word still serves it, as its own.
+    Detailed,
 }
 
 impl Profile {
@@ -318,7 +335,7 @@ impl Profile {
     pub fn named(word: &str) -> Option<Self> {
         match word {
             "planner" => Some(Self::Planner),
-            "monitor" => Some(Self::Monitor),
+            "detailed" => Some(Self::Detailed),
             _ => None,
         }
     }
@@ -328,7 +345,7 @@ impl Profile {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Planner => "planner",
-            Self::Monitor => "monitor",
+            Self::Detailed => "detailed",
         }
     }
 
@@ -343,13 +360,13 @@ impl Profile {
                 }],
                 exclude: Vec::new(),
             },
-            Self::Monitor => EventFilter::default(),
+            Self::Detailed => EventFilter::default(),
         }
     }
 }
 
 /// Every built-in profile, in the order `docs/contract.md` lists them.
-pub const PROFILES: [Profile; 2] = [Profile::Planner, Profile::Monitor];
+pub const PROFILES: [Profile; 2] = [Profile::Planner, Profile::Detailed];
 
 /// What `?filter=` asked for, before it is resolved against a run.
 ///
@@ -445,7 +462,7 @@ impl FilterSpec {
     /// has to be opened and read: a connection that narrowed nothing learns
     /// everything it needs from the journal's own metadata, and one that did has
     /// to look at what arrived. The browser's own **Detailed activity** setting
-    /// is exactly this case — it is the profile `monitor`, which is named rather
+    /// is exactly this case — it is the profile `detailed`, which is named rather
     /// than derived so that the two settings a viewer switches between are two
     /// profiles, and it admits every record.
     ///
@@ -498,25 +515,45 @@ impl From<FilterSpec> for String {
 /// The named profiles one run answers to: the built-in ones, plus whatever its
 /// own launch config defined.
 ///
-/// Read from the launch record's retained `--set` overrides, which is where a
-/// launch's own opaque decisions are kept. A `--set` this crate cannot read as a
-/// filter is **not** an error: those overrides belong to the graph launch and
-/// most of them are nothing to do with this server, so one that does not parse
-/// is one that was not addressed to it.
+/// Read from two places on the launch record, because the engine has kept a
+/// launch's profiles in two. The `filters.profiles` block is where a
+/// `--launch-config` file or a `--filter-profile NAME=SPEC` flag lands, retained
+/// as the typed block the engine itself resolves `next` and `monitor` through;
+/// the retained `--set` overrides are where a `--set filters.NAME=SPEC` landed
+/// before that block existed, and the runs that recorded one are still opened.
+/// A `--set` this crate cannot read as a filter is **not** an error: those
+/// overrides belong to the graph launch and most of them are nothing to do with
+/// this server, so one that does not parse is one that was not addressed to it.
 #[derive(Debug, Clone, Default)]
 pub struct LaunchProfiles {
     defined: BTreeMap<String, EventFilter>,
 }
 
 impl LaunchProfiles {
-    /// The profiles defined by a run's retained launch overrides.
+    /// The profiles a run's launch record defines: its retained `filters` block,
+    /// and its retained `--set` overrides.
     ///
     /// A launch-defined profile may not shadow a built-in one: `planner` and
-    /// `monitor` mean the same thing for every run, which is the whole reason a
-    /// reader names them instead of writing a spec.
+    /// `detailed` mean the same thing for every run, which is the whole reason a
+    /// reader names them instead of writing a spec. Any other word is the
+    /// launch's own — including `monitor`, which the engine shipped under that
+    /// name before it stopped naming an observer member, so a run launched with
+    /// a profile of that name still serves it.
     #[must_use]
-    pub fn of(sets: &[String]) -> Self {
+    pub fn of(sets: &[String], filters: &onepipeline::filter::Filters) -> Self {
         let mut defined = BTreeMap::new();
+        for (name, filter) in &filters.profiles {
+            // The block's filter is the bus's own type and this crate's copy is
+            // held to it, so the wire document is the one reading both share.
+            let Ok(filter) =
+                serde_json::to_value(filter).and_then(serde_json::from_value::<EventFilter>)
+            else {
+                continue;
+            };
+            if !name.is_empty() && Profile::named(name).is_none() && filter.validate().is_ok() {
+                defined.insert(name.clone(), filter);
+            }
+        }
         for set in sets {
             let Some((path, spec)) = set.split_once('=') else {
                 continue;

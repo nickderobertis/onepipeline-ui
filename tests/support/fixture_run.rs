@@ -3411,6 +3411,34 @@ pub fn define_filter_profile(dir: &Path, name: &str, spec: &str) {
     fs::write(&path, pretty(&record)).expect("the launch record");
 }
 
+/// Declare a named filter profile in a run's launch record's `filters` block.
+///
+/// This is where the engine itself keeps a launch's profiles — the block a
+/// `--launch-config` file or a `--filter-profile NAME=SPEC` flag is retained
+/// into, and the one `onepipeline next` and `onepipeline monitor` resolve a
+/// name through — where [`define_filter_profile`] writes the older `--set`
+/// spelling. Written by rewriting the record the same way a relaunch would.
+pub fn declare_filter_profile(dir: &Path, name: &str, spec: &str) {
+    let path = dir.join("launch.json");
+    let mut record: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    let filter: Value = serde_json::from_str(spec).expect("the profile's spec is a filter");
+    record
+        .as_object_mut()
+        .expect("a mapping")
+        .entry("filters")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("the filters block")
+        .entry("profiles")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("the profiles map")
+        .insert(name.to_owned(), filter);
+    fs::write(&path, pretty(&record)).expect("the launch record");
+}
+
 fn pretty(value: &Value) -> String {
     format!(
         "{}\n",
