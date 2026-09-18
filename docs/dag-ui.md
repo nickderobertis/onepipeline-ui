@@ -323,6 +323,16 @@ Escape key. It is a **timeline over a transcript**, both projected from
   switching tasks. Opened, it states the delivery, the member addressed and how many
   bytes were offered — never the planner's prose, which is not what a reader of the
   turn is asking — and, for one that did not land, the producing library's own reason.
+- a **surface** — something the run raised to somebody about this node — is a
+  record named by the kind the host raised it under and what it said, and opened
+  it states the kind, who raised it, whether anything waits on the answer, and the
+  message. The kind and the source are the host's own words, shown as recorded:
+  the engine relays any well-formed kind a host's observer binding defines and
+  any author its launch declared, so the app keeps no list of either and a word
+  it has never seen is a surface to draw rather than a record to fall back from.
+  An **edit** by an author other than the planner is named by that author on its
+  row and in its facts, and the engine's own report of it is a surface like any
+  other, `edit-applied`, raised by that author.
 - the node's **task, completion criteria, dependencies, PR and gate result** are
   tabs beside the timeline, one selection away rather than a wall of blocks. Six
   names do not fit every width, so below the breakpoint they wrap onto a second
