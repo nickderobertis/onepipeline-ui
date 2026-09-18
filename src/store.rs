@@ -38,9 +38,9 @@
 //! response carries and never what the run is: every status, settlement,
 //! decision, count and timing is folded from the whole journal whatever it said.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU64;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -56,7 +56,7 @@ use crate::contract::{
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
-use crate::payload::{self, Scope, Signature};
+use crate::payload::{self, DeclaredMembers, Scope, Signature};
 use crate::telemetry::{self, RunTelemetry};
 
 /// How often the event stream re-reads the runs root, in milliseconds.
@@ -76,10 +76,45 @@ pub const CONVERSATION_POLLS_PER_RUN_POLL: u32 = 10;
 /// whether a payload it cannot read was a keep-alive.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 
+/// The variable `oneagentgraph` — and the engine launching graphs through it —
+/// reads its state directory from.
+///
+/// Restated rather than imported, as the engine itself restates it: the sibling
+/// declares this name as a private `const` in its binary, so there is no library
+/// item to name. What matters is that all three read the *same* name, so the
+/// records the engine's launches wrote are the records this store reads.
+pub const GRAPH_RECORDS_ENV: &str = "ONEAGENTGRAPH_STATE_DIR";
+
+/// Where `oneagentgraph` keeps its run records when nothing says otherwise,
+/// under the home directory — resolved exactly as that CLI and the engine
+/// resolve it, so a host that configured neither still reads what it recorded.
+const GRAPH_RECORDS_UNDER_HOME: &str = ".local/state/oneagentgraph/runs";
+
+/// Where this process would read graph records from, as the engine decides it:
+/// [`GRAPH_RECORDS_ENV`], else the default under `HOME`.
+///
+/// A path and not a validated directory: a host that has never run an observer
+/// graph has no such directory, and that is a host whose sessions are served
+/// with no `agent_role` rather than one this server refuses to start on.
+#[must_use]
+pub fn graph_records_from_env() -> PathBuf {
+    std::env::var_os(GRAPH_RECORDS_ENV).map_or_else(
+        || {
+            std::env::var_os("HOME")
+                .map_or_else(std::env::temp_dir, PathBuf::from)
+                .join(GRAPH_RECORDS_UNDER_HOME)
+        },
+        PathBuf::from,
+    )
+}
+
 /// A read-only view of one runs root.
 #[derive(Debug, Clone)]
 pub struct RunStore {
     root: PathBuf,
+    /// Where the `oneagentgraph` run records this store reads a run's declared
+    /// members from live — the sibling's state directory, not the runs root.
+    graph_records: PathBuf,
     poll: Duration,
     conversation_poll: Duration,
     aggregated: Aggregated,
@@ -117,10 +152,64 @@ impl RunStore {
         let poll = Duration::from_millis(poll_ms.get());
         Self {
             root: root.as_path().to_path_buf(),
+            graph_records: graph_records_from_env(),
             poll,
             conversation_poll: poll * CONVERSATION_POLLS_PER_RUN_POLL,
             aggregated: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// The same store, reading `oneagentgraph`'s run records from `dir` rather
+    /// than from where this process's environment says that library keeps them.
+    ///
+    /// For a reader that holds a store of its own — a suite writing records
+    /// beside the runs it serves — where the served process reads the engine's.
+    #[must_use]
+    pub fn reading_graph_records(mut self, dir: &Path) -> Self {
+        self.graph_records = dir.to_path_buf();
+        self
+    }
+
+    /// The members this run's recorded graph declarations name.
+    ///
+    /// Read off the run records `oneagentgraph` wrote for the graphs this run
+    /// ran: the observer graph's, which the launch record names — every one it
+    /// has been, because a replaced observer is still the producer of what it
+    /// relayed — and every node graph's, whose run id is the **stream** its
+    /// records were relayed on, because that library writes each graph run's
+    /// envelopes under the id it minted for the run. A record from before the
+    /// sibling kept its declarations lists only the members that settled, which
+    /// is what the engine itself falls back to; a stream this host holds no
+    /// record for declares nothing, so a session on it is served no role rather
+    /// than one guessed at.
+    fn declared(&self, view: &RunView) -> DeclaredMembers {
+        let mut graph_runs: Vec<&str> = view
+            .launch
+            .observer_runs
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(view.launch.graph_run.as_str()))
+            .filter(|run| !run.is_empty())
+            .collect();
+        graph_runs.extend(
+            view.events
+                .iter()
+                .filter(|event| event.source == onepipeline::event::Source::Agentgraph)
+                .map(|event| event.stream.as_str()),
+        );
+        let graph_runs: BTreeSet<&str> = graph_runs.into_iter().collect();
+        DeclaredMembers::new(graph_runs.into_iter().flat_map(|run| {
+            oneagentgraph::history::show(&self.graph_records, run).map_or_else(
+                |_| Vec::new(),
+                |record| {
+                    if record.declared_members.is_empty() {
+                        record.members.into_keys().collect()
+                    } else {
+                        record.declared_members
+                    }
+                },
+            )
+        }))
     }
 
     /// What `onepipeline` aggregated for this run, read through its own CLI and
@@ -471,6 +560,7 @@ impl ReadApi for RunStore {
         let aggregated = self.telemetry(&view);
         Ok(Self::envelope(payload::run_detail(
             &view,
+            &self.declared(&view),
             query.include_conversations,
             aggregated.as_deref(),
             &filter,
@@ -484,7 +574,12 @@ impl ReadApi for RunStore {
             TimelineScope::Run => Scope::Run,
             TimelineScope::Node { node } => Scope::Node(node),
         };
-        Ok(Self::envelope(payload::timeline(&view, &scope, &filter)))
+        Ok(Self::envelope(payload::timeline(
+            &view,
+            &self.declared(&view),
+            &scope,
+            &filter,
+        )))
     }
 
     fn conversation(
@@ -493,7 +588,7 @@ impl ReadApi for RunStore {
         conversation: &ConversationId,
     ) -> Result<Envelope<Value>, ApiError> {
         let view = self.view(run)?;
-        payload::conversation(&view, conversation)
+        payload::conversation(&view, &self.declared(&view), conversation)
             .map(Self::envelope)
             .ok_or_else(|| ApiError::ConversationNotFound(conversation.clone()))
     }
@@ -750,6 +845,7 @@ impl Frames {
         let view = self.store.view(watched).ok()?;
         Some(payload::conversation_signature(
             &view,
+            &self.store.declared(&view),
             &self.filter_for(&view),
         ))
     }

@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
+use crate::fixture_run;
+
 /// How long a process asked to stop may take before a journey calls it hung.
 ///
 /// A shutdown here is bounded work — stop accepting, finish the requests in
@@ -59,8 +61,9 @@ pub struct Serving {
     child: Child,
     /// The address the kernel gave it, read off its own first line of output.
     pub address: SocketAddr,
-    /// The runs root it is serving, kept alive for as long as it is.
-    pub runs: TempDir,
+    /// The workspace holding the runs root it serves and the graph records
+    /// beside it, kept alive for as long as it is.
+    workspace: TempDir,
     /// What it has said on its own log, when a journey asked for that to be
     /// captured rather than inherited.
     log: Option<Arc<Mutex<String>>>,
@@ -74,9 +77,9 @@ impl Serving {
     /// one, which is what lets these journeys run beside each other — and beside
     /// another checkout doing the same thing.
     pub fn start(build: impl FnOnce(&Path)) -> Self {
-        let runs = tempfile::tempdir().expect("temp dir");
-        build(runs.path());
-        Self::start_in(runs, &[])
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::start_in(workspace, &[])
     }
 
     /// The same, with the server's environment changed.
@@ -86,9 +89,9 @@ impl Serving {
     /// cannot have one, which is a state an operator really meets and a payload
     /// with no clock in it is the answer to.
     pub fn start_with_env(build: impl FnOnce(&Path), environment: &[(&str, &str)]) -> Self {
-        let runs = tempfile::tempdir().expect("temp dir");
-        build(runs.path());
-        Self::start_in(runs, environment)
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::start_in(workspace, environment)
     }
 
     /// The same, reading the server's own log rather than letting it through to
@@ -98,26 +101,36 @@ impl Serving {
     /// behaviour under test. Inherited otherwise, so a failing journey still
     /// prints the server's own account of what it did.
     pub fn start_with_log(build: impl FnOnce(&Path)) -> Self {
-        let runs = tempfile::tempdir().expect("temp dir");
-        build(runs.path());
-        Self::spawn(runs, &[], true)
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn(workspace, &[], true)
     }
 
-    /// Start a server over a runs root the caller already built.
-    pub fn start_in(runs: TempDir, environment: &[(&str, &str)]) -> Self {
-        Self::spawn(runs, environment, false)
+    /// Start a server over a workspace the caller already built — one
+    /// [`fixture_run::workspace`] laid out, whose runs root is what it serves.
+    pub fn start_in(workspace: TempDir, environment: &[(&str, &str)]) -> Self {
+        Self::spawn(workspace, environment, false)
     }
 
-    fn spawn(runs: TempDir, environment: &[(&str, &str)], capture: bool) -> Self {
+    fn spawn(workspace: TempDir, environment: &[(&str, &str)], capture: bool) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        let runs = workspace.path().join(fixture_run::RUNS_DIR);
         let mut child = Command::new(binary)
             .arg("serve")
             .arg("--runs-root")
-            .arg(runs.path())
+            .arg(&runs)
             .args(["--bind", "127.0.0.1:0"])
             // Fast enough that a journey asserting on a live append finishes in
             // about a second, and still a real poll of the real runs root.
             .args(["--poll-interval-ms", "50"])
+            // Where the fixtures keep the graph records the server reads a run's
+            // declared members from: the same variable the engine and the
+            // sibling CLI read, pointed at this workspace's rather than at the
+            // host's own.
+            .env(
+                onepipeline_ui::store::GRAPH_RECORDS_ENV,
+                fixture_run::graph_records_for(&runs),
+            )
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(if capture {
@@ -148,7 +161,7 @@ impl Serving {
         Self {
             child,
             address,
-            runs,
+            workspace,
             log,
             stopped: false,
         }
@@ -190,13 +203,13 @@ impl Serving {
 
     /// The run directory of `run` under this server's root.
     pub fn run_dir(&self, run: &str) -> std::path::PathBuf {
-        self.runs.path().join(run)
+        self.runs_root().join(run)
     }
 
     /// The root it is serving, for a journey that asks the sibling about the same
     /// runs this server is reading.
-    pub fn runs_root(&self) -> &Path {
-        self.runs.path()
+    pub fn runs_root(&self) -> std::path::PathBuf {
+        self.workspace.path().join(fixture_run::RUNS_DIR)
     }
 
     /// Ask the server to stop the given way, and return the status it exited
@@ -329,6 +342,10 @@ impl ForeignServing {
             .arg(root)
             .args(["--bind", "127.0.0.1:0"])
             .args(["--poll-interval-ms", "50"])
+            .env(
+                onepipeline_ui::store::GRAPH_RECORDS_ENV,
+                fixture_run::graph_records_for(root),
+            )
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

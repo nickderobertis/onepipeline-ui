@@ -1159,12 +1159,14 @@ fn lanes() -> Serving {
 
 /// One node's spans, as an operator opening that node reads them.
 fn node_spans(serving: &Serving, node: &str) -> Vec<Value> {
+    node_spans_of(serving, fixture_run::LANES_RUN_ID, node)
+}
+
+/// The same, for a node of `run`.
+fn node_spans_of(serving: &Serving, run: &str, node: &str) -> Vec<Value> {
     http::get(
         serving.address,
-        &format!(
-            "/api/v2/runs/{}/timeline?scope=node&node={node}",
-            fixture_run::LANES_RUN_ID
-        ),
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
     )
     .json()["spans"]
         .as_array()
@@ -1338,9 +1340,9 @@ fn a_session_is_read_in_the_category_the_run_named_its_member() {
         json!("pr-author")
     );
 
-    // The run's own observer, at no node: `monitor` is the watching member and is
-    // served in the `orchestrator` lane it shares, because the vocabulary a
-    // client switches on is closed and a lane it already has is not widened.
+    // The run's own observer, at no node: `monitor` is the member the observer
+    // graph declared, and it is served under that word — not mapped onto a lane
+    // this crate kept, because it keeps none.
     let run = http::get(
         serving.address,
         &format!(
@@ -1354,29 +1356,32 @@ fn a_session_is_read_in_the_category_the_run_named_its_member() {
         &spans,
         &format!("run-session.{}", fixture_run::WATCHING_CONVERSATION_ID),
     );
-    assert_eq!(watching["agent_role"], json!("orchestrator"));
-    // And no word outside that vocabulary reached the wire.
+    assert_eq!(watching["agent_role"], json!("monitor"));
+    // And every word that reached the wire is one a graph of this run declared —
+    // the observer's two members, the node graphs' worker and the drafting
+    // graph's author — rather than one this crate knows.
     for span in &spans {
         if let Some(role) = span.get("agent_role").and_then(Value::as_str) {
             assert!(
-                ["orchestrator", "worker", "judge", "check-in", "pr-author"].contains(&role),
-                "`{role}` is not a member of `agentRoleSchema`: {span}"
+                ["monitor", "check-in", "worker", "pr-author"].contains(&role),
+                "`{role}` is a word no graph of this run declared: {span}"
             );
         }
     }
 }
 
 #[test]
-fn a_member_this_wire_has_no_word_for_is_not_read_off_the_persona_beside_it() {
+fn a_member_no_graph_declared_is_not_read_off_the_persona_beside_it() {
     let serving = lanes();
 
-    // A session the graph stamped `reviewer`, which `agentRoleSchema` has no word
-    // for, beside the one persona that reads like a role — the literal word
-    // `pr-author`, which is what a host really dispatches a drafting turn under.
-    // The run said what this session was and said something this vocabulary
-    // cannot carry, so no role is served: answering with the persona would put a
-    // *style* over the run's own word for it, and serve a drafting lane for a
-    // session that was not one.
+    // A session the graph stamped `reviewer`, a member no graph of this run
+    // declared, beside the one persona that reads like a member — the literal
+    // word `pr-author`, which the drafting graph does declare and which is what
+    // a host really dispatches a drafting turn under. The run said what this
+    // session was and said something its own declarations cannot vouch for, so
+    // no role is served: answering with the persona would put a *style* over
+    // the run's own word for it, and serve a drafting lane for a session that
+    // was not one.
     let spans = node_spans(&serving, fixture_run::UNNAMED_NODE_ID);
     let dispatch = span_named(
         &spans,
@@ -1420,9 +1425,10 @@ fn a_member_this_wire_has_no_word_for_is_not_read_off_the_persona_beside_it() {
 
     // And the other half of the same rule, which the member is only ever read
     // *ahead* of: a record that stamped no member at all is still read by the
-    // persona it ran under. This dispatch relayed no session, so its
-    // `node-dispatched` — persona `check-in`, no member — is the whole of what
-    // the run said about it.
+    // persona it ran under — where a graph of this run declared that word as a
+    // member, which the observer graph's `check-in` is. This dispatch relayed
+    // no session, so its `node-dispatched` — persona `check-in`, no member — is
+    // the whole of what the run said about it.
     let silent = node_spans(&serving, fixture_run::SILENT_NODE_ID);
     let only = span_named(
         &silent,
@@ -1435,6 +1441,209 @@ fn a_member_this_wire_has_no_word_for_is_not_read_off_the_persona_beside_it() {
             &format!("rollup.{}.agent.check-in", fixture_run::SILENT_NODE_ID)
         )["agent_role"],
         json!("check-in")
+    );
+}
+
+/// A run whose graphs named their members with words nothing here knows.
+fn named_members() -> Serving {
+    Serving::start(|root| {
+        fixture_run::write_named_members(root, fixture_run::NAMED_RUN_ID);
+    })
+}
+
+/// The `agent_role` a span carries, or `None` where it carries none.
+fn role_of(span: &Value) -> Option<&str> {
+    span.get("agent_role").and_then(Value::as_str)
+}
+
+#[test]
+fn a_member_is_served_under_the_word_the_runs_own_graphs_declared_it_as() {
+    let serving = named_members();
+
+    // The run's own observers, at no node: `ticker` and `sentinel` are the
+    // members the observer graph declared, and each is served under exactly
+    // that word — in the order the run relayed them, which is not the alphabet's.
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::NAMED_RUN_ID
+        ),
+    )
+    .json();
+    let spans = run["spans"].as_array().expect("spans").clone();
+    let watching: Vec<(&str, Option<&str>)> = spans
+        .iter()
+        .filter(|span| span["kind"] == "dispatch" && span.get("node_id").is_none())
+        .map(|span| (span["label"].as_str().expect("a label"), role_of(span)))
+        .collect();
+    assert_eq!(
+        watching,
+        vec![
+            (fixture_run::TICKER_CONVERSATION_ID, Some("ticker")),
+            (fixture_run::SENTINEL_CONVERSATION_ID, Some("sentinel")),
+        ]
+    );
+
+    // A node graph's member, the same way: the session was stamped `drafter`
+    // and its graph declared one, so `drafter` is what it is served as — on the
+    // node's own dispatch span, on the run-scope category standing for it, and
+    // on the detail's session link and conversation alike.
+    let drafted = node_spans_of(
+        &serving,
+        fixture_run::NAMED_RUN_ID,
+        fixture_run::DRAFTED_BY_NAME_NODE_ID,
+    );
+    let dispatch = span_named(
+        &drafted,
+        &format!("dispatch.{}", fixture_run::DRAFTER_CONVERSATION_ID),
+    );
+    assert_eq!(dispatch["agent_role"], json!("drafter"), "{dispatch}");
+    assert_eq!(dispatch["transport_role"], json!("agent"));
+    let rollup = span_named(
+        &spans,
+        &format!(
+            "rollup.{}.agent.drafter",
+            fixture_run::DRAFTED_BY_NAME_NODE_ID
+        ),
+    );
+    assert_eq!(rollup["agent_role"], json!("drafter"));
+
+    let detail = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?include_conversations=true",
+            fixture_run::NAMED_RUN_ID
+        ),
+    )
+    .json();
+    let node = detail["run"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|node| node["node"] == json!(fixture_run::DRAFTED_BY_NAME_NODE_ID))
+        .expect("the drafted node");
+    assert_eq!(
+        node["sessions"][0]["agent_role"],
+        json!("drafter"),
+        "{node}"
+    );
+    let conversation = detail["conversations"]
+        .as_array()
+        .expect("conversations")
+        .iter()
+        .find(|document| {
+            document["conversation"]["id"] == json!(fixture_run::DRAFTER_CONVERSATION_ID)
+        })
+        .expect("the drafter's conversation");
+    assert_eq!(conversation["attribution"]["agentRole"], json!("drafter"));
+
+    // And every word that reached the wire is one a graph of this run declared.
+    for span in &spans {
+        if let Some(role) = role_of(span) {
+            assert!(
+                ["ticker", "sentinel", "drafter"].contains(&role),
+                "`{role}` is a word no graph of this run declared: {span}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_that_word() {
+    let serving = named_members();
+    let detail = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}?include_conversations=true",
+            fixture_run::NAMED_RUN_ID
+        ),
+    )
+    .json();
+    let session_of = |node: &str| {
+        detail["run"]["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .find(|row| row["node"] == json!(node))
+            .expect("the node")["sessions"][0]
+            .clone()
+    };
+    let attribution_of = |session: &str| {
+        detail["conversations"]
+            .as_array()
+            .expect("conversations")
+            .iter()
+            .find(|document| document["conversation"]["id"] == json!(session))
+            .expect("the conversation")["attribution"]
+            .clone()
+    };
+
+    // No member stamped, and a persona — `ticker` — the observer graph declared
+    // as a member: the persona is the reading, and it reads as that member.
+    let timed = node_spans_of(
+        &serving,
+        fixture_run::NAMED_RUN_ID,
+        fixture_run::TIMED_NODE_ID,
+    );
+    let dispatch = span_named(
+        &timed,
+        &format!("dispatch.{}", fixture_run::TIMED_CONVERSATION_ID),
+    );
+    assert_eq!(dispatch["agent_role"], json!("ticker"), "{dispatch}");
+    assert_eq!(
+        session_of(fixture_run::TIMED_NODE_ID)["agent_role"],
+        json!("ticker")
+    );
+    assert_eq!(
+        attribution_of(fixture_run::TIMED_CONVERSATION_ID)["agentRole"],
+        json!("ticker")
+    );
+
+    // No member stamped, and a persona — `poet` — no graph declared: the
+    // session is served, and it is served under no role at all.
+    let mused = node_spans_of(
+        &serving,
+        fixture_run::NAMED_RUN_ID,
+        fixture_run::MUSED_NODE_ID,
+    );
+    let dispatch = span_named(
+        &mused,
+        &format!("dispatch.{}", fixture_run::MUSED_CONVERSATION_ID),
+    );
+    assert_eq!(role_of(dispatch), None, "{dispatch}");
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:04:00.000Z"));
+    assert!(session_of(fixture_run::MUSED_NODE_ID)
+        .get("agent_role")
+        .is_none());
+    assert!(
+        attribution_of(fixture_run::MUSED_CONVERSATION_ID)
+            .get("agentRole")
+            .is_none(),
+        "a persona no graph declared was served as a role"
+    );
+
+    // A member stamped — `stranger` — that no graph declared, beside a persona
+    // — `drafter` — that one did: the member decides, the persona is never
+    // consulted, and nothing is served.
+    let strayed = node_spans_of(
+        &serving,
+        fixture_run::NAMED_RUN_ID,
+        fixture_run::STRAYED_NODE_ID,
+    );
+    let dispatch = span_named(
+        &strayed,
+        &format!("dispatch.{}", fixture_run::STRAYED_CONVERSATION_ID),
+    );
+    assert_eq!(role_of(dispatch), None, "{dispatch}");
+    assert!(session_of(fixture_run::STRAYED_NODE_ID)
+        .get("agent_role")
+        .is_none());
+    assert!(
+        attribution_of(fixture_run::STRAYED_CONVERSATION_ID)
+            .get("agentRole")
+            .is_none(),
+        "a member no graph declared was read off the persona beside it"
     );
 }
 
@@ -2656,8 +2865,8 @@ fn a_pointer_naming_no_store_reads_the_one_every_oneharness_process_here_resolve
         "write into the default store",
         "the default store is where this landed",
     );
-    let runs = tempfile::tempdir().expect("temp dir");
-    let dir = fixture_run::write(runs.path(), fixture_run::RUN_ID);
+    let (workspace, runs) = fixture_run::workspace();
+    let dir = fixture_run::write(&runs, fixture_run::RUN_ID);
     fixture_run::relay_harness_session(
         &dir,
         &fixture_run::HarnessSession {
@@ -2672,7 +2881,7 @@ fn a_pointer_naming_no_store_reads_the_one_every_oneharness_process_here_resolve
         },
     );
     let serving = Serving::start_in(
-        runs,
+        workspace,
         &[("XDG_STATE_HOME", state.path().to_str().expect("utf-8"))],
     );
 
@@ -2785,7 +2994,7 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
     // stamped no session onto: the label is the difference, so the timeline must
     // hang no transcript on it.
     fixture_run::append_relayed(
-        &serving.runs.path().join(fixture_run::RUN_ID),
+        &serving.run_dir(fixture_run::RUN_ID),
         "agentgraph",
         "turn-started",
         json!({
@@ -2802,7 +3011,7 @@ fn the_conversation_label_a_producer_stamps_is_what_makes_a_turn_reachable() {
     // beside a node that folded in a session nobody can open is the same broken
     // promise as no number at all.
     fixture_run::append_relayed(
-        &serving.runs.path().join(fixture_run::RUN_ID),
+        &serving.run_dir(fixture_run::RUN_ID),
         "agentgraph",
         "turn-started",
         json!({
@@ -4182,13 +4391,15 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
                 && span["node_id"] == json!(fixture_run::SHIP_NODE_ID)
         })
         .collect();
-    // Two sessions under one semantic role, and the transport half is what tells
-    // them apart: the work, and the lint member that read it.
+    // Two sessions, two categories: the drafting work, read off the persona its
+    // first record carried with no member beside it, and the lint member that
+    // read it — served under the member word the graph declared for it, which
+    // is also the transport it ran as.
     assert_eq!(rollups.len(), 2, "one category, one summary: {rollups:?}");
     assert_eq!(rollups[0]["agent_role"], json!("pr-author"));
     assert_eq!(rollups[0]["transport_role"], json!("agent"));
     assert_eq!(rollups[0]["count"], json!(1));
-    assert_eq!(rollups[1]["agent_role"], json!("pr-author"));
+    assert_eq!(rollups[1]["agent_role"], json!("llmlint"));
     assert_eq!(rollups[1]["transport_role"], json!("llmlint"));
     assert_eq!(rollups[1]["count"], json!(1));
     assert_eq!(
@@ -4221,6 +4432,7 @@ fn the_run_scope_summarizes_a_nodes_sessions_by_the_category_they_ran_under() {
     assert_eq!(dispatches.len(), 2);
     assert_eq!(dispatches[0]["agent_role"], json!("pr-author"));
     assert_eq!(dispatches[0]["transport_role"], json!("agent"));
+    assert_eq!(dispatches[1]["agent_role"], json!("llmlint"));
     assert_eq!(dispatches[1]["transport_role"], json!("llmlint"));
     assert!(
         !node["spans"]
@@ -4762,12 +4974,11 @@ fn the_side_of_the_conversation_a_session_ran_on_is_served_with_it() {
     )
     .json();
     assert_eq!(lint["attribution"]["transportRole"], json!("llmlint"));
-    // `llmlint` is a word in the *transport* vocabulary and in no other, so this
-    // session stamped a member that says which chain ran and nothing about what
-    // the dispatch was for. A stamped member is the reading whether or not this
-    // wire has a word for it, so the persona beside it is not consulted and the
-    // transcript falls to the role every dispatch has.
-    assert_eq!(lint["attribution"]["agentRole"], json!("worker"));
+    // The member the graph declared for its lint side is called `llmlint` too,
+    // and a stamped member is the reading: the persona beside it — `pr-author`,
+    // the word the dispatch ran under — is not consulted, and the session is
+    // served as the member the run recorded it as.
+    assert_eq!(lint["attribution"]["agentRole"], json!("llmlint"));
 
     // The agent side of the same node is the other half of that rule: its first
     // relayed record stamps a persona and no member — `oneagentgraph` names the
@@ -4844,7 +5055,7 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     // that binary says right now, so a build whose attribution moves fails here
     // instead of leaving two readings of one run's clock disagreeing.
     let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
-    let document = onepipeline_ui::telemetry::of_run(serving.runs_root(), &run)
+    let document = onepipeline_ui::telemetry::of_run(&serving.runs_root(), &run)
         .expect("the sibling aggregates the fixture run");
     assert_eq!(timing["wall_ms"], json!(document.wall_ms));
     for (lane, name) in [
@@ -4969,15 +5180,15 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
 
 #[test]
 fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
-    let runs = tempfile::tempdir().expect("temp dir");
-    fixture_run::write(runs.path(), fixture_run::RUN_ID);
+    let (_workspace, runs) = fixture_run::workspace();
+    fixture_run::write(&runs, fixture_run::RUN_ID);
 
     // Asked about a run it does not have: it ran, and refused. The reason names
     // the command, because the alternative is a server serving no clock and no
     // account of why.
     let never_recorded = RunId::try_from("run-that-was-never-recorded").expect("a valid id");
     let refused =
-        telemetry::of_run(runs.path(), &never_recorded).expect_err("the sibling has no such run");
+        telemetry::of_run(&runs, &never_recorded).expect_err("the sibling has no such run");
     assert!(
         matches!(refused, telemetry::Unavailable::Refused(_)),
         "{refused:?}"
@@ -4987,7 +5198,7 @@ fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
     // Not startable at all, which is what a missing install looks like: the
     // message says how to fix it rather than only that it broke.
     let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
-    let missing = telemetry::of_run_from("a-onepipeline-that-is-not-installed", runs.path(), &run)
+    let missing = telemetry::of_run_from("a-onepipeline-that-is-not-installed", &runs, &run)
         .expect_err("nothing to start");
     assert!(
         matches!(missing, telemetry::Unavailable::NoBinary(_)),
@@ -8701,9 +8912,7 @@ fn a_dispatch_with_no_readable_report_alternates_its_own_records() {
     // here: the distinct turns the agent's side of this session relayed.
     let journal = fs::read_to_string(
         serving
-            .runs
-            .path()
-            .join(fixture_run::LANES_RUN_ID)
+            .run_dir(fixture_run::LANES_RUN_ID)
             .join("events.jsonl"),
     )
     .expect("the run's journal");
@@ -9583,7 +9792,7 @@ fn a_run_that_appears_after_the_stream_opened_is_announced_without_reopening_it(
         "the run that appears below is not there yet"
     );
 
-    fixture_run::write(serving.runs_root(), fixture_run::OTHER_RUN_ID);
+    fixture_run::write(&serving.runs_root(), fixture_run::OTHER_RUN_ID);
 
     let changed = stream.next_frame().expect("the new run is noticed");
     assert_eq!(changed.event, "run.changed");

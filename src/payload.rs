@@ -89,29 +89,98 @@ impl Party {
     }
 }
 
-/// The semantic roles a client may be given, from `agentRoleSchema`.
+/// The members a run's recorded graph declarations name.
 ///
-/// A persona outside this set is not served as an `agent_role` at all: the field
-/// is a closed vocabulary a client switches on, so a persona it does not know
-/// must be absent rather than present and unmatched.
-// llmlint: ignore[invalid_states_unrepresentable] this is a *filter* over what a run recorded, not a domain the crate reasons in: a persona the wire's vocabulary has no member for must be dropped rather than parsed, and an enum would have to be turned straight back into these strings to serve them.
-const AGENT_ROLES: [&str; 5] = ["orchestrator", "worker", "judge", "check-in", "pr-author"];
+/// A session's `agent_role` is the **member name the run recorded for it**, and
+/// it is served exactly when one of the run's own graphs declared that member:
+/// the observer graph's run record and every node graph's carry the members
+/// each declared, and `crate::store` reads those records off the run's launch
+/// record and the streams its journal relayed. No member and no role word is
+/// built into this crate — a host's `monitor` is served as `monitor`, its
+/// `check-in` as `check-in`, and a member it named `sentinel` as `sentinel` —
+/// so the lane vocabulary a client draws is the run's rather than one kept
+/// here, and a host that names its members differently loses no lane to it.
+///
+/// A set of words and nothing more: a word is either one some graph of this run
+/// declared or it is not, and that is the only question any reading asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeclaredMembers {
+    names: BTreeSet<String>,
+}
 
-/// Which of those roles each member a run declares is read as.
-///
-/// The observing member is `monitor` and is served in the `orchestrator` lane
-/// deliberately: it is the same lane a reader watches the run's own driving from,
-/// and `agentRoleSchema` is a closed vocabulary a client switches on
-/// exhaustively — so a word that means a lane the client already has is mapped
-/// onto it rather than added beside it.
-// llmlint: ignore[invalid_states_unrepresentable] the same reason as the array above: this maps one wire vocabulary onto another, and both halves are strings this crate reads off a record and writes back onto the wire.
-const ROLE_MEMBERS: [(&str, &str); 5] = [
-    ("worker", "worker"),
-    ("judge", "judge"),
-    ("pr-author", "pr-author"),
-    ("check-in", "check-in"),
-    ("monitor", "orchestrator"),
-];
+impl DeclaredMembers {
+    /// The members `names` declares, in whichever order they arrive.
+    pub fn new(names: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            names: names.into_iter().collect(),
+        }
+    }
+
+    /// Whether some graph of this run declared a member called `word`.
+    fn names(&self, word: &str) -> bool {
+        self.names.contains(word)
+    }
+
+    /// The semantic role one record's session ran under.
+    fn role_of<'e>(&self, event: &'e Envelope) -> Option<&'e str> {
+        self.agent_role(member_label(event), event.labels.persona.as_deref())
+    }
+
+    /// The semantic role a dispatched session ran under, from the first record
+    /// it relayed and — for what that record left unsaid — from the
+    /// `node-dispatched` that opened it.
+    ///
+    /// The session's own stamped member is the whole reading where there is
+    /// one, exactly as [`Self::agent_role`] says: a member no graph declared is
+    /// served as nothing, and the dispatch's persona is not a way around that.
+    /// Only a session that stamped no member is read by a persona — its own
+    /// record's first, and the dispatch's where its record carried none — and a
+    /// dispatch that relayed nothing at all is read by the dispatch alone.
+    fn role_of_dispatched<'e>(
+        &self,
+        first: Option<&'e Envelope>,
+        dispatched: &'e Envelope,
+    ) -> Option<&'e str> {
+        let Some(first) = first else {
+            return self.role_of(dispatched);
+        };
+        match member_label(first) {
+            Some(member) => self.agent_role(Some(member), None),
+            None => self.agent_role(
+                None,
+                first
+                    .labels
+                    .persona
+                    .as_deref()
+                    .or(dispatched.labels.persona.as_deref()),
+            ),
+        }
+    }
+
+    /// The semantic role a run recorded for a session, from the member it named
+    /// it and — only where it named none — from the persona it ran under.
+    ///
+    /// The member is the reading that survives a host naming its personas: a
+    /// persona is a *style* a host invented, so `engineer` and `docs-writer` are
+    /// the ordinary worker under two names, and reading a role off one drops
+    /// every session a host did not happen to name after a role. The member is
+    /// the run's own word for what the session *was*, and it is served as that
+    /// word — when a graph of this run declared it. A stamped member decides the
+    /// reading whether or not it was declared, and the persona beside it is
+    /// never consulted: a record naming a member no declaration knows has said
+    /// what the session was and said something this run cannot vouch for, while
+    /// a persona that happens to read like a member would answer with a *style*
+    /// over the run's own word. The persona is the reading for a record that
+    /// stamped no member at all, which is what a `node-dispatched` is — and it
+    /// is served only where a declaration names its word as a member, never
+    /// through a list of persona words kept here.
+    fn agent_role<'e>(&self, member: Option<&'e str>, persona: Option<&'e str>) -> Option<&'e str> {
+        match member {
+            Some(member) => self.names(member).then_some(member),
+            None => persona.filter(|persona| self.names(persona)),
+        }
+    }
+}
 
 /// The kinds `onevcs` relays, as the wire strings that library writes.
 ///
@@ -1161,7 +1230,7 @@ fn timing_presence(measured: &Measured) -> Value {
 /// A relayed agent-graph envelope carries the session it came from in its
 /// labels; that is the whole of what the journal links, so a session appears
 /// here exactly when one is recorded and never inferred from anything else.
-fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
+fn sessions_of(view: &RunView, node: &str, declared: &DeclaredMembers) -> Vec<Value> {
     let mut seen: BTreeMap<String, Vec<&Envelope>> = BTreeMap::new();
     for event in &view.events {
         if event.source != Source::Agentgraph || event.labels.node.as_deref() != Some(node) {
@@ -1190,7 +1259,7 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
                 "role".into(),
                 json!(relayed_transport_role(events.iter().copied()).as_str()),
             );
-            if let Some(role) = first.and_then(event_agent_role) {
+            if let Some(role) = first.and_then(|event| declared.role_of(event)) {
                 link.insert("agent_role".into(), json!(role));
             }
             if let Some(event) = first {
@@ -1199,39 +1268,6 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
             Value::Object(link)
         })
         .collect()
-}
-
-/// The semantic role one record's session ran under.
-fn event_agent_role(event: &Envelope) -> Option<&'static str> {
-    agent_role(member_label(event), event.labels.persona.as_deref())
-}
-
-/// The semantic role a run recorded for a session, from the member it named it
-/// and — only where it named none — from the persona it ran under.
-///
-/// The member is the reading that survives a host naming its personas: a persona
-/// is a *style* a host invented, so `engineer` and `docs-writer` are the ordinary
-/// worker under two names, and reading a role off one drops every session a host
-/// did not happen to name after a role. The member is the run's own word for what
-/// the session *was*.
-///
-/// So a stamped member decides the reading whether or not this crate has a word
-/// for it, and the persona beside it is never consulted: a record naming a member
-/// outside [`ROLE_MEMBERS`] has said what the session was and said something this
-/// vocabulary cannot carry, while a persona that happens to read like a role — the
-/// literal word `pr-author` — would answer with a *style* over the run's own word
-/// for it. The persona is the reading for a record that stamped no member at all,
-/// which is what a `node-dispatched` is.
-fn agent_role(member: Option<&str>, persona: Option<&str>) -> Option<&'static str> {
-    match member {
-        Some(member) => ROLE_MEMBERS
-            .into_iter()
-            .find_map(|(named, role)| (named == member).then_some(role)),
-        None => {
-            let persona = persona?;
-            AGENT_ROLES.into_iter().find(|role| *role == persona)
-        }
-    }
 }
 
 /// The statuses that mean this node's own work ran, or was cut short, without
@@ -1376,7 +1412,10 @@ fn node_telemetry(
     // No per-node usage: the sibling folds what a run spent, not what each of
     // its nodes did, and splitting it here would be this crate answering a
     // question with a second reading of the records the SDK already read.
-    row.insert("sessions".into(), json!(sessions_of(view, node)));
+    row.insert(
+        "sessions".into(),
+        json!(sessions_of(view, node, transcripts.declared)),
+    );
     row.insert("turns".into(), json!(turns_of(transcripts, Some(node))));
     // What the lint transport recorded here, which is a party of the pair rather
     // than a producer of its own: a member the graph ran under that transport
@@ -2043,6 +2082,7 @@ fn last_seq(view: &RunView) -> u64 {
 #[must_use]
 pub fn run_detail(
     view: &RunView,
+    declared: &DeclaredMembers,
     include_conversations: bool,
     telemetry: Option<&RunTelemetry>,
     filter: &EventFilter,
@@ -2052,7 +2092,7 @@ pub fn run_detail(
     // numbers or lists a turn: the count beside a node and the transcript a
     // reader opens from it are two readings of it, and reading it twice is how
     // they come to disagree.
-    let transcripts = Transcripts::of(view);
+    let transcripts = Transcripts::of(view, declared);
     // Everything below the transcripts is read from the whole journal, whatever
     // the filter said: the graph's statuses, the answer about each in-flight
     // node's turn, the evidence each node kept and the run's own clock are what
@@ -2427,8 +2467,12 @@ fn node_details(view: &RunView) -> Value {
 /// settled member's stored report where the run holds one, and out of the
 /// session's own records where it does not.
 #[must_use]
-pub fn conversations(view: &RunView) -> Vec<Value> {
-    conversations_under(view, &Transcripts::of(view), &EventFilter::default())
+pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
+    conversations_under(
+        view,
+        &Transcripts::of(view, declared),
+        &EventFilter::default(),
+    )
 }
 
 /// The transcripts a reader's filter admits, each as the whole session it is.
@@ -2456,7 +2500,12 @@ fn conversations_under(
             if events.is_empty() {
                 return Vec::new();
             }
-            let mut served = vec![conversation_document(view, session, &events)];
+            let mut served = vec![conversation_document(
+                view,
+                transcripts.declared,
+                session,
+                &events,
+            )];
             served.extend(session.stored.as_ref().and_then(|stored| {
                 judge_conversation(
                     view,
@@ -2482,6 +2531,11 @@ fn conversations_under(
 /// listing, the counting and the numbering all need what is in it.
 struct Transcripts<'a> {
     sessions: Vec<SessionTranscript<'a>>,
+    /// The members the run's graphs declared, which is what every session's
+    /// `agent_role` is read against: folded beside the transcripts because it is
+    /// the other half of what a session *is*, and read once for the same reason
+    /// they are.
+    declared: &'a DeclaredMembers,
 }
 
 /// One session, with everything any reading of its transcript is taken from.
@@ -2517,7 +2571,7 @@ struct StoredReport<'a> {
 
 impl<'a> Transcripts<'a> {
     /// Fold every session the run relayed, in the order it first relayed them.
-    fn of(view: &'a RunView) -> Self {
+    fn of(view: &'a RunView, declared: &'a DeclaredMembers) -> Self {
         let mut order: Vec<&'a str> = Vec::new();
         let mut grouped: BTreeMap<&'a str, Vec<&'a Envelope>> = BTreeMap::new();
         for event in &view.events {
@@ -2570,7 +2624,7 @@ impl<'a> Transcripts<'a> {
                 })
             })
             .collect();
-        Self { sessions }
+        Self { sessions, declared }
     }
 }
 
@@ -3511,6 +3565,7 @@ fn turn_key(event: &Envelope) -> Option<(u64, String)> {
 /// `docs/contract.md` states the same precedence for a reader of the wire.
 fn conversation_document(
     view: &RunView,
+    declared: &DeclaredMembers,
     transcript: &SessionTranscript<'_>,
     events: &[&Envelope],
 ) -> Value {
@@ -3719,10 +3774,12 @@ fn conversation_document(
         "transportRole".into(),
         json!(relayed_transport_role(events.iter().copied()).as_str()),
     );
-    attribution.insert(
-        "agentRole".into(),
-        json!(first.and_then(event_agent_role).unwrap_or("worker")),
-    );
+    // Served only where the run recorded a member a graph of its own declared:
+    // a session with no such word is served none rather than a default this
+    // crate chose for it.
+    if let Some(role) = first.and_then(|event| declared.role_of(event)) {
+        attribution.insert("agentRole".into(), json!(role));
+    }
     if let Some(persona) = first.and_then(|event| event.labels.persona.clone()) {
         attribution.insert("persona".into(), json!(persona));
     }
@@ -3745,12 +3802,16 @@ fn conversation_document(
     })
 }
 
-/// The member word both closed role vocabularies spell the judge with.
+/// The party the judge's own lane and conversation are attributed to, on both
+/// halves of the role pair.
 ///
-/// Resolved through [`agent_role`] and [`Party::named`] rather than written onto
-/// the wire, so a vocabulary that stopped carrying it fails to resolve here
-/// instead of serving a word no client switches on.
-const JUDGE_MEMBER: &str = "judge";
+/// The judge is a *party* of a two-party member and not a member of its own:
+/// no graph declares it, no record stamps a `member` for it, and the report
+/// that is the whole of what a run holds about that side records it under
+/// `role: judge` — so its `agent_role` is the transport's own word rather than
+/// a member name read against the run's declarations. That word is the wire's,
+/// spelled once by [`Party::as_str`], not a role word kept here.
+const JUDGE_PARTY: Party = Party::Judge;
 
 /// The report's own rows for the side that supervised a dispatch, ordered by the
 /// producer's 1-based turn counter — the join [`agent_session`] makes on the
@@ -3806,8 +3867,8 @@ fn judge_conversation(
 ) -> Option<Value> {
     let links = judge_links(report);
     let (opened, closed) = judge_interval(report)?;
-    let agent_role = agent_role(Some(JUDGE_MEMBER), None)?;
-    let transport = Party::named(JUDGE_MEMBER)?;
+    let agent_role = JUDGE_PARTY.as_str();
+    let transport = JUDGE_PARTY;
     let id = judge_session(session);
     let first = events.first().copied();
     let node = first.and_then(|event| event.labels.node.clone());
@@ -3887,7 +3948,7 @@ fn judge_conversation(
 /// session's own with `.judge` after it, which `check_segment` admits as a bare
 /// identifier, so the route resolves it through the same lookup as any other.
 fn judge_session(session: &str) -> String {
-    format!("{session}.{JUDGE_MEMBER}")
+    format!("{session}.{}", JUDGE_PARTY.as_str())
 }
 
 /// One judge turn: bounded and measured, and not transcribed — see
@@ -3984,8 +4045,12 @@ fn judge_conclusion(
 
 /// One conversation by id, or `None` when the run records none by that name.
 #[must_use]
-pub fn conversation(view: &RunView, id: &ConversationId) -> Option<Value> {
-    conversations(view)
+pub fn conversation(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    id: &ConversationId,
+) -> Option<Value> {
+    conversations(view, declared)
         .into_iter()
         .find(|document| document["conversation"]["id"] == json!(id.as_str()))
 }
@@ -4168,8 +4233,13 @@ impl Lens<'_> {
 
 /// The whole of `GET /api/v2/runs/{run}/timeline`'s payload.
 #[must_use]
-pub fn timeline(view: &RunView, scope: &Scope<'_>, filter: &EventFilter) -> Value {
-    let transcripts = Transcripts::of(view);
+pub fn timeline(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    scope: &Scope<'_>,
+    filter: &EventFilter,
+) -> Value {
+    let transcripts = Transcripts::of(view, declared);
     let turns = turn_ids(view, &transcripts);
     let lens = Lens {
         turns: &turns,
@@ -4690,7 +4760,7 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
         );
         if let Some(role) = relayed
             .first()
-            .and_then(|(_, event)| event_agent_role(event))
+            .and_then(|(_, event)| lens.transcripts.declared.role_of(event))
         {
             span.insert("agent_role".into(), json!(role));
         }
@@ -4725,7 +4795,12 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
         });
         spans.extend(waiting_span(view, settled, &node_id, node));
         spans.extend(queued_spans(&mine, &node_id, node));
-        spans.extend(role_rollups(&mine, &node_id, node));
+        spans.extend(role_rollups(
+            &mine,
+            &node_id,
+            node,
+            lens.transcripts.declared,
+        ));
         spans.extend(kept_spans(view, &mine, &node_id, node));
     }
     spans
@@ -5290,7 +5365,12 @@ fn kept_spans(
 /// The category is the *pair* and not either half of it, which is what tells a
 /// lint run from the worker whose semantic role it borrows: both are `worker`
 /// work, and only the transport half says which of them ran.
-fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<Value> {
+fn role_rollups(
+    events: &[(usize, &Envelope)],
+    parent: &str,
+    node: &str,
+    declared: &DeclaredMembers,
+) -> Vec<Value> {
     let dispatched = events.iter().find(|(_, event)| {
         event.source == Source::Pipeline
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
@@ -5308,10 +5388,8 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
     });
     let mut counted: Vec<Category> = Vec::new();
     for (session, relayed) in relayed_sessions(events) {
-        let Some(role) = relayed
-            .first()
-            .and_then(|(_, event)| event_agent_role(event))
-            .or_else(|| event_agent_role(start))
+        let Some(role) =
+            declared.role_of_dispatched(relayed.first().map(|(_, event)| *event), start)
         else {
             continue;
         };
@@ -5333,7 +5411,7 @@ fn role_rollups(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
         // Dispatched and nothing relayed: still one category, because the node
         // was dispatched and the row has to say so. Nothing bounds it but the
         // node's own window, which is all the run said about it.
-        if let Some(role) = event_agent_role(start) {
+        if let Some(role) = declared.role_of(start) {
             counted.extend(Moment::of(start).map(|began| {
                 Category::of(
                     (transport_role(start), role),
@@ -5380,15 +5458,18 @@ enum Reach {
 /// One category of a node's sessions, and the interval they ran over between
 /// them: the transport-and-semantic pair that names it, the earliest start
 /// among them, and how far their ends have got.
-struct Category {
-    pair: (Party, &'static str),
+struct Category<'r> {
+    /// The party that ran the sessions and the member word the run recorded
+    /// for them — borrowed from the record that stamped it, because the word
+    /// is the run's own and this crate keeps no copy of it.
+    pair: (Party, &'r str),
     count: usize,
     started: Moment,
     reach: Reach,
 }
 
-impl Category {
-    fn of(pair: (Party, &'static str), started: Moment, ended: Option<Moment>) -> Self {
+impl<'r> Category<'r> {
+    fn of(pair: (Party, &'r str), started: Moment, ended: Option<Moment>) -> Self {
         Self {
             pair,
             count: 1,
@@ -5560,10 +5641,10 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
             }),
         );
-        if let Some(role) = relayed
-            .first()
-            .and_then(|(_, event)| event_agent_role(event))
-            .or_else(|| event_agent_role(start))
+        if let Some(role) = lens
+            .transcripts
+            .declared
+            .role_of_dispatched(relayed.first().map(|(_, event)| *event), start)
         {
             span.insert("agent_role".into(), json!(role));
         }
@@ -5606,8 +5687,8 @@ fn judge_span(
         .as_ref()
         .map(|stored| &stored.report)?;
     let (opened, closed) = judge_interval(report)?;
-    let agent_role = agent_role(Some(JUDGE_MEMBER), None)?;
-    let transport = Party::named(JUDGE_MEMBER)?;
+    let agent_role = JUDGE_PARTY.as_str();
+    let transport = JUDGE_PARTY;
     let id = judge_session(session);
     let mut span = dispatch.clone();
     span.insert("id".into(), json!(format!("dispatch.{id}")));
@@ -5758,9 +5839,13 @@ pub type Signature = (usize, u64);
 /// anything it is watching — and a digest over the whole store would wake it on
 /// every tool call the filter exists to keep out of its way.
 #[must_use]
-pub fn conversation_signature(view: &RunView, filter: &EventFilter) -> String {
+pub fn conversation_signature(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    filter: &EventFilter,
+) -> String {
     let mut hasher = Sha256::new();
-    for document in conversations_under(view, &Transcripts::of(view), filter) {
+    for document in conversations_under(view, &Transcripts::of(view, declared), filter) {
         hasher.update(document.to_string().as_bytes());
     }
     hasher
