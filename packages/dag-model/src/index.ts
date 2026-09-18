@@ -145,8 +145,19 @@ export const API_V2_FILTER_PROFILES = {
  * field `15` served is served with the same meaning; the literal moves because a
  * client that has never seen `judges` shows a panel's dispatch as though no judge
  * had said anything about any of its turns.
+ *
+ * `17` opens the `agent_role` vocabulary. Under `16` a session's `agent_role` — on
+ * a run's session links and on a conversation's attribution — was one of five
+ * words the server kept, and a member a run recorded under any other name was
+ * mapped onto one of them or dropped. Under `17` it is the member name the run
+ * recorded for the session, served where the run's own recorded graph
+ * declarations name that member, and held only to `oneagentgraph`'s member-name
+ * grammar; a conversation's `attribution.agentRole` is optional, because a session
+ * the run recorded no declared member for carries none. The literal moves because
+ * a client that switched on the closed vocabulary exhaustively misreads an open
+ * one.
  */
-export const TELEMETRY_SCHEMA_VERSION = 16;
+export const TELEMETRY_SCHEMA_VERSION = 17;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -154,6 +165,15 @@ export const TELEMETRY_SCHEMA_VERSION = 16;
  * `3` is where a `rollup` span stopped implying a dispatch: one may now carry no
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
+ *
+ * `10` is where a span's `agent_role` became the member name the run's own graphs
+ * declared, as telemetry `17` is for the same field elsewhere. A server on `9`
+ * serves one of five words it keeps and the observer's `monitor` member as
+ * `orchestrator`; a server on `10` serves the run's own word for every session
+ * whose member a graph of that run declared, and no word at all for one none
+ * did. The lanes a reader sees are therefore the run's members under the run's
+ * names, one per distinct role a payload serves, in the order it serves them;
+ * the `run` span the engine's own driving is drawn under keeps its kind.
  *
  * `7` is where an event began carrying the release it was about. A server on `6`
  * serves the six release kinds as a kind and a stamp alone, so a node held on a
@@ -197,7 +217,7 @@ export const TELEMETRY_SCHEMA_VERSION = 16;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 9;
+export const TIMELINE_SCHEMA_VERSION = 10;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -252,16 +272,23 @@ export const timingSchema = openObject({
 /**
  * The two role vocabularies, declared once here because three payloads carry them:
  * a conversation's attribution, a node's session links, and a timeline dispatch
- * span. `transportRole` is the party oneharness recorded; `agentRole` is what the
- * dispatch was for.
+ * span. `transportRole` is the party oneharness recorded, and it is closed — a
+ * dispatch has an agent side, a judge side and a lint side and no other.
+ * `agentRole` is the member name the run recorded for the session, served where a
+ * graph of that run declared it, and it is **open**: the words are the run's own,
+ * and the one thing held here is `oneagentgraph`'s grammar for a member's name —
+ * `config::is_member_name`, as `MemberName::parse` states it — because a member's
+ * name is a path component in that library's run directory. Letters, digits,
+ * hyphens and underscores, and at least one of them; not the empty string, not a
+ * separator, not whitespace, not `..`.
  */
-export const agentRoleSchema = z.enum([
-  "orchestrator",
-  "worker",
-  "judge",
-  "check-in",
-  "pr-author",
-]);
+export const MEMBER_NAME = /^[A-Za-z0-9_-]+$/;
+export const agentRoleSchema = z
+  .string()
+  .regex(
+    MEMBER_NAME,
+    "a member name: letters, digits, hyphens and underscores",
+  );
 export const transportRoleSchema = z.enum(["agent", "judge", "llmlint"]);
 
 const usageValue = nonnegative.nullable();
@@ -919,7 +946,9 @@ export const dagConversationSchema = openObject({
     launchId: z.string().optional(),
     launcher: z.enum(["claude-code", "codex", "unknown"]).optional(),
     transportRole: transportRoleSchema,
-    agentRole: agentRoleSchema,
+    // Absent for a session the run recorded no declared member for, which is
+    // what a session under a persona no graph declared is.
+    agentRole: agentRoleSchema.optional(),
     parentConversationId: z.string().optional(),
     persona: z.string().optional(),
     finishedAt: timestamp.nullable().optional(),
@@ -1382,9 +1411,10 @@ export type Failure = z.infer<typeof failureSchema>;
 export type NodeState = z.infer<typeof nodeStateSchema>;
 export type NodeStatus = z.infer<typeof nodeStatusSchema>;
 /**
- * The two closed role vocabularies a dispatch is served with. Exported so a consumer
- * can key a table on them rather than restating their members as strings — which is
- * what makes a role added here fail to compile there instead of falling through.
+ * The two role vocabularies a dispatch is served with: the transport's, closed, so a
+ * consumer can key a table on it and have a party added here fail to compile there;
+ * and the agent's, open, which is a member name the run itself chose and no table
+ * here can be keyed on.
  */
 export type AgentRole = z.infer<typeof agentRoleSchema>;
 export type TransportRole = z.infer<typeof transportRoleSchema>;

@@ -32,7 +32,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(16), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(17), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -624,7 +624,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(9));
+    assert_eq!(body["timeline_schema_version"], json!(10));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -8981,7 +8981,7 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
     .json();
     // No field is added by this reading and no vocabulary moves for it, so the
     // envelope carrying it declares the version it already declared.
-    assert_eq!(served["telemetry_schema_version"], json!(16));
+    assert_eq!(served["telemetry_schema_version"], json!(17));
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
 
     let finished = &turns[0];

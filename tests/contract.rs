@@ -589,12 +589,12 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 16);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 17);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 9);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 10);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"

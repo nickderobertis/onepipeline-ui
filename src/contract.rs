@@ -86,7 +86,22 @@ pub const API_VERSION: u32 = 2;
 /// served with the same meaning. The version moves because a client that has
 /// never seen `judges` reads a stacked panel's dispatch as though no judge had
 /// said anything about any turn of it.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 16;
+///
+/// **Schema 17 opens the `agent_role` vocabulary.** Under 16 a session's
+/// `agent_role` — on a run's session links and on a conversation's attribution
+/// — was one of five words this crate kept, and a member a run recorded under
+/// any other name was mapped onto one of them or dropped. Under 17 it is the
+/// **member name the run recorded for the session**, served exactly where one
+/// of the run's own recorded graph declarations — the observer graph's or a
+/// node graph's — names that member: a host's `monitor` is served as `monitor`
+/// and a member named `sentinel` as `sentinel`. A session stamped with a member
+/// no declaration names, or with none and a persona none names, is served no
+/// `agent_role`; a conversation's attribution may therefore carry none, where
+/// 16 defaulted it to `worker`. The word is held to `oneagentgraph`'s own
+/// member-name grammar and to nothing narrower, and the version moves because a
+/// client that switched on the closed vocabulary exhaustively misreads an open
+/// one.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 17;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -173,7 +188,20 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 16;
 /// declared, and the one closed list this build refuses to keep is a list of
 /// them. Additive exactly as `release` was in 7 — every other span and every
 /// event is byte-for-byte what 8 served.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 9;
+///
+/// **Schema 10 opens the `agent_role` vocabulary, as telemetry schema 17 does
+/// for the same field elsewhere.** Under 9 a `dispatch` or `rollup` span's
+/// `agent_role` was one of five words this crate kept, and the observer's
+/// `monitor` member was served as `orchestrator`. Under 10 it is the member
+/// name the run recorded for the session, served where the run's own recorded
+/// graph declarations name that member — so the lanes a client draws are the
+/// run's members under the run's own words, one per distinct role a payload
+/// serves, in the order it serves them. A session stamped with a member no
+/// declaration names, or with none and a persona none names, carries no
+/// `agent_role`. The `run` span the engine's own driving is drawn under keeps
+/// its kind and its label: it is the engine's lane, not a member's. The word
+/// is held to `oneagentgraph`'s member-name grammar and to nothing narrower.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 10;
 
 /// The largest run-list page any request can ask for.
 ///
