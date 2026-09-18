@@ -21,7 +21,7 @@ import {
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { API_V2_PATHS } from "@onepipeline-ui/dag-model";
+import { API_V2_PATHS, parseRunTimeline } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -2915,14 +2915,17 @@ test("draws one lane per member word the run's own graphs declared, as served", 
 }) => {
   const named = runs().named;
   // The words, in the order the server serves them: read off the same route the
-  // app reads, so the expectation is the payload's rather than a copy of the
-  // fixture's — and checked against what the fixture said it wrote, so a corpus
-  // that stopped carrying the case fails here rather than passing vacuously.
-  const atRun = await (
-    await page.request.get(`/api/v2/runs/${named}/timeline?scope=run`)
-  ).json();
+  // app reads and through the same parser it narrows a payload with, so the
+  // expectation is the payload's rather than a copy of the fixture's — and
+  // checked against what the fixture said it wrote, so a corpus that stopped
+  // carrying the case fails here rather than passing vacuously.
+  const atRun = parseRunTimeline(
+    await (
+      await page.request.get(`/api/v2/runs/${named}/timeline?scope=run`)
+    ).json(),
+  );
   const served: string[] = [];
-  for (const span of atRun.spans as { agent_role?: string }[]) {
+  for (const span of atRun.spans) {
     if (span.agent_role !== undefined && !served.includes(span.agent_role))
       served.push(span.agent_role);
   }
@@ -2937,9 +2940,7 @@ test("draws one lane per member word the run's own graphs declared, as served", 
   // Served more than once — the second node ran the same member — so a lane per
   // *span* would draw one of them twice.
   expect(
-    (atRun.spans as { agent_role?: string }[]).filter(
-      (span) => span.agent_role === served.at(-1),
-    ).length,
+    atRun.spans.filter((span) => span.agent_role === served.at(-1)).length,
   ).toBeGreaterThan(1);
 
   await openObservatory(page, `/?run=${named}&view=overall`);

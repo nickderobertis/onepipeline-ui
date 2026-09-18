@@ -88,16 +88,12 @@ assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
 **The server reads a second store beside the runs root, and it is the
 engine's to place.** A session's `agent_role` is the member name the run's own
 graph declared for it, and those declarations live in `oneagentgraph`'s run
-records — one per graph run, in that library's state directory rather than in
-the run store. `onepipeline-api serve` resolves that directory exactly as the
-engine and the sibling CLI do — `ONEAGENTGRAPH_STATE_DIR`, else
+records, in that library's state directory rather than in the run store.
+`onepipeline-api serve` resolves that directory exactly as the engine and the
+sibling CLI do — `ONEAGENTGRAPH_STATE_DIR`, else
 `~/.local/state/oneagentgraph/runs` — so a server run where the engine ran reads
-what the engine wrote and needs no flag for it. A server run elsewhere sets the
-variable; one that reaches no records serves every session with no role, which
-is the honest answer and also indistinguishable from a graph that declared
-nothing. Every fixture here writes those records beside the runs it serves and
-every harness points the served binary at them (`tests/support/fixture_run.rs`,
-`apps/dag-ui-e2e/fixtures/runs.mjs`); `src/AGENTS.md` has the reading itself.
+what the engine wrote and needs no flag for it; a server run elsewhere sets the
+variable, and one that reaches no records serves every session with no role.
 
 **One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
 edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the

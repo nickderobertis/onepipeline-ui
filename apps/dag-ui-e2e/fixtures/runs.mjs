@@ -2292,7 +2292,6 @@ function writeBusyRun(root) {
   journal.write();
 }
 
-/** Write every run this fixture serves, oldest first. */
 /**
  * The run [`NAMED_RUN`] describes: two observers the observer graph declared under
  * words of its own, and two nodes run by the members its node graph declared.
@@ -2373,6 +2372,7 @@ function writeNamedRun(root) {
   journal.write();
 }
 
+/** Write every run this fixture serves, oldest first. */
 export function buildRuns(root) {
   mkdirSync(root, { recursive: true });
   writeEventlessRun(root);

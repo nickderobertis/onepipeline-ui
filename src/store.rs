@@ -83,11 +83,13 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// declares this name as a private `const` in its binary, so there is no library
 /// item to name. What matters is that all three read the *same* name, so the
 /// records the engine's launches wrote are the records this store reads.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the one source is a private `const` in `oneagentgraph`'s binary and the engine's own restatement of it is private too, so there is no declaration a gate could read; the engine records the same gap in its `docs/contract-divergences.md`, and the surface that would close it — a library entry point that names its keys — is the sibling's to add.
 pub const GRAPH_RECORDS_ENV: &str = "ONEAGENTGRAPH_STATE_DIR";
 
 /// Where `oneagentgraph` keeps its run records when nothing says otherwise,
 /// under the home directory — resolved exactly as that CLI and the engine
 /// resolve it, so a host that configured neither still reads what it recorded.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the default is computed inside `oneagentgraph`'s binary from `HOME` and a literal no library item declares, so there is nothing to import and no declaration to gate against; the value is a fact about where that CLI writes, restated here so a host that configured nothing is read where it wrote.
 const GRAPH_RECORDS_UNDER_HOME: &str = ".local/state/oneagentgraph/runs";
 
 /// Where this process would read graph records from, as the engine decides it:
@@ -95,8 +97,12 @@ const GRAPH_RECORDS_UNDER_HOME: &str = ".local/state/oneagentgraph/runs";
 ///
 /// A path and not a validated directory: a host that has never run an observer
 /// graph has no such directory, and that is a host whose sessions are served
-/// with no `agent_role` rather than one this server refuses to start on.
+/// with no `agent_role` rather than one this server refuses to start on. Nor is
+/// the value itself checked: it has to resolve to the byte the engine resolved
+/// when it wrote the records, and a reading that refused what the engine
+/// accepted would read a different store than the engine wrote.
 #[must_use]
+// llmlint: ignore[boundary_inputs_validated] the variable is read exactly as the engine and the sibling CLI read it — a path, taken verbatim — because the property this store needs is that it looks where they wrote; a value they accept and this refuses is a store nothing here can find, and the path is only ever read from, never created or written.
 pub fn graph_records_from_env() -> PathBuf {
     std::env::var_os(GRAPH_RECORDS_ENV).map_or_else(
         || {
