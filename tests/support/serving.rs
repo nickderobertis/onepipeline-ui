@@ -103,34 +103,56 @@ impl Serving {
     pub fn start_with_log(build: impl FnOnce(&Path)) -> Self {
         let (workspace, runs) = fixture_run::workspace();
         build(&runs);
-        Self::spawn(workspace, &[], true)
+        Self::spawn(workspace, &[], true, None)
     }
 
     /// Start a server over a workspace the caller already built — one
     /// [`fixture_run::workspace`] laid out, whose runs root is what it serves.
     pub fn start_in(workspace: TempDir, environment: &[(&str, &str)]) -> Self {
-        Self::spawn(workspace, environment, false)
+        Self::spawn(workspace, environment, false, None)
     }
 
-    fn spawn(workspace: TempDir, environment: &[(&str, &str)], capture: bool) -> Self {
+    /// The same, told nothing about where the graph records are and given
+    /// `home` as its home directory instead — the host an operator's own
+    /// server runs on, where the engine wrote the records under `HOME` and
+    /// nothing set the variable that would name them.
+    pub fn start_under_home(workspace: TempDir, home: &Path) -> Self {
+        Self::spawn(workspace, &[], false, Some(home))
+    }
+
+    fn spawn(
+        workspace: TempDir,
+        environment: &[(&str, &str)],
+        capture: bool,
+        home: Option<&Path>,
+    ) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let runs = workspace.path().join(fixture_run::RUNS_DIR);
-        let mut child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .arg("serve")
             .arg("--runs-root")
             .arg(&runs)
             .args(["--bind", "127.0.0.1:0"])
             // Fast enough that a journey asserting on a live append finishes in
             // about a second, and still a real poll of the real runs root.
-            .args(["--poll-interval-ms", "50"])
+            .args(["--poll-interval-ms", "50"]);
+        match home {
             // Where the fixtures keep the graph records the server reads a run's
             // declared members from: the same variable the engine and the
             // sibling CLI read, pointed at this workspace's rather than at the
             // host's own.
-            .env(
+            None => command.env(
                 onepipeline_ui::store::GRAPH_RECORDS_ENV,
                 fixture_run::graph_records_for(&runs),
-            )
+            ),
+            // Or nothing at all, so the server resolves them as the engine does
+            // on a host that configured nothing: under the home it is given.
+            Some(home) => command
+                .env_remove(onepipeline_ui::store::GRAPH_RECORDS_ENV)
+                .env("HOME", home),
+        };
+        let mut child = command
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(if capture {

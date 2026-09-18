@@ -59,6 +59,33 @@ pub fn graph_records_for(runs_root: &Path) -> PathBuf {
         .join(GRAPH_RECORDS_DIR)
 }
 
+/// The graph run one session id names: `{stream}.{member}`, as that library
+/// spells one, so the stream is everything before the last `.`.
+pub fn stream_of(session: &str) -> &str {
+    session
+        .rsplit_once('.')
+        .map_or(session, |(stream, _)| stream)
+}
+
+/// Write one graph run's record as `record`, whatever shape that is.
+///
+/// For the records [`declare_graph`] cannot write through the sibling's own
+/// type: one a later build wrote, one from before the sibling kept its
+/// declarations, one carrying a word the member grammar refuses. What the
+/// server makes of each is the journey's to say.
+pub fn write_graph_record(runs_root: &Path, graph_run: &str, record: Value) {
+    let dir = graph_records_for(runs_root).join(graph_run);
+    fs::create_dir_all(&dir).expect("the graph run's directory");
+    fs::write(dir.join(oneagentgraph::run::RECORD_FILE), pretty(&record))
+        .expect("the graph run's record");
+}
+
+/// Take one graph run's record away, as a host that never held it.
+pub fn remove_graph_record(runs_root: &Path, graph_run: &str) {
+    fs::remove_dir_all(graph_records_for(runs_root).join(graph_run))
+        .expect("the graph run's directory was there to remove");
+}
+
 /// Record that one graph run declared `members`, as `oneagentgraph` records it.
 ///
 /// `graph_run` is the id that library minted for the run — which is the
@@ -281,7 +308,7 @@ pub const SUPERVISED_NODE_ID: &str = "supervised";
 /// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
 /// mints one — the pair has to agree or nothing joins a session to the records
 /// that opened and closed it.
-const LANE_STREAMS: [&str; 10] = [
+pub const LANE_STREAMS: [&str; 10] = [
     "node-scope-1786925520001-4311",
     "node-scope-1786925520002-4311",
     "node-scope-1786925520003-4311",
@@ -1099,13 +1126,30 @@ pub fn append(dir: &Path, kind: &str, payload: Value) {
 /// and the member the producing library named, and a journey about what this
 /// crate makes of one has to be able to write exactly that.
 pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, payload: Value) {
+    append_relayed_as(dir, LIVE_STREAM, source, kind, labels, payload);
+}
+
+/// The same, on `stream` — the graph run a session belongs to, for a journey
+/// about what the record of that run says.
+pub fn append_relayed_on(dir: &Path, stream: &str, kind: &str, labels: Value, payload: Value) {
+    append_relayed_as(dir, stream, "agentgraph", kind, labels, payload);
+}
+
+fn append_relayed_as(
+    dir: &Path,
+    stream: &str,
+    source: &str,
+    kind: &str,
+    labels: Value,
+    payload: Value,
+) {
     let journal = dir.join("events.jsonl");
     let existing = fs::read_to_string(&journal).unwrap_or_default();
     let seq = existing.lines().count();
     let line = json!({
         "v": 1,
         "ts": "2026-08-07T12:01:00.000Z",
-        "stream": "a-recording-host-4243",
+        "stream": stream,
         "seq": seq,
         "source": source,
         "kind": kind,

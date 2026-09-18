@@ -85,16 +85,6 @@ release from `onepipeline::VERSION`, so a host pinning the engine that writes a
 run store and this reader of it separately can *prove* the two match rather than
 assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
 
-**The server reads a second store beside the runs root, and it is the
-engine's to place.** A session's `agent_role` is the member name the run's own
-graph declared for it, and those declarations live in `oneagentgraph`'s run
-records, in that library's state directory rather than in the run store.
-`onepipeline-api serve` resolves that directory exactly as the engine and the
-sibling CLI do — `ONEAGENTGRAPH_STATE_DIR`, else
-`~/.local/state/oneagentgraph/runs` — so a server run where the engine ran reads
-what the engine wrote and needs no flag for it; a server run elsewhere sets the
-variable, and one that reaches no records serves every session with no role.
-
 **One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
 edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the
 bounds on what a read may do to a runs root — the defect that made one open

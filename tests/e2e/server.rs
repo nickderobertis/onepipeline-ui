@@ -1648,6 +1648,204 @@ fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_t
 }
 
 #[test]
+fn the_graph_records_are_read_from_where_the_engine_keeps_them_when_nothing_names_them() {
+    // The host an operator's own server runs on: the engine wrote every graph
+    // run's record under `HOME`, and nothing set `ONEAGENTGRAPH_STATE_DIR`. The
+    // fixture wrote the records where the harness keeps them, so they are moved
+    // to where that library keeps them by default and the server is told only
+    // where home is.
+    let (workspace, runs) = fixture_run::workspace();
+    fixture_run::write_lanes(&runs, fixture_run::LANES_RUN_ID);
+    let home = tempfile::tempdir().expect("the home directory");
+    let kept = home.path().join(".local/state/oneagentgraph/runs");
+    fs::create_dir_all(kept.parent().expect("a parent")).expect("the state directory");
+    fs::rename(fixture_run::graph_records_for(&runs), &kept).expect("the records move");
+    let serving = Serving::start_under_home(workspace, home.path());
+
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json();
+    let spans = run["spans"].as_array().expect("spans").clone();
+    let watching = span_named(
+        &spans,
+        &format!("run-session.{}", fixture_run::WATCHING_CONVERSATION_ID),
+    );
+    assert_eq!(watching["agent_role"], json!("monitor"), "{watching}");
+    let drafting = node_spans(&serving, fixture_run::DRAFTED_NODE_ID);
+    assert_eq!(
+        span_named(
+            &drafting,
+            &format!("dispatch.{}", fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID)
+        )["agent_role"],
+        json!("pr-author")
+    );
+}
+
+/// The lanes run with every node graph's record taken away, so that what one
+/// node graph's record is made to say is the only thing that says it: the
+/// declarations are read per run, and a `worker` any other record declared
+/// would answer for a session whose own record is the one under test.
+fn lanes_with_only_the_observer_declared(build: impl FnOnce(&Path)) -> Serving {
+    Serving::start(|root| {
+        fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+        for graph_run in fixture_run::LANE_STREAMS {
+            fixture_run::remove_graph_record(root, graph_run);
+        }
+        build(root);
+    })
+}
+
+/// A graph run whose record declares a word no member may be called, and the
+/// session it stamped with that word.
+const REFUSING_STREAM: &str = "node-scope-1786925520099-4311";
+const REFUSED_WORD: &str = "wor ker";
+const REFUSING_SESSION: &str = "6a0c2e84-1b3d-4f57-9e8a-2c4d6b8f0a13";
+
+/// The `agent_role` one session's dispatch span carries, or `None`.
+fn role_at(serving: &Serving, node: &str, session: &str) -> Option<Value> {
+    let spans = node_spans(serving, node);
+    span_named(&spans, &format!("dispatch.{session}"))
+        .get("agent_role")
+        .cloned()
+}
+
+#[test]
+fn a_record_this_build_cannot_read_or_find_or_believe_declares_nothing() {
+    let serving = lanes_with_only_the_observer_declared(|root| {
+        // A record a later `oneagentgraph` wrote, which this build refuses by
+        // its version rather than guessing at.
+        fixture_run::write_graph_record(
+            root,
+            fixture_run::stream_of(fixture_run::RETRIED_SECOND_CONVERSATION_ID),
+            json!({ "schema_version": 99, "run_id": "later", "declared_members": ["worker"] }),
+        );
+        // A record declaring a word the member grammar refuses, and a session
+        // stamped with that very word: the declaration declares nothing, so the
+        // session is served no role rather than one the client would refuse the
+        // whole payload over.
+        fixture_run::write_graph_record(
+            root,
+            REFUSING_STREAM,
+            json!({
+                "schema_version": 3,
+                "run_id": REFUSING_STREAM,
+                "graph": "graphs/node-scope.yaml",
+                "name": "node-scope",
+                "started_ms": 1_786_925_520_000_u64,
+                "declared_members": [REFUSED_WORD],
+                "events_path": "events.jsonl",
+            }),
+        );
+        fixture_run::append_relayed_on(
+            &root.join(fixture_run::LANES_RUN_ID),
+            REFUSING_STREAM,
+            "turn-started",
+            json!({
+                "run_id": fixture_run::LANES_RUN_ID,
+                "node": fixture_run::WORKING_NODE_ID,
+                "member": REFUSED_WORD,
+                "persona": REFUSED_WORD,
+                "session": REFUSING_SESSION,
+            }),
+            json!({ "turn": 1 }),
+        );
+        // And the drafting graph's record, as the sibling writes one, so the
+        // run still has a node graph that declared what it ran.
+        fixture_run::declare_graph(
+            root,
+            fixture_run::stream_of(fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID),
+            &["pr-author"],
+        );
+    });
+    assert_eq!(
+        role_at(
+            &serving,
+            fixture_run::RETRIED_NODE_ID,
+            fixture_run::RETRIED_SECOND_CONVERSATION_ID
+        ),
+        None,
+        "a record this build cannot read was read as declaring its members"
+    );
+    // A graph run this host holds no record for at all.
+    assert_eq!(
+        role_at(
+            &serving,
+            fixture_run::DRAFTED_NODE_ID,
+            fixture_run::DRAFTED_WORK_CONVERSATION_ID
+        ),
+        None,
+        "a graph run with no record was read as declaring its members"
+    );
+    assert_eq!(
+        role_at(&serving, fixture_run::WORKING_NODE_ID, REFUSING_SESSION),
+        None,
+        "a word the member grammar refuses was read as a declared member"
+    );
+    // And every graph whose record is as the sibling writes it is untouched:
+    // the observer's, which the launch record names, and the drafting graph's.
+    let run = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID
+        ),
+    )
+    .json();
+    let spans = run["spans"].as_array().expect("spans").clone();
+    assert_eq!(
+        span_named(
+            &spans,
+            &format!("run-session.{}", fixture_run::WATCHING_CONVERSATION_ID)
+        )["agent_role"],
+        json!("monitor")
+    );
+    assert_eq!(
+        role_at(
+            &serving,
+            fixture_run::DRAFTED_NODE_ID,
+            fixture_run::DRAFTED_DRAFTING_CONVERSATION_ID
+        ),
+        Some(json!("pr-author"))
+    );
+}
+
+#[test]
+fn a_record_from_before_the_sibling_kept_declarations_declares_what_settled() {
+    // A record from before the sibling kept declarations lists only the
+    // members that settled — and the engine itself reads those as the members
+    // the run had, so this does too.
+    let serving = lanes_with_only_the_observer_declared(|root| {
+        let legacy = fixture_run::stream_of(fixture_run::REFUSED_CONVERSATION_ID);
+        fixture_run::write_graph_record(
+            root,
+            legacy,
+            json!({
+                "run_id": legacy,
+                "graph": "graphs/node-scope.yaml",
+                "name": "node-scope",
+                "started_ms": 1_786_925_520_000_u64,
+                "members": { "worker": "settled" },
+                "events_path": "events.jsonl",
+            }),
+        );
+    });
+    assert_eq!(
+        role_at(
+            &serving,
+            fixture_run::REFUSED_NODE_ID,
+            fixture_run::REFUSED_CONVERSATION_ID
+        ),
+        Some(json!("worker")),
+        "a record that lists only settled members declares none of them"
+    );
+}
+
+#[test]
 fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
     let serving = lanes();
     let spans = http::get(

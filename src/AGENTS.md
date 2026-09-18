@@ -98,9 +98,11 @@ anything new here is a proposal to make upstream first.
   carries `declared_members` — out of the state directory the engine itself
   resolves (`ONEAGENTGRAPH_STATE_DIR`, else `~/.local/state/oneagentgraph/runs`;
   `store::GRAPH_RECORDS_ENV`, restated because the sibling declares it privately
-  in its binary, as the engine restates it too). No member and no role word is
-  kept here — that is the whole point, and closing the vocabulary again over any
-  host's names is the regression timeline schema 10 and telemetry 17 fixed. A
+  in its binary, as the engine restates it too). So a server run where the
+  engine ran reads what the engine wrote and needs no flag for it, and a server
+  run elsewhere sets that variable. No member and no role word is kept here —
+  that is the whole point, and closing the vocabulary again over any host's
+  names is the regression timeline schema 10 and telemetry 17 fixed. A
   stamped member no declaration names is served as nothing and the persona
   beside it is never consulted; a session that stamped no member is read by its
   persona, and served only where a declaration names that word. The judge's lane

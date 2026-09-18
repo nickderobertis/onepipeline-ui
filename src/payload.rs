@@ -105,20 +105,61 @@ impl Party {
 /// declared or it is not, and that is the only question any reading asks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeclaredMembers {
-    names: BTreeSet<String>,
+    names: BTreeSet<MemberName>,
+}
+
+/// One member name a graph declared, in the grammar `oneagentgraph` holds a
+/// member's name to: letters, digits, hyphens and underscores, and at least one
+/// of them.
+///
+/// A run record is a file on disk read back by a later process, so what it
+/// declares is external input like any other — and what this crate serves as an
+/// `agent_role` is held by the client's `agentRoleSchema` to exactly that
+/// grammar. Parsing at this boundary is what keeps the two in step: a word a
+/// record declares that the grammar refuses is dropped here, so no session is
+/// ever served a role the client would refuse the whole payload over.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemberName(String);
+
+impl MemberName {
+    /// The name as the graph spelled it.
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for MemberName {
+    type Error = String;
+
+    /// The grammar is the sibling's own, called rather than restated.
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        if oneagentgraph::config::is_member_name(&name) {
+            Ok(Self(name))
+        } else {
+            Err(format!(
+                "{name:?} is not a member name: letters, digits, hyphens and underscores"
+            ))
+        }
+    }
 }
 
 impl DeclaredMembers {
     /// The members `names` declares, in whichever order they arrive.
+    ///
+    /// A name the member grammar refuses is not a member and is dropped: see
+    /// [`MemberName`].
     pub fn new(names: impl IntoIterator<Item = String>) -> Self {
         Self {
-            names: names.into_iter().collect(),
+            names: names
+                .into_iter()
+                .filter_map(|name| MemberName::try_from(name).ok())
+                .collect(),
         }
     }
 
     /// Whether some graph of this run declared a member called `word`.
     fn names(&self, word: &str) -> bool {
-        self.names.contains(word)
+        self.names.iter().any(|name| name.as_str() == word)
     }
 
     /// The semantic role one record's session ran under.
