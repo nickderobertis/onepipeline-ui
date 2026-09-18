@@ -5,14 +5,15 @@ import {
   collapseLabel,
   compactTimelineItems,
   compactTimelineMarkers,
-  type DispatchRole,
   dispatchRoleLabel,
   findRow,
   GROUP_THRESHOLD,
-  NODE_LANES,
+  laneLabel,
+  laneVocabulary,
   nodeTimeline,
   nodeTimelineV2,
   pathTo,
+  roleLaneId,
   spanAsRow,
   type TimelineRow,
   transcriptEntries,
@@ -43,19 +44,20 @@ describe("one node's slice of the run timeline", () => {
     expect(worker?.status).toBe("completed");
     // 11:00:12 to 11:01:00 is the interval the stream recorded for it.
     expect(worker?.durationMs).toBe(48_000);
-    expect(worker?.displayLabel).toBe("Worker (engineer-dashboard)");
-    // Every session says which role it played and which session it was — three
-    // concurrent sessions of one dispatch are told apart by nothing else.
+    expect(worker?.displayLabel).toBe("worker (engineer-dashboard)");
+    // Every session says which member it ran as — the run's own word for it —
+    // and which session it was: three concurrent sessions of one dispatch are
+    // told apart by nothing else.
     expect(worker?.children.map(({ displayLabel }) => displayLabel)).toEqual([
       "conversation-turn",
-      "Lint (llmlint-dashboard)",
-      "Judge (you-are-a-strict-careful-evaluator)",
+      "llmlint (llmlint-dashboard)",
+      "judge (you-are-a-strict-careful-evaluator)",
     ]);
     expect(dashboard.rows.map(({ displayLabel }) => displayLabel)).toContain(
-      "Check-in (check-in-dashboard)",
+      "check-in (check-in-dashboard)",
     );
     expect(dashboard.rows.map(({ displayLabel }) => displayLabel)).toContain(
-      "PR author (pr-author-dashboard)",
+      "pr-author (pr-author-dashboard)",
     );
     // An aggregate stands in for thousands of records and carries their total
     // itself; it is named for what was aggregated, never for the word `rollup`.
@@ -115,30 +117,55 @@ describe("one node's slice of the run timeline", () => {
   });
 
   test("calls a session the same word in the plot and wherever it is opened", () => {
-    // Every served role, and the word the operator reads for it. The conversation
-    // panel heads an opened session with this same call, so the two surfaces cannot
-    // drift into naming one session two things: there is one vocabulary, not a copy
-    // of it beside each surface that reads it.
-    const roles: readonly DispatchRole[] = [
+    // A served role is the run's own word for the member, and it reaches the
+    // operator exactly as served: no table here renames it. The conversation
+    // panel heads an opened session with this same call, so the two surfaces
+    // cannot drift into naming one session two things.
+    for (const role of ["worker", "judge", "monitor", "sentinel", "pr-author"])
+      expect(dispatchRoleLabel(role, "agent")).toBe(role);
+    // A session the run recorded no declared member for is named by the party it
+    // ran as, which is the one thing still known about it.
+    expect(dispatchRoleLabel(undefined, "agent")).toBe("Agent");
+    expect(dispatchRoleLabel(undefined, "judge")).toBe("Judge");
+    expect(dispatchRoleLabel(undefined, "llmlint")).toBe("Lint");
+    expect(dispatchRoleLabel(undefined, undefined)).toBe("Dispatch");
+    // A session over a member's work is served under that member's own word —
+    // the judge of a `worker` dispatch is `worker` on the wire — and the transport
+    // is the one thing that tells it from the work, so it is read beside the word.
+    // Never doubled where a host named the member after the transport it ran as.
+    expect(dispatchRoleLabel("worker", "judge")).toBe("worker · judge");
+    expect(dispatchRoleLabel("drafter", "llmlint")).toBe("drafter · llmlint");
+    expect(dispatchRoleLabel("llmlint", "llmlint")).toBe("llmlint");
+    expect(dispatchRoleLabel("worker", undefined)).toBe("worker");
+    // And each served word is one the plot's own legend really shows, in the order
+    // the payload served it, rather than a synonym of one that would read as a
+    // category the reader never saw named.
+    const served: string[] = [];
+    for (const span of timeline.spans) {
+      if (span.agent_role !== undefined && !served.includes(span.agent_role))
+        served.push(span.agent_role);
+    }
+    expect(served).toEqual([
       "worker",
       "judge",
-      "llmlint",
-      "orchestrator",
       "check-in",
       "pr-author",
-    ];
-    expect(roles.map(dispatchRoleLabel)).toEqual([
-      "Worker",
-      "Judge",
-      "Lint",
-      "Orchestrator",
-      "Check-in",
-      "PR author",
+      "llmlint",
+      "monitor",
     ]);
-    // And each is a word the plot's own legend really shows, rather than a synonym
-    // of one that would read as a category the reader never saw named.
-    const legend = NODE_LANES.map(({ label }) => label);
-    for (const role of roles) expect(legend).toContain(dispatchRoleLabel(role));
+    const legend = laneVocabulary(timeline).map(({ label }) => label);
+    expect(legend.filter((label) => served.includes(label))).toEqual(served);
+  });
+
+  test("keeps a member named after a structural lane in a lane of its own", () => {
+    // The word is the lane, and what the plot reads back as `Lane: …` — except
+    // where a host named a member after a lane every run has, which would
+    // otherwise plot that member in a lane meaning something else.
+    expect(roleLaneId("sentinel")).toBe("sentinel");
+    expect(roleLaneId("queued")).toBe("member:queued");
+    expect(laneLabel(roleLaneId("queued"))).toBe("queued");
+    expect(laneLabel("queued")).toBe("Queued");
+    expect(laneLabel("sentinel")).toBe("sentinel");
   });
 
   test("gathers one dispatch's agent, lint, and judge sessions under it", () => {
@@ -395,7 +422,7 @@ describe("one node's slice of the run timeline", () => {
       findRow(projected.rows, "dispatch-worker-session")?.dispatch,
     ).toMatchObject({ label: "Dispatch 1" });
     expect(findRow(projected.rows, "dispatch-worker-retry")?.displayLabel).toBe(
-      "Worker (engineer-dashboard-retry) · retry 1",
+      "worker (engineer-dashboard-retry) · retry 1",
     );
     // A retry is a second dispatch of the same node, never a second session of the
     // first one, so it opens a group of its own.
@@ -413,14 +440,17 @@ describe("one node's slice of the run timeline", () => {
 
   test("projects intervals into deterministic lanes and journals into markers", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
+    // The member lanes are the payload's own words in the payload's own order —
+    // neither the alphabet's nor any this app keeps — between the queue and the
+    // structural kinds; the unroled lane is absent because no session needs it.
     expect(projected.lanes.map(({ label }) => label)).toEqual([
       "Queued",
-      "Worker",
-      "Judge",
-      "Lint",
-      "Orchestrator",
-      "Check-in",
-      "PR author",
+      "worker",
+      "judge",
+      "check-in",
+      "pr-author",
+      "llmlint",
+      "monitor",
       "Verification",
       "Publication",
       "Lock waits",
@@ -504,19 +534,22 @@ describe("one node's slice of the run timeline", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
     const worker = projected.items.find(({ laneId }) => laneId === "worker");
     const judge = projected.items.find(({ laneId }) => laneId === "judge");
-    const lint = projected.items.find(({ laneId }) => laneId === "lint");
+    const lint = projected.items.find(({ laneId }) => laneId === "llmlint");
     if (worker === undefined || judge === undefined || lint === undefined)
       throw new Error("fixture lost the dashboard's dispatches");
     // Three moments, two of them coincident and neither an end of the window: the
     // pair collapses to the category that dominates it, and the window's own ends
     // are untouched, so what the compact line spans is what the node spans.
     const first = { ...lint, start: 0, end: 10 };
-    const compacted = compactTimelineItems([
-      first,
-      { ...judge, start: 1_000, end: 1_000 },
-      { ...worker, start: 1_000, end: 1_000 },
-      { ...lint, id: "last", start: 100_000, end: 100_010 },
-    ]);
+    const compacted = compactTimelineItems(
+      [
+        first,
+        { ...judge, start: 1_000, end: 1_000 },
+        { ...worker, start: 1_000, end: 1_000 },
+        { ...lint, id: "last", start: 100_000, end: 100_010 },
+      ],
+      projected.lanes,
+    );
     expect(compacted.map(({ id }) => id)).toEqual([
       first.id,
       worker.id,
@@ -544,10 +577,13 @@ describe("one node's slice of the run timeline", () => {
     // And the dominant one still wins when it is the later arrival, without taking
     // the window's end with it.
     expect(
-      compactTimelineItems([
-        { ...judge, start: 0, end: 60_000 },
-        { ...worker, start: 0, end: 60_000 },
-      ]).map(({ id }) => id),
+      compactTimelineItems(
+        [
+          { ...judge, start: 0, end: 60_000 },
+          { ...worker, start: 0, end: 60_000 },
+        ],
+        projected.lanes,
+      ).map(({ id }) => id),
     ).toEqual([judge.id, worker.id]);
   });
 

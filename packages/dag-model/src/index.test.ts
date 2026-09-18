@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  agentRoleSchema,
+  dagConversationSchema,
   graphPayloadSchema,
   graphResultItemSchema,
   graphStateSchema,
@@ -97,7 +99,7 @@ const RUN_TELEMETRY = {
 test("validates and preserves additive run-list fields", () => {
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     extension: true,
     runs: [
@@ -131,7 +133,7 @@ test("reads the launching session off the list row it is served on", () => {
   // session never has to fetch a run's transcripts to recover the same answer.
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [
       { ...row, launch: { launch_id: "c0de".repeat(8), launcher: "codex" } },
@@ -165,7 +167,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   // omitted it is indistinguishable from a host with nothing running.
   const refused = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [row],
     unreadable: [{ path: "/runs/run-9", reason: "no launch record" }],
@@ -174,7 +176,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   // And a run a `?select=` named that is no longer there is named, not omitted.
   const selected = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [row],
     missing: ["run-swept"],
@@ -186,7 +188,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 16,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [row],
     }).unreadable,
@@ -195,7 +197,7 @@ test("reads the run roots the server refused, and the selection it could not fin
   expect(
     runListSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 16,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [row],
       unreadable: [{ path: "/runs/run-9", reason: "" }],
@@ -216,7 +218,7 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
   };
   const parsed = parseRunList({
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     runs: [eventless],
   });
@@ -346,12 +348,89 @@ describe("schema compatibility", () => {
   });
 });
 
+describe("agent roles", () => {
+  /**
+   * The vocabulary is open — a role is the member name a run's own graph declared,
+   * under the run's word — and the one thing held is `oneagentgraph`'s grammar for
+   * a member's name. Both halves are asserted: a word that grammar admits is a role
+   * this client reads, and a word it does not is refused, so replacing the schema
+   * with an unrestricted string fails here.
+   */
+  test("admits exactly the member names oneagentgraph's grammar admits", () => {
+    for (const name of [
+      "sentinel",
+      "check-in",
+      "a_name",
+      "monitor",
+      "ticker2",
+      "PR-Author",
+    ]) {
+      expect(agentRoleSchema.parse(name)).toBe(name);
+    }
+    for (const name of ["", "a/b", "a b", "..", "sentinel\n", "role:x"]) {
+      expect(() => agentRoleSchema.parse(name), name).toThrow();
+    }
+  });
+
+  test("carries a run's own member names on a session link, a span and an attribution", () => {
+    expect(
+      sessionLinkSchema.parse({
+        session_id: "dag-scope-1.sentinel",
+        role: "agent",
+        agent_role: "sentinel",
+      }).agent_role,
+    ).toBe("sentinel");
+    expect(
+      timelineSpanSchema.parse({
+        id: "dispatch.node-scope-1.drafter",
+        kind: "dispatch",
+        label: "node-scope-1.drafter",
+        started_at: "2026-07-26T12:00:00Z",
+        ended_at: null,
+        events: [],
+        agent_role: "drafter",
+        transport_role: "agent",
+      }).agent_role,
+    ).toBe("drafter");
+    const attributed = {
+      conversation: {
+        canContinue: false,
+        harnesses: ["oneagentgraph"],
+        id: "node-scope-1.drafter",
+        name: "draft",
+        project: "run-1",
+        startedAt: "2026-07-26T12:00:00Z",
+        state: "turn-started",
+        turns: [],
+      },
+      attribution: { transportRole: "agent", agentRole: "drafter" },
+    };
+    expect(dagConversationSchema.parse(attributed).attribution.agentRole).toBe(
+      "drafter",
+    );
+    // A session the run recorded no declared member for is attributed none, and
+    // that is a conversation this client reads rather than refuses.
+    expect(
+      dagConversationSchema.parse({
+        ...attributed,
+        attribution: { transportRole: "agent" },
+      }).attribution.agentRole,
+    ).toBeUndefined();
+    expect(() =>
+      dagConversationSchema.parse({
+        ...attributed,
+        attribution: { transportRole: "agent", agentRole: "not a member" },
+      }),
+    ).toThrow();
+  });
+});
+
 describe("boundary failures", () => {
   test("rejects incompatible API versions and negative counters", () => {
     expect(() =>
       parseRunList({
         api_version: 3,
-        telemetry_schema_version: 16,
+        telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         runs: [],
       }),
@@ -368,7 +447,7 @@ describe("boundary failures", () => {
   test("rejects a detail with an unsupported projected state", () => {
     const result = runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 16,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       graph: { node_states: { build: "paused" } },
@@ -643,7 +722,7 @@ describe("run timeline", () => {
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 9,
+      timeline_schema_version: TIMELINE_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [
@@ -699,7 +778,7 @@ describe("run timeline", () => {
     };
     const timeline = parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 9,
+      timeline_schema_version: TIMELINE_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "demo",
       spans: [span, queued],
@@ -718,7 +797,7 @@ describe("run timeline", () => {
     expect(
       parseRunTimeline({
         api_version: 2,
-        timeline_schema_version: 9,
+        timeline_schema_version: TIMELINE_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [{ ...queued, reasons: [{ kind: "budget" }] }],
@@ -730,7 +809,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 2,
-        timeline_schema_version: 9,
+        timeline_schema_version: TIMELINE_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [{ ...queued, id: "node-1-api", kind: "node" }],
@@ -906,7 +985,7 @@ describe("run timeline", () => {
     expect(() =>
       parseRunTimeline({
         api_version: 3,
-        timeline_schema_version: 9,
+        timeline_schema_version: TIMELINE_SCHEMA_VERSION,
         observed_at: "2026-07-26T12:00:00Z",
         run_id: "demo",
         spans: [],

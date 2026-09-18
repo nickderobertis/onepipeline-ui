@@ -44,6 +44,7 @@ use std::process::{Child, Command, Stdio};
 
 use tempfile::TempDir;
 
+use crate::fixture_run;
 use crate::http;
 use crate::serving::{address_of, ask_to_stop, wait_within, Stop, STOP_DEADLINE};
 
@@ -236,8 +237,9 @@ pub struct Traced {
     child: Child,
     /// The address the kernel gave it, read off its own first line of output.
     pub address: SocketAddr,
-    /// The runs root it is serving, kept alive for as long as it is.
-    pub runs: TempDir,
+    /// The workspace holding the runs root it serves and the graph records
+    /// beside it, kept alive for as long as it is.
+    workspace: TempDir,
     traces: TempDir,
     /// The server's own program, so its own `execve` is not counted as a
     /// process it started.
@@ -257,16 +259,17 @@ pub const TRACED_POLL_MS: u64 = 200;
 impl Traced {
     /// Start a traced server over a fresh runs root.
     pub fn start(build: impl FnOnce(&Path)) -> Self {
-        let runs = tempfile::tempdir().expect("temp dir");
-        build(runs.path());
-        Self::start_in(runs, TRACED_POLL_MS)
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::start_in(workspace, TRACED_POLL_MS)
     }
 
-    /// The same, over a runs root the caller already built, polling as it says.
-    pub fn start_in(runs: TempDir, poll_ms: u64) -> Self {
+    /// The same, over a workspace the caller already built, polling as it says.
+    pub fn start_in(workspace: TempDir, poll_ms: u64) -> Self {
         require_strace();
         let traces = tempfile::tempdir().expect("temp dir");
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        let runs = workspace.path().join(fixture_run::RUNS_DIR);
         let mut child = Command::new("strace")
             // The tracer runs as a grandchild, so the process this journey
             // holds — and signals to stop — is the server itself rather than
@@ -291,9 +294,15 @@ impl Traced {
             .arg(&binary)
             .arg("serve")
             .arg("--runs-root")
-            .arg(runs.path())
+            .arg(&runs)
             .args(["--bind", "127.0.0.1:0"])
             .args(["--poll-interval-ms", &poll_ms.to_string()])
+            // Where the fixtures keep the graph records the server reads a run's
+            // declared members from, exactly as `Serving` points it there.
+            .env(
+                onepipeline_ui::store::GRAPH_RECORDS_ENV,
+                fixture_run::graph_records_for(&runs),
+            )
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
@@ -302,20 +311,20 @@ impl Traced {
         Self {
             child,
             address,
-            runs,
+            workspace,
             traces,
             binary,
         }
     }
 
     /// The root it is serving.
-    pub fn runs_root(&self) -> &Path {
-        self.runs.path()
+    pub fn runs_root(&self) -> PathBuf {
+        self.workspace.path().join(fixture_run::RUNS_DIR)
     }
 
     /// Where one run's state lives under that root.
     pub fn run_dir(&self, run: &str) -> PathBuf {
-        self.runs.path().join(run)
+        self.runs_root().join(run)
     }
 
     /// Leave a landmark in the trace, and answer the name of it.

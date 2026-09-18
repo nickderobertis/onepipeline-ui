@@ -45,6 +45,20 @@ const ROUTE_FIXTURES: [(&str, &str); 7] = [
     (routes::EVENTS, "events.json"),
 ];
 
+/// The store the served process would build over a workspace's runs root: the
+/// root itself, and the graph records the fixtures keep beside it — where the
+/// binary reads the latter off `ONEAGENTGRAPH_STATE_DIR`, an in-process store is
+/// told directly, so a suite of parallel tests never writes one process-wide
+/// variable.
+fn store_over(root: &Path) -> RunStore {
+    let runs_root: onepipeline_ui::cli::RunsRoot = root
+        .to_str()
+        .expect("utf-8 path")
+        .parse()
+        .expect("a readable runs root");
+    RunStore::new(&runs_root).reading_graph_records(&fixture_run::graph_records_for(root))
+}
+
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
@@ -180,16 +194,10 @@ fn fields_missing_from(expected: &Value, served: &Value, at: &str) -> Vec<String
 /// checked as such rather than compared.
 #[test]
 fn every_field_the_run_list_served_before_is_served_with_the_same_value() {
-    let root = tempfile::tempdir().expect("temp dir");
-    fixture_run::write(root.path(), fixture_run::RUN_ID);
-    fixture_run::write(root.path(), fixture_run::OTHER_RUN_ID);
-    let runs_root: onepipeline_ui::cli::RunsRoot = root
-        .path()
-        .to_str()
-        .expect("utf-8 path")
-        .parse()
-        .expect("a readable runs root");
-    let served = RunStore::new(&runs_root)
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write(&root, fixture_run::RUN_ID);
+    fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    let served = store_over(&root)
         .runs(&RunsQuery::Page(RunsPage {
             include_settled: true,
             ..RunsPage::default()
@@ -329,9 +337,9 @@ fn driven_by(root: &Path, run: &str, pid: u32) {
 #[test]
 fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
     for (shape, write) in shapes() {
-        let root = tempfile::tempdir().expect("temp dir");
-        let run = write(root.path());
-        let paths = RunPaths::under(root.path(), &run);
+        let (_workspace, root) = fixture_run::workspace();
+        let run = write(&root);
+        let paths = RunPaths::under(&root, &run);
         // Taken first, because this is the read that folds and caches for a run
         // whose summary is not there — which is every run a fixture writes.
         let summary = RunSummary::of(&paths).unwrap_or_else(|err| panic!("{shape}: {err}"));
@@ -357,16 +365,10 @@ fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
 /// `UPDATE_CONTRACT_FIXTURES=1` is how that change is made deliberately.
 #[test]
 fn every_route_serves_the_payload_its_golden_pins() {
-    let root = tempfile::tempdir().expect("temp dir");
-    fixture_run::write(root.path(), fixture_run::RUN_ID);
-    fixture_run::write(root.path(), fixture_run::OTHER_RUN_ID);
-    let runs_root: onepipeline_ui::cli::RunsRoot = root
-        .path()
-        .to_str()
-        .expect("utf-8 path")
-        .parse()
-        .expect("a readable runs root");
-    let store = RunStore::new(&runs_root);
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write(&root, fixture_run::RUN_ID);
+    fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
 
     // The timings in these goldens are `onepipeline`'s own document, read through
@@ -587,12 +589,12 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 16);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 17);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 9);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 10);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -610,15 +612,9 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
 /// field added to the projection and not to the prose fails here.
 #[test]
 fn the_contract_describes_the_queued_span_and_every_field_it_carries() {
-    let root = tempfile::tempdir().expect("temp dir");
-    fixture_run::write_held(root.path(), fixture_run::HELD_RUN_ID);
-    let runs_root: onepipeline_ui::cli::RunsRoot = root
-        .path()
-        .to_str()
-        .expect("utf-8 path")
-        .parse()
-        .expect("a readable runs root");
-    let store = RunStore::new(&runs_root);
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write_held(&root, fixture_run::HELD_RUN_ID);
+    let store = store_over(&root);
     let served = store
         .timeline(
             &RunId::try_from(fixture_run::HELD_RUN_ID).expect("valid"),

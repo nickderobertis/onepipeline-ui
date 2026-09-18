@@ -340,8 +340,8 @@ function NodeExecution({
   const sync = useTimelineScrollSync(entries);
   const [expanded, setExpanded] = useState(false);
   const compactItems = useMemo(
-    () => compactTimelineItems(projection.items),
-    [projection.items],
+    () => compactTimelineItems(projection.items, projection.lanes),
+    [projection.items, projection.lanes],
   );
   const compactMarkers = useMemo(
     () =>

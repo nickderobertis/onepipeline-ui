@@ -17,6 +17,7 @@ import {
   runSummarySchema,
   sessionLinkSchema,
   sseEventNameSchema,
+  TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "vitest";
@@ -47,6 +48,25 @@ async function served(name: string) {
     ),
   );
 }
+
+/**
+ * The document both halves of the contract are quoted from, so the versions this
+ * package pins are held to the ones it names — `tests/contract.rs` holds the
+ * server's copy to the same text, which is what puts the server, this client and
+ * the document in one place or fails all three.
+ */
+async function contractText() {
+  return readFile(
+    new URL("../../../docs/contract.md", import.meta.url),
+    "utf8",
+  );
+}
+
+test("the schema versions this client pins are the ones the contract names", async () => {
+  const text = await contractText();
+  expect(text).toContain(`schema ${TELEMETRY_SCHEMA_VERSION}`);
+  expect(text).toContain(`Timeline schema ${TIMELINE_SCHEMA_VERSION}`);
+});
 
 const zeroTiming = {
   agent_seconds: 0,
@@ -81,7 +101,7 @@ test("a package consumer validates an API response through the public export", (
   expect(
     parseRunList({
       api_version: 2,
-      telemetry_schema_version: 16,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }).runs,
@@ -284,7 +304,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(() =>
     parseRunList({
       api_version: 3,
-      telemetry_schema_version: 16,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       runs: [],
     }),
@@ -292,7 +312,7 @@ test("a package consumer rejects incompatible list and detail payloads", () => {
   expect(
     runDetailSchema.safeParse({
       api_version: 2,
-      telemetry_schema_version: 16,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       run: {},
       graph: { node_states: { build: "paused" } },
@@ -359,7 +379,7 @@ function completeDetail(conversations: unknown[]) {
   };
   return {
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     run: {
       run_id: "run-1",
@@ -557,7 +577,7 @@ test("a package consumer validates populated telemetry and attribution", () => {
 test("a package consumer parses a served run timeline through the export", () => {
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 9,
+    timeline_schema_version: TIMELINE_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -615,7 +635,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   };
   const timeline = parseRunTimeline({
     api_version: 2,
-    timeline_schema_version: 9,
+    timeline_schema_version: TIMELINE_SCHEMA_VERSION,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: "run-1",
     spans: [
@@ -645,7 +665,7 @@ test("a package consumer reads one dispatch's two sessions, its turn timing, and
   expect(() =>
     parseRunTimeline({
       api_version: 2,
-      timeline_schema_version: 9,
+      timeline_schema_version: TIMELINE_SCHEMA_VERSION,
       observed_at: "2026-07-26T12:00:00Z",
       run_id: "run-1",
       spans: [

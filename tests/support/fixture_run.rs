@@ -11,6 +11,7 @@
 
 #![allow(dead_code)] // Each test binary uses the part of the builder it needs.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,107 @@ use onepipeline::event::Envelope;
 use onepipeline::report;
 use onepipeline::views::RunPaths;
 use serde_json::{json, Map, Value};
+use tempfile::TempDir;
+
+/// The runs root's name inside a [`workspace`].
+pub const RUNS_DIR: &str = "runs";
+/// Where a workspace keeps the `oneagentgraph` run records the server reads a
+/// run's declared members from — beside the runs root, never under it, because
+/// every directory under a runs root is a claim to be a run.
+pub const GRAPH_RECORDS_DIR: &str = "oneagentgraph";
+
+/// A fresh workspace laid out the way every served root here is: the runs
+/// root under [`RUNS_DIR`], with room beside it for the graph records under
+/// [`GRAPH_RECORDS_DIR`]. Returns the workspace — dropped, it is gone — and the
+/// runs root a fixture writes into and a server is pointed at.
+pub fn workspace() -> (TempDir, PathBuf) {
+    let workspace = tempfile::tempdir().expect("temp dir");
+    let runs = workspace.path().join(RUNS_DIR);
+    fs::create_dir_all(&runs).expect("the runs root");
+    (workspace, runs)
+}
+
+/// Where the graph records for the runs under `runs_root` are kept.
+///
+/// Derived from the runs root rather than passed beside it, so every fixture
+/// writer keeps the one-path signature its hundred callers use — and refused
+/// for a root that is not a [`workspace`]'s, because the derivation would
+/// otherwise write records beside whatever directory a caller happened to
+/// hold, which for a bare temporary directory is the host's own `/tmp`.
+pub fn graph_records_for(runs_root: &Path) -> PathBuf {
+    assert_eq!(
+        runs_root.file_name().and_then(|name| name.to_str()),
+        Some(RUNS_DIR),
+        "{} is not a workspace's runs root: write fixtures into the root `workspace()`          returns, which is where their graph records are kept beside them",
+        runs_root.display()
+    );
+    runs_root
+        .parent()
+        .expect("a workspace's runs root has the workspace above it")
+        .join(GRAPH_RECORDS_DIR)
+}
+
+/// The graph run one session id names: `{stream}.{member}`, as that library
+/// spells one, so the stream is everything before the last `.`.
+pub fn stream_of(session: &str) -> &str {
+    session
+        .rsplit_once('.')
+        .map_or(session, |(stream, _)| stream)
+}
+
+/// Write one graph run's record as `record`, whatever shape that is.
+///
+/// For the records [`declare_graph`] cannot write through the sibling's own
+/// type: one a later build wrote, one from before the sibling kept its
+/// declarations, one carrying a word the member grammar refuses. What the
+/// server makes of each is the journey's to say.
+pub fn write_graph_record(runs_root: &Path, graph_run: &str, record: Value) {
+    let dir = graph_records_for(runs_root).join(graph_run);
+    fs::create_dir_all(&dir).expect("the graph run's directory");
+    fs::write(dir.join(oneagentgraph::run::RECORD_FILE), pretty(&record))
+        .expect("the graph run's record");
+}
+
+/// Take one graph run's record away, as a host that never held it.
+pub fn remove_graph_record(runs_root: &Path, graph_run: &str) {
+    fs::remove_dir_all(graph_records_for(runs_root).join(graph_run))
+        .expect("the graph run's directory was there to remove");
+}
+
+/// Record that one graph run declared `members`, as `oneagentgraph` records it.
+///
+/// `graph_run` is the id that library minted for the run — which is the
+/// **stream** every envelope it relayed carries, and what a launch record's
+/// `graph_run` names for the observer — and the record is that library's own
+/// `Record`, written through its own type so a fixture cannot spell a field the
+/// reader would refuse. This is the whole of what says which words are members
+/// of this run: a session stamped with a word no record here declares is served
+/// no `agent_role`, whatever the word is.
+pub fn declare_graph(runs_root: &Path, graph_run: &str, members: &[&str]) {
+    let dir = graph_records_for(runs_root).join(graph_run);
+    fs::create_dir_all(&dir).expect("the graph run's directory");
+    let record = oneagentgraph::run::Record {
+        schema_version: oneagentgraph::run::RECORD_SCHEMA_VERSION,
+        run_id: oneagentgraph::run::RunId::parse(graph_run).expect("a run id the sibling mints"),
+        graph: "graphs/a-graph.yaml".into(),
+        name: graph_run.into(),
+        started_ms: 1_786_925_520_000,
+        finished_ms: None,
+        exit_code: None,
+        members: BTreeMap::new(),
+        declared_members: members.iter().map(|member| (*member).to_owned()).collect(),
+        refs: Vec::new(),
+        events_path: dir
+            .join(oneagentgraph::run::EVENTS_FILE)
+            .display()
+            .to_string(),
+    };
+    fs::write(
+        dir.join(oneagentgraph::run::RECORD_FILE),
+        serde_json::to_string_pretty(&record).expect("the record serializes"),
+    )
+    .expect("the graph run's record");
+}
 
 /// The run every fixture is written for.
 pub const RUN_ID: &str = "run-20260807-a1b2c3";
@@ -206,7 +308,7 @@ pub const SUPERVISED_NODE_ID: &str = "supervised";
 /// Every session id below is `{stream}.{member}`, which is how `oneagentgraph`
 /// mints one — the pair has to agree or nothing joins a session to the records
 /// that opened and closed it.
-const LANE_STREAMS: [&str; 10] = [
+pub const LANE_STREAMS: [&str; 10] = [
     "node-scope-1786925520001-4311",
     "node-scope-1786925520002-4311",
     "node-scope-1786925520003-4311",
@@ -298,12 +400,16 @@ pub fn supervised_turn_cost(turn: u64) -> f64 {
 /// top-level `usage`, which is no turn's and must never be served as one.
 pub const SUPERVISED_TOTAL_COST: f64 = 98.5;
 
-/// The run's own observer, recorded at no node and under no role word: the
-/// `monitor` member is the run's watching side, and it is served in the
-/// `orchestrator` lane it shares rather than as a member of its own.
+/// The run's own observer, recorded at no node: the `monitor` member the
+/// observer graph declared, served under that word and no other.
 pub const WATCHING_CONVERSATION_ID: &str = "dag-scope-1786925520007-4311.monitor";
 /// The stream that observer runs on.
 const WATCHING_STREAM: &str = "dag-scope-1786925520007-4311";
+/// The one stream the settled contract run's journal is written on, and so the
+/// graph run every session of it is read against.
+const CONTRACT_STREAM: &str = "a-recording-host-4242";
+/// The one stream the live run's journal is written on.
+const LIVE_STREAM: &str = "a-recording-host-4243";
 
 /// One recorded run under `root`, complete and settled.
 ///
@@ -380,6 +486,13 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
     .expect("the passing check's log");
 
     fs::write(dir.join("events.jsonl"), journal(run)).expect("the journal");
+    // What the node graph those dispatches ran declared, as `oneagentgraph`
+    // recorded it for each graph run: a `worker` member and a `judge` member.
+    // Every role served for this run is read against these words, so a session
+    // stamped with a member no record here names is served no role at all.
+    for graph_run in [CONTRACT_STREAM, WORKER_STREAM, REVIEWER_STREAM] {
+        declare_graph(root, graph_run, &["worker", "judge"]);
+    }
     // The dispatch's own settlement, and with it the report that holds what the
     // journal cannot: the prompts, the replies, what each tool call returned, and
     // what each turn alone spent and took. Relayed through the same writer the
@@ -525,7 +638,7 @@ fn journal(run: &str) -> String {
         "session": REVIEW_CONVERSATION_ID,
     });
     let identity = "github.com/nickderobertis/onepipeline-ui";
-    let mut journal = Journal::new("a-recording-host-4242");
+    let mut journal = Journal::new(CONTRACT_STREAM);
     journal
         .emit(
             START,
@@ -1013,13 +1126,30 @@ pub fn append(dir: &Path, kind: &str, payload: Value) {
 /// and the member the producing library named, and a journey about what this
 /// crate makes of one has to be able to write exactly that.
 pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, payload: Value) {
+    append_relayed_as(dir, LIVE_STREAM, source, kind, labels, payload);
+}
+
+/// The same, on `stream` — the graph run a session belongs to, for a journey
+/// about what the record of that run says.
+pub fn append_relayed_on(dir: &Path, stream: &str, kind: &str, labels: Value, payload: Value) {
+    append_relayed_as(dir, stream, "agentgraph", kind, labels, payload);
+}
+
+fn append_relayed_as(
+    dir: &Path,
+    stream: &str,
+    source: &str,
+    kind: &str,
+    labels: Value,
+    payload: Value,
+) {
     let journal = dir.join("events.jsonl");
     let existing = fs::read_to_string(&journal).unwrap_or_default();
     let seq = existing.lines().count();
     let line = json!({
         "v": 1,
         "ts": "2026-08-07T12:01:00.000Z",
-        "stream": "a-recording-host-4243",
+        "stream": stream,
         "seq": seq,
         "source": source,
         "kind": kind,
@@ -1344,6 +1474,18 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
 
     let journal = live_journal(run, &plan, &report_path);
     fs::write(dir.join("events.jsonl"), &journal).expect("the journal");
+    // What the graphs behind this run declared, as `oneagentgraph` recorded them:
+    // the observer's `monitor`, and the lifecycle node graph's `worker`, its lint
+    // member and the `pr-author` its drafting step dispatches — the last of which
+    // is also the persona the node's first relayed record carries with no member
+    // beside it, which is the one reading a persona still decides.
+    for graph_run in [LIVE_STREAM, LINT_STREAM] {
+        declare_graph(
+            root,
+            graph_run,
+            &["monitor", "worker", "llmlint", "pr-author"],
+        );
+    }
     retain_reported_control(&dir, &journal);
     // The lint member settled with a report of its own, which is the only place
     // the time it spent in a harness is recorded: a `turn-completed` carries the
@@ -1380,6 +1522,11 @@ pub fn write_lanes(root: &Path, run: &str) -> PathBuf {
             "run_id": run,
             "plan": "plan.json",
             "graph": "graphs/dag-scope.yaml",
+            // The `oneagentgraph` run the observer graph is, as the engine
+            // records it: what a later `next` addresses the run's clocks by, and
+            // what this server reads the observer's declared members off.
+            "graph_run": WATCHING_STREAM,
+            "observer_runs": [WATCHING_STREAM],
             "launcher": "claude-code",
             "session": "claude-code-session-7a8b9c0d",
             "pid": 4311,
@@ -1395,6 +1542,21 @@ pub fn write_lanes(root: &Path, run: &str) -> PathBuf {
     // Deliberately no `result.json`: a node of this run is still working, and the
     // SDK rewrites that document only when a driver closes out.
     fs::write(dir.join("events.jsonl"), lanes_journal(run, &plan)).expect("the journal");
+    // What each graph of this run declared, as `oneagentgraph` recorded it. The
+    // observer graph is this host's: a `monitor` member and a `check-in` member.
+    // Every node graph declares one `worker` — including the one whose session
+    // was stamped `reviewer`, a member no declaration names — and the drafting
+    // graph declares its `pr-author`. These words, and only these, are what the
+    // sessions below are served as.
+    declare_graph(root, WATCHING_STREAM, &["monitor", "check-in"]);
+    for graph_run in LANE_STREAMS {
+        let members: &[&str] = if graph_run.starts_with("pr-author-") {
+            &["pr-author"]
+        } else {
+            &["worker"]
+        };
+        declare_graph(root, graph_run, members);
+    }
     // The supervised member's own report, retained the way the engine retains
     // one: through `onepipeline::report::retain`, under the name
     // `RunPaths::report_for` gives it. It is the whole of that session's
@@ -1476,8 +1638,8 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
         json!({ "plan": plan }),
     );
 
-    // The run's own observer, at no node: a `monitor` member, which is neither a
-    // node's work nor a word `agentRoleSchema` has.
+    // The run's own observer, at no node: the observer graph's `monitor` member,
+    // which is not a node's work and is served under its own word.
     let watching = Lane {
         run,
         stream: WATCHING_STREAM,
@@ -2397,6 +2559,375 @@ impl Lane<'_> {
     }
 }
 
+/// A run whose graphs declare members named by nothing built in.
+///
+/// The observer graph declared `ticker` and `sentinel` — in that order, which
+/// is neither alphabetical nor any order this crate could have — and each node
+/// graph declared one `drafter`. Four nodes ran, and between them they hold
+/// every reading a member word can get: a session stamped with a declared
+/// member, one stamped with none whose persona a declaration names, one stamped
+/// with a member no declaration names beside a persona one does, and one
+/// stamped with neither — and the first of them settled with a report, so the
+/// judge that supervised it is served too, under the member it supervised.
+/// What the server makes of each is what says the lane vocabulary is the run's
+/// own and not this crate's.
+pub const NAMED_RUN_ID: &str = "run-20260807-5e6f7a";
+/// The observer graph's run, which the launch record names and both watching
+/// sessions run on.
+const NAMED_OBSERVER_STREAM: &str = "dag-scope-1786925530007-5150";
+/// The two watching sessions, as `oneagentgraph` spells them: the member that
+/// spoke first is `ticker`, so the payload serves it first.
+pub const TICKER_CONVERSATION_ID: &str = "dag-scope-1786925530007-5150.ticker";
+pub const SENTINEL_CONVERSATION_ID: &str = "dag-scope-1786925530007-5150.sentinel";
+/// The node whose session was stamped with the member its graph declared.
+pub const DRAFTED_BY_NAME_NODE_ID: &str = "drafted";
+pub const DRAFTER_CONVERSATION_ID: &str = "node-scope-1786925530001-5150.drafter";
+/// The judge that supervised that dispatch, served under its session's own id
+/// with `.judge` after it: the one side of this run that no record relays and
+/// no graph declares, which is what makes its role the *member's*.
+pub const DRAFTER_JUDGE_CONVERSATION_ID: &str = "node-scope-1786925530001-5150.drafter.judge";
+/// The artifact id the drafter's settlement recorded for the report it stored.
+pub const DRAFTER_REPORT_ARTIFACT: &str = "report-node-scope-1786925530001-5150";
+/// The one interval that report observed its judge over, inside the dispatch.
+pub const DRAFTER_JUDGE_BOUNDS: (&str, &str) =
+    ("2026-08-07T12:01:10.000Z", "2026-08-07T12:01:12.000Z");
+/// The node whose session was stamped with no member, under a persona the
+/// observer graph happens to declare as a member.
+pub const TIMED_NODE_ID: &str = "timed";
+pub const TIMED_CONVERSATION_ID: &str = "7c1e9a52-3b4d-4f60-8e2a-1d5c6b7a8f90";
+/// The node whose session was stamped with a member no graph declared, beside a
+/// persona one did.
+pub const STRAYED_NODE_ID: &str = "strayed";
+pub const STRAYED_CONVERSATION_ID: &str = "node-scope-1786925530003-5150.stranger";
+/// The node whose session was stamped with no member and a persona no graph
+/// declared.
+pub const MUSED_NODE_ID: &str = "mused";
+pub const MUSED_CONVERSATION_ID: &str = "9d3f1b64-5c6e-4a72-b0c4-3f7e8d9a0b12";
+/// The node graphs' runs, one per node, in node order.
+const NAMED_NODE_STREAMS: [&str; 4] = [
+    "node-scope-1786925530001-5150",
+    "node-scope-1786925530002-5150",
+    "node-scope-1786925530003-5150",
+    "node-scope-1786925530004-5150",
+];
+
+/// One recorded run of the shape [`NAMED_RUN_ID`] describes.
+pub fn write_named_members(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/watch.yaml",
+            "graph_run": NAMED_OBSERVER_STREAM,
+            "observer_runs": [NAMED_OBSERVER_STREAM],
+            "launcher": "claude-code",
+            "session": "claude-code-session-5e6f7a8b",
+            "pid": 5150,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "name the members" },
+        "name": "named",
+        "concurrency": 4,
+        "tasks": [
+            { "id": DRAFTED_BY_NAME_NODE_ID, "persona": "poet", "task": "## What\nDraft." },
+            { "id": TIMED_NODE_ID, "persona": "ticker", "task": "## What\nKeep time." },
+            { "id": STRAYED_NODE_ID, "persona": "drafter", "task": "## What\nStray." },
+            { "id": MUSED_NODE_ID, "persona": "poet", "task": "## What\nMuse." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(dir.join("events.jsonl"), named_journal(run, &plan)).expect("the journal");
+    // What each graph declared, as `oneagentgraph` recorded it: the observer's
+    // two members, and one `drafter` per node graph. `stranger` and `poet` are
+    // named by no record here, which is what makes them the words they are.
+    declare_graph(root, NAMED_OBSERVER_STREAM, &["ticker", "sentinel"]);
+    for graph_run in NAMED_NODE_STREAMS {
+        declare_graph(root, graph_run, &["drafter"]);
+    }
+    // The drafter settled with a report whose judge ran once: the side of a
+    // dispatch that no graph declares a member for, served under the member it
+    // supervised. Relayed through the engine's own writer so the copy the
+    // server reads is the copy that promise makes. The settlement's persona is
+    // the member's own name, as every settlement this module relays carries;
+    // the session was stamped a member, so no reading consults it.
+    settle_member(
+        &dir,
+        &SettledMember {
+            stream: NAMED_NODE_STREAMS[0],
+            node: DRAFTED_BY_NAME_NODE_ID,
+            member: "drafter",
+            at: "2026-08-07T12:01:30.000Z",
+            artifact: DRAFTER_REPORT_ARTIFACT,
+            report: &drafter_report(),
+        },
+        Produced::Report,
+    );
+    dir
+}
+
+/// The report the drafter's member stored: one agent turn, and one judge turn
+/// bounded by [`DRAFTER_JUDGE_BOUNDS`], with nothing else a judge reading needs.
+#[must_use]
+pub fn drafter_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(80),
+        output_tokens: Some(16),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        cost_usd: None,
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("## What\nDraft."),
+                Message::assistant("Drafted."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: Some("The draft is what was asked for.".into()),
+        completion_reason: Some("the draft landed".into()),
+        settled_reason: None,
+        judge_decisions: Vec::new(),
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 30_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry {
+                usage: Some(usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            orchestration_ms: 20,
+            sessions: vec![SessionLink {
+                session_id: "2f1c0a4e-7b3d-4e19-9c5a-6d8b0e1f2a3b".into(),
+                role: TelemetryRole::Judge,
+                turn_index: 1,
+                started_at: DRAFTER_JUDGE_BOUNDS.0.to_owned(),
+                finished_at: Some(DRAFTER_JUDGE_BOUNDS.1.to_owned()),
+                history_id: None,
+                judge: None,
+            }],
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Judge,
+                turn_index: 1,
+                ran: Some("codex:judge".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "codex".into(),
+                    harness_id: "codex:judge".into(),
+                    variant: Some("judge".into()),
+                    model: Some(JUDGE_MODEL.to_owned()),
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(2_000),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(usage),
+                }],
+                history_file: None,
+                judge: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
+}
+
+/// That run's merged event store, in merge order.
+fn named_journal(run: &str, plan: &Value) -> String {
+    let mut driver = Journal::new("a-recording-host-5150");
+    let mut members: Vec<Journal> = NAMED_NODE_STREAMS
+        .into_iter()
+        .chain([NAMED_OBSERVER_STREAM])
+        .map(Journal::new)
+        .collect();
+    let at_node = |node: &str| json!({ "run_id": run, "node": node });
+    driver.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        json!({ "plan": plan }),
+    );
+
+    // The two watching sessions, `ticker` first: the order the run relayed them
+    // is the order the payload serves them, and it is the reverse of the
+    // alphabet so that a client sorting its lanes is told apart from one drawing
+    // them as served.
+    for (at, member) in [
+        ("2026-08-07T12:00:00.500Z", "ticker"),
+        ("2026-08-07T12:00:00.700Z", "sentinel"),
+    ] {
+        Lane {
+            run,
+            stream: NAMED_OBSERVER_STREAM,
+            session: &format!("{NAMED_OBSERVER_STREAM}.{member}"),
+            node: None,
+            member,
+            persona: member,
+        }
+        .turn(&mut members, at);
+    }
+
+    // A session stamped with the member its node graph declared, under a
+    // persona no graph declared: the member is the reading.
+    let drafted = Lane {
+        run,
+        stream: NAMED_NODE_STREAMS[0],
+        session: DRAFTER_CONVERSATION_ID,
+        node: Some(DRAFTED_BY_NAME_NODE_ID),
+        member: "drafter",
+        persona: "poet",
+    };
+    driver.emit(
+        "2026-08-07T12:01:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": DRAFTED_BY_NAME_NODE_ID, "persona": "poet" }),
+        json!({ "persona": "poet" }),
+    );
+    drafted.started(&mut members, "2026-08-07T12:01:01.000Z");
+    drafted.turn(&mut members, "2026-08-07T12:01:02.000Z");
+    // Its settlement is relayed by `write_named_members` through the engine's
+    // own writer, because it stores the report the judge side is read from.
+    driver.emit(
+        "2026-08-07T12:01:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(DRAFTED_BY_NAME_NODE_ID),
+        json!({ "status": "done", "outcome": "drafted" }),
+    );
+
+    // A session stamped with no member at all, under a persona the observer
+    // graph declared as a member: the one reading a persona still decides.
+    driver.emit(
+        "2026-08-07T12:02:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": TIMED_NODE_ID, "persona": "ticker" }),
+        json!({ "persona": "ticker" }),
+    );
+    memberless_turn(
+        &mut members,
+        NAMED_NODE_STREAMS[1],
+        "2026-08-07T12:02:02.000Z",
+        json!({
+            "run_id": run,
+            "node": TIMED_NODE_ID,
+            "persona": "ticker",
+            "session": TIMED_CONVERSATION_ID,
+        }),
+    );
+    driver.emit(
+        "2026-08-07T12:02:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(TIMED_NODE_ID),
+        json!({ "status": "done", "outcome": "timed" }),
+    );
+
+    // A session stamped with a member no graph declared, beside a persona one
+    // did: the member decides, and it decides nothing is served.
+    let strayed = Lane {
+        run,
+        stream: NAMED_NODE_STREAMS[2],
+        session: STRAYED_CONVERSATION_ID,
+        node: Some(STRAYED_NODE_ID),
+        member: "stranger",
+        persona: "drafter",
+    };
+    driver.emit(
+        "2026-08-07T12:03:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": STRAYED_NODE_ID, "persona": "drafter" }),
+        json!({ "persona": "drafter" }),
+    );
+    strayed.started(&mut members, "2026-08-07T12:03:01.000Z");
+    strayed.turn(&mut members, "2026-08-07T12:03:02.000Z");
+    strayed.settled(&mut members, "2026-08-07T12:03:30.000Z", true);
+    driver.emit(
+        "2026-08-07T12:03:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(STRAYED_NODE_ID),
+        json!({ "status": "done", "outcome": "strayed" }),
+    );
+
+    // A session stamped with neither: nothing the run recorded names it.
+    driver.emit(
+        "2026-08-07T12:04:00.000Z",
+        "pipeline",
+        "node-dispatched",
+        json!({ "run_id": run, "node": MUSED_NODE_ID, "persona": "poet" }),
+        json!({ "persona": "poet" }),
+    );
+    memberless_turn(
+        &mut members,
+        NAMED_NODE_STREAMS[3],
+        "2026-08-07T12:04:02.000Z",
+        json!({
+            "run_id": run,
+            "node": MUSED_NODE_ID,
+            "persona": "poet",
+            "session": MUSED_CONVERSATION_ID,
+        }),
+    );
+    driver.emit(
+        "2026-08-07T12:04:31.000Z",
+        "pipeline",
+        "node-settled",
+        at_node(MUSED_NODE_ID),
+        json!({ "status": "done", "outcome": "mused" }),
+    );
+
+    merged(members.into_iter().chain([driver]))
+}
+
+/// One `turn-started` a producer stamped no member on — the shape a record
+/// written before that library named members took — under `labels` on `stream`.
+fn memberless_turn(members: &mut [Journal], stream: &str, at: &str, labels: Value) {
+    members
+        .iter_mut()
+        .find(|journal| journal.stream == stream)
+        .expect("a stream this journal writes on")
+        .emit(
+            at,
+            "agentgraph",
+            "turn-started",
+            labels,
+            json!({ "turn": 1 }),
+        );
+}
+
 /// Several streams as one store, in the order the SDK's own reader merges them.
 fn merged(streams: impl IntoIterator<Item = Journal>) -> String {
     let mut lines: Vec<(String, String, usize, String)> = Vec::new();
@@ -2565,7 +3096,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             json!({
                 "v": version.get(),
                 "ts": at,
-                "stream": "a-recording-host-4243",
+                "stream": LIVE_STREAM,
                 "seq": seq,
                 "source": source,
                 "kind": kind,
@@ -2593,14 +3124,16 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         json!({ "plan": plan }),
     );
     // The run's own driving session, recorded at no node: what starts the run
-    // rather than any of the work in it.
+    // rather than any of the work in it — the observer graph's `monitor` member,
+    // stamped as that library stamps it.
     emit(
         "2026-08-07T12:00:05.000Z",
         "agentgraph",
         "turn-started",
         json!({
             "run_id": run,
-            "persona": "orchestrator",
+            "member": "monitor",
+            "persona": "monitor",
             "session": DRIVING_CONVERSATION_ID,
         }),
         json!({
@@ -2617,7 +3150,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "turn-message",
         json!({
             "run_id": run,
-            "persona": "orchestrator",
+            "member": "monitor",
+            "persona": "monitor",
             "session": DRIVING_CONVERSATION_ID,
         }),
         json!({ "turn": 1, "role": "assistant", "text": "driving the run" }),
@@ -2749,7 +3283,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "turn-started",
         json!({
             "run_id": run,
-            "persona": "orchestrator",
+            "member": "monitor",
+            "persona": "monitor",
             "session": DRIVING_CONVERSATION_ID,
         }),
         json!({
@@ -2766,7 +3301,8 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "turn-message",
         json!({
             "run_id": run,
-            "persona": "orchestrator",
+            "member": "monitor",
+            "persona": "monitor",
             "session": DRIVING_CONVERSATION_ID,
         }),
         json!({ "turn": 2, "role": "assistant", "text": "reconciling the frontier" }),
@@ -3487,6 +4023,9 @@ fn pretty(value: &Value) -> String {
 /// The run id of the stopped-mid-flight fixture below.
 pub const STOPPED_RUN_ID: &str = "run-20260807-5c4b3a";
 
+/// The stream the stopped run's node graph relayed its member on.
+const STOPPED_MEMBER_STREAM: &str = "node-scope-1786925518250-4250";
+
 /// A run whose driver was stopped with a node still dispatched, and which never
 /// wrote a result.
 ///
@@ -3538,6 +4077,14 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
             "labels": { "run_id": run, "node": NODE_ID, "persona": "worker" },
             "payload": {}, "artifacts": [],
         }),
+        // The node graph opening its member, on that graph's own stream: the first
+        // record a dispatch relays, and what puts its declared members in reach.
+        json!({
+            "v": 1, "ts": "2026-08-07T12:00:02.500Z", "stream": STOPPED_MEMBER_STREAM,
+            "seq": 0, "source": "agentgraph", "kind": "member-started",
+            "labels": { "run_id": run, "node": NODE_ID, "member": "worker", "persona": "worker" },
+            "payload": {}, "artifacts": [],
+        }),
         json!({
             "v": 1, "ts": "2026-08-07T12:00:03.000Z", "stream": "a-recording-host-4250",
             "seq": 3, "source": "pipeline", "kind": "run-stopped",
@@ -3550,6 +4097,8 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
         format!("{}\n", journal.join("\n")),
     )
     .expect("the journal");
+    // This host's node graph declares the `worker` it opened and the dispatch names.
+    declare_graph(root, STOPPED_MEMBER_STREAM, &["worker"]);
     dir
 }
 
@@ -3783,6 +4332,10 @@ pub fn write_held(root: &Path, run: &str) -> PathBuf {
             json!({ "status": "done" }),
         );
     fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    // The node graph this host dispatches under declares a `worker`, which is
+    // the persona every `node-dispatched` here carries and the one word its
+    // category is served as.
+    declare_graph(root, &journal.stream, &["worker"]);
     dir
 }
 
@@ -3862,6 +4415,9 @@ pub const PRESERVED_RUN_ID: &str = "run-20260807-7e6d5c";
 /// The commit that run's work was preserved on, rather than published as.
 pub const PRESERVED_SHA: &str = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
 
+/// The stream the preserved run's node graph relayed its member on.
+const PRESERVED_MEMBER_STREAM: &str = "node-scope-1786925518251-4251";
+
 /// A run whose publication never landed: the base moved under it, the bounded
 /// resolve did not converge, and the work was preserved on its branch instead.
 ///
@@ -3897,6 +4453,17 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
     let at_node = json!({ "run_id": run, "node": NODE_ID });
     let mut journal = Journal::new("a-recording-host-4251");
+    // The node graph the dispatch ran, opening its member before the session
+    // said anything — the first record every dispatch relays, and the one that
+    // puts that graph's run, and so its declared members, in the reader's reach.
+    let mut member = Journal::new(PRESERVED_MEMBER_STREAM);
+    member.emit(
+        "2026-08-07T12:00:02.500Z",
+        "agentgraph",
+        "member-started",
+        json!({ "run_id": run, "node": NODE_ID, "member": "worker", "persona": "worker" }),
+        json!({}),
+    );
     journal
         .emit(
             START,
@@ -3966,7 +4533,10 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
                 "detail": "the base moved under the publication",
             }),
         );
-    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    fs::write(dir.join("events.jsonl"), merged([journal, member])).expect("the journal");
+    // The node graph this host dispatches under declares a `worker`, which is
+    // the member it opened and the persona the `node-dispatched` carries.
+    declare_graph(root, PRESERVED_MEMBER_STREAM, &["worker"]);
     dir
 }
 
@@ -4860,6 +5430,10 @@ pub fn write_malformed_releases(root: &Path, run: &str) -> PathBuf {
             json!({ "status": "done", "outcome": "shipped" }),
         );
     fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    // The node graph this host dispatches under declares a `worker`, which is
+    // the persona every `node-dispatched` here carries and the one word its
+    // category is served as.
+    declare_graph(root, &journal.stream, &["worker"]);
     dir
 }
 

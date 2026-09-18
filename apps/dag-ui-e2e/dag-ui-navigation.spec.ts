@@ -600,13 +600,14 @@ test("reads a segment of the graph timeline, and follows it as the view scrolls"
     .click();
   const row = page.getByRole("region", { name: "Run-level timeline" });
   const segment = row.getByRole("button", {
-    name: /^Run-level · Orchestrator/,
+    name: /^Run-level · monitor/,
   });
   await segment.hover();
 
   const reading = page.getByTestId("timeline-popover");
   await expect(reading).toBeInViewport({ ratio: 1 });
-  await expect(reading).toContainText("Lane: orchestrator");
+  // The lane is the member word the run recorded, read back as itself.
+  await expect(reading).toContainText("Lane: monitor");
 
   // Held by focus for the scroll, because the pointer is about to leave the segment:
   // a reader scrolls by putting the pointer over the reading and turning the wheel,
@@ -731,7 +732,7 @@ test("puts the reading above a segment with no room below it", async ({
     .click();
   const segment = page
     .getByRole("region", { name: "Run-level timeline" })
-    .getByRole("button", { name: /^Run-level · Orchestrator/ });
+    .getByRole("button", { name: /^Run-level · monitor/ });
   await tabTo(page, segment);
   const reading = page.getByTestId("timeline-popover");
   await expect(reading).toBeInViewport({ ratio: 1 });
@@ -759,7 +760,7 @@ test("reads a segment of an opened conversation's own timeline", async ({
   // reading.
   await open(page, DESKTOP, `/?run=${runs().live}&node=dashboard`);
   await transcript(page)
-    .getByRole("button", { name: /^Open Judge/ })
+    .getByRole("button", { name: /^Open worker · judge/ })
     .click();
   const conversation = itemDetail(page).getByRole("region", {
     name: "Conversation timeline",
@@ -802,7 +803,7 @@ test("keeps an opened turn readable at the phone", async ({ page }) => {
   // reported, never what it said, so the card itself is the widest thing served.)
   await open(page, PHONE, `/?run=${runs().live}&node=dashboard`);
   await transcript(page)
-    .getByRole("button", { name: /^Open Judge/ })
+    .getByRole("button", { name: /^Open worker · judge/ })
     .click();
   const detail = itemDetail(page);
   const turn = detail.getByRole("article", { name: /^Turn / }).first();

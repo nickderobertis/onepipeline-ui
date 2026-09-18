@@ -13,7 +13,7 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** The in-flight run every graph, node and timeline journey opens. */
 export const LIVE_RUN = "dag-ui-live";
@@ -87,7 +87,52 @@ export const BUSY_LONG_SESSION = "engineer-sweep-7";
 /** How many turns that one recorded. */
 export const BUSY_LONG_TURNS = 30;
 /** More than one API page of cheap records, so paging is the real cursor boundary. */
-export const PAGE_RUNS = 44;
+export const PAGE_RUNS = 43;
+
+/**
+ * A run whose graphs declared members named by nothing built into this repository.
+ *
+ * Its observer graph declared `ticker` and `sentinel` — in that order, which is
+ * neither the alphabet's nor one any table here could produce — and its node graph
+ * declared `reviser` and `drafter`: the first node ran both, in that order, and the
+ * second ran `drafter` again. What the browser draws for it is one lane per word
+ * the payload serves, in the payload's order, beside the engine's own run-level
+ * row: the proof that the lanes are the run's and not this app's.
+ */
+export const NAMED_RUN = "dag-ui-named";
+/** That run's members, in the order the payload serves them. */
+export const NAMED_ROLES = ["ticker", "sentinel", "reviser", "drafter"];
+/**
+ * The two nodes: the first ran the node graph's two members in the declared
+ * order, the second ran `drafter` alone, so one word is served twice.
+ */
+export const NAMED_NODES = ["drafted", "redrafted"];
+
+/**
+ * The members this host's own graphs declare, which every other run here ran
+ * under: the observer graph's `monitor` and `check-in`, and the node graph's
+ * `worker`, `llmlint` and the `pr-author` its drafting step dispatches. No
+ * `judge`: the judge is one party of the `worker` member rather than a member of
+ * its own, so its records carry the worker's word and the `judge` transport.
+ *
+ * Declared per run rather than assumed by the server: a session's `agent_role` is
+ * served only where a record of the run's own graph names its member, so a fixture
+ * that wrote no such record would be served every session with no role at all.
+ */
+const HOST_MEMBERS = ["monitor", "check-in", "worker", "llmlint", "pr-author"];
+
+/**
+ * Where the graph records the served API reads a run's declared members from are
+ * kept: beside the runs root, never under it, because every directory under a runs
+ * root is a claim to be a run. `serve-fixture.mjs` points the server here through
+ * `ONEAGENTGRAPH_STATE_DIR`, the variable the engine itself reads.
+ */
+export const GRAPH_RECORDS_DIR = "oneagentgraph";
+
+/** The graph records kept beside `root`. */
+export function graphRecordsFor(root) {
+  return join(dirname(root), GRAPH_RECORDS_DIR);
+}
 
 /**
  * How many consecutive rows of one kind the reading collapses at.
@@ -222,8 +267,9 @@ const CLAUDE_SESSION = "claude-code-top-session";
 export const WORKER_SESSION = "engineer-dashboard";
 /** The session the run's first node's dispatch ran under. */
 export const FOUNDATION_SESSION = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
+/** The judge over that dispatch: the worker's own word under the judge transport. */
 export const JUDGE_SESSION = "you-are-a-strict-careful-evaluator";
-/** The lint member's session: the worker's own role under another transport. */
+/** The lint member's session: the `llmlint` member the host's graph declares. */
 export const LINT_SESSION = "llmlint-dashboard";
 export const CHECK_IN_SESSION = "5d2e4f18-9c3a-4b66-82bb-7e4f3a1c8d25";
 /** The run's own driving session, recorded at no node. */
@@ -468,6 +514,32 @@ class Journal {
   write() {
     writeFileSync(this.path, `${this.lines.join("\n")}\n`);
   }
+
+  /**
+   * Several streams as one store, in the order the SDK's own reader merges them:
+   * `(ts, stream, seq)`. A graph run writes on a stream of its own, so a run whose
+   * observer graph and node graph both relayed is two journals merged into one.
+   */
+  static writeMerged(path, journals) {
+    const lines = journals.flatMap((journal) =>
+      journal.lines.map((line, seq) => ({
+        line,
+        key: [JSON.parse(line).ts, journal.stream, seq],
+      })),
+    );
+    lines.sort((left, right) =>
+      left.key[0] === right.key[0]
+        ? left.key[1] === right.key[1]
+          ? left.key[2] - right.key[2]
+          : left.key[1] < right.key[1]
+            ? -1
+            : 1
+        : left.key[0] < right.key[0]
+          ? -1
+          : 1,
+    );
+    writeFileSync(path, `${lines.map(({ line }) => line).join("\n")}\n`);
+  }
 }
 
 /** Append one event to a journal an already-running server is serving. */
@@ -511,6 +583,38 @@ function runDir(root, runId) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Record that one graph run declared `members`, as `oneagentgraph` records it.
+ *
+ * `graphRun` is the id that library minted for the run, which is the **stream**
+ * every envelope it relayed carries — so a run written on one stream here is one
+ * graph run to the server, and the words below are the whole of what says which
+ * members it had. The shape is that library's own `record.json`, spelled here
+ * because a `.mjs` fixture cannot link the crate that owns it; what holds the two
+ * together is the served API, which refuses a record it cannot read and then serves
+ * every session with no role, which the lane journeys stop finding.
+ */
+function declareGraph(root, graphRun, members) {
+  const dir = join(graphRecordsFor(root), graphRun);
+  mkdirSync(dir, { recursive: true });
+  writeJson(join(dir, "record.json"), {
+    schema_version: 3,
+    run_id: graphRun,
+    graph: "graphs/a-graph.yaml",
+    name: graphRun,
+    started_ms: HISTORIC,
+    members: {},
+    declared_members: members,
+    refs: [],
+    events_path: join(dir, "events.jsonl"),
+  });
+}
+
+/** The stream every record of `runId` is written on, and so its graph run's id. */
+function streamOf(runId) {
+  return `a-recording-host-${runId}`;
 }
 
 /**
@@ -680,21 +784,30 @@ function writeLiveRun(root) {
     launch(LIVE_RUN, "codex", CODEX_SESSION, stamp(start), 4242),
   );
 
-  const journal = new Journal(dir, `a-recording-host-${LIVE_RUN}`, start);
+  const journal = new Journal(dir, streamOf(LIVE_RUN), start);
   journal.runId = LIVE_RUN;
+  declareGraph(root, journal.stream, HOST_MEMBERS);
   const run = { run_id: LIVE_RUN };
   journal.emit("pipeline", "run-started", run, { plan });
 
   // The run's own driving session, opened well after the run started and before
   // the first node was dispatched: the stretch before it is silence the plot has to
-  // draw, and a hairline of it is a segment nobody can read or reach.
+  // draw, and a hairline of it is a segment nobody can read or reach. It is the
+  // observer graph's `monitor` member, stamped as that library stamps it, and it
+  // is served under that word.
   journal.advance(12);
-  turn(
+  relayTurn(
     journal,
-    undefined,
+    {
+      run_id: LIVE_RUN,
+      member: "monitor",
+      persona: "monitor",
+      session: ORCHESTRATOR_SESSION,
+    },
     ORCHESTRATOR_SESSION,
-    "orchestrator",
+    "Carry on with the plan.",
     "Coordinating the execution frontier",
+    "a-model",
   );
   // Held before it could start: this node needs the *released* sibling rather
   // than the work in it. Two entries, because the two waits are not the same
@@ -1335,10 +1448,12 @@ function writeLiveRun(root) {
   // Several turns each, because this is the node whose transcript the reading
   // journeys scroll: a rail short enough to fit its own region has no reading
   // position to move.
-  // One session per party the dispatch ran under. The lint member is the case the
-  // pair exists for: the same semantic role as the work it is reading, told apart
-  // from it only by the transport `oneagentgraph` ran it as.
-  for (const [session, member, persona, message, instruction] of [
+  // One session per party the dispatch ran under. The judge is the case the pair
+  // exists for: the same member as the work it supervised — `worker`, the one
+  // word the node graph declared for it — told apart from that work only by the
+  // `judge` transport `oneagentgraph` stamps on its records, so the browser has
+  // to draw it in the worker's lane and still let a reader tell which is which.
+  for (const [session, member, persona, message, instruction, transport] of [
     [
       WORKER_SESSION,
       "worker",
@@ -1348,10 +1463,11 @@ function writeLiveRun(root) {
     ],
     [
       JUDGE_SESSION,
-      "judge",
-      "judge",
+      "worker",
+      "worker",
       "The transcript is accessible",
       "Read the transcript panel as a keyboard user would.",
+      "judge",
     ],
     [
       WORKER_SESSION,
@@ -1383,10 +1499,11 @@ function writeLiveRun(root) {
     ],
     [
       JUDGE_SESSION,
-      "judge",
-      "judge",
+      "worker",
+      "worker",
       "The graph and the rail agree",
       "Check the graph against the rail.",
+      "judge",
     ],
     [
       CHECK_IN_SESSION,
@@ -1397,7 +1514,14 @@ function writeLiveRun(root) {
     ],
   ]) {
     const numbered = journal.nextTurn(session);
-    const labels = { ...run, node: "dashboard", member, persona, session };
+    const labels = {
+      ...run,
+      node: "dashboard",
+      member,
+      persona,
+      ...(transport === undefined ? {} : { role: transport }),
+      session,
+    };
     const startedAt = stamp(journal.at);
     journal.emit("agentgraph", "turn-started", labels, {
       turn: numbered,
@@ -1669,7 +1793,8 @@ function writeHistoryRun(root) {
     ok: true,
     nodes: [{ id: "archive", status: "done", outcome: "merged" }],
   });
-  const journal = new Journal(dir, `a-recording-host-${HISTORY_RUN}`, HISTORIC);
+  const journal = new Journal(dir, streamOf(HISTORY_RUN), HISTORIC);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
   journal.emit("pipeline", "run-started", { run_id: HISTORY_RUN }, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
@@ -1807,11 +1932,8 @@ function writeOutcomesRun(root) {
       },
     ],
   });
-  const journal = new Journal(
-    dir,
-    `a-recording-host-${OUTCOMES_RUN}`,
-    HISTORIC,
-  );
+  const journal = new Journal(dir, streamOf(OUTCOMES_RUN), HISTORIC);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
   journal.emit("pipeline", "run-started", { run_id: OUTCOMES_RUN }, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
@@ -1892,9 +2014,10 @@ function writeSiblingRun(root) {
   // operator reads it in, and what the grouping journey opens on.
   const journal = new Journal(
     dir,
-    `a-recording-host-${SIBLING_RUN}`,
+    streamOf(SIBLING_RUN),
     HISTORIC + 10 * 60 * 1000,
   );
+  declareGraph(root, journal.stream, HOST_MEMBERS);
   journal.emit("pipeline", "run-started", { run_id: SIBLING_RUN }, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
@@ -1931,11 +2054,8 @@ function writeUnattributedRun(root) {
     // a launcher outside the closed vocabulary a client switches on.
     launch(UNATTRIBUTED_RUN, "a-plain-shell", "", stamp(HISTORIC), 4247),
   );
-  const journal = new Journal(
-    dir,
-    `a-recording-host-${UNATTRIBUTED_RUN}`,
-    HISTORIC,
-  );
+  const journal = new Journal(dir, streamOf(UNATTRIBUTED_RUN), HISTORIC);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
   journal.emit(
     "pipeline",
     "run-started",
@@ -2079,7 +2199,8 @@ function writeBusyRun(root) {
     join(dir, "launch.json"),
     launch(BUSY_RUN, "codex", CODEX_SESSION, stamp(HISTORIC), 4249),
   );
-  const journal = new Journal(dir, `a-recording-host-${BUSY_RUN}`, HISTORIC);
+  const journal = new Journal(dir, streamOf(BUSY_RUN), HISTORIC);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
   journal.emit("pipeline", "run-started", { run_id: BUSY_RUN }, { plan });
   journal.advance(1).emit("pipeline", "node-dispatched", {
     ...run,
@@ -2204,6 +2325,106 @@ function writeBusyRun(root) {
   journal.write();
 }
 
+/**
+ * The run [`NAMED_RUN`] describes: two observers the observer graph declared under
+ * words of its own, and two nodes run by the members its node graph declared.
+ *
+ * Every session here carries the member its graph declared, stamped as
+ * `oneagentgraph` stamps one, and the declaration written beside the run is the
+ * only thing that says those words are members: nothing in this repository names
+ * `ticker`, `sentinel`, `reviser` or `drafter` anywhere else.
+ */
+function writeNamedRun(root) {
+  const run = { run_id: NAMED_RUN };
+  const dir = runDir(root, NAMED_RUN);
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Name the members" },
+    name: "named",
+    concurrency: 2,
+    tasks: NAMED_NODES.map((id) => ({
+      id,
+      persona: "poet",
+      task: `## What\nDraft ${id}.`,
+    })),
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  // Two graph runs, each on a stream of its own, each with a record of its own
+  // declaring what it ran: the observer graph the launch record names, and the
+  // node graph the nodes' dispatches relayed on.
+  const observerStream = `dag-scope-${NAMED_RUN}`;
+  const nodeStream = `node-scope-${NAMED_RUN}`;
+  writeJson(join(dir, "launch.json"), {
+    ...launch(NAMED_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4250),
+    graph: "graphs/watch.yaml",
+    // The `oneagentgraph` run the observer graph is, as the engine records it:
+    // what the server reads the observer's declared members off.
+    graph_run: observerStream,
+    observer_runs: [observerStream],
+  });
+  declareGraph(root, observerStream, NAMED_ROLES.slice(0, 2));
+  declareGraph(root, nodeStream, NAMED_ROLES.slice(2));
+  const driver = new Journal(dir, streamOf(NAMED_RUN), HISTORIC);
+  driver.emit("pipeline", "run-started", run, { plan });
+  // The observers, at no node, `ticker` first: the order the run relayed them is
+  // the order the payload serves them, and it is the reverse of the alphabet.
+  const observers = new Journal(dir, observerStream, HISTORIC);
+  observers.runId = NAMED_RUN;
+  for (const member of NAMED_ROLES.slice(0, 2)) {
+    observers.advance(1);
+    relayTurn(
+      observers,
+      {
+        ...run,
+        member,
+        persona: member,
+        session: `${observerStream}.${member}`,
+      },
+      `${observerStream}.${member}`,
+      `Watch the run as ${member}.`,
+      `${member} is watching`,
+    );
+  }
+  // The nodes, after the observers: the first ran the node graph's two members
+  // in the order it declared them, the second ran `drafter` again.
+  const nodes = new Journal(dir, nodeStream, HISTORIC);
+  nodes.runId = NAMED_RUN;
+  driver.advance(10);
+  const [both, again] = NAMED_NODES;
+  for (const [node, members] of [
+    [both, NAMED_ROLES.slice(2)],
+    [again, [NAMED_ROLES.at(-1)]],
+  ]) {
+    driver
+      .advance(1)
+      .emit("pipeline", "node-dispatched", { ...run, node, persona: "poet" });
+    // The two clocks are one: the sessions run inside the dispatch that opened
+    // them and the settlement follows the last of them.
+    nodes.at = driver.at;
+    for (const member of members) {
+      const session = `${node}-${member}`;
+      nodes.advance(1);
+      relayTurn(
+        nodes,
+        { ...run, node, member, persona: "poet", session },
+        session,
+        `Work on ${node} as ${member}.`,
+        `${member} worked on ${node}`,
+      );
+    }
+    driver.at = nodes.at;
+    driver
+      .advance(1)
+      .emit(
+        "pipeline",
+        "node-settled",
+        { ...run, node },
+        { status: "done", outcome: "drafted" },
+      );
+  }
+  Journal.writeMerged(join(dir, "events.jsonl"), [driver, observers, nodes]);
+}
+
 /** Write every run this fixture serves, oldest first. */
 export function buildRuns(root) {
   mkdirSync(root, { recursive: true });
@@ -2222,6 +2443,7 @@ export function buildRuns(root) {
   writeOutcomesRun(root);
   writeLegacyRun(root);
   writeSiblingRun(root);
+  writeNamedRun(root);
   writeLiveRun(root);
 }
 
@@ -2237,6 +2459,11 @@ export function facts() {
       unattributed: UNATTRIBUTED_RUN,
       eventless: EVENTLESS_RUN,
       busy: BUSY_RUN,
+      named: NAMED_RUN,
+    },
+    named: {
+      roles: NAMED_ROLES,
+      nodes: NAMED_NODES,
     },
     foundation_pr: FOUNDATION_PR,
     unfiled_kind: UNFILED_KIND,

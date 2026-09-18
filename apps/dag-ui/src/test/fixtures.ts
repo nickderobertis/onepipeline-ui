@@ -63,7 +63,7 @@ const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 16,
+  telemetry_schema_version: 17,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -191,7 +191,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 16,
+    telemetry_schema_version: 17,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -343,7 +343,7 @@ export function runDetail(runId: string = LIVE_RUN) {
       ),
       conversation(
         "llmlint-session",
-        "worker",
+        "llmlint",
         "llmlint",
         node,
         launchId,
@@ -352,7 +352,7 @@ export function runDetail(runId: string = LIVE_RUN) {
       ),
       conversation(
         "orchestrator-session",
-        "orchestrator",
+        "monitor",
         "agent",
         undefined,
         launchId,
@@ -410,7 +410,7 @@ function stamp(seconds: number): string {
 export function runTimeline(runId: string = LIVE_RUN) {
   return {
     api_version: 2,
-    timeline_schema_version: 9,
+    timeline_schema_version: 10,
     // Read shortly after the last record it carries, which is what a poll of a live
     // run actually returns. The graph-level view plots an unfinished run out to this
     // instant, so a stamp an hour past the record would say the run had spent an
@@ -715,9 +715,9 @@ function liveSpans() {
       20,
       50,
       ["llmlint-session-0"],
-      // Lint is verification inside the worker dispatch, so it keeps the worker's
-      // semantic role and is told apart by its transport role alone.
-      { agent_role: "worker", transport_role: "llmlint" },
+      // Lint is verification inside the worker dispatch: the member this host's
+      // graph declared for it is `llmlint`, which is also the party it ran as.
+      { agent_role: "llmlint", transport_role: "llmlint" },
       "dispatch-worker-session",
     ),
     {
@@ -778,15 +778,16 @@ function liveSpans() {
       status: "waiting",
       events: [],
     },
-    // Run-level work, recorded at no node: the planner driving the whole graph, and
-    // the run's own check-in dispatched beside it once work was under way.
+    // Run-level work, recorded at no node: the observer graph's `monitor` member
+    // watching the whole graph, and the run's own check-in dispatched beside it
+    // once work was under way — each under the member word its graph declared.
     runLevelDispatch(
       "orchestrator-session",
       "orchestrator-dag-ui-live",
       1,
       200,
       {
-        agent_role: "orchestrator",
+        agent_role: "monitor",
         transport_role: "agent",
       },
     ),
@@ -889,7 +890,7 @@ export function runScopeTimeline(runId: string = LIVE_RUN) {
               transport_role: "agent",
             }),
             categorySummary("node-dashboard", "dashboard", "dispatch", 20, 50, {
-              agent_role: "worker",
+              agent_role: "llmlint",
               transport_role: "llmlint",
             }),
             categorySummary("node-dashboard", "dashboard", "dispatch", 62, 90, {
@@ -1024,7 +1025,7 @@ export function busyTimeline(sessions: number) {
   );
   return {
     api_version: 2,
-    timeline_schema_version: 9,
+    timeline_schema_version: 10,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: LIVE_RUN,
     spans: [

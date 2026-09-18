@@ -158,24 +158,26 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       within(legend)
         .getAllByRole("listitem")
         .map((item) => item.textContent),
+      // The member lanes are the run's own words, in the order the payload served
+      // them — this host's shape, served by nothing built in here.
     ).toEqual([
       "Queued",
-      "Worker",
-      "Judge",
-      "Lint",
-      "Orchestrator",
-      "Check-in",
-      "PR author",
+      "worker",
+      "judge",
+      "check-in",
+      "pr-author",
+      "llmlint",
+      "monitor",
       "Verification",
       "Publication",
       "Lock waits",
       "Human wait",
     ]);
     await userEvent.click(railRow(/^Expand timeline$/));
-    expect(railRow(/^Judge/)).toBeInTheDocument();
-    expect(railRow(/^Lint/)).toBeInTheDocument();
-    expect(railRow(/^Check-in/)).toBeInTheDocument();
-    expect(railRow(/^PR author/)).toBeInTheDocument();
+    expect(railRow(/^judge/)).toBeInTheDocument();
+    expect(railRow(/^llmlint/)).toBeInTheDocument();
+    expect(railRow(/^check-in/)).toBeInTheDocument();
+    expect(railRow(/^pr-author/)).toBeInTheDocument();
     expect(railRow(/^Lock waits/)).toBeInTheDocument();
     await userEvent.click(railRow(/^Collapse timeline$/));
 
@@ -189,7 +191,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     // The conversation says which dispatch it belongs to, which role it played in
     // it, and which persona it ran — a judge transcript is unreadable without them.
     expect(
-      within(detail()).getByText("Dispatch 1 · Worker · engineer"),
+      within(detail()).getByText("Dispatch 1 · worker · engineer"),
     ).toBeInTheDocument();
     expect(
       within(detail()).getAllByRole("button", { name: "Bash tool details" }),
@@ -472,13 +474,13 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       name: "Node transcript",
     });
     const retry = within(transcript).getByRole("article", {
-      name: /Worker \(engineer-dashboard\) · retry 1/,
+      name: /worker \(engineer-dashboard\) · retry 1/,
     });
     // The retry is a second dispatch of the node, so it is grouped as its own.
     expect(retry).toHaveAttribute("data-dispatch-group", "Dispatch 4");
     expect(
       within(transcript).getByRole("article", {
-        name: "Worker (engineer-dashboard)",
+        name: "worker (engineer-dashboard)",
       }),
     ).toHaveAttribute("data-dispatch-group", "Dispatch 1");
   });
@@ -1280,10 +1282,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       name: "Run-level timeline",
     });
     expect(
-      within(runRow).getByRole("button", { name: /^Run-level · Orchestrator/ }),
+      within(runRow).getByRole("button", { name: /^Run-level · monitor/ }),
     ).toBeInTheDocument();
     expect(
-      within(runRow).getByRole("button", { name: /^Run-level · Check-in/ }),
+      within(runRow).getByRole("button", { name: /^Run-level · check-in/ }),
     ).toBeInTheDocument();
     for (const node of ["foundation", "dashboard", "publish", "queued"]) {
       expect(
@@ -1304,17 +1306,18 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       name: "dashboard timeline",
     });
     // Collapsed, the row is one line whatever it holds; the legend already names the
-    // categories, including the lint run that shares the worker's semantic role.
+    // categories — the members under the run's own words, in the order the whole
+    // payload first served each, the lint member among them.
     expect(
       within(row)
         .getAllByRole("listitem")
         .map((l) => l.textContent),
     ).toEqual([
-      "Worker",
-      "Judge",
-      "Lint",
-      "Check-in",
-      "PR author",
+      "check-in",
+      "worker",
+      "llmlint",
+      "judge",
+      "pr-author",
       "Lock waits",
       "Idle",
     ]);
@@ -1363,7 +1366,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
     const runRow = screen.getByRole("region", { name: "Run-level timeline" });
     await userEvent.click(
-      within(runRow).getByRole("button", { name: /^Run-level · Check-in/ }),
+      within(runRow).getByRole("button", { name: /^Run-level · check-in/ }),
     );
     // It opens in the same panel a node's own session opens in, with the turns
     // labelled by the role the plot named the segment with.
@@ -1371,8 +1374,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(
       await within(panel).findByText("Progress reported"),
     ).toBeInTheDocument();
+    // Headed by the member word alone: the session's label is that same word, and
+    // a session is not named twice for saying its name once.
     expect(
-      within(panel).getByRole("heading", { name: /^Check-in \(/ }),
+      within(panel).getByRole("heading", { name: /^check-in$/ }),
     ).toBeInTheDocument();
     expect(transcripts()).toEqual([RUN_CHECK_IN_SESSION]);
     expect(window.location.search).toContain(`event=${CHECK_IN_SPAN}`);

@@ -156,7 +156,7 @@ fn a_run_list_over_summarised_runs_folds_no_journal_and_starts_no_process() {
     let marker = serving.mark("marker-no-fold");
     let listed = http::get(serving.address, WHOLE_LIST).json();
     assert_eq!(listed["runs"].as_array().map(Vec::len), Some(3), "{listed}");
-    let root = serving.runs_root().to_path_buf();
+    let root = serving.runs_root();
     let journals: Vec<std::path::PathBuf> = (0..3)
         .map(|n| root.join(nth_run(n)).join("events.jsonl"))
         .collect();
@@ -223,7 +223,7 @@ fn a_run_the_page_does_not_serve_costs_its_summary_and_nothing_else() {
             fixture_run::summarize(root, run);
         }
     });
-    let root = serving.runs_root().to_path_buf();
+    let root = serving.runs_root();
     let sizes: Vec<u64> = [SMALL, LARGE]
         .iter()
         .map(|run| fixture_run::summary_len(&root, run))
@@ -316,7 +316,7 @@ fn asking_for_one_row_never_costs_more_than_asking_for_fifty() {
     // 2m44s against a page of fifty at 1m46s, because the limit was a slice
     // taken after every run had already been read.
     let serving = Traced::start(store_of(30));
-    let root = serving.runs_root().to_path_buf();
+    let root = serving.runs_root();
 
     let one = serving.mark("marker-page-of-one");
     assert_eq!(
@@ -359,7 +359,7 @@ fn an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin() {
     // core, continuously, while emitting nothing, because every poll tick
     // re-surveyed the whole root to compute change tokens.
     let serving = Traced::start(store_of(3));
-    let root = serving.runs_root().to_path_buf();
+    let root = serving.runs_root();
     let mut stream = http::stream(serving.address, "/api/v2/events", None);
     let snapshot = stream
         .next_frame()
@@ -439,7 +439,7 @@ fn an_idle_subscribers_tick_grows_only_by_one_lookup_per_run() {
         .into_iter()
         .map(|runs| {
             let serving = Traced::start(store_of(runs));
-            let root = serving.runs_root().to_path_buf();
+            let root = serving.runs_root();
             let mut stream = http::stream(serving.address, "/api/v2/events", None);
             assert_eq!(
                 stream.next_frame().expect("a snapshot").event,
@@ -499,7 +499,7 @@ fn a_route_serving_one_named_run_touches_that_run_alone() {
         fixture_run::inflate(root, OTHER, BULK_RECORDS, 5_000);
         fixture_run::summarize(root, OTHER);
     });
-    let root = serving.runs_root().to_path_buf();
+    let root = serving.runs_root();
     let marker = serving.mark("marker-one-run");
     for route in [
         format!("/api/v2/runs/{ASKED}/timeline?scope=run"),
@@ -537,7 +537,7 @@ fn a_selection_touches_only_the_runs_it_names() {
     // first page costs, which is the defect it was added to remove.
     const NAMED: &str = "run-20260807-000000";
     let serving = Traced::start(store_of(20));
-    let root = serving.runs_root().to_path_buf();
+    let root = serving.runs_root();
     let marker = serving.mark("marker-selection");
     let answered = http::get(serving.address, &format!("/api/v2/runs?select={NAMED}")).json();
     assert_eq!(answered["runs"][0]["run_id"], json!(NAMED), "{answered}");
@@ -614,7 +614,7 @@ fn a_subscriber_whose_filter_narrows_nothing_pays_nothing_to_narrow_it() {
                     fixture_run::summarize(root, &run);
                 }
             });
-            let root = serving.runs_root().to_path_buf();
+            let root = serving.runs_root();
             let journals: Vec<std::path::PathBuf> = (0..3)
                 .map(|n| root.join(nth_run(n)).join("events.jsonl"))
                 .collect();

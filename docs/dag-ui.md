@@ -102,8 +102,8 @@ is one click into the last: the [graph timeline](#the-graph-timeline) on the ove
 view opens a node's [timeline view](#the-node-timeline-view), whose transcript opens
 a session in the right panel, where the package's `ConversationTimeline` plots that
 session's own turns above them. Nothing about the vocabulary changes on the way down
-— a segment labelled Judge at the graph scope is the Judge lane of its node and the
-Judge turns of its conversation.
+— a segment labelled `worker · judge` at the graph scope sits in the `worker` lane
+of its node and heads the judge conversation opened from it with the same words.
 
 Every stamp is read in the browser's own zone — as a clock time for work recorded
 today and with the date it happened on for anything older — with the whole instant,
@@ -141,14 +141,15 @@ three in the vocabulary the node view already uses, projected from
   is still going. "Now" is the payload's own `observed_at` rather than the
   browser's clock, so the line says how long the run had been going when it was
   last read instead of drifting between polls.
-- **Opened once** it is one row per plan node, plus a **run-level row** for the
-  sessions recorded at no node — the orchestrator driving the graph and the run's
-  own check-ins. Each row says how long it recorded work and how long it did
-  not.
+- **Opened once** it is one row per plan node, plus a **run-level row** — named
+  `Run-level`, the engine's own lane rather than any member's — for the sessions
+  recorded at no node: the observer graph's members watching the graph and the
+  run's own check-ins. Each row says how long it recorded work and how long it
+  did not.
 - **Opened again**, a row is that node's own category lanes: the same words the
-  node view draws, read out of the `scope=run` summaries. A summary's lane comes
-  from the *pair* of roles it carries, which is what tells a lint run from the
-  worker whose semantic role it borrows.
+  node view draws, read out of the `scope=run` summaries, in the one ordering the
+  whole payload gives them. A summary's lane is the member word it carries, which
+  is what tells a lint member from the worker beside it.
 
 Every plot is handed one controlled range, so a wheel or a brush anywhere reframes
 all of them and a column means the same instant at every level. There is
@@ -244,12 +245,29 @@ Escape key. It is a **timeline over a transcript**, both projected from
 
 - the **timeline** is pinned across the full width and opens as one compact line
   showing what dominated each moment. Expanding gives every category a row:
-  Queued, Worker, Judge, Lint, Orchestrator, Check-in, PR author, Verification,
-  Publication, Lock waits, Human wait. Those are the served `agent_role`,
-  `transport_role` and span-kind vocabulary rendered as words — an operator never
-  reads a served identifier such as `rollup` or `pr-drafting`, and the span kinds
-  that *hold* work rather than being work (the run, the node, a lifecycle step)
-  occupy no lane at all. A journal record is a moment rather than an interval, so
+  Queued, then **one lane per member word the served payload carries, in the
+  order the payload serves them**, then Verification, Publication, Lock waits,
+  Human wait. The member lanes are the run's own: a session's `agent_role` is the
+  member name the run's graph declared for it, served under that word, and the
+  browser keeps no table of them — a run of this host's shape reads in `worker`,
+  `check-in`, `llmlint`, `pr-author` and `monitor` as recorded, and a run whose
+  observer graph declared `ticker` and `sentinel` reads in those two, in that
+  order, labelled with those words (`features/timeline/timeline-model.ts`,
+  `laneVocabulary`). There is no `judge` lane: the judge is one party of the
+  member it supervised and is served under that member's word, so it is drawn in
+  that member's lane and told from the member's own session by its transport,
+  read beside the word — `worker · judge` — wherever the session is named
+  (`dispatchRoleLabel`). Before timeline schema 10 the same run read in six lanes
+  this app named — Worker, Judge, Lint, Orchestrator, Check-in, PR author — with
+  the observer's `monitor` mapped onto Orchestrator and any other member dropped.
+  A session the run recorded no declared member for is named by the party it ran
+  as and drawn in a Dispatch lane that exists only while such a session does.
+  Which sessions open a dispatch and which supervise one is read off the closed
+  `transport_role`, never off the member word. The structural lanes are the served
+  span-kind vocabulary rendered as words — an operator never reads a served
+  identifier such as `rollup` or `pr-drafting`, and the span kinds that *hold*
+  work rather than being work (the run, the node, a lifecycle step) occupy no lane
+  at all. A journal record is a moment rather than an interval, so
   it is a **marker** — an icon on a full-height line over every lane — and the icon
   says which of eleven **categories** the record belongs to, so the plot can be
   scanned rather than read record by record. The category is derived in the browser
@@ -262,9 +280,10 @@ Escape key. It is a **timeline over a transcript**, both projected from
   expanded lanes always span the same window, so a moment does not move when the
   view is collapsed. An aggregate is plotted at the total it carries, not across
   the window its records happened to fall in. The compact line is sized to fit
-  whole at every width, because it is the view a node opens on. Eleven expanded
-  lanes and a reading fit no viewport shorter than the laptop the layout is designed
-  against, so below that the region scrolls: the axis is painted inside the plot's
+  whole at every width, because it is the view a node opens on. The eleven
+  expanded lanes a run of this host's shape draws — more where a host declared
+  more members — and a reading fit no viewport shorter than the laptop the layout
+  is designed against, so below that the region scrolls: the axis is painted inside the plot's
   own clipping box, so it cannot be pinned above that fold, and collapsing is the
   one-click way back to it.
 - **Queued** is the lane a gap used to be. The engine records why a node it has not
@@ -295,7 +314,8 @@ Escape key. It is a **timeline over a transcript**, both projected from
 - **detail on demand** slides in from the right over two thirds of the working
   area, leaving the navigation alone. Escape and its own control close it. A
   conversation renders the package's `ConversationTimeline` pinned above its
-  turns, each `TurnCard` carrying the role that spoke — Worker, Judge or Lint.
+  turns, each `TurnCard` carrying the session's own call — the member word, with
+  the transport beside it for a judge or a lint run.
 - one **onejudge dispatch** — the agent session plus the judge and lint sessions
   that supervised it — is one labelled group, nested in the transcript and named
   on the conversation header. Schema 10 serves that identity as `dispatch_id`;

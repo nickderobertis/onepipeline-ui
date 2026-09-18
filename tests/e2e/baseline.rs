@@ -312,7 +312,7 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
     let sibling = provisioned_sibling();
     let older = ForeignServing::start(
         &baseline,
-        serving.runs_root(),
+        &serving.runs_root(),
         &[(onepipeline_ui::telemetry::BINARY_ENV, sibling.as_str())],
     );
 
@@ -396,7 +396,7 @@ fn every_run_the_base_commit_listed_is_listed_now() {
     let serving = Serving::start(|root| {
         shapes = fixture_run::write_launch_shapes(root);
     });
-    let older = ForeignServing::start(&baseline, serving.runs_root(), &[]);
+    let older = ForeignServing::start(&baseline, &serving.runs_root(), &[]);
 
     let listed = |address| -> BTreeSet<String> {
         http::get(address, "/api/v2/runs?include_settled=true").json()["runs"]

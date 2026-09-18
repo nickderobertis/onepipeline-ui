@@ -89,6 +89,32 @@ anything new here is a proposal to make upstream first.
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
   writes where it writes one, else the graph `member`, else the persona — and
   falls back to the agent side, which is the one side every dispatch has.
+- **Which member a session was, read against the run's own declarations.** The
+  other half of that pair is the member name the run recorded for the session,
+  and `payload::DeclaredMembers` serves it exactly where one of the run's
+  graphs declared it: `store::RunStore::declared` reads `oneagentgraph`'s run
+  record for every graph run the launch record's `graph_run`/`observer_runs`
+  name and every stream the journal relayed from that library — the record
+  carries `declared_members` — out of the state directory the engine itself
+  resolves (`ONEAGENTGRAPH_STATE_DIR`, else `~/.local/state/oneagentgraph/runs`;
+  `store::GRAPH_RECORDS_ENV`, restated because the sibling declares it privately
+  in its binary, as the engine restates it too). So a server run where the
+  engine ran reads what the engine wrote and needs no flag for it, and a server
+  run elsewhere sets that variable. No member and no role word is kept here —
+  that is the whole point, and closing the vocabulary again over any host's
+  names is the regression timeline schema 10 and telemetry 17 fixed. A
+  stamped member no declaration names is served as nothing and the persona
+  beside it is never consulted; a session that stamped no member is read by its
+  persona, and served only where a declaration names that word. The judge's lane
+  is no exception: the judge is a party of a two-party member and not a member,
+  so `payload::judge_conversation` and `payload::judge_span` serve it under the
+  supervised member's own word, read exactly as the agent side's is, and
+  `payload::JUDGE_PARTY` is only the transport that tells the two sides apart —
+  the engine's run-level lane is the one lane that is not a member's. A run on a host where the state directory is missing, or where the
+  records were written by a later `oneagentgraph` this build refuses, serves
+  every session with no role — reported nowhere, because the server cannot tell
+  a graph that declared nothing from a record it could not find; the SDK
+  publishing the declarations beside the run would close that.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,

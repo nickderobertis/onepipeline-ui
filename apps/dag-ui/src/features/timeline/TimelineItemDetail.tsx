@@ -40,7 +40,6 @@ import {
   dispatchRoleLabel,
   editAuthor,
   holdReasonLabel,
-  LLMLINT_TRANSPORT,
   type TimelineRow,
 } from "./timeline-model";
 import { useConversation } from "./useConversation";
@@ -949,18 +948,15 @@ type Attribution = DagConversation["attribution"];
 /**
  * What this session is called, from the lane vocabulary that names it in the plot.
  *
- * The word is not chosen here: `dispatchRoleLabel` derives it from the lane the role
- * is plotted in, so an opened conversation cannot head itself with one word while the
- * segment that opened it carries another. It is keyed
- * on the contract's closed `agentRole` enum, so a role added there fails to compile
- * until it has been given a lane rather than rendering as its raw identifier.
+ * The word is not chosen here: `dispatchRoleLabel` is what names the lane the
+ * session is plotted in — the member word the run's own graph declared, or the
+ * party it ran as where the run recorded no declared member — so an opened
+ * conversation cannot head itself with one word while the segment that opened it
+ * carries another.
  */
 function roleLabel(
-  agentRole: AgentRole,
+  agentRole: AgentRole | undefined,
   transportRole: Attribution["transportRole"],
 ): string {
-  // Nested lint work is grouped under its worker, so its transport is what names it.
-  return dispatchRoleLabel(
-    transportRole === LLMLINT_TRANSPORT ? LLMLINT_TRANSPORT : agentRole,
-  );
+  return dispatchRoleLabel(agentRole, transportRole);
 }
