@@ -576,9 +576,15 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
     timeline(page).getByRole("button", { name: "Expand timeline" }),
   ).toBeVisible();
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
-  await expect(
-    timeline(page).getByRole("button", { name: /^judge/ }),
-  ).toBeVisible();
+  // The judge is drawn in the lane of the member it supervised — it is one party
+  // of the worker member, served under the worker's own word — and is told from
+  // the worker's own session by its transport, read beside that word. No lane is
+  // labelled `judge`: the judge is a transport here, never a member.
+  const judge = timeline(page)
+    .locator('[data-lane-id="worker"]')
+    .getByRole("button", { name: /^worker · judge \(/ });
+  await expect(judge).toBeVisible();
+  await expect(timeline(page).locator('[data-lane-id="judge"]')).toHaveCount(0);
   await expect(
     timeline(page).getByRole("button", { name: /^check-in/ }),
   ).toBeVisible();
@@ -594,7 +600,6 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
     [
       "Queued",
       "worker",
-      "judge",
       "check-in",
       "llmlint",
       "Verification",
@@ -761,7 +766,7 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
   expect((await timeline(page).boundingBox())?.y).toBe(timelineTop);
 
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
-  const judge = timeline(page).getByRole("button", { name: /^judge/ });
+  const judge = timeline(page).getByRole("button", { name: /^worker · judge/ });
   await expect(judge).toHaveAttribute("data-timeline-shape", "span");
   // Read as a share of the plot, not as pixels: a supervising session projected
   // against a window nothing else occupied still clears the minimum bar width the
@@ -785,13 +790,15 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
     .filter({ hasText: "you-are-a-strict-careful-evaluator" });
   await expect(judgeItem).toHaveAttribute("data-selected", "true");
   await expect(judgeItem).toHaveAttribute("data-dispatch-group", "Dispatch 1");
-  await expect(judgeItem).toContainText("judge");
+  await expect(judgeItem).toContainText("worker · judge");
   const workerItem = transcript
     .getByRole("article")
     .filter({ hasText: "engineer-dashboard" });
   await expect(workerItem).toHaveAttribute("data-dispatch-group", "Dispatch 1");
 
-  await expect(itemDetail(page)).toContainText("judge");
+  // Opened, the conversation heads itself with the same call the segment that
+  // opened it carried: the member's word and the transport beside it.
+  await expect(itemDetail(page)).toContainText("worker · judge");
   await expect(itemDetail(page)).toContainText(
     "you-are-a-strict-careful-evaluator",
   );
@@ -802,7 +809,7 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
     itemDetail(page)
       .getByRole("article", { name: /^Turn / })
       .first(),
-  ).toContainText("judge");
+  ).toContainText("worker · judge");
   await page.keyboard.press("Escape");
   await expect(page.getByLabel("Item detail panel")).toHaveCount(0);
 });
@@ -1250,7 +1257,7 @@ test("scrolls the transcript to the journal record a marker names", async ({
     dispatch.getByRole("article", { name: /^worker \(engineer-dashboard\)/ }),
   ).toBeVisible();
   await expect(
-    dispatch.getByRole("article", { name: /^judge \(/ }),
+    dispatch.getByRole("article", { name: /^worker · judge \(/ }),
   ).toBeVisible();
   // A separately dispatched role is its own group rather than a member of the first.
   await expect(
@@ -3096,15 +3103,17 @@ test("reads the whole run as one clock, node by node, from one line", async ({
   await expect(dashboard.getByTestId("timeline-lane")).toHaveCount(1);
 
   // Opened again: that node's own category lanes, the same vocabulary its node view
-  // draws, one row per role the run recorded a session under.
+  // draws, one row per role the run recorded a session under — and none for the
+  // judge, which is drawn in the lane of the worker it supervised.
   await dashboard.getByRole("button", { name: "Expand timeline" }).click();
-  for (const lane of ["worker", "judge", "check-in"]) {
+  for (const lane of ["worker", "check-in", "llmlint"]) {
     await expect(
       dashboard
         .getByTestId("timeline-lane")
         .and(page.locator(`[data-lane-id="${lane}"]`)),
     ).toHaveCount(1);
   }
+  await expect(dashboard.locator('[data-lane-id="judge"]')).toHaveCount(0);
   // And the other rows are untouched: opening one node is not opening the graph.
   await expect(
     graphRow(page, "publish").getByTestId("timeline-lane"),

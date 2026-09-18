@@ -111,20 +111,15 @@ export const NAMED_NODES = ["drafted", "redrafted"];
 /**
  * The members this host's own graphs declare, which every other run here ran
  * under: the observer graph's `monitor` and `check-in`, and the node graph's
- * `worker`, `judge`, `llmlint` and the `pr-author` its drafting step dispatches.
+ * `worker`, `llmlint` and the `pr-author` its drafting step dispatches. No
+ * `judge`: the judge is one party of the `worker` member rather than a member of
+ * its own, so its records carry the worker's word and the `judge` transport.
  *
  * Declared per run rather than assumed by the server: a session's `agent_role` is
  * served only where a record of the run's own graph names its member, so a fixture
  * that wrote no such record would be served every session with no role at all.
  */
-const HOST_MEMBERS = [
-  "monitor",
-  "check-in",
-  "worker",
-  "judge",
-  "llmlint",
-  "pr-author",
-];
+const HOST_MEMBERS = ["monitor", "check-in", "worker", "llmlint", "pr-author"];
 
 /**
  * Where the graph records the served API reads a run's declared members from are
@@ -272,6 +267,7 @@ const CLAUDE_SESSION = "claude-code-top-session";
 export const WORKER_SESSION = "engineer-dashboard";
 /** The session the run's first node's dispatch ran under. */
 export const FOUNDATION_SESSION = "3f9a1c2e-0b77-4d21-9a6e-5c8f0a1b2c3d";
+/** The judge over that dispatch: the worker's own word under the judge transport. */
 export const JUDGE_SESSION = "you-are-a-strict-careful-evaluator";
 /** The lint member's session: the worker's own role under another transport. */
 export const LINT_SESSION = "llmlint-dashboard";
@@ -1452,10 +1448,12 @@ function writeLiveRun(root) {
   // Several turns each, because this is the node whose transcript the reading
   // journeys scroll: a rail short enough to fit its own region has no reading
   // position to move.
-  // One session per party the dispatch ran under. The lint member is the case the
-  // pair exists for: the same semantic role as the work it is reading, told apart
-  // from it only by the transport `oneagentgraph` ran it as.
-  for (const [session, member, persona, message, instruction] of [
+  // One session per party the dispatch ran under. The judge is the case the pair
+  // exists for: the same member as the work it supervised — `worker`, the one
+  // word the node graph declared for it — told apart from that work only by the
+  // `judge` transport `oneagentgraph` stamps on its records, so the browser has
+  // to draw it in the worker's lane and still let a reader tell which is which.
+  for (const [session, member, persona, message, instruction, transport] of [
     [
       WORKER_SESSION,
       "worker",
@@ -1465,10 +1463,11 @@ function writeLiveRun(root) {
     ],
     [
       JUDGE_SESSION,
-      "judge",
-      "judge",
+      "worker",
+      "worker",
       "The transcript is accessible",
       "Read the transcript panel as a keyboard user would.",
+      "judge",
     ],
     [
       WORKER_SESSION,
@@ -1500,10 +1499,11 @@ function writeLiveRun(root) {
     ],
     [
       JUDGE_SESSION,
-      "judge",
-      "judge",
+      "worker",
+      "worker",
       "The graph and the rail agree",
       "Check the graph against the rail.",
+      "judge",
     ],
     [
       CHECK_IN_SESSION,
@@ -1514,7 +1514,14 @@ function writeLiveRun(root) {
     ],
   ]) {
     const numbered = journal.nextTurn(session);
-    const labels = { ...run, node: "dashboard", member, persona, session };
+    const labels = {
+      ...run,
+      node: "dashboard",
+      member,
+      persona,
+      ...(transport === undefined ? {} : { role: transport }),
+      session,
+    };
     const startedAt = stamp(journal.at);
     journal.emit("agentgraph", "turn-started", labels, {
       turn: numbered,

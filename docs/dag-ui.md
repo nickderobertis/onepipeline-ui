@@ -102,8 +102,8 @@ is one click into the last: the [graph timeline](#the-graph-timeline) on the ove
 view opens a node's [timeline view](#the-node-timeline-view), whose transcript opens
 a session in the right panel, where the package's `ConversationTimeline` plots that
 session's own turns above them. Nothing about the vocabulary changes on the way down
-— a segment labelled Judge at the graph scope is the Judge lane of its node and the
-Judge turns of its conversation.
+— a segment labelled `worker · judge` at the graph scope sits in the `worker` lane
+of its node and heads the judge conversation opened from it with the same words.
 
 Every stamp is read in the browser's own zone — as a clock time for work recorded
 today and with the date it happened on for anything older — with the whole instant,
@@ -250,13 +250,17 @@ Escape key. It is a **timeline over a transcript**, both projected from
   Human wait. The member lanes are the run's own: a session's `agent_role` is the
   member name the run's graph declared for it, served under that word, and the
   browser keeps no table of them — a run of this host's shape reads in `worker`,
-  `judge`, `check-in`, `llmlint`, `pr-author` and `monitor` as recorded, and a run
-  whose observer graph declared `ticker` and `sentinel` reads in those two, in
-  that order, labelled with those words (`features/timeline/timeline-model.ts`,
-  `laneVocabulary`). Before timeline schema 10 the same run read in six lanes this
-  app named — Worker, Judge, Lint, Orchestrator, Check-in, PR author — with the
-  observer's `monitor` mapped onto Orchestrator and any other member dropped. A
-  session the run recorded no declared member for is named by the party it ran
+  `check-in`, `llmlint`, `pr-author` and `monitor` as recorded, and a run whose
+  observer graph declared `ticker` and `sentinel` reads in those two, in that
+  order, labelled with those words (`features/timeline/timeline-model.ts`,
+  `laneVocabulary`). There is no `judge` lane: the judge is one party of the
+  member it supervised and is served under that member's word, so it is drawn in
+  that member's lane and told from the member's own session by its transport,
+  read beside the word — `worker · judge` — wherever the session is named
+  (`dispatchRoleLabel`). Before timeline schema 10 the same run read in six lanes
+  this app named — Worker, Judge, Lint, Orchestrator, Check-in, PR author — with
+  the observer's `monitor` mapped onto Orchestrator and any other member dropped.
+  A session the run recorded no declared member for is named by the party it ran
   as and drawn in a Dispatch lane that exists only while such a session does.
   Which sessions open a dispatch and which supervise one is read off the closed
   `transport_role`, never off the member word. The structural lanes are the served
@@ -310,7 +314,8 @@ Escape key. It is a **timeline over a transcript**, both projected from
 - **detail on demand** slides in from the right over two thirds of the working
   area, leaving the navigation alone. Escape and its own control close it. A
   conversation renders the package's `ConversationTimeline` pinned above its
-  turns, each `TurnCard` carrying the role that spoke — Worker, Judge or Lint.
+  turns, each `TurnCard` carrying the session's own call — the member word, with
+  the transport beside it for a judge or a lint run.
 - one **onejudge dispatch** — the agent session plus the judge and lint sessions
   that supervised it — is one labelled group, nested in the transcript and named
   on the conversation header. Schema 10 serves that identity as `dispatch_id`;

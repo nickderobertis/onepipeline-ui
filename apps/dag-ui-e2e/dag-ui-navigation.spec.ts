@@ -760,7 +760,7 @@ test("reads a segment of an opened conversation's own timeline", async ({
   // reading.
   await open(page, DESKTOP, `/?run=${runs().live}&node=dashboard`);
   await transcript(page)
-    .getByRole("button", { name: /^Open judge/ })
+    .getByRole("button", { name: /^Open worker · judge/ })
     .click();
   const conversation = itemDetail(page).getByRole("region", {
     name: "Conversation timeline",
@@ -803,7 +803,7 @@ test("keeps an opened turn readable at the phone", async ({ page }) => {
   // reported, never what it said, so the card itself is the widest thing served.)
   await open(page, PHONE, `/?run=${runs().live}&node=dashboard`);
   await transcript(page)
-    .getByRole("button", { name: /^Open judge/ })
+    .getByRole("button", { name: /^Open worker · judge/ })
     .click();
   const detail = itemDetail(page);
   const turn = detail.getByRole("article", { name: /^Turn / }).first();

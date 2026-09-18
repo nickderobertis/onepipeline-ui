@@ -145,7 +145,9 @@ const SURFACES: readonly Surface[] = [
       const plot = page.getByRole("region", { name: "Node timeline" });
       await plot.getByRole("button", { name: "Expand timeline" }).click();
       // Photographed with the lanes drawn, not with the line they replaced.
-      await expect(plot.getByRole("button", { name: /^judge/ })).toBeVisible();
+      await expect(
+        plot.getByRole("button", { name: /^worker · judge/ }),
+      ).toBeVisible();
     },
   },
   {
@@ -170,7 +172,7 @@ const SURFACES: readonly Surface[] = [
       await page.goto(`/?run=${runs().live}&node=dashboard`);
       await page
         .getByRole("region", { name: "Node transcript" })
-        .getByRole("button", { name: /^Open judge/ })
+        .getByRole("button", { name: /^Open worker · judge/ })
         .click();
       await expect(
         page

@@ -129,6 +129,14 @@ describe("one node's slice of the run timeline", () => {
     expect(dispatchRoleLabel(undefined, "judge")).toBe("Judge");
     expect(dispatchRoleLabel(undefined, "llmlint")).toBe("Lint");
     expect(dispatchRoleLabel(undefined, undefined)).toBe("Dispatch");
+    // A session over a member's work is served under that member's own word —
+    // the judge of a `worker` dispatch is `worker` on the wire — and the transport
+    // is the one thing that tells it from the work, so it is read beside the word.
+    // Never doubled where a host named the member after the transport it ran as.
+    expect(dispatchRoleLabel("worker", "judge")).toBe("worker · judge");
+    expect(dispatchRoleLabel("drafter", "llmlint")).toBe("drafter · llmlint");
+    expect(dispatchRoleLabel("llmlint", "llmlint")).toBe("llmlint");
+    expect(dispatchRoleLabel("worker", undefined)).toBe("worker");
     // And each served word is one the plot's own legend really shows, in the order
     // the payload served it, rather than a synonym of one that would read as a
     // category the reader never saw named.

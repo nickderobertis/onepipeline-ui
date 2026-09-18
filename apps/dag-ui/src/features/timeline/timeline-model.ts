@@ -175,10 +175,12 @@ const STRUCTURAL_LANES: readonly TimelineLane[] = Object.entries(
  * neither sorted nor keyed by any table here, because the words are the run's own
  * graph declarations and this app knows none of them: a run whose observer graph
  * declared `ticker` and `sentinel` reads in those two lanes, in that order, and a
- * run of this host's shape reads in `worker`, `judge`, `llmlint`, `monitor`,
- * `check-in` and `pr-author` as the run recorded them. Queued comes first for the
- * reason {@link STRUCTURAL_LANE_LABELS} gives; the rest of the structural lanes
- * follow the members, so a member's work reads above the publication of it.
+ * run of this host's shape reads in `worker`, `llmlint`, `monitor`, `check-in`
+ * and `pr-author` as the run recorded them — and in no `judge` lane, because a
+ * judge is served under the word of the member it supervised and lands in that
+ * member's lane. Queued comes first for the reason {@link STRUCTURAL_LANE_LABELS}
+ * gives; the rest of the structural lanes follow the members, so a member's work
+ * reads above the publication of it.
  */
 export function laneVocabulary(
   timeline: RunTimeline | undefined,
@@ -253,18 +255,25 @@ function opensDispatch(transport: TransportRole | undefined): boolean {
  *
  * The word is the run's own — the member name its graph declared, exactly as
  * served — and a session the run recorded no declared member for is named by the
- * party it ran as. One function rather than a table beside the conversation
- * panel, so the plot and the transcript it is read against call the same session
- * the same thing.
+ * party it ran as. A session that ran *over* a member's work under that member's
+ * word — its judge, or the lint tier reading it — is the same member on the wire,
+ * told from the agent side by its transport and by nothing else, so the transport
+ * is read beside the word: `worker · judge` is the worker's judge, in the
+ * worker's lane. One function rather than a table beside the conversation panel,
+ * so the plot and the transcript it is read against call the same session the
+ * same thing.
  */
 export function dispatchRoleLabel(
   role: AgentRole | undefined,
   transport: TransportRole | undefined,
 ): string {
-  if (role !== undefined) return role;
-  return transport === undefined
-    ? STRUCTURAL_LANE_LABELS.dispatch
-    : transportLabel(transport);
+  if (role === undefined)
+    return transport === undefined
+      ? STRUCTURAL_LANE_LABELS.dispatch
+      : transportLabel(transport);
+  return supervises(transport) && transport !== role
+    ? `${role} · ${transport}`
+    : role;
 }
 
 /** The party word as an operator reads it, for a session with no member word. */
