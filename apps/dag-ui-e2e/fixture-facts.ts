@@ -24,6 +24,22 @@ const fixtureSchema = z.object({
   /** The one kind the store holds that this build has no category rule for. */
   unfiled_kind: z.string().min(1),
   /**
+   * A host's own observer binding on the live run: the author it applies edits
+   * under, the two surface kinds it raises — one blocking, one not — with what
+   * each said, and the engine's own report of its applied edit. Words naming no
+   * member, no persona and no built-in kind, so the journey over them proves the
+   * app draws what it has never heard of.
+   */
+  sentinel: z.object({
+    node: z.string().min(1),
+    author: z.string().min(1),
+    kind: z.string().min(1),
+    message: z.string().min(1),
+    blocking_kind: z.string().min(1),
+    blocking_message: z.string().min(1),
+    edit_applied_message: z.string().min(1),
+  }),
+  /**
    * The boundary the reading collapses a run of consecutive rows at, and the two
    * nodes the corpus is written around it: one records one short of it and one
    * records exactly it, each as a run of dispatched sessions and a run of journal

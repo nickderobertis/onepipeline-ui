@@ -89,13 +89,16 @@ export const API_V2_TIMELINE_SCOPES = {
  * `planner` is the decisions-level view: onepipeline's own event vocabulary is a
  * closed set and it is exactly the decision vocabulary — a node became ready, was
  * dispatched, settled; an edit was committed; a decision began holding dependents
- * back and was cleared. `monitor` is detailed activity: the whole merged stream,
- * all three sources, which is what the monitor persona's own contract says it
- * reads.
+ * back and was cleared. `detailed` is detailed activity: the whole merged stream,
+ * all three sources, which is what an observer of a run reads. Both are the
+ * engine's own shipped names — it named the second `monitor` until it stopped
+ * naming an observer member at all, and ships no alias — so a run launched with
+ * a profile called `monitor` serves it as that launch's own, passed through like
+ * any other launch-defined name.
  */
 export const API_V2_FILTER_PROFILES = {
   planner: "planner",
-  monitor: "monitor",
+  detailed: "detailed",
 } as const;
 
 /**
@@ -157,6 +160,13 @@ export const TELEMETRY_SCHEMA_VERSION = 16;
  * machine and a node held on a **person** draw as the same row with the same word
  * on it — and the reader with something to go and do cannot tell that they have it.
  *
+ * `9` is where an event began carrying what a surface said. A server on `8`
+ * serves a `planner-surface-queued` and a `planner-surfaced` as a kind and a stamp
+ * alone, so a reader sees that something was raised to somebody and not what was
+ * asked, by whom, or whether anything waited on the answer. The surface's `kind`
+ * and `source` are open words: a host defines its own kinds and its own channel
+ * authors, and the engine relays both as recorded.
+ *
  * `8` is where a ready node says what it was waiting for. A server on `7` serves
  * the interval between a node becoming ready and its dispatch as empty space,
  * which reads as the harness having done nothing — when the node was queued behind
@@ -187,7 +197,7 @@ export const TELEMETRY_SCHEMA_VERSION = 16;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 8;
+export const TIMELINE_SCHEMA_VERSION = 9;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1095,6 +1105,35 @@ export const releaseAwaitedSchema = openObject({
   last_answer: z.string().min(1).optional(),
 });
 /**
+ * What one surface record said about the surface, on a `planner-surface-queued`
+ * and on the `planner-surfaced` that consumed it.
+ *
+ * `kind` is an **open** word on the terms `timelineEventSchema.kind` is: the engine
+ * declares and acts on `check-in` and `finding`, raises `edit-applied` of its own
+ * when an author other than the planner applies an edit, and relays every other
+ * well-formed kind a host defines unchanged — so a kind this build has never seen
+ * is a surface a host raised, not a payload to refuse. `source` is the author that
+ * raised it, in the word the run's bus configuration declared for it, and open for
+ * the same reason. Every field is present exactly where the record carried it, on
+ * the discipline `redirection` and `release` keep.
+ */
+export const timelineSurfaceSchema = openObject({
+  kind: z.string().min(1).optional(),
+  message: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  blocking: z.boolean().optional(),
+}).superRefine((surface, context) => {
+  // A surface that says nothing is not a surface record: the server serves no
+  // `surface` at all for a record that carried none of these, so an empty one is
+  // a payload this client cannot render rather than one it renders as nothing.
+  if (Object.values(surface).every((fact) => fact === undefined)) {
+    context.addIssue({
+      code: "custom",
+      message: "a surface record carries at least one recorded fact",
+    });
+  }
+});
+/**
  * What one release record said about itself, under one shape for all six kinds.
  *
  * The six are two producers' halves of one sequencing — `onepipeline` records a node
@@ -1174,6 +1213,13 @@ export const timelineEventSchema = openObject({
    */
   // llmlint: ignore[boundary_inputs_validated] the pairing of `release` with a `kind` is the same constraint this parser may not enforce as the `redirection` pairing above, and for the same reason: the six release kinds are `onevcs`'s and `onepipeline`'s, both released on their own schedules, so a conforming server relaying a seventh release record — or relaying one of these six under a name this build has never seen — would have its whole timeline refused over a field it filled correctly. What `release` itself carries is fully validated above, down to refusing one that carries nothing, and that is the part this contract owns.
   release: timelineReleaseSchema.optional(),
+  /**
+   * What a surface said, on the two kinds that raise and consume one and on no
+   * other. Not *keyed* on those two names here, for the reason `release` is not
+   * keyed on its six: `kind` is the journal event kind and the journal owns it.
+   */
+  // llmlint: ignore[boundary_inputs_validated] the pairing of `surface` with a `kind` is the same constraint this parser may not enforce as the `release` pairing above, and for the same reason: the surface kinds are `onepipeline`'s, released on its own schedule, so a conforming server relaying one of them under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `surface` itself carries is validated above, down to refusing one that carries nothing.
+  surface: timelineSurfaceSchema.optional(),
   reference: timelineReferenceSchema.optional(),
 });
 /**
@@ -1366,6 +1412,8 @@ export type NodeRelease = z.infer<typeof nodeReleaseSchema>;
 export type ReleaseAwaited = z.infer<typeof releaseAwaitedSchema>;
 /** What one release record said about itself. */
 export type TimelineRelease = z.infer<typeof timelineReleaseSchema>;
+/** What one surface record said about the surface it raised or consumed. */
+export type TimelineSurface = z.infer<typeof timelineSurfaceSchema>;
 export type DagConversation = z.infer<typeof dagConversationSchema>;
 export type NodeConversations = z.infer<typeof nodeConversationsSchema>;
 export type RunConversations = z.infer<typeof runConversationsSchema>;

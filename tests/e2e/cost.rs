@@ -603,7 +603,7 @@ fn a_subscriber_whose_filter_narrows_nothing_pays_nothing_to_narrow_it() {
     // nothing to compare the admitted records against, the first movement of
     // every run would announce and a reader who narrowed their attention would
     // be woken by the very records they excluded. What neither pays is a tick.
-    let measured: Vec<(&str, u64, u64)> = ["monitor", "planner"]
+    let measured: Vec<(&str, u64, u64)> = ["detailed", "planner"]
         .into_iter()
         .map(|profile| {
             let serving = Traced::start(|root| {

@@ -410,7 +410,7 @@ function stamp(seconds: number): string {
 export function runTimeline(runId: string = LIVE_RUN) {
   return {
     api_version: 2,
-    timeline_schema_version: 8,
+    timeline_schema_version: 9,
     // Read shortly after the last record it carries, which is what a poll of a live
     // run actually returns. The graph-level view plots an unfinished run out to this
     // instant, so a stamp an hour past the record would say the run had spent an
@@ -643,6 +643,38 @@ function liveSpans() {
             input_bytes: 26,
             reason: "the member is between turns",
           },
+        },
+        // A host's own observer binding at work: a surface under a kind of its
+        // own, and an edit under an author of its own — both words the app has
+        // never heard of, which is the ordinary state of an open vocabulary.
+        {
+          id: "event-12",
+          kind: "planner-surface-queued",
+          at: stamp(54),
+          node_id: "dashboard",
+          surface: {
+            kind: "sentinel-lost",
+            message: "the sentinel stopped answering",
+            source: "sentinel",
+            blocking: true,
+          },
+        },
+        {
+          id: "event-13",
+          kind: "edit-committed",
+          at: stamp(55),
+          node_id: "dashboard",
+          author: "sentinel",
+        },
+        // A change request's record names who opened it under the same key, and
+        // that is not an edit's author.
+        {
+          id: "event-14",
+          kind: "change-opened",
+          at: stamp(56),
+          node_id: "dashboard",
+          author: "a-recording-host",
+          reference: { kind: "pr", value: PR_URL },
         },
       ],
     },
@@ -992,7 +1024,7 @@ export function busyTimeline(sessions: number) {
   );
   return {
     api_version: 2,
-    timeline_schema_version: 8,
+    timeline_schema_version: 9,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: LIVE_RUN,
     spans: [

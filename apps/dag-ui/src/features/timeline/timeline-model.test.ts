@@ -32,6 +32,9 @@ describe("one node's slice of the run timeline", () => {
       "event-9",
       "event-10",
       "event-11",
+      "event-12",
+      "event-13",
+      "event-14",
       "dispatch-check-in-session",
       "dispatch-pr-author-session",
     ]);
@@ -84,6 +87,30 @@ describe("one node's slice of the run timeline", () => {
     expect(named("event-9")).toMatchObject({
       displayKind: "Event",
       displayLabel: "checkpoint-recorded",
+    });
+  });
+
+  test("names a surface by the host's own kind and an edit by its own author", () => {
+    const rows = nodeTimeline(timeline, "dashboard").rows;
+    const named = (id: string) =>
+      rows.find((row) => row.id === id) ??
+      (() => {
+        throw new Error(`no row ${id}`);
+      })();
+    // Neither word is one this app declares: the vocabulary is the host's, and
+    // the row reads what the record said rather than falling back to its kind.
+    expect(named("event-12")).toMatchObject({
+      displayKind: "Blocking surface",
+      displayLabel: "sentinel-lost: the sentinel stopped answering",
+    });
+    expect(named("event-13")).toMatchObject({
+      displayKind: "Event",
+      displayLabel: "edit-committed · by sentinel",
+    });
+    // A change request's opener is not an edit's author, and is not read as one.
+    expect(named("event-14")).toMatchObject({
+      displayKind: "Event",
+      displayLabel: "change-opened",
     });
   });
 
@@ -412,9 +439,10 @@ describe("one node's slice of the run timeline", () => {
   test("draws each journal marker as the category its kind is read under", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
     const records = projected.rows.filter((row) => row.rowKind === "event");
-    // Three different things happened on this node, and the plot says so: a
+    // Several different things happened on this node, and the plot says so: a
     // conversation took turns, a checkpoint this build has no rule for was
-    // recorded, and the planner redirected a turn that was already running.
+    // recorded, the planner redirected a turn that was already running, a host's
+    // observer raised a surface and applied an edit, and a change was opened.
     expect(
       records.map(({ event, category }) => [event.kind, category]),
     ).toEqual([
@@ -424,6 +452,9 @@ describe("one node's slice of the run timeline", () => {
       ["checkpoint-recorded", "activity"],
       ["turn-interrupted", "recovery"],
       ["turn-interrupted", "recovery"],
+      ["planner-surface-queued", "planning"],
+      ["edit-committed", "repository"],
+      ["change-opened", "publication"],
       ["conversation-turn", "session"],
       ["conversation-turn", "session"],
     ]);

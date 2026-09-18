@@ -44,6 +44,14 @@ allow = [
     # and FSF-free, and strictly weaker than the MIT this binary ships under:
     # having dropped the notice requirement it imposes no condition to carry.
     "MIT-0",
+    # The zlib license, on `foldhash`: hashbrown's default hasher, which the
+    # message bus the onepipeline SDK reads its envelopes through enables
+    # (onepipeline -> onemessagebus -> jsonschema 0.56 -> hashbrown -> foldhash).
+    # OSI-approved and FSF-free, and it asks only that the origin not be
+    # misrepresented, that altered sources say so, and that the notice stay —
+    # the same attribution bar as the MIT this binary ships under. Reviewed when
+    # the 0.37 engine was adopted.
+    "Zlib",
 ]
 confidence-threshold = 0.9
 exceptions = []

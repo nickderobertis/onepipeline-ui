@@ -61,6 +61,11 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "round-finished": "lifecycle",
   "round-budget-exceeded": "failure",
   "body-not-drafted": "publication",
+  // A run-end hook is the run's own boundary: it fires once the driver has let
+  // go of the run, and what it reports is that the run ended one way or another.
+  "run-hook-fired": "lifecycle",
+  "run-hook-finished": "lifecycle",
+  "run-hook-withheld": "lifecycle",
   // `agentgraph` — the members and turns under each node.
   "graph-started": "lifecycle",
   "graph-settled": "lifecycle",

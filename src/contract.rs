@@ -161,7 +161,19 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 16;
 /// served — and a run recorded before the engine wrote any of this serves no
 /// `queued` span at all, because a span drawn from a guess cannot be told from one
 /// the run recorded.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 8;
+///
+/// **Schema 9 carries what a surface said.** An event produced by a
+/// `planner-surface-queued` or a `planner-surfaced` carries **`surface`** —
+/// `{kind?, message?, source?, blocking?}` — each present exactly where the
+/// record carried it, on the discipline `release` keeps. Under 8 a surface was
+/// its kind and its stamp alone, so a reader could see that something was raised
+/// and not what, by whom, or whether anything waited on the answer. The `kind`
+/// and the `source` are **open** words served as recorded: the engine relays any
+/// well-formed surface kind a host defines and any author its bus configuration
+/// declared, and the one closed list this build refuses to keep is a list of
+/// them. Additive exactly as `release` was in 7 — every other span and every
+/// event is byte-for-byte what 8 served.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 9;
 
 /// The largest run-list page any request can ask for.
 ///

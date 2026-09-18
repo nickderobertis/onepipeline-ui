@@ -398,7 +398,7 @@ pub mod pipeline {
 /// vocabulary; the `note` op that replaced it compiles to [`NOTE_DELIVERED`].
 /// The engine still folds the older one and so does this crate — a run that
 /// recorded a `context-added` is still a run an operator opens.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.29.0 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `onepipeline` declares `edits::Operation` and `edits::Delivery` in a private module, in 0.37.0 as in every release before it, so there is no type to generate from and nothing to compare a copy against. Making that module public is the proposal recorded in src/AGENTS.md; until it lands, the gate available is the public `channel::Command` and `note::Reached` beside it, which `tests/contract.rs` asserts, plus the goldens written from a real reconciler's output.
 mod edits {
     /// The compiled mutations one accepted edit became.
     pub const OPERATIONS: &str = "operations";
@@ -446,8 +446,29 @@ fn named_transport_role(event: &Envelope) -> Option<Party> {
     let named = |value: Option<&str>| Party::named(value?);
     named(event.payload.get("role").and_then(Value::as_str))
         .or_else(|| named(event.labels.extra.get("role").and_then(Value::as_str)))
-        .or_else(|| named(event.labels.extra.get("member").and_then(Value::as_str)))
+        .or_else(|| named(member_label(event)))
         .or_else(|| named(event.labels.persona.as_deref()))
+}
+
+/// The graph member a record was stamped for, wherever its producer put it.
+///
+/// The bus's envelope carries `member` in a typed slot of its own, which is
+/// where every producer linked here writes it; a record written before that
+/// slot existed carries it among the extras under the same key, and those runs
+/// are still opened. A blank stamp is no stamp.
+fn member_label(event: &Envelope) -> Option<&str> {
+    event
+        .labels
+        .member
+        .as_deref()
+        .or_else(|| {
+            event
+                .labels
+                .extra
+                .get(graph::MEMBER)
+                .and_then(Value::as_str)
+        })
+        .filter(|member| !member.trim().is_empty())
 }
 
 /// The party that produced one record.
@@ -1182,14 +1203,7 @@ fn sessions_of(view: &RunView, node: &str) -> Vec<Value> {
 
 /// The semantic role one record's session ran under.
 fn event_agent_role(event: &Envelope) -> Option<&'static str> {
-    agent_role(
-        event
-            .labels
-            .extra
-            .get(graph::MEMBER)
-            .and_then(Value::as_str),
-        event.labels.persona.as_deref(),
-    )
+    agent_role(member_label(event), event.labels.persona.as_deref())
 }
 
 /// The semantic role a run recorded for a session, from the member it named it
@@ -1613,11 +1627,7 @@ fn member_turn_states<'a>(view: &'a RunView, node: &str) -> Vec<(&'a str, TurnSt
     for event in relayed {
         // The address the engine keeps is the sibling's own run id and member, and
         // a record naming neither addresses nothing.
-        let Some(member) = event
-            .labels
-            .extra
-            .get(graph::MEMBER)
-            .and_then(Value::as_str)
+        let Some(member) = member_label(event)
             .or_else(|| event.payload.get(graph::MEMBER).and_then(Value::as_str))
             .filter(|member| !member.trim().is_empty())
         else {
@@ -2156,7 +2166,7 @@ fn evidence<'a>(view: &'a RunView, node: &str) -> Vec<Evidence<'a>> {
                 .to_owned();
             let ok = verdict_of(event);
             event.artifacts.iter().map(move |artifact| Evidence {
-                artifact: artifact.id.0.as_str(),
+                artifact: artifact.id.as_str(),
                 since,
                 at: event.ts.as_str(),
                 ok,
@@ -2208,7 +2218,7 @@ fn observed_checks(events: &[&Envelope]) -> Vec<Value> {
             check.insert("status".into(), json!(status));
         }
         if let Some(artifact) = event.artifacts.first() {
-            check.insert("artifact_id".into(), json!(artifact.id.0));
+            check.insert("artifact_id".into(), json!(artifact.id));
         }
         if latest.insert(name, Value::Object(check)).is_none() {
             order.push(name);
@@ -2708,12 +2718,7 @@ fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
 /// `session` label of its own.
 fn spells_session(event: &Envelope, session: &str) -> bool {
     event.source == Source::Agentgraph
-        && event
-            .labels
-            .extra
-            .get(graph::MEMBER)
-            .and_then(Value::as_str)
-            .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+        && member_label(event).is_some_and(|member| format!("{}.{member}", event.stream) == session)
 }
 
 /// Each judge's decision on one session's agent turns, keyed by the turn number
@@ -3997,7 +4002,7 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
         event
             .artifacts
             .iter()
-            .find(|artifact| artifact.id.0 == id.as_str())
+            .find(|artifact| artifact.id == id.as_str())
             .map(|artifact| (event, artifact))
     })?;
     let kind = ReferenceKind::of(&recorded.kind);
@@ -4269,15 +4274,8 @@ fn redirection(event: &Envelope) -> Option<Value> {
             // field is a record that said nothing and must be absent rather than
             // present and empty.
             if let Some(member) =
-                non_empty(event.payload.get(graph::MEMBER).and_then(Value::as_str)).or_else(|| {
-                    non_empty(
-                        event
-                            .labels
-                            .extra
-                            .get(graph::MEMBER)
-                            .and_then(Value::as_str),
-                    )
-                })
+                non_empty(event.payload.get(graph::MEMBER).and_then(Value::as_str))
+                    .or_else(|| member_label(event))
             {
                 record.insert("member".into(), json!(member));
             }
@@ -4336,6 +4334,43 @@ fn redirection(event: &Envelope) -> Option<Value> {
         _ => return None,
     }
     Some(Value::Object(record))
+}
+
+/// What one surface record said about the surface, when the record is one.
+///
+/// Two pipeline kinds carry a surface: `planner-surface-queued`, the moment it
+/// was sent, and `planner-surfaced`, the moment a reader took it. Both carry the
+/// same four facts — the `kind` a host raised it as, its `message`, the `source`
+/// that raised it and whether it is `blocking` — and every one of them is served
+/// exactly where the record carried it, on the discipline `release_facts` keeps:
+/// a field this crate filled in would be this crate saying something no record
+/// did. A record that carried none of them serves no surface at all.
+///
+/// The kind is an **open** word, served as spelled. The engine declares and acts
+/// on two of its own and raises a third, and relays every other well-formed kind
+/// a host defines unchanged — so a closed list here would be the one thing in
+/// this stack that drops a surface a host raised, on the field that says what
+/// it was. The same goes for `source`: it is whatever author the run's bus
+/// configuration declared, in that author's own word.
+fn surface_facts(event: &Envelope) -> Option<Value> {
+    if event.source != Source::Pipeline
+        || !matches!(
+            PipelineKind::from_wire(&event.kind),
+            Some(PipelineKind::PlannerSurfaceQueued | PipelineKind::PlannerSurfaced)
+        )
+    {
+        return None;
+    }
+    let mut record = Map::new();
+    for key in ["kind", "message", "source"] {
+        if let Some(value) = non_empty(event.payload.get(key).and_then(Value::as_str)) {
+            record.insert(key.to_owned(), json!(value));
+        }
+    }
+    if let Some(blocking) = event.payload.get("blocking").and_then(Value::as_bool) {
+        record.insert("blocking".into(), json!(blocking));
+    }
+    (!record.is_empty()).then_some(Value::Object(record))
 }
 
 /// The release facts one record carried, when it is one of the six that carry any.
@@ -4524,11 +4559,13 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
         item.insert("status".into(), json!(status));
     }
     // Who submitted an accepted live edit. The SDK carries an `author` on every
-    // `edit-committed`, and the run enforces a per-author op allowlist — the
-    // planner may issue every op and the monitor a narrower set — so an edit that
-    // changed the graph and an edit the monitor self-applied are two different
-    // facts about the same run, and a reader that could not tell them apart was
-    // reading the second as the planner's own decision.
+    // `edit-committed`, and the run's bus configuration grants each author its
+    // own ops — the planner every op, and each author the launch declared a
+    // narrower set — so an edit that changed the graph and an edit an observer
+    // self-applied are two different facts about the same run, and a reader that
+    // could not tell them apart was reading the second as the planner's own
+    // decision. The word is open: it is whatever the launch declared, served as
+    // the record spelled it.
     if let Some(author) = event.payload.get("author").and_then(Value::as_str) {
         item.insert("author".into(), json!(author));
     }
@@ -4541,6 +4578,13 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     // reader meets four rows that differ only in the word at the front.
     if let Some(release) = release_facts(event) {
         item.insert("release".into(), release);
+    }
+    // What one surface said, as the record carried it. A surface is the one
+    // thing a run raises *to* somebody, and its kind is a host's own word: a
+    // reader met its record as a kind and a stamp and had to guess what was
+    // asked, of whom, and whether anything waited on the answer.
+    if let Some(surface) = surface_facts(event) {
+        item.insert("surface".into(), surface);
     }
     // Where the event's own heavy content lives, never inlined: the transcript it
     // is a turn of, the change it published, or the first evidence it stored. A
@@ -4555,7 +4599,7 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     } else if let Some(artifact) = event.artifacts.first() {
         item.insert(
             "reference".into(),
-            json!({ "kind": ReferenceKind::of(&artifact.kind).as_str(), "value": artifact.id.0 }),
+            json!({ "kind": ReferenceKind::of(&artifact.kind).as_str(), "value": artifact.id }),
         );
     }
     Value::Object(item)
@@ -4792,12 +4836,7 @@ fn moment_at(ts: &str) -> Option<Moment> {
 /// — which is the one join this contract allows, because `oneagentgraph` stamps
 /// no `session` label on the records that open and close a member.
 fn belongs_to(event: &Envelope, session: &str) -> bool {
-    event
-        .labels
-        .extra
-        .get(graph::MEMBER)
-        .and_then(Value::as_str)
-        .is_some_and(|member| format!("{}.{member}", event.stream) == session)
+    member_label(event).is_some_and(|member| format!("{}.{member}", event.stream) == session)
 }
 
 fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) -> Vec<Moment> {

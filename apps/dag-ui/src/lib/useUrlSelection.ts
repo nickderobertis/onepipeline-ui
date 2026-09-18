@@ -33,7 +33,7 @@ export interface UrlSelection {
    * put on it — and `decisions` narrows to onepipeline's own vocabulary, which is
    * exactly the decisions: a node became ready, was dispatched, settled; an edit
    * was committed; a decision began holding dependents back and was cleared. It is
-   * the same distinction the planner and the monitor get on the CLI, and it is in
+   * the same distinction the planner and an observer get on the CLI, and it is in
    * the query string for the same reason every other selection is — a reader who
    * narrowed their attention can send someone the reading they were looking at.
    *
@@ -66,7 +66,7 @@ export const DETAIL_LEVELS = {
   activity: {
     label: "Detailed activity",
     description: "Every record all three producers put on the stream",
-    profile: API_V2_FILTER_PROFILES.monitor,
+    profile: API_V2_FILTER_PROFILES.detailed,
   },
 } as const;
 export type DetailLevel = keyof typeof DETAIL_LEVELS;

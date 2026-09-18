@@ -624,7 +624,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(8));
+    assert_eq!(body["timeline_schema_version"], json!(9));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -5086,10 +5086,30 @@ fn a_named_profile_narrows_the_stream_to_the_decisions_or_leaves_it_whole() {
         );
     }
 
-    // `monitor` is the detailed stream, which is what that persona's own contract
-    // says it reads: it narrows nothing, and is named so that the two readings a
-    // viewer switches between are two profiles rather than a profile and nothing.
-    assert_eq!(kinds_on(&timeline_under(&serving, Some("monitor"))), whole);
+    // `detailed` is the detailed stream, which is what an observer of a run
+    // reads: it narrows nothing, and is named so that the two readings a viewer
+    // switches between are two profiles rather than a profile and nothing.
+    assert_eq!(kinds_on(&timeline_under(&serving, Some("detailed"))), whole);
+
+    // The engine shipped that profile as `monitor` until it stopped naming an
+    // observer member, and ships no alias — so neither does this API. A reader
+    // asking for it at a run whose launch defined nothing is refused by name and
+    // told which profiles do exist, rather than served an alias of either.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter=monitor",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404, "{}", refused.body);
+    let error = &refused.json()["error"];
+    assert_eq!(error["code"], json!("unknown_filter_profile"));
+    let message = error["message"].as_str().expect("a message");
+    assert!(
+        message.contains("planner") && message.contains("detailed"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -5147,6 +5167,73 @@ fn an_inline_spec_is_read_in_the_grammar_the_stack_shares() {
         !one_node.iter().any(|kind| kind == "change-opened"),
         "{one_node:?}"
     );
+
+    // `member` has a typed slot of its own on the bus's envelope, which is where
+    // every producer linked here stamps it: a matcher over it reaches the records
+    // of one member and none of the run's own.
+    let one_member = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"member":"worker"}]}"#),
+    ));
+    assert!(
+        one_member.iter().any(|kind| kind == "turn-started"),
+        "{one_member:?}"
+    );
+    assert!(
+        !one_member.iter().any(|kind| kind == "node-settled"),
+        "{one_member:?}"
+    );
+    let no_member = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"member":"nobody-ran-as-this"}]}"#),
+    ));
+    assert!(no_member.is_empty(), "{no_member:?}");
+}
+
+#[test]
+fn a_matcher_over_the_phase_reaches_the_records_a_producer_stamped_one_on() {
+    // `phase` is the agent envelope's one reserved dimension — the part of a
+    // change's life a record belongs to, which `onevcs` stamps and `onepipeline`
+    // relays as stamped — and the grammar every producer in the stack now reads
+    // names it. A record carrying none matches no phase a matcher asks for.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed_at_phase(
+            &dir,
+            "vcs",
+            "change-check",
+            "review",
+            json!({ "run_id": fixture_run::RUN_ID, "node": fixture_run::NODE_ID }),
+            json!({ "name": "gate", "required": true, "from": "queued", "to": "in_progress" }),
+        );
+    });
+    let reviewed = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"phase":"review"}]}"#),
+    ));
+    assert_eq!(reviewed, vec!["change-check"], "{reviewed:?}");
+    let released = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"phase":"release"}]}"#),
+    ));
+    assert!(released.is_empty(), "{released:?}");
+    // And it is refused where every other field is, in the grammar's own terms: a
+    // phase the bus does not spell is not a matcher, and an empty one matches
+    // nothing on the stream.
+    for spec in [
+        r#"{"include":[{"phase":"gate"}]}"#,
+        r#"{"include":[{"phase":""}]}"#,
+    ] {
+        let refused = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run&filter={}",
+                fixture_run::RUN_ID,
+                urlencode(spec)
+            ),
+        );
+        assert_eq!(refused.status, 422, "{spec}: {}", refused.body);
+    }
 }
 
 #[test]
@@ -5165,7 +5252,7 @@ fn a_filter_shapes_the_response_and_never_the_run() {
         )
         .json()
     };
-    let wide = detail("monitor");
+    let wide = detail("detailed");
     let narrow = detail("planner");
     assert_eq!(narrow["graph"]["node_status"], wide["graph"]["node_status"]);
     assert_eq!(
@@ -5221,7 +5308,7 @@ fn a_profile_the_runs_launch_config_defined_answers_for_that_run_alone() {
     let message = error["message"].as_str().expect("a message");
     assert!(message.contains(defined), "{message}");
     assert!(
-        message.contains("planner") && message.contains("monitor"),
+        message.contains("planner") && message.contains("detailed"),
         "a reader who mistyped a name is told which names exist: {message}"
     );
 
@@ -5235,6 +5322,63 @@ fn a_profile_the_runs_launch_config_defined_answers_for_that_run_alone() {
     assert!(
         planner.iter().any(|kind| kind == "node-settled"),
         "the built-in profile is what `planner` still means: {planner:?}"
+    );
+}
+
+#[test]
+fn a_profile_the_launch_config_declared_in_its_filters_block_answers_under_its_own_name() {
+    // The engine's own place for a launch's profiles is the `filters.profiles`
+    // block a `--launch-config` file or a `--filter-profile NAME=SPEC` flag lands
+    // in, retained on the launch record as the typed block `next` and `monitor`
+    // resolve through. `monitor` is the word the engine shipped its detailed
+    // profile under before it stopped naming an observer member, and it ships no
+    // alias — so a run whose launch declared a profile of that name is served
+    // *that* profile, as the launch's own, and not the built-in it used to be.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::declare_filter_profile(&dir, "monitor", r#"{"include":[{"source":"vcs"}]}"#);
+        fixture_run::write_live(root, fixture_run::OTHER_RUN_ID);
+    });
+
+    let served = kinds_on(&timeline_under(&serving, Some("monitor")));
+    assert!(!served.is_empty(), "the launch's profile resolved");
+    assert!(
+        served.iter().any(|kind| kind == "change-opened"),
+        "the launch's own spec is what shaped it: {served:?}"
+    );
+    assert!(
+        !served.iter().any(|kind| kind == "node-settled"),
+        "not the detailed stream the word used to name: {served:?}"
+    );
+    // Named beside the two built-ins when a reader asks for something else.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter=no-such-profile",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404);
+    let message = refused.json()["error"]["message"]
+        .as_str()
+        .expect("a message")
+        .to_owned();
+    for name in ["planner", "detailed", "monitor"] {
+        assert!(message.contains(name), "{message}");
+    }
+
+    // At a run whose launch declared no such block, the word names nothing.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter=monitor",
+            fixture_run::OTHER_RUN_ID
+        ),
+    );
+    assert_eq!(refused.status, 404, "{}", refused.body);
+    assert_eq!(
+        refused.json()["error"]["code"],
+        json!("unknown_filter_profile")
     );
 }
 
@@ -5366,7 +5510,7 @@ fn a_filtered_detail_carries_the_transcripts_that_reading_is_about() {
             .collect()
     };
 
-    let detailed = sessions(&detail("monitor"));
+    let detailed = sessions(&detail("detailed"));
     assert!(
         detailed.contains(&fixture_run::LIVE_CONVERSATION_ID.to_owned()),
         "{detailed:?}"
@@ -5512,7 +5656,7 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
         activity
     };
 
-    let told = latest("monitor").expect("the detailed reading is told what the turn is doing");
+    let told = latest("detailed").expect("the detailed reading is told what the turn is doing");
     let summary = told["activity"]
         .as_array()
         .expect("the live activity")
@@ -5531,12 +5675,369 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
     );
 }
 
+/// Every event a run-scoped timeline lists, across its spans.
+fn events_on(body: &Value) -> Vec<Value> {
+    body["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .collect()
+}
+
+/// The word a host's observer binding raises its surfaces under in these
+/// journeys: a word naming no member, no persona and no kind the engine declares,
+/// so what they prove is that the vocabulary is open rather than that one host's
+/// words happen to be on a list.
+const SENTINEL: &str = "sentinel";
+/// A blocking kind that same host defined, likewise nobody's built-in.
+const SENTINEL_LOST: &str = "sentinel-lost";
+
+#[test]
+fn a_surface_of_a_kind_no_vocabulary_declares_is_served_as_the_host_raised_it() {
+    // Surface kinds are an open vocabulary: the engine declares and acts on two
+    // of its own, raises a third, and relays every other well-formed kind a host
+    // defines unchanged — its message, its source, its blocking flag and its
+    // unread accounting. A reader of this API is shown exactly that, on the
+    // timeline, the run detail and the stream, under a kind this build has never
+    // heard of.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::OTHER_RUN_ID);
+        // One the host's observer raised and the planner has read.
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({
+                "kind": SENTINEL,
+                "message": "the gate went red twice on the same hunk",
+                "source": SENTINEL,
+                "blocking": false,
+            }),
+        );
+        fixture_run::append(
+            &dir,
+            "planner-surfaced",
+            json!({
+                "kind": SENTINEL,
+                "message": "the gate went red twice on the same hunk",
+                "source": SENTINEL,
+                "blocking": false,
+                "queued_at": 1_786_190_460_000_u64,
+            }),
+        );
+        // And one that holds a subtree until it is answered, which the engine
+        // records as the decision point it is, under the surface's own kind.
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({
+                "kind": SENTINEL_LOST,
+                "message": "the sentinel stopped answering; park the node or carry on?",
+                "source": SENTINEL,
+                "blocking": true,
+            }),
+        );
+        fixture_run::append_relayed(
+            &dir,
+            "pipeline",
+            "decision-pending",
+            json!({ "run_id": fixture_run::OTHER_RUN_ID, "node": "surface:7" }),
+            json!({
+                "reference": "surface:7",
+                "kind": SENTINEL_LOST,
+                "unblocks": [fixture_run::ANNOUNCE_NODE_ID],
+            }),
+        );
+    });
+
+    // The timeline: each surface record carries what it said, as recorded.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::OTHER_RUN_ID
+        ),
+    )
+    .json();
+    // The host's own, beside the one the fixture's engine raised itself.
+    let surfaces: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| event["surface"]["source"] == json!(SENTINEL))
+        .collect();
+    let kinds: Vec<&str> = surfaces
+        .iter()
+        .filter_map(|event| event["kind"].as_str())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "planner-surface-queued",
+            "planner-surfaced",
+            "planner-surface-queued"
+        ],
+        "{surfaces:?}"
+    );
+    assert_eq!(
+        surfaces[0]["surface"],
+        json!({
+            "kind": SENTINEL,
+            "message": "the gate went red twice on the same hunk",
+            "source": SENTINEL,
+            "blocking": false,
+        })
+    );
+    assert_eq!(surfaces[1]["surface"], surfaces[0]["surface"]);
+    assert_eq!(
+        surfaces[2]["surface"],
+        json!({
+            "kind": SENTINEL_LOST,
+            "message": "the sentinel stopped answering; park the node or carry on?",
+            "source": SENTINEL,
+            "blocking": true,
+        })
+    );
+    // The two are decisions, so the decisions-level profile lists them too.
+    let decisions = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter=planner",
+            fixture_run::OTHER_RUN_ID
+        ),
+    )
+    .json();
+    assert_eq!(
+        events_on(&decisions)
+            .iter()
+            .filter(|event| event["surface"]["kind"] == json!(SENTINEL_LOST))
+            .count(),
+        1,
+        "{decisions}"
+    );
+
+    // The run detail: the blocking one is the decision point holding its
+    // subtree, keyed by the surface and carrying the host's own kind.
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::OTHER_RUN_ID),
+    )
+    .json();
+    let decisions = detail["graph"]["decisions"]
+        .as_array()
+        .expect("decisions")
+        .clone();
+    let held = decisions
+        .iter()
+        .find(|decision| decision["id"] == json!("surface:7"))
+        .unwrap_or_else(|| panic!("the blocking surface is a decision point: {decisions:?}"));
+    assert_eq!(held["kind"], json!(SENTINEL_LOST));
+    assert_eq!(held["unblocks"], json!([fixture_run::ANNOUNCE_NODE_ID]));
+    assert_eq!(detail["run"]["phase"], json!("deciding"));
+    assert_eq!(detail["run"]["last_event"], json!("decision-pending"));
+
+    // The stream: the run's row is what the snapshot carries, and the surface
+    // raised next is what wakes a subscriber — the decisions-level one included,
+    // because a surface is a decision whatever kind a host gave it.
+    let mut stream = http::stream(serving.address, "/api/v2/events?filter=planner", None);
+    assert_eq!(stream.status, 200);
+    let snapshot = stream.next_frame().expect("a snapshot").json();
+    let row = snapshot["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(fixture_run::OTHER_RUN_ID))
+        .expect("the run's row")
+        .clone();
+    assert_eq!(row["phase"], json!("deciding"));
+    fixture_run::append(
+        &serving.run_dir(fixture_run::OTHER_RUN_ID),
+        "planner-surface-queued",
+        json!({
+            "kind": SENTINEL,
+            "message": "the sentinel is back",
+            "source": SENTINEL,
+            "blocking": false,
+        }),
+    );
+    let changed = stream.next_frame().expect("the surface is noticed");
+    assert_eq!(changed.event, "run.changed");
+    assert_eq!(changed.json()["run_id"], json!(fixture_run::OTHER_RUN_ID));
+    // And the row refreshed by name, as a client does on that frame, carries the
+    // one thing that moved: the run is surfacing again on top of its decision.
+    let refreshed = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::OTHER_RUN_ID
+        ),
+    )
+    .json();
+    assert_eq!(
+        events_on(&refreshed)
+            .iter()
+            .filter(|event| event["surface"]["message"] == json!("the sentinel is back"))
+            .count(),
+        1
+    );
+
+    // Counted with every other surface: a run holding nothing but an unread
+    // surface of a kind nobody declared is a run waiting on somebody, not one
+    // nobody is driving — and a run whose newest record is that surface is
+    // surfacing, whatever the kind.
+    let asked = Serving::start(|root| {
+        let dir = fixture_run::write_launched(root, fixture_run::RUN_ID);
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({
+                "kind": SENTINEL_LOST,
+                "message": "park or carry on?",
+                "source": SENTINEL,
+                "blocking": true,
+            }),
+        );
+    });
+    let waiting = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(waiting["state"], json!("active"), "{waiting}");
+    // A run with work still queued and no decision outstanding.
+    let surfacing = Serving::start(|root| {
+        let dir = fixture_run::write_held(root, fixture_run::HELD_RUN_ID);
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({
+                "kind": SENTINEL,
+                "message": "one more thing",
+                "source": SENTINEL,
+                "blocking": false,
+            }),
+        );
+    });
+    let row =
+        http::get(surfacing.address, "/api/v2/runs?include_settled=true").json()["runs"][0].clone();
+    assert_eq!(row["phase"], json!("surfacing"), "{row}");
+}
+
+#[test]
+fn a_surface_that_said_nothing_this_build_can_read_is_served_without_one() {
+    // A record carrying none of the four facts serves no `surface` at all, and a
+    // record carrying some serves exactly those: nothing is defaulted, because a
+    // field filled in here would be this API saying something no record did.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::append(&dir, "planner-surface-queued", json!({}));
+        fixture_run::append(
+            &dir,
+            "planner-surfaced",
+            json!({ "blocking": true, "kind": "", "message": "   " }),
+        );
+    });
+    let surfaces: Vec<Value> = events_on(&timeline_under(&serving, None))
+        .into_iter()
+        .filter(|event| {
+            event["kind"]
+                .as_str()
+                .is_some_and(|kind| kind.starts_with("planner-surface"))
+        })
+        .collect();
+    assert_eq!(surfaces.len(), 2, "{surfaces:?}");
+    assert!(surfaces[0].get("surface").is_none(), "{surfaces:?}");
+    assert_eq!(surfaces[1]["surface"], json!({ "blocking": true }));
+}
+
+#[test]
+fn an_edit_by_an_author_the_launch_declared_is_served_with_that_authors_word() {
+    // Channel authors are open words: an omitted author is the planner, and every
+    // other is one the launch's bus configuration declared together with the ops
+    // it grants. The engine reports each such author's applied edit back as an
+    // `edit-applied` surface whose source is that author's word. Both reach a
+    // reader as recorded — and so does a run the older engine wrote, with its
+    // `monitor` author and its `monitor-edit` surface kind, because nothing here
+    // keeps a list to refuse either against.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::OTHER_RUN_ID);
+        fixture_run::append(
+            &dir,
+            "edit-committed",
+            json!({
+                "author": SENTINEL,
+                "command": { "op": "amend", "id": fixture_run::UNCONTROLLED_NODE_ID, "text": "the benchmark's bar is the p99, not the mean" },
+                "operations": [{ "kind": "task-amended", "node": fixture_run::UNCONTROLLED_NODE_ID }],
+            }),
+        );
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({
+                "kind": "edit-applied",
+                "message": format!("{SENTINEL} applied an edit: amend {}", fixture_run::UNCONTROLLED_NODE_ID),
+                "source": SENTINEL,
+                "blocking": false,
+            }),
+        );
+        // What the engine wrote before it stopped naming its observer.
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            json!({
+                "kind": "monitor-edit",
+                "message": "monitor applied an edit: context benchmark",
+                "source": "monitor",
+                "blocking": false,
+            }),
+        );
+    });
+    let events = events_on(
+        &http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run",
+                fixture_run::OTHER_RUN_ID
+            ),
+        )
+        .json(),
+    );
+    let by_sentinel: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == "edit-committed" && event["author"] == json!(SENTINEL))
+        .collect();
+    assert_eq!(by_sentinel.len(), 1, "{events:?}");
+    let applied: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["surface"]["kind"] == json!("edit-applied"))
+        .collect();
+    assert_eq!(applied.len(), 1, "{events:?}");
+    assert_eq!(applied[0]["surface"]["source"], json!(SENTINEL));
+    assert_eq!(applied[0]["surface"]["blocking"], json!(false));
+    assert_eq!(
+        applied[0]["surface"]["message"],
+        json!(format!(
+            "{SENTINEL} applied an edit: amend {}",
+            fixture_run::UNCONTROLLED_NODE_ID
+        ))
+    );
+    let older: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["surface"]["kind"] == json!("monitor-edit"))
+        .collect();
+    assert_eq!(older.len(), 1, "{events:?}");
+    assert_eq!(older[0]["surface"]["source"], json!("monitor"));
+    // The older engine's observer author is still served as its own word, on the
+    // edit the live fixture recorded for it.
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == "edit-committed" && event["author"] == json!("monitor")),
+        "{events:?}"
+    );
+}
+
 #[test]
 fn an_accepted_edit_is_served_with_the_author_that_submitted_it() {
-    // The run enforces a per-author op allowlist — a planner may issue every op
-    // and a monitor a narrower set — so who asked for a change is a fact about
-    // the change. Without it an observer's self-applied fix and the planner's own
-    // decision read as one thing on a reader's timeline.
+    // The run's bus configuration grants each author its own ops — the planner
+    // every op, and each author the launch declared a narrower set — so who
+    // asked for a change is a fact about the change. Without it an observer's
+    // self-applied fix and the planner's own decision read as one thing on a
+    // reader's timeline.
     let serving = live_run();
     let edits: Vec<Value> = http::get(
         serving.address,
@@ -7997,7 +8498,7 @@ fn a_filter_narrows_the_turns_a_transcript_lists_and_never_what_each_one_was() {
             .clone()
     };
 
-    let wide = detail("monitor");
+    let wide = detail("detailed");
     // The records that opened the two turns the journal bracketed, excluded: they
     // are relayed envelopes, so a reader who excluded their kind is not shown the
     // turns they opened.
@@ -8888,7 +9389,7 @@ fn a_filter_narrows_a_live_transcript_and_never_what_a_turn_said() {
             .clone()
     };
 
-    let all = transcript("monitor");
+    let all = transcript("detailed");
     // The two kinds a turn is opened and answered by. Excluding them drops the
     // turn in flight from the listing — the run relayed nothing else for it — and
     // leaves the one the producer also closed, which it relayed a `turn-completed`

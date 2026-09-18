@@ -592,7 +592,7 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 8);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 9);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -1357,6 +1357,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         delivered: false,
         input_bytes: 31,
         reason: Some("the member is between turns".into()),
+        truncated: false,
     })
     .expect("the refusal serializes");
     let declared: Vec<&str> = refused
@@ -1379,6 +1380,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         delivered: true,
         input_bytes: 31,
         reason: None,
+        truncated: false,
     })
     .expect("the delivery serializes");
     assert!(
@@ -1394,6 +1396,7 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         kind: "oneharness".into(),
         decision: onejudge::Decision::Continue.as_str().into(),
         reason: "the tests are missing".into(),
+        truncated: false,
     })
     .expect("the decision serializes");
     let declared: Vec<&str> = decided
@@ -2408,14 +2411,15 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
 /// This crate's copy of the stack's shared filter grammar, held to the wire the
 /// grammar fixes.
 ///
-/// The grammar is duplicated per repository by design — there is no shared util
-/// crate here, exactly as with the envelope — so this is the drift gate that
-/// stands in for the shared declaration. It is a **type** gate, like the event
-/// vocabulary above: `oneagentgraph` declares `EventFilter` and `Matcher` in a
-/// public module, and this crate's copy is held to that library's own
-/// serialization rather than to a second reading of the wire alone. Which is why
-/// the sibling's resolution is the SDK's to decide: a tree that cannot reach that
-/// declaration has only the wire to compare against.
+/// The grammar is `onemessagebus-agent`'s now — every producer in the stack
+/// re-exports that one `EventFilter` and `Matcher` — and this crate keeps a copy
+/// of it because a read API asks the grammar a per-request question of its own.
+/// So this is the drift gate that stands in for linking the declaration. It is a
+/// **type** gate, like the event vocabulary above: the copy is held to the bus's
+/// own serialization, reached through `oneagentgraph`'s re-export, rather than
+/// to a second reading of the wire alone. Which is why the sibling's resolution
+/// is the SDK's to decide: a tree that cannot reach that declaration has only
+/// the wire to compare against.
 ///
 /// One field is deliberately *not* shared: this grammar has no `round` matcher.
 /// Execution is continuous, the label is deprecated and stamped by nothing, and a
@@ -2429,6 +2433,7 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
     let mine = serde_json::to_value(Matcher {
         source: Some(onepipeline::event::Source::Agentgraph),
         kind: Some("turn-*".into()),
+        phase: Some(onepipeline::event::Phase::Review),
         run_id: Some("run-1".into()),
         node: Some("build".into()),
         step: Some("compile".into()),
@@ -2441,6 +2446,7 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         serde_json::json!({
             "source": "agentgraph",
             "kind": "turn-*",
+            "phase": "review",
             "run_id": "run-1",
             "node": "build",
             "step": "compile",
@@ -2450,23 +2456,33 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         "the shared grammar's matcher has drifted"
     );
 
-    // And the same document off the sibling's own type, filled the same way:
-    // this is what makes the gate read that library's declaration rather than a
-    // second transcription of what it happens to emit.
+    // And the same document off the bus's own type, filled the same way: this
+    // is what makes the gate read that library's declaration rather than a
+    // second transcription of what it happens to emit. The bus keeps the
+    // dimension and the reserved labels behind `fields`, and flattens them onto
+    // the wire beside `source` and `kind`.
     assert_eq!(
         mine,
         serde_json::to_value(oneagentgraph::event::Matcher {
             source: Some(oneagentgraph::event::Source::Agentgraph),
             kind: Some("turn-*".into()),
-            run_id: Some("run-1".into()),
-            node: Some("build".into()),
-            step: Some("compile".into()),
-            member: Some("worker".into()),
-            persona: Some("engineer".into()),
+            fields: oneagentgraph::event::MatchFields {
+                phase: Some(onepipeline::event::Phase::Review),
+                run_id: Some("run-1".into()),
+                node: Some("build".into()),
+                step: Some("compile".into()),
+                member: Some("worker".into()),
+                persona: Some("engineer".into()),
+            },
         })
-        .expect("the sibling's matcher serializes"),
-        "this crate's matcher has drifted from the one `oneagentgraph` declares"
+        .expect("the bus's matcher serializes"),
+        "this crate's matcher has drifted from the one the bus declares"
     );
+    // And read back through the bus's own reader, the same document is the same
+    // matcher: the fields this copy names are exactly the ones the bus admits.
+    let theirs: oneagentgraph::event::Matcher =
+        serde_json::from_value(mine.clone()).expect("the bus reads this crate's matcher");
+    assert_eq!(serde_json::to_value(theirs).expect("serializes"), mine);
 
     // A matcher that names nothing serializes to nothing, so a spec round-trips
     // as the file wrote it rather than gaining every key it left unasked — which

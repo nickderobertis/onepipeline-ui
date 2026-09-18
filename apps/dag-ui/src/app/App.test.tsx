@@ -1689,7 +1689,7 @@ describe("the reading a viewer asks for", () => {
       await waitFor(() =>
         expect(filtersAsked(fetch).length).toBeGreaterThan(0),
       );
-      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["monitor"]));
+      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["detailed"]));
 
       // Narrowing to the decisions is one click, and every read of the run is
       // taken again under the profile it names — so the graph, the timeline and
@@ -1702,7 +1702,7 @@ describe("the reading a viewer asks for", () => {
         expect(filtersAsked(fetch).length).toBeGreaterThan(before),
       );
       expect(filtersAsked(fetch).slice(before)).toContain("planner");
-      expect(filtersAsked(fetch).slice(before)).not.toContain("monitor");
+      expect(filtersAsked(fetch).slice(before)).not.toContain("detailed");
 
       // And the reading is in the address, like every other selection: a reader
       // who narrowed their attention can send someone what they were looking at.

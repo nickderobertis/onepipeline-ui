@@ -158,6 +158,30 @@ export const REMOTE_OPEN_PR = "https://example.invalid/changes/13";
 export const UNFILED_KIND = "worktree-pruned";
 
 /**
+ * The host's own observer binding, raising surfaces under kinds of its own and
+ * applying edits under an author of its own.
+ *
+ * Surface kinds and channel authors are open words in the engine: it declares and
+ * acts on `check-in` and `finding`, raises `edit-applied` when an author other than
+ * the planner applies an edit, and relays every other well-formed kind a host
+ * defines unchanged; an author is whatever the launch's bus configuration declared.
+ * So this is a word naming no member, no persona and no built-in kind, and what the
+ * journey over it proves is that the app draws a surface or an edit it has never
+ * heard of the way it draws every other — never that one host's words are on a
+ * list. Published in the facts below because the journey asserts what was drawn.
+ */
+export const SENTINEL_AUTHOR = "sentinel";
+/** The non-blocking kind that binding raises, and what it said. */
+export const SENTINEL_KIND = "sentinel";
+export const SENTINEL_MESSAGE = "the gate went red twice on the same hunk";
+/** The blocking kind it raises, and what it asked. */
+export const SENTINEL_LOST_KIND = "sentinel-lost";
+export const SENTINEL_LOST_MESSAGE =
+  "the sentinel stopped answering; park the node or carry on?";
+/** The engine's own report of that author's applied edit. */
+export const EDIT_APPLIED_MESSAGE = `${SENTINEL_AUTHOR} applied an edit: amend local-direct`;
+
+/**
  * The release the foundation node's landed work went out in.
  *
  * Recorded with **no node label at all**, exactly as `onevcs` records one: a
@@ -998,6 +1022,82 @@ function writeLiveRun(root) {
       history_session: HARNESS_SESSION_FILE,
     },
     [{ id: UNASKABLE_HARNESS_SESSION, kind: "oneharness_session", bytes: 0 }],
+  );
+  // A host's observer binding raised two surfaces about this node under kinds of
+  // its own — one that held the node's dependents until the planner answered it,
+  // one that did not — and self-applied an edit under its own author, which the
+  // engine reported back as an `edit-applied` surface naming that author. Every
+  // one of them is a word the app has never heard of.
+  journal.advance(1).emit(
+    "pipeline",
+    "planner-surface-queued",
+    { ...run, node: "local-direct" },
+    {
+      kind: SENTINEL_KIND,
+      message: SENTINEL_MESSAGE,
+      source: SENTINEL_AUTHOR,
+      blocking: false,
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "planner-surfaced",
+    { ...run, node: "local-direct" },
+    {
+      kind: SENTINEL_KIND,
+      message: SENTINEL_MESSAGE,
+      source: SENTINEL_AUTHOR,
+      blocking: false,
+      queued_at: journal.at,
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "planner-surface-queued",
+    { ...run, node: "local-direct" },
+    {
+      kind: SENTINEL_LOST_KIND,
+      message: SENTINEL_LOST_MESSAGE,
+      source: SENTINEL_AUTHOR,
+      blocking: true,
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "planner-surfaced",
+    { ...run, node: "local-direct" },
+    {
+      kind: SENTINEL_LOST_KIND,
+      message: SENTINEL_LOST_MESSAGE,
+      source: SENTINEL_AUTHOR,
+      blocking: true,
+      queued_at: journal.at,
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "edit-committed",
+    { ...run, node: "local-direct" },
+    {
+      author: SENTINEL_AUTHOR,
+      command: {
+        op: "amend",
+        id: "local-direct",
+        text: "the bar is the p99, not the mean",
+      },
+      operations: [{ kind: "task-amended", node: "local-direct" }],
+    },
+  );
+  journal.emit(
+    "pipeline",
+    "planner-surface-queued",
+    { ...run, node: "local-direct" },
+    {
+      kind: "edit-applied",
+      message: EDIT_APPLIED_MESSAGE,
+      source: SENTINEL_AUTHOR,
+      blocking: false,
+    },
   );
   journal
     .advance(3)
@@ -2140,6 +2240,15 @@ export function facts() {
     },
     foundation_pr: FOUNDATION_PR,
     unfiled_kind: UNFILED_KIND,
+    sentinel: {
+      node: "local-direct",
+      author: SENTINEL_AUTHOR,
+      kind: SENTINEL_KIND,
+      message: SENTINEL_MESSAGE,
+      blocking_kind: SENTINEL_LOST_KIND,
+      blocking_message: SENTINEL_LOST_MESSAGE,
+      edit_applied_message: EDIT_APPLIED_MESSAGE,
+    },
     collapse: {
       threshold: COLLAPSE_THRESHOLD,
       narrow_node: NARROW_NODE,

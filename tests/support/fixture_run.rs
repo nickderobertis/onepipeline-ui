@@ -1030,6 +1030,44 @@ pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, paylo
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
+/// Append one event a sibling relayed at a **phase**, which is the agent
+/// envelope's one reserved dimension.
+///
+/// `onevcs` stamps a change's records with the part of its life they belong
+/// to — `development`, `integrate`, `review`, `release` — and `onepipeline`
+/// relays it as stamped, on the wire between `kind` and `labels`. [`append_relayed`]
+/// writes a record carrying none, which is every other producer's; a journey
+/// about a matcher over the phase has to be able to write one that carries it.
+pub fn append_relayed_at_phase(
+    dir: &Path,
+    source: &str,
+    kind: &str,
+    phase: &str,
+    labels: Value,
+    payload: Value,
+) {
+    let journal = dir.join("events.jsonl");
+    let existing = fs::read_to_string(&journal).unwrap_or_default();
+    let seq = existing.lines().count();
+    let line = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:01:00.000Z",
+        "stream": "a-recording-host-4244",
+        "seq": seq,
+        "source": source,
+        "kind": kind,
+        "phase": phase,
+        "labels": labels,
+        "payload": payload,
+        "artifacts": [],
+    });
+    // Parsed back through the SDK's own envelope before it is written, so a
+    // phase the bus does not spell fails here rather than being served as a
+    // record the producing library never wrote.
+    let _: Envelope = serde_json::from_value(line.clone()).expect("the phased envelope");
+    fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
+}
+
 /// One member's settlement, as the producing library relays it.
 ///
 /// The stream is deliberately a parameter and deliberately unconstrained: it is
@@ -3408,6 +3446,34 @@ pub fn define_filter_profile(dir: &Path, name: &str, spec: &str) {
     sets.as_array_mut()
         .expect("the retained overrides")
         .push(json!(format!("filters.{name}={spec}")));
+    fs::write(&path, pretty(&record)).expect("the launch record");
+}
+
+/// Declare a named filter profile in a run's launch record's `filters` block.
+///
+/// This is where the engine itself keeps a launch's profiles — the block a
+/// `--launch-config` file or a `--filter-profile NAME=SPEC` flag is retained
+/// into, and the one `onepipeline next` and `onepipeline monitor` resolve a
+/// name through — where [`define_filter_profile`] writes the older `--set`
+/// spelling. Written by rewriting the record the same way a relaunch would.
+pub fn declare_filter_profile(dir: &Path, name: &str, spec: &str) {
+    let path = dir.join("launch.json");
+    let mut record: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    let filter: Value = serde_json::from_str(spec).expect("the profile's spec is a filter");
+    record
+        .as_object_mut()
+        .expect("a mapping")
+        .entry("filters")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("the filters block")
+        .entry("profiles")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("the profiles map")
+        .insert(name.to_owned(), filter);
     fs::write(&path, pretty(&record)).expect("the launch record");
 }
 
