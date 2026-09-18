@@ -5167,6 +5167,73 @@ fn an_inline_spec_is_read_in_the_grammar_the_stack_shares() {
         !one_node.iter().any(|kind| kind == "change-opened"),
         "{one_node:?}"
     );
+
+    // `member` has a typed slot of its own on the bus's envelope, which is where
+    // every producer linked here stamps it: a matcher over it reaches the records
+    // of one member and none of the run's own.
+    let one_member = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"member":"worker"}]}"#),
+    ));
+    assert!(
+        one_member.iter().any(|kind| kind == "turn-started"),
+        "{one_member:?}"
+    );
+    assert!(
+        !one_member.iter().any(|kind| kind == "node-settled"),
+        "{one_member:?}"
+    );
+    let no_member = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"member":"nobody-ran-as-this"}]}"#),
+    ));
+    assert!(no_member.is_empty(), "{no_member:?}");
+}
+
+#[test]
+fn a_matcher_over_the_phase_reaches_the_records_a_producer_stamped_one_on() {
+    // `phase` is the agent envelope's one reserved dimension — the part of a
+    // change's life a record belongs to, which `onevcs` stamps and `onepipeline`
+    // relays as stamped — and the grammar every producer in the stack now reads
+    // names it. A record carrying none matches no phase a matcher asks for.
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::append_relayed_at_phase(
+            &dir,
+            "vcs",
+            "change-check",
+            "review",
+            json!({ "run_id": fixture_run::RUN_ID, "node": fixture_run::NODE_ID }),
+            json!({ "name": "gate", "required": true, "from": "queued", "to": "in_progress" }),
+        );
+    });
+    let reviewed = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"phase":"review"}]}"#),
+    ));
+    assert_eq!(reviewed, vec!["change-check"], "{reviewed:?}");
+    let released = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"phase":"release"}]}"#),
+    ));
+    assert!(released.is_empty(), "{released:?}");
+    // And it is refused where every other field is, in the grammar's own terms: a
+    // phase the bus does not spell is not a matcher, and an empty one matches
+    // nothing on the stream.
+    for spec in [
+        r#"{"include":[{"phase":"gate"}]}"#,
+        r#"{"include":[{"phase":""}]}"#,
+    ] {
+        let refused = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run&filter={}",
+                fixture_run::RUN_ID,
+                urlencode(spec)
+            ),
+        );
+        assert_eq!(refused.status, 422, "{spec}: {}", refused.body);
+    }
 }
 
 #[test]

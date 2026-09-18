@@ -1030,6 +1030,44 @@ pub fn append_relayed(dir: &Path, source: &str, kind: &str, labels: Value, paylo
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
+/// Append one event a sibling relayed at a **phase**, which is the agent
+/// envelope's one reserved dimension.
+///
+/// `onevcs` stamps a change's records with the part of its life they belong
+/// to — `development`, `integrate`, `review`, `release` — and `onepipeline`
+/// relays it as stamped, on the wire between `kind` and `labels`. [`append_relayed`]
+/// writes a record carrying none, which is every other producer's; a journey
+/// about a matcher over the phase has to be able to write one that carries it.
+pub fn append_relayed_at_phase(
+    dir: &Path,
+    source: &str,
+    kind: &str,
+    phase: &str,
+    labels: Value,
+    payload: Value,
+) {
+    let journal = dir.join("events.jsonl");
+    let existing = fs::read_to_string(&journal).unwrap_or_default();
+    let seq = existing.lines().count();
+    let line = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:01:00.000Z",
+        "stream": "a-recording-host-4244",
+        "seq": seq,
+        "source": source,
+        "kind": kind,
+        "phase": phase,
+        "labels": labels,
+        "payload": payload,
+        "artifacts": [],
+    });
+    // Parsed back through the SDK's own envelope before it is written, so a
+    // phase the bus does not spell fails here rather than being served as a
+    // record the producing library never wrote.
+    let _: Envelope = serde_json::from_value(line.clone()).expect("the phased envelope");
+    fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
+}
+
 /// One member's settlement, as the producing library relays it.
 ///
 /// The stream is deliberately a parameter and deliberately unconstrained: it is
