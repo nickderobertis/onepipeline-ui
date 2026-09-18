@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.7.3...v0.8.0) - 2026-09-18
+
+### Added
+
+- *(deps)* [**breaking**] link the engine release whose channel relays any surface kind and any declared author ([#60](https://github.com/nickderobertis/onepipeline-ui/pull/60))
+
 ## [0.7.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.7.2...v0.7.3) - 2026-09-13
 
 ### Added
