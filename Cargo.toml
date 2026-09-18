@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
