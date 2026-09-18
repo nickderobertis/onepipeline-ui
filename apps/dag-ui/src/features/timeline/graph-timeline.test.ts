@@ -58,11 +58,13 @@ describe("the whole graph on one clock", () => {
       liveNodes.map(({ id }) => id),
     );
 
-    // The run row is the orchestrator driving the graph and the run's check-in,
-    // each in the lane its served roles name — not one undifferentiated "planner".
+    // The run row is the observer's `monitor` member watching the graph and the
+    // run's check-in, each in the lane the member word it was served under names
+    // — not one undifferentiated "planner" — under the engine's own row name.
+    expect(rowFor(graph, RUN_ROW_ID).label).toBe("Run-level");
     expect(rowFor(graph, RUN_ROW_ID).lanes.map(({ id }) => id)).toEqual([
-      "orchestrator",
-      "check-in",
+      "role:monitor",
+      "role:check-in",
       "idle",
     ]);
   });
@@ -72,19 +74,23 @@ describe("the whole graph on one clock", () => {
       graphTimeline(live, liveNodes),
       nodeRowId("dashboard"),
     );
-    // Including Lint, which shares the worker's semantic role and is told from it by
-    // the transport the summary carries — the pair, not either half.
+    // One lane per member word the payload serves for this node, in the order the
+    // whole payload first served each — the run's check-in came before the node's
+    // summaries — so every row of the graph reads its lanes in one ordering. The
+    // lint member is among them under the word its graph declared.
     expect(dashboard.lanes.map(({ id }) => id)).toEqual([
-      "worker",
-      "judge",
-      "lint",
-      "check-in",
-      "pr-author",
+      "role:check-in",
+      "role:worker",
+      "role:llmlint",
+      "role:judge",
+      "role:pr-author",
       "lock-waits",
       "idle",
     ]);
-    const lint = dashboard.items.find(({ laneId }) => laneId === "lint");
-    expect(lint?.label).toBe("dashboard · Lint");
+    const lint = dashboard.items.find(
+      ({ laneId }) => laneId === "role:llmlint",
+    );
+    expect(lint?.label).toBe("dashboard · llmlint");
     expect(lint?.start).toBe(at(20));
     expect(lint?.end).toBe(at(50));
 
@@ -168,7 +174,7 @@ describe("the whole graph on one clock", () => {
   test("carries what a click on a segment should open", () => {
     const graph = graphTimeline(live, liveNodes);
     const session = rowFor(graph, RUN_ROW_ID).items.find(
-      ({ laneId }) => laneId === "orchestrator",
+      ({ laneId }) => laneId === "role:monitor",
     );
     // A run-level session has no node to drill into; it opens its own transcript.
     expect(session?.payload.nodeId).toBeUndefined();

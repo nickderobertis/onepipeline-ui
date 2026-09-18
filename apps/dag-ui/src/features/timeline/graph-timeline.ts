@@ -10,7 +10,7 @@ import {
   compactTimelineItems,
   compactTimelineMarkers,
   laneLabel,
-  NODE_LANES,
+  laneVocabulary,
   spanLane,
 } from "./timeline-model";
 
@@ -51,8 +51,16 @@ export const nodeRowId = (nodeId: string): string => `row:node:${nodeId}`;
 
 const IDLE_LANE: TimelineLane = { id: IDLE_LANE_ID, label: "Idle" };
 
-/** Every category a graph row is read in: the node vocabulary, plus its own silence. */
-export const GRAPH_LANES: readonly TimelineLane[] = [...NODE_LANES, IDLE_LANE];
+/**
+ * Every category a graph row is read in: the node vocabulary this payload serves —
+ * the run's own members, in the order it serves them, between the queue and the
+ * structural kinds — plus the graph's own silence.
+ */
+export function graphLanes(
+  timeline: RunTimeline | undefined,
+): readonly TimelineLane[] {
+  return [...laneVocabulary(timeline), IDLE_LANE];
+}
 
 /**
  * One plotted stretch of a row: recorded work, or recorded silence.
@@ -132,14 +140,18 @@ export function graphTimeline(
 ): GraphTimeline {
   const spans = timeline?.spans ?? [];
   const range = runRange(timeline);
+  const lanes = graphLanes(timeline);
   const runLevel = spans.filter((span) => span.node_id === undefined);
   const rows: GraphRow[] = [
+    // The engine's own lane: the row the sessions recorded at no node are read
+    // in, under the name it has always had — it is the engine's, not a member's.
     row({
       id: RUN_ROW_ID,
       kind: "run",
       label: "Run-level",
       range,
       spans: runLevel,
+      lanes,
     }),
     ...nodes.map((node) =>
       row({
@@ -149,6 +161,7 @@ export function graphTimeline(
         nodeId: node.id,
         range,
         spans: spans.filter((span) => span.node_id === node.id),
+        lanes,
       }),
     ),
   ];
@@ -165,13 +178,13 @@ export function graphTimeline(
       // every row's, they are laid down first so the work sits over them.
       items: [
         ...idleItems(range, work, undefined),
-        ...compactTimelineItems(work),
+        ...compactTimelineItems(work, lanes),
       ],
       markers: compactTimelineMarkers(
         rows.flatMap((entry) => [...entry.markers]),
         work,
       ),
-      lanes: GRAPH_LANES,
+      lanes,
     },
   };
 }
@@ -209,6 +222,7 @@ function row({
   nodeId,
   range,
   spans,
+  lanes,
 }: {
   readonly id: string;
   readonly kind: GraphRow["kind"];
@@ -216,6 +230,8 @@ function row({
   readonly nodeId?: string;
   readonly range: readonly [number, number];
   readonly spans: readonly TimelineSpan[];
+  /** The whole payload's vocabulary, so every row's lanes are one ordering. */
+  readonly lanes: readonly TimelineLane[];
 }): GraphRow {
   const work = spans.flatMap((span): TimelineItem<GraphSegment>[] => {
     const lane = spanLane(span);
@@ -259,14 +275,14 @@ function row({
     kind,
     label,
     ...(nodeId === undefined ? {} : { nodeId }),
-    lanes: GRAPH_LANES.filter(({ id: lane }) =>
+    lanes: lanes.filter(({ id: lane }) =>
       [...work, ...idle].some((item) => item.laneId === lane),
     ),
     // Silence first, work over it. The plot draws in the order it is given and gives
     // every segment a minimum width a finger can hit, so a moment's work is wider on
     // screen than in time — and the silence that begins where it ended would cover it.
     items: [...idle, ...work],
-    line: [...idle, ...compactTimelineItems(work)],
+    line: [...idle, ...compactTimelineItems(work, lanes)],
     markers: spans.flatMap((span) =>
       span.events.map(
         (event): TimelineMarker<GraphSegment> => ({

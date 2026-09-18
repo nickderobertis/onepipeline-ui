@@ -10,6 +10,7 @@ import type {
   TimelineHoldReason,
   TimelineSpan,
   TimelineSpanKind,
+  TransportRole,
 } from "@onepipeline-ui/dag-model";
 import { createElement } from "react";
 import { type EventCategory, eventCategory } from "./event-category";
@@ -53,12 +54,18 @@ interface RowBase {
   /** What the row is: a span kind, a journal event kind, or the grouped span kind. */
   readonly kind: string;
   /**
-   * What a dispatch was for — worker, judge, orchestrator, check-in, pr-author, or
-   * the lint run under a worker. Served on the span itself, so a row says which
+   * What a dispatch was for: the member name the run recorded for the session,
+   * under the run's own word. Served on the span itself, so a row says which
    * session it is without the transcript behind it being fetched. Absent on every
-   * other kind of row, and on a dispatch recorded before the roles were served.
+   * other kind of row, and on a dispatch the run recorded no declared member for.
    */
-  readonly role?: DispatchRole;
+  readonly role?: AgentRole;
+  /**
+   * The party the session ran as — its agent side, its judge or its lint run —
+   * which is what tells the sessions of one dispatch apart and which of them
+   * opened it. Carried by a dispatch row and by nothing else.
+   */
+  readonly transport?: TransportRole;
   readonly label: string;
   readonly startedAt: string;
   /** `null` for work the recorded stream never closed, and for an instant. */
@@ -102,35 +109,93 @@ export interface NodeTimeline {
 const EMPTY: NodeTimeline = { rows: [], total: 0 };
 
 /**
- * The categories a node's recorded work is read in, one lane each.
+ * The lanes every run is read in whatever its graphs declared, one per kind of
+ * recorded work that is not a member's session.
  *
- * Every one of them is a word the server already serves — the `agent_role` and
- * `transport_role` of a dispatch, and the span kinds around them — so a reader is
- * never shown a category the journal has no record of.
+ * Every one of them is a span kind the server serves, so a reader is never shown a
+ * category the journal has no record of. The member lanes are **not** here: a
+ * session's lane is the member name the run's own graph declared, served as
+ * `agent_role`, and {@link laneVocabulary} draws one per distinct word a payload
+ * carries — in the order the payload serves them — because a table of them kept
+ * here would be a second host's vocabulary closed over the first's.
  */
-const LANE_LABELS = {
+const STRUCTURAL_LANE_LABELS = {
   // First, because it is what happened before anything else on the node, and
-  // because `compactTimelineItems` reads this order as priority: where a queued
+  // because `compactTimelineItems` reads lane order as priority: where a queued
   // span shares a moment with anything, why nothing was running is the answer the
   // reader opened the node for.
   queued: "Queued",
-  worker: "Worker",
-  judge: "Judge",
-  lint: "Lint",
-  orchestrator: "Orchestrator",
-  "check-in": "Check-in",
-  "pr-author": "PR author",
+  // A session the run recorded no declared member for, read by the one thing
+  // still known about it: that it was a dispatch.
+  dispatch: "Dispatch",
   verification: "Verification",
   publication: "Publication",
   "lock-waits": "Lock waits",
   "human-wait": "Human wait",
 } as const;
 
-export type LaneId = keyof typeof LANE_LABELS;
+type StructuralLaneId = keyof typeof STRUCTURAL_LANE_LABELS;
 
-export const NODE_LANES: readonly TimelineLane[] = Object.entries(
-  LANE_LABELS,
+/**
+ * The id a member's lane is plotted under: the served word behind a prefix no span
+ * kind shares, so a member a host happened to name `queued` or `publication` is a
+ * lane of its own rather than the structural one.
+ */
+const ROLE_LANE_PREFIX = "role:";
+
+export type LaneId = StructuralLaneId | `${typeof ROLE_LANE_PREFIX}${string}`;
+
+/** The lane a member's sessions are plotted in. */
+export function roleLaneId(role: AgentRole): LaneId {
+  return `${ROLE_LANE_PREFIX}${role}`;
+}
+
+/** The member word a lane id carries, or `undefined` for a structural lane. */
+function roleOfLane(lane: string): AgentRole | undefined {
+  return lane.startsWith(ROLE_LANE_PREFIX)
+    ? lane.slice(ROLE_LANE_PREFIX.length)
+    : undefined;
+}
+
+/** The lanes in which the structural kinds are read, in their canonical order. */
+const STRUCTURAL_LANES: readonly TimelineLane[] = Object.entries(
+  STRUCTURAL_LANE_LABELS,
 ).map(([id, label]) => ({ id, label }));
+
+/**
+ * Every lane one served timeline is read in: the member lanes the payload names,
+ * between the queue and the structural kinds.
+ *
+ * The member lanes are **derived from the payload and drawn in its order**. One
+ * lane per distinct `agent_role` the served spans carry, first seen first —
+ * neither sorted nor keyed by any table here, because the words are the run's own
+ * graph declarations and this app knows none of them: a run whose observer graph
+ * declared `ticker` and `sentinel` reads in those two lanes, in that order, and a
+ * run of this host's shape reads in `worker`, `judge`, `llmlint`, `monitor`,
+ * `check-in` and `pr-author` as the run recorded them. Queued comes first for the
+ * reason {@link STRUCTURAL_LANE_LABELS} gives; the rest of the structural lanes
+ * follow the members, so a member's work reads above the publication of it.
+ */
+export function laneVocabulary(
+  timeline: RunTimeline | undefined,
+): readonly TimelineLane[] {
+  const spans = timeline?.spans ?? [];
+  const roles: AgentRole[] = [];
+  for (const span of spans) {
+    const role = span.agent_role;
+    if (role !== undefined && !roles.includes(role)) roles.push(role);
+  }
+  // The unroled lane exists only where the payload has a session for it: every
+  // session of a run whose graphs declared their members has a lane of its own,
+  // and an always-empty row would push the reading below the fold for nothing.
+  const unroled = spans.some((span) => spanLane(span) === "dispatch");
+  const [queued, ...rest] = STRUCTURAL_LANES;
+  return [
+    ...(queued === undefined ? [] : [queued]),
+    ...roles.map((role) => ({ id: roleLaneId(role), label: role })),
+    ...rest.filter(({ id }) => unroled || id !== "dispatch"),
+  ];
+}
 
 /**
  * Which lane each served span kind belongs in, or `null` for the kinds that hold
@@ -147,11 +212,13 @@ const LANE_BY_SPAN_KIND: Readonly<Record<TimelineSpanKind, LaneId | null>> = {
   // A lifecycle step brackets the sessions inside it; the transcript names it, and
   // giving it a lane of its own would plot the container over its own contents.
   step: null,
-  // Refined by the dispatch's own served roles; `worker` is what an unroled one is.
-  dispatch: "worker",
+  // Refined by the dispatch's own served role; this is what an unroled one is.
+  dispatch: "dispatch",
   verification: "verification",
   publication: "publication",
-  "pr-drafting": "pr-author",
+  // Drafting is a member's work under this host's graphs, and that member's own
+  // lane is where the session sits; the step that brackets it is read here.
+  "pr-drafting": "dispatch",
   // Resolving a conflict is work on the merge, so it reads beside the publication
   // it is unblocking rather than as a category an operator has to learn.
   "conflict-resolution": "publication",
@@ -162,56 +229,45 @@ const LANE_BY_SPAN_KIND: Readonly<Record<TimelineSpanKind, LaneId | null>> = {
   rollup: "lock-waits",
 };
 
-/**
- * What one dispatch is read as: the semantic role the server records on it, or the
- * lint transport, which is the worker's own verification told apart from the worker
- * by nothing else.
- */
-export type DispatchRole = AgentRole | typeof LLMLINT_TRANSPORT;
-
+/** The party `oneagentgraph` runs a lint member as. */
 export const LLMLINT_TRANSPORT = "llmlint";
 
 /**
- * The lane each of those roles is plotted in.
+ * Which sessions open a dispatch of their own, and which run over another's work.
  *
- * Keyed by the contract's own closed `agentRoleSchema`, so a role added there fails
- * to compile until it has been given a lane — rather than falling through to the
- * dispatch default and being plotted and named "Worker" without anything saying so.
+ * Read off the closed transport vocabulary rather than off the member word: an
+ * agent-side session is the work, and the judge and the lint run that supervised
+ * it are gathered under it — whatever the host called any of the three.
  */
-const LANE_BY_ROLE: Readonly<Record<DispatchRole, LaneId>> = {
-  worker: "worker",
-  judge: "judge",
-  llmlint: "lint",
-  orchestrator: "orchestrator",
-  "check-in": "check-in",
-  "pr-author": "pr-author",
-};
+function opensDispatch(transport: TransportRole | undefined): boolean {
+  return transport === "agent";
+}
 
 /**
- * Which of those roles onejudge dispatches in its own right, and which run over an
- * agent's work. Keyed by the same enum for the same reason: a newly served role that
- * matched neither would be left an ungrouped sibling with nothing reporting it.
- */
-const OPENS_DISPATCH: Readonly<Record<DispatchRole, boolean>> = {
-  worker: true,
-  orchestrator: true,
-  "check-in": true,
-  "pr-author": true,
-  judge: false,
-  llmlint: false,
-};
-
-/**
- * What one dispatch role is called wherever the operator meets it: the lane legend,
- * the transcript's eyebrow, and the header of the conversation it opens.
+ * What one dispatch role is called wherever the operator meets it: the lane
+ * legend, the transcript's eyebrow, and the header of the conversation it opens.
  *
- * The lane vocabulary above is the one source of those words. A second table of them
- * beside the conversation panel would agree with this one only for as long as nobody
- * renamed a role in one place — and every test would stay green while the plot and
- * the transcript it is read against called the same session two different things.
+ * The word is the run's own — the member name its graph declared, exactly as
+ * served — and a session the run recorded no declared member for is named by the
+ * party it ran as. One function rather than a table beside the conversation
+ * panel, so the plot and the transcript it is read against call the same session
+ * the same thing.
  */
-export function dispatchRoleLabel(role: DispatchRole): string {
-  return LANE_LABELS[LANE_BY_ROLE[role]];
+export function dispatchRoleLabel(
+  role: AgentRole | undefined,
+  transport: TransportRole | undefined,
+): string {
+  if (role !== undefined) return role;
+  return transport === undefined
+    ? STRUCTURAL_LANE_LABELS.dispatch
+    : transportLabel(transport);
+}
+
+/** The party word as an operator reads it, for a session with no member word. */
+function transportLabel(transport: TransportRole): string {
+  return transport === LLMLINT_TRANSPORT
+    ? "Lint"
+    : `${transport[0]?.toUpperCase() ?? ""}${transport.slice(1)}`;
 }
 
 /** What each aggregated journal kind is called; `rollup` is never a word here. */
@@ -245,6 +301,7 @@ export interface NodeTimelineV2 {
  */
 export function compactTimelineItems<Payload>(
   items: readonly TimelineItem<Payload>[],
+  lanes: readonly TimelineLane[] = STRUCTURAL_LANES,
 ): readonly TimelineItem<Payload>[] {
   const ordered = [...items].sort((left, right) => left.start - right.start);
   const first = ordered.at(0)?.start ?? 0;
@@ -295,7 +352,9 @@ export function compactTimelineItems<Payload>(
     // whichever category dominates it and the rest are read in the lanes.
     if (collision === undefined || boundaries.has(item.id)) {
       result.push(item);
-    } else if (compactPriority(item) < compactPriority(collision)) {
+    } else if (
+      compactPriority(item, lanes) < compactPriority(collision, lanes)
+    ) {
       if (boundaries.has(collision.id)) result.push(item);
       else result[result.indexOf(collision)] = item;
     } else if (!coincident(item, collision, pointCluster)) {
@@ -317,10 +376,19 @@ function coincident(
   );
 }
 
-function compactPriority(item: TimelineItem<unknown>): number {
+/**
+ * Which item wins a moment two share: the one in the earlier lane, in the order the
+ * lanes are drawn — the queue first, then the run's members as served, then the
+ * structural kinds — so what dominates a collapsed moment is what the expanded
+ * plot shows at the top of it.
+ */
+function compactPriority(
+  item: TimelineItem<unknown>,
+  lanes: readonly TimelineLane[],
+): number {
   const lane = item.laneId ?? "";
-  const order = NODE_LANES.findIndex(({ id }) => id === lane);
-  return order < 0 ? NODE_LANES.length : order;
+  const order = lanes.findIndex(({ id }) => id === lane);
+  return order < 0 ? lanes.length : order;
 }
 
 /** Keep one clickable journal icon per visual moment, always retaining a deep link. */
@@ -418,7 +486,13 @@ export function nodeTimelineV2(
       ? { ...item, end: recorded, duration: recorded - item.start }
       : item,
   );
-  return { items: plotted, markers, lanes: NODE_LANES, rows, tree: projected };
+  return {
+    items: plotted,
+    markers,
+    lanes: laneVocabulary(timeline),
+    rows,
+    tree: projected,
+  };
 }
 
 /** One thing the reading draws: a row, or the control standing for a collapsed run. */
@@ -515,18 +589,12 @@ function flattenRows(
 function laneId(row: TimelineRow): LaneId | null {
   // A journal record is a moment, not an interval: it is a marker over every lane.
   if (row.rowKind === "event") return null;
-  const role = roleLane(row.role);
-  if (role !== null) return role;
+  if (row.role !== undefined) return roleLaneId(row.role);
   // Widened for the lookup, not narrowed for it: a group row carries the kind of the
   // spans it stands for as a plain string, and a kind the table has no entry for is
   // an answer here rather than an assertion that it must have one.
   const table: Readonly<Record<string, LaneId | null>> = LANE_BY_SPAN_KIND;
   return table[row.rowKind === "span" ? row.span.kind : row.kind] ?? null;
-}
-
-/** A dispatch's own lane, from the roles the server records on it. */
-function roleLane(role: DispatchRole | undefined): LaneId | null {
-  return role === undefined ? null : (LANE_BY_ROLE[role] ?? null);
 }
 
 export function nodeTimeline(
@@ -634,12 +702,14 @@ function spanRow(
   children: Map<string, TimelineSpan[]>,
 ): TimelineRow {
   const role = dispatchRole(span);
+  const transport = span.kind === "dispatch" ? span.transport_role : undefined;
   return {
     rowKind: "span",
     span,
     id: span.id,
     kind: span.kind,
-    role,
+    ...(role === undefined ? {} : { role }),
+    ...(transport === undefined ? {} : { transport }),
     label: span.label,
     startedAt: span.started_at,
     endedAt: span.ended_at,
@@ -649,55 +719,48 @@ function spanRow(
     durationMs:
       span.total_duration_ms ?? elapsed(span.started_at, span.ended_at),
     children: group(spanRows(span, children)),
-    displayLabel: spanLabel(span, role),
-    displayKind: displayKind(span, role),
+    displayLabel: spanLabel(span, role, transport),
+    displayKind: displayKind(span, role, transport),
     ...(span.kind === "dispatch" && span.label
       ? { sessionName: span.label }
       : {}),
   };
 }
 
-/**
- * A dispatch's role as one word. Lint is the case that needs both halves: it is the
- * worker's own verification, told apart from the worker only by its transport role.
- */
-function dispatchRole(span: TimelineSpan): DispatchRole | undefined {
-  return span.kind === "dispatch" ? servedRole(span) : undefined;
+/** A dispatch's served member word, and nothing for any other kind of span. */
+function dispatchRole(span: TimelineSpan): AgentRole | undefined {
+  return span.kind === "dispatch" ? span.agent_role : undefined;
 }
 
 /**
- * The dispatch role a span was *served* with, whatever kind of span it is.
+ * The lane one served span is plotted in, from its role and the kind vocabulary.
  *
- * A `scope=run` rollup of dispatches carries the same pair the dispatches it stands
- * for carry, because that pair is the category it summarizes — so the graph-level
+ * A span served with an `agent_role` — a dispatch, or a `scope=run` rollup of
+ * dispatches, which carries the pair the dispatches it stands for carry — is
+ * plotted in that member's lane, whatever kind of span it is, so the graph-level
  * view reads a lane out of one exactly as the node view reads it out of the other.
- */
-function servedRole(span: TimelineSpan): DispatchRole | undefined {
-  if (span.agent_role === undefined) return undefined;
-  return span.transport_role === LLMLINT_TRANSPORT
-    ? LLMLINT_TRANSPORT
-    : span.agent_role;
-}
-
-/**
- * The lane one served span is plotted in, from its roles and the kind vocabulary.
- *
- * A rollup is named for what it summarized rather than for being a rollup, so its
- * `label` is read as that kind — which is what keeps a summarized verification in the
- * verification lane instead of in the aggregate one every rollup would otherwise share.
+ * A rollup of anything else is named for what it summarized rather than for being
+ * a rollup, so its `label` is read as that kind — which is what keeps a summarized
+ * verification in the verification lane instead of in the aggregate one every
+ * rollup would otherwise share.
  */
 export function spanLane(span: TimelineSpan): LaneId | null {
-  const role = servedRole(span);
-  if (role !== undefined) return LANE_BY_ROLE[role] ?? null;
+  if (span.agent_role !== undefined) return roleLaneId(span.agent_role);
   // Widened for the lookup, not narrowed for it: a rollup's label is a plain string,
   // and a word the table has no entry for is an answer rather than an assertion.
   const table: Readonly<Record<string, LaneId | null>> = LANE_BY_SPAN_KIND;
   return table[span.kind === "rollup" ? span.label : span.kind] ?? null;
 }
 
-/** What one lane is called wherever an operator meets it. */
+/**
+ * What one lane is called wherever an operator meets it: a member's lane is the
+ * member's own word, and a structural lane its label above.
+ */
 export function laneLabel(lane: LaneId): string {
-  return LANE_LABELS[lane];
+  const role = roleOfLane(lane);
+  if (role !== undefined) return role;
+  const table: Readonly<Record<string, string>> = STRUCTURAL_LANE_LABELS;
+  return table[lane] ?? lane;
 }
 
 /**
@@ -848,12 +911,14 @@ function group(rows: readonly TimelineRow[]): TimelineRow[] {
  */
 function displayKind(
   span: TimelineSpan,
-  role: DispatchRole | undefined,
+  role: AgentRole | undefined,
+  transport: TransportRole | undefined,
 ): string {
   if (span.kind === "step") return "Lifecycle";
   if (span.kind === "rollup") return ROLLUP_LABELS[span.label] ?? span.label;
-  const lane = roleLane(role) ?? LANE_BY_SPAN_KIND[span.kind];
-  return lane === null || lane === undefined ? span.kind : LANE_LABELS[lane];
+  if (span.kind === "dispatch") return dispatchRoleLabel(role, transport);
+  const lane = LANE_BY_SPAN_KIND[span.kind];
+  return lane === null ? span.kind : laneLabel(lane);
 }
 
 /**
@@ -900,14 +965,18 @@ export function holdLabel(reasons: readonly TimelineHoldReason[]): string {
  * artifact it was. A judge session says Judge and says which session it was, which is
  * the pair a reader needs to tell three concurrent sessions apart.
  */
-function spanLabel(span: TimelineSpan, role: DispatchRole | undefined): string {
+function spanLabel(
+  span: TimelineSpan,
+  role: AgentRole | undefined,
+  transport: TransportRole | undefined,
+): string {
   if (span.kind === "step")
     return span.label ? `Lifecycle: ${span.label}` : "Lifecycle step";
   // A queue is named for what it was waiting for and never for the node it held:
   // "Queued" alone is the empty space this span replaced, said in a word.
   if (span.kind === "queued")
     return `Queued ${holdLabel(span.reasons ?? [])}`.trim();
-  const kind = displayKind(span, role);
+  const kind = displayKind(span, role, transport);
   if (span.kind === "rollup") return `${kind}: ${span.count ?? 0} recorded`;
   if (!span.label || span.label === kind) return kind;
   // A session is named for the session it is; everything else is named for the
@@ -917,14 +986,19 @@ function spanLabel(span: TimelineSpan, role: DispatchRole | undefined): string {
     : `${kind}: ${span.label}`;
 }
 
-/** Label each worker attempt from retry-requested records without renaming sessions. */
+/**
+ * Label each attempt's working session from retry-requested records without
+ * renaming sessions: the session that opened the dispatch — its agent side,
+ * whatever member word it ran under — is the one a retry re-asked.
+ */
 function labelWorkerRetries(rows: readonly TimelineRow[]): TimelineRow[] {
   let retry = 0;
   return rows.map((row) => {
     if (row.rowKind === "event" && row.event.kind === "retry-requested")
       retry += 1;
     const children = labelWorkerRetries(row.children);
-    if (row.role !== "worker" || retry === 0) return { ...row, children };
+    if (!opensDispatch(row.transport) || retry === 0)
+      return { ...row, children };
     return {
       ...row,
       children,
@@ -957,14 +1031,14 @@ function groupDispatches(rows: readonly TimelineRow[]): TimelineRow[] {
     children: row.children.map((child) => joined(child, dispatch)),
   });
   for (const row of rows) {
-    if (opensDispatch(row.role)) {
+    if (opensDispatch(row.transport)) {
       ordinal += 1;
       agentIndex = grouped.length;
       grouped.push(joined(row, { id: row.id, label: `Dispatch ${ordinal}` }));
       continue;
     }
     const agent = agentIndex < 0 ? undefined : grouped[agentIndex];
-    if (supervises(row.role) && agent?.dispatch !== undefined) {
+    if (supervises(row.transport) && agent?.dispatch !== undefined) {
       grouped[agentIndex] = {
         ...agent,
         children: [...agent.children, joined(row, agent.dispatch)],
@@ -976,14 +1050,9 @@ function groupDispatches(rows: readonly TimelineRow[]): TimelineRow[] {
   return grouped;
 }
 
-/** The roles onejudge dispatches in their own right, each opening a group. */
-function opensDispatch(role: DispatchRole | undefined): boolean {
-  return role !== undefined && OPENS_DISPATCH[role] === true;
-}
-
-/** The roles that run over an agent's work rather than being dispatched alone. */
-function supervises(role: DispatchRole | undefined): boolean {
-  return role !== undefined && OPENS_DISPATCH[role] === false;
+/** The parties that run over an agent's work rather than being dispatched alone. */
+function supervises(transport: TransportRole | undefined): boolean {
+  return transport === "judge" || transport === LLMLINT_TRANSPORT;
 }
 
 /**
