@@ -2567,8 +2567,10 @@ impl Lane<'_> {
 /// every reading a member word can get: a session stamped with a declared
 /// member, one stamped with none whose persona a declaration names, one stamped
 /// with a member no declaration names beside a persona one does, and one
-/// stamped with neither. What the server makes of each is what says the lane
-/// vocabulary is the run's own and not this crate's.
+/// stamped with neither — and the first of them settled with a report, so the
+/// judge that supervised it is served too, under the member it supervised.
+/// What the server makes of each is what says the lane vocabulary is the run's
+/// own and not this crate's.
 pub const NAMED_RUN_ID: &str = "run-20260807-5e6f7a";
 /// The observer graph's run, which the launch record names and both watching
 /// sessions run on.
@@ -2580,6 +2582,15 @@ pub const SENTINEL_CONVERSATION_ID: &str = "dag-scope-1786925530007-5150.sentine
 /// The node whose session was stamped with the member its graph declared.
 pub const DRAFTED_BY_NAME_NODE_ID: &str = "drafted";
 pub const DRAFTER_CONVERSATION_ID: &str = "node-scope-1786925530001-5150.drafter";
+/// The judge that supervised that dispatch, served under its session's own id
+/// with `.judge` after it: the one side of this run that no record relays and
+/// no graph declares, which is what makes its role the *member's*.
+pub const DRAFTER_JUDGE_CONVERSATION_ID: &str = "node-scope-1786925530001-5150.drafter.judge";
+/// The artifact id the drafter's settlement recorded for the report it stored.
+pub const DRAFTER_REPORT_ARTIFACT: &str = "report-node-scope-1786925530001-5150";
+/// The one interval that report observed its judge over, inside the dispatch.
+pub const DRAFTER_JUDGE_BOUNDS: (&str, &str) =
+    ("2026-08-07T12:01:10.000Z", "2026-08-07T12:01:12.000Z");
 /// The node whose session was stamped with no member, under a persona the
 /// observer graph happens to declare as a member.
 pub const TIMED_NODE_ID: &str = "timed";
@@ -2643,7 +2654,111 @@ pub fn write_named_members(root: &Path, run: &str) -> PathBuf {
     for graph_run in NAMED_NODE_STREAMS {
         declare_graph(root, graph_run, &["drafter"]);
     }
+    // The drafter settled with a report whose judge ran once: the side of a
+    // dispatch that no graph declares a member for, served under the member it
+    // supervised. Relayed through the engine's own writer so the copy the
+    // server reads is the copy that promise makes. The settlement's persona is
+    // the member's own name, as every settlement this module relays carries;
+    // the session was stamped a member, so no reading consults it.
+    settle_member(
+        &dir,
+        &SettledMember {
+            stream: NAMED_NODE_STREAMS[0],
+            node: DRAFTED_BY_NAME_NODE_ID,
+            member: "drafter",
+            at: "2026-08-07T12:01:30.000Z",
+            artifact: DRAFTER_REPORT_ARTIFACT,
+            report: &drafter_report(),
+        },
+        Produced::Report,
+    );
     dir
+}
+
+/// The report the drafter's member stored: one agent turn, and one judge turn
+/// bounded by [`DRAFTER_JUDGE_BOUNDS`], with nothing else a judge reading needs.
+#[must_use]
+pub fn drafter_report() -> String {
+    use onejudge::{
+        CandidateAttempt, HarnessAttribution, Message, PartyTelemetry, Report, SessionLink,
+        Telemetry, TelemetryRole, Transcript, Usage,
+    };
+
+    let usage = Usage {
+        input_tokens: Some(80),
+        output_tokens: Some(16),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        cost_usd: None,
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("## What\nDraft."),
+                Message::assistant("Drafted."),
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: Some("The draft is what was asked for.".into()),
+        completion_reason: Some("the draft landed".into()),
+        settled_reason: None,
+        judge_decisions: Vec::new(),
+        usage: Some(usage.clone()),
+        telemetry: Some(Telemetry {
+            wall_ms: 30_000,
+            agent: PartyTelemetry::default(),
+            judge: PartyTelemetry {
+                usage: Some(usage.clone()),
+                ..PartyTelemetry::default()
+            },
+            orchestration_ms: 20,
+            sessions: vec![SessionLink {
+                session_id: "2f1c0a4e-7b3d-4e19-9c5a-6d8b0e1f2a3b".into(),
+                role: TelemetryRole::Judge,
+                turn_index: 1,
+                started_at: DRAFTER_JUDGE_BOUNDS.0.to_owned(),
+                finished_at: Some(DRAFTER_JUDGE_BOUNDS.1.to_owned()),
+                history_id: None,
+                judge: None,
+            }],
+            attribution: vec![HarnessAttribution {
+                role: TelemetryRole::Judge,
+                turn_index: 1,
+                ran: Some("codex:judge".into()),
+                fell_through: Vec::new(),
+                candidates: vec![CandidateAttempt {
+                    harness: "codex".into(),
+                    harness_id: "codex:judge".into(),
+                    variant: Some("judge".into()),
+                    model: Some(JUDGE_MODEL.to_owned()),
+                    status: "ok".into(),
+                    available: true,
+                    ran: true,
+                    failure_kind: None,
+                    failure_kind_source: None,
+                    exit_code: Some(0),
+                    duration_ms: Some(2_000),
+                    error: None,
+                    session_id: None,
+                    history_id: None,
+                    usage: Some(usage),
+                }],
+                history_file: None,
+                judge: None,
+            }],
+        }),
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+    format!(
+        "{}\n",
+        serde_json::to_string(&report).expect("the report serializes")
+    )
 }
 
 /// That run's merged event store, in merge order.
@@ -2701,7 +2816,8 @@ fn named_journal(run: &str, plan: &Value) -> String {
     );
     drafted.started(&mut members, "2026-08-07T12:01:01.000Z");
     drafted.turn(&mut members, "2026-08-07T12:01:02.000Z");
-    drafted.settled(&mut members, "2026-08-07T12:01:30.000Z", true);
+    // Its settlement is relayed by `write_named_members` through the engine's
+    // own writer, because it stores the report the judge side is read from.
     driver.emit(
         "2026-08-07T12:01:31.000Z",
         "pipeline",

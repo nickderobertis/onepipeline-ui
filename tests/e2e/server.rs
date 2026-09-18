@@ -1549,6 +1549,64 @@ fn a_member_is_served_under_the_word_the_runs_own_graphs_declared_it_as() {
     }
 }
 
+/// The judge that supervised a dispatch is one party of the member it
+/// supervised, so it is served under that member's own word — one no graph
+/// declared for a judge and nothing here knows — and is the judge side of it
+/// by its transport alone.
+#[test]
+fn a_dispatchs_judge_is_served_under_the_member_it_supervised() {
+    let serving = named_members();
+
+    let opened = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::NAMED_RUN_ID,
+            fixture_run::DRAFTER_JUDGE_CONVERSATION_ID
+        ),
+    );
+    assert_eq!(opened.status, 200, "{}", opened.body);
+    let attribution = opened.json()["attribution"].clone();
+    assert_eq!(attribution["agentRole"], json!("drafter"), "{attribution}");
+    assert_eq!(attribution["transportRole"], json!("judge"));
+    assert_eq!(
+        attribution["parentConversationId"],
+        json!(fixture_run::DRAFTER_CONVERSATION_ID)
+    );
+
+    // And the lane it is reachable through sits in the drafter's own lane,
+    // straight after the dispatch it supervised.
+    let spans = node_spans_of(
+        &serving,
+        fixture_run::NAMED_RUN_ID,
+        fixture_run::DRAFTED_BY_NAME_NODE_ID,
+    );
+    let dispatch = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::DRAFTER_CONVERSATION_ID),
+    );
+    let lane = span_named(
+        &spans,
+        &format!("dispatch.{}", fixture_run::DRAFTER_JUDGE_CONVERSATION_ID),
+    );
+    assert_eq!(lane["agent_role"], json!("drafter"), "{lane}");
+    assert_eq!(lane["transport_role"], json!("judge"));
+    assert_eq!(dispatch["transport_role"], json!("agent"));
+    assert_eq!(lane["dispatch_id"], dispatch["dispatch_id"]);
+    assert_eq!(
+        lane["started_at"],
+        json!(fixture_run::DRAFTER_JUDGE_BOUNDS.0)
+    );
+    assert_eq!(lane["ended_at"], json!(fixture_run::DRAFTER_JUDGE_BOUNDS.1));
+    // No role word reached this node's timeline that a graph of the run did not
+    // declare: `judge` is a transport here and never a lane.
+    for span in &spans {
+        if let Some(role) = role_of(span) {
+            assert_eq!(role, "drafter", "{span}");
+        }
+    }
+}
+
 #[test]
 fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_that_word() {
     let serving = named_members();
@@ -6807,8 +6865,26 @@ fn a_settled_dispatch_serves_the_judge_that_supervised_it_as_its_own_conversatio
     let body = response.json();
     assert_enveloped(&body);
 
-    // The dispatch it supervised, at the node it supervised it under.
+    // The dispatch it supervised, at the node it supervised it under — and
+    // served under that dispatch's own member word, whatever it is: the
+    // review graph happens to have named the member it runs as the judge
+    // transport `judge`, and that is the run's word rather than this crate's.
+    // The transport is what tells the two sides of one member apart.
     let attribution = &body["attribution"];
+    let supervised = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{}",
+            fixture_run::RUN_ID,
+            fixture_run::REVIEW_CONVERSATION_ID
+        ),
+    )
+    .json();
+    assert_eq!(supervised["attribution"]["transportRole"], json!("judge"));
+    assert_eq!(
+        attribution["agentRole"], supervised["attribution"]["agentRole"],
+        "{attribution}"
+    );
     assert_eq!(attribution["agentRole"], json!("judge"));
     assert_eq!(attribution["transportRole"], json!("judge"));
     assert_eq!(
@@ -7261,7 +7337,8 @@ fn the_judges_lane_sits_with_the_dispatch_it_supervised_on_the_nodes_timeline() 
     assert_eq!(at(&judge), at(&supervised) + 1, "{spans:?}");
     let lane = &spans[at(&judge)];
     let dispatch = &spans[at(&supervised)];
-    assert_eq!(lane["agent_role"], json!("judge"));
+    // In the lane of the member it supervised, told from it by the transport.
+    assert_eq!(lane["agent_role"], dispatch["agent_role"], "{lane}");
     assert_eq!(lane["transport_role"], json!("judge"));
     assert_eq!(lane["kind"], dispatch["kind"]);
     assert_eq!(lane["parent_id"], dispatch["parent_id"]);
@@ -7330,9 +7407,12 @@ fn a_member_that_has_not_settled_serves_no_judge_lane_and_no_judge_conversation(
         "the dispatch itself is still drawn: {spans:?}"
     );
     assert!(
-        !spans
-            .iter()
-            .any(|span| span["agent_role"] == json!("judge")),
+        !spans.iter().any(|span| {
+            span["transport_role"] == json!("judge")
+                || span["reference"]["value"]
+                    .as_str()
+                    .is_some_and(|value| value.ends_with(".judge"))
+        }),
         "a running dispatch has no judge lane to draw: {spans:?}"
     );
 }
@@ -7401,7 +7481,11 @@ fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
     assert_eq!(supervising, worker + 1, "{spans:?}");
     assert_eq!(spans[worker]["agent_role"], json!("worker"));
     let lane = spans[supervising].clone();
-    assert_eq!(lane["agent_role"], json!("judge"));
+    // A run of this host's shape: the worker's judge is in the worker's lane,
+    // under the member word the node graph declared, and is the judge side of
+    // it by its transport alone.
+    assert_eq!(lane["agent_role"], json!("worker"), "{lane}");
+    assert_eq!(lane["transport_role"], json!("judge"));
     assert_eq!(lane["dispatch_id"], spans[worker]["dispatch_id"]);
     assert_eq!(lane["started_at"], json!("2026-08-07T12:01:00.000Z"));
     assert_eq!(lane["step_id"], json!("build"), "the step it supervised");
@@ -7417,6 +7501,8 @@ fn a_judge_lane_the_run_never_closed_is_served_open_and_its_conclusion_whole() {
         ),
     )
     .json();
+    assert_eq!(supervised["attribution"]["agentRole"], json!("worker"));
+    assert_eq!(supervised["attribution"]["transportRole"], json!("judge"));
     assert_eq!(
         supervised["attribution"]["stepId"],
         json!("build"),

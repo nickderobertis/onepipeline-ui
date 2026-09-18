@@ -106,9 +106,11 @@ anything new here is a proposal to make upstream first.
   stamped member no declaration names is served as nothing and the persona
   beside it is never consulted; a session that stamped no member is read by its
   persona, and served only where a declaration names that word. The judge's lane
-  is the exception by construction: the judge is a party of a two-party member
-  and not a member, so `payload::JUDGE_PARTY` attributes it under the transport's
-  own word. A run on a host where the state directory is missing, or where the
+  is no exception: the judge is a party of a two-party member and not a member,
+  so `payload::judge_conversation` and `payload::judge_span` serve it under the
+  supervised member's own word, read exactly as the agent side's is, and
+  `payload::JUDGE_PARTY` is only the transport that tells the two sides apart —
+  the engine's run-level lane is the one lane that is not a member's. A run on a host where the state directory is missing, or where the
   records were written by a later `oneagentgraph` this build refuses, serves
   every session with no role — reported nowhere, because the server cannot tell
   a graph that declared nothing from a record it could not find; the SDK

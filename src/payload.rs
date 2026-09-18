@@ -2561,6 +2561,7 @@ fn conversations_under(
             served.extend(session.stored.as_ref().and_then(|stored| {
                 judge_conversation(
                     view,
+                    transcripts.declared,
                     session.session.as_str(),
                     &events,
                     stored.settlement,
@@ -3854,15 +3855,18 @@ fn conversation_document(
     })
 }
 
-/// The party the judge's own lane and conversation are attributed to, on both
-/// halves of the role pair.
+/// The party the judge's own lane and conversation run as: the transport half
+/// of their pair, and only that half.
 ///
-/// The judge is a *party* of a two-party member and not a member of its own:
+/// The judge is one *party* of a two-party member and not a member of its own:
 /// no graph declares it, no record stamps a `member` for it, and the report
-/// that is the whole of what a run holds about that side records it under
-/// `role: judge` — so its `agent_role` is the transport's own word rather than
-/// a member name read against the run's declarations. That word is the wire's,
-/// spelled once by [`Party::as_str`], not a role word kept here.
+/// that is the whole of what a run holds about that side records it inside the
+/// member's own. So its `agent_role` is **that member's** — read off the
+/// dispatch it supervised exactly as the agent side's is, against the run's
+/// declarations, and absent where that side is served none — and this word is
+/// what tells the two sides apart, as it tells the lint tier from the work it
+/// reads. It is the wire's, spelled once by [`Party::as_str`], never a role
+/// word kept here: a `judge` lane would be a role this crate invented.
 const JUDGE_PARTY: Party = Party::Judge;
 
 /// The report's own rows for the side that supervised a dispatch, ordered by the
@@ -3912,6 +3916,7 @@ fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
 /// `src/AGENTS.md`, under the report a settled member left.
 fn judge_conversation(
     view: &RunView,
+    declared: &DeclaredMembers,
     session: &str,
     events: &[&Envelope],
     settlement: &Envelope,
@@ -3919,7 +3924,6 @@ fn judge_conversation(
 ) -> Option<Value> {
     let links = judge_links(report);
     let (opened, closed) = judge_interval(report)?;
-    let agent_role = JUDGE_PARTY.as_str();
     let transport = JUDGE_PARTY;
     let id = judge_session(session);
     let first = events.first().copied();
@@ -3966,7 +3970,12 @@ fn judge_conversation(
         json!(launcher_word(&view.launch.launcher)),
     );
     attribution.insert("transportRole".into(), json!(transport.as_str()));
-    attribution.insert("agentRole".into(), json!(agent_role));
+    // The member it supervised, read off the same record the agent side's role
+    // is read off: the two sides of one dispatch are one member, and served
+    // under one word — or under none, where the run declared none for it.
+    if let Some(role) = first.and_then(|event| declared.role_of(event)) {
+        attribution.insert("agentRole".into(), json!(role));
+    }
     // The dispatch this conversation supervised. It is what names the two sides
     // one dispatch rather than two rows of equal weight, and a reader who opened
     // the judge has to be able to see which work it ruled on.
@@ -5727,8 +5736,9 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
 /// judge turn to draw it over.
 ///
 /// Everything but the interval, the party and the events is the worker's span:
-/// the two ran under one dispatch, at one node, in one step, and a lane that
-/// disagreed about any of those would be an unrelated row beside it.
+/// the two ran under one dispatch, at one node, in one step, as one member —
+/// so the `agent_role` is the dispatch's own, kept rather than rewritten — and
+/// a lane that disagreed about any of those would be an unrelated row beside it.
 fn judge_span(
     transcripts: &Transcripts<'_>,
     session: &str,
@@ -5742,7 +5752,6 @@ fn judge_span(
         .as_ref()
         .map(|stored| &stored.report)?;
     let (opened, closed) = judge_interval(report)?;
-    let agent_role = JUDGE_PARTY.as_str();
     let transport = JUDGE_PARTY;
     let id = judge_session(session);
     let mut span = dispatch.clone();
@@ -5754,7 +5763,6 @@ fn judge_span(
         closed.map_or(Value::Null, |moment| json!(moment.ts)),
     );
     span.insert("transport_role".into(), json!(transport.as_str()));
-    span.insert("agent_role".into(), json!(agent_role));
     span.insert(
         "reference".into(),
         json!({ "kind": "conversation", "value": id }),
