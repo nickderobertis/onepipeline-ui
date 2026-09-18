@@ -720,8 +720,59 @@ export function redirectionLabel(event: TimelineEvent): string | undefined {
 /** The category a redirection is read under, in the words the lane legend uses. */
 export const REDIRECTION_KIND = "Redirection";
 
+/**
+ * What one surface is called where it sits in the timeline: the kind the host
+ * raised it as, and what it said.
+ *
+ * The kind is the host's own word and is shown as spelled — `check-in`, `finding`,
+ * `edit-applied`, or anything a host's observer binding raises — because a
+ * vocabulary this app translated would be a vocabulary it had to know, and the
+ * whole point of an open kind is that it does not. The message is the surface
+ * itself; a record that carried neither is the served kind alone.
+ */
+export function surfaceLabel(event: TimelineEvent): string | undefined {
+  if (event.surface === undefined) return undefined;
+  const named = [event.surface.kind, event.surface.message].filter(
+    (part) => part !== undefined,
+  );
+  return named.length === 0 ? undefined : named.join(": ");
+}
+
+/** The two categories a surface is read under, by whether it holds work back. */
+export const SURFACE_KIND = "Surface";
+export const BLOCKING_SURFACE_KIND = "Blocking surface";
+
+/**
+ * Who submitted a live edit, when the record is one and says.
+ *
+ * Who submitted an edit is a fact about the edit — the planner's own decision and
+ * an observer's self-applied fix are two different things to a reader scanning
+ * the plan's changes — and the word is whatever author the run's bus configuration
+ * declared, shown as recorded. Only an edit's: a change request's record names
+ * the person who opened it under the same key, and that is a different fact
+ * about a different thing.
+ */
+export function editAuthor(event: TimelineEvent): string | undefined {
+  return event.kind.startsWith("edit-") ? event.author : undefined;
+}
+
+/** The author an edit names, appended to whatever the row is called. */
+function byAuthor(label: string, event: TimelineEvent): string {
+  const author = editAuthor(event);
+  return author === undefined ? label : `${label} · by ${author}`;
+}
+
 function eventRow(event: TimelineEvent): TimelineRow {
   const redirected = redirectionLabel(event);
+  const surfaced = surfaceLabel(event);
+  const displayKind =
+    redirected !== undefined
+      ? REDIRECTION_KIND
+      : event.surface === undefined
+        ? "Event"
+        : event.surface.blocking === true
+          ? BLOCKING_SURFACE_KIND
+          : SURFACE_KIND;
   return {
     rowKind: "event",
     event,
@@ -733,12 +784,15 @@ function eventRow(event: TimelineEvent): TimelineRow {
     status: event.status,
     durationMs: null,
     children: [],
-    displayLabel:
+    displayLabel: byAuthor(
       redirected ??
-      (event.kind === "retry-requested"
-        ? "Retry requested"
-        : (event.step_id ?? event.kind)),
-    displayKind: redirected === undefined ? "Event" : REDIRECTION_KIND,
+        surfaced ??
+        (event.kind === "retry-requested"
+          ? "Retry requested"
+          : (event.step_id ?? event.kind)),
+      event,
+    ),
+    displayKind,
     category: eventCategory(event.kind),
   };
 }

@@ -204,7 +204,7 @@ function sweepDuringRead(page: Page, runId: string): { swept: () => boolean } {
 /**
  * Ask for every run-detail read under `profile`.
  *
- * The browser's own toolbar offers `planner` and `monitor`, which every run answers
+ * The browser's own toolbar offers `planner` and `detailed`, which every run answers
  * to, so a reading a run has no profile for cannot be asked for from the app — and
  * that refusal is the other half of what the detail route's swallow must not cover.
  * The name is put on the request the app was going to make anyway; what comes back
@@ -893,6 +893,82 @@ test("shows the moment a planner redirected a running turn", async ({
   await expect(itemDetail(page)).toContainText(
     fixture().redirection.no_control_reason,
   );
+});
+
+/**
+ * A surface of a kind this build has never seen, and an edit by an author it has
+ * never seen, drawn as any other surface or edit — in a real browser, off the read
+ * API serving a run a host's own observer binding wrote into.
+ *
+ * Surface kinds and channel authors are open words in the engine: it relays every
+ * well-formed kind a host defines and every author its bus configuration declared,
+ * and reports an author's applied edit back as an `edit-applied` surface naming
+ * that author. The app keeps no list of either, and this is what proves it: every
+ * word below names no member, no persona and no built-in kind.
+ */
+test("draws a surface of an unfamiliar kind and an edit by an unfamiliar author", async ({
+  page,
+}) => {
+  const sentinel = fixture().sentinel;
+  await openObservatory(page, `/?run=${runs().live}&node=${sentinel.node}`);
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+
+  // The surface is read under the host's own kind and what it said — once when it
+  // was raised and once when the planner took it, which are two records of one
+  // surface.
+  const raised = transcript
+    .getByRole("article")
+    .filter({ hasText: `${sentinel.kind}: ${sentinel.message}` });
+  await expect(raised).toHaveCount(2);
+  await raised.first().getByRole("button").click();
+  await expect(itemDetail(page)).toContainText("Surface");
+  await expect(itemDetail(page).locator(".facts")).toContainText(
+    `Kind${sentinel.kind}`,
+  );
+  await expect(itemDetail(page).locator(".facts")).toContainText(
+    `Raised by${sentinel.author}`,
+  );
+  await expect(itemDetail(page).locator(".facts")).toContainText(
+    "Blockingno — nothing waits on it",
+  );
+  await expect(itemDetail(page)).toContainText("Message");
+  await expect(itemDetail(page)).toContainText(sentinel.message);
+  await page.keyboard.press("Escape");
+
+  // The blocking one says so: it is the fact a reader of a paused run came for.
+  const blocking = transcript.getByRole("article").filter({
+    hasText: `${sentinel.blocking_kind}: ${sentinel.blocking_message}`,
+  });
+  await expect(blocking).toHaveCount(2);
+  await blocking.first().getByRole("button").click();
+  await expect(itemDetail(page)).toContainText("Blocking surface");
+  await expect(itemDetail(page).locator(".facts")).toContainText(
+    "Blockingyes — dependents wait on the answer",
+  );
+  await page.keyboard.press("Escape");
+
+  // The edit names who applied it, in the word the run recorded — and the engine's
+  // own report of that edit is a surface like any other, raised by that author.
+  const edited = transcript
+    .getByRole("article")
+    .filter({ hasText: `edit-committed · by ${sentinel.author}` });
+  await expect(edited).toHaveCount(1);
+  await edited.getByRole("button").click();
+  await expect(itemDetail(page).locator(".facts")).toContainText(
+    `Author${sentinel.author}`,
+  );
+  await page.keyboard.press("Escape");
+  const applied = transcript
+    .getByRole("article")
+    .filter({ hasText: `edit-applied: ${sentinel.edit_applied_message}` });
+  await expect(applied).toHaveCount(1);
+  await applied.getByRole("button").click();
+  await expect(itemDetail(page).locator(".facts")).toContainText(
+    `Raised by${sentinel.author}`,
+  );
+  // Nothing failed on the way: a record this build had never seen was drawn, not
+  // refused.
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 /**
@@ -1992,6 +2068,15 @@ test("keeps a node's task, criteria, dependencies and verification reachable", a
 test("switches the reading between decisions and detailed activity", async ({
   page,
 }) => {
+  // Which profile each read of the run asked the server for, as the requests
+  // leave the browser: the switch is two named profiles the server defines for
+  // every run, and the word on the wire is what proves which two.
+  const asked: string[] = [];
+  page.on("request", (request) => {
+    const filter = new URL(request.url()).searchParams.get("filter");
+    if (filter !== null && request.url().includes("/api/v2/"))
+      asked.push(filter);
+  });
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
 
@@ -2011,15 +2096,20 @@ test("switches the reading between decisions and detailed activity", async ({
   );
   await expect(markers().first()).toBeVisible();
   const detailed = await markers().count();
+  // Under the engine's own name for the whole stream — `detailed`, which is what
+  // it renamed `monitor` to when it stopped naming an observer member.
+  expect(new Set(asked)).toEqual(new Set(["detailed"]));
 
   // Narrowing to the decisions is one click, and fewer records are drawn — but
   // not none, because a decision is a record too.
+  const before = asked.length;
   await choice("Decisions").click();
   await expect(page).toHaveURL(/detail=decisions/);
   await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
   await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
   await expect.poll(() => markers().count()).toBeLessThan(detailed);
   expect(await markers().count()).toBeGreaterThan(0);
+  expect(new Set(asked.slice(before))).toEqual(new Set(["planner"]));
   // The node's own dispatch is still drawn at the bounds the run recorded: a
   // filter narrows what is listed, never what the run did.
   await expect(

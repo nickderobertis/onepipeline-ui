@@ -644,6 +644,38 @@ function liveSpans() {
             reason: "the member is between turns",
           },
         },
+        // A host's own observer binding at work: a surface under a kind of its
+        // own, and an edit under an author of its own — both words the app has
+        // never heard of, which is the ordinary state of an open vocabulary.
+        {
+          id: "event-12",
+          kind: "planner-surface-queued",
+          at: stamp(54),
+          node_id: "dashboard",
+          surface: {
+            kind: "sentinel-lost",
+            message: "the sentinel stopped answering",
+            source: "sentinel",
+            blocking: true,
+          },
+        },
+        {
+          id: "event-13",
+          kind: "edit-committed",
+          at: stamp(55),
+          node_id: "dashboard",
+          author: "sentinel",
+        },
+        // A change request's record names who opened it under the same key, and
+        // that is not an edit's author.
+        {
+          id: "event-14",
+          kind: "change-opened",
+          at: stamp(56),
+          node_id: "dashboard",
+          author: "a-recording-host",
+          reference: { kind: "pr", value: PR_URL },
+        },
       ],
     },
     dispatch("worker-session", "engineer-dashboard", "dashboard", 12, 60, [

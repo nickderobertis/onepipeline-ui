@@ -26,6 +26,7 @@ import type {
   Redirection as RedirectionRecord,
   TimelineReference,
   TimelineRelease,
+  TimelineSurface,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
@@ -37,6 +38,7 @@ import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
 import {
   dispatchRoleLabel,
+  editAuthor,
   holdReasonLabel,
   LLMLINT_TRANSPORT,
   type TimelineRow,
@@ -148,6 +150,11 @@ function Body({
   // nobody asked in place of the one they did.
   const release = releaseOf(row);
   if (release !== undefined) return <ReleaseRecord release={release} />;
+  // And a surface is what it says: the question or the finding a host raised to
+  // the planner, in the host's own kind, rather than a record with a reference.
+  const surface = surfaceOf(row);
+  if (surface !== undefined)
+    return <SurfaceRecord row={row} surface={surface} />;
   if (reference?.kind === "conversation")
     return <Session row={row} transcript={transcript} />;
   if (isVerification(row))
@@ -657,11 +664,87 @@ function Redirection({
             <dd>{redirection.input_bytes} bytes offered</dd>
           </div>
         )}
+        <Author row={row} />
       </dl>
       {redirection.reason !== undefined && (
         <>
           <h3 className="detail-heading">Why it was not delivered</h3>
           <p className="detail-note">{redirection.reason}</p>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Who submitted a live edit, where the record says.
+ *
+ * One row, only on an edit that carries an author: the run's bus configuration
+ * declares every author beside the planner and grants each its own operations,
+ * so the planner's decision and an observer's self-applied fix are two different
+ * facts about the same graph, and the word is shown exactly as the run recorded
+ * it — this app keeps no list of the authors a host may declare.
+ */
+function Author({ row }: { readonly row: TimelineRow }) {
+  const author = row.rowKind === "event" ? editAuthor(row.event) : undefined;
+  if (author === undefined) return null;
+  return (
+    <div>
+      <dt>Author</dt>
+      <dd>{author}</dd>
+    </div>
+  );
+}
+
+/**
+ * What one surface said, in the fields the record carried.
+ *
+ * The kind is the host's own word, shown as spelled: the engine relays any
+ * well-formed kind a host raises, so a kind this app has never seen is a surface
+ * to draw rather than a record to fall back from. Whether it holds dependents
+ * back is the fact a reader scanning a paused run came for, so it is stated as a
+ * sentence rather than a flag — and only where the record said either way.
+ */
+function SurfaceRecord({
+  surface,
+  row,
+}: {
+  readonly surface: TimelineSurface;
+  readonly row: TimelineRow;
+}) {
+  const stated: readonly (readonly [string, string | undefined])[] = [
+    ["Kind", surface.kind],
+    ["Raised by", surface.source],
+    [
+      "Blocking",
+      surface.blocking === undefined
+        ? undefined
+        : surface.blocking
+          ? "yes — dependents wait on the answer"
+          : "no — nothing waits on it",
+    ],
+  ];
+  const facts = stated.filter(([, value]) => value !== undefined);
+  return (
+    <>
+      <dl className="facts">
+        <div>
+          <dt>Recorded at</dt>
+          <dd>
+            <Timestamp at={row.startedAt} relative />
+          </dd>
+        </div>
+        {facts.map(([term, value]) => (
+          <div key={term}>
+            <dt>{term}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {surface.message !== undefined && (
+        <>
+          <h3 className="detail-heading">Message</h3>
+          <p className="detail-note">{surface.message}</p>
         </>
       )}
     </>
@@ -736,6 +819,7 @@ function Recorded({
           <dt>Step</dt>
           <dd>{stepOf(located) ?? "None"}</dd>
         </div>
+        <Author row={row} />
       </dl>
       <h3 className="detail-heading">Reference</h3>
       <Reference
@@ -822,6 +906,14 @@ function redirectionOf(row: TimelineRow): RedirectionRecord | undefined {
  */
 function releaseOf(row: TimelineRow): TimelineRelease | undefined {
   return row.rowKind === "event" ? row.event.release : undefined;
+}
+
+/**
+ * What a surface record said, when the row is one. Only an event row can be: a
+ * surface is a moment the run raised something, never an interval.
+ */
+function surfaceOf(row: TimelineRow): TimelineSurface | undefined {
+  return row.rowKind === "event" ? row.event.surface : undefined;
 }
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {
