@@ -2071,12 +2071,14 @@ test("switches the reading between decisions and detailed activity", async ({
   // Which profile each read of the run asked the server for, as the requests
   // leave the browser: the switch is two named profiles the server defines for
   // every run, and the word on the wire is what proves which two.
+  // llmlint: ignore-block[tests_mirror_real_usage] the word is the property under test and nothing on screen carries it: the switch's two settings are the two *named* profiles the server defines for every run — `planner` and `detailed`, the engine's own names, which are what make the browser and the CLI narrow to the same thing — and every reader-visible effect asserted below (fewer markers, no refusal, the same dispatch drawn) would hold just as well under an inline spec that narrows the same records without being the profile the CLI shares, or under a launch-defined alias of it. The requests are read, never altered or answered.
   const asked: string[] = [];
   page.on("request", (request) => {
     const filter = new URL(request.url()).searchParams.get("filter");
     if (filter !== null && request.url().includes("/api/v2/"))
       asked.push(filter);
   });
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
 
