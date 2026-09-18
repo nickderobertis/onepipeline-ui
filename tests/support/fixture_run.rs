@@ -3863,6 +3863,9 @@ fn pretty(value: &Value) -> String {
 /// The run id of the stopped-mid-flight fixture below.
 pub const STOPPED_RUN_ID: &str = "run-20260807-5c4b3a";
 
+/// The stream the stopped run's node graph relayed its member on.
+const STOPPED_MEMBER_STREAM: &str = "node-scope-1786925518250-4250";
+
 /// A run whose driver was stopped with a node still dispatched, and which never
 /// wrote a result.
 ///
@@ -3914,6 +3917,14 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
             "labels": { "run_id": run, "node": NODE_ID, "persona": "worker" },
             "payload": {}, "artifacts": [],
         }),
+        // The node graph opening its member, on that graph's own stream: the first
+        // record a dispatch relays, and what puts its declared members in reach.
+        json!({
+            "v": 1, "ts": "2026-08-07T12:00:02.500Z", "stream": STOPPED_MEMBER_STREAM,
+            "seq": 0, "source": "agentgraph", "kind": "member-started",
+            "labels": { "run_id": run, "node": NODE_ID, "member": "worker", "persona": "worker" },
+            "payload": {}, "artifacts": [],
+        }),
         json!({
             "v": 1, "ts": "2026-08-07T12:00:03.000Z", "stream": "a-recording-host-4250",
             "seq": 3, "source": "pipeline", "kind": "run-stopped",
@@ -3926,6 +3937,8 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
         format!("{}\n", journal.join("\n")),
     )
     .expect("the journal");
+    // This host's node graph declares the `worker` it opened and the dispatch names.
+    declare_graph(root, STOPPED_MEMBER_STREAM, &["worker"]);
     dir
 }
 
@@ -4159,6 +4172,10 @@ pub fn write_held(root: &Path, run: &str) -> PathBuf {
             json!({ "status": "done" }),
         );
     fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    // The node graph this host dispatches under declares a `worker`, which is
+    // the persona every `node-dispatched` here carries and the one word its
+    // category is served as.
+    declare_graph(root, &journal.stream, &["worker"]);
     dir
 }
 
@@ -4238,6 +4255,9 @@ pub const PRESERVED_RUN_ID: &str = "run-20260807-7e6d5c";
 /// The commit that run's work was preserved on, rather than published as.
 pub const PRESERVED_SHA: &str = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
 
+/// The stream the preserved run's node graph relayed its member on.
+const PRESERVED_MEMBER_STREAM: &str = "node-scope-1786925518251-4251";
+
 /// A run whose publication never landed: the base moved under it, the bounded
 /// resolve did not converge, and the work was preserved on its branch instead.
 ///
@@ -4273,6 +4293,17 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
     let at_node = json!({ "run_id": run, "node": NODE_ID });
     let mut journal = Journal::new("a-recording-host-4251");
+    // The node graph the dispatch ran, opening its member before the session
+    // said anything — the first record every dispatch relays, and the one that
+    // puts that graph's run, and so its declared members, in the reader's reach.
+    let mut member = Journal::new(PRESERVED_MEMBER_STREAM);
+    member.emit(
+        "2026-08-07T12:00:02.500Z",
+        "agentgraph",
+        "member-started",
+        json!({ "run_id": run, "node": NODE_ID, "member": "worker", "persona": "worker" }),
+        json!({}),
+    );
     journal
         .emit(
             START,
@@ -4342,7 +4373,10 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
                 "detail": "the base moved under the publication",
             }),
         );
-    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    fs::write(dir.join("events.jsonl"), merged([journal, member])).expect("the journal");
+    // The node graph this host dispatches under declares a `worker`, which is
+    // the member it opened and the persona the `node-dispatched` carries.
+    declare_graph(root, PRESERVED_MEMBER_STREAM, &["worker"]);
     dir
 }
 
@@ -5236,6 +5270,10 @@ pub fn write_malformed_releases(root: &Path, run: &str) -> PathBuf {
             json!({ "status": "done", "outcome": "shipped" }),
         );
     fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    // The node graph this host dispatches under declares a `worker`, which is
+    // the persona every `node-dispatched` here carries and the one word its
+    // category is served as.
+    declare_graph(root, &journal.stream, &["worker"]);
     dir
 }
 
