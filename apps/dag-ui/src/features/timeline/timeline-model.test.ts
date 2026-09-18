@@ -8,10 +8,12 @@ import {
   dispatchRoleLabel,
   findRow,
   GROUP_THRESHOLD,
+  laneLabel,
   laneVocabulary,
   nodeTimeline,
   nodeTimelineV2,
   pathTo,
+  roleLaneId,
   spanAsRow,
   type TimelineRow,
   transcriptEntries,
@@ -145,6 +147,17 @@ describe("one node's slice of the run timeline", () => {
     ]);
     const legend = laneVocabulary(timeline).map(({ label }) => label);
     expect(legend.filter((label) => served.includes(label))).toEqual(served);
+  });
+
+  test("keeps a member named after a structural lane in a lane of its own", () => {
+    // The word is the lane, and what the plot reads back as `Lane: …` — except
+    // where a host named a member after a lane every run has, which would
+    // otherwise plot that member in a lane meaning something else.
+    expect(roleLaneId("sentinel")).toBe("sentinel");
+    expect(roleLaneId("queued")).toBe("member:queued");
+    expect(laneLabel(roleLaneId("queued"))).toBe("queued");
+    expect(laneLabel("queued")).toBe("Queued");
+    expect(laneLabel("sentinel")).toBe("sentinel");
   });
 
   test("gathers one dispatch's agent, lint, and judge sessions under it", () => {
@@ -437,7 +450,7 @@ describe("one node's slice of the run timeline", () => {
     ]);
     expect(
       projected.items.find(({ id }) => id === "dispatch-judge-session"),
-    ).toMatchObject({ laneId: "role:judge" });
+    ).toMatchObject({ laneId: "judge" });
     expect(
       projected.items.find(({ id }) => id === "rollup-lock-wait-11"),
     ).toMatchObject({ laneId: "lock-waits", duration: 4200 });
@@ -501,7 +514,7 @@ describe("one node's slice of the run timeline", () => {
     expect(worker?.end).toBe(recorded);
     expect(worker?.duration).toBe(recorded - (worker?.start ?? 0));
     // And a span the record *did* close keeps the interval it recorded.
-    const judge = projected.items.find(({ laneId }) => laneId === "role:judge");
+    const judge = projected.items.find(({ laneId }) => laneId === "judge");
     expect(judge?.end).toBe(
       Date.parse(
         open.spans.find((span) => span.id === judge?.id)?.ended_at ?? "",
@@ -511,13 +524,9 @@ describe("one node's slice of the run timeline", () => {
 
   test("keeps one deterministic hit target for coincident compact items", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
-    const worker = projected.items.find(
-      ({ laneId }) => laneId === "role:worker",
-    );
-    const judge = projected.items.find(({ laneId }) => laneId === "role:judge");
-    const lint = projected.items.find(
-      ({ laneId }) => laneId === "role:llmlint",
-    );
+    const worker = projected.items.find(({ laneId }) => laneId === "worker");
+    const judge = projected.items.find(({ laneId }) => laneId === "judge");
+    const lint = projected.items.find(({ laneId }) => laneId === "llmlint");
     if (worker === undefined || judge === undefined || lint === undefined)
       throw new Error("fixture lost the dashboard's dispatches");
     // Three moments, two of them coincident and neither an end of the window: the
@@ -542,10 +551,8 @@ describe("one node's slice of the run timeline", () => {
 
   test("drops a category a window end covers rather than painting it underneath", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
-    const worker = projected.items.find(
-      ({ laneId }) => laneId === "role:worker",
-    );
-    const judge = projected.items.find(({ laneId }) => laneId === "role:judge");
+    const worker = projected.items.find(({ laneId }) => laneId === "worker");
+    const judge = projected.items.find(({ laneId }) => laneId === "judge");
     if (worker === undefined || judge === undefined)
       throw new Error("fixture lost the dashboard's dispatches");
     // The shape a node that dispatched a worker and the judge over it serves: both
@@ -574,9 +581,7 @@ describe("one node's slice of the run timeline", () => {
 
   test("spans the same window compact as expanded", () => {
     const projected = nodeTimelineV2(timeline, "dashboard");
-    const worker = projected.items.find(
-      ({ laneId }) => laneId === "role:worker",
-    );
+    const worker = projected.items.find(({ laneId }) => laneId === "worker");
     const waits = projected.items.find(({ laneId }) => laneId === "lock-waits");
     if (worker === undefined || waits === undefined)
       throw new Error("fixture lost the dashboard's work");

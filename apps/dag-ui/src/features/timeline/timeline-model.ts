@@ -134,27 +134,31 @@ const STRUCTURAL_LANE_LABELS = {
   "human-wait": "Human wait",
 } as const;
 
-type StructuralLaneId = keyof typeof STRUCTURAL_LANE_LABELS;
+/** The lane the graph timeline plots a row's own unrecorded stretches in. */
+export const IDLE_LANE_ID = "idle";
 
 /**
- * The id a member's lane is plotted under: the served word behind a prefix no span
- * kind shares, so a member a host happened to name `queued` or `publication` is a
- * lane of its own rather than the structural one.
+ * A lane's id, which the plot reads back to the operator — in a segment's hover
+ * reading, as `Lane: …` — and hashes into the lane's colour.
+ *
+ * A member's lane is the served word itself, so what the reading says is the word
+ * the run recorded and the colour follows the word across runs. The one exception
+ * is a member a host happened to name after a structural lane, or after the graph's
+ * own silence: that word is prefixed, because the alternative is plotting the member
+ * in a lane that means something else and never saying so.
  */
-const ROLE_LANE_PREFIX = "role:";
+export type LaneId = string;
 
-export type LaneId = StructuralLaneId | `${typeof ROLE_LANE_PREFIX}${string}`;
+const RESERVED_LANE_IDS: ReadonlySet<string> = new Set([
+  ...Object.keys(STRUCTURAL_LANE_LABELS),
+  IDLE_LANE_ID,
+]);
+
+const MEMBER_LANE_PREFIX = "member:";
 
 /** The lane a member's sessions are plotted in. */
 export function roleLaneId(role: AgentRole): LaneId {
-  return `${ROLE_LANE_PREFIX}${role}`;
-}
-
-/** The member word a lane id carries, or `undefined` for a structural lane. */
-function roleOfLane(lane: string): AgentRole | undefined {
-  return lane.startsWith(ROLE_LANE_PREFIX)
-    ? lane.slice(ROLE_LANE_PREFIX.length)
-    : undefined;
+  return RESERVED_LANE_IDS.has(role) ? `${MEMBER_LANE_PREFIX}${role}` : role;
 }
 
 /** The lanes in which the structural kinds are read, in their canonical order. */
@@ -755,12 +759,24 @@ export function spanLane(span: TimelineSpan): LaneId | null {
 /**
  * What one lane is called wherever an operator meets it: a member's lane is the
  * member's own word, and a structural lane its label above.
+ *
+ * Read off the vocabulary the payload was drawn with where the caller holds it,
+ * which is what names a member lane; the structural table and the id itself are
+ * the answers for a lane that vocabulary does not list.
  */
-export function laneLabel(lane: LaneId): string {
-  const role = roleOfLane(lane);
-  if (role !== undefined) return role;
+export function laneLabel(
+  lane: LaneId,
+  lanes: readonly TimelineLane[] = [],
+): string {
+  const listed = lanes.find(({ id }) => id === lane);
+  if (listed !== undefined) return listed.label;
   const table: Readonly<Record<string, string>> = STRUCTURAL_LANE_LABELS;
-  return table[lane] ?? lane;
+  return (
+    table[lane] ??
+    (lane.startsWith(MEMBER_LANE_PREFIX)
+      ? lane.slice(MEMBER_LANE_PREFIX.length)
+      : lane)
+  );
 }
 
 /**

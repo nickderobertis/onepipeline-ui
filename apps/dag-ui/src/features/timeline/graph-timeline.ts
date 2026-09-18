@@ -9,6 +9,7 @@ import { formatDuration } from "../../lib/time";
 import {
   compactTimelineItems,
   compactTimelineMarkers,
+  IDLE_LANE_ID,
   laneLabel,
   laneVocabulary,
   spanLane,
@@ -31,7 +32,7 @@ import {
  */
 
 /** The lane the run's own unrecorded stretches are plotted in. */
-export const IDLE_LANE_ID = "idle";
+export { IDLE_LANE_ID };
 
 /**
  * The id every idle segment starts with.
@@ -245,7 +246,7 @@ function row({
     return [
       {
         id: span.id,
-        label: `${label} · ${laneLabel(lane)}${summarized(span)}`,
+        label: `${label} · ${laneLabel(lane, lanes)}${summarized(span)}`,
         laneId: lane,
         start,
         end,
@@ -254,7 +255,7 @@ function row({
         payload: {
           id: span.id,
           kind: "work",
-          label: `${label} · ${laneLabel(lane)}`,
+          label: `${label} · ${laneLabel(lane, lanes)}`,
           rowId: id,
           ...(nodeId === undefined ? {} : { nodeId }),
           ...(conversationId === undefined ? {} : { conversationId }),

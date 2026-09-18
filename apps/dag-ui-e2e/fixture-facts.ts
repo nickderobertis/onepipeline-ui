@@ -19,8 +19,19 @@ const fixtureSchema = z.object({
     unattributed: z.string().min(1),
     eventless: z.string().min(1),
     busy: z.string().min(1),
+    named: z.string().min(1),
   }),
   foundation_pr: z.string().min(1),
+  /**
+   * The run whose graphs declared members named by nothing built in: the words
+   * its payload serves, in the order it serves them, and the nodes its node
+   * graph's member ran under — so the journey over its lanes reads the run's own
+   * vocabulary rather than naming one of its own.
+   */
+  named: z.object({
+    roles: z.array(z.string().min(1)).min(2),
+    nodes: z.array(z.string().min(1)).min(2),
+  }),
   /** The one kind the store holds that this build has no category rule for. */
   unfiled_kind: z.string().min(1),
   /**

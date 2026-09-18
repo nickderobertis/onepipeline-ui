@@ -32,6 +32,7 @@ import {
   buildRuns,
   churnLive,
   facts,
+  graphRecordsFor,
   growTranscript,
   recordActivity,
   removePageRuns,
@@ -238,7 +239,16 @@ async function serve(workspace, port) {
       "--poll-interval-ms",
       "125",
     ],
-    { stdio: ["ignore", "inherit", "inherit"] },
+    {
+      stdio: ["ignore", "inherit", "inherit"],
+      // Where `runs.mjs` kept the graph records the server reads a run's declared
+      // members from: the same variable the engine and `oneagentgraph` read,
+      // pointed at this workspace's rather than at the operator's own.
+      env: {
+        ...process.env,
+        ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
+      },
+    },
   );
   const stop = () => server.kill("SIGTERM");
   process.on("SIGTERM", stop);

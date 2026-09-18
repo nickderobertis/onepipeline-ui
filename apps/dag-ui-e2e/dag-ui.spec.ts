@@ -31,6 +31,7 @@ import {
   graphNodes,
   metric as metricTile,
   metrics as metricTiles,
+  timelineLane,
 } from "./observatory-locators";
 import {
   FIXTURE_WORKSPACE,
@@ -570,31 +571,32 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   // transcript: every dispatch on this node read "dispatch" and nothing else, so
   // the worker, the judge that supervised it, and the lint run under it were three
   // rows a reader could not tell apart. Neither name contains its own role.
-  await expect(worker).toHaveAccessibleName(/Worker \(engineer-dashboard\)/);
+  await expect(worker).toHaveAccessibleName(/worker \(engineer-dashboard\)/);
   await expect(
     timeline(page).getByRole("button", { name: "Expand timeline" }),
   ).toBeVisible();
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
   await expect(
-    timeline(page).getByRole("button", { name: /^Judge/ }),
+    timeline(page).getByRole("button", { name: /^judge/ }),
   ).toBeVisible();
   await expect(
-    timeline(page).getByRole("button", { name: /^Check-in/ }),
+    timeline(page).getByRole("button", { name: /^check-in/ }),
   ).toBeVisible();
   const plot = timeline(page).getByLabel(/Timeline plot/);
   // The categories the reader was promised, and no served identifier among them.
-  // The whole vocabulary is offered whatever this run recorded: a lane this node
-  // has nothing in — the lock waits, which its publication never met — is a lane an
-  // operator still has to be able to read as absent rather than as missing.
+  // The member lanes are the run's own words — the members this node's payload
+  // serves, under the words this host's graphs declared and in the order the
+  // payload first served each — and every structural lane is offered whatever
+  // this node recorded: a lane this node has nothing in — the lock waits, which
+  // its publication never met — is a lane an operator still has to be able to
+  // read as absent rather than as missing.
   await expect(page.getByRole("list", { name: "Timeline legend" })).toHaveText(
     [
       "Queued",
-      "Worker",
-      "Judge",
-      "Lint",
-      "Orchestrator",
-      "Check-in",
-      "PR author",
+      "worker",
+      "judge",
+      "check-in",
+      "llmlint",
       "Verification",
       "Publication",
       "Lock waits",
@@ -642,7 +644,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   );
   // The dispatch it belongs to and the role it played in it, on the transcript's
   // own header rather than left to be inferred from the session name.
-  await expect(itemDetail(page)).toContainText("Dispatch 1 · Worker · worker");
+  await expect(itemDetail(page)).toContainText("Dispatch 1 · worker · worker");
   await expect(
     itemDetail(page)
       .getByRole("article", { name: /^Turn / })
@@ -759,7 +761,7 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
   expect((await timeline(page).boundingBox())?.y).toBe(timelineTop);
 
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
-  const judge = timeline(page).getByRole("button", { name: /^Judge/ });
+  const judge = timeline(page).getByRole("button", { name: /^judge/ });
   await expect(judge).toHaveAttribute("data-timeline-shape", "span");
   // Read as a share of the plot, not as pixels: a supervising session projected
   // against a window nothing else occupied still clears the minimum bar width the
@@ -783,13 +785,13 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
     .filter({ hasText: "you-are-a-strict-careful-evaluator" });
   await expect(judgeItem).toHaveAttribute("data-selected", "true");
   await expect(judgeItem).toHaveAttribute("data-dispatch-group", "Dispatch 1");
-  await expect(judgeItem).toContainText("Judge");
+  await expect(judgeItem).toContainText("judge");
   const workerItem = transcript
     .getByRole("article")
     .filter({ hasText: "engineer-dashboard" });
   await expect(workerItem).toHaveAttribute("data-dispatch-group", "Dispatch 1");
 
-  await expect(itemDetail(page)).toContainText("Judge");
+  await expect(itemDetail(page)).toContainText("judge");
   await expect(itemDetail(page)).toContainText(
     "you-are-a-strict-careful-evaluator",
   );
@@ -800,7 +802,7 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
     itemDetail(page)
       .getByRole("article", { name: /^Turn / })
       .first(),
-  ).toContainText("Judge");
+  ).toContainText("judge");
   await page.keyboard.press("Escape");
   await expect(page.getByLabel("Item detail panel")).toHaveCount(0);
 });
@@ -1245,16 +1247,16 @@ test("scrolls the transcript to the journal record a marker names", async ({
   // it: the agent session and the lint run it made of its own work read as one unit.
   const dispatch = transcript.getByRole("region", { name: "Dispatch 1" });
   await expect(
-    dispatch.getByRole("article", { name: /^Worker \(engineer-dashboard\)/ }),
+    dispatch.getByRole("article", { name: /^worker \(engineer-dashboard\)/ }),
   ).toBeVisible();
   await expect(
-    dispatch.getByRole("article", { name: /^Judge \(/ }),
+    dispatch.getByRole("article", { name: /^judge \(/ }),
   ).toBeVisible();
   // A separately dispatched role is its own group rather than a member of the first.
   await expect(
     transcript
       .getByRole("region", { name: "Dispatch 2" })
-      .getByRole("article", { name: /^Check-in \(/ }),
+      .getByRole("article", { name: /^check-in \(/ }),
   ).toBeVisible();
 });
 
@@ -1997,16 +1999,16 @@ test("reads the contention a publication met as one summary", async ({
 });
 
 /**
- * The lint transport, which is the reason a session is served under a *pair* of
- * roles: this member has the same semantic role as the work it is reading, and
- * only the transport half tells the two apart.
+ * The lint member, served under the word this host's graph declared for it —
+ * which is also the transport it ran as — and drawn in a lane of that word beside
+ * the work it is reading.
  */
 test("tells the lint member apart from the work it is reading", async ({
   page,
 }) => {
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
-  const lint = timeline(page).getByRole("button", { name: /^Lint/ });
+  const lint = timeline(page).getByRole("button", { name: /^llmlint/ });
   await expect(lint).toBeVisible();
   await expect(lint).toHaveAccessibleName(new RegExp(fixture().sessions.lint));
   await lint.click();
@@ -2116,7 +2118,7 @@ test("switches the reading between decisions and detailed activity", async ({
   // filter narrows what is listed, never what the run did.
   await expect(
     timeline(page).getByRole("button", {
-      name: /Worker \(engineer-dashboard\)/,
+      name: /worker \(engineer-dashboard\)/,
     }),
   ).toBeVisible();
 
@@ -2358,7 +2360,7 @@ test("draws what a ready node was waiting for as spans of its own", async ({
   const last = stamps.indexOf(
     `Queued behind ${queue.ahead.at(-1)?.join(", ")}`,
   );
-  const dispatched = stamps.findIndex((label) => label.startsWith("Worker ("));
+  const dispatched = stamps.findIndex((label) => label.startsWith("worker ("));
   expect(last).toBeGreaterThanOrEqual(0);
   expect(dispatched).toBeGreaterThan(last);
 
@@ -2897,6 +2899,109 @@ test("lists a run that has recorded no event beside the runs that have", async (
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+/**
+ * The lanes are the run's own graph declarations, not a vocabulary this app keeps.
+ *
+ * The served run's observer graph declared `ticker` and `sentinel` — in that order,
+ * which no alphabet and no table here would produce — and its node graph declared
+ * `reviser` and `drafter`, the first node running both in that order and the
+ * second running `drafter` again. Nothing in this repository names any of the
+ * four: what the browser draws for them is read off the served payload, one lane
+ * per distinct word in the order the payload serves them, beside the engine's own
+ * run-level row under the name it has always had.
+ */
+test("draws one lane per member word the run's own graphs declared, as served", async ({
+  page,
+}) => {
+  const named = runs().named;
+  // The words, in the order the server serves them: read off the same route the
+  // app reads, so the expectation is the payload's rather than a copy of the
+  // fixture's — and checked against what the fixture said it wrote, so a corpus
+  // that stopped carrying the case fails here rather than passing vacuously.
+  const atRun = await (
+    await page.request.get(`/api/v2/runs/${named}/timeline?scope=run`)
+  ).json();
+  const served: string[] = [];
+  for (const span of atRun.spans as { agent_role?: string }[]) {
+    if (span.agent_role !== undefined && !served.includes(span.agent_role))
+      served.push(span.agent_role);
+  }
+  expect(served).toEqual(fixture().named.roles);
+  // Neither the observers' two words nor the node graph's two are in alphabetical
+  // order, so a client sorting its lanes is told apart from one drawing them as
+  // served.
+  const observers = served.slice(0, 2);
+  const members = served.slice(2);
+  expect(observers).not.toEqual([...observers].sort());
+  expect(members).not.toEqual([...members].sort());
+  // Served more than once — the second node ran the same member — so a lane per
+  // *span* would draw one of them twice.
+  expect(
+    (atRun.spans as { agent_role?: string }[]).filter(
+      (span) => span.agent_role === served.at(-1),
+    ).length,
+  ).toBeGreaterThan(1);
+
+  await openObservatory(page, `/?run=${named}&view=overall`);
+  await expandGraphRows(page);
+  // The engine's own row, under its own name, beside the members' lanes.
+  const runLevel = page.getByRole("region", { name: "Run-level timeline" });
+  await expect(runLevel).toBeVisible();
+  await expect(page.locator(".graph-row-name").first()).toHaveText("Run-level");
+  // The observers' lanes on the engine's row: the two words, in served order,
+  // each exactly once, and the row's own silence after them.
+  await expect(runLevel.getByRole("listitem")).toHaveText([
+    ...observers,
+    "Idle",
+  ]);
+  // The node graph's members, on each node that ran them, under their own words:
+  // the node that ran both reads them in the order it ran them, and the node that
+  // ran one of them again reads that one word once.
+  // Exact names: one node's name is the other's with a prefix, and a substring
+  // match would read both rows as one.
+  const [both, again] = fixture().named.nodes;
+  await expect(
+    page
+      .getByRole("region", { name: `${both} timeline`, exact: true })
+      .getByRole("listitem"),
+  ).toHaveText([...members, "Idle"]);
+  await expect(
+    page
+      .getByRole("region", { name: `${again} timeline`, exact: true })
+      .getByRole("listitem"),
+  ).toHaveText([served.at(-1) ?? "", "Idle"]);
+  // Opened, every row draws those same lanes, and a segment is named by them.
+  await runLevel.getByRole("button", { name: "Expand timeline" }).click();
+  for (const role of observers)
+    await expect(timelineLane(runLevel, role)).toBeAttached();
+  await expect(
+    runLevel.getByRole("button", {
+      name: RegExp(`^Run-level · ${observers[0]}`),
+    }),
+  ).toBeVisible();
+
+  // And the node view's legend is the vocabulary that node's payload serves —
+  // every word once, in served order, between the queue and the structural kinds
+  // — with no word this app could have supplied among them.
+  await openObservatory(page, `/?run=${named}&node=${both}`);
+  await expect(page.getByRole("list", { name: "Timeline legend" })).toHaveText(
+    [
+      "Queued",
+      ...members,
+      "Verification",
+      "Publication",
+      "Lock waits",
+      "Human wait",
+    ].join(""),
+  );
+  await timeline(page).getByRole("button", { name: "Expand timeline" }).click();
+  for (const role of members) {
+    await expect(
+      timeline(page).getByRole("button", { name: RegExp(`^${role} \\(`) }),
+    ).toBeVisible();
+  }
+});
+
 test("opens a run-level session other than the one shown on arrival", async ({
   page,
 }) => {
@@ -2924,9 +3029,7 @@ test("opens a run-level session other than the one shown on arrival", async ({
 
   // Each opens in the two-thirds panel beside the plot, with the turns labelled by
   // the role the segment that opened them was named with.
-  await runLevel
-    .getByRole("button", { name: /^Run-level · Orchestrator/ })
-    .click();
+  await runLevel.getByRole("button", { name: /^Run-level · monitor/ }).click();
   await expect(itemDetail(page)).toContainText(
     "Coordinating the execution frontier",
   );
@@ -2942,9 +3045,9 @@ test("opens a run-level session other than the one shown on arrival", async ({
   // does here exactly as it does in the node view.
   await page.keyboard.press("Escape");
   await expect(itemDetail(page)).toHaveCount(0);
-  await runLevel.getByRole("button", { name: /^Run-level · Check-in/ }).click();
+  await runLevel.getByRole("button", { name: /^Run-level · check-in/ }).click();
   await expect(itemDetail(page)).toContainText("Progress reported");
-  await expect(itemDetail(page)).toContainText("Check-in");
+  await expect(itemDetail(page)).toContainText("check-in");
   await expect.poll(() => transcripts.size).toBe(2);
 });
 
@@ -3053,7 +3156,7 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
   );
   expect(hatching).toContain("repeating-linear-gradient");
   const working = await runLevel
-    .getByRole("button", { name: /^Run-level · Orchestrator/ })
+    .getByRole("button", { name: /^Run-level · monitor/ })
     .evaluate((element) => getComputedStyle(element).backgroundImage);
   expect(working).not.toContain("repeating-linear-gradient");
 
@@ -3639,7 +3742,7 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
     .press("Enter");
   await page
     .getByRole("region", { name: "Node transcript" })
-    .getByRole("button", { name: /^Open Worker \(engineer-dashboard\)/ })
+    .getByRole("button", { name: /^Open worker \(engineer-dashboard\)/ })
     .click();
   await expect(
     page.getByText("Implementing the dashboard now").first(),
@@ -4043,7 +4146,7 @@ test("follows a growing transcript only while the reader is at its end", async (
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   await page
     .getByRole("region", { name: "Node transcript" })
-    .getByRole("button", { name: /^Open Worker \(engineer-dashboard\)/ })
+    .getByRole("button", { name: /^Open worker \(engineer-dashboard\)/ })
     .click();
   await expect(itemDetail(page)).toContainText(
     "Implementing the dashboard now",
@@ -4272,6 +4375,7 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
     runs().unattributed,
     runs().eventless,
     runs().busy,
+    runs().named,
   ]) {
     changeServedRuns(["--remove-run", runId]);
     await expect(page.getByText("No DAG runs found")).toHaveCount(0);

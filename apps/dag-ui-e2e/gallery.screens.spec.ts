@@ -81,7 +81,7 @@ const SURFACES: readonly Surface[] = [
       await dashboard.getByRole("button", { name: "Expand timeline" }).click();
       // An opened row names each of its lanes for a reader who cannot see the plot,
       // and that name is what says the lanes have arrived.
-      await expect(timelineLane(dashboard, "Worker")).toBeAttached();
+      await expect(timelineLane(dashboard, "worker")).toBeAttached();
     },
   },
   {
@@ -95,7 +95,7 @@ const SURFACES: readonly Surface[] = [
         .click();
       await page
         .getByRole("region", { name: "Run-level timeline" })
-        .getByRole("button", { name: /^Run-level · Orchestrator/ })
+        .getByRole("button", { name: /^Run-level · monitor/ })
         .click();
       await expect(
         page
@@ -145,7 +145,7 @@ const SURFACES: readonly Surface[] = [
       const plot = page.getByRole("region", { name: "Node timeline" });
       await plot.getByRole("button", { name: "Expand timeline" }).click();
       // Photographed with the lanes drawn, not with the line they replaced.
-      await expect(plot.getByRole("button", { name: /^Judge/ })).toBeVisible();
+      await expect(plot.getByRole("button", { name: /^judge/ })).toBeVisible();
     },
   },
   {
@@ -170,7 +170,7 @@ const SURFACES: readonly Surface[] = [
       await page.goto(`/?run=${runs().live}&node=dashboard`);
       await page
         .getByRole("region", { name: "Node transcript" })
-        .getByRole("button", { name: /^Open Judge/ })
+        .getByRole("button", { name: /^Open judge/ })
         .click();
       await expect(
         page
