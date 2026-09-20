@@ -36,6 +36,9 @@ GET /api/v2/goals
 GET /api/v2/runs/{run}/goals
 GET /api/v2/runs/{run}/transcript     ?node=ID
 GET /api/v2/runs/{run}/telemetry
+GET /api/v2/runs/{run}/agents         # every oneharness session the run launched
+GET /api/v2/runs/{run}/nodes/{node}/agents
+GET /api/v2/projects/{project}/agents # the union over the project's runs
 ```
 
 The first seven are the read surface the browser view was written against;
@@ -47,7 +50,7 @@ one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
 which is what its stops and adoptions are judged by.
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (18), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (19), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy

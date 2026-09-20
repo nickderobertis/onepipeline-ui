@@ -62,6 +62,9 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_GOALS, "run-goals.json"),
     (routes::RUN_TRANSCRIPT, "run-transcript.json"),
     (routes::RUN_TELEMETRY, "run-telemetry.json"),
+    (routes::RUN_AGENTS, "run-agents.json"),
+    (routes::RUN_NODE_AGENTS, "run-node-agents.json"),
+    (routes::PROJECT_AGENTS, "project-agents.json"),
 ];
 
 /// The binary that carries the hidden driver verb an adoption retains.
@@ -440,6 +443,9 @@ fn every_route_serves_the_payload_its_golden_pins() {
     let (_workspace, root) = fixture_run::workspace();
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    // The sessions the run's launches wrote, so the detail's `agent_count` is
+    // pinned over a run that launched some.
+    fixture_run::point_sessions(&root, fixture_run::RUN_ID);
     let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
 
@@ -573,16 +579,29 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     let (_workspace, root) = fixture_run::workspace();
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    // One run's launches wrote sessions and the other's wrote none, so the
+    // project's union and its count are pinned over both cases at once.
+    fixture_run::point_sessions(&root, fixture_run::RUN_ID);
     let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+    let node = NodeId::try_from(fixture_run::NODE_ID).expect("valid");
     let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
     let journal_end = fs::metadata(RunPaths::under(&root, fixture_run::RUN_ID).journal())
         .expect("the fixture run's journal")
         .len();
 
-    let served: [(&str, Value); 12] = [
+    let served: [(&str, Value); 15] = [
         ("projects.json", enveloped(store.projects())),
         ("project.json", enveloped(store.project(&project))),
+        ("run-agents.json", enveloped(store.agents(&run))),
+        (
+            "run-node-agents.json",
+            enveloped(store.node_agents(&run, &node)),
+        ),
+        (
+            "project-agents.json",
+            enveloped(store.project_agents(&project)),
+        ),
         ("run-channel.json", enveloped(store.channel(&run))),
         (
             "run-watch.json",
@@ -1000,7 +1019,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 18);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 19);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1133,6 +1152,53 @@ fn the_browser_clients_copy_of_the_reference_vocabulary_matches_this_one() {
          from this crate's",
         path.display()
     );
+}
+
+/// The engine's label vocabulary for the sessions a launch writes is declared
+/// twice — in `onepipeline::agents` and in the browser client's model — because
+/// a Rust constant cannot be read from TypeScript.
+///
+/// The client groups a run's agents by the scope word and the attempt, and names
+/// the node and step off these keys, so a key the engine renamed would leave the
+/// panel grouping every session under nothing. Held to the engine's own
+/// constants and its own `Scope::ALL`, spelled by that type's `as_str`, never a
+/// third copy of either.
+#[test]
+fn the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines() {
+    use onepipeline::agents::{
+        Scope, ATTEMPT_LABEL, LABEL_PREFIX, NODE_LABEL, PROJECT_LABEL, RUN_ID_LABEL, SCOPE_LABEL,
+        STEP_LABEL,
+    };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let labels = format!(
+        "export const AGENT_LABELS = {{\n  runId: \"{RUN_ID_LABEL}\",\n  project: \
+         \"{PROJECT_LABEL}\",\n  scope: \"{SCOPE_LABEL}\",\n  node: \"{NODE_LABEL}\",\n  \
+         step: \"{STEP_LABEL}\",\n  attempt: \"{ATTEMPT_LABEL}\",\n}} as const;"
+    );
+    let prefix = format!("export const AGENT_LABEL_PREFIX = \"{LABEL_PREFIX}\";");
+    let scopes = format!(
+        "export const AGENT_SCOPES = [{}] as const;",
+        Scope::ALL
+            .iter()
+            .map(|scope| format!("\"{}\"", scope.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    for declaration in [labels, prefix, scopes] {
+        assert!(
+            source.contains(&declaration),
+            "{} does not declare `{declaration}`; the client's copy of the engine's agent \
+             label vocabulary has drifted",
+            path.display()
+        );
+    }
 }
 
 #[test]
@@ -1843,6 +1909,18 @@ impl RunApi for Unimplemented {
 
     fn telemetry(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn agents(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn node_agents(&self, run: &RunId, _node: &NodeId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn project_agents(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::ProjectNotFound(project.clone()))
     }
 }
 

@@ -19,7 +19,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oneharness_core::domain::history::HistoryLabels;
+use oneharness_core::domain::harness::HarnessIdentity;
+use oneharness_core::domain::history::{parse_labels, HistoryLabels};
 use oneharness_core::domain::mode::PermissionMode;
 use oneharness_core::domain::report::RunResult;
 use oneharness_core::domain::signals::FailureKind;
@@ -94,18 +95,64 @@ pub fn record_under(
     text: &str,
     model: Model<'_>,
 ) -> Recorded {
+    record_session(dir, name, prompt, text, model, None)
+}
+
+/// A session launched under a run the engine stamped: the labels the launch
+/// carried, and the pointer file every harness run of it appends a line to.
+///
+/// What the engine overlays on every dispatch, in the writer's own terms —
+/// `ONEHARNESS_HISTORY_LABELS` as the session's labels and
+/// `ONEHARNESS_HISTORY_POINTER_FILE` as the file the run's `agents` verb reads
+/// — so a store written this way is what a run the engine launched leaves
+/// behind, and nothing here spells a pointer line: the writer does.
+pub struct Pointed<'a> {
+    /// The run's pointer file, `RunPaths::oneharness_sessions()`.
+    pub pointer_file: &'a Path,
+    /// oneharness's wire format for a label set: `key=value`, comma-separated,
+    /// which is what `onepipeline::agents::compose_labels` renders.
+    pub labels: &'a str,
+}
+
+/// [`record`], for one harness run of a session launched under a run.
+///
+/// The line the writer appends names the store, the project slug and the
+/// session stem exactly as [`Recorded`] reads them back, which is what lets a
+/// journey open the served entry to the file the writer wrote.
+pub fn record_pointed(
+    dir: &Path,
+    pointed: &Pointed<'_>,
+    name: &str,
+    prompt: &str,
+    text: &str,
+) -> Recorded {
+    record_session(dir, name, prompt, text, Model::Unreported, Some(pointed))
+}
+
+fn record_session(
+    dir: &Path,
+    name: &str,
+    prompt: &str,
+    text: &str,
+    model: Model<'_>,
+    pointed: Option<&Pointed<'_>>,
+) -> Recorded {
     // The directory the harness ran in. oneharness canonicalizes it and slugs
     // the result into the store's project layer, so it has to be a real one.
     let project = dir.join("project");
     fs::create_dir_all(&project).expect("the project the harness ran in");
-    let writer = HistoryWriter::open(
-        dir,
-        &project,
-        name,
-        HistoryLabels::new(BTreeMap::new()).expect("no labels"),
-    )
-    .expect("open the history store");
-    let history_id = writer.begin_run();
+    let labels = match pointed {
+        Some(pointed) => parse_labels(pointed.labels.split(',').map(str::trim))
+            .expect("the labels the engine composed"),
+        None => HistoryLabels::new(BTreeMap::new()).expect("no labels"),
+    };
+    let writer = HistoryWriter::open(dir, &project, name, labels)
+        .expect("open the history store")
+        .with_pointer_file(pointed.map(|pointed| pointed.pointer_file.to_path_buf()));
+    // The identity the fixture result below reports, begun the way oneharness
+    // begins one: this is what appends the pointer line.
+    let identity: HarnessIdentity = "claude-code:alternate".parse().expect("an identity");
+    let history_id = writer.begin_harness_run(&identity);
     let result = result(prompt, text, model);
     writer
         .append_streamed(

@@ -34,7 +34,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(18), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(19), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -256,6 +256,7 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
             let path = template
                 .replace("{run}", run)
                 .replace("{project}", &encoded(fixture_run::PLAN_PROJECT))
+                .replace("{node}", fixture_run::NODE_ID)
                 .replace(
                     "/conversations/{id}",
                     &format!("/conversations/{conversation}"),
@@ -3184,6 +3185,352 @@ fn a_pointer_naming_no_store_reads_the_one_every_oneharness_process_here_resolve
     assert_eq!(
         content["text"],
         json!("the default store is where this landed")
+    );
+}
+
+/// The engine's own label set for one launch under a run, in oneharness's wire
+/// format: what `ONEHARNESS_HISTORY_LABELS` carries into every harness turn of
+/// that launch, composed by the engine's own composer over what the repository
+/// stamped.
+fn stamped(run: &str, launched: onepipeline::agents::Launched<'_>) -> String {
+    onepipeline::agents::compose_labels(
+        Some("role=engineer"),
+        &onepipeline::agents::Stamp {
+            run,
+            project: Some(fixture_run::PLAN_PROJECT),
+            launched,
+        },
+    )
+    .expect("the engine composes the labels")
+}
+
+/// A node-scope launch of `node`, at its first attempt.
+fn node_launch(node: &str) -> onepipeline::agents::Launched<'_> {
+    onepipeline::agents::Launched::Node {
+        node,
+        step: None,
+        attempt: std::num::NonZeroU32::MIN,
+    }
+}
+
+/// Record one session a launch under `run` wrote, into `store`, the way a
+/// oneharness under the engine's overlay records one: labelled as the engine
+/// stamped the launch, and pointed at from the run's own pointer file.
+fn launched_session(
+    store: &Path,
+    root: &Path,
+    run: &str,
+    launched: onepipeline::agents::Launched<'_>,
+    name: &str,
+    text: &str,
+) -> harness_history::Recorded {
+    let pointer_file = onepipeline::views::RunPaths::under(root, run).oneharness_sessions();
+    harness_history::record_pointed(
+        store,
+        &harness_history::Pointed {
+            pointer_file: &pointer_file,
+            labels: &stamped(run, launched),
+        },
+        name,
+        "do the work the node asks",
+        text,
+    )
+}
+
+/// One served agent entry, read back to the session file its pointer line
+/// names: the record served under the entry's own `run_id` and history id is
+/// the one the writer wrote, in the file the entry says it is in.
+fn assert_opens_to_transcript(
+    serving: &Serving,
+    entry: &Value,
+    recorded: &harness_history::Recorded,
+    text: &str,
+) {
+    assert_eq!(entry["history_session"], json!(recorded.session), "{entry}");
+    assert_eq!(entry["history_project"], json!(recorded.project), "{entry}");
+    assert_eq!(
+        entry["history_file"],
+        json!(recorded.path.display().to_string()),
+        "the entry names the file the writer wrote: {entry}"
+    );
+    let runs = entry["runs"].as_array().expect("the harness runs");
+    assert_eq!(runs.len(), 1, "{entry}");
+    assert_eq!(runs[0]["history_id"], json!(recorded.history_id));
+    assert_eq!(runs[0]["harness_id"], json!("claude-code:alternate"));
+    assert_eq!(runs[0]["harness"], json!("claude-code"));
+    assert_eq!(runs[0]["variant"], json!("alternate"));
+    assert!(runs[0]["started"]
+        .as_str()
+        .is_some_and(|at| at.ends_with('Z')));
+    // The link: the run the entry names, and the harness run's history id, on
+    // the artifact route — the same resolution a relayed session opens through.
+    let run = entry["run_id"]
+        .as_str()
+        .expect("the run the entry is under");
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{run}/artifacts/{}",
+            runs[0]["history_id"].as_str().expect("a history id")
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_eq!(body["kind"], json!("oneharness_session"));
+    let content: Value =
+        serde_json::from_str(body["content"].as_str().expect("content")).expect("the record");
+    assert_eq!(
+        content["history_id"],
+        json!(recorded.history_id),
+        "{content}"
+    );
+    assert_eq!(
+        content["session"],
+        json!(recorded.session),
+        "the record served is from the session file the pointer line names: {content}"
+    );
+    assert_eq!(content["text"], json!(text), "{content}");
+}
+
+/// Every agent a run launched, off the run's own pointer file, each opening to
+/// the transcript in the store oneharness itself kept it in.
+///
+/// Three runs under one project, recorded the way the engine's overlay has a
+/// oneharness record them — the labels the launch was stamped with, and one
+/// pointer line per harness run appended to the run's own file — through that
+/// library's own writer, into a store under the journey's own state directory.
+/// Nothing is relayed into any journal: these sessions are the ones only the
+/// pointer file names, and the artifact route opens each through it.
+#[test]
+fn the_agents_a_run_launched_are_served_off_its_pointer_file_and_open_to_their_transcripts() {
+    const QUIET_RUN: &str = "run-20260807-e7f8a9";
+    let (workspace, root) = fixture_run::workspace();
+    let store = workspace.path().join("oneharness-history");
+    for run in [fixture_run::RUN_ID, fixture_run::OTHER_RUN_ID, QUIET_RUN] {
+        fixture_run::write(&root, run);
+    }
+    // The first run: a worker under its node and the run's observer. The
+    // second: one worker. The third launched nothing yet, so it has no file.
+    let worker = launched_session(
+        &store,
+        &root,
+        fixture_run::RUN_ID,
+        node_launch(fixture_run::NODE_ID),
+        "contract interface worker",
+        "the route table is landed",
+    );
+    let observer = launched_session(
+        &store,
+        &root,
+        fixture_run::RUN_ID,
+        onepipeline::agents::Launched::Observer,
+        "monitor",
+        "nothing has been quiet for long",
+    );
+    let other = launched_session(
+        &store,
+        &root,
+        fixture_run::OTHER_RUN_ID,
+        node_launch(fixture_run::REVIEW_NODE_ID),
+        "reviewer",
+        "the review is approved",
+    );
+    let serving = Serving::start_in(workspace, &[]);
+
+    // The run's agents: both sessions, each carrying the engine's keys and the
+    // repository's own, in the order they first appeared.
+    let response = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/agents", fixture_run::RUN_ID),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_enveloped(&body);
+    assert_eq!(body["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(body["skipped"], json!(0));
+    let sessions = body["sessions"].as_array().expect("sessions");
+    assert_eq!(sessions.len(), 2, "{body}");
+    assert_opens_to_transcript(&serving, &sessions[0], &worker, "the route table is landed");
+    // The name as the writer keeps it, which is its own sanitised spelling.
+    assert_eq!(
+        sessions[0]["name"],
+        json!(oneharness_core::domain::history::sanitize_name(
+            "contract interface worker"
+        ))
+    );
+    assert_eq!(sessions[0]["run_id"], json!(fixture_run::RUN_ID));
+    assert_eq!(
+        sessions[0]["labels"],
+        json!({
+            "onepipeline.attempt": "1",
+            "onepipeline.node": fixture_run::NODE_ID,
+            "onepipeline.project": fixture_run::PLAN_PROJECT,
+            "onepipeline.run_id": fixture_run::RUN_ID,
+            "onepipeline.scope": "node",
+            "role": "engineer",
+        }),
+        "{body}"
+    );
+    assert_eq!(
+        sessions[0]["history_dir"],
+        json!(store.display().to_string())
+    );
+    assert!(
+        sessions[0]["project"]
+            .as_str()
+            .is_some_and(|cwd| cwd.ends_with("project")),
+        "the directory the harness ran in: {body}"
+    );
+    assert_opens_to_transcript(
+        &serving,
+        &sessions[1],
+        &observer,
+        "nothing has been quiet for long",
+    );
+    assert_eq!(
+        sessions[1]["labels"]["onepipeline.scope"],
+        json!("observer")
+    );
+    assert!(sessions[1]["labels"].get("onepipeline.node").is_none());
+
+    // One node's: the worker alone. A node that dispatched nothing is an empty
+    // list, not an error.
+    let node = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/nodes/{}/agents",
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID
+        ),
+    )
+    .json();
+    assert_enveloped(&node);
+    assert_eq!(node["node"], json!(fixture_run::NODE_ID));
+    assert_eq!(
+        node["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .map(|entry| entry["history_session"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!(worker.session)],
+        "{node}"
+    );
+    let none = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/nodes/{}/agents",
+            fixture_run::RUN_ID,
+            fixture_run::REVIEW_NODE_ID
+        ),
+    );
+    assert_eq!(none.status, 200, "{}", none.body);
+    assert_eq!(none.json()["sessions"], json!([]));
+
+    // A run with no pointer file is an empty list, not an error.
+    let quiet = http::get(serving.address, &format!("/api/v2/runs/{QUIET_RUN}/agents"));
+    assert_eq!(quiet.status, 200, "{}", quiet.body);
+    assert_eq!(quiet.json()["sessions"], json!([]));
+    assert_eq!(quiet.json()["skipped"], json!(0));
+
+    // The count beside the run's detail is the number of sessions the agents
+    // route answers: two, and zero for the run that launched nothing.
+    for (run, expected) in [(fixture_run::RUN_ID, 2), (QUIET_RUN, 0)] {
+        let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+        assert_eq!(
+            detail["run"]["agent_count"],
+            json!(expected),
+            "{run}: {detail}"
+        );
+    }
+
+    // The project's: the union over its three runs, each entry naming the run
+    // it is under, and the count beside the project on both routes that serve
+    // the group.
+    let project = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/projects/{}/agents",
+            fixture_run::PLAN_PROJECT.replace(':', "%3A")
+        ),
+    );
+    assert_eq!(project.status, 200, "{}", project.body);
+    let body = project.json();
+    assert_enveloped(&body);
+    assert_eq!(body["project"], json!(fixture_run::PLAN_PROJECT));
+    let sessions = body["sessions"].as_array().expect("sessions");
+    assert_eq!(sessions.len(), 3, "{body}");
+    let by_run = |run: &str| -> Vec<&Value> {
+        sessions
+            .iter()
+            .filter(|entry| entry["run_id"] == json!(run))
+            .collect()
+    };
+    assert_eq!(by_run(fixture_run::RUN_ID).len(), 2, "{body}");
+    let others = by_run(fixture_run::OTHER_RUN_ID);
+    assert_eq!(others.len(), 1, "{body}");
+    assert_opens_to_transcript(&serving, others[0], &other, "the review is approved");
+    let groups = http::get(serving.address, "/api/v2/projects").json();
+    let group = groups["projects"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .find(|group| group["project"] == json!(fixture_run::PLAN_PROJECT))
+        .expect("the fixture's project");
+    assert_eq!(group["agent_count"], json!(3), "{groups}");
+    let group = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/projects/{}",
+            fixture_run::PLAN_PROJECT.replace(':', "%3A")
+        ),
+    )
+    .json();
+    assert_eq!(group["agent_count"], json!(3), "{group}");
+
+    // A run that is not there, and a project no run was launched from, are the
+    // contract's own not-found on every one of the three.
+    let missing = http::get(serving.address, "/api/v2/runs/run-20260807-000000/agents");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], json!("run_not_found"));
+    let missing = http::get(
+        serving.address,
+        "/api/v2/runs/run-20260807-000000/nodes/contract-interface/agents",
+    );
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], json!("run_not_found"));
+    let missing = http::get(serving.address, "/api/v2/projects/local-md%3Anobody/agents");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], json!("project_not_found"));
+}
+
+/// A pointer file the engine's own reader cannot read is the engine's refusal
+/// on the agents route, and leaves the count beside the run absent rather
+/// than a zero a reader would take for "nothing launched".
+#[test]
+fn a_pointer_file_that_cannot_be_read_is_refused_and_leaves_the_count_absent() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        // A directory where the file should be: there, and not readable as one.
+        fs::create_dir_all(
+            onepipeline::views::RunPaths::under(root, fixture_run::RUN_ID).oneharness_sessions(),
+        )
+        .expect("a directory in the pointer file's place");
+    });
+    let response = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/agents", fixture_run::RUN_ID),
+    );
+    assert_eq!(response.status, 422, "{}", response.body);
+    assert_eq!(response.json()["error"]["code"], json!("refused"));
+    let detail = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    assert!(
+        detail["run"].get("agent_count").is_none(),
+        "a count nothing could read is served absent, not as a zero: {detail}"
     );
 }
 

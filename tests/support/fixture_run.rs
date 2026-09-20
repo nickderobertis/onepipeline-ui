@@ -1441,6 +1441,118 @@ pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
     report::retain(&paths_of(dir), &settlement);
 }
 
+/// Where a workspace keeps the oneharness history store the fixture run's
+/// pointer file names — beside the runs root, as [`GRAPH_RECORDS_DIR`] is,
+/// because every directory under a runs root is a claim to be a run.
+pub const POINTED_STORE_DIR: &str = "oneharness-history";
+
+/// The worker session the fixture run's pointer file names: the node-scope
+/// dispatch of [`NODE_ID`], attempt 1, stamped by the engine and by the
+/// repository (`role=engineer`) — two harness runs, so one session groups two
+/// lines.
+pub const POINTED_WORKER_SESSION: &str = "contract-interface-worker-20260807T120003Z-3163646";
+/// The observer session it names: the dag-scope graph, which carries no node.
+pub const POINTED_OBSERVER_SESSION: &str = "monitor-20260807T120000Z-3163600";
+/// The three harness runs, as their pointer lines name them: the first two are
+/// the worker session's, the last the observer's. Time-ordered ids, as
+/// oneharness mints them.
+pub const POINTED_HISTORY_IDS: [&str; 3] = [
+    "0198a5b3-2c4d-7e60-8f01-000000000001",
+    "0198a5b3-2c4d-7e60-8f01-000000000002",
+    "0198a5b3-2c4d-7e60-8f01-000000000000",
+];
+
+/// Write the fixture run's pointer file: what every oneharness turn under the
+/// run's launches appended, saying where its session went.
+///
+/// Each line is built through `oneharness-core`'s own constructors —
+/// `PointerSession`, `HistoryPointer` — and serialized by that library, so a
+/// line here is one its reader admits; the labels are composed by the engine's
+/// own `compose_labels`, as a launch stamps them. Fixed values throughout, so a
+/// golden pinned over it does not move with the clock: the store is named and
+/// never written, because the pointer file is the whole of what the agents
+/// routes read.
+pub fn point_sessions(root: &Path, run: &str) -> PathBuf {
+    use oneharness_core::domain::harness::HarnessIdentity;
+    use oneharness_core::domain::history::{
+        parse_labels, project_slug, HistoryId, HistoryPointer, PointerSession,
+    };
+    use oneharness_core::domain::usage::UtcInstant;
+    use onepipeline::agents::{compose_labels, Launched, Stamp};
+
+    let store = root
+        .parent()
+        .expect("a workspace's runs root has the workspace above it")
+        .join(POINTED_STORE_DIR);
+    let cwd = "/a-recording-host/workspace";
+    let session = |name: &str, stem: &str, launched: Launched<'_>| {
+        let labels = compose_labels(
+            Some("role=engineer"),
+            &Stamp {
+                run,
+                project: Some(PLAN_PROJECT),
+                launched,
+            },
+        )
+        .expect("the engine composes the labels");
+        PointerSession::new(
+            &store,
+            &store.join(project_slug(cwd)).join(format!("{stem}.jsonl")),
+            name,
+            cwd,
+            parse_labels(labels.split(',')).expect("the labels oneharness reads"),
+        )
+        .expect("a session one project directory below the store")
+    };
+    // Named as the writer keeps a name: its own sanitised spelling.
+    let worker = session(
+        &oneharness_core::domain::history::sanitize_name("contract interface worker"),
+        POINTED_WORKER_SESSION,
+        Launched::Node {
+            node: NODE_ID,
+            step: None,
+            attempt: std::num::NonZeroU32::MIN,
+        },
+    );
+    let observer = session("monitor", POINTED_OBSERVER_SESSION, Launched::Observer);
+    let identity = |id: &str| -> HarnessIdentity { id.parse().expect("an identity") };
+    let lines = [
+        (
+            &observer,
+            POINTED_HISTORY_IDS[2],
+            "claude-code",
+            1_786_104_000,
+        ),
+        (
+            &worker,
+            POINTED_HISTORY_IDS[0],
+            "claude-code:alternate",
+            1_786_104_003,
+        ),
+        (&worker, POINTED_HISTORY_IDS[1], "codex", 1_786_104_010),
+    ];
+    let text: String = lines
+        .iter()
+        .map(|(session, id, harness, started)| {
+            let history_id: HistoryId = id.parse().expect("a history id");
+            let pointer = HistoryPointer::new(
+                session,
+                history_id,
+                &identity(harness),
+                UtcInstant::from_epoch(*started),
+            )
+            .expect("a pointer");
+            format!(
+                "{}\n",
+                serde_json::to_string(&pointer).expect("the pointer serializes")
+            )
+        })
+        .collect();
+    let file = RunPaths::under(root, run).oneharness_sessions();
+    fs::write(&file, text).expect("the pointer file");
+    file
+}
+
 /// The pointer at one oneharness invocation's conversation, as `oneagentgraph`
 /// publishes one.
 ///

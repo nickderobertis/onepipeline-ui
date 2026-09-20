@@ -74,6 +74,16 @@ export const API_V2_PATHS = {
     `/api/v2/runs/${encodeURIComponent(runId)}/transcript`,
   telemetry: (runId: string) =>
     `/api/v2/runs/${encodeURIComponent(runId)}/telemetry`,
+  /**
+   * The agents a run, one of its nodes, or a project launched — every oneharness
+   * session, read off each run's own pointer file. The project's is the union
+   * over its runs, under the same path-encoded id as `project`.
+   */
+  agents: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/agents`,
+  nodeAgents: (runId: string, nodeId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/agents`,
+  projectAgents: (projectId: string) =>
+    `/api/v2/projects/${encodeURIComponent(projectId)}/agents`,
 } as const;
 export const API_V2_QUERY = {
   includeSettled: "include_settled",
@@ -225,8 +235,16 @@ export const API_V2_FILTER_PROFILES = {
  * happening to, and one that has never seen `project` cannot group the list the
  * way the CLI does. A `run.changed` frame names the `project` of the run that
  * moved beside its `run_id`, on the same terms.
+ *
+ * `19` is the agent count. The run detail's `run` and each project group carry
+ * `agent_count`: how many oneharness sessions the corresponding agents route
+ * answers, read off the run's own pointer file — `0` for a run with none, and
+ * absent only where the file is there and the server could not read it. Every
+ * field `18` served is served with the same meaning; the literal moves because a
+ * client that has never seen the field shows a run a dozen agents ran under as
+ * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 18;
+export const TELEMETRY_SCHEMA_VERSION = 19;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -513,6 +531,12 @@ export const runTelemetrySchema = openObject({
   }),
   turns: counter,
   lint: counter,
+  /**
+   * How many oneharness sessions the run's agents route answers, under schema 19:
+   * `0` for a run with no pointer file, and absent only where the file is there
+   * and the server could not read it.
+   */
+  agent_count: counter.optional(),
 });
 
 /**
@@ -1545,6 +1569,12 @@ export const projectGroupSchema = openObject({
   name: z.string().min(1).nullable(),
   last_write_at: nonnegative.nullable(),
   runs: z.array(runSummarySchema),
+  /**
+   * How many oneharness sessions the project's agents route answers — the union
+   * over its runs — under schema 19; absent only where one of its runs' pointer
+   * files could not be read.
+   */
+  agent_count: counter.optional(),
 });
 
 /**
@@ -1994,6 +2024,96 @@ export const runTelemetryDocumentSchema = openObject({
   telemetry: openObject({ schema_version: counter }),
 });
 
+/**
+ * The label keys the engine stamps on every oneharness session a launch under a
+ * run writes, and the words its `scope` takes.
+ *
+ * A copy of `onepipeline::agents`'s constants — the engine's own contract, which
+ * nothing a browser can read declares — gated from the crate's suite, which
+ * links the engine and holds these to it. Every other key on a session's labels
+ * is the repository's own, stamped by whatever launched the harness, and is
+ * shown as the word it chose.
+ */
+export const AGENT_LABELS = {
+  runId: "onepipeline.run_id",
+  project: "onepipeline.project",
+  scope: "onepipeline.scope",
+  node: "onepipeline.node",
+  step: "onepipeline.step",
+  attempt: "onepipeline.attempt",
+} as const;
+/** The prefix every key the engine owns sits under; the rest are the repository's. */
+export const AGENT_LABEL_PREFIX = "onepipeline.";
+/**
+ * Which launch of a run a session was written under: a node-scope dispatch (a
+ * lifecycle step included), the dag-scope observer graph, or the drafting graph
+ * a change request's body comes from — in the order a reader scans them.
+ */
+export const AGENT_SCOPES = ["node", "observer", "pr-author"] as const;
+export type AgentScope = (typeof AGENT_SCOPES)[number];
+
+/**
+ * One harness run of a session, as its pointer line names it: the history id —
+ * also the artifact id `GET /api/v2/runs/{run}/artifacts/{id}` serves its
+ * transcript under — the harness, its variant where the identity names one,
+ * the whole configured id, and when it began.
+ */
+export const agentRunSchema = openObject({
+  history_id: z.string().min(1),
+  harness: z.string().min(1),
+  variant: z.string().min(1).optional(),
+  harness_id: z.string().min(1),
+  started: timestamp,
+});
+
+/**
+ * One oneharness session a launch under a run wrote, as the SDK serves it: the
+ * session's id (its file's stem), its name, the store it is under, its project
+ * slug and file, the directory the harness ran in, when its first harness run
+ * began, its labels — the engine's keys and the repository's own — and its
+ * harness runs in file order. Beside those, `run_id` is the run whose pointer
+ * file the line is in, which is the run the transcript is opened under; a
+ * project's union reads it off the engine's label and leaves it off an entry
+ * that carries none.
+ */
+export const agentSessionSchema = openObject({
+  history_session: z.string().min(1),
+  name: z.string().min(1),
+  history_dir: z.string().min(1),
+  history_project: z.string().min(1),
+  history_file: z.string().min(1),
+  project: z.string().min(1),
+  started: timestamp,
+  labels: z.record(z.string(), z.string()),
+  runs: z.array(agentRunSchema),
+  run_id: z.string().min(1).optional(),
+});
+
+const agentsListing = {
+  ...verbEnvelope,
+  sessions: z.array(agentSessionSchema),
+  /** The lines the reader counted and did not read: a torn tail, or a foreign line. */
+  skipped: counter,
+} as const;
+
+/**
+ * `GET /api/v2/runs/{run}/agents` and `GET /api/v2/runs/{run}/nodes/{node}/agents`:
+ * every session the run's launches wrote, or the ones one node's dispatches
+ * wrote. A run with no pointer file, and a node that dispatched nothing, are an
+ * empty list rather than an error.
+ */
+export const runAgentsSchema = openObject({
+  ...agentsListing,
+  run_id: z.string().min(1),
+  node: z.string().min(1).optional(),
+});
+
+/** `GET /api/v2/projects/{project}/agents`: the union over the project's runs. */
+export const projectAgentsSchema = openObject({
+  ...agentsListing,
+  project: z.string().min(1),
+});
+
 export type Timing = z.infer<typeof timingSchema>;
 export type FailureClass = z.infer<typeof failureClassSchema>;
 export type Failure = z.infer<typeof failureSchema>;
@@ -2082,6 +2202,10 @@ export type RenderedRun = z.infer<typeof renderedRunSchema>;
 export type RunStatus = z.infer<typeof runStatusSchema>;
 export type RunTranscript = z.infer<typeof runTranscriptSchema>;
 export type RunTelemetryDocument = z.infer<typeof runTelemetryDocumentSchema>;
+export type AgentRun = z.infer<typeof agentRunSchema>;
+export type AgentSession = z.infer<typeof agentSessionSchema>;
+export type RunAgents = z.infer<typeof runAgentsSchema>;
+export type ProjectAgents = z.infer<typeof projectAgentsSchema>;
 export type FilterProfile =
   (typeof API_V2_FILTER_PROFILES)[keyof typeof API_V2_FILTER_PROFILES];
 

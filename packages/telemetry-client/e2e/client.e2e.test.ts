@@ -315,6 +315,104 @@ test("a package consumer reads the grouped projects and every rendered verb over
   }
 });
 
+test("a package consumer reads the agents a run, a node and a project launched over a real HTTP boundary", async () => {
+  const session = {
+    history_session: "worker-20260807T120003Z-3163646",
+    name: "worker",
+    history_dir: "/a-store",
+    history_project: "a-project",
+    history_file: "/a-store/a-project/worker-20260807T120003Z-3163646.jsonl",
+    project: "/a-workspace",
+    started: "2026-08-07T12:00:03Z",
+    labels: {
+      "onepipeline.node": "a",
+      "onepipeline.run_id": "run-1",
+      "onepipeline.scope": "node",
+    },
+    runs: [
+      {
+        history_id: "0198a5b3-2c4d-7e60-8f01-000000000001",
+        harness: "claude-code",
+        harness_id: "claude-code",
+        started: "2026-08-07T12:00:03Z",
+      },
+    ],
+    run_id: "run-1",
+  };
+  const requested: string[] = [];
+  const server = await serveLoopback((request) => {
+    const url = new URL(request.url);
+    requested.push(`${request.method} ${url.pathname}`);
+    switch (url.pathname) {
+      case "/api/v2/runs/run-1/agents":
+        return Response.json({
+          ...enveloped,
+          run_id: "run-1",
+          sessions: [session],
+          skipped: 0,
+        });
+      // A node that dispatched nothing is an empty list rather than an error.
+      case "/api/v2/runs/run-1/nodes/b/agents":
+        return Response.json({
+          ...enveloped,
+          run_id: "run-1",
+          node: "b",
+          sessions: [],
+          skipped: 0,
+        });
+      // The project id reaches the route path-encoded, as `getProject` sends it.
+      case "/api/v2/projects/local-md%3Aobservatory/agents":
+        return Response.json({
+          ...enveloped,
+          project: "local-md:observatory",
+          sessions: [session],
+          skipped: 1,
+        });
+      case "/api/v2/runs/run-1/artifacts/0198a5b3-2c4d-7e60-8f01-000000000001":
+        return Response.json({
+          ...enveloped,
+          id: "0198a5b3-2c4d-7e60-8f01-000000000001",
+          kind: "oneharness_session",
+          content: '{"text": "what the agent said"}',
+          truncated: false,
+        });
+      default:
+        return Response.json(
+          {
+            error: { code: "project_not_found", message: "no such project" },
+          },
+          { status: 404 },
+        );
+    }
+  });
+  try {
+    const client = new TelemetryClient(`http://127.0.0.1:${server.port}`);
+    const agents = await client.getAgents("run-1");
+    expect(agents.sessions[0]?.labels["onepipeline.node"]).toBe("a");
+    expect(agents.sessions[0]?.runs[0]?.variant).toBeUndefined();
+    expect((await client.getNodeAgents("run-1", "b")).sessions).toEqual([]);
+    const project = await client.getProjectAgents("local-md:observatory");
+    expect(project.skipped).toBe(1);
+    // The link the entry carries: its run and its harness run's history id, on
+    // the artifact route, is the transcript.
+    const [entry] = project.sessions;
+    const transcript = await client.getArtifact(
+      entry?.run_id ?? "",
+      entry?.runs[0]?.history_id ?? "",
+    );
+    expect(transcript.kind).toBe("oneharness_session");
+    expect(transcript.content).toContain("what the agent said");
+    await expect(client.getProjectAgents("local-md:nobody")).rejects.toThrow(
+      "no such project",
+    );
+    expect(requested).toContain(
+      "GET /api/v2/projects/local-md%3Aobservatory/agents",
+    );
+  } finally {
+    await server.stop();
+  }
+});
+
 test("a package consumer sends an envelope as the bytes it typed and reads the engine's receipt or refusal verbatim", async () => {
   const received: { method: string; path: string; body: string }[] = [];
   const server = await serveLoopback(async (request) => {

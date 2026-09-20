@@ -46,6 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use onepipeline::agents::{AgentScope, Agents};
 use onepipeline::verbs;
 use onepipeline::views::{Listing, RunPaths, RunSummary, RunView, Skipped};
 use serde_json::{json, Value};
@@ -54,13 +55,13 @@ use crate::api::RunApi;
 use crate::cli::{RunsRoot, SessionId};
 use crate::contract::{
     ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
-    Health, HealthStatus, NextQuery, ProjectId, Release, RunId, RunQuery, RunSelection, RunsPage,
-    RunsQuery, SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope,
+    Health, HealthStatus, NextQuery, NodeId, ProjectId, Release, RunId, RunQuery, RunSelection,
+    RunsPage, RunsQuery, SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope,
     TranscriptQuery, WatchEvent, WatchFrame, WatchQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
-use crate::payload::{self, DeclaredMembers, Scope, Signature};
+use crate::payload::{self, AgentsScope, DeclaredMembers, Scope, Signature};
 use crate::telemetry::{self, RunTelemetry};
 
 /// How many watch frames the engine may run ahead of a reader.
@@ -683,6 +684,63 @@ impl RunStore {
         Self::unreadable(&skipped)
     }
 
+    /// How many sessions the run's pointer file names, as `GET .../agents`
+    /// would answer them: zero for a run with no pointer file, and `None` —
+    /// said once to stderr, on the terms an unreadable telemetry document is —
+    /// where the file is there and this build could not read it.
+    fn agent_count(&self, run: &RunId) -> Option<usize> {
+        match verbs::agents(&self.paths_of(run), AgentScope::Run) {
+            Ok(agents) => Some(agents.sessions.len()),
+            Err(unreadable) => {
+                eprintln!("onepipeline-api: no agent count for {run}: {unreadable}");
+                None
+            }
+        }
+    }
+
+    /// How many sessions `GET /api/v2/projects/{project}/agents` answers for
+    /// one group: the union over its runs, grouped by session as the SDK
+    /// groups them, so the number a project row shows is the number its
+    /// listing serves.
+    ///
+    /// Read run by run rather than through `verbs::project_agents`, which
+    /// lists the whole root once per call — a grouped listing of every project
+    /// would list it once per group. Each read is one small file, paid only for
+    /// a run the group serves. `None` where any of them could not be read.
+    fn group_agent_count(&self, group: &onepipeline::views::ProjectGroup) -> Option<usize> {
+        let mut sessions = BTreeSet::new();
+        for summary in &group.runs {
+            let run = RunId::try_from(summary.run_id.as_str()).ok()?;
+            let agents = self.agents_of(&run, AgentScope::Run).ok()?;
+            sessions.extend(
+                agents
+                    .sessions
+                    .into_iter()
+                    .map(|session| session.history_session),
+            );
+        }
+        Some(sessions.len())
+    }
+
+    /// `verbs::agents` over one run that is known to be there, with the
+    /// engine's refusal of a pointer file it could not read on the wire.
+    fn agents_of(&self, run: &RunId, scope: AgentScope<'_>) -> Result<Agents, ApiError> {
+        let paths = self.present(run)?;
+        verbs::agents(&paths, scope).map_err(|error| Self::refused(run, error))
+    }
+
+    /// The agents payload, enveloped.
+    fn agents_payload(
+        scope: &AgentsScope<'_>,
+        agents: &Agents,
+    ) -> Result<Envelope<Value>, ApiError> {
+        payload::agents(scope, agents)
+            .map(Self::envelope)
+            .map_err(|error| {
+                ApiError::ProjectionFailed(format!("the agents do not serialize: {error}"))
+            })
+    }
+
     /// The filter one verb request asked for, as the engine's own type.
     ///
     /// Resolved against the run, exactly as a read route resolves one — the
@@ -724,6 +782,7 @@ impl RunApi for RunStore {
             &self.declared(&view),
             query.include_conversations,
             aggregated.as_deref(),
+            self.agent_count(run),
             &filter,
         )))
     }
@@ -772,7 +831,9 @@ impl RunApi for RunStore {
         let mut payload = serde_json::Map::new();
         payload.insert(
             "projects".into(),
-            payload::projects(&projects, &|summary| self.grouped_row(summary)),
+            payload::projects(&projects, &|summary| self.grouped_row(summary), &|group| {
+                self.group_agent_count(group)
+            }),
         );
         if let Some(refused) = self.grouped_unreadable(&projects) {
             payload.insert("unreadable".into(), refused);
@@ -787,9 +848,11 @@ impl RunApi for RunStore {
             .iter()
             .find(|group| group.project.as_deref() == Some(project.as_str()))
             .ok_or_else(|| ApiError::ProjectNotFound(project.clone()))?;
-        Ok(Self::envelope(payload::project_group(group, &|summary| {
-            self.grouped_row(summary)
-        })))
+        Ok(Self::envelope(payload::project_group(
+            group,
+            &|summary| self.grouped_row(summary),
+            &|group| self.group_agent_count(group),
+        )))
     }
 
     fn channel(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
@@ -988,6 +1051,39 @@ impl RunApi for RunStore {
         Ok(Self::envelope(
             json!({ "run_id": run, "telemetry": document }),
         ))
+    }
+
+    fn agents(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        let agents = self.agents_of(run, AgentScope::Run)?;
+        Self::agents_payload(&AgentsScope::Run { run, node: None }, &agents)
+    }
+
+    fn node_agents(&self, run: &RunId, node: &NodeId) -> Result<Envelope<Value>, ApiError> {
+        let agents = self.agents_of(run, AgentScope::Node(node.as_str()))?;
+        Self::agents_payload(
+            &AgentsScope::Run {
+                run,
+                node: Some(node),
+            },
+            &agents,
+        )
+    }
+
+    fn project_agents(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError> {
+        // The project route's own not-found first: the engine refuses a project
+        // no run was launched from in its own words, and a group this listing
+        // does not hold is the contract's `404` rather than the engine's `422`.
+        let projects = self.grouped();
+        if !projects
+            .groups
+            .iter()
+            .any(|group| group.project.as_deref() == Some(project.as_str()))
+        {
+            return Err(ApiError::ProjectNotFound(project.clone()));
+        }
+        let agents = verbs::project_agents(&self.root, project.as_str())
+            .map_err(|error| ApiError::Engine(error.to_string()))?;
+        Self::agents_payload(&AgentsScope::Project(project), &agents)
     }
 }
 
