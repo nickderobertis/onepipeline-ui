@@ -241,7 +241,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       within(composer).getByRole("button", { name: "Compose envelope" }),
     );
     const editor = within(composer).getByLabelText("Envelope (sent as typed)");
-    expect(JSON.parse((editor as HTMLTextAreaElement).value)).toEqual({
+    const composedEnvelope = {
       version: 3,
       commands: [
         {
@@ -251,7 +251,8 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
           text: "measure the cold start too",
         },
       ],
-    });
+    };
+    expect(editor).toHaveValue(JSON.stringify(composedEnvelope, null, 2));
     // The bytes on the wire are the editor's, whitespace and all — edited by
     // hand after the shortcut, so what reaches the engine is what is on screen.
     await userEvent.type(editor, " ");
@@ -265,9 +266,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     expect(shown).toHaveTextContent(
       "nothing is driving the run; adopt it for the reply to be read",
     );
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toBe(`${(editor as HTMLTextAreaElement).value}`);
-    expect(sent[0]?.endsWith("} ")).toBe(true);
+    expect(sent).toEqual([`${JSON.stringify(composedEnvelope, null, 2)} `]);
 
     // A refusal is the engine's own words, unaltered.
     await userEvent.clear(editor);

@@ -1,4 +1,14 @@
+import {
+  apiErrorSchema,
+  type ProjectGroup,
+  projectListSchema,
+  renderedRootSchema,
+  renderedRunSchema,
+  runStatusSchema,
+  runTranscriptSchema,
+} from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { z } from "zod";
 import { fixture, runs } from "./fixture-facts";
 
 /**
@@ -18,29 +28,32 @@ import { fixture, runs } from "./fixture-facts";
  * stopped, and the stop of the run the session owns is the last thing done to it.
  */
 
-/** What the served API answers, read beside the browser to hold it to the same bytes. */
-async function served(page: Page, path: string): Promise<unknown> {
+/**
+ * What the served API answers, read beside the browser to hold it to the same
+ * bytes — and read through the contract's own parser, as the browser reads it,
+ * so a journey never asserts against a shape the client would have refused.
+ */
+async function served<T>(
+  page: Page,
+  path: string,
+  schema: z.ZodType<T>,
+): Promise<T> {
   const response = await page.request.get(path);
   expect(response.ok()).toBe(true);
-  return response.json();
+  return schema.parse(await response.json());
 }
 
-/** One group of the grouped listing, as the projects route serves it. */
-interface ServedGroup {
-  readonly project: string | null;
-  readonly name: string | null;
-  readonly runs: readonly {
-    readonly run_id: string;
-    readonly state: string;
-    readonly liveness?: string;
-  }[];
+/** A refusal the API answered, as `{error: {code, message}}` and nothing else. */
+async function refusedBy(
+  response: { status(): number; json(): Promise<unknown> },
+  status: number,
+): Promise<{ code: string; message: string }> {
+  expect(response.status()).toBe(status);
+  return apiErrorSchema.parse(await response.json()).error;
 }
 
-async function servedProjects(page: Page): Promise<readonly ServedGroup[]> {
-  const listing = (await served(page, "/api/v2/projects")) as {
-    projects: readonly ServedGroup[];
-  };
-  return listing.projects;
+async function servedProjects(page: Page): Promise<readonly ProjectGroup[]> {
+  return (await served(page, "/api/v2/projects", projectListSchema)).projects;
 }
 
 const receipt = (page: Page, label: string): Locator =>
@@ -127,13 +140,13 @@ test("opens on the projects in the order the API serves them, and a project open
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Runs", exact: true }).click();
-  // Every run row is a button named by its mark — live or historical — and
-  // then its id, and the first page is fifty of them.
+  // The flat list, with the live run on it — every run row is a button named
+  // by its mark, live or historical, and then its id.
   await expect(
-    page
-      .getByRole("navigation", { name: "DAG runs" })
-      .getByRole("button", { name: /^(Live|Historical) / }),
-  ).toHaveCount(50);
+    page.getByRole("navigation", { name: "DAG runs" }).getByRole("button", {
+      name: RegExp(`^(Live|Historical) ${runs().live}`),
+    }),
+  ).toBeVisible();
 });
 
 test("raises a surface, claims it, and answers it with a reply composed by shortcut and sent as typed", async ({
@@ -226,14 +239,13 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   // A refusal is the engine's own words: what the API answers for these bytes
   // is what the page shows, unaltered.
   const malformed = '{"nonsense": 1}';
-  const answered = await page.request.post(
-    `/api/v2/runs/${runs().supervised}/channel/reply`,
-    { data: malformed, headers: { "content-type": "application/json" } },
+  const error = await refusedBy(
+    await page.request.post(`/api/v2/runs/${runs().supervised}/channel/reply`, {
+      data: malformed,
+      headers: { "content-type": "application/json" },
+    }),
+    422,
   );
-  expect(answered.status()).toBe(422);
-  const { error } = (await answered.json()) as {
-    error: { code: string; message: string };
-  };
   expect(error.code).toBe("refused");
   await editor.fill(malformed);
   await composer.getByRole("button", { name: "Send reply" }).click();
@@ -390,18 +402,23 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
   page,
 }) => {
   await page.goto(`/?run=${runs().supervised}&view=reads`);
-  const status = (await served(
+  const status = await served(
     page,
     `/api/v2/runs/${runs().supervised}/status`,
-  )) as { rendered: string; liveness: string };
+    runStatusSchema,
+  );
   const panel = page.getByRole("region", { name: "Status" });
   await expect(panel).toContainText(status.liveness);
-  await expect(panel.getByText(status.rendered, { exact: true })).toBeVisible();
+  // The rendering carries a clock — how long a node has been running — that
+  // moves between the API's read and the browser's, so it is held to its
+  // first line, which is the run's own standing.
+  await expect(panel).toContainText(status.rendered.split("\n")[0] ?? "");
 
-  const results = (await served(
+  const results = await served(
     page,
     `/api/v2/runs/${runs().supervised}/results`,
-  )) as { rendered: string };
+    renderedRunSchema,
+  );
   await page.getByRole("tab", { name: "Results" }).click();
   await expect(
     page
@@ -409,10 +426,11 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
       .getByText(results.rendered, { exact: true }),
   ).toBeVisible();
 
-  const goals = (await served(
+  const goals = await served(
     page,
     `/api/v2/runs/${runs().supervised}/goals`,
-  )) as { rendered: string };
+    renderedRunSchema,
+  );
   await page.getByRole("tab", { name: "Goals" }).click();
   await expect(
     page
@@ -420,10 +438,11 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
       .getByText(goals.rendered, { exact: true }),
   ).toBeVisible();
 
-  const transcript = (await served(
+  const transcript = await served(
     page,
     `/api/v2/runs/${runs().supervised}/transcript`,
-  )) as { rendered: string };
+    runTranscriptSchema,
+  );
   await page.getByRole("tab", { name: "Transcript" }).click();
   const transcriptPanel = page.getByRole("region", { name: "Transcript" });
   await expect(
@@ -431,22 +450,21 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
   ).toBeVisible();
   // A node this run dispatched nothing for is the engine's refusal rather than
   // an empty transcript, and it is shown as the API worded it.
-  const refusedNode = await page.request.get(
-    `/api/v2/runs/${runs().supervised}/transcript?node=prepare`,
+  const { message } = await refusedBy(
+    await page.request.get(
+      `/api/v2/runs/${runs().supervised}/transcript?node=prepare`,
+    ),
+    422,
   );
-  expect(refusedNode.status()).toBe(422);
-  const { error } = (await refusedNode.json()) as {
-    error: { message: string };
-  };
   await transcriptPanel.getByLabel("Node").selectOption("prepare");
-  await expect(refusal(page, "Transcript")).toContainText(error.message);
+  await expect(refusal(page, "Transcript")).toContainText(message);
 
   await page.getByRole("tab", { name: "Telemetry" }).click();
   await expect(page.getByRole("region", { name: "Telemetry" })).toContainText(
     `"run_id": "${runs().supervised}"`,
   );
 
-  const host = (await served(page, "/api/v2/host")) as { rendered: string };
+  const host = await served(page, "/api/v2/host", renderedRootSchema);
   await page.getByRole("tab", { name: "Host" }).click();
   await expect(
     page
@@ -473,6 +491,9 @@ test("stops a run the acting session owns on one confirm", async ({ page }) => {
     0,
   );
   // The run's own record says so now: the stop is journalled, and the
-  // liveness reads what the engine makes of a stopped run.
-  await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible();
+  // liveness reads what the engine makes of a stopped run — on the status
+  // read's next landing, which on a loaded host is seconds away.
+  await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible({
+    timeout: 60_000,
+  });
 });

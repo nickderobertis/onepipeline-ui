@@ -2669,7 +2669,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   // An address that names the flat list and no view is an operator arriving at
   // the runs, and what they came to read is the newest one as a whole — not the
   // shape of its graph. A bare address opens on the projects instead, which
-  // `dag-ui-supervise.spec.ts` holds.
+  // `supervise.spec.ts` holds.
   await page.goto("/?list=runs");
   await expect(page.getByText("DAG Observatory")).toBeVisible();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(

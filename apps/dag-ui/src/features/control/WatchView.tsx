@@ -68,16 +68,18 @@ export function WatchView({
   );
 }
 
+/** A plain object, as the engine's open records are read field by field. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function Frame({ frame }: { readonly frame: WatchFrame }) {
   const data = frame.data;
   if (data.watch === "event") {
     const event = data.event;
     const kind = typeof event.kind === "string" ? event.kind : "event";
     const ts = typeof event.ts === "string" ? event.ts : undefined;
-    const labels =
-      typeof event.labels === "object" && event.labels !== null
-        ? (event.labels as Record<string, unknown>)
-        : {};
+    const labels = isRecord(event.labels) ? event.labels : {};
     const node = typeof labels.node === "string" ? labels.node : undefined;
     return (
       <>

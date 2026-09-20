@@ -244,7 +244,7 @@ the run as a whole; three tabs beside Graph and Overall carry the rest.
   SDK's own document, and the `host` view. `monitor` is the existing timeline under
   a profile.
 
-`e2e/dag-ui-supervise.spec.ts` drives every one of these against the real API over
+`e2e/supervise.spec.ts` drives every one of these against the real API over
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
 every other journey reads is left as it was.

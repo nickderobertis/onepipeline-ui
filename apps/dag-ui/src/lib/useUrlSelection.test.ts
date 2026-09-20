@@ -149,3 +149,12 @@ test("reads a view the app has no reading for as an unnamed one", () => {
   const { result } = renderHook(() => useUrlSelection());
   expect(result.current.view).toBe("overall");
 });
+
+test("reads a project key that is neither the reserved word nor a qualified id as none", () => {
+  window.history.replaceState(null, "", "/?project=not%20a%20project");
+  const { result } = renderHook(() => useUrlSelection());
+  expect(result.current.projectKey).toBeUndefined();
+  window.history.replaceState(null, "", "/?project=local-md%3Aobservatory");
+  const { result: named } = renderHook(() => useUrlSelection());
+  expect(named.current.projectKey).toBe("local-md:observatory");
+});

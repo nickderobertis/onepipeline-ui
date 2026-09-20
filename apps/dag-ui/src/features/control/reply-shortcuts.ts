@@ -28,12 +28,14 @@ export type VerdictShortcut = keyof typeof VERDICT_SHORTCUTS;
 export type Shortcut = VerdictShortcut | ReplyOp;
 
 export const SHORTCUTS: readonly Shortcut[] = [
-  ...(Object.keys(VERDICT_SHORTCUTS) as VerdictShortcut[]),
+  "approve",
+  "reject",
+  "continue",
   ...REPLY_OPS,
 ];
 
 export function isShortcut(value: string): value is Shortcut {
-  return (SHORTCUTS as readonly string[]).includes(value);
+  return SHORTCUTS.some((shortcut) => shortcut === value);
 }
 
 /** What a shortcut's form collects, every field as the text a person typed. */
@@ -251,7 +253,9 @@ function optional<K extends string, V>(
   key: K,
   value: V | undefined,
 ): Partial<Record<K, V>> {
-  return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
+  const entry: Partial<Record<K, V>> = {};
+  if (value !== undefined) entry[key] = value;
+  return entry;
 }
 
 /** A command's op, for a row of the queue listing what an envelope carried. */
@@ -262,6 +266,6 @@ export function opOf(command: Record<string, unknown>): string {
 
 /** Whether a command the queue holds is one the grammar spells. */
 export const isKnownOp = (op: string): op is ReplyOp =>
-  (REPLY_OPS as readonly string[]).includes(op);
+  REPLY_OPS.some((known) => known === op);
 
 export type { ReplyCommand };

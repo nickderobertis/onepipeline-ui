@@ -1508,6 +1508,27 @@ export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
 export const liveActivityListSchema = z.array(liveActivitySchema);
 
 /**
+ * Whether a string is a qualified project id: `<source>:<native>`, the source
+ * under onetaskgraph's grammar and the native id a bare identifier — ASCII
+ * letters, digits, `-`, `_` and `.`, not starting with `.`, at most 128
+ * characters, and carrying no second `:`. The same grammar the route reads an
+ * id back through, so a client refuses what the server would.
+ */
+export function isProjectId(value: string): boolean {
+  const separator = value.indexOf(":");
+  if (separator === -1) return false;
+  const source = value.slice(0, separator);
+  const native = value.slice(separator + 1);
+  return (
+    /^[a-z0-9][a-z0-9-]*$/u.test(source) &&
+    native.length > 0 &&
+    native.length <= 128 &&
+    !native.startsWith(".") &&
+    /^[A-Za-z0-9._-]+$/u.test(native)
+  );
+}
+
+/**
  * A project group of `GET /api/v2/projects`, and the body of
  * `GET /api/v2/projects/{project}`: `{project, name, last_write_at, runs}`.
  *

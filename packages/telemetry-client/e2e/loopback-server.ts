@@ -35,10 +35,8 @@ export function serveLoopback(
           new Request(`http://127.0.0.1${incoming.url ?? "/"}`, {
             method,
             headers: Object.entries(incoming.headers).flatMap(
-              ([name, value]) =>
-                typeof value === "string"
-                  ? [[name, value] as [string, string]]
-                  : [],
+              ([name, value]): [string, string][] =>
+                typeof value === "string" ? [[name, value]] : [],
             ),
             ...(method === "GET" || method === "HEAD"
               ? {}

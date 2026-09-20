@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface Read<T> {
   readonly value?: T;
@@ -15,6 +15,13 @@ export interface Read<T> {
  * that flickers to a skeleton on every invalidation is unreadable on a run that
  * is moving. A different key never shows the previous key's value — the key is
  * part of what the value is a reading of.
+ *
+ * A read is **never discarded for being overtaken**: a re-read asked for while
+ * one is out does not cancel it, because on a run that is moving the stream
+ * can ask faster than a slow verb answers, and a read cancelled on every ask
+ * never lands at all. Reads land in the order they were started instead — one
+ * that started earlier than the last to land is dropped, so the screen cannot
+ * step backwards — and only a read for a key no longer on screen is ignored.
  */
 export function useRead<T>(
   key: string | undefined,
@@ -26,25 +33,32 @@ export function useRead<T>(
     readonly value?: T;
     readonly error?: Error;
   }>({});
+  /** Which key is on screen, and the order reads were started and landed in. */
+  const reads = useRef({ key, started: 0, landed: 0 });
+  useEffect(() => {
+    reads.current.key = key;
+  }, [key]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `read` is a closure over the key and the client — the key is what says it changed, and `invalidations` is what asks for the same read again; listing the closure would re-read on every render.
   useEffect(() => {
     if (key === undefined) return;
-    let current = true;
+    const mine = ++reads.current.started;
+    const current = () =>
+      reads.current.key === key && mine > reads.current.landed;
     read()
       .then((value) => {
-        if (current) setState({ key, value });
+        if (!current()) return;
+        reads.current.landed = mine;
+        setState({ key, value });
       })
       .catch((caught: unknown) => {
-        if (current)
-          setState((previous) => ({
-            ...(previous.key === key ? previous : {}),
-            key,
-            error: asError(caught),
-          }));
+        if (!current()) return;
+        reads.current.landed = mine;
+        setState((previous) => ({
+          ...(previous.key === key ? previous : {}),
+          key,
+          error: asError(caught),
+        }));
       });
-    return () => {
-      current = false;
-    };
   }, [key, invalidations]);
   const shown = state.key === key ? state : undefined;
   return {

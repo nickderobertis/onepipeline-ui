@@ -1,4 +1,4 @@
-import { API_V2_FILTER_PROFILES } from "@onepipeline-ui/dag-model";
+import { API_V2_FILTER_PROFILES, isProjectId } from "@onepipeline-ui/dag-model";
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
@@ -155,7 +155,15 @@ export function useUrlSelection(): UrlSelection {
   const params = new URLSearchParams(query);
   const namedList = params.get("list");
   const list: ListMode = isListMode(namedList) ? namedList : "projects";
-  const projectKey = params.get("project") ?? undefined;
+  // A project key is the reserved word or a qualified id under the contract's
+  // grammar; anything else in a shared address is not a page and lands on the
+  // projects, as an unnamed view lands on the run as a whole.
+  const namedProject = params.get("project");
+  const projectKey =
+    namedProject !== null &&
+    (namedProject === NO_PROJECT_KEY || isProjectId(namedProject))
+      ? namedProject
+      : undefined;
   const runId = params.get("run") ?? undefined;
   const nodeId = params.get("node") ?? undefined;
   const itemId = params.get("event") ?? undefined;

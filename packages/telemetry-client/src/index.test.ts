@@ -294,11 +294,17 @@ test("holds a watch as its three frames, and closes the source on the frame that
     addEventListener: (
       name: string,
       listener: EventListenerOrEventListenerObject,
+      // The DOM signature also admits a `{ handleEvent }` object. The client
+      // only ever registers plain functions, and this map is what the test
+      // calls back, so narrowing here keeps the double's own surface honest.
     ) => listeners.set(name, listener as EventListener),
     close: () => {
       closed += 1;
     },
     onerror: null,
+    // `EventSource` is a DOM class with readyState, url and the rest of the
+    // spec surface; the client reaches for exactly the three members above, so
+    // the double implements those and this names what it stands in for.
   } as unknown as EventSource;
   const frames: unknown[] = [];
   const errors: unknown[] = [];
