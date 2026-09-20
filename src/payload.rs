@@ -4191,8 +4191,9 @@ pub fn conversation(
 ///
 /// The id has already crossed the trust boundary as an [`ArtifactId`], so it is
 /// a bare path segment; it is still resolved only against the ids the run's own
-/// envelopes recorded, so a well-formed id naming a file the run never produced
-/// reads nothing.
+/// records name — the artifacts its envelopes recorded, and the sessions its
+/// pointer file names — so a well-formed id naming a file the run never
+/// produced reads nothing.
 #[must_use]
 pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
     let recorded = view.events.iter().find_map(|event| {
