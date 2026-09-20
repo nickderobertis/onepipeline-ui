@@ -1324,6 +1324,7 @@ dependencies = [
  "oneagentgraph",
  "oneharness-core",
  "onejudge",
+ "onemessagebus",
  "onepipeline",
  "onevcs",
  "predicates",
@@ -1336,7 +1337,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

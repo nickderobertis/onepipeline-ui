@@ -57,6 +57,7 @@
         "{projectRoot}/tests/support/fixture_run.rs",
         "{projectRoot}/tests/support/http.rs",
         "{projectRoot}/tests/support/serving.rs",
+        "{projectRoot}/tests/support/sibling.rs",
         "{projectRoot}/justfile",
         "sharedGlobals",
         { "runtime": "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main" }

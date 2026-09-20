@@ -1,15 +1,20 @@
-//! The axum server: `docs/contract.md`'s seven routes, and nothing else.
+//! The axum server: `docs/contract.md`'s routes, and nothing else.
 //!
-//! Every handler is the same three steps — validate the path and query at the
-//! trust boundary, ask the [`ReadApi`] for the payload, render the envelope or
-//! the error contract — so a route cannot serve a status and a code that
-//! disagree, and a raw `String` from a URL never reaches storage.
+//! Every handler is the same three steps — validate the path, the query and
+//! the body at the trust boundary, ask the [`ReadApi`] for the payload, render
+//! the envelope or the error contract — so a route cannot serve a status and a
+//! code that disagree, and a raw `String` from a URL never reaches storage.
+//! The one body that is *not* parsed here is a channel reply's: it is the
+//! envelope's bytes, handed to the engine verbatim, because the engine is what
+//! rules on it.
 //!
 //! Reads block: a run list walks the whole root and a detail folds a journal.
 //! None of that runs on the async runtime. Each handler defers its read to a
-//! blocking worker, and the event stream drives its whole (blocking, endless)
-//! frame iterator on one, forwarding through a channel — so one slow scan
-//! occupies a worker rather than the runtime every other connection shares.
+//! blocking worker, and the two streams — the event stream and a watch — drive
+//! their whole (blocking) frame iterators on one, forwarding through a channel
+//! — so one slow scan occupies a worker rather than the runtime every other
+//! connection shares. A write is a read on the same terms: the engine's verbs
+//! block on the run's own files and locks.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -21,7 +26,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -30,8 +35,9 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::ReadApi;
 use crate::contract::{
-    routes, ArtifactId, ConversationId, Envelope, EventsQuery, NodeId, PageLimit, RunId, RunQuery,
-    RunSelection, RunsPage, RunsQuery, TimelineQuery, TimelineScope,
+    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventsQuery,
+    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
+    StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery, WatchQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -56,16 +62,18 @@ struct Serving {
 
 /// The router serving one runs root, ending its streams when `stopping` is set.
 // llmlint: ignore-block[authorization_enforced_server_side] there is no authorization to
-// enforce here and no place to enforce it from. This is `docs/contract.md`'s whole surface:
-// seven **read** routes over a directory of runs, with no writes, no accounts, no sessions
-// and no principal — the CLI's `--bind` defaults to loopback, and an operator who exposes it
-// wider puts whatever their host uses in front of it. Adding an authentication layer would
-// be a change to the contract this crate is the Rust rendering of, which that document's
-// owner decides and this repository is forbidden from editing to suit the code; it is not a
-// change a run-list read makes on its own authority. The trust boundary this surface *does*
-// have is validated at every handler above: each `{...}` a route interpolates is an
-// identifier newtype, every query is parsed before a run is opened, and no raw `String`
-// reaches storage.
+// enforce here and no place to enforce it from. This is `docs/contract.md`'s whole surface
+// over a directory of runs, with no accounts and no principal but the **one** session the
+// whole server acts as — `--session`, resolved once at startup, which the engine's own
+// ownership rule judges every stop and adoption by — and the CLI's `--bind` defaults to
+// loopback, so an operator who exposes it wider puts whatever their host uses in front of
+// it, exactly as they would in front of a shell holding `onepipeline`. Adding an
+// authentication layer would be a change to the contract this crate is the Rust rendering
+// of, which that document's owner decides and this repository is forbidden from editing to
+// suit the code. The trust boundary this surface *does* have is validated at every handler
+// above: each `{...}` a route interpolates is an identifier newtype, every query and every
+// body is parsed before a run is opened, the one body that is not parsed is handed to the
+// engine that rules on it, and no raw `String` reaches storage.
 fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
     Router::new()
         .route(routes::HEALTHZ, get(healthz))
@@ -75,6 +83,24 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
         .route(routes::RUN_CONVERSATION, get(conversation))
         .route(routes::RUN_ARTIFACT, get(artifact))
         .route(routes::EVENTS, get(events))
+        .route(routes::PROJECTS, get(projects))
+        .route(routes::PROJECT, get(project))
+        .route(routes::RUN_CHANNEL, get(channel))
+        .route(routes::RUN_CHANNEL_NEXT, post(channel_next))
+        .route(routes::RUN_CHANNEL_REPLY, post(channel_reply))
+        .route(routes::RUN_CHANNEL_SURFACE, post(channel_surface))
+        .route(routes::RUN_ATTEST, post(attest))
+        .route(routes::RUN_STOP, post(stop))
+        .route(routes::RUN_ADOPT, post(adopt))
+        .route(routes::RUN_WATCH, get(watch))
+        .route(routes::UNWATCHED, get(unwatched))
+        .route(routes::HOST, get(host))
+        .route(routes::RUN_STATUS, get(status))
+        .route(routes::RUN_RESULTS, get(results))
+        .route(routes::GOALS, get(goals))
+        .route(routes::RUN_GOALS, get(run_goals))
+        .route(routes::RUN_TRANSCRIPT, get(transcript))
+        .route(routes::RUN_TELEMETRY, get(telemetry))
         .fallback(not_found)
         .with_state(Serving {
             store: Arc::new(store),
@@ -463,4 +489,304 @@ fn events_query(
         after,
         filter: filter_spec(raw)?,
     })
+}
+
+async fn projects(State(serving): Store) -> Response {
+    read(move || serving.store.projects()).await
+}
+
+async fn project(State(serving): Store, Path(project): Path<String>) -> Response {
+    // The router has already percent-decoded the segment, so this is the id as
+    // the engine records it, checked before anything is compared against it.
+    let project = match ProjectId::try_from(project.as_str()) {
+        Ok(project) => project,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.project(&project)).await
+}
+
+/// The run a verb route is about, validated.
+fn run_id(run: &str) -> Result<RunId, ApiError> {
+    RunId::try_from(run)
+}
+
+async fn channel(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.channel(&run)).await
+}
+
+async fn channel_next(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let query = match filter_spec(&raw) {
+        Ok(filter) => NextQuery { filter },
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.channel_next(&run, &query)).await
+}
+
+/// The envelope's bytes, verbatim: the engine parses them, so the only thing
+/// checked here is that they are text at all, which is what an envelope is.
+async fn channel_reply(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+    body: String,
+) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let correlation = match raw.get("correlation") {
+        None => None,
+        Some(value) => match Correlation::try_from(value.as_str()) {
+            Ok(correlation) => Some(correlation),
+            Err(error) => return error.into_response(),
+        },
+    };
+    read(move || {
+        serving
+            .store
+            .channel_reply(&run, correlation.as_ref(), &body)
+    })
+    .await
+}
+
+/// A JSON body, or the contract's refusal of what was sent.
+///
+/// Parsed by hand rather than through axum's `Json` extractor so a body the
+/// route does not accept is the error contract — a client parsing every
+/// response the same way must not meet a framework's own rejection.
+fn body<T: serde::de::DeserializeOwned>(what: &str, body: &str) -> Result<T, ApiError> {
+    serde_json::from_str(body)
+        .map_err(|error| ApiError::InvalidRequest(format!("the body is not {what}: {error}")))
+}
+
+async fn channel_surface(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let request: SurfaceRequest = match body("{kind, message}", &raw) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.channel_surface(&run, &request)).await
+}
+
+async fn attest(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let request: AttestRequest = match body("{reference}", &raw) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.attest(&run, &request)).await
+}
+
+async fn stop(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    // An empty body is a stop that forces nothing, which is what the CLI's bare
+    // `stop RUN` is.
+    let request: StopRequest = if raw.trim().is_empty() {
+        StopRequest::default()
+    } else {
+        match body("{force?}", &raw) {
+            Ok(request) => request,
+            Err(error) => return error.into_response(),
+        }
+    };
+    read(move || serving.store.stop(&run, &request)).await
+}
+
+async fn adopt(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.adopt(&run)).await
+}
+
+async fn watch(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let query = match watch_query(&raw) {
+        Ok(query) => query,
+        Err(error) => return error.into_response(),
+    };
+    // The engine rules on the request before it waits, and it rules from
+    // inside a blocking read of the run — so the ruling is taken on a worker,
+    // and a refusal is this response rather than a frame.
+    let opened = {
+        let serving = serving.clone();
+        tokio::task::spawn_blocking(move || serving.store.watch(&run, &query)).await
+    };
+    let mut frames = match opened {
+        Ok(Ok(frames)) => frames,
+        Ok(Err(error)) => return error.into_response(),
+        Err(_) => return ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    };
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(FRAME_BUFFER);
+    // The same two reasons to stop the event stream keeps: the client went
+    // away, or this process was asked to. Dropping the frames ends the engine's
+    // wait, and with it the watcher record it wrote for this connection.
+    let closed = tx.clone();
+    let stopping = Arc::clone(&serving.stopping);
+    let stop = move || closed.is_closed() || stopping.load(Ordering::Relaxed);
+    tokio::task::spawn_blocking(move || {
+        while let Some(frame) = frames.next_frame_unless(&stop) {
+            let event = Event::default()
+                .id(frame.id.to_string())
+                .event(frame.event.as_str())
+                .data(frame.data.to_string());
+            if tx.blocking_send(Ok(event)).is_err() {
+                return;
+            }
+        }
+    });
+    Sse::new(ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::new().interval(HEARTBEAT_INTERVAL))
+        .into_response()
+}
+
+/// `?until=&timeout=&tick=&filter=&cursor=`, each parsed by the engine's own
+/// parser where the engine declares one.
+///
+/// `until` is repeatable, which a query string spells as either a repeated key
+/// or a comma-separated list; axum's map keeps one value per key, so the list
+/// form is the one read here and a repeated key is the last of them.
+fn watch_query(raw: &HashMap<String, String>) -> Result<WatchQuery, ApiError> {
+    let mut query = WatchQuery {
+        filter: filter_spec(raw)?,
+        cursor: raw.get("cursor").cloned(),
+        ..WatchQuery::default()
+    };
+    if let Some(until) = raw.get("until") {
+        query.until = until
+            .split(',')
+            .map(str::trim)
+            .filter(|condition| !condition.is_empty())
+            .map(|condition| {
+                condition
+                    .parse::<onepipeline::cli::WatchUntil>()
+                    .map_err(ApiError::InvalidRequest)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if query.until.is_empty() {
+            return Err(ApiError::InvalidRequest(
+                "until names no condition".to_owned(),
+            ));
+        }
+    }
+    if let Some(timeout) = raw.get("timeout") {
+        query.timeout = timeout
+            .parse::<onepipeline::cli::WatchTimeout>()
+            .map_err(ApiError::InvalidRequest)?;
+    }
+    if let Some(tick) = raw.get("tick") {
+        let seconds = tick.parse::<u64>().map_err(|_| {
+            ApiError::InvalidRequest(format!(
+                "tick must be a whole number of seconds, got {tick:?}"
+            ))
+        })?;
+        query.tick = std::time::Duration::from_secs(seconds);
+    }
+    if let Some(cursor) = &query.cursor {
+        if cursor.is_empty() || cursor.len() > CURSOR_MAX_LEN || !cursor.is_ascii() {
+            return Err(ApiError::InvalidRequest(
+                "cursor is not a token an earlier watch returned".to_owned(),
+            ));
+        }
+    }
+    Ok(query)
+}
+
+/// The longest cursor a watch accepts, before the engine places it.
+///
+/// A bound rather than a limit anyone will meet: the token an earlier watch
+/// returned is short, and an unbounded one is an unbounded refusal message.
+const CURSOR_MAX_LEN: usize = 256;
+
+async fn unwatched(State(serving): Store) -> Response {
+    read(move || serving.store.unwatched()).await
+}
+
+async fn host(State(serving): Store) -> Response {
+    read(move || serving.store.host()).await
+}
+
+async fn status(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.status(&run)).await
+}
+
+async fn results(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.results(&run)).await
+}
+
+async fn goals(State(serving): Store) -> Response {
+    read(move || serving.store.goals()).await
+}
+
+async fn run_goals(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.run_goals(&run)).await
+}
+
+async fn transcript(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let node = match raw.get("node") {
+        None => None,
+        Some(node) => match NodeId::try_from(node.as_str()) {
+            Ok(node) => Some(node),
+            Err(error) => return error.into_response(),
+        },
+    };
+    let query = TranscriptQuery { node };
+    read(move || serving.store.transcript(&run, &query)).await
+}
+
+async fn telemetry(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    read(move || serving.store.telemetry(&run)).await
 }

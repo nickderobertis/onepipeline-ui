@@ -108,6 +108,28 @@ pub struct Matcher {
 }
 
 impl EventFilter {
+    /// The same filter as the engine's own type, for the verbs that take one.
+    ///
+    /// The two are one grammar — `tests/contract.rs` holds this copy to the
+    /// bus's own declaration — so the conversion is the wire: serialized by this
+    /// crate's derives and read back by the engine's, which is what a filter a
+    /// caller wrote on a command line goes through too. A copy the engine
+    /// refused would be a drift the gate has not caught, and is a projection
+    /// failure rather than a served answer.
+    ///
+    /// # Errors
+    ///
+    /// When the engine's parser refuses what this crate's grammar admitted.
+    pub fn to_engine(&self) -> Result<onepipeline::filter::EventFilter, ApiError> {
+        serde_json::to_value(self)
+            .and_then(serde_json::from_value)
+            .map_err(|refused| {
+                ApiError::ProjectionFailed(format!(
+                    "the engine does not read this filter as its own: {refused}"
+                ))
+            })
+    }
+
     /// Whether an envelope reaches the response.
     ///
     /// `exclude` wins: a matcher there rejects whatever `include` admitted, and

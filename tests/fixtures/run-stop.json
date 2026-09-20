@@ -1,0 +1,10 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 18,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "run_id": "run-20260807-a1b2c3",
+  "stopped": true,
+  "owner": "[mine]",
+  "forced": false,
+  "teardown": "elsewhere"
+}

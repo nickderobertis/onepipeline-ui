@@ -73,17 +73,27 @@ and because nothing else recovers *why* the tooling is what it is.
 
 `just --list` is the index; do not hand-roll equivalents. **`just gate` is the
 pre-push bar.** `just bootstrap` also provisions the `onepipeline` CLI at the
-version the lock pins its library to, into `.tools/`: a run **detail** asks it
-for that run's telemetry document, the two speak a versioned document, and a
-mismatched pair serves every opened run with no clock at all. A run *list* no
-longer asks it at all — the bounded summary each run carries holds the same
-document, which is why fifty rows are no longer fifty processes. So on a host
-where that sibling is missing or refuses, a row carries the clock and the detail
-opened from it carries none; the server names that on its own log, and it is the
-only state in which the two disagree. `/healthz` reports that
-release from `onepipeline::VERSION`, so a host pinning the engine that writes a
-run store and this reader of it separately can *prove* the two match rather than
-assume it. The SDK pin and `tests/fixtures/healthz.json` move together.
+version the lock pins its library to, into `.tools/`, and it is **only the
+journeys that need it**: the server itself runs no `onepipeline` binary, for
+anything — every verb it serves, the telemetry fold included, is a call into the
+SDK it links — so the CLI is there for the comparisons in `tests/e2e/server.rs`
+that hold what the server served to what `onepipeline telemetry`, `results`,
+`goals`, `transcript` and `unwatched` print over the same run. The two speak
+one document because they are one library at one version, which is why the
+sibling is pinned to the lock rather than taken from `PATH`. `/healthz` reports
+that release from `onepipeline::VERSION`, so a host pinning the engine that
+writes a run store and this reader of it separately can *prove* the two match
+rather than assume it. The SDK pin and `tests/fixtures/healthz.json` move
+together.
+
+**The server acts as one launching session and writes to runs.** `onepipeline-api
+serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else unattributed) is
+the identity every stop and adoption is judged by, and `POST .../adopt` retains
+**this binary** at its own hidden `drive-run RUN --adopt` verb as the run's
+driver — so an adopted run is driven by the engine this crate links, and a host
+pinning the engine CLI and this reader separately has one pin that governs a
+dispatch. `docs/contract.md` states the process model; `src/AGENTS.md` records
+the two SDK shapes the binary has to answer out of its environment for.
 
 **One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
 edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the

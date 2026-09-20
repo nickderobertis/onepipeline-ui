@@ -1,0 +1,112 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 18,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "projects": [
+    {
+      "project": "authoring:contract-interface",
+      "name": "contract",
+      "last_write_at": 1786104030000,
+      "runs": [
+        {
+          "run_id": "run-20260807-a1b2c3",
+          "state": "settled",
+          "phase": "settled",
+          "last_event": "node-settled",
+          "last_progress_at": 1786104030,
+          "timing_quality": "complete",
+          "linkage_quality": "labelled",
+          "timing": {
+            "agent_seconds": 13,
+            "judge_seconds": null,
+            "llmlint_seconds": null,
+            "gate_seconds": 2,
+            "publication_wait_seconds": 9,
+            "lock_wait_seconds": 1,
+            "setup_seconds": 1,
+            "scheduling_seconds": 3,
+            "wall_seconds": 30,
+            "agent_model_ms": null,
+            "judge_model_ms": null,
+            "llmlint_model_ms": null,
+            "tool_ms": null,
+            "idle_orchestration_ms": null,
+            "unattributed_ms": 0,
+            "wall_ms": 30000,
+            "fractions": {
+              "agent_model": null,
+              "judge_model": null,
+              "llmlint_model": null,
+              "tool": null,
+              "idle_orchestration": null,
+              "lock_wait": 0.03666666666666667,
+              "setup": 0.06333333333333334,
+              "scheduling": 0.1
+            }
+          },
+          "node_counts": {
+            "done": 2
+          },
+          "launch": {
+            "launch_id": "run-20260807-a1b2c3",
+            "launcher": "claude-code",
+            "session_key": "f4a5b11c4e92"
+          },
+          "project": "authoring:contract-interface",
+          "project_name": "contract",
+          "liveness": "PARKED",
+          "unread_surfaces": 0
+        },
+        {
+          "run_id": "run-20260807-d4e5f6",
+          "state": "settled",
+          "phase": "settled",
+          "last_event": "node-settled",
+          "last_progress_at": 1786104030,
+          "timing_quality": "complete",
+          "linkage_quality": "labelled",
+          "timing": {
+            "agent_seconds": 13,
+            "judge_seconds": null,
+            "llmlint_seconds": null,
+            "gate_seconds": 2,
+            "publication_wait_seconds": 9,
+            "lock_wait_seconds": 1,
+            "setup_seconds": 1,
+            "scheduling_seconds": 3,
+            "wall_seconds": 30,
+            "agent_model_ms": null,
+            "judge_model_ms": null,
+            "llmlint_model_ms": null,
+            "tool_ms": null,
+            "idle_orchestration_ms": null,
+            "unattributed_ms": 0,
+            "wall_ms": 30000,
+            "fractions": {
+              "agent_model": null,
+              "judge_model": null,
+              "llmlint_model": null,
+              "tool": null,
+              "idle_orchestration": null,
+              "lock_wait": 0.03666666666666667,
+              "setup": 0.06333333333333334,
+              "scheduling": 0.1
+            }
+          },
+          "node_counts": {
+            "done": 2
+          },
+          "launch": {
+            "launch_id": "run-20260807-d4e5f6",
+            "launcher": "claude-code",
+            "session_key": "f4a5b11c4e92"
+          },
+          "project": "authoring:contract-interface",
+          "project_name": "contract",
+          "liveness": "PARKED",
+          "unread_surfaces": 0
+        }
+      ]
+    }
+  ]
+}

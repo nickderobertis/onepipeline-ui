@@ -1,0 +1,70 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 18,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "run_id": "run-20260807-a1b2c3",
+  "telemetry": {
+    "schema_version": 2,
+    "run_id": "run-20260807-a1b2c3",
+    "wall_ms": 30000,
+    "buckets": [
+      {
+        "name": "agent",
+        "ms": 13000
+      },
+      {
+        "name": "judge"
+      },
+      {
+        "name": "llmlint"
+      },
+      {
+        "name": "gate",
+        "ms": 2000
+      },
+      {
+        "name": "publication_wait",
+        "ms": 9000
+      },
+      {
+        "name": "lock_wait",
+        "ms": 1100
+      },
+      {
+        "name": "setup",
+        "ms": 1900
+      },
+      {
+        "name": "scheduling",
+        "ms": 3000
+      }
+    ],
+    "usage": {
+      "agent": {
+        "input": 776,
+        "output": 254,
+        "cache_read": 44051,
+        "cache_write": 356,
+        "cost_usd": 31.33
+      },
+      "judge": {
+        "input": 130545,
+        "output": 929,
+        "cache_read": 70144,
+        "cost_usd": 9.75
+      },
+      "total": {
+        "input": 160210,
+        "output": 1818,
+        "cache_read": 231481,
+        "cache_write": 1068,
+        "cost_usd": 53.9
+      }
+    },
+    "dispatches": 2,
+    "settled_done": 2,
+    "no_diff": 0,
+    "surfaces_queued": 0,
+    "surfaces_read": 0
+  }
+}

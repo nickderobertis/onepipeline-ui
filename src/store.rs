@@ -19,7 +19,9 @@
 //!   A tick now costs one listing of the root and one metadata lookup per run,
 //!   and opens nothing until a run's journal has actually moved.
 //! - A process started per served row to read that row's clock. The summary
-//!   carries the run's aggregate timing, which is what the process was fetching.
+//!   carries the run's aggregate timing, which is what the process was fetching;
+//!   and a detail's clock is the SDK's fold over the view the route already
+//!   holds, so this server starts no `onepipeline` process for anything.
 //!
 //! Reads take no lock the engine's single writer needs, which is what lets the
 //! server run beside the engine's own reconcile loop. Nothing here writes — but
@@ -44,20 +46,29 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use onepipeline::verbs;
 use onepipeline::views::{Listing, RunPaths, RunSummary, RunView, Skipped};
 use serde_json::{json, Value};
 
 use crate::api::ReadApi;
-use crate::cli::RunsRoot;
+use crate::cli::{RunsRoot, SessionId};
 use crate::contract::{
-    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, Release,
-    RunId, RunQuery, RunSelection, RunsPage, RunsQuery, SseEvent, TimelineQuery, TimelineScope,
-    API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
+    Health, HealthStatus, NextQuery, ProjectId, Release, RunId, RunQuery, RunSelection, RunsPage,
+    RunsQuery, SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope,
+    TranscriptQuery, WatchEvent, WatchFrame, WatchQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
 use crate::payload::{self, DeclaredMembers, Scope, Signature};
 use crate::telemetry::{self, RunTelemetry};
+
+/// How many watch frames the engine may run ahead of a reader.
+///
+/// Small on purpose: the engine's wait parks on a full channel, so a client
+/// that stopped reading stops the frames being rendered for it rather than
+/// queueing an unbounded backlog in this process.
+const FRAME_BUFFER: usize = 8;
 
 /// How often the event stream re-reads the runs root, in milliseconds.
 pub const POLL_INTERVAL_MS: NonZeroU64 = NonZeroU64::new(500).expect("500 is not zero");
@@ -114,10 +125,31 @@ pub fn graph_records_from_env() -> PathBuf {
     )
 }
 
+/// The variable the engine reads its runs root from.
+///
+/// The SDK's own listing reading — `views::liveness_of`, which asks a run's
+/// channel whether a blocking surface is outstanding — finds that channel under
+/// the root this variable names rather than under one a caller hands it, and
+/// the driver an adoption retains resolves the run it drives the same way. So
+/// the binary exports it from `--runs-root` before it serves anything, and this
+/// is the name it exports. Restated because the engine declares it in a private
+/// module; `tests/e2e/server.rs` holds the spelling by starting the server over
+/// one root and reading a channel-held run as waiting rather than parked.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the one source is `ledger::RUNS_DIR_ENV` in a private module of the engine, so there is no declaration a gate could import; the journey named above is the drift gate, because a spelling the engine did not read would leave every channel-held run served as parked.
+pub const RUNS_DIR_ENV: &str = "ONEPIPELINE_RUNS_DIR";
+
 /// A read-only view of one runs root.
 #[derive(Debug, Clone)]
 pub struct RunStore {
     root: PathBuf,
+    /// The launching session this store acts as on every write, or `None` for
+    /// an unattributed server that owns no run.
+    session: Option<SessionId>,
+    /// The program an adoption retains as the run's driver: this executable,
+    /// unless a reader that is not the binary named the binary.
+    driver: Option<PathBuf>,
+    /// The drivers this process has retained and not yet seen exit.
+    reaper: Reaper,
     /// Where the `oneagentgraph` run records this store reads a run's declared
     /// members from live — the sibling's state directory, not the runs root.
     graph_records: PathBuf,
@@ -126,14 +158,13 @@ pub struct RunStore {
     aggregated: Aggregated,
 }
 
-/// The sibling's telemetry document for each run, kept until that run moves.
+/// The SDK's telemetry document for each run, kept until that run moves.
 ///
-/// Asking for it starts a process, and a run list serves fifty rows: doing that
-/// per row per read would make the cheapest surface in this server the most
-/// expensive one. The run's own change token is what the cached answer is held
-/// against, so a document is re-read exactly when the run it describes has
-/// recorded something — which is the same condition the event stream already
-/// invalidates on.
+/// Folding it walks the run's every event and reads every retained report, and
+/// a detail is refreshed far more often than a run moves. The run's own change
+/// token is what the cached answer is held against, so a document is re-folded
+/// exactly when the run it describes has recorded something — which is the same
+/// condition the event stream already invalidates on.
 type Aggregated = Arc<Mutex<HashMap<String, (Signature, Option<Arc<RunTelemetry>>)>>>;
 
 impl RunStore {
@@ -158,11 +189,68 @@ impl RunStore {
         let poll = Duration::from_millis(poll_ms.get());
         Self {
             root: root.as_path().to_path_buf(),
+            session: None,
+            driver: None,
+            reaper: Reaper::default(),
             graph_records: graph_records_from_env(),
             poll,
             conversation_poll: poll * CONVERSATION_POLLS_PER_RUN_POLL,
             aggregated: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// The same store, acting as `session` on every write it makes.
+    ///
+    /// `None` is an unattributed server: it owns no run, so it is refused every
+    /// stop it does not force and every adoption, and `unwatched` has nothing
+    /// to report for it. The acting session is the one the binary resolved from
+    /// `--session` and the environment, so the store never reads the
+    /// environment for it.
+    #[must_use]
+    pub fn acting_as(mut self, session: Option<&SessionId>) -> Self {
+        self.session = session.cloned();
+        self
+    }
+
+    /// The same store, retaining `program` as the driver of every run it adopts
+    /// rather than this process's own executable.
+    ///
+    /// For a reader that is not the `onepipeline-api` binary — a suite holding
+    /// the store in-process — to retain the binary that does carry the hidden
+    /// driver verb. The served process retains itself.
+    #[must_use]
+    pub fn driving_with(mut self, program: &Path) -> Self {
+        self.driver = Some(program.to_path_buf());
+        self
+    }
+
+    /// The program an adoption retains, and its arguments, exactly as the
+    /// engine will spawn them: this executable at its own hidden driver verb,
+    /// `drive-run RUN --adopt`, as the engine's binary retains itself. The
+    /// engine appends nothing.
+    fn retain(&self, run: &RunId) -> Result<verbs::Retain, ApiError> {
+        let program = match &self.driver {
+            Some(program) => program.clone(),
+            None => std::env::current_exe().map_err(|error| {
+                ApiError::Engine(format!(
+                    "cannot find this executable to retain a driver: {error}"
+                ))
+            })?,
+        };
+        Ok(verbs::Retain {
+            program,
+            args: vec![
+                crate::cli::DRIVE_RUN_VERB.to_owned(),
+                run.as_str().to_owned(),
+                "--adopt".to_owned(),
+            ],
+        })
+    }
+
+    /// The session this store acts as, as the engine is handed it: the empty
+    /// string for an unattributed server, which the engine reads as nobody.
+    fn session(&self) -> &str {
+        self.session.as_ref().map_or("", SessionId::as_str)
     }
 
     /// The same store, reading `oneagentgraph`'s run records from `dir` rather
@@ -218,22 +306,25 @@ impl RunStore {
         }))
     }
 
-    /// What `onepipeline` aggregated for this run, read through its own CLI and
+    /// What `onepipeline` folds for this run, over the view already in hand,
     /// kept until the run moves.
     ///
-    /// `None` when the sibling cannot be asked, which leaves every timing the
-    /// payload carries absent rather than zero. The reason is written once per
-    /// run per change, to stderr beside the server's own output: a run served
-    /// with no clock at all is a thing an operator has to be able to explain,
-    /// and the alternative is a payload full of nulls with nothing saying why.
+    /// `None` when the document the fold produced is not one this build reads,
+    /// which leaves every timing the payload carries absent rather than zero.
+    /// The reason is written once per run per change, to stderr beside the
+    /// server's own output: a run served with no clock at all is a thing an
+    /// operator has to be able to explain, and the alternative is a payload full
+    /// of nulls with nothing saying why.
     ///
-    /// A lock poisoned by a panicking reader is not a reason to stop serving:
-    /// the cache is an optimisation, and the worst a recovered one costs is a
-    /// re-read.
+    /// A cache still, though the fold is in-process now: it walks every event
+    /// of the run and reads every settled member's retained report, which is
+    /// affordable per change and not per refresh of an unmoved run. A lock
+    /// poisoned by a panicking reader is not a reason to stop serving: the cache
+    /// is an optimisation, and the worst a recovered one costs is a re-read.
     fn telemetry(&self, view: &RunView) -> Option<Arc<RunTelemetry>> {
-        // Keyed and asked for by the validated id, so a directory this contract
-        // could not name is one no argument list is built from either — the same
-        // filter the stream applies before announcing a run.
+        // Keyed by the validated id, so a directory this contract could not name
+        // is one no cache entry is written under either — the same filter the
+        // stream applies before announcing a run.
         let run = RunId::try_from(view.paths.run.as_str()).ok()?;
         // The run's own change token, unfiltered: the cached document describes
         // the run, so what invalidates it is the run moving at all.
@@ -247,10 +338,10 @@ impl RunStore {
                 return document.clone();
             }
         }
-        let document = match telemetry::of_run(&self.root, &run) {
+        let document = match telemetry::of_run(view) {
             Ok(document) => Some(Arc::new(document)),
-            Err(unavailable) => {
-                eprintln!("onepipeline-api: no telemetry for {run}: {unavailable}");
+            Err(unreadable) => {
+                eprintln!("onepipeline-api: no telemetry for {run}: {unreadable}");
                 None
             }
         };
@@ -541,6 +632,70 @@ impl RunStore {
             RunsQuery::Page(page) => self.page(page),
         }
     }
+
+    /// The paths of a run a verb is about, once the run is known to be there.
+    ///
+    /// Every verb route answers `404 run_not_found` for a run that is not under
+    /// the root, before anything else is read or written about it: the engine
+    /// refuses the same run on every verb, and a refusal in its words about a
+    /// run that does not exist would be the engine's account of a directory
+    /// rather than the contract's answer.
+    fn present(&self, run: &RunId) -> Result<RunPaths, ApiError> {
+        let paths = self.paths_of(run);
+        if !paths.exists() {
+            return Err(ApiError::RunNotFound(run.clone()));
+        }
+        Ok(paths)
+    }
+
+    /// The engine's own refusal of a verb about `run`, on the wire.
+    fn refused(run: &RunId, error: onepipeline::Error) -> ApiError {
+        ApiError::from_engine(run, error)
+    }
+
+    /// One row of the grouped listing, on the terms a page serves one.
+    ///
+    /// `None` for a run whose directory this contract's boundary refuses, which
+    /// the caller reports on `unreadable` rather than serving under a name the
+    /// run route beside it would refuse.
+    fn grouped_row(&self, summary: &RunSummary) -> Option<Value> {
+        let run = RunId::try_from(summary.run_id.as_str()).ok()?;
+        Some(self.row(&run, summary))
+    }
+
+    /// The runs under this root grouped by project, as `verbs::runs` groups them
+    /// for the acting session.
+    fn grouped(&self) -> onepipeline::views::Projects {
+        verbs::runs(&self.root, self.session(), false)
+    }
+
+    /// The roots a grouped listing refused, and the runs it could not name.
+    fn grouped_unreadable(&self, projects: &onepipeline::views::Projects) -> Option<Value> {
+        let mut skipped = projects.skipped.clone();
+        for summary in projects.groups.iter().flat_map(|group| &group.runs) {
+            if let Err(why) = RunId::try_from(summary.run_id.as_str()) {
+                skipped.push(Skipped {
+                    path: self.root.join(&summary.run_id),
+                    reason: format!("this API cannot serve a run under that name: {why}"),
+                });
+            }
+        }
+        Self::unreadable(&skipped)
+    }
+
+    /// The filter one verb request asked for, as the engine's own type.
+    ///
+    /// Resolved against the run, exactly as a read route resolves one — the
+    /// built-in profiles, the run's own, or an inline spec — and then handed to
+    /// the engine in its own grammar.
+    fn engine_filter(
+        &self,
+        run: &RunId,
+        spec: Option<&FilterSpec>,
+    ) -> Result<onepipeline::filter::EventFilter, ApiError> {
+        let view = self.view(run)?;
+        Self::resolve(&view, spec)?.to_engine()
+    }
 }
 
 impl ReadApi for RunStore {
@@ -608,6 +763,426 @@ impl ReadApi for RunStore {
 
     fn events(&self, query: &EventsQuery) -> Result<Self::Events, ApiError> {
         Ok(Frames::open(self.clone(), query))
+    }
+
+    type Watch = Watching;
+
+    fn projects(&self) -> Result<Envelope<Value>, ApiError> {
+        let projects = self.grouped();
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            "projects".into(),
+            payload::projects(&projects, &|summary| self.grouped_row(summary)),
+        );
+        if let Some(refused) = self.grouped_unreadable(&projects) {
+            payload.insert("unreadable".into(), refused);
+        }
+        Ok(Self::envelope(Value::Object(payload)))
+    }
+
+    fn project(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError> {
+        let projects = self.grouped();
+        let group = projects
+            .groups
+            .iter()
+            .find(|group| group.project.as_deref() == Some(project.as_str()))
+            .ok_or_else(|| ApiError::ProjectNotFound(project.clone()))?;
+        Ok(Self::envelope(payload::project_group(group, &|summary| {
+            self.grouped_row(summary)
+        })))
+    }
+
+    fn channel(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let queue = verbs::channel(&paths).map_err(|error| Self::refused(run, error))?;
+        let mut payload = serde_json::to_value(&queue).map_err(|error| {
+            ApiError::ProjectionFailed(format!("the channel does not serialize: {error}"))
+        })?;
+        payload["run_id"] = json!(run);
+        Ok(Self::envelope(payload))
+    }
+
+    fn channel_next(&self, run: &RunId, query: &NextQuery) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let filter = self.engine_filter(run, query.filter.as_ref())?;
+        let next = verbs::next(&paths, &filter).map_err(|error| Self::refused(run, error))?;
+        let mut payload = serde_json::to_value(&next).map_err(|error| {
+            ApiError::ProjectionFailed(format!("the claim does not serialize: {error}"))
+        })?;
+        payload["run_id"] = json!(run);
+        Ok(Self::envelope(payload))
+    }
+
+    fn channel_reply(
+        &self,
+        run: &RunId,
+        correlation: Option<&Correlation>,
+        envelope: &str,
+    ) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        // The body, byte for byte: the engine parses it, validates it and rules
+        // on its author, and this crate reads nothing out of it first.
+        let receipt = verbs::reply(&paths, correlation.map(Correlation::inner), envelope)
+            .map_err(|error| Self::refused(run, error))?;
+        Ok(Self::envelope(payload::receipt(run, &receipt)))
+    }
+
+    fn channel_surface(
+        &self,
+        run: &RunId,
+        request: &SurfaceRequest,
+    ) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let surfaced = verbs::surface(&paths, request.kind.clone(), request.message.clone())
+            .map_err(|error| Self::refused(run, error))?;
+        Ok(Self::envelope(json!({
+            "run_id": run,
+            "surface": surfaced.surface,
+            "state": "queued",
+        })))
+    }
+
+    fn attest(&self, run: &RunId, request: &AttestRequest) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let receipt =
+            verbs::attest(&paths, &request.reference).map_err(|error| Self::refused(run, error))?;
+        Ok(Self::envelope(payload::receipt(run, &receipt)))
+    }
+
+    fn stop(&self, run: &RunId, request: &StopRequest) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let stopped = verbs::stop(
+            &paths,
+            verbs::StopRequest {
+                session: self.session(),
+                force: request.force,
+            },
+        )
+        .map_err(|error| Self::refused(run, error))?;
+        // A teardown that was not clean is journalled and is not a stop: the run
+        // is still running, and the engine's own account of what it could not
+        // reach is the answer, on the status its binary refuses with.
+        if let Some(refusal) = stopped.refusal() {
+            return Err(ApiError::NotStopped(refusal));
+        }
+        Ok(Self::envelope(payload::stopped(run, &stopped)))
+    }
+
+    fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let adopted = verbs::adopt(&paths, verbs::Adopt::Detached(self.retain(run)?))
+            .map_err(|error| Self::refused(run, error))?;
+        let verbs::Adopted::Detached { pid, .. } = adopted else {
+            return Err(ApiError::ProjectionFailed(
+                "a detached adoption answered as an attached one".to_owned(),
+            ));
+        };
+        self.reaper.watch(pid);
+        Ok(Self::envelope(json!({ "run_id": run, "pid": pid })))
+    }
+
+    fn watch(&self, run: &RunId, query: &WatchQuery) -> Result<Self::Watch, ApiError> {
+        let paths = self.present(run)?;
+        let filter = self.engine_filter(run, query.filter.as_ref())?;
+        let request = verbs::WatchRequest {
+            filter,
+            timeout: query.timeout,
+            tick: query.tick,
+            cursor: query.cursor.clone(),
+            until: query.until.clone(),
+        };
+        Watching::open(run, paths, request)
+    }
+
+    fn unwatched(&self) -> Result<Envelope<Value>, ApiError> {
+        let unwatched = verbs::unwatched(&self.root, self.session())
+            .map_err(|error| ApiError::Engine(error.to_string()))?;
+        Ok(Self::envelope(json!({
+            "reported": unwatched
+                .reported
+                .iter()
+                .map(|run| json!({
+                    "run": run.run,
+                    "standing": run.standing,
+                    "why_not_watched": run.why_not_watched,
+                }))
+                .collect::<Vec<Value>>(),
+            "unresolved": unwatched.unresolved,
+        })))
+    }
+
+    fn host(&self) -> Result<Envelope<Value>, ApiError> {
+        let host = verbs::host(&self.root);
+        Ok(Self::envelope(payload::rendered_root(
+            verbs::render_host(&host),
+            &host.survey.skipped,
+        )))
+    }
+
+    fn status(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        self.present(run)?;
+        let status = verbs::status(&self.root, Some(run.as_str()))
+            .map_err(|error| Self::refused(run, error))?;
+        let rendered = verbs::render_status(&status);
+        let verbs::Status::Run(detail) = status else {
+            return Err(ApiError::ProjectionFailed(
+                "a run's status answered as a listing".to_owned(),
+            ));
+        };
+        Ok(Self::envelope(payload::status(run, &detail, rendered)))
+    }
+
+    fn results(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let results = verbs::results(&paths).map_err(|error| Self::refused(run, error))?;
+        Ok(Self::envelope(payload::rendered(
+            run,
+            verbs::render_results(&results),
+        )))
+    }
+
+    fn goals(&self) -> Result<Envelope<Value>, ApiError> {
+        let goals =
+            verbs::goals(&self.root, None).map_err(|error| ApiError::Engine(error.to_string()))?;
+        Ok(Self::envelope(payload::rendered_root(
+            verbs::render_goals(&goals),
+            &goals.survey.skipped,
+        )))
+    }
+
+    fn run_goals(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        self.present(run)?;
+        let goals = verbs::goals(&self.root, Some(run.as_str()))
+            .map_err(|error| Self::refused(run, error))?;
+        Ok(Self::envelope(payload::rendered(
+            run,
+            verbs::render_goals(&goals),
+        )))
+    }
+
+    fn transcript(
+        &self,
+        run: &RunId,
+        query: &TranscriptQuery,
+    ) -> Result<Envelope<Value>, ApiError> {
+        let paths = self.present(run)?;
+        let transcript = verbs::transcript(
+            &paths,
+            query.node.as_ref().map(crate::contract::NodeId::as_str),
+        )
+        .map_err(|error| Self::refused(run, error))?;
+        let mut payload = payload::rendered(run, verbs::render_transcript(&transcript));
+        if let Some(node) = &query.node {
+            payload["node"] = json!(node);
+        }
+        Ok(Self::envelope(payload))
+    }
+
+    fn telemetry(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        self.present(run)?;
+        let measured = verbs::telemetry(&self.root, Some(run.as_str()))
+            .map_err(|error| Self::refused(run, error))?;
+        let document = measured.first().ok_or_else(|| {
+            ApiError::ProjectionFailed("the engine measured nothing for the run".to_owned())
+        })?;
+        Ok(Self::envelope(
+            json!({ "run_id": run, "telemetry": document }),
+        ))
+    }
+}
+
+/// The retained drivers this process is the parent of, reaped when they exit.
+///
+/// `verbs::adopt(Detached)` spawns the driver as this process's child, in a
+/// process group of its own, and hands back its pid and nothing else: the
+/// server keeps no handle on the driver, and every later read is off the run
+/// record. But a child nobody waits on stays a **zombie** when it exits, and a
+/// zombie answers the engine's own liveness probe as a live process — so a
+/// driver that had settled its run and gone would go on reading as driving it,
+/// and the run would refuse every adoption after the first, for as long as
+/// this process lived. The CLI never meets this because it exits right after
+/// retaining, and `init` reaps what it left; a server that lives on has to reap
+/// its own. This waits on exactly the pids it retained, with `WNOHANG`, so no
+/// exit status of any other child — the engine's own subprocesses, which it
+/// waits on itself — is ever taken from the process that started it.
+#[derive(Debug, Clone, Default)]
+struct Reaper {
+    retained: Arc<Mutex<Vec<u32>>>,
+}
+
+/// How often the reaper looks at the drivers it retained.
+const REAP_EVERY: Duration = Duration::from_millis(500);
+
+impl Reaper {
+    /// Reap `pid` when it exits, on a thread started for the first driver and
+    /// kept for every one after it.
+    fn watch(&self, pid: u32) {
+        let mut retained = self
+            .retained
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let first = retained.is_empty();
+        retained.push(pid);
+        drop(retained);
+        if first {
+            let retained = Arc::clone(&self.retained);
+            std::thread::spawn(move || loop {
+                std::thread::sleep(REAP_EVERY);
+                let mut retained = retained
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                retained.retain(|pid| !reaped(*pid));
+                if retained.is_empty() {
+                    return;
+                }
+            });
+        }
+    }
+}
+
+/// Whether `pid` has exited and been waited on, or is no child of this
+/// process to wait on at all — either way, nothing left to reap.
+#[cfg(unix)]
+fn reaped(pid: u32) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return true;
+    };
+    let mut status = 0;
+    // SAFETY: `waitpid` with `WNOHANG` touches no memory but the status it is
+    // handed, and asks only about the one child named.
+    let answered = unsafe { libc::waitpid(raw, &mut status, libc::WNOHANG) };
+    // `0` is a child still running; the pid is one that exited and is reaped
+    // by this call; `-1` is a pid that is not this process's child, which is
+    // nothing to wait on.
+    answered != 0
+}
+
+/// A platform with no zombies to reap: a handle the SDK dropped is a handle
+/// closed, and the kernel keeps nothing for it.
+#[cfg(not(unix))]
+fn reaped(_pid: u32) -> bool {
+    true
+}
+
+/// One `GET /api/v2/runs/{run}/watch` connection's frames: the engine's wait,
+/// driven on a thread of its own and read off a channel.
+///
+/// `verbs::watch` is a blocking call that hands each frame to a sink and returns
+/// when the wait ends, so an iterator over it is a thread running the wait and
+/// a channel the sink writes to. Dropping the iterator drops the receiver, the
+/// next frame's send fails, the sink refuses, and the engine ends the wait with
+/// that refusal — which is when it removes the watcher record it wrote. A
+/// client that disconnected is therefore no longer a watcher by the time the
+/// next frame would have been sent.
+pub struct Watching {
+    frames: std::sync::mpsc::Receiver<WatchFrame>,
+    /// Whether the `returned` frame has been handed out, after which the
+    /// engine's wait is over and there is nothing more to receive.
+    ended: bool,
+}
+
+/// How long a receive may block before the iterator checks whether the
+/// stopping condition its driver watches has fired.
+///
+/// The engine's wait cannot be interrupted from outside, so what a server asked
+/// to stop can do is stop *reading* — which ends the wait at the next frame the
+/// engine hands out, a tick at most. Polling at this interval is what keeps the
+/// blocking worker from sitting on a receive nothing will ever satisfy.
+const WATCH_RECEIVE_POLL: Duration = Duration::from_millis(250);
+
+impl Watching {
+    /// Start the engine's wait over `paths`, refusing what it refuses before
+    /// it would wait.
+    ///
+    /// The engine rules on the request — the cursor, every condition — before
+    /// it hands out a frame or waits a second, but it rules from inside one
+    /// blocking call that then goes on to wait. So the ruling is taken first
+    /// through a wait of no seconds, which reads the run once and returns:
+    /// every refusal it can make it makes there, in its own words, before this
+    /// connection opens. The frames of that read are not served; the real wait
+    /// starts from the same cursor.
+    fn open(run: &RunId, paths: RunPaths, request: verbs::WatchRequest) -> Result<Self, ApiError> {
+        let preflight = verbs::WatchRequest {
+            timeout: onepipeline::cli::WatchTimeout::Bounded(0),
+            ..request.clone()
+        };
+        verbs::watch(&paths, &preflight, &mut |_| Ok(()))
+            .map_err(|error| ApiError::from_engine(run, error))?;
+
+        let (tx, rx) = std::sync::mpsc::sync_channel::<WatchFrame>(FRAME_BUFFER);
+        let run = run.clone();
+        std::thread::spawn(move || {
+            let mut next = 0;
+            let mut sink = |frame: verbs::WatchFrame<'_>| -> onepipeline::Result<()> {
+                let event = match frame {
+                    verbs::WatchFrame::Event { .. } => WatchEvent::Event,
+                    verbs::WatchFrame::Tick { .. } => WatchEvent::Tick,
+                    verbs::WatchFrame::Ended { .. } => WatchEvent::Returned,
+                };
+                let lines = verbs::render_watch_frame(&frame)?;
+                let data = serde_json::from_str(&lines.machine).map_err(|error| {
+                    onepipeline::Error::Invalid(format!(
+                        "the watch rendered a record this API cannot read: {error}"
+                    ))
+                })?;
+                let frame = WatchFrame {
+                    id: next,
+                    event,
+                    data,
+                };
+                next += 1;
+                tx.send(frame)
+                    .map_err(|_| onepipeline::Error::Refused("the reader has gone".to_owned()))
+            };
+            // A wait that ends with its reader gone is the ordinary end of a
+            // connection, and the engine's own ending is on the last frame it
+            // handed out; nothing here has anyone left to tell.
+            if let Err(error) = verbs::watch(&paths, &request, &mut sink) {
+                if !matches!(&error, onepipeline::Error::Refused(why) if why == "the reader has gone")
+                {
+                    eprintln!("onepipeline-api: the watch on {run} ended: {error}");
+                }
+            }
+        });
+        Ok(Self {
+            frames: rx,
+            ended: false,
+        })
+    }
+
+    /// The next frame, or `None` once the wait is over or `stop` says to end.
+    ///
+    /// Not [`Iterator::next`], because the one thing an iterator cannot be told
+    /// is when to stop waiting: the server's driver asks with the same stopping
+    /// condition the event stream is driven with.
+    pub fn next_frame_unless(&mut self, stop: &dyn Fn() -> bool) -> Option<WatchFrame> {
+        if self.ended {
+            return None;
+        }
+        loop {
+            match self.frames.recv_timeout(WATCH_RECEIVE_POLL) {
+                Ok(frame) => {
+                    if frame.event == WatchEvent::Returned {
+                        self.ended = true;
+                    }
+                    return Some(frame);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if stop() {
+                        return None;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return None,
+            }
+        }
+    }
+}
+
+impl Iterator for Watching {
+    type Item = WatchFrame;
+
+    fn next(&mut self) -> Option<WatchFrame> {
+        self.next_frame_unless(&|| false)
     }
 }
 
@@ -856,6 +1431,14 @@ impl Frames {
         ))
     }
 
+    /// The project a run's bounded summary records, or `None` where it
+    /// records none — or where the summary cannot be read, which is a run the
+    /// detail refetch will report on its own terms.
+    fn project_of(&self, run: &RunId) -> Option<String> {
+        let summary = RunSummary::of(&self.store.paths_of(run)).ok()?;
+        (!summary.project.is_empty()).then_some(summary.project)
+    }
+
     /// What the watched run's nodes were last reported doing from inside a turn.
     ///
     /// Read only when that run's own change token moved, because an activity
@@ -947,9 +1530,16 @@ impl Iterator for Frames {
                     // The run that moved, and nothing else: the client refetches
                     // its detail. There is no round to name here, and naming the
                     // event count instead would be this stream restating state it
-                    // deliberately does not carry.
-                    self.pending
-                        .push_back((SseEvent::RunChanged, json!({ "run_id": run })));
+                    // deliberately does not carry. The project group it belongs
+                    // to is named beside it — read off the run's own bounded
+                    // summary, which is one document of a run that has actually
+                    // moved — so a client refreshing by group refreshes the group
+                    // that moved; a run whose summary records none names none.
+                    let mut changed = json!({ "run_id": run });
+                    if let Some(project) = self.project_of(&run) {
+                        changed["project"] = json!(project);
+                    }
+                    self.pending.push_back((SseEvent::RunChanged, changed));
                     // The same movement, read for what it was: a run that moved
                     // because a turn reported from inside itself has something in
                     // flight to say, and a client watching it is told rather than

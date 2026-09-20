@@ -1,0 +1,68 @@
+[
+  {
+    "id": 0,
+    "event": "event",
+    "data": {
+      "watch": "event",
+      "event": {
+        "v": 1,
+        "ts": "2026-08-07T12:00:20.000Z",
+        "stream": "a-recording-host-4242",
+        "seq": 31,
+        "source": "pipeline",
+        "kind": "node-settled",
+        "labels": {
+          "run_id": "run-20260807-a1b2c3",
+          "node": "contract-interface"
+        },
+        "payload": {
+          "status": "done",
+          "outcome": "shipped",
+          "branch": "feature/contract-interface",
+          "change_url": "https://example.invalid/changes/1"
+        },
+        "artifacts": []
+      }
+    }
+  },
+  {
+    "id": 1,
+    "event": "event",
+    "data": {
+      "watch": "event",
+      "event": {
+        "v": 1,
+        "ts": "2026-08-07T12:00:30.000Z",
+        "stream": "a-recording-host-4242",
+        "seq": 36,
+        "source": "pipeline",
+        "kind": "node-settled",
+        "labels": {
+          "run_id": "run-20260807-a1b2c3",
+          "node": "review"
+        },
+        "payload": {
+          "status": "done",
+          "outcome": "approved"
+        },
+        "artifacts": []
+      }
+    }
+  },
+  {
+    "id": 2,
+    "event": "returned",
+    "data": {
+      "watch": "return",
+      "run_id": "run-20260807-a1b2c3",
+      "condition": "settled",
+      "exit": 0,
+      "cursor": "1:run-20260807-a1b2c3:13752",
+      "unread": {
+        "count": 0,
+        "oldest_seconds": null,
+        "kinds": []
+      }
+    }
+  }
+]

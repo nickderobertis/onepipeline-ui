@@ -8,95 +8,47 @@
 //! - [`of_aggregate`] takes the document a run's own **bounded summary** carries,
 //!   read in this process. That is what a run-list row uses: a page of fifty rows
 //!   used to be fifty subprocesses, each one folding the run it was asked about.
-//! - [`of_run`] asks `onepipeline telemetry <run>`. That is what the run
-//!   **detail** uses, and it stays a process for a reason rather than by
-//!   inheritance: the fold itself is still behind the SDK's contract surface, and
-//!   reaching the summary beside a view this route has already opened would
-//!   refold the run whenever that document is stale. `src/AGENTS.md` carries the
-//!   upstream change that would close it, and the one state in which the two
-//!   readings can differ.
+//! - [`of_run`] takes the SDK's published fold,
+//!   [`telemetry::of_run`](onepipeline::telemetry::of_run), over a view the
+//!   caller already holds. That is what the run **detail** uses: the route has
+//!   already folded the run, so its clock is read off the fold in hand rather
+//!   than fetched from a process started for it. No `onepipeline` binary is run
+//!   by this server, for anything — the rule `AGENTS.md` states, and the
+//!   coupling `src/AGENTS.md` carried as a proposal until the SDK published the
+//!   fold.
 //!
 //! Both cross one boundary — `validated` — so what a telemetry document has to
-//! be before this crate serves anything out of it is stated once.
+//! be before this crate serves anything out of it is stated once. Not because
+//! the producer is less trusted in-process — it is the same fold — but because
+//! there is then **one** statement of what a document has to be, rather than a
+//! second path in that nobody has to keep true. The two vocabularies are joined
+//! by exhaustive matches, so a bucket or a party the sibling adds fails to
+//! compile here rather than being quietly dropped out of a served row.
 //!
-//! What is duplicated here is the *document*, not the fold: the stack has no
-//! shared crate, so each side owns its copy of a wire shape and a contract test
-//! holds them together: `tests/e2e/server.rs` runs the real binary over a real
-//! recorded run and reads what it prints through these very types, beside the
-//! payload this server made of the same document.
-//!
-//! Two boundaries, kept apart because they fail differently and are answerable
-//! separately. [`of_run`] is the *process*: a build that will not start, or one
-//! that ran and refused. [`read_document`] is the *document*: whether what came
-//! back is one at all — the version, the run it is about, and then every
-//! property `onepipeline` states about what it writes. Nothing under a failed
-//! check is served, because
-//! a timing read out of a document that does not add up is a claim with nothing
-//! behind it, and this server's whole answer for an unknown clock is to say so.
-//!
-//! What arrives and what leaves are deliberately different shapes. A decode
-//! target has to be able to hold whatever the bytes say — a version this build
-//! does not read, a bucket set that is not the eight, a cost that is not an
-//! amount of money — so the wire types below hold all of it and are private.
-//! [`RunTelemetry`] is what survived, and it cannot represent any of those: the
-//! version is gone, because after the check there is only one; the buckets are
-//! the eight slots rather than a list; and a cost is a [`Cost`]. So a reader
-//! downstream is never the last thing between the producer's bytes and a
-//! payload.
-
-use std::collections::BTreeMap;
-use std::path::Path;
-use std::process::Command;
+//! What arrives and what leaves are deliberately different shapes. The SDK's
+//! document can hold whatever a summary on disk said — a version this build does
+//! not read, a bucket set that is not the eight, a cost that is not an amount of
+//! money. [`RunTelemetry`] is what survived, and it cannot represent any of
+//! those: the version is gone, because after the check there is only one; the
+//! buckets are the eight slots rather than a list; and a cost is a [`Cost`]. So a
+//! reader downstream is never the last thing between the producer's document and
+//! a payload.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::contract::RunId;
 
-/// The environment variable naming the `onepipeline` executable.
+/// One run's telemetry document, as wide as the SDK's own is.
 ///
-/// Resolved rather than hardcoded, for the same reason the SDK resolves its own
-/// siblings: an operator can point at a specific build, and the suite can point
-/// at the one it provisioned.
-pub const BINARY_ENV: &str = "ONEPIPELINE_UI_ONEPIPELINE_BIN";
-
-/// The executable's name when the environment names none.
-pub const DEFAULT_BINARY: &str = "onepipeline";
-
-/// The environment variable `onepipeline` reads its runs root from.
-///
-/// Its CLI takes the run id and finds the root here rather than on a flag, so
-/// this is how a reader points it at the root this server is serving.
-pub const RUNS_DIR_ENV: &str = "ONEPIPELINE_RUNS_DIR";
-
-/// The document version this build reads.
-///
-/// The number is the whole compatibility statement, and the producer refuses a
-/// document of another version rather than reading it: version 1 named four
-/// spans and carried no usage at all, so reading one as a 2 would report a run
-/// as having spent nothing. Refused here on the same terms.
-pub const DOCUMENT_VERSION: u32 = 2;
-
-/// The executable this process asks for a telemetry document.
-fn binary() -> String {
-    std::env::var(BINARY_ENV)
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_BINARY.to_owned())
-}
-
-/// One run's telemetry document, exactly as it arrives.
-///
-/// Private, and the only thing `serde` builds: every field here is as wide as
-/// the bytes are, so that what the producer's contract rules out is ruled out
-/// once — in [`validated`] — rather than left for each reader to remember.
-///
-/// Only what the wire carries is read back. Extra fields are the producer's own
-/// and are ignored rather than refused: a newer build of the same document
-/// version may report more about a run than this server serves. The version
-/// itself is not among them: it is read and checked before this shape is
-/// decoded at all, so nothing under it is decoded out of a document that turned
-/// out to be another one.
-#[derive(Debug, Deserialize)]
+/// Private, and built only from [`onepipeline::views::RunTelemetry`]: every
+/// field here is as wide as that document's, so that what the producer's
+/// contract rules out is ruled out once — in [`validated`] — rather than left
+/// for each reader to remember. The version is not among the fields, because
+/// the SDK's own type refuses to read a document of another version — schema 1
+/// named four spans and carried no usage at all — so a value of that type is
+/// already a document of the one version this build reads.
+#[derive(Debug)]
 struct Document {
     /// Which run the producer aggregated. Required, because the producer writes
     /// it on every document and it is the only thing in the answer that says
@@ -108,44 +60,38 @@ struct Document {
     /// the eight.
     buckets: Vec<WireBucket>,
     /// What the producer wrote for each party.
-    #[serde(default)]
     usage: BTreeMap<Party, WireUsage>,
 }
 
 /// One span of the run's wall clock, as the document names it.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 struct WireBucket {
     /// What the run was doing.
     name: BucketName,
     /// For how long, in milliseconds — absent when nothing in the stack
     /// measures this bucket, which is not the same fact as a measured zero.
-    #[serde(default)]
     ms: Option<u64>,
 }
 
 /// What one party consumed, as the document writes it.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 struct WireUsage {
-    #[serde(default)]
     input: Option<u64>,
-    #[serde(default)]
     output: Option<u64>,
-    #[serde(default)]
     cache_read: Option<u64>,
-    #[serde(default)]
     cache_write: Option<u64>,
     /// A bare number here, because a document may carry one that is not a cost;
     /// it becomes a [`Cost`] or the document is refused.
-    #[serde(default)]
     cost_usd: Option<f64>,
 }
 
 /// One run's telemetry, as `onepipeline` aggregates it and after its own
 /// contract has been held to.
 ///
-/// Constructed only by [`read_document`]. There is no version on it because a
-/// value of this type is already a [`DOCUMENT_VERSION`] document, and no list of
-/// buckets because it is already exactly the eight.
+/// Constructed only by the boundary that holds a document to the producer's
+/// contract. There is no version on it because the SDK's own document already
+/// is one of the version this build reads, and no list of buckets because it
+/// is already exactly the eight.
 #[derive(Debug, Clone)]
 pub struct RunTelemetry {
     /// The whole elapsed time, in milliseconds.
@@ -367,41 +313,33 @@ impl RunTelemetry {
 /// a document failing one is not a document with a surprising number in it — it
 /// is a producer this reader cannot honestly project, and every timing served
 /// from it would be a claim nothing supports.
-fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unavailable> {
+fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unreadable> {
     // The run the answer is about, before anything measured in it. Nothing in a
     // document says which run's clock it is except this, and a document about
     // another run is not a surprising number — it is a whole other run's timing,
     // which this server would serve under this run's name with nothing in the
     // payload to tell them apart.
     if document.run_id != run.as_str() {
-        return Err(Unavailable::Unreadable(format!(
+        return Err(Unreadable(format!(
             "the document is run `{}`'s, and this asked about `{run}`",
             document.run_id
         )));
     }
 
-    // Exactly the eight, once each. The invariant under everything else is that
-    // every millisecond of the clock has one of a known set of homes, which says
-    // nothing at all over a set missing one, carrying one twice, or naming one
-    // this build cannot add up. Order is the producer's own and is not required
-    // here: the slot a span lands in is its bucket's place in `ALL`.
+    // Exactly the eight, once each, slotted by each bucket's place in `ALL`.
+    // The invariant under everything else is that every millisecond of the
+    // clock has one of a known set of homes, and the SDK's own type holds it:
+    // it refuses to read a document whose bucket list is not exactly the eight
+    // in its own order, so a value of that type carries each name once and the
+    // slotting below cannot meet a name twice or miss one. Order is looked up
+    // rather than assumed all the same, so a producer that reordered its list
+    // would land each span in its own slot.
     let mut buckets = [None; BucketName::COUNT];
-    for (slot, name) in BucketName::ALL.into_iter().enumerate() {
-        let mut named = document.buckets.iter().filter(|bucket| bucket.name == name);
-        let one = named.next();
-        let found = usize::from(one.is_some()) + named.count();
-        if found != 1 {
-            return Err(Unavailable::Unreadable(format!(
-                "the `{}` bucket appears {found} times, and a telemetry document carries \
-                 exactly one of each of the eight",
-                name.as_str()
-            )));
+    for bucket in &document.buckets {
+        if let Some(slot) = BucketName::ALL.iter().position(|name| *name == bucket.name) {
+            buckets[slot] = bucket.ms;
         }
-        buckets[slot] = one.and_then(|bucket| bucket.ms);
     }
-    // No length check beside it: a name outside the eight is refused while the
-    // document is still being decoded, so eight names each appearing once is
-    // eight buckets and nothing else.
 
     // Measured time that was never on the clock. The producer's aim is that its
     // measured buckets sum *exactly* to the whole, and it sweeps any residue into
@@ -414,7 +352,7 @@ fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unavailabl
         .filter_map(|ms| *ms)
         .fold(0, u64::saturating_add);
     if measured > document.wall_ms {
-        return Err(Unavailable::Unreadable(format!(
+        return Err(Unreadable(format!(
             "the buckets measure {measured}ms of a {}ms wall clock",
             document.wall_ms
         )));
@@ -427,7 +365,7 @@ fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unavailabl
             .map(Cost::try_from)
             .transpose()
             .map_err(|rejected| {
-                Unavailable::Unreadable(format!("the `{}` party cost {rejected}", party.as_str()))
+                Unreadable(format!("the `{}` party cost {rejected}", party.as_str()))
             })?;
         let spent = Usage {
             input: spent.input,
@@ -440,7 +378,7 @@ fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unavailabl
         // present and empty — the producer says so, and a reader that accepted
         // an empty one would serve "spent nothing" for a party nobody measured.
         if spent.is_empty() {
-            return Err(Unavailable::Unreadable(format!(
+            return Err(Unreadable(format!(
                 "the `{}` party is present and reports nothing, where a party nothing was \
                  reported for is absent",
                 party.as_str()
@@ -456,154 +394,63 @@ fn validated(run: &RunId, document: Document) -> Result<RunTelemetry, Unavailabl
     })
 }
 
-/// Read one telemetry document about `run`, or say why it is not one.
-///
-/// The parser boundary, separate from the process that produced the bytes: what
-/// a document has to be is the same question whichever build wrote it, and it is
-/// answerable — and tested — without starting anything.
-///
-/// `run` is what was asked about, and a document is only an answer to that: the
-/// producer names the run it aggregated, so an answer naming another one is
-/// refused rather than served under the name the caller used.
-///
-/// # Errors
-///
-/// [`Unavailable::Unreadable`] for anything that is not a document of
-/// [`DOCUMENT_VERSION`] about `run`, holding to the producer's own contract.
-pub fn read_document(run: &RunId, answer: &[u8]) -> Result<RunTelemetry, Unavailable> {
-    // The version before anything under it. A document of another version is not
-    // a document with a bad field in it: schema 1 named four spans this build has
-    // no names for, and reporting that as an unknown bucket would send a reader
-    // looking for a typo instead of at the version they are running.
-    let answered: serde_json::Value =
-        serde_json::from_slice(answer).map_err(|err| Unavailable::Unreadable(err.to_string()))?;
-    let version = answered
-        .get("schema_version")
-        .and_then(serde_json::Value::as_u64);
-    if version != Some(u64::from(DOCUMENT_VERSION)) {
-        return Err(Unavailable::Unreadable(format!(
-            "telemetry schema_version {}, and this build reads {DOCUMENT_VERSION}",
-            version.map_or_else(|| "absent".to_owned(), |found| found.to_string())
-        )));
-    }
-    let document: Document =
-        serde_json::from_value(answered).map_err(|err| Unavailable::Unreadable(err.to_string()))?;
-    validated(run, document)
-}
-
-/// Why a run's telemetry could not be read.
+/// Why a run's telemetry document could not be served.
 ///
 /// Carried rather than swallowed: every timing this server serves is absent
 /// without it, and an operator looking at a run with no clock at all needs to
-/// know whether the sibling is missing, refusing, or answering something this
-/// build cannot read.
+/// know what the document said that this build could not read. One variant
+/// rather than three: with the subprocess gone there is no binary to fail to
+/// start and no process to refuse, and what is left is the document itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Unavailable {
-    /// The executable could not be started.
-    NoBinary(String),
-    /// It ran and refused, with the tail of what it said.
-    Refused(String),
-    /// It answered something this build cannot read.
-    Unreadable(String),
-}
+pub struct Unreadable(pub String);
 
-impl std::fmt::Display for Unavailable {
+impl std::fmt::Display for Unreadable {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoBinary(reason) => write!(
-                out,
-                "cannot start `{} telemetry`: {reason} — install the matching \
-                 `onepipeline`, or name one with {BINARY_ENV}",
-                binary()
-            ),
-            Self::Refused(reason) => write!(out, "`{} telemetry` refused: {reason}", binary()),
-            Self::Unreadable(reason) => write!(
-                out,
-                "`{} telemetry` answered a document this build cannot read: {reason}",
-                binary()
-            ),
-        }
+        write!(
+            out,
+            "the telemetry document is not one this build can read: {}",
+            self.0
+        )
     }
 }
 
-/// The telemetry `onepipeline` aggregates for one run under `root`.
+impl std::error::Error for Unreadable {}
+
+/// The telemetry `onepipeline` folds for one run, over the view a caller
+/// already holds.
 ///
-/// A [`RunId`] rather than a name: this reaches another process's argument list,
-/// and the sibling refuses a run id that navigates for exactly the reason this
-/// crate does. Taking the validated type means there is no path into the seam
-/// that has not already crossed that boundary.
+/// The SDK's published fold — [`onepipeline::telemetry::of_run`] over the
+/// run's paths and its merged events — and nothing else: no process, no second
+/// reading of the journal. The run whose clock this is comes off the view, so
+/// the only way to ask about one run and be answered about another is a view
+/// that lies about its own paths, which `validated` still refuses.
 ///
 /// # Errors
 ///
-/// When the sibling cannot be started, refuses the run, or answers a document of
-/// another version. Every one of those leaves the run's timing unknown, which is
-/// served as absent rather than as zero.
-pub fn of_run(root: &Path, run: &RunId) -> Result<RunTelemetry, Unavailable> {
-    of_run_from(&binary(), root, run)
+/// When the document the fold produces does not hold to the producer's own
+/// contract, which leaves the run's timing unknown and served as absent rather
+/// than as zero.
+pub fn of_run(view: &onepipeline::views::RunView) -> Result<RunTelemetry, Unreadable> {
+    let run = RunId::try_from(view.paths.run.as_str()).map_err(|refused| {
+        Unreadable(format!("the view names a run this API cannot: {refused}"))
+    })?;
+    of_aggregate(
+        &run,
+        &onepipeline::telemetry::of_run(&view.paths, &view.events),
+    )
 }
 
-/// The same, from a named build of the sibling.
-///
-/// The one caller that names it is a journey: every reading this can give but a
-/// good one needs a producer that gives it — one that is not installed, one that
-/// refuses, one that answers a document of another version — and choosing which
-/// producer answers is the only way to drive those without changing the
-/// environment out from under every other test in the process.
-///
-/// # Errors
-///
-/// As [`of_run`].
-pub fn of_run_from(binary: &str, root: &Path, run: &RunId) -> Result<RunTelemetry, Unavailable> {
-    let output = Command::new(binary)
-        .arg("telemetry")
-        .arg(run.as_str())
-        .env(RUNS_DIR_ENV, root)
-        .output()
-        .map_err(|err| Unavailable::NoBinary(err.to_string()))?;
-    if !output.status.success() {
-        return Err(Unavailable::Refused(tail(&output.stderr)));
-    }
-    // llmlint: ignore[changed_behavior_has_e2e] the observable behaviour behind
-    // this line — a run served with no clock at all, every timing absent rather
-    // than zero, on the row and in the detail alike — is driven end to end by
-    // `a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all`, and
-    // the two process outcomes are driven against the real `onepipeline` by
-    // `a_sibling_that_cannot_answer_names_which_way_it_could_not`. What is not
-    // driven through a subprocess is a *started* producer answering a bad
-    // document — one that contradicts itself, or one about another run entirely —
-    // and deliberately: that would need a fake `onepipeline` written to emit one,
-    // since the real one echoes the id it was asked, and what makes a document
-    // wrong is a property of its bytes rather than of who wrote them. So it is
-    // driven through `read_document` over real bytes instead, exhaustively, in
-    // `tests/contract.rs`.
-    read_document(run, &output.stdout)
-}
-
-/// The last line of what a refused command said, bounded: the sibling names the
-/// problem on its last line, and the rest is its own context.
-fn tail(stderr: &[u8]) -> String {
-    String::from_utf8_lossy(stderr)
-        .lines()
-        .next_back()
-        .unwrap_or("it said nothing")
-        .trim()
-        .to_owned()
-}
-
-/// The same document, taken from the sibling's **own in-process aggregation**
-/// rather than from its CLI.
+/// The SDK's own document, held to the producer's contract and projected.
 ///
 /// A run's bounded summary carries `views::RunTelemetry` — the whole of what
 /// `onepipeline telemetry <run>` prints, referenced by that document rather than
 /// restated in it — so a run list reads each served row's clock without starting
-/// a process for it. That is the point: a list of fifty rows used to be fifty
-/// subprocesses, each of which folded the run it was asked about.
+/// a process for it; and the fold [`of_run`] takes produces the same document
+/// over a view. Both cross this one boundary.
 ///
-/// It crosses the same `validated` boundary the printed document does. Not
-/// because the producer is less trusted in-process — it is the same fold — but
-/// because there is then **one** statement of what a telemetry document has to
-/// be before this crate serves anything out of it, rather than a second path in
-/// that nobody has to keep true.
+/// `run` is what was asked about, and a document is only an answer to that: the
+/// producer names the run it aggregated, so an answer naming another one is
+/// refused rather than served under the name the caller used.
 ///
 /// The two vocabularies are joined by exhaustive matches below, so a bucket or a
 /// party the sibling adds fails to compile here rather than being quietly
@@ -611,12 +458,12 @@ fn tail(stderr: &[u8]) -> String {
 ///
 /// # Errors
 ///
-/// As [`read_document`]: anything that is not a telemetry document about `run`,
-/// held to the producer's own contract.
+/// Anything that is not a telemetry document about `run`, held to the
+/// producer's own contract.
 pub fn of_aggregate(
     run: &RunId,
     aggregate: &onepipeline::views::RunTelemetry,
-) -> Result<RunTelemetry, Unavailable> {
+) -> Result<RunTelemetry, Unreadable> {
     validated(
         run,
         Document {
