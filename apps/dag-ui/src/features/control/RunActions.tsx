@@ -51,23 +51,14 @@ export function RunActions({
   const { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal } =
     useStop(control);
   const owner = refusal === undefined ? undefined : ownerNamed(refusal.message);
-  const adopt = useVerb("Adopt", control.adopt);
+  const { adopt, offered: nothingDriving, adoptedPid } = useAdopt(control);
   const stopOutcome = stop.outcome;
   const adoptOutcome = adopt.outcome;
   const stopping = stop.pending;
 
   const liveness = control.status.value?.liveness;
-  const nothingDriving =
-    liveness !== undefined && RUN_LIVENESS_NOTHING_DRIVING.includes(liveness);
   const unwatched = control.unwatched.value;
   const thisUnwatched = unwatched?.reported.some((run) => run.run === runId);
-  const adoptedPid =
-    adoptOutcome?.kind === "answered" &&
-    typeof adoptOutcome.payload === "object" &&
-    adoptOutcome.payload !== null &&
-    "pid" in adoptOutcome.payload
-      ? String(adoptOutcome.payload.pid)
-      : undefined;
 
   return (
     <>
@@ -264,4 +255,26 @@ function useStop(control: RunControl) {
       ? stop.outcome.error
       : undefined;
   return { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal };
+}
+
+/**
+ * The adoption as a control offers it: the verb, whether it is offered at all
+ * — only where the run's own status says nothing is driving it, the two words
+ * the engine's `adopt` will take over — and the driver pid the last one
+ * answered.
+ */
+function useAdopt(control: RunControl) {
+  const adopt = useVerb("Adopt", control.adopt);
+  const liveness = control.status.value?.liveness;
+  const offered =
+    liveness !== undefined && RUN_LIVENESS_NOTHING_DRIVING.includes(liveness);
+  const answered = adopt.outcome;
+  const adoptedPid =
+    answered?.kind === "answered" &&
+    typeof answered.payload === "object" &&
+    answered.payload !== null &&
+    "pid" in answered.payload
+      ? String(answered.payload.pid)
+      : undefined;
+  return { adopt, offered, adoptedPid };
 }

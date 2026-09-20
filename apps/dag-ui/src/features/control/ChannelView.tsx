@@ -23,7 +23,7 @@ import { useRead } from "../../lib/useRead";
 import { Outcome } from "./Outcome";
 import { ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
-import { useVerb } from "./useVerb";
+import { useVerb, type Verb } from "./useVerb";
 
 /**
  * The run's channel: the queue as the engine keeps it, the one consumer of it,
@@ -367,14 +367,7 @@ function Attestations({
   readonly decisions: readonly Decision[];
   readonly onWrote: () => void;
 }) {
-  const attest = useVerb(
-    (reference: string) => `Attest ${reference}`,
-    useCallback(
-      (reference: string) => client.attest(runId, reference),
-      [client, runId],
-    ),
-    onWrote,
-  );
+  const attest = useAttest(client, runId, onWrote);
   return (
     <section aria-labelledby="attest-heading" className="channel-section">
       <h3 id="attest-heading">
@@ -425,18 +418,10 @@ function SurfaceForm({
   readonly onRaised: () => void;
 }) {
   const id = useId();
-  const [kind, setKind] = useState("");
-  const [message, setMessage] = useState("");
-  const raise = useVerb(
-    "Surface",
-    useCallback(
-      () => client.surface(runId, { kind, message }),
-      [client, runId, kind, message],
-    ),
-    useCallback(() => {
-      setMessage("");
-      onRaised();
-    }, [onRaised]),
+  const { kind, setKind, message, setMessage, raise } = useSurfaceForm(
+    client,
+    runId,
+    onRaised,
   );
   return (
     <section aria-labelledby={`${id}-heading`} className="channel-section">
@@ -477,4 +462,50 @@ function SurfaceForm({
       <Outcome label="Surface" outcome={raise.outcome} />
     </section>
   );
+}
+
+/**
+ * The planner's own `attest` of a ready human action, by its reference: the
+ * receipt it answers is the one a reply carries, and the queue is read again on
+ * it because the attestation is a write to the channel.
+ */
+function useAttest(
+  client: TelemetryClient,
+  runId: string,
+  onWrote: () => void,
+): Verb<[reference: string]> {
+  return useVerb(
+    (reference: string) => `Attest ${reference}`,
+    useCallback(
+      (reference: string) => client.attest(runId, reference),
+      [client, runId],
+    ),
+    onWrote,
+  );
+}
+
+/**
+ * The surface form's state and the verb that raises one: the kind stays for
+ * the next surface — a manager raising two findings raises two of one kind —
+ * and the message clears once the engine has queued it.
+ */
+function useSurfaceForm(
+  client: TelemetryClient,
+  runId: string,
+  onRaised: () => void,
+) {
+  const [kind, setKind] = useState("");
+  const [message, setMessage] = useState("");
+  const raise = useVerb(
+    "Surface",
+    useCallback(
+      () => client.surface(runId, { kind, message }),
+      [client, runId, kind, message],
+    ),
+    useCallback(() => {
+      setMessage("");
+      onRaised();
+    }, [onRaised]),
+  );
+  return { kind, setKind, message, setMessage, raise };
 }
