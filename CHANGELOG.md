@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.10.0...v0.10.1) - 2026-09-20
+
+### Added
+
+- *(dag-ui)* project pages and a supervising surface for every post-launch verb ([#71](https://github.com/nickderobertis/onepipeline-ui/pull/71))
+
 ## [0.10.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.9.0...v0.10.0) - 2026-09-20
 
 ### Added
