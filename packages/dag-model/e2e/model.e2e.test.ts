@@ -976,4 +976,21 @@ test("a reply envelope composed against the engine's grammar carries what the en
       commands: [{ op: "drop", id: "obsolete" }],
     }).success,
   ).toBe(false);
+  // Commands under no version, or another, are what the engine refuses as "an
+  // edit envelope requires version 3"; an envelope carrying neither half is one
+  // the engine answers, naming no verdict, so it parses.
+  const unversioned = replyEnvelopeSchema.safeParse({
+    commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
+  });
+  expect(unversioned.success).toBe(false);
+  expect(unversioned.error?.issues[0]?.message).toBe(
+    "an edit envelope requires version 3",
+  );
+  expect(
+    replyEnvelopeSchema.safeParse({
+      version: 2,
+      commands: [{ op: "complete", reason: "done" }],
+    }).success,
+  ).toBe(false);
+  expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
 });

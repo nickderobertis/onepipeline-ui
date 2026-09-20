@@ -1730,7 +1730,26 @@ export const replyEnvelopeSchema = z
     reason: z.string().optional(),
     commands: z.array(replyCommandSchema).optional(),
   })
-  .strict();
+  .strict()
+  // An edit envelope is read at exactly the version the engine writes: a
+  // `commands` array under any other `version`, or none, is refused by the
+  // engine with "an edit envelope requires version 3", so it is refused here
+  // first. An envelope carrying neither half is deliberately *not* refused —
+  // the engine answers one, naming no verdict — and a verdict alone names no
+  // version, so nothing else is required.
+  .superRefine((envelope, context) => {
+    if (
+      envelope.commands !== undefined &&
+      envelope.commands.length > 0 &&
+      envelope.version !== REPLY_ENVELOPE_VERSION
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["version"],
+        message: `an edit envelope requires version ${REPLY_ENVELOPE_VERSION}`,
+      });
+    }
+  });
 
 /**
  * One reply the planner wrote, as the channel keeps it: the envelope, when, and
