@@ -3,12 +3,16 @@ import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { vi } from "vitest";
 import {
   channelQueue,
+  harnessTranscript,
   HISTORY_RUN,
   LIVE_RUN,
   LONG_SESSION,
   longConversation,
+  nodeAgents,
+  projectAgents,
   projectList,
   receipt,
+  runAgents,
   runDetail,
   runList,
   runScopeTimeline,
@@ -160,13 +164,18 @@ function verbResponder(url: URL): Response | undefined {
   if (isProjectList(url)) return Response.json(projectList);
   const project = projectOf(url);
   if (project !== undefined) {
-    const group = projectList.projects.find((g) => g.project === project);
-    return group
-      ? Response.json({ ...projectList, ...group })
-      : Response.json(
-          { error: { code: "project_not_found", message: "no such project" } },
-          { status: 404 },
-        );
+    // The project's agents, or the group itself: `<id>/agents` names the union
+    // over the group's runs, and the id alone names the group.
+    const [id, verb] = project.split("/");
+    const group = projectList.projects.find((g) => g.project === id);
+    if (group === undefined)
+      return Response.json(
+        { error: { code: "project_not_found", message: "no such project" } },
+        { status: 404 },
+      );
+    return verb === "agents"
+      ? Response.json(projectAgents(id ?? ""))
+      : Response.json({ ...projectList, ...group });
   }
   if (url.pathname === API_V2_PATHS.unwatched)
     return Response.json(unwatched());
@@ -179,7 +188,13 @@ function verbResponder(url: URL): Response | undefined {
     });
   const verb = verbOf(url);
   const runId = fixtureRunFor(url);
+  if (verb?.startsWith("nodes/") && verb.endsWith("/agents"))
+    return Response.json(nodeAgents(runId, verb.split("/")[1] ?? ""));
+  if (verb?.startsWith("artifacts/"))
+    return Response.json(harnessTranscript(verb.slice("artifacts/".length)));
   switch (verb) {
+    case "agents":
+      return Response.json(runAgents(runId));
     case "status":
       return Response.json(runStatus(runId));
     case "channel":

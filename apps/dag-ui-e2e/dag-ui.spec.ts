@@ -3389,7 +3389,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
 
   await page.setViewportSize({ width: 800, height: 700 });
   await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
-  // Below the layout's breakpoint the six named readings wrap onto a second row
+  // Below the layout's breakpoint the seven named readings wrap onto a second row
   // rather than widening the view that holds them — and rather than overflowing a
   // centred row, which spilled the first and last of them past both edges of a
   // scroller that could only ever reach one of the two.
@@ -3401,7 +3401,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
   const stripBox = await tabStrip.boundingBox();
   if (stripBox === null) throw new Error("the node tab strip has no bounds");
   const labels = await tabStrip.getByRole("tab").all();
-  expect(labels).toHaveLength(6);
+  expect(labels).toHaveLength(7);
   for (const label of labels) {
     // Both axes: the row they spill past horizontally is only reachable one way, and
     // the row they spill past vertically is drawn under the reading below and reaches

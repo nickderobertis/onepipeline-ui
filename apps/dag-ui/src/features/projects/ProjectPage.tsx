@@ -9,8 +9,10 @@ import {
   Skeleton,
 } from "@oneharness/ui";
 import type { ProjectGroup, RunSummary } from "@onepipeline-ui/dag-model";
+import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ChevronRight, FolderKanban, TriangleAlert } from "lucide-react";
 import {
+  projectAgentCount,
   projectDetailLine,
   projectKeyOf,
   projectLabel,
@@ -21,6 +23,8 @@ import { nodeCountSummary } from "../../lib/run-model";
 import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import { isoOfMillis } from "../../lib/time";
+import { AgentsPanel } from "../agents/AgentsPanel";
+import { useProjectAgents } from "../agents/useAgents";
 
 /**
  * The landing view: every project the root holds, as cards, in the server's own
@@ -81,6 +85,8 @@ export function ProjectsLanding({
                       {runCount(group.runs)}
                       {group.runs.length > 0 &&
                         ` · ${runStateSummary(group.runs)}`}
+                      {projectAgentCount(group) !== undefined &&
+                        ` · ${projectAgentCount(group)}`}
                     </p>
                     <p className="project-card-facts">
                       {group.last_write_at === null ? (
@@ -110,21 +116,35 @@ export function ProjectsLanding({
  * One project's page: every DAG launched against it, most recent activity first,
  * each with its settlement, its nodes counted, what is driving it, how many
  * surfaces nobody has read, and when it last wrote — every one of them the row
- * the run list serves, and each opening to the run view.
+ * the run list serves, and each opening to the run view. Under the runs, every
+ * agent those runs launched: the union the project's agents route serves,
+ * grouped as a run's own are, each opening to its transcript under the run the
+ * entry names.
  */
 export function ProjectPage({
+  client,
   projectKey,
   group,
   error,
   loading,
+  invalidations,
   onSelectRun,
 }: {
+  readonly client: TelemetryClient;
   readonly projectKey: string;
   readonly group?: ProjectGroup;
   readonly error?: Error;
   readonly loading: boolean;
+  readonly invalidations: number;
   readonly onSelectRun: (runId: string) => void;
 }) {
+  // Only a project with an id has an agents route: the `(no project)` group
+  // has none, and its page shows its runs alone.
+  const agents = useProjectAgents(
+    client,
+    group?.project ?? undefined,
+    invalidations,
+  );
   return (
     <ScrollArea className="h-full">
       <section aria-labelledby="project-heading" className="projects-landing">
@@ -139,6 +159,8 @@ export function ProjectPage({
           <p className="projects-lede">
             {runCount(group.runs)}
             {group.runs.length > 0 && ` · ${runStateSummary(group.runs)}`}
+            {projectAgentCount(group) !== undefined &&
+              ` · ${projectAgentCount(group)}`}
             {group.last_write_at !== null && (
               <>
                 {" · last activity "}
@@ -155,16 +177,26 @@ export function ProjectPage({
             Loading project…
           </div>
         ) : group ? (
-          <ul
-            aria-label={`Runs of ${projectLabel(group)}`}
-            className="project-runs"
-          >
-            {group.runs.map((run) => (
-              <li key={run.run_id}>
-                <ProjectRunRow onSelect={onSelectRun} run={run} />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul
+              aria-label={`Runs of ${projectLabel(group)}`}
+              className="project-runs"
+            >
+              {group.runs.map((run) => (
+                <li key={run.run_id}>
+                  <ProjectRunRow onSelect={onSelectRun} run={run} />
+                </li>
+              ))}
+            </ul>
+            {group.project !== null && (
+              <AgentsPanel
+                agents={agents}
+                client={client}
+                count={group.agent_count}
+                title={`Agents of ${projectLabel(group)}`}
+              />
+            )}
+          </>
         ) : null}
       </section>
     </ScrollArea>

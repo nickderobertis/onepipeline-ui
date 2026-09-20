@@ -21,6 +21,7 @@ import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
   ArrowLeft,
   BookOpenText,
+  Bot,
   Eye,
   Inbox,
   RefreshCw,
@@ -30,6 +31,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { AgentsView } from "../features/agents/AgentsView";
 import { ChannelView } from "../features/control/ChannelView";
 import { ReadsView } from "../features/control/ReadsView";
 import { RunActions } from "../features/control/RunActions";
@@ -258,8 +260,10 @@ export function App({
           )}
           {selectedRunId === undefined && selection.projectKey !== undefined ? (
             <ProjectPage
+              client={client}
               error={project.error}
               group={openedProject}
+              invalidations={telemetry.invalidations}
               loading={project.loading && openedProject === undefined}
               onSelectRun={selection.selectRun}
               projectKey={selection.projectKey}
@@ -302,6 +306,9 @@ export function App({
                   </TabsTrigger>
                   <TabsTrigger value="reads">
                     <BookOpenText size={15} /> Reads
+                  </TabsTrigger>
+                  <TabsTrigger value="agents">
+                    <Bot size={15} /> Agents
                   </TabsTrigger>
                 </TabsList>
                 {/* How much of what the run recorded this reading carries. Beside
@@ -365,6 +372,13 @@ export function App({
                       runId={selectedRunId}
                       status={control.status}
                     />
+                  ) : selection.view === "agents" ? (
+                    <AgentsView
+                      client={client}
+                      count={detail.run.agent_count}
+                      invalidations={telemetry.invalidations}
+                      runId={selectedRunId}
+                    />
                   ) : selection.view === "overall" ? (
                     <OverallView
                       client={client}
@@ -381,6 +395,7 @@ export function App({
                     // one breadcrumb away rather than one narrow column beside it.
                     <NodeTimelineView
                       client={client}
+                      invalidations={telemetry.invalidations}
                       node={selectedNode}
                       onBack={() => selection.selectNode(undefined)}
                       onSelectItem={selection.selectItem}

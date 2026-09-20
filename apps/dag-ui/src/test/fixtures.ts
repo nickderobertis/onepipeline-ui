@@ -63,7 +63,7 @@ const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 18,
+  telemetry_schema_version: 19,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -93,7 +93,7 @@ export const LIVE_PROJECT_NAME = "observe-live-run";
  */
 export const projectList = {
   api_version: 2,
-  telemetry_schema_version: 18,
+  telemetry_schema_version: 19,
   observed_at: "2026-07-26T12:00:00Z",
   projects: [
     {
@@ -110,6 +110,7 @@ export const projectList = {
           last_progress_at: 1_785_000_000,
         },
       ],
+      agent_count: 3,
     },
     {
       project: null,
@@ -130,9 +131,159 @@ export const projectList = {
 /** The envelope every wrapped verb answers under. */
 const verbEnvelope = {
   api_version: 2,
-  telemetry_schema_version: 18,
+  telemetry_schema_version: 19,
   observed_at: "2026-07-26T12:00:00Z",
 };
+
+/** The history ids of the live run's harness runs: the artifact id each transcript is served under. */
+export const DASHBOARD_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000001";
+export const DASHBOARD_RETRY_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000002";
+export const OBSERVER_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000000";
+export const PUBLISH_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000003";
+/** What the dashboard worker's first harness run said, which is what a reader opens it to read. */
+export const DASHBOARD_TRANSCRIPT_TEXT =
+  "wired the dashboard to the read API and left the rail alone";
+
+/**
+ * The sessions the live run's launches wrote, as the agents route serves them
+ * off its pointer file: the dashboard worker across two attempts — the second
+ * attempt's session recorded two harness runs, one falling back to another
+ * harness — the run's observer, and the drafting turn for the publish node.
+ * Stamped with the engine's keys and the repository's own `role`.
+ */
+export function runAgents(runId: string = LIVE_RUN) {
+  const store = "/a-host/.local/state/oneharness/history";
+  const project = "a-host-workspace";
+  const session = (
+    name: string,
+    stem: string,
+    labels: Record<string, string>,
+    runs: readonly {
+      history_id: string;
+      harness_id: string;
+      started: string;
+    }[],
+  ) => ({
+    history_session: stem,
+    name,
+    history_dir: store,
+    history_project: project,
+    history_file: `${store}/${project}/${stem}.jsonl`,
+    project: "/a-host/workspace",
+    started: runs[0]?.started ?? "2026-07-26T11:57:00Z",
+    labels: {
+      "onepipeline.project": LIVE_PROJECT,
+      "onepipeline.run_id": runId,
+      role: "engineer",
+      ...labels,
+    } as Record<string, string>,
+    runs: runs.map((run) => ({
+      ...run,
+      harness: run.harness_id.split(":")[0] ?? run.harness_id,
+      ...(run.harness_id.includes(":")
+        ? { variant: run.harness_id.split(":")[1] }
+        : {}),
+    })),
+    run_id: runId,
+  });
+  return {
+    ...verbEnvelope,
+    run_id: runId,
+    sessions:
+      runId === HISTORY_RUN
+        ? []
+        : [
+            session(
+              "monitor",
+              "monitor-20260726T115700Z-4242",
+              { "onepipeline.scope": "observer" },
+              [
+                {
+                  history_id: OBSERVER_HISTORY_ID,
+                  harness_id: "claude-code",
+                  started: "2026-07-26T11:57:00Z",
+                },
+              ],
+            ),
+            session(
+              "engineer-dashboard",
+              "engineer-dashboard-20260726T115800Z-4243",
+              {
+                "onepipeline.scope": "node",
+                "onepipeline.node": "dashboard",
+                "onepipeline.attempt": "1",
+              },
+              [
+                {
+                  history_id: DASHBOARD_HISTORY_ID,
+                  harness_id: "claude-code:alternate",
+                  started: "2026-07-26T11:58:00Z",
+                },
+              ],
+            ),
+            session(
+              "engineer-dashboard",
+              "engineer-dashboard-20260726T115900Z-4244",
+              {
+                "onepipeline.scope": "node",
+                "onepipeline.node": "dashboard",
+                "onepipeline.attempt": "2",
+              },
+              [
+                {
+                  history_id: DASHBOARD_RETRY_HISTORY_ID,
+                  harness_id: "claude-code:alternate",
+                  started: "2026-07-26T11:59:00Z",
+                },
+                {
+                  history_id: PUBLISH_HISTORY_ID,
+                  harness_id: "codex",
+                  started: "2026-07-26T11:59:30Z",
+                },
+              ],
+            ),
+          ],
+    skipped: 0,
+  };
+}
+
+/** The sessions one node's dispatches wrote: the lines whose `onepipeline.node` is that node. */
+export function nodeAgents(runId: string, node: string) {
+  const all = runAgents(runId);
+  return {
+    ...all,
+    node,
+    sessions: all.sessions.filter(
+      (session) => session.labels["onepipeline.node"] === node,
+    ),
+  };
+}
+
+/** The union over the project's runs, which here is the live run's alone. */
+export function projectAgents(project: string) {
+  return { ...runAgents(LIVE_RUN), run_id: undefined, project };
+}
+
+/** The transcript one harness run opens to, as the artifact route serves a oneharness session. */
+export function harnessTranscript(historyId: string) {
+  return {
+    ...verbEnvelope,
+    id: historyId,
+    kind: "oneharness_session",
+    content: JSON.stringify(
+      {
+        history_id: historyId,
+        text:
+          historyId === DASHBOARD_HISTORY_ID
+            ? DASHBOARD_TRANSCRIPT_TEXT
+            : `what harness run ${historyId} said`,
+      },
+      null,
+      2,
+    ),
+    truncated: false,
+  };
+}
 
 /** `GET .../status` for a run: the live run is driven, the history run is not. */
 export function runStatus(runId: string = LIVE_RUN) {
@@ -330,7 +481,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 18,
+    telemetry_schema_version: 19,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -383,6 +534,9 @@ export function runDetail(runId: string = LIVE_RUN) {
       },
       turns: 4,
       lint: 0,
+      // What the run's agents route answers: the live run launched three
+      // sessions, the history run none.
+      agent_count: historical ? 0 : runAgents(runId).sessions.length,
     },
     graph: {
       run_id: runId,

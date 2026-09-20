@@ -478,8 +478,14 @@ turn is served as it always was. Both shapes are in `write_lanes`.
 
 A `oneharness_session` artifact's bytes are the only ones this API serves from
 outside the runs root: `oneagentgraph` publishes a pointer and nothing is copied,
-so `payload::harness_session` opens another tool's directory. Four constraints on
-it, each because the obvious alternative is worse:
+so `payload::session_record` opens another tool's directory. Two records name
+one, in one spelling — the `oneharness-session` envelope a member's turn relays,
+and a line of the run's own **pointer file**, which the engine has every
+oneharness under any of its launches append (`onepipeline::agents`), so a nested
+turn no envelope relays is still named. `verbs::agents` reads that file and
+nothing else, and `payload::pointed_session` is the artifact route's second way
+in for an id no envelope recorded. Four constraints on both, each because the
+obvious alternative is worse:
 
 - **Link `oneharness-core`; never spawn the `oneharness` CLI.** A process is a
   second contract — arguments, output shape, version — that nothing here pins.

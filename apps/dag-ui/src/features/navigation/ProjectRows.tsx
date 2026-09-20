@@ -1,6 +1,7 @@
 import type { ProjectGroup } from "@onepipeline-ui/dag-model";
 import { ChevronRight, FolderKanban } from "lucide-react";
 import {
+  projectAgentCount,
   projectDetailLine,
   projectKeyOf,
   projectLabel,
@@ -58,7 +59,11 @@ export function ProjectRows({
                 </span>
               )}
               <span className="run-link-counts">
-                {[runCount(group.runs), runStateSummary(group.runs)]
+                {[
+                  runCount(group.runs),
+                  runStateSummary(group.runs),
+                  projectAgentCount(group),
+                ]
                   .filter(Boolean)
                   .join(" · ")}
               </span>

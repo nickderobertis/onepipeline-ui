@@ -42,6 +42,7 @@ import {
   NODE_TAB_LABELS,
   type NodeTab,
 } from "../../lib/useUrlSelection";
+import { NodeAgents } from "../agents/AgentsView";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
 import { NodeRelease } from "./release";
@@ -81,10 +82,13 @@ export function NodeTimelineView({
   onBack,
   selectedTab,
   onSelectTab,
+  invalidations,
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly node: NodeView;
+  /** How many times the stream has said the run moved; the agents tab re-reads on each. */
+  readonly invalidations: number;
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
   readonly selectedItemId?: string;
@@ -243,6 +247,19 @@ export function NodeTimelineView({
               </dd>
             </div>
           </dl>
+        </TabsContent>
+        {/* The sessions this node's dispatches wrote, every one whatever the
+            repository's agent structure, each opening to its transcript. Read
+            only while the tab is open, like the run's own reads. */}
+        <TabsContent className="node-tab-panel" value="agents">
+          {selectedTab === "agents" && (
+            <NodeAgents
+              client={client}
+              invalidations={invalidations}
+              nodeId={node.id}
+              runId={runId}
+            />
+          )}
         </TabsContent>
         <TabsContent className="node-timeline-panel" value="timeline">
           {/* llmlint: ignore[changed_behavior_has_e2e] the detail and the timeline are
