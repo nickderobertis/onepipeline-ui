@@ -146,13 +146,6 @@ export const DASHBOARD_TRANSCRIPT_TEXT =
   "wired the dashboard to the read API and left the rail alone";
 
 /**
- * The sessions the live run's launches wrote, as the agents route serves them
- * off its pointer file: the dashboard worker across two attempts — the second
- * attempt's session recorded two harness runs, one falling back to another
- * harness — the run's observer, and the drafting turn for the publish node.
- * Stamped with the engine's keys and the repository's own `role`.
- */
-/**
  * The labels one launch under `runId` stamped its sessions with: the engine's
  * run and project keys, the repository's own `role`, and the keys the launch's
  * scope carries. An open record, because a session's labels are whatever the
@@ -170,6 +163,13 @@ function stamped(
   };
 }
 
+/**
+ * The sessions the live run's launches wrote, as the agents route serves them
+ * off its pointer file: the dashboard worker across two attempts — the second
+ * attempt's session recorded two harness runs, one falling back to another
+ * harness — the run's observer, and the drafting turn for the publish node.
+ * Stamped with the engine's keys and the repository's own `role`.
+ */
 export function runAgents(runId: string = LIVE_RUN) {
   const store = "/a-host/.local/state/oneharness/history";
   const project = "a-host-workspace";
