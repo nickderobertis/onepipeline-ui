@@ -6156,6 +6156,7 @@ fn agent_entry(
     scope: &AgentsScope<'_>,
     session: &AgentSession,
 ) -> Result<Value, serde_json::Error> {
+    // llmlint: ignore[secrets_stay_server_side] the record is served whole on purpose: `history_dir`, `history_file` and `project` are the SDK's own `AgentSession` fields, which `docs/contract.md` names one by one and `onepipeline agents RUN` prints to the same operator on the same host — they locate the operator's own transcripts, not a credential, and the rule this crate keeps is that the agent reading the CLI sees at least what the human here sees. Nothing opens a file by them: a transcript is opened through the artifact route, which resolves the pointer's fields through the confined `session_record` and never a path a reader sent.
     let mut entry = serde_json::to_value(session)?;
     let run = match scope {
         AgentsScope::Run { run, .. } => Some(run.as_str().to_owned()),

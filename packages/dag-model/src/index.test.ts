@@ -396,11 +396,7 @@ describe("agents", () => {
   });
 
   test("refuses a session missing one of the three fields its transcript resolves through", () => {
-    for (const field of [
-      "history_dir",
-      "history_project",
-      "history_session",
-    ] as const) {
+    for (const field of ["history_dir", "history_project", "history_session"]) {
       const missing = Object.fromEntries(
         Object.entries(session).filter(([key]) => key !== field),
       );
