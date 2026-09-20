@@ -1135,12 +1135,44 @@ fn the_error_envelope_round_trips_and_matches_the_error_it_renders() {
 fn every_error_maps_to_its_code_and_status() {
     let reason = "why".to_owned();
     let id = "why-1";
-    let cases: [(ApiError, &str, u16); 11] = [
+    let cases: [(ApiError, &str, u16); 20] = [
         (
             ApiError::InvalidRequest(reason.clone()),
             "invalid_request",
             422,
         ),
+        (
+            ApiError::InvalidProjectId(reason.clone()),
+            "invalid_project_id",
+            422,
+        ),
+        (
+            ApiError::InvalidCorrelation(reason.clone()),
+            "invalid_correlation",
+            422,
+        ),
+        (ApiError::Refused(reason.clone()), "refused", 422),
+        (
+            ApiError::ProjectNotFound(ProjectId::try_from("local-md:why").expect("valid")),
+            "project_not_found",
+            404,
+        ),
+        (
+            ApiError::NotOwner {
+                run: RunId::try_from(id).expect("valid"),
+                owner: "[claude-code:why0why0]".to_owned(),
+            },
+            "not_owner",
+            409,
+        ),
+        (
+            ApiError::NothingDriving(RunId::try_from(id).expect("valid")),
+            "nothing_driving",
+            409,
+        ),
+        (ApiError::Locked(reason.clone()), "locked", 409),
+        (ApiError::NotStopped(reason.clone()), "not_stopped", 409),
+        (ApiError::Engine(reason.clone()), "engine_error", 500),
         (
             ApiError::InvalidRunId(reason.clone()),
             "invalid_run_id",
@@ -1204,6 +1236,94 @@ fn every_error_maps_to_its_code_and_status() {
         ApiError::NoSuchRoute.envelope().error.message,
         "no such route"
     );
+}
+
+/// Every refusal the engine can make of a verb reaches the wire as the one code
+/// and status the contract assigns it, in the engine's own words.
+///
+/// The engine's error is an enum this crate maps once, in `ApiError::from_engine`;
+/// the arms a journey can reach — a run that is not there, one another session
+/// owns, a refusal, an invalid envelope — are driven over HTTP in
+/// `tests/e2e/server.rs`, and the ones a journey cannot put a fixture run into
+/// — nothing driving where something had to be, a lock another writer holds, a
+/// ledger the engine could not write — are held here to the same table, so no
+/// arm serves a status its code disagrees with.
+#[test]
+fn every_engine_refusal_maps_to_the_code_and_status_the_contract_assigns() {
+    let run = RunId::try_from("run-1").expect("valid");
+    let root = std::path::PathBuf::from("/a-runs-root");
+    let cases: [(onepipeline::Error, &str, u16, &str); 7] = [
+        (
+            onepipeline::Error::NoSuchRun {
+                run: "run-1".to_owned(),
+                root: root.clone(),
+            },
+            "run_not_found",
+            404,
+            "run-1",
+        ),
+        (
+            onepipeline::Error::NotOwned {
+                run: "run-1".to_owned(),
+                owner: "[claude-code:0a1b2c3d]".to_owned(),
+            },
+            "not_owner",
+            409,
+            "[claude-code:0a1b2c3d]",
+        ),
+        (
+            onepipeline::Error::NothingDriving {
+                run: "run-1".to_owned(),
+            },
+            "nothing_driving",
+            409,
+            "run-1",
+        ),
+        (
+            onepipeline::Error::Refused("the reply is malformed: nope".to_owned()),
+            "refused",
+            422,
+            "the reply is malformed: nope",
+        ),
+        (
+            onepipeline::Error::Invalid("'x' is not a run id".to_owned()),
+            "refused",
+            422,
+            "'x' is not a run id",
+        ),
+        (
+            onepipeline::Error::Locked {
+                run: "run-1".to_owned(),
+                pid: 4242,
+                host: "a-recording-host".to_owned(),
+                verb: "drive".to_owned(),
+            },
+            "locked",
+            409,
+            "pid 4242",
+        ),
+        (
+            onepipeline::Error::Ledger {
+                path: root.join("run-1/launch.json"),
+                source: std::io::Error::other("disk gone"),
+            },
+            "engine_error",
+            500,
+            "disk gone",
+        ),
+    ];
+    for (engine, code, status, said) in cases {
+        let error = ApiError::from_engine(&run, engine);
+        assert_eq!(error.code(), code);
+        assert_eq!(error.status(), status);
+        let rendered = error.envelope();
+        assert_eq!(rendered.error.code, code);
+        assert!(
+            rendered.error.message.contains(said),
+            "{code}: the engine's own words did not reach the wire — {}",
+            rendered.error.message
+        );
+    }
 }
 
 /// The project id's source grammar is the contract's, and the code's copy is
