@@ -287,6 +287,59 @@ fn ui_dist_never_serves_a_file_outside_the_directory() {
     fs::remove_file(outside).expect("remove the file beside the view");
 }
 
+/// The directory is checked once, at the command line, and read per request
+/// after that — so its index can go while the server is up, and what a reader
+/// meets then is said rather than drawn.
+///
+/// A rebuild is when it happens: Vite empties `dist` before it writes it, so a
+/// browser loading the view across a `just build` asks for an index that is not
+/// there for a moment. A blank `200` would be a page a reader reloads forever;
+/// this says what is wrong, and the reader's next request — after the build —
+/// is the rebuilt view. The API beside it never stops answering: the view's
+/// trouble is the view's.
+#[test]
+fn a_view_whose_index_goes_while_it_is_served_says_so_and_recovers() {
+    let dist = a_view_on_disk();
+    let dir = dist.path().to_str().expect("utf-8 path");
+    let serving = a_run_served_with(&["--ui", "--ui-dist", dir]);
+    assert_eq!(http::get_raw(serving.address, "/").status, 200);
+
+    fs::remove_file(dist.path().join("index.html")).expect("take the index away");
+    for path in ["/", "/assets/gone-1234.js", "/runs/deep/link"] {
+        let served = http::get_raw(serving.address, path);
+        assert_eq!(served.status, 500, "{path}");
+        assert_eq!(
+            served.header("content-type"),
+            Some("text/plain; charset=utf-8"),
+            "{path}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&served.body),
+            "the browser view has no index.html to serve",
+            "{path}"
+        );
+    }
+    // A file the bundle still has is still its own bytes: only the fallback is
+    // gone, and only the paths that need it are refused.
+    let script = http::get_raw(serving.address, "/assets/app-1234.js");
+    assert_eq!(script.status, 200);
+    assert_eq!(script.body, b"console.log('on disk')");
+    // And the API never noticed.
+    assert_eq!(
+        http::get(serving.address, "/healthz").json()["status"],
+        "ok"
+    );
+
+    fs::write(
+        dist.path().join("index.html"),
+        "<!doctype html><title>rebuilt</title>",
+    )
+    .expect("the rebuild finishes");
+    let recovered = http::get_raw(serving.address, "/runs/deep/link");
+    assert_eq!(recovered.status, 200);
+    assert_eq!(recovered.body, b"<!doctype html><title>rebuilt</title>");
+}
+
 fn cli() -> Command {
     Command::cargo_bin("onepipeline-api").expect("the binary is built")
 }
