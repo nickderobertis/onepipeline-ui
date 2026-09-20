@@ -153,6 +153,41 @@ fn the_route_table_documents_no_route_the_contract_does_not() {
     );
 }
 
+/// The README indexes the routes and names the served schema version, and
+/// both are read back against the source rather than left as a second copy.
+///
+/// The README is the crate's front page on crates.io and npm, so it carries
+/// the route table a reader meets first; what keeps it from drifting is this,
+/// which holds its `METHOD path` lines to [`routes::TABLE`] in order and its
+/// version to the constant the envelope is served at.
+#[test]
+fn the_readme_indexes_every_route_and_names_the_served_schema() {
+    let readme = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("the README reads");
+    let indexed: Vec<(&str, &str)> = readme
+        .lines()
+        .filter_map(|line| {
+            let (method, rest) = line.split_once(' ')?;
+            matches!(method, "GET" | "POST")
+                .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
+        })
+        .collect();
+    let table: Vec<(&str, &str)> = routes::TABLE
+        .iter()
+        .map(|route| (route.method.as_str(), route.path))
+        .collect();
+    assert_eq!(
+        indexed, table,
+        "README.md indexes different routes than the route table, or in a different order"
+    );
+    assert!(
+        readme.contains(&format!(
+            "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})"
+        )),
+        "README.md names a telemetry schema version other than {TELEMETRY_SCHEMA_VERSION}"
+    );
+}
+
 #[test]
 fn every_route_has_a_fixture() {
     let mapped: Vec<&str> = ROUTE_FIXTURES.iter().map(|(route, _)| *route).collect();

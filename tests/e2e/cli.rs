@@ -203,12 +203,12 @@ fn the_hidden_driver_verbs_answer_as_the_engines_own_do() {
     ] {
         let ours = cli()
             .args(&arguments)
-            .env("ONEPIPELINE_RUNS_DIR", dir)
+            .env(onepipeline_ui::store::RUNS_DIR_ENV, dir)
             .output()
             .expect("the binary runs");
         let theirs = std::process::Command::new(crate::sibling::binary())
             .args(&arguments)
-            .env("ONEPIPELINE_RUNS_DIR", dir)
+            .env(onepipeline_ui::store::RUNS_DIR_ENV, dir)
             .output()
             .expect("the provisioned onepipeline runs — `just bootstrap` provisions it");
         assert_eq!(
