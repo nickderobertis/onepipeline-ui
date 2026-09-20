@@ -50,19 +50,14 @@ fn main() {
     // Cargo re-runs this when anything under the watched path changes, and
     // re-runs it on *every* build while a watched path is missing. So the
     // bundle is watched while it is there — the whole directory is scanned —
-    // and its parent, the app itself, while it is not: that is the directory
-    // the bundle appears in, it exists on every checkout, and it is small
-    // enough (the app's sources and its own installs) that scanning it costs
-    // nothing a rebuild on every `cargo build` would not cost a thousand times
-    // over.
-    let watched = if bundle.is_dir() {
-        bundle.clone()
-    } else {
-        bundle
-            .parent()
-            .expect("the bundle is under the app")
-            .to_path_buf()
-    };
+    // and its nearest existing ancestor while it is not: the app directory on
+    // a checkout, which is where the bundle appears, and small enough (the
+    // app's sources and its own installs) that scanning it costs nothing a
+    // rebuild on every `cargo build` would not cost a thousand times over.
+    let watched = bundle
+        .ancestors()
+        .find(|path| path.is_dir())
+        .unwrap_or(&manifest_dir);
     println!("cargo:rerun-if-changed={}", watched.display());
     println!("cargo:rerun-if-changed=build.rs");
     let required = std::env::var_os("CARGO_FEATURE_BUNDLED_UI").is_some();

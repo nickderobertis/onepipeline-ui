@@ -86,6 +86,19 @@ writes a run store and this reader of it separately can *prove* the two match
 rather than assume it. The SDK pin and `tests/fixtures/healthz.json` move
 together.
 
+**The binary embeds the browser view, so the crate's test tiers build the
+frontend first.** `build.rs` compiles whatever `apps/dag-ui/dist` holds into
+`onepipeline-api` for `serve --ui`, and the `ui::` journeys read that view back
+off a port against the bundle on disk — so `onepipeline-ui:test`,
+`test-baseline`, `test-cost` and `dag-ui:build-api-server` all depend on
+`dag-ui:build` through Nx, `check-cross` reaches the same build through
+`_ensure-bundle`, and `tests/e2e/ensure_sibling.rs` holds that graph. A binary
+compiled before the bundle exists carries nothing and refuses `--ui`, which is
+the right answer for a `cargo install` from crates.io and the wrong one for a
+test tier or a release: the `bundled-ui` feature makes a missing bundle a build
+error, every release job that compiles the binary turns it on after `just
+build`, and `tests/packaging.rs` reads each of those jobs for both halves.
+
 **One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
 edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the
 bounds on what a read may do to a runs root — the defect that made one open
