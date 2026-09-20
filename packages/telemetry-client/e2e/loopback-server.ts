@@ -19,27 +19,44 @@ export interface LoopbackServer {
 
 /** Start one, on a port the kernel picks, and resolve once it is listening. */
 export function serveLoopback(
-  handler: (request: Request) => Response,
+  handler: (request: Request) => Response | Promise<Response>,
 ): Promise<LoopbackServer> {
   const server: Server = createServer((incoming, outgoing) => {
-    const response = handler(
-      new Request(`http://127.0.0.1${incoming.url ?? "/"}`, {
-        method: incoming.method,
-      }),
-    );
-    response
-      .arrayBuffer()
-      .then((body) => {
-        outgoing.writeHead(
-          response.status,
-          Object.fromEntries(response.headers.entries()),
-        );
-        outgoing.end(Buffer.from(body));
-      })
-      .catch(() => {
-        outgoing.writeHead(500);
-        outgoing.end();
-      });
+    // The body is read whole before the handler is asked, so a verb that sends
+    // one — a reply's envelope bytes, a stop's `{force}` — reaches the handler
+    // as the bytes the client put on the socket.
+    const chunks: Buffer[] = [];
+    incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+    incoming.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const method = incoming.method ?? "GET";
+      Promise.resolve(
+        handler(
+          new Request(`http://127.0.0.1${incoming.url ?? "/"}`, {
+            method,
+            headers: Object.entries(incoming.headers).flatMap(
+              ([name, value]): [string, string][] =>
+                typeof value === "string" ? [[name, value]] : [],
+            ),
+            ...(method === "GET" || method === "HEAD"
+              ? {}
+              : { body: new Uint8Array(body) }),
+          }),
+        ),
+      )
+        .then(async (response) => {
+          const payload = await response.arrayBuffer();
+          outgoing.writeHead(
+            response.status,
+            Object.fromEntries(response.headers.entries()),
+          );
+          outgoing.end(Buffer.from(payload));
+        })
+        .catch(() => {
+          outgoing.writeHead(500);
+          outgoing.end();
+        });
+    });
   });
   return new Promise<LoopbackServer>((resolve, reject) => {
     server.once("error", reject);

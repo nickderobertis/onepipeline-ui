@@ -1298,6 +1298,338 @@ button.graph-row-name {
   }
 }
 
+/* Which list the navigation shows, on the terms the reading switch keeps. */
+.list-switch {
+  margin-bottom: 12px;
+}
+
+/*
+ * The project surfaces: the landing's cards and a project's page of runs. Both
+ * scroll inside the working area like the overall view does, and both are read
+ * top to bottom — a page of runs is a list, not a grid, because its rows carry
+ * five facts each and a grid would fold them.
+ */
+.projects-landing {
+  padding: 24px 28px;
+}
+
+.projects-landing h2 {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 20px;
+}
+
+.projects-lede {
+  margin-bottom: 18px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.project-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-card-open {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.project-card-id,
+.project-card-facts {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.project-card-id {
+  font-family: var(--font-mono);
+}
+
+.project-runs {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-run {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-run:hover {
+  background: var(--accent);
+}
+
+.project-run-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.project-run-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+/*
+ * The supervising surface: the channel, the watch and the reads. One column of
+ * sections, each a heading over its cards, forms and outcomes; the rendered
+ * verbs are shown in the SDK's own text and so keep its whitespace.
+ */
+.channel-view {
+  display: grid;
+  gap: 22px;
+  padding: 20px 28px 32px;
+}
+
+.channel-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.channel-heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.channel-heading h3 {
+  margin-bottom: 0;
+}
+
+.channel-queue {
+  display: grid;
+  gap: 14px;
+}
+
+.channel-list h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.channel-list ul,
+.attest-list,
+.watch-frames {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.channel-card [data-slot="card-content"] {
+  display: grid;
+  gap: 8px;
+}
+
+.channel-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.channel-empty,
+.channel-age,
+.watch-standing {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.channel-message {
+  margin: 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.verb-text {
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  display: grid;
+  gap: 12px;
+}
+
+.composer h3 {
+  margin-bottom: 0;
+  font-size: 14px;
+}
+
+.composer-shortcut,
+.composer-field {
+  display: grid;
+  gap: 6px;
+}
+
+.composer-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.composer-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-select {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.composer-envelope {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.composer-correlation {
+  max-width: 420px;
+}
+
+.composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.composer-problem {
+  margin: 0;
+  color: var(--destructive);
+  font-size: 12px;
+}
+
+.attest-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.attest-reference {
+  font-family: var(--font-mono);
+}
+
+.watch-frame {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.watch-kind {
+  font-family: var(--font-mono);
+}
+
+/*
+ * The supervising controls are icons below the widest desktop: the header is a
+ * fixed-height row the timeline region's own share of the window is measured
+ * against, and at a laptop the four words beside the reading's own controls
+ * wrapped it past that height. Each button keeps its name for a reader without
+ * a pointer, and says it on hover for one with.
+ */
+@media (max-width: 1440px) {
+  .run-action-label {
+    display: none;
+  }
+}
+
+/* The supervising controls and the way back, in the header beside the run. */
+.topbar-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* What a stop or an adoption came back with, under the header rather than in
+   it: a receipt is a paragraph, and the header is a row. */
+.run-outcomes {
+  display: grid;
+  gap: 8px;
+  padding: 10px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reads-view {
+  display: flex;
+  flex-direction: column;
+}
+
 /*
  * The phone. Two full columns stop fitting here: a 220px navigation beside a 390px
  * screen leaves 170px of working area, which is narrower than a reading of the node's
@@ -1389,6 +1721,21 @@ button.graph-row-name {
 
   .overall-hero {
     padding: 14px;
+  }
+
+  .projects-landing,
+  .channel-view {
+    padding: 14px;
+  }
+
+  .run-outcomes {
+    padding: 10px 14px;
+  }
+
+  /* The header keeps one row of controls at this width: the badges' words are
+     on the Watch tab, and the buttons keep their names on the icon. */
+  .run-actions-badge {
+    display: none;
   }
 
   /* One column, so the run id keeps the width instead of sharing it with a state pill

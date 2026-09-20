@@ -117,7 +117,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   // on, so the journeys that are about it say so — exactly as an operator's own
   // bookmark of the graph does. The landing view has a journey of its own below.
   beforeEach(() => {
-    window.history.replaceState(null, "", "/?view=graph");
+    window.history.replaceState(null, "", "/?list=runs&view=graph");
   });
 
   afterEach(cleanup);
@@ -1200,7 +1200,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   });
 
   test("opens on the run as a whole when the address names no view", async () => {
-    window.history.replaceState(null, "", "/");
+    window.history.replaceState(null, "", "/?list=runs");
     const { client } = telemetryHarness();
     render(<App client={client} />);
     // The overall reading of the run is what an operator arrives for; the graph is
@@ -1239,7 +1239,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   }
 
   test("says a run's clock is unmeasured rather than reporting no time at all", async () => {
-    window.history.replaceState(null, "", "/");
+    window.history.replaceState(null, "", "/?list=runs");
     // Schema 11 serves a timing nothing measured as null, and a server that could
     // not read the document that aggregates a run's clock serves every one of
     // them that way. `0s` would be the one reading that is a lie.
@@ -1848,7 +1848,12 @@ describe("a read that outlives the invalidation that arrived during it", () => {
     "discards a read of the run the reader has moved away from",
     JOURNEY_TIMEOUT,
     async () => {
-      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+      // Under the flat list, where the other run is one row away.
+      window.history.replaceState(
+        null,
+        "",
+        `/?list=runs&run=${LIVE_RUN}&view=graph`,
+      );
       const { client, release } = heldDetail(LIVE_RUN);
       render(<App client={client} />);
       await screen.findByText("Loading execution history…");

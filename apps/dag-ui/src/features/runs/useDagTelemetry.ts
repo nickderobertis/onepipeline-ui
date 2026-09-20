@@ -67,6 +67,13 @@ export interface DagTelemetryState {
    * than looking like a list that has simply stopped at its end.
    */
   readonly loadingMore: boolean;
+  /**
+   * How many times the stream has said something moved: bumped on every
+   * invalidation frame and on every snapshot after the first. A reading this hook
+   * does not own — the project list, a run's status — re-reads on it, so one
+   * stream drives every live surface rather than each opening its own.
+   */
+  readonly invalidations: number;
 }
 
 export function useDagTelemetry(
@@ -82,6 +89,14 @@ export function useDagTelemetry(
    * *about*.
    */
   filter?: string,
+  /**
+   * Whether an address naming no run opens the first one served. It does under
+   * the flat run list, whose whole point is the newest activity; it does not on
+   * the projects, where an address naming no run is asking for the project list
+   * rather than for a run. A run that *is* named but not served still falls back
+   * to the first, so a stale bookmark opens something rather than nothing.
+   */
+  selectFirst = true,
 ): DagTelemetryState {
   const [list, setList] = useState<RunList>();
   const [record, setRecord] = useState<RunRecord>();
@@ -115,7 +130,11 @@ export function useDagTelemetry(
       ? undefined
       : list.runs.some(({ run_id }) => run_id === requestedRunId)
         ? requestedRunId
-        : list.runs.at(0)?.run_id;
+        : requestedRunId !== undefined || selectFirst
+          ? list.runs.at(0)?.run_id
+          : undefined;
+  //: How many times the stream has announced a change, for readings held elsewhere.
+  const [invalidations, setInvalidations] = useState(0);
   const timelineScopeKey =
     timelineScope === undefined ? undefined : (timelineScope.nodeId ?? "run");
   // Read by the event stream, which must not be torn down and reopened every time
@@ -388,12 +407,16 @@ export function useDagTelemetry(
           // taken, so nothing about the open run is read again for it. A later one
           // means the stream dropped and came back, and a run that moved during
           // that outage was never announced — so that run is read again.
-          if (opened.current) setRevision((current) => current + 1);
+          if (opened.current) {
+            setRevision((current) => current + 1);
+            setInvalidations((current) => current + 1);
+          }
           opened.current = true;
           return;
         }
         const invalidated = invalidatedRunId(event);
         if (invalidated === undefined) return;
+        setInvalidations((current) => current + 1);
         // One row for one invalidation. The first page is not refetched: doing so
         // threw away every page the reader had scrolled to, so a list on a host
         // with anything moving snapped back to the top before it could be read.
@@ -465,6 +488,7 @@ export function useDagTelemetry(
       loadMore,
       hasMore: list?.next_cursor !== undefined,
       loadingMore,
+      invalidations,
     }),
     [
       list,
@@ -478,6 +502,7 @@ export function useDagTelemetry(
       refresh,
       loadMore,
       loadingMore,
+      invalidations,
     ],
   );
 }

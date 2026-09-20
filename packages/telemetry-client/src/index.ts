@@ -1,21 +1,53 @@
 import {
+  type Adopted,
   API_V2_PATHS,
   API_V2_QUERY,
   API_V2_TIMELINE_SCOPES,
   type ArtifactContent,
+  adoptedSchema,
   apiErrorSchema,
   artifactContentSchema,
+  type ChannelNext,
+  type ChannelQueue,
+  channelNextSchema,
+  channelQueueSchema,
   type DagConversation,
   dagConversationSchema,
+  type ProjectDetail,
+  type ProjectList,
+  projectDetailSchema,
+  projectListSchema,
+  type RenderedRoot,
+  type RenderedRun,
+  type ReplyReceipt,
   type RunDetail,
   type RunList,
+  type RunStatus,
+  type RunTelemetryDocument,
   type RunTimeline,
+  type RunTranscript,
+  renderedRootSchema,
+  renderedRunSchema,
+  replyReceiptSchema,
   runDetailSchema,
   runListSchema,
+  runStatusSchema,
+  runTelemetryDocumentSchema,
   runTimelineSchema,
+  runTranscriptSchema,
   type SseEventName,
+  type Stopped,
+  type Surfaced,
   sseEventDataSchema,
   sseEventNameSchema,
+  stoppedSchema,
+  surfacedSchema,
+  type Unwatched,
+  unwatchedSchema,
+  type WatchEventName,
+  type WatchFrameData,
+  watchEventNameSchema,
+  watchFrameDataSchema,
 } from "@onepipeline-ui/dag-model";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] client.e2e.test.ts crosses a real loopback HTTP
@@ -55,6 +87,35 @@ export interface SubscribeOptions {
    */
   readonly filter?: string;
   readonly onEvent: (event: TelemetryEvent) => void;
+  readonly onError?: (error: unknown) => void;
+}
+
+/**
+ * One frame of a held watch: the server's cursor within the connection, which of
+ * the three frames it is, and the engine's own record for it.
+ */
+export interface WatchFrame {
+  readonly id: string;
+  readonly event: WatchEventName;
+  readonly data: WatchFrameData;
+}
+
+export interface WatchOptions {
+  readonly runId: string;
+  /**
+   * What ends the wait — the CLI's own conditions, repeatable — beside the run
+   * finishing and nothing driving it. Omitted, the server defaults to `surface`.
+   */
+  readonly until?: readonly string[];
+  /** Whole seconds, `0` to read once and return, or `"none"` to never give up. */
+  readonly timeout?: number | "none";
+  /** The heartbeat interval in whole seconds, `0` to turn it off. */
+  readonly tick?: number;
+  /** Which events the stream reports, as a profile name or an inline spec. */
+  readonly filter?: string;
+  /** Resume from the cursor an earlier watch returned. */
+  readonly cursor?: string;
+  readonly onFrame: (frame: WatchFrame) => void;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -225,17 +286,7 @@ export class TelemetryClient {
       url.searchParams.set(API_V2_QUERY.after, options.after);
     if (options.filter !== undefined)
       url.searchParams.set(API_V2_QUERY.filter, options.filter);
-    const create =
-      this.#eventSource ??
-      ((sourceUrl: string) => {
-        if (typeof EventSource === "undefined") {
-          throw new TelemetryClientError(
-            "EventSource is unavailable; provide an eventSource factory",
-          );
-        }
-        return new EventSource(sourceUrl);
-      });
-    const source = create(url.toString());
+    const source = this.#open(url);
     for (const eventName of sseEventNameSchema.options) {
       source.addEventListener(eventName, (rawEvent) => {
         try {
@@ -261,14 +312,247 @@ export class TelemetryClient {
     return { close: () => source.close() };
   }
 
+  /**
+   * The grouped listing: every project the root holds, newest activity first,
+   * each with its runs newest first — the SDK's own order, never recomputed.
+   */
+  async listProjects(): Promise<ProjectList> {
+    return this.#request(
+      this.#url(API_V2_PATHS.projects),
+      projectListSchema.parse,
+    );
+  }
+
+  /**
+   * One project's group. The `(no project)` group has no id and so no route of
+   * its own; a reader of it takes it off {@link listProjects}.
+   */
+  async getProject(projectId: string): Promise<ProjectDetail> {
+    requireOpaqueId(projectId, "project ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.project(projectId)),
+      projectDetailSchema.parse,
+    );
+  }
+
+  /** The run's channel, read and never consumed. */
+  async getChannel(runId: string): Promise<ChannelQueue> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.channel(runId)),
+      channelQueueSchema.parse,
+    );
+  }
+
+  /**
+   * Claim the next surface, as `onepipeline next` does: the channel's only
+   * consumer. `filter` shapes the `events` answered and nothing else.
+   */
+  async claimNext(runId: string, filter?: string): Promise<ChannelNext> {
+    requireOpaqueId(runId, "run ID");
+    const url = this.#url(API_V2_PATHS.channelNext(runId));
+    if (filter !== undefined) url.searchParams.set(API_V2_QUERY.filter, filter);
+    return this.#request(url, channelNextSchema.parse, { method: "POST" });
+  }
+
+  /**
+   * Send a reply envelope **as the bytes given**. Nothing here reads or reshapes
+   * them: a malformed envelope is the engine's refusal in the engine's words, and
+   * the author the body names is granted or refused by the run's own launch
+   * configuration. `correlation` names the question a verdict answers.
+   */
+  async reply(
+    runId: string,
+    envelope: string,
+    correlation?: string,
+  ): Promise<ReplyReceipt> {
+    requireOpaqueId(runId, "run ID");
+    const url = this.#url(API_V2_PATHS.channelReply(runId));
+    if (correlation !== undefined)
+      url.searchParams.set(API_V2_QUERY.correlation, correlation);
+    return this.#request(url, replyReceiptSchema.parse, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: envelope,
+    });
+  }
+
+  /** Raise a surface on the run's channel under `kind`, with `message`. */
+  async surface(
+    runId: string,
+    surface: { readonly kind: string; readonly message: string },
+  ): Promise<Surfaced> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.channelSurface(runId)),
+      surfacedSchema.parse,
+      json("POST", surface),
+    );
+  }
+
+  /** Attest a ready human action by its reference, as the planner's own `attest`. */
+  async attest(runId: string, reference: string): Promise<ReplyReceipt> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.attest(runId)),
+      replyReceiptSchema.parse,
+      json("POST", { reference }),
+    );
+  }
+
+  /**
+   * Stop the run as the acting session. A run another session owns is refused
+   * `409 not_owner` naming the owner unless `force` is set, in which case the
+   * stop is journalled forced with the owner it overrode.
+   */
+  async stop(runId: string, force = false): Promise<Stopped> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.stop(runId)),
+      stoppedSchema.parse,
+      json("POST", { force }),
+    );
+  }
+
+  /** Adopt a run nothing is driving; the answer names the retained driver's pid. */
+  async adopt(runId: string): Promise<Adopted> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.adopt(runId)),
+      adoptedSchema.parse,
+      {
+        method: "POST",
+      },
+    );
+  }
+
+  /**
+   * Hold `GET .../watch` as a server-sent stream. While it is held the server is
+   * the run's registered watcher; the `returned` frame ends the wait and this
+   * closes the source on it, so the browser does not reopen a wait that is over.
+   */
+  watch(options: WatchOptions): TelemetrySubscription {
+    requireOpaqueId(options.runId, "run ID");
+    const url = this.#url(API_V2_PATHS.watch(options.runId));
+    for (const condition of options.until ?? [])
+      url.searchParams.append(API_V2_QUERY.until, condition);
+    if (options.timeout !== undefined)
+      url.searchParams.set(API_V2_QUERY.timeout, String(options.timeout));
+    if (options.tick !== undefined)
+      url.searchParams.set(API_V2_QUERY.tick, String(options.tick));
+    if (options.filter !== undefined)
+      url.searchParams.set(API_V2_QUERY.filter, options.filter);
+    if (options.cursor !== undefined)
+      url.searchParams.set(API_V2_QUERY.cursor, options.cursor);
+    const source = this.#open(url);
+    for (const eventName of watchEventNameSchema.options) {
+      source.addEventListener(eventName, (rawEvent) => {
+        try {
+          // DOM's EventListener callback erases the MessageEvent subtype even though
+          // EventSource listeners for named server events always receive one.
+          const event = rawEvent as MessageEvent<string>;
+          const data = watchFrameDataSchema.parse(JSON.parse(event.data));
+          if (eventName === "returned") source.close();
+          options.onFrame({ id: event.lastEventId, event: eventName, data });
+        } catch (error) {
+          options.onError?.(error);
+        }
+      });
+    }
+    source.onerror = (error) => options.onError?.(error);
+    return { close: () => source.close() };
+  }
+
+  /** The runs the acting session owns that nothing is watching. */
+  async unwatched(): Promise<Unwatched> {
+    return this.#request(
+      this.#url(API_V2_PATHS.unwatched),
+      unwatchedSchema.parse,
+    );
+  }
+
+  /** Every live dispatch on the host, as `onepipeline host` prints it. */
+  async host(): Promise<RenderedRoot> {
+    return this.#request(
+      this.#url(API_V2_PATHS.host),
+      renderedRootSchema.parse,
+    );
+  }
+
+  async getStatus(runId: string): Promise<RunStatus> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.status(runId)),
+      runStatusSchema.parse,
+    );
+  }
+
+  async getResults(runId: string): Promise<RenderedRun> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.results(runId)),
+      renderedRunSchema.parse,
+    );
+  }
+
+  async getGoals(): Promise<RenderedRoot> {
+    return this.#request(
+      this.#url(API_V2_PATHS.goals),
+      renderedRootSchema.parse,
+    );
+  }
+
+  async getRunGoals(runId: string): Promise<RenderedRun> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.runGoals(runId)),
+      renderedRunSchema.parse,
+    );
+  }
+
+  /** The CLI's rendering of a node's transcript, or the whole run's when `node` is omitted. */
+  async getTranscript(runId: string, node?: string): Promise<RunTranscript> {
+    requireOpaqueId(runId, "run ID");
+    const url = this.#url(API_V2_PATHS.transcript(runId));
+    if (node !== undefined) url.searchParams.set(API_V2_QUERY.node, node);
+    return this.#request(url, runTranscriptSchema.parse);
+  }
+
+  /** The SDK's own telemetry document for the run. */
+  async getTelemetryDocument(runId: string): Promise<RunTelemetryDocument> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.telemetry(runId)),
+      runTelemetryDocumentSchema.parse,
+    );
+  }
+
   #url(path: string): URL {
     return new URL(path, this.#baseUrl);
   }
 
-  async #request<T>(url: URL, parse: (value: unknown) => T): Promise<T> {
+  #open(url: URL): EventSource {
+    const create =
+      this.#eventSource ??
+      ((sourceUrl: string) => {
+        if (typeof EventSource === "undefined") {
+          throw new TelemetryClientError(
+            "EventSource is unavailable; provide an eventSource factory",
+          );
+        }
+        return new EventSource(sourceUrl);
+      });
+    return create(url.toString());
+  }
+
+  async #request<T>(
+    url: URL,
+    parse: (value: unknown) => T,
+    init?: RequestInit,
+  ): Promise<T> {
     let response: Response;
     try {
-      response = await this.#fetch(url);
+      response = await this.#fetch(url, init);
     } catch (error) {
       throw new TelemetryClientError(
         "Telemetry request failed",
@@ -308,6 +592,15 @@ export class TelemetryClient {
       );
     }
   }
+}
+
+/** A JSON request body with the header that says so. */
+function json(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  };
 }
 
 function requireOpaqueId(value: string, label: string): void {

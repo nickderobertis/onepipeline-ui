@@ -19,6 +19,10 @@ import {
 } from "@oneharness/ui";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
+  ArrowLeft,
+  BookOpenText,
+  Eye,
+  Inbox,
   RefreshCw,
   Route,
   Satellite,
@@ -26,17 +30,26 @@ import {
   Workflow,
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { ChannelView } from "../features/control/ChannelView";
+import { ReadsView } from "../features/control/ReadsView";
+import { RunActions } from "../features/control/RunActions";
+import { useRunControl } from "../features/control/useRunControl";
+import { WatchView } from "../features/control/WatchView";
 import { DagGraph } from "../features/graph/DagGraph";
 import { RunNavigation } from "../features/navigation/RunNavigation";
+import { ProjectPage, ProjectsLanding } from "../features/projects/ProjectPage";
+import { useProject, useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
-import { nodeViews } from "../lib/run-model";
+import { groupForKey, projectLabel } from "../lib/project-model";
+import { graphOf, nodeViews } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
 import {
   DETAIL_LEVELS,
   type DetailLevel,
+  isRunView,
   useUrlSelection,
 } from "../lib/useUrlSelection";
 
@@ -81,6 +94,9 @@ export function App({
     selection.runId,
     timelineScope,
     filter,
+    // Under the flat list an address naming no run opens the first served; on
+    // the projects it opens the project list.
+    selection.list === "runs",
   );
   // The order is the server's — most recent activity first — and is never
   // recomputed here.
@@ -88,6 +104,30 @@ export function App({
   const selectedRunId = telemetry.runId;
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
+  const projects = useProjects(
+    client,
+    telemetry.invalidations,
+    selection.list === "projects",
+  );
+  // The page is read only while it is the thing on screen: a run opened from
+  // it is the run's own reads, with the page one step back.
+  const project = useProject(
+    client,
+    selectedRunId === undefined ? selection.projectKey : undefined,
+    telemetry.invalidations,
+  );
+  const openedProject =
+    selection.projectKey === undefined
+      ? undefined
+      : (project.group ??
+        groupForKey(projects.list?.projects ?? [], selection.projectKey));
+  const control = useRunControl(
+    client,
+    selectedRunId,
+    filter,
+    telemetry.invalidations,
+  );
+  const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
   const liveRunIds = useMemo(
     () =>
@@ -125,6 +165,11 @@ export function App({
       <TimelinePopoverLayer />
       <div className="app-shell">
         <RunNavigation
+          list={selection.list}
+          onSelectList={selection.selectList}
+          projects={projects.list?.projects}
+          selectedProjectKey={selection.projectKey}
+          onSelectProject={selection.selectProject}
           runs={runs}
           selectedRunId={selectedRunId}
           liveRunIds={liveRunIds}
@@ -135,11 +180,38 @@ export function App({
         />
         <main className="workspace">
           <header className="topbar">
-            <div>
-              <p className="eyebrow">Execution telemetry</p>
-              <h2>{selectedRunId ?? "No DAG selected"}</h2>
+            <div className="topbar-title">
+              {/* The way back to the project a run was opened from, where it was. */}
+              {selection.projectKey !== undefined && selectedRunId && (
+                <Button
+                  aria-label={`Back to ${openedProject ? projectLabel(openedProject) : "the project"}`}
+                  className="topbar-back"
+                  onClick={() => selection.selectProject(selection.projectKey)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowLeft size={14} />
+                  {openedProject ? projectLabel(openedProject) : "Project"}
+                </Button>
+              )}
+              <div>
+                <p className="eyebrow">Execution telemetry</p>
+                <h2>
+                  {selectedRunId ??
+                    (selection.projectKey !== undefined
+                      ? ((openedProject && projectLabel(openedProject)) ??
+                        selection.projectKey)
+                      : selection.list === "projects"
+                        ? "Projects"
+                        : "No DAG selected")}
+                </h2>
+              </div>
             </div>
             <div className="topbar-actions">
+              {selectedRunId !== undefined && (
+                <RunActions control={control} runId={selectedRunId} />
+              )}
               <span className="connection">
                 <Satellite size={15} />
                 {telemetry.lastUpdated === undefined ? (
@@ -184,100 +256,158 @@ export function App({
               <AlertDescription>{telemetry.error.message}</AlertDescription>
             </Alert>
           )}
-          <Tabs
-            className="min-h-0 flex-1 gap-0"
-            onValueChange={(value) =>
-              value === "overall"
-                ? selection.showOverall()
-                : selection.selectNode(undefined)
-            }
-            value={selection.view}
-          >
-            <div className="view-tabs">
-              <TabsList aria-label="DAG views" variant="line">
-                <TabsTrigger value="graph">
-                  <Workflow size={15} /> Graph
-                </TabsTrigger>
-                <TabsTrigger value="overall">
-                  <Route size={15} /> Overall
-                </TabsTrigger>
-              </TabsList>
-              {/* How much of what the run recorded this reading carries. Beside
+          {selectedRunId === undefined && selection.projectKey !== undefined ? (
+            <ProjectPage
+              error={project.error}
+              group={openedProject}
+              loading={project.loading && openedProject === undefined}
+              onSelectRun={selection.selectRun}
+              projectKey={selection.projectKey}
+            />
+          ) : selectedRunId === undefined &&
+            selection.list === "projects" &&
+            !telemetry.loading ? (
+            <ProjectsLanding
+              error={projects.error}
+              groups={projects.list?.projects}
+              onSelect={selection.selectProject}
+            />
+          ) : (
+            <Tabs
+              className="min-h-0 flex-1 gap-0"
+              onValueChange={(value) =>
+                value === "overall"
+                  ? selection.showOverall()
+                  : value === "graph"
+                    ? selection.selectNode(undefined)
+                    : isRunView(value)
+                      ? selection.selectView(value)
+                      : undefined
+              }
+              value={selection.view}
+            >
+              <div className="view-tabs">
+                <TabsList aria-label="DAG views" variant="line">
+                  <TabsTrigger value="graph">
+                    <Workflow size={15} /> Graph
+                  </TabsTrigger>
+                  <TabsTrigger value="overall">
+                    <Route size={15} /> Overall
+                  </TabsTrigger>
+                  <TabsTrigger value="channel">
+                    <Inbox size={15} /> Channel
+                  </TabsTrigger>
+                  <TabsTrigger value="watch">
+                    <Eye size={15} /> Watch
+                  </TabsTrigger>
+                  <TabsTrigger value="reads">
+                    <BookOpenText size={15} /> Reads
+                  </TabsTrigger>
+                </TabsList>
+                {/* How much of what the run recorded this reading carries. Beside
                   the views rather than in the toolbar: it selects a reading, like
                   they do, and the toolbar is a fixed-height row the timeline
                   region's own share of the window is measured against. */}
-              <fieldset className="detail-switch">
-                <legend className="sr-only">Level of detail</legend>
-                {detailLevels.map(([level, { label, description }]) => (
-                  <Button
-                    aria-pressed={selection.detail === level}
-                    key={level}
-                    onClick={() => selection.selectDetail(level)}
-                    size="sm"
-                    title={description}
-                    type="button"
-                    variant={selection.detail === level ? "default" : "outline"}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </fieldset>
-            </div>
-            {/* One content region for whichever view is selected: the other tab's
+                <fieldset className="detail-switch">
+                  <legend className="sr-only">Level of detail</legend>
+                  {detailLevels.map(([level, { label, description }]) => (
+                    <Button
+                      aria-pressed={selection.detail === level}
+                      key={level}
+                      onClick={() => selection.selectDetail(level)}
+                      size="sm"
+                      title={description}
+                      type="button"
+                      variant={
+                        selection.detail === level ? "default" : "outline"
+                      }
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </fieldset>
+              </div>
+              {/* One content region for whichever view is selected: the other tab's
                 panel is unmounted by the primitive, exactly as it is for any tab set. */}
-            <TabsContent className="min-h-0" value={selection.view}>
-              {/* A run is selected but its detail has not arrived yet — still loading. The
+              <TabsContent className="min-h-0" value={selection.view}>
+                {/* A run is selected but its detail has not arrived yet — still loading. The
                   empty state means the server serves no run at all, so it is reached only
                   once the list is known and holds none. */}
-              {!detail && (telemetry.loading || selectedRunId !== undefined) ? (
-                <div aria-live="polite" className="loading-state">
-                  <Skeleton className="h-2 w-48" />
-                  <Skeleton className="h-2 w-32" />
-                  Loading execution history…
-                </div>
-              ) : detail && selectedRunId ? (
-                selection.view === "overall" ? (
-                  <OverallView
-                    client={client}
-                    detail={detail}
-                    nodes={nodes}
-                    timeline={telemetry.timeline}
-                    timelineError={telemetry.timelineError}
-                    onSelectNode={selection.selectNode}
-                    onSelectItem={selection.selectItem}
-                    selectedItemId={selection.itemId}
-                  />
-                ) : selectedNode ? (
-                  // Opening a node hands it the whole working area: the graph stays
-                  // one breadcrumb away rather than one narrow column beside it.
-                  <NodeTimelineView
-                    client={client}
-                    node={selectedNode}
-                    onBack={() => selection.selectNode(undefined)}
-                    onSelectItem={selection.selectItem}
-                    runId={selectedRunId}
-                    selectedItemId={selection.itemId}
-                    selectedTab={selection.nodeTab}
-                    onSelectTab={selection.selectNodeTab}
-                    timeline={telemetry.timeline}
-                    timelineError={telemetry.timelineError}
-                  />
+                {!detail &&
+                (telemetry.loading || selectedRunId !== undefined) ? (
+                  <div aria-live="polite" className="loading-state">
+                    <Skeleton className="h-2 w-48" />
+                    <Skeleton className="h-2 w-32" />
+                    Loading execution history…
+                  </div>
+                ) : detail && selectedRunId ? (
+                  selection.view === "channel" ? (
+                    <ChannelView
+                      client={client}
+                      decisions={graph?.decisions ?? []}
+                      filter={filter}
+                      invalidations={telemetry.invalidations}
+                      observedAt={detail.observed_at}
+                      runId={selectedRunId}
+                    />
+                  ) : selection.view === "watch" ? (
+                    <WatchView
+                      onToggle={control.toggleWatch}
+                      runId={selectedRunId}
+                      unwatched={control.unwatched.value}
+                      watch={control.watch}
+                    />
+                  ) : selection.view === "reads" ? (
+                    <ReadsView
+                      client={client}
+                      invalidations={telemetry.invalidations}
+                      nodes={nodes}
+                      runId={selectedRunId}
+                      status={control.status}
+                    />
+                  ) : selection.view === "overall" ? (
+                    <OverallView
+                      client={client}
+                      detail={detail}
+                      nodes={nodes}
+                      timeline={telemetry.timeline}
+                      timelineError={telemetry.timelineError}
+                      onSelectNode={selection.selectNode}
+                      onSelectItem={selection.selectItem}
+                      selectedItemId={selection.itemId}
+                    />
+                  ) : selectedNode ? (
+                    // Opening a node hands it the whole working area: the graph stays
+                    // one breadcrumb away rather than one narrow column beside it.
+                    <NodeTimelineView
+                      client={client}
+                      node={selectedNode}
+                      onBack={() => selection.selectNode(undefined)}
+                      onSelectItem={selection.selectItem}
+                      runId={selectedRunId}
+                      selectedItemId={selection.itemId}
+                      selectedTab={selection.nodeTab}
+                      onSelectTab={selection.selectNodeTab}
+                      timeline={telemetry.timeline}
+                      timelineError={telemetry.timelineError}
+                    />
+                  ) : (
+                    <DagGraph
+                      nodes={nodes}
+                      selectedNodeId={selection.nodeId}
+                      onSelectNode={selection.selectNode}
+                    />
+                  )
                 ) : (
-                  <DagGraph
-                    nodes={nodes}
-                    selectedNodeId={selection.nodeId}
-                    onSelectNode={selection.selectNode}
-                  />
-                )
-              ) : (
-                <div className="empty-state">
-                  <Workflow size={34} />
-                  <h2>No DAG runs found</h2>
-                  <p>Start an orchestrated run to see it appear here.</p>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
+                  <div className="empty-state">
+                    <Workflow size={34} />
+                    <h2>No DAG runs found</h2>
+                    <p>Start an orchestrated run to see it appear here.</p>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
         </main>
       </div>
     </TooltipProvider>

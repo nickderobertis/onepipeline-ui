@@ -71,6 +71,11 @@ export function formatAbsoluteTimestamp(at: string): string {
   return parsed === undefined ? at : format(parsed, "PPpp zzzz");
 }
 
+/** An epoch-millisecond stamp as the ISO instant every `Timestamp` reads. */
+export function isoOfMillis(millis: number): string {
+  return new Date(millis).toISOString();
+}
+
 /** How long ago it happened — the reading that answers "is this still recent?". */
 export function formatRelativeTimestamp(at: string): string {
   const parsed = parseTimestamp(at);

@@ -21,7 +21,11 @@ import {
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { API_V2_PATHS, parseRunTimeline } from "@onepipeline-ui/dag-model";
+import {
+  API_V2_PATHS,
+  parseRunList,
+  parseRunTimeline,
+} from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -58,9 +62,19 @@ import { DESKTOP, PHONE } from "./viewports";
  * overall reading of the run — which is a journey of its own below, and what every
  * graph journey here would otherwise have to walk out of first.
  */
+/**
+ * Open the app under the flat run list, on the graph of the live run.
+ *
+ * The projects are what a bare address opens on now, and these journeys are about
+ * the live run: they used to open on whatever run was served first, which was it,
+ * until the supervising journeys began writing to a run of their own — a write is
+ * a write *now*, and the run written to becomes the newest activity the flat list
+ * leads with. So the run is named, and the one journey about landing on the first
+ * run served says so itself.
+ */
 async function openObservatory(
   page: Page,
-  path = "/?view=graph",
+  path = `/?list=runs&run=${runs().live}&view=graph`,
 ): Promise<void> {
   await page.goto(path);
   await expect(page.getByText("DAG Observatory")).toBeVisible();
@@ -2542,7 +2556,7 @@ test("navigates historical DAGs from one list tagged by launching session", asyn
 test("loads another run-list page when navigation reaches the end", async ({
   page,
 }) => {
-  await page.goto("/?view=graph");
+  await page.goto("/?list=runs&view=graph");
   const navigation = page.getByRole("navigation", { name: "DAG runs" });
   await expect(navigation.locator(".run-link")).toHaveCount(50);
   await navigation.locator("[data-radix-scroll-area-viewport]").hover();
@@ -2555,7 +2569,7 @@ test("says the next run-list page is loading while it is", async ({ page }) => {
   // shows nothing is a list that looks like it has simply stopped, which is what
   // an operator who could not scroll past the first page was looking at.
   await delayReads(page, RUN_LIST_READ, 1_500);
-  await page.goto("/?view=graph");
+  await page.goto("/?list=runs&view=graph");
   const navigation = page.getByRole("navigation", { name: "DAG runs" });
   await expect(navigation.locator(".run-link")).toHaveCount(50);
 
@@ -2582,7 +2596,7 @@ test("loads another run-list page from the keyboard", async ({ page }) => {
   // list scrolls it, the navigation pages itself from that scroll, and `hasMore` going
   // false unmounts the control being tabbed towards. A list that fits cannot scroll.
   await page.setViewportSize({ width: 1280, height: RUN_LIST_FITS_HEIGHT });
-  await page.goto("/?view=graph");
+  await page.goto("/?list=runs&view=graph");
   const navigation = page.getByRole("navigation", { name: "DAG runs" });
   const loadMore = page.getByRole("button", { name: "Load more runs" });
   await expect(navigation.locator(".run-link")).toHaveCount(50);
@@ -2605,7 +2619,7 @@ test("recovers when loading another run-list page fails", async ({
   context,
   page,
 }) => {
-  await page.goto("/?view=graph");
+  await page.goto("/?list=runs&view=graph");
   const navigation = page.getByRole("navigation", { name: "DAG runs" });
   const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
   await expect(navigation.locator(".run-link")).toHaveCount(50);
@@ -2627,7 +2641,7 @@ test("recovers when loading another run-list page fails", async ({
 test("restores a bookmarked view and refreshes through the read API", async ({
   page,
 }) => {
-  await openObservatory(page, `/?run=${runs().live}&view=overall`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&view=overall`);
   const metric = (label: string) => metricTile(page, label);
   await expect(metric("Status")).toContainText("active");
   await expect(metric("Nodes")).toContainText(/[1-9]\d*/);
@@ -2659,9 +2673,11 @@ test("restores a bookmarked view and refreshes through the read API", async ({
 test("lands on the run as a whole, with every deep link still opening", async ({
   page,
 }) => {
-  // An address that names no view is an operator arriving at the observatory, and
-  // what they came to read is the run — not the shape of its graph.
-  await page.goto("/");
+  // An address that names the flat list and no view is an operator arriving at
+  // the runs, and what they came to read is the newest one as a whole — not the
+  // shape of its graph. A bare address opens on the projects instead, which
+  // `dag-ui-supervise.spec.ts` holds.
+  await page.goto("/?list=runs");
   await expect(page.getByText("DAG Observatory")).toBeVisible();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
     "aria-selected",
@@ -2684,7 +2700,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   await expect(graphNodes(page)).toHaveCount(0);
 
   // Every address that does name where it is going still opens there.
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
   await expect(
     page.getByRole("region", { name: "Timeline for dashboard" }),
   ).toBeVisible();
@@ -2772,7 +2788,10 @@ test("restores node tabs and moves between them from the keyboard", async ({
   await page.getByRole("tab", { name: "Overall" }).click();
   await expect(page).not.toHaveURL(/tab=/);
 
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard&tab=bogus`);
+  await openObservatory(
+    page,
+    `/?list=runs&run=${runs().live}&node=dashboard&tab=bogus`,
+  );
   await expect(page.getByRole("tab", { name: "Timeline" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -3206,7 +3225,7 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
 test("frames a different run from scratch when the reader moves to it", async ({
   page,
 }) => {
-  await openObservatory(page, `/?run=${runs().live}&view=overall`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&view=overall`);
   await expandGraphRows(page);
   const dashboard = graphRow(page, "dashboard");
   await dashboard.getByRole("button", { name: "Expand timeline" }).click();
@@ -3291,25 +3310,29 @@ test("connects to the server's event stream on load", async ({ page }) => {
 test("recovers the selection when a bookmarked run is not being served", async ({
   page,
 }) => {
+  // The run the fallback lands on is whichever the server serves first — its
+  // newest activity, which the supervising journeys' writes decide — so it is
+  // read off the list rather than assumed.
+  const listed = await page.request.get(
+    `${RUN_LIST_PATH}?include_settled=true&limit=1`,
+  );
+  const first = parseRunList(await listed.json()).runs[0]?.run_id ?? "";
+  expect(first).not.toBe("");
   await openObservatory(page, "/?run=absent-run&node=dashboard");
   // The server serves no such run, so the view falls back to a real one and
   // rewrites the address rather than stranding the operator on an empty graph.
-  await expect(graphNodes(page, "running")).toContainText("dashboard");
-  await expect
-    .poll(() => new URL(page.url()).search)
-    .toContain(`run=${runs().live}`);
+  await expect(graphNodes(page).first()).toBeVisible();
+  await expect.poll(() => new URL(page.url()).search).toContain(`run=${first}`);
 
   // The same fallback from the overall reading keeps the operator in it: only the
   // run under the view is rewritten, so a stale bookmark never also moves them.
-  await openObservatory(page, "/?run=absent-run");
+  await openObservatory(page, "/?list=runs&run=absent-run");
   await expect(graphLine(page)).toBeVisible();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  await expect
-    .poll(() => new URL(page.url()).search)
-    .toContain(`run=${runs().live}`);
+  await expect.poll(() => new URL(page.url()).search).toContain(`run=${first}`);
 });
 
 test("reflows navigation, detail, and metrics at a narrow viewport", async ({
@@ -3338,7 +3361,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
     });
 
   await page.setViewportSize({ width: 1400, height: 900 });
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
   expect(await viewportOverflow()).toEqual({
     overflowsX: false,
     overflowsY: false,
@@ -3365,7 +3388,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
   expect(new Set(wideRows).size).toBe(1);
 
   await page.setViewportSize({ width: 800, height: 700 });
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
   // Below the layout's breakpoint the six named readings wrap onto a second row
   // rather than widening the view that holds them — and rather than overflowing a
   // centred row, which spilled the first and last of them past both edges of a
@@ -3685,8 +3708,16 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
   // EventSource both fail for real, and the operator must be told rather than shown
   // an empty graph that looks like "no runs yet".
   await page.goto(OFFLINE_UI_URL);
-  const banner = page.getByRole("alert");
+  // The header's banner is about the run list and the stream; the projects the
+  // landing opens on report their own failed read beside it, so the banner is
+  // asked for by what it says.
+  const banner = page
+    .getByRole("alert")
+    .filter({ hasText: "Live telemetry issue" });
   await expect(banner).toContainText("Live telemetry issue");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "could not be read" }),
+  ).toBeVisible();
   // The banner names the failure as well as announcing one: an operator who cannot
   // see what broke cannot tell a wedged server from a mistyped API address.
   await expect(
@@ -4212,7 +4243,7 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
     const url = new URL(request.url());
     if (url.pathname === RUN_LIST_PATH) listReads.push(url.search);
   });
-  await page.goto("/?view=graph");
+  await page.goto("/?list=runs&view=graph");
   const navigation = page.getByRole("navigation", { name: "DAG runs" });
   const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
   await expect(navigation.locator(".run-link")).toHaveCount(50);
@@ -4281,7 +4312,7 @@ test("never renders one run's detail under another run's name", async ({
   const staleRead = page.waitForResponse((response) =>
     new URL(response.url()).pathname.endsWith(`/runs/${runs().live}`),
   );
-  await page.goto(`/?run=${runs().live}&view=graph`);
+  await page.goto(`/?list=runs&run=${runs().live}&view=graph`);
   await expect(page.getByText("Loading execution history…")).toBeVisible();
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
@@ -4311,7 +4342,7 @@ test("stays quiet when the run it is opening is swept out from under it", async 
   const banners = await watchForBanners(page);
   const sweep = sweepDuringRead(page, swept);
 
-  await page.goto(`/?run=${swept}&view=graph`);
+  await page.goto(`/?list=runs&run=${swept}&view=graph`);
 
   // The row goes, which is the whole of what the reader is told about it.
   await expect(
@@ -4386,6 +4417,9 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
     runs().eventless,
     runs().busy,
     runs().named,
+    runs().supervised,
+    runs().elsewhere,
+    runs().adoptable,
   ]) {
     changeServedRuns(["--remove-run", runId]);
     await expect(page.getByText("No DAG runs found")).toHaveCount(0);

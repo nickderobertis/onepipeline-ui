@@ -1,11 +1,20 @@
 # DAG Observatory web UI
 
-`apps/dag-ui` is the read-only live and historical view of orchestrated DAG
-execution. It visualizes the run's graph with React Flow, using the exact coordinates
-from `@onepipeline-ui/dag-layout`, and builds its surface out of the published
-`@oneharness/ui` components. Every payload it reads is validated by
-`@onepipeline-ui/dag-model` through `@onepipeline-ui/telemetry-client`; the app
-declares no schema, event name, or API path of its own.
+`apps/dag-ui` is the live and historical view of orchestrated DAG execution, and
+the place a manager supervises one from once its plan has started. It visualizes
+the run's graph with React Flow, using the exact coordinates from
+`@onepipeline-ui/dag-layout`, and builds its surface out of the published
+`@oneharness/ui` components. Every payload it reads and every verb it calls is
+validated by `@onepipeline-ui/dag-model` through `@onepipeline-ui/telemetry-client`;
+the app declares no schema, event name, or API path of its own.
+
+**What stays read-only.** Launching a plan and authoring one are outside this app,
+as they are outside the API it reads: `start`, `plan check` and the planning
+conversation are what make a run, and the browser is what a run is reached with
+afterwards. A planner's conversation is read here and never continued here. What
+the browser *can* do is everything the CLI does once a plan is running — the
+[supervising surface](#supervising-a-run) below — each verb wired to its one
+route under `/api/v2` and no other.
 
 ## Design system
 
@@ -15,8 +24,23 @@ The view switcher is its `Tabs`; panels, metric tiles and transcript cards are i
 its `ScrollArea`; the node's task and context are its `Accordion`; the telemetry banner is its
 `Alert`; the loading view is its `Skeleton`; and every secondary action is its
 `Button`, with `Badge`, `Separator`, `Tooltip` and the `cn` helper where they fit.
-`ConversationView` is deliberately not adopted: it requires a reply handler and
-continuation callbacks, and this app is read-only.
+`ConversationView` is still not adopted, for a reason that has changed. It used to
+be that it requires a reply handler and this app was read-only. The app now takes
+a reply — on the run's channel — and the decision was revisited on those terms:
+the component is a whole page for continuing one *harness session* with a free-text
+follow-up (its form is labelled "Continue this session", its help line says it
+"continues the exact native session", and the `Conversation` it renders is a
+harness session with `harnesses`, a `project` and `user`/`assistant` turns), and
+the reply this app sends is none of those. A channel reply is the engine's `Reply`
+envelope — a verdict half and a commands half, JSON, sent byte for byte — and the
+one conversation that takes one is the run's channel, whose sides are surfaces
+raised by a run and envelopes written by a manager, not turns of a session.
+Rendering the channel through `ConversationView` would put the run's surfaces on
+the `user` side and the manager's envelopes on the `assistant` side of a session
+that never existed, and its uncontrolled textarea gives a shortcut nothing to fill.
+The composer is built from the package's `Textarea`, `Input`, `Label`, `Button`,
+`Card`, `Badge` and `Dialog` instead, and the planner's own conversations stay
+read-only under `ConversationTimeline` and `TurnCard`, exactly as before.
 
 Status is the one place the package's components are not used unchanged.
 `StatusBadge` is the right component for a conversation, whose state really is one
@@ -74,14 +98,31 @@ the API, or route those paths to it.
 
 ## Use
 
-The left navigation groups current and settled DAGs by their launching Claude
-or Codex session, read from the `launch` attribution the run list itself carries.
-The grouping key is that record's opaque `session_key`, not its `launch_id`: one
-planner session mints a fresh launch id per `just orchestrate`, so every run of one
-session gathers under one heading, and its short form is the same fingerprint
-`just runs` prints. A run whose session nothing can name reads as its launch, and a
-run with no launch record at all — an e2e fixture, a bare `run-plan` — reads as
-`Unattributed` rather than as an unknown session. Select a run, then:
+**The app opens on the projects.** A bare address is the project list
+`GET /api/v2/projects` serves: one card per project, in the server's own order —
+newest activity first, by the group's last write — each carrying the plan's name
+and its qualified id, how many runs, when it last wrote, and its runs' states
+counted in the server's own words (`2 active · 1 settled`). The `(no project)`
+group — the runs whose launch recorded none — is a card like any other, wherever
+its own recency puts it, headed by that word rather than by the plan name of
+whichever run in it wrote last. The left navigation lists the same groups as rows.
+Clicking either opens the project's page, `GET /api/v2/projects/{project}` (the
+`(no project)` group has no id and no route, so its page is taken off the listing):
+every DAG launched against it, most recent activity first, each row the same row
+the run list serves — its settlement, its nodes counted, what is driving it in the
+engine's word, how many surfaces nobody has read, and when it last wrote — and
+each opening to the run view below. The project rides in the address (`?project=`,
+with `none` for the group that has no id), so a page is linkable and a run opened
+from one keeps the page one step back. Nothing here recomputes the order or the
+counts; the tallies are of the served rows, in the served words.
+
+**The flat run list is one toggle away** (`?list=runs`), and under it an address
+naming no run opens the first one served, as it always did. That list is one flat
+list, ordered by last activity, tagged by the launching Claude or Codex session
+read from the `launch` attribution the row carries — its `session_key`, the same
+fingerprint `just runs` prints — rather than gathered into sections by it: a
+grouping that outranks time is what the projects are for. A run with no launch
+record at all reads as `Unattributed`. Select a run, then:
 
 - **Overall** is where an address that names no view lands, and it is the run read
   as a whole: its telemetry tiles over the **graph timeline** (below).
@@ -95,6 +136,9 @@ run with no launch record at all — an e2e fixture, a bare `run-plan` — reads
   that says nothing about having more beside it.
 - select a node in the graph or keyboard-accessible node list to open its
   **timeline view** (below).
+- **Channel**, **Watch** and **Reads** are the supervising surface, described in
+  [Supervising a run](#supervising-a-run): every verb the CLI has once a plan is
+  running, from the run it is about.
 
 **One reading, at three scopes.** The same plot, the same lane words and the same
 clock are used for the whole run, for one node, and for one conversation, and each
@@ -128,6 +172,82 @@ exactly where they are, new ones are appended to them, and the loading skeleton 
 only ever the first read of a transcript, never a refresh of one. The panel follows
 that growth only while the reader is at the end of it — scroll up and it holds the
 position you chose while the session keeps being written below.
+
+## Supervising a run
+
+A manager supervising a plan used to read run ids here and leave for a terminal to
+act. The run view now offers every post-launch verb, each wired to its one route
+and nothing else — the routes are named verb by verb below — and every receipt and
+refusal is shown **as the API returned it** — the engine's own object, the engine's
+own words — never restated. The header of a run carries the controls that are about
+the run as a whole; three tabs beside Graph and Overall carry the rest.
+
+- **Status and liveness** in the header are `GET .../status`: the engine's own word
+  for how the run is being driven, read again on every stream invalidation and on a
+  ten-second clock of its own, because a driver that dies writes nothing and the
+  stream announces nothing. That word is what decides whether **Adopt** is offered:
+  only under `DRIVER DEAD` or `UNDRIVEN`, the two the engine's own `adopt` will take
+  over, and never under `ACTIVE` or `PARKED`, where offering it would be offering
+  the engine's refusal. An adoption is `POST .../adopt`, and the pid it answers is
+  shown.
+- **Stop** is `POST .../stop` as the acting session, behind one confirm. A run
+  another session owns comes back `409 not_owner` naming the owner as the engine
+  names it — `[codex:160c290a]`, never the raw session — and that refusal is shown
+  verbatim; only then is a **forced stop** offered, behind a second confirm that
+  names the owner it would override. It is never the default and never the first
+  dialog. The body sent is `{force}` exactly as the route takes it.
+- **Watch** holds `GET .../watch` as a server-sent stream for as long as the toggle
+  is on, under the reading's filter profile and with no clock on the wait. While it
+  is held the server is the run's registered watcher, and the Watch tab says the run
+  is being watched by this browser and lists the frames as they arrive: the events
+  under the profile, the heartbeats with the run's unread accounting, and the
+  `returned` frame that ends the wait — on which the client closes the source
+  itself, so the browser does not reopen a wait that is over. The stream asks for a
+  two-second heartbeat, and that is for the server rather than the reader: the wait
+  runs on a blocking worker that learns the browser has gone only when a write to
+  it fails, so a watch with no heartbeat keeps the watcher record for as long as
+  the run stays quiet. The **unwatched badge** beside the toggle is
+  `GET /api/v2/unwatched` for the acting session — how many runs it owns that
+  nothing is watching, and whether this is one — read again on the first frame and
+  once the server has had a heartbeat in which to notice the close.
+- **Channel** is the run's channel. The queue is `GET .../channel`, a reading that
+  consumes nothing, shown as the engine keeps it: the **pending** surface (the held
+  one nobody has given up on), the **waiting** ones nobody has read, an
+  **abandoned** one where the process serving it exited without an answer, and the
+  **answered** ones — each with its kind, its source, whether it blocks, the node it
+  holds and its age against the payload's own clock — then the replies written, the
+  edit envelopes the reconciler has not claimed, and its answers to the ones it
+  has. **Next** is `POST .../channel/next`, the channel's only consumer, and shows
+  what it claimed. **Ready human actions** are the graph's own `decisions`, each
+  with an **Attest** (`POST .../attest` with the decision's reference). **Surface**
+  is `POST .../channel/surface` with a kind and a message. The composer is
+  available on every run, a planning run included: the browser launches nothing
+  and authors no plan, and a reply is a post-launch route.
+- **The reply composer** sends `POST .../channel/reply` the editor's text, **byte
+  for byte** — never a parse of it — so a manager can type an envelope this app has
+  never heard of, and the engine's refusal of a malformed one is the engine's. The
+  shortcuts only ever fill the editor: a **verdict** — `approve`, `reject`,
+  `continue` — is the engine's legacy verdict half (`completion: true`,
+  `completion: false` with a reason, or a `message` alone), and every op the
+  engine's `Reply` schema declares (`add`, `drop`, `reparent`, `retry`, `cancel`,
+  `requeue`, `attest`, `complete`, `amend`, `note`, `finding`, `settle`) is a form
+  that renders to one command at the envelope version the engine reads edits at.
+  That grammar is `@onepipeline-ui/dag-model`'s `replyEnvelopeSchema`, held to the
+  engine's own field set, and a form that cannot compose an envelope the grammar
+  reads says which field rather than sending something the engine would refuse for
+  a reason that is not the reader's. A correlation names the question a verdict
+  answers.
+- **Reads** are the rendered verbs, each a panel showing the SDK's own text — byte
+  for byte what the binary prints, because those verbs answer rendered views rather
+  than records: `status`, `results`, `goals`, the `transcript` per node (a node the
+  run never dispatched is the engine's refusal, shown as such), `telemetry` as the
+  SDK's own document, and the `host` view. `monitor` is the existing timeline under
+  a profile.
+
+`e2e/dag-ui-supervise.spec.ts` drives every one of these against the real API over
+runs the fixture writes for them alone — the supervised run the acting session
+owns, the run another session owns, and the run nothing drives — so the live run
+every other journey reads is left as it was.
 
 ## The graph timeline
 
@@ -430,6 +550,9 @@ being photographed.
 | `08-conversation` | a conversation in the right panel |
 | `09-node-redirected` | a node reading as having a reachable turn, with the redirection that turn took open beside it |
 | `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
+| `11-project-list` | the projects the app opens on, the `(no project)` group among them |
+| `12-project-page` | a project's page: its runs, newest activity first |
+| `13-channel` | the channel: the queue, the composer and the surface form |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
@@ -493,7 +616,13 @@ browser against a real `onepipeline-api serve` process:
 own on-disk shape — a launch record, a plan, the run's own recorded result, and
 the merged event store — `serve-fixture.mjs` serves it through the compiled binary,
 and `playwright.config.ts` starts both that server and Vite. Nothing between the
-browser and the read model is doubled.
+browser and the read model is doubled. The server acts as the session that launched
+the supervised runs, so a stop on one of them is the owner's and a stop on any other
+is refused naming its owner; and the run an adoption takes over is recorded as
+driven on *this* host under a pid nothing can hold, with the host name pinned in the
+server's environment to the one the fixture wrote, so the engine proves the driver
+gone rather than reading the run as driven. The adopted driver is this repository's
+own binary at the engine's driver verb, settling a graph of one human action.
 
 The gallery spec lives beside the journeys because it drives the same surfaces against
 the same stack, but it asserts nothing and writes images, so `playwright.config.ts`
