@@ -19,13 +19,14 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use onepipeline::views::{RunPaths, RunSummary, RunView};
-use onepipeline_ui::api::ReadApi;
-use onepipeline_ui::cli::{Cli, Command, ServeArgs, EXIT_SOFTWARE};
+use onepipeline_ui::api::RunApi;
+use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
-    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
-    EventsQuery, Health, HealthStatus, NodeId, PageLimit, ReferenceKind, Release, RunId, RunQuery,
-    RunsPage, RunsQuery, SseEvent, TimelineQuery, TimelineScope, API_VERSION, RUNS_PAGE_LIMIT,
-    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
+    EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
+    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, SseEvent, StopRequest,
+    SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery, WatchQuery, API_VERSION,
+    RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -35,7 +36,7 @@ use serde_json::{json, Value};
 mod fixture_run;
 
 /// The fixture file each route's response body is pinned in.
-const ROUTE_FIXTURES: [(&str, &str); 7] = [
+const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::HEALTHZ, "healthz.json"),
     (routes::RUNS, "runs.json"),
     (routes::RUN, "run.json"),
@@ -43,7 +44,34 @@ const ROUTE_FIXTURES: [(&str, &str); 7] = [
     (routes::RUN_CONVERSATION, "run-conversation.json"),
     (routes::RUN_ARTIFACT, "run-artifact.json"),
     (routes::EVENTS, "events.json"),
+    (routes::PROJECTS, "projects.json"),
+    (routes::PROJECT, "project.json"),
+    (routes::RUN_CHANNEL, "run-channel.json"),
+    (routes::RUN_CHANNEL_NEXT, "run-channel-next.json"),
+    (routes::RUN_CHANNEL_REPLY, "run-channel-reply.json"),
+    (routes::RUN_CHANNEL_SURFACE, "run-channel-surface.json"),
+    (routes::RUN_ATTEST, "run-attest.json"),
+    (routes::RUN_STOP, "run-stop.json"),
+    (routes::RUN_ADOPT, "run-adopt.json"),
+    (routes::RUN_WATCH, "run-watch.json"),
+    (routes::UNWATCHED, "unwatched.json"),
+    (routes::HOST, "host.json"),
+    (routes::RUN_STATUS, "run-status.json"),
+    (routes::RUN_RESULTS, "run-results.json"),
+    (routes::GOALS, "goals.json"),
+    (routes::RUN_GOALS, "run-goals.json"),
+    (routes::RUN_TRANSCRIPT, "run-transcript.json"),
+    (routes::RUN_TELEMETRY, "run-telemetry.json"),
 ];
+
+/// The binary that carries the hidden driver verb an adoption retains.
+///
+/// An in-process store would retain the *test* executable, which does not
+/// answer `drive-run`; the served process retains itself, and this is what it
+/// would retain.
+fn api_binary() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_onepipeline-api"))
+}
 
 /// The store the served process would build over a workspace's runs root: the
 /// root itself, and the graph records the fixtures keep beside it — where the
@@ -104,15 +132,59 @@ fn every_route_the_contract_documents_is_in_the_route_table() {
 #[test]
 fn the_route_table_documents_no_route_the_contract_does_not() {
     let contract = contract_text();
-    let documented: Vec<&str> = contract
+    // The contract writes each route as `METHOD path …` on a line of its own,
+    // so the method is read beside the path: a route the table serves as a
+    // `POST` and the contract writes as a `GET` is a disagreement too.
+    let documented: Vec<(&str, &str)> = contract
         .lines()
-        .filter_map(|line| line.strip_prefix("GET "))
-        .map(|rest| rest.split_whitespace().next().unwrap_or_default())
+        .filter_map(|line| {
+            let (method, rest) = line.split_once(' ')?;
+            matches!(method, "GET" | "POST")
+                .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
+        })
+        .collect();
+    let table: Vec<(&str, &str)> = routes::TABLE
+        .iter()
+        .map(|route| (route.method.as_str(), route.path))
         .collect();
     assert_eq!(
-        documented,
-        routes::ALL.to_vec(),
+        documented, table,
         "the route table and docs/contract.md list different routes, or list them in a different order"
+    );
+}
+
+/// The README indexes the routes and names the served schema version, and
+/// both are read back against the source rather than left as a second copy.
+///
+/// The README is the crate's front page on crates.io and npm, so it carries
+/// the route table a reader meets first; what keeps it from drifting is this,
+/// which holds its `METHOD path` lines to [`routes::TABLE`] in order and its
+/// version to the constant the envelope is served at.
+#[test]
+fn the_readme_indexes_every_route_and_names_the_served_schema() {
+    let readme = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("the README reads");
+    let indexed: Vec<(&str, &str)> = readme
+        .lines()
+        .filter_map(|line| {
+            let (method, rest) = line.split_once(' ')?;
+            matches!(method, "GET" | "POST")
+                .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
+        })
+        .collect();
+    let table: Vec<(&str, &str)> = routes::TABLE
+        .iter()
+        .map(|route| (route.method.as_str(), route.path))
+        .collect();
+    assert_eq!(
+        indexed, table,
+        "README.md indexes different routes than the route table, or in a different order"
+    );
+    assert!(
+        readme.contains(&format!(
+            "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})"
+        )),
+        "README.md names a telemetry schema version other than {TELEMETRY_SCHEMA_VERSION}"
     );
 }
 
@@ -371,10 +443,11 @@ fn every_route_serves_the_payload_its_golden_pins() {
     let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
 
-    // The timings in these goldens are `onepipeline`'s own document, read through
-    // its CLI, and every one of them is `null` when that CLI cannot be asked. So
-    // the sibling being missing would quietly rewrite the goldens to say the run
-    // had no clock — checked here rather than discovered in a diff.
+    // The timings in these goldens are `onepipeline`'s own document, folded
+    // in-process, and every one of them is `null` when that fold produced a
+    // document this build refuses. So a refusal would quietly rewrite the
+    // goldens to say the run had no clock — checked here rather than discovered
+    // in a diff.
     let served = store
         .run(
             &run,
@@ -386,9 +459,8 @@ fn every_route_serves_the_payload_its_golden_pins() {
         .expect("the fixture run serves");
     assert!(
         !served.payload["run"]["timing"]["wall_ms"].is_null(),
-        "the sibling that aggregates a run's telemetry did not answer, so every timing here \
-         would be pinned absent — run `just bootstrap` to provision the `onepipeline` build \
-         the lock pins, or name one with ONEPIPELINE_UI_ONEPIPELINE_BIN"
+        "the SDK's fold of the fixture run's telemetry was refused, so every timing here \
+         would be pinned absent — read the server's own account of why on stderr"
     );
 
     let served: [(&str, Value); 6] = [
@@ -449,18 +521,228 @@ fn every_route_serves_the_payload_its_golden_pins() {
     ];
 
     for (name, document) in served {
-        let rendered = canonical(&normalized(document));
-        if std::env::var_os(UPDATE).is_some() {
-            fs::write(fixture_dir().join(name), &rendered).expect("rewrite the golden");
-            continue;
-        }
-        assert_eq!(
-            rendered,
-            read_fixture(name),
-            "tests/fixtures/{name} is not what the server serves — \
-             re-run with {UPDATE}=1 to accept the change deliberately"
-        );
+        pin(name, document);
     }
+}
+
+/// Hold one served document to its golden, or rewrite the golden deliberately.
+fn pin(name: &str, document: Value) {
+    pin_under(name, document, None);
+}
+
+/// [`pin`], for a document that may name the runs root it was read from.
+fn pin_under(name: &str, document: Value, root: Option<&Path>) {
+    let rendered = canonical(&normalized_under(document, root));
+    if std::env::var_os(UPDATE).is_some() {
+        fs::write(fixture_dir().join(name), &rendered).expect("rewrite the golden");
+        return;
+    }
+    assert_eq!(
+        rendered,
+        read_fixture(name),
+        "tests/fixtures/{name} is not what the server serves — \
+         re-run with {UPDATE}=1 to accept the change deliberately"
+    );
+}
+
+/// The read verbs, served against the settled fixture run and pinned.
+///
+/// Every one is `onepipeline::verbs` over the same directory
+/// `every_route_serves_the_payload_its_golden_pins` serves the read routes
+/// against, so what these goldens pin is the envelope this crate owns around
+/// the SDK's own result — the grouped listing in its order, the channel as it
+/// stands, and the CLI's own renderings.
+#[test]
+fn every_read_verb_serves_the_payload_its_golden_pins() {
+    // `status` renders the provider-health block the engine reads through its
+    // own sibling, which is a probe of this host's identities and quotas — the
+    // same block `onepipeline status RUN` prints. Pointed at an executable that
+    // is not there, at the engine's own documented override, so the golden pins
+    // the run's standing rather than this host's quota at the moment of the
+    // read. Nothing else in this binary consults the sibling.
+    std::env::set_var(
+        "ONEPIPELINE_ONEAGENTGRAPH_BIN",
+        "/nonexistent/onepipeline-ui-contract/oneagentgraph",
+    );
+    // `host` opens with the name of the host doing the reading, which the
+    // engine takes from `HOSTNAME` before it asks the system — so the golden
+    // pins a named host rather than whichever machine ran the suite. No
+    // fixture run was recorded on this name, so every liveness verdict below
+    // is the one a reader on any other host reaches.
+    std::env::set_var("HOSTNAME", READING_HOST);
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write(&root, fixture_run::RUN_ID);
+    fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    let store = store_over(&root);
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+    let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
+    let journal_end = fs::metadata(RunPaths::under(&root, fixture_run::RUN_ID).journal())
+        .expect("the fixture run's journal")
+        .len();
+
+    let served: [(&str, Value); 12] = [
+        ("projects.json", enveloped(store.projects())),
+        ("project.json", enveloped(store.project(&project))),
+        ("run-channel.json", enveloped(store.channel(&run))),
+        (
+            "run-watch.json",
+            at_journal_end(
+                serde_json::to_value(
+                    store
+                        .watch(
+                            &run,
+                            &WatchQuery {
+                                timeout: onepipeline::cli::WatchTimeout::Bounded(0),
+                                ..WatchQuery::default()
+                            },
+                        )
+                        .expect("a watch of no seconds reads the run once")
+                        .collect::<Vec<_>>(),
+                )
+                .expect("serialize the frames"),
+                journal_end,
+            ),
+        ),
+        ("unwatched.json", enveloped(store.unwatched())),
+        ("host.json", enveloped(store.host())),
+        ("run-status.json", enveloped(store.status(&run))),
+        ("run-results.json", enveloped(store.results(&run))),
+        ("goals.json", enveloped(store.goals())),
+        ("run-goals.json", enveloped(store.run_goals(&run))),
+        (
+            "run-transcript.json",
+            enveloped(store.transcript(
+                &run,
+                &TranscriptQuery {
+                    node: Some(NodeId::try_from(fixture_run::NODE_ID).expect("valid")),
+                },
+            )),
+        ),
+        ("run-telemetry.json", enveloped(store.telemetry(&run))),
+    ];
+    for (name, document) in served {
+        pin_under(name, document, Some(&root));
+    }
+}
+
+/// The verbs that write, each served once against a fresh copy of a fixture
+/// run and pinned.
+///
+/// Each is the engine's own verb over a run nothing is driving, which is what
+/// lets every one of them succeed without a driver: a reply is applied by the
+/// call itself, a claim finds the queue the surface was pushed onto, and an
+/// adoption retains the compiled binary and lets it settle the complete run.
+/// What the goldens pin is the receipt, the claim, the stop and the pid
+/// answer — projected from the SDK's own results — with the one value no golden
+/// can hold, the driver's pid, replaced as `observed_at` is.
+#[test]
+fn every_write_verb_serves_the_payload_its_golden_pins() {
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write(&root, fixture_run::RUN_ID);
+    let store = store_over(&root);
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+
+    // A surface raised, then claimed by the channel's only consumer: the claim
+    // carries the surface the raise queued.
+    let surfaced = enveloped(store.channel_surface(
+        &run,
+        &SurfaceRequest {
+            kind: onepipeline::channel::SurfaceKind::finding(),
+            message: "the gate is red".to_owned(),
+        },
+    ));
+    // Shaped through a spec that admits no event: what this golden pins is the
+    // claim — the surface the raise queued, consumed by the channel's only
+    // consumer — and the run's events are pinned by the read routes' own
+    // goldens. Unshaped, the answer carries the `planner-surfaced` the claim
+    // itself just journalled, stamped with this host and this instant.
+    let claimed = enveloped(
+        store.channel_next(
+            &run,
+            &NextQuery {
+                filter: Some(
+                    onepipeline_ui::filter::FilterSpec::parse(
+                        r#"{"include":[{"kind":"no-such-kind"}]}"#,
+                    )
+                    .expect("a spec"),
+                ),
+            },
+        ),
+    );
+    // An edit, applied by the reply itself because nothing is driving the run.
+    let replied = enveloped(store.channel_reply(
+        &run,
+        None,
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+    ));
+    pin("run-channel-surface.json", surfaced);
+    pin("run-channel-next.json", claimed);
+    pin("run-channel-reply.json", replied);
+
+    // The attestation, over the run holding a ready human action nobody has
+    // taken.
+    let (_live, live_root) = fixture_run::workspace();
+    fixture_run::write_live(&live_root, fixture_run::RUN_ID);
+    let live = store_over(&live_root);
+    pin(
+        "run-attest.json",
+        enveloped(live.attest(
+            &run,
+            &AttestRequest {
+                reference: fixture_run::SIGNOFF_NODE_ID.to_owned(),
+            },
+        )),
+    );
+
+    // A stop, as the session the fixture's launch record names.
+    let (_stopping, stop_root) = fixture_run::workspace();
+    fixture_run::write(&stop_root, fixture_run::RUN_ID);
+    let stopping = store_over(&stop_root).acting_as(Some(
+        &SessionId::try_from(fixture_run::SESSION.to_owned()).expect("the fixture's session"),
+    ));
+    pin(
+        "run-stop.json",
+        enveloped(stopping.stop(&run, &StopRequest::default())),
+    );
+
+    // An adoption, retaining the compiled binary as the driver of the complete
+    // run — which settles it and lets go, so nothing is left running behind
+    // this test. The engine judges an adoption's ownership by the session its
+    // *environment* names rather than by one handed in — the served process
+    // exports its acting session for exactly that reason — so this process
+    // acts as the fixture's session for the length of the call. Nothing else
+    // in this binary reads the variable: every other verb is handed the
+    // session explicitly.
+    // Over a fresh copy: the reply above wrote to the first copy's journal a
+    // moment ago, which is a run being driven as far as the engine's liveness
+    // reading is concerned, and an adoption refuses one of those. The driver
+    // the engine retains resolves the run under the root *its* environment
+    // names — the served process exports its root for exactly that reason —
+    // so this process names the copy's root for the length of the call, as it
+    // names the session.
+    let (adopting_workspace, adopt_root) = fixture_run::workspace();
+    fixture_run::write(&adopt_root, fixture_run::RUN_ID);
+    fixture_run::adoptable_from(&adopt_root, fixture_run::RUN_ID, adopting_workspace.path());
+    let adopting = store_over(&adopt_root).driving_with(&api_binary());
+    std::env::set_var(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION);
+    std::env::set_var(onepipeline_ui::store::RUNS_DIR_ENV, &adopt_root);
+    let adopted = enveloped(adopting.adopt(&run));
+    std::env::remove_var(onepipeline_ui::cli::SESSION_ENV);
+    std::env::remove_var(onepipeline_ui::store::RUNS_DIR_ENV);
+    let pid = adopted["pid"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("a detached adoption answers the driver's pid: {adopted}"));
+    assert!(pid > 0);
+    pin("run-adopt.json", adopted);
+    let lock = adopt_root.join(fixture_run::RUN_ID).join("owner.lock");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while lock.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        !lock.exists(),
+        "the retained driver never let go of the run"
+    );
 }
 
 /// The envelope a route served, as JSON, or the failure that stops the golden
@@ -469,8 +751,124 @@ fn enveloped(served: Result<Envelope<Value>, ApiError>) -> Value {
     serde_json::to_value(served.expect("the fixture run serves every route")).expect("serialize")
 }
 
-/// The same document with the read's own instant replaced, wherever it appears.
-fn normalized(document: Value) -> Value {
+/// The pid a golden claims a retained driver was given.
+///
+/// The one other value no golden can pin: the kernel hands it out, so it is
+/// replaced as the read's instant is, and the test that pins it holds the
+/// served one to being a pid.
+const DRIVER_PID: u64 = 4242;
+
+/// The instant a golden claims a surface was queued at.
+///
+/// The engine stamps a raised surface with the clock, so it is replaced as the
+/// read's instant is: the fact the golden pins is that the claim carries the
+/// surface the raise queued, not when.
+const QUEUED_AT: u64 = 1_786_104_000_000;
+
+/// Where a golden says the runs root was.
+///
+/// A rendered verb names the root it read — `host` and `goals` open with it —
+/// and a temporary workspace's path is new on every run of the suite, so it is
+/// replaced wherever a served string carries it.
+const RUNS_ROOT: &str = "/a-workspace/runs";
+
+/// Where a golden says a producing library's scratch was.
+///
+/// A settled member's report is retained from the path its settlement names,
+/// which is that library's own scratch — gone by the time anything reads the
+/// run, and new on every write of the fixture — and the CLI's transcript
+/// rendering prints the path as recorded. Replaced wherever a served string
+/// carries one, so the golden pins the rendering and not a directory name.
+const SCRATCH: &str = "/a-scratch";
+
+/// `text` with every temporary directory `tempfile` made replaced by
+/// [`SCRATCH`]: the process's temporary directory, `.tmp`, and the six
+/// characters that library draws.
+///
+/// The prefix is joined rather than formatted because the temporary directory
+/// is spelled with a trailing separator on some hosts — macOS's `TMPDIR` is one
+/// — and `tempfile` joins onto it exactly as this does, so the two spell the
+/// directory the same way. The separator after the drawn characters is
+/// replaced too, so a path a Windows host recorded reads as the golden does.
+fn without_scratch(text: &str) -> String {
+    let prefix = std::env::temp_dir().join(".tmp").display().to_string();
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(&prefix) {
+        out.push_str(&rest[..at]);
+        out.push_str(SCRATCH);
+        rest = &rest[at + prefix.len()..];
+        let drawn = rest
+            .char_indices()
+            .take(6)
+            .take_while(|(_, c)| c.is_ascii_alphanumeric())
+            .last()
+            .map_or(0, |(index, c)| index + c.len_utf8());
+        rest = &rest[drawn..];
+        if let Some(under) = rest.strip_prefix(std::path::MAIN_SEPARATOR) {
+            out.push('/');
+            rest = under;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The name of the host a golden says did the reading.
+///
+/// A rendered verb names the host it ran on — `host` opens with it — and the
+/// engine reads that name from `HOSTNAME` before it asks the system, so the
+/// test that pins the rendering names one rather than pinning the machine the
+/// suite happened to run on.
+const READING_HOST: &str = "a-reading-host";
+
+/// Where a golden says a watch's cursor stood: at the end of the journal.
+///
+/// A cursor is a byte offset into the run's journal, and the fixture journal's
+/// length is a property of the host that wrote it — a settled member records
+/// the path its producer's scratch had, and a temporary directory is spelled
+/// differently on every platform. So the offset is replaced by this where it
+/// equals the journal's length, and kept where it does not: what the golden pins
+/// is that a watch of no seconds read the whole journal and says so, not how
+/// many bytes that was.
+const JOURNAL_END: &str = "end-of-journal";
+
+/// `frames` with every `cursor` standing at `journal_end` replaced by
+/// [`JOURNAL_END`].
+fn at_journal_end(frames: Value, journal_end: u64) -> Value {
+    let whole = format!(":{journal_end}");
+    match frames {
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, value)| {
+                    if key != "cursor" {
+                        return (key, at_journal_end(value, journal_end));
+                    }
+                    if let Some(run) = value
+                        .as_str()
+                        .and_then(|cursor| cursor.strip_suffix(&whole))
+                    {
+                        return (key, Value::String(format!("{run}:{JOURNAL_END}")));
+                    }
+                    (key, value)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| at_journal_end(item, journal_end))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// The same document with the read's own instant — and a retained driver's
+/// pid, a surface's queued instant, every scratch directory, and the
+/// workspace's `root` where one is named — replaced, wherever they appear.
+fn normalized_under(document: Value, root: Option<&Path>) -> Value {
     match document {
         Value::Object(fields) => Value::Object(
             fields
@@ -478,13 +876,26 @@ fn normalized(document: Value) -> Value {
                 .map(|(key, value)| {
                     if key == "observed_at" {
                         (key, Value::String(OBSERVED_AT.to_owned()))
+                    } else if key == "pid" {
+                        (key, json!(DRIVER_PID))
+                    } else if key == "queued_at" {
+                        (key, json!(QUEUED_AT))
                     } else {
-                        (key, normalized(value))
+                        (key, normalized_under(value, root))
                     }
                 })
                 .collect(),
         ),
-        Value::Array(items) => Value::Array(items.into_iter().map(normalized).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| normalized_under(item, root))
+                .collect(),
+        ),
+        Value::String(text) => Value::String(without_scratch(&match root {
+            Some(root) => text.replace(&root.display().to_string(), RUNS_ROOT),
+            None => text,
+        })),
         other => other,
     }
 }
@@ -571,8 +982,8 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
-        if route == routes::HEALTHZ || route == routes::EVENTS {
-            continue; // Not enveloped, and enveloped one level down, respectively.
+        if route == routes::HEALTHZ || route == routes::EVENTS || route == routes::RUN_WATCH {
+            continue; // Not enveloped, and enveloped one level down, and a list of frames.
         }
         let raw = read_fixture(fixture);
         let envelope: Envelope<Value> =
@@ -589,7 +1000,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 17);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 18);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -797,12 +1208,44 @@ fn the_error_envelope_round_trips_and_matches_the_error_it_renders() {
 fn every_error_maps_to_its_code_and_status() {
     let reason = "why".to_owned();
     let id = "why-1";
-    let cases: [(ApiError, &str, u16); 11] = [
+    let cases: [(ApiError, &str, u16); 20] = [
         (
             ApiError::InvalidRequest(reason.clone()),
             "invalid_request",
             422,
         ),
+        (
+            ApiError::InvalidProjectId(reason.clone()),
+            "invalid_project_id",
+            422,
+        ),
+        (
+            ApiError::InvalidCorrelation(reason.clone()),
+            "invalid_correlation",
+            422,
+        ),
+        (ApiError::Refused(reason.clone()), "refused", 422),
+        (
+            ApiError::ProjectNotFound(ProjectId::try_from("local-md:why").expect("valid")),
+            "project_not_found",
+            404,
+        ),
+        (
+            ApiError::NotOwner {
+                run: RunId::try_from(id).expect("valid"),
+                owner: "[claude-code:why0why0]".to_owned(),
+            },
+            "not_owner",
+            409,
+        ),
+        (
+            ApiError::NothingDriving(RunId::try_from(id).expect("valid")),
+            "nothing_driving",
+            409,
+        ),
+        (ApiError::Locked(reason.clone()), "locked", 409),
+        (ApiError::NotStopped(reason.clone()), "not_stopped", 409),
+        (ApiError::Engine(reason.clone()), "engine_error", 500),
         (
             ApiError::InvalidRunId(reason.clone()),
             "invalid_run_id",
@@ -866,6 +1309,133 @@ fn every_error_maps_to_its_code_and_status() {
         ApiError::NoSuchRoute.envelope().error.message,
         "no such route"
     );
+}
+
+/// Every refusal the engine can make of a verb reaches the wire as the one code
+/// and status the contract assigns it, in the engine's own words.
+///
+/// The engine's error is an enum this crate maps once, in `ApiError::from_engine`;
+/// the arms a journey can reach — a run that is not there, one another session
+/// owns, a refusal, an invalid envelope — are driven over HTTP in
+/// `tests/e2e/server.rs`, and the ones a journey cannot put a fixture run into
+/// — nothing driving where something had to be, a lock another writer holds, a
+/// ledger the engine could not write — are held here to the same table, so no
+/// arm serves a status its code disagrees with.
+#[test]
+fn every_engine_refusal_maps_to_the_code_and_status_the_contract_assigns() {
+    let run = RunId::try_from("run-1").expect("valid");
+    let root = std::path::PathBuf::from("/a-runs-root");
+    let cases: [(onepipeline::Error, &str, u16, &str); 7] = [
+        (
+            onepipeline::Error::NoSuchRun {
+                run: "run-1".to_owned(),
+                root: root.clone(),
+            },
+            "run_not_found",
+            404,
+            "run-1",
+        ),
+        (
+            onepipeline::Error::NotOwned {
+                run: "run-1".to_owned(),
+                owner: "[claude-code:0a1b2c3d]".to_owned(),
+            },
+            "not_owner",
+            409,
+            "[claude-code:0a1b2c3d]",
+        ),
+        (
+            onepipeline::Error::NothingDriving {
+                run: "run-1".to_owned(),
+            },
+            "nothing_driving",
+            409,
+            "run-1",
+        ),
+        (
+            onepipeline::Error::Refused("the reply is malformed: nope".to_owned()),
+            "refused",
+            422,
+            "the reply is malformed: nope",
+        ),
+        (
+            onepipeline::Error::Invalid("'x' is not a run id".to_owned()),
+            "refused",
+            422,
+            "'x' is not a run id",
+        ),
+        (
+            onepipeline::Error::Locked {
+                run: "run-1".to_owned(),
+                pid: 4242,
+                host: "a-recording-host".to_owned(),
+                verb: "drive".to_owned(),
+            },
+            "locked",
+            409,
+            "pid 4242",
+        ),
+        (
+            onepipeline::Error::Ledger {
+                path: root.join("run-1/launch.json"),
+                source: std::io::Error::other("disk gone"),
+            },
+            "engine_error",
+            500,
+            "disk gone",
+        ),
+    ];
+    for (engine, code, status, said) in cases {
+        let error = ApiError::from_engine(&run, engine);
+        assert_eq!(error.code(), code);
+        assert_eq!(error.status(), status);
+        let rendered = error.envelope();
+        assert_eq!(rendered.error.code, code);
+        assert!(
+            rendered.error.message.contains(said),
+            "{code}: the engine's own words did not reach the wire — {}",
+            rendered.error.message
+        );
+    }
+}
+
+/// The project id's source grammar is the contract's, and the code's copy is
+/// held to the text.
+///
+/// onetaskgraph is no dependency of this crate — the engine reaches it by
+/// subprocess — so there is no declaration to import; what there is, is the
+/// grammar the contract quotes, and this reads the code's copy back against it
+/// and drives it at the edges the grammar draws.
+#[test]
+fn the_project_id_grammar_is_the_one_the_contract_quotes() {
+    let contract = contract_text();
+    assert!(
+        contract.contains(&format!("`{}`", ProjectId::SOURCE_GRAMMAR)),
+        "docs/contract.md does not spell the source grammar {}",
+        ProjectId::SOURCE_GRAMMAR
+    );
+    for accepted in ["local-md:plan", "a0:run-1", "github-projects:x.y_z"] {
+        assert_eq!(
+            ProjectId::try_from(accepted).map(|id| id.as_str().to_owned()),
+            Ok(accepted.to_owned())
+        );
+    }
+    for refused in [
+        "no-separator",
+        "Upper:plan",
+        "-leading:plan",
+        "under_score:plan",
+        "local-md:",
+        "local-md:a:b",
+        "local-md:.dot",
+        "local-md:a/b",
+    ] {
+        assert_eq!(
+            ProjectId::try_from(refused).expect_err(refused).code(),
+            "invalid_project_id",
+            "{refused}"
+        );
+    }
 }
 
 #[test]
@@ -968,9 +1538,12 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
     let root = runs.path().to_str().expect("utf-8 path");
     let cli =
         Cli::try_parse_from(["onepipeline-api", "serve", "--runs-root", root]).expect("parse");
-    let Command::Serve(args) = &cli.command;
+    let Command::Serve(args) = &cli.command else {
+        panic!("`serve` parsed as {:?}", cli.command);
+    };
     assert_eq!(args.runs_root.as_path(), runs.path());
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
+    assert_eq!(args.session, None, "a session nobody named");
     assert_eq!(cli.command.name(), "serve");
 
     let bound = Cli::try_parse_from([
@@ -982,8 +1555,43 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
         "0.0.0.0:9000",
     ])
     .expect("parse");
-    let Command::Serve(args) = &bound.command;
+    let Command::Serve(args) = &bound.command else {
+        panic!("`serve` parsed as {:?}", bound.command);
+    };
     assert_eq!(args.bind.to_string(), "0.0.0.0:9000");
+
+    // The acting session, as the flag names it — and refused where the flag
+    // names something a launch record could never have carried.
+    let acting = Cli::try_parse_from([
+        "onepipeline-api",
+        "serve",
+        "--runs-root",
+        root,
+        "--session",
+        "c276121e-6630-5213-be31-ca182068739e",
+    ])
+    .expect("parse");
+    let Command::Serve(args) = &acting.command else {
+        panic!("`serve` parsed as {:?}", acting.command);
+    };
+    assert_eq!(
+        args.session.as_ref().map(SessionId::as_str),
+        Some("c276121e-6630-5213-be31-ca182068739e")
+    );
+    for refused in ["", "has a space", "tab\there"] {
+        assert!(
+            Cli::try_parse_from([
+                "onepipeline-api",
+                "serve",
+                "--runs-root",
+                root,
+                "--session",
+                refused
+            ])
+            .is_err(),
+            "{refused:?} is not a session id"
+        );
+    }
 }
 
 #[test]
@@ -1107,7 +1715,7 @@ fn the_software_failure_status_is_distinct_from_success_and_usage() {
 /// to hold a real store and that its method shapes line up with the contract.
 struct Unimplemented;
 
-impl ReadApi for Unimplemented {
+impl RunApi for Unimplemented {
     type Events = std::vec::IntoIter<EventFrame>;
 
     fn health(&self) -> Health {
@@ -1143,6 +1751,98 @@ impl ReadApi for Unimplemented {
 
     fn events(&self, _query: &EventsQuery) -> Result<Self::Events, ApiError> {
         Ok(Vec::new().into_iter())
+    }
+
+    type Watch = std::vec::IntoIter<onepipeline_ui::contract::WatchFrame>;
+
+    fn projects(&self) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
+    }
+
+    fn project(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::ProjectNotFound(project.clone()))
+    }
+
+    fn channel(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn channel_next(&self, run: &RunId, _query: &NextQuery) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn channel_reply(
+        &self,
+        _run: &RunId,
+        _correlation: Option<&onepipeline_ui::contract::Correlation>,
+        envelope: &str,
+    ) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Refused(format!(
+            "the reply is malformed: {envelope}"
+        )))
+    }
+
+    fn channel_surface(
+        &self,
+        run: &RunId,
+        _request: &SurfaceRequest,
+    ) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn attest(&self, run: &RunId, _request: &AttestRequest) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn stop(&self, run: &RunId, _request: &StopRequest) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::NotOwner {
+            run: run.clone(),
+            owner: "[claude-code:abcdef012345]".to_owned(),
+        })
+    }
+
+    fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn watch(&self, _run: &RunId, _query: &WatchQuery) -> Result<Self::Watch, ApiError> {
+        Ok(Vec::new().into_iter())
+    }
+
+    fn unwatched(&self) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
+    }
+
+    fn host(&self) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
+    }
+
+    fn status(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn results(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn goals(&self) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
+    }
+
+    fn run_goals(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn transcript(
+        &self,
+        run: &RunId,
+        _query: &TranscriptQuery,
+    ) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn telemetry(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
     }
 }
 
@@ -2165,11 +2865,20 @@ fn telemetry_document() -> Value {
     })
 }
 
-/// The document above, with one thing about it changed.
-fn document_with(change: impl FnOnce(&mut Value)) -> Vec<u8> {
+/// The document above, with one thing about it changed, as the SDK's own type
+/// reads it back — or the SDK's own refusal of it.
+///
+/// The SDK's document is what reaches this crate's boundary now: the fold hands
+/// one over in-process and the summary carries one. So what a document *can*
+/// be is what that type admits, and the cases below split along that line —
+/// what the type itself refuses never reaches `validated`, and what it admits
+/// is what `validated` has to rule on.
+fn document_with(
+    change: impl FnOnce(&mut Value),
+) -> Result<onepipeline::views::RunTelemetry, serde_json::Error> {
     let mut document = telemetry_document();
     change(&mut document);
-    document.to_string().into_bytes()
+    serde_json::from_value(document)
 }
 
 /// The run the document above is about, which is the run these tests ask about.
@@ -2177,11 +2886,22 @@ fn telemetry_run() -> RunId {
     RunId::try_from(fixture_run::RUN_ID).expect("valid")
 }
 
+/// One way of breaking the document above: what it is, how, and what the
+/// refusal has to say.
+type Broken = (&'static str, fn(&mut Value), &'static str);
+
+/// A document the SDK's type admits, held to the producer's contract by this
+/// crate's boundary.
+fn projected(
+    change: impl FnOnce(&mut Value),
+) -> Result<onepipeline_ui::telemetry::RunTelemetry, onepipeline_ui::telemetry::Unreadable> {
+    let document = document_with(change).expect("a document the SDK's own type reads");
+    onepipeline_ui::telemetry::of_aggregate(&telemetry_run(), &document)
+}
+
 #[test]
 fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
-    let document =
-        onepipeline_ui::telemetry::read_document(&telemetry_run(), &document_with(|_| {}))
-            .expect("the document a run really produces");
+    let document = projected(|_| {}).expect("the document a run really produces");
     assert_eq!(document.wall_ms, 31_000);
     assert_eq!(
         document.bucket(onepipeline_ui::telemetry::BucketName::Agent),
@@ -2214,98 +2934,101 @@ fn a_telemetry_document_that_holds_to_its_producers_contract_is_read() {
 /// add up, time that was never on the clock, a party reported as having spent
 /// nothing when nobody measured it, a whole other run's clock. A malformed
 /// document has to become an absence of timing with a reason, never a payload.
+///
+/// Two lists, because two boundaries rule. The SDK's own type refuses a document
+/// that is not one of its documents — no run, no version, a bucket it has no
+/// name for — before this crate sees it; everything else is a document that
+/// type admits and this crate's `validated` refuses by name.
 #[test]
 fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
-    let refusals: [(&str, Vec<u8>, &str); 11] = [
-        (
-            "not a document at all",
-            b"onepipeline: something went wrong".to_vec(),
-            "expected value",
-        ),
-        (
-            "a document about another run",
-            document_with(|document| {
-                document["run_id"] = serde_json::json!(fixture_run::OTHER_RUN_ID);
-            }),
-            "the document is run `run-20260807-d4e5f6`'s",
-        ),
-        (
-            "a document about no run at all",
-            document_with(|document| {
-                document
-                    .as_object_mut()
-                    .expect("a mapping")
-                    .remove("run_id");
-            }),
-            "missing field `run_id`",
-        ),
-        (
-            "a version this build does not read",
-            document_with(|document| document["schema_version"] = serde_json::json!(1)),
-            "schema_version 1, and this build reads 2",
-        ),
-        (
-            "no version at all",
-            document_with(|document| {
-                document
-                    .as_object_mut()
-                    .expect("a mapping")
-                    .remove("schema_version");
-            }),
-            "schema_version absent",
-        ),
+    let unreadable_by_the_sdk: [Broken; 6] = [
         (
             "a bucket named twice",
-            document_with(|document| {
+            |document| {
                 document["buckets"][1] = serde_json::json!({ "name": "agent", "ms": 0 });
-            }),
-            "the `agent` bucket appears 2 times",
+            },
+            "a telemetry document carries exactly",
         ),
         (
             "a bucket left out",
-            document_with(|document| {
+            |document| {
                 document["buckets"]
                     .as_array_mut()
                     .expect("the buckets")
                     .retain(|bucket| bucket["name"] != serde_json::json!("setup"));
-            }),
-            "the `setup` bucket appears 0 times",
+            },
+            "a telemetry document carries exactly",
+        ),
+        (
+            "a version this build does not read",
+            |document| document["schema_version"] = serde_json::json!(1),
+            "schema_version 1, and this build reads 2",
+        ),
+        (
+            "a document about no run at all",
+            |document| {
+                document
+                    .as_object_mut()
+                    .expect("a mapping")
+                    .remove("run_id");
+            },
+            "missing field `run_id`",
+        ),
+        (
+            "no version at all",
+            |document| {
+                document
+                    .as_object_mut()
+                    .expect("a mapping")
+                    .remove("schema_version");
+            },
+            "missing field `schema_version`",
         ),
         (
             "a bucket this build cannot add up",
-            document_with(|document| {
+            |document| {
                 document["buckets"][2] = serde_json::json!({ "name": "dispatching", "ms": 1 });
-            }),
+            },
             "unknown variant `dispatching`",
+        ),
+    ];
+    for (what, change, said) in unreadable_by_the_sdk {
+        let refused = document_with(change)
+            .expect_err(&format!("{what} is not a document the SDK's type reads"));
+        assert!(
+            refused.to_string().contains(said),
+            "{what}: the refusal does not name it — {refused}"
+        );
+    }
+
+    let refusals: [Broken; 4] = [
+        (
+            "a document about another run",
+            |document| {
+                document["run_id"] = serde_json::json!(fixture_run::OTHER_RUN_ID);
+            },
+            "the document is run `run-20260807-d4e5f6`'s",
         ),
         (
             "more time measured than the clock ran",
-            document_with(|document| document["wall_ms"] = serde_json::json!(1_000)),
+            |document| document["wall_ms"] = serde_json::json!(1_000),
             "the buckets measure 31000ms of a 1000ms wall clock",
         ),
         (
             "a party present and reporting nothing",
-            document_with(|document| document["usage"]["judge"] = serde_json::json!({})),
+            |document| document["usage"]["judge"] = serde_json::json!({}),
             "the `judge` party is present and reports nothing",
         ),
         (
             "a cost that is not an amount of money",
-            document_with(|document| {
+            |document| {
                 document["usage"]["total"]["cost_usd"] = serde_json::json!(-1.0);
-            }),
+            },
             "the `total` party cost -1.0",
         ),
     ];
-    for (what, answered, said) in refusals {
-        let refused = onepipeline_ui::telemetry::read_document(&telemetry_run(), &answered)
-            .expect_err(&format!("{what} is not a telemetry document"));
-        assert!(
-            matches!(
-                refused,
-                onepipeline_ui::telemetry::Unavailable::Unreadable(_)
-            ),
-            "{what}: {refused:?}"
-        );
+    for (what, change, said) in refusals {
+        let refused = projected(change).expect_err(&format!("{what} is not a telemetry document"));
         assert!(
             refused.to_string().contains(said),
             "{what}: the refusal does not name it — {refused}"
@@ -2315,18 +3038,15 @@ fn a_document_that_breaks_the_producers_contract_is_refused_by_name() {
 
 /// A number no clock could hold is refused whichever layer notices it.
 ///
-/// `1e999` is valid JSON and not a `f64`, so the reader may refuse it while
-/// decoding rather than while checking; both are refusals, and the one thing
-/// that must not happen is a cost of infinity reaching a payload.
+/// `1e999` is valid JSON and not a `f64`, so the SDK's reader refuses it while
+/// decoding rather than this crate while checking; both are refusals, and the
+/// one thing that must not happen is a cost of infinity reaching a payload.
 #[test]
 fn a_cost_no_number_can_hold_never_reaches_a_payload() {
-    let refused = onepipeline_ui::telemetry::read_document(
-        &telemetry_run(),
-        &document_with(|document| {
-            document["usage"]["total"]["cost_usd"] = serde_json::json!(1e308);
-            document["usage"]["total"]["input"] = serde_json::json!(1);
-        }),
-    )
+    let refused = projected(|document| {
+        document["usage"]["total"]["cost_usd"] = serde_json::json!(1e308);
+        document["usage"]["total"]["input"] = serde_json::json!(1);
+    })
     .map(|document| {
         document
             .usage_of(onepipeline_ui::telemetry::Party::Total)
@@ -2338,20 +3058,14 @@ fn a_cost_no_number_can_hold_never_reaches_a_payload() {
             cost.is_some_and(f64::is_finite),
             "a cost that reached a payload is a number: {cost:?}"
         ),
-        Err(unavailable) => assert!(matches!(
-            unavailable,
-            onepipeline_ui::telemetry::Unavailable::Unreadable(_)
-        )),
+        Err(unreadable) => assert!(unreadable.to_string().contains("cost")),
     }
     // Written as text rather than through `serde_json::json!`, because `1e999` is
     // not a number any `Value` holds either — and the rest of the document is the
     // good one, so the cost is the only thing there is to refuse it for.
-    let overflowed = String::from_utf8(document_with(|_| {}))
-        .expect("utf-8")
-        .replace("0.53", "1e999")
-        .into_bytes();
+    let overflowed = telemetry_document().to_string().replace("0.53", "1e999");
     assert!(
-        onepipeline_ui::telemetry::read_document(&telemetry_run(), &overflowed).is_err(),
+        serde_json::from_str::<onepipeline::views::RunTelemetry>(&overflowed).is_err(),
         "a cost past every number is not a cost"
     );
 }

@@ -26,12 +26,14 @@ msrv-version := `sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml`
 # Keep the gate's own output to signal: successes are silent, failures are not.
 export CARGO_TERM_QUIET := "true"
 
-# The `onepipeline` build the read API asks for a run's telemetry, pinned to the
-# version the lock resolves its library to. The two speak a versioned document
-# and the producer refuses a mismatched one, so a stray build on PATH would serve
-# every run with no clock at all. Provisioned into the tree rather than taken
-# from PATH for exactly that reason, and exported so every tier — the crate's own
-# suite and the browser tier's server alike — asks the same one.
+# The `onepipeline` build the journeys compare the read API against, pinned to
+# the version the lock resolves its library to. The server runs no `onepipeline`
+# binary itself — every verb it serves is a call into the SDK it links — so what
+# this provisions is the CLI `tests/e2e/server.rs` holds the served answers to:
+# the telemetry document, the rendered verbs, and whether a run is watched. A
+# stray build on PATH prints a different release's document, which is exactly
+# the comparison that would prove nothing. Provisioned into the tree rather than
+# taken from PATH for that reason, and exported so every tier asks the same one.
 onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^version = /{gsub(/[",]/, "", $3); print $3; exit}' Cargo.lock`
 
 # The extension `cargo install` gives the file it writes, so the name below is
@@ -70,8 +72,8 @@ _crate-bootstrap:
     @cargo fetch --locked --quiet
 
 # The sibling CLI, at the exact version the lock pins its library to. Unlike the
-# test runners above this *is* a rule: it produces the telemetry document this
-# server serves, and a different version of it is a different document.
+# test runners above this *is* a rule: the journeys hold what the server serves
+# to what it prints, and a different version of it prints a different document.
 #
 # Not `bootstrap`'s alone: the test tiers that start the read API reach this recipe
 # through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
@@ -85,7 +87,7 @@ _crate-bootstrap:
 _ensure-sibling:
     @[ "$("$ONEPIPELINE_UI_ONEPIPELINE_BIN" --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
       || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
-      || { echo "cannot provision onepipeline {{onepipeline-version}} — the read API serves no timing without it" >&2; exit 1; }
+      || { echo "cannot provision onepipeline {{onepipeline-version}} — the journeys that compare the read API against it cannot run without it" >&2; exit 1; }
 
 # The base commit's own server, for the journeys that compare what this build
 # serves against what it served. Behind its own Nx target rather than inside the

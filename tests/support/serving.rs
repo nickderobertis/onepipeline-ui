@@ -84,14 +84,27 @@ impl Serving {
 
     /// The same, with the server's environment changed.
     ///
-    /// The one thing a journey needs to say about that environment is which
-    /// `onepipeline` the server asks for a run's telemetry — including that it
-    /// cannot have one, which is a state an operator really meets and a payload
-    /// with no clock in it is the answer to.
+    /// What a journey says about that environment is what the engine reads out
+    /// of it — the launching session, or how long a run may be quiet before it
+    /// reads as parked — so a server can be started in the shape of a
+    /// planner's shell.
     pub fn start_with_env(build: impl FnOnce(&Path), environment: &[(&str, &str)]) -> Self {
         let (workspace, runs) = fixture_run::workspace();
         build(&runs);
         Self::start_in(workspace, environment)
+    }
+
+    /// The same, acting as `session`: `--session ID` on the command line, which
+    /// is the one identity every write the server makes carries.
+    pub fn start_as(build: impl FnOnce(&Path), session: &str) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_as(workspace, &[], false, None, Some(session))
+    }
+
+    /// The same, acting as `session` over a workspace the caller already built.
+    pub fn start_in_as(workspace: TempDir, session: &str) -> Self {
+        Self::spawn_as(workspace, &[], false, None, Some(session))
     }
 
     /// The same, reading the server's own log rather than letting it through to
@@ -126,6 +139,16 @@ impl Serving {
         capture: bool,
         home: Option<&Path>,
     ) -> Self {
+        Self::spawn_as(workspace, environment, capture, home, None)
+    }
+
+    fn spawn_as(
+        workspace: TempDir,
+        environment: &[(&str, &str)],
+        capture: bool,
+        home: Option<&Path>,
+        session: Option<&str>,
+    ) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let runs = workspace.path().join(fixture_run::RUNS_DIR);
         let mut command = Command::new(binary);
@@ -136,7 +159,15 @@ impl Serving {
             .args(["--bind", "127.0.0.1:0"])
             // Fast enough that a journey asserting on a live append finishes in
             // about a second, and still a real poll of the real runs root.
-            .args(["--poll-interval-ms", "50"]);
+            .args(["--poll-interval-ms", "50"])
+            // Unattributed unless the journey says otherwise: this suite runs
+            // inside a planner's own dispatch, whose environment names that
+            // planner's session, and a server that inherited it would own the
+            // planner's runs. A journey that wants a session names one.
+            .env_remove(onepipeline_ui::cli::SESSION_ENV);
+        if let Some(session) = session {
+            command.args(["--session", session]);
+        }
         match home {
             // Where the fixtures keep the graph records the server reads a run's
             // declared members from: the same variable the engine and the
@@ -249,6 +280,21 @@ impl Serving {
         let status = wait_within(&mut self.child, STOP_DEADLINE);
         self.stopped = true;
         status
+    }
+
+    /// The same stop, keeping the workspace it served so another server can be
+    /// started over the same runs — the journey for a driver that outlives the
+    /// server that retained it.
+    #[cfg(unix)]
+    pub fn stop_keeping_workspace(mut self, stop: Stop) -> (ExitStatus, TempDir) {
+        ask_to_stop(&mut self.child, stop);
+        let status = wait_within(&mut self.child, STOP_DEADLINE);
+        self.stopped = true;
+        // Moved out rather than dropped with `self`: a `TempDir` deletes its
+        // directory when it goes, and the whole point is that it does not.
+        let placeholder = tempfile::tempdir().expect("a placeholder workspace");
+        let workspace = std::mem::replace(&mut self.workspace, placeholder);
+        (status, workspace)
     }
 }
 

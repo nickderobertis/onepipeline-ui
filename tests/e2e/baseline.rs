@@ -59,6 +59,7 @@ use serde_json::Value;
 use crate::fixture_run;
 use crate::http;
 use crate::serving::{ForeignServing, Serving};
+use crate::sibling;
 
 /// The environment variable naming the provisioned baseline server.
 ///
@@ -204,6 +205,22 @@ fn asked(run: &str) -> Vec<(&'static str, String)> {
             routes::RUN_ARTIFACT,
             for_run(routes::RUN_ARTIFACT).replace("{id}", fixture_run::ARTIFACT_ID),
         ),
+        // The verb routes, which a base commit from before them does not answer
+        // and every base commit after them must go on answering.
+        (routes::PROJECTS, routes::PROJECTS.to_owned()),
+        (
+            routes::PROJECT,
+            routes::PROJECT.replace("{project}", fixture_run::PLAN_PROJECT),
+        ),
+        (routes::RUN_CHANNEL, for_run(routes::RUN_CHANNEL)),
+        (routes::UNWATCHED, routes::UNWATCHED.to_owned()),
+        (routes::HOST, routes::HOST.to_owned()),
+        (routes::RUN_STATUS, for_run(routes::RUN_STATUS)),
+        (routes::RUN_RESULTS, for_run(routes::RUN_RESULTS)),
+        (routes::GOALS, routes::GOALS.to_owned()),
+        (routes::RUN_GOALS, for_run(routes::RUN_GOALS)),
+        (routes::RUN_TRANSCRIPT, for_run(routes::RUN_TRANSCRIPT)),
+        (routes::RUN_TELEMETRY, for_run(routes::RUN_TELEMETRY)),
     ]
 }
 
@@ -220,13 +237,20 @@ fn the_comparison_asks_for_every_route_the_contract_defines() {
         .into_iter()
         .map(|(route, _)| route)
         .collect();
-    for route in routes::ALL {
-        // The event stream is the one route with no single response to compare:
-        // it stays open rather than answering once, and what it opens with is the
-        // run list this already asks for. `tests/e2e/server.rs` drives it.
-        if route == routes::EVENTS {
+    for route in routes::TABLE {
+        // The two streams have no single response to compare: each stays open
+        // rather than answering once, and what the event stream opens with is
+        // the run list this already asks for. `tests/e2e/server.rs` drives
+        // both. A route that writes to the run is not a comparison either: what
+        // it serves is what the engine did, and asking two servers to do it is
+        // two stops or two adoptions of one run.
+        if route.path == routes::EVENTS
+            || route.path == routes::RUN_WATCH
+            || route.method == routes::Method::Post
+        {
             continue;
         }
+        let route = route.path;
         assert!(
             exercised.contains(route),
             "`{route}` is a route the contract defines and this comparison never asks \
@@ -274,16 +298,19 @@ fn walk(value: &Value, at: String, found: &mut BTreeSet<String>) {
     }
 }
 
-/// The `onepipeline` this clone provisioned, as the older server must be handed it.
+/// The `onepipeline` this clone provisioned, as an older server may need it.
 ///
-/// Read from the environment because that is how `_ensure-sibling` hands it over,
-/// and held to the path that recipe writes for the reason `baseline_binary` holds
-/// its own: what this names is a *program these journeys start*, and one that is
-/// anything but the provisioned sibling makes the comparison about two servers
-/// asking different CLIs for a run's clock. Empty when nothing named one, which is
-/// what a tier that provisioned nothing looks like and is passed through as such.
+/// This build runs no `onepipeline` process; a base commit from before that may
+/// still ask one for a run's clock, and it reads the path under the variable the
+/// justfile still exports. Read from the environment because that is how
+/// `_ensure-sibling` hands it over, and held to the path that recipe writes for
+/// the reason `baseline_binary` holds its own: what this names is a *program
+/// these journeys start*, and one that is anything but the provisioned sibling
+/// makes the comparison about a server asking a different CLI for a run's clock.
+/// Empty when nothing named one, which is what a tier that provisioned nothing
+/// looks like and is passed through as such.
 fn provisioned_sibling() -> String {
-    let Some(named) = std::env::var_os(onepipeline_ui::telemetry::BINARY_ENV) else {
+    let Some(named) = std::env::var_os(sibling::BINARY_ENV) else {
         return String::new();
     };
     let provisioned = repository()
@@ -294,7 +321,7 @@ fn provisioned_sibling() -> String {
         provisioned,
         "{} names a path this clone does not provision to; run the \
          `onepipeline-ui:ensure-sibling` target, which exports the one it writes",
-        onepipeline_ui::telemetry::BINARY_ENV
+        sibling::BINARY_ENV
     );
     named.to_string_lossy().into_owned()
 }
@@ -305,15 +332,15 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
     let baseline = baseline_binary(&base);
 
     let serving = Serving::start(shared_store);
-    // Both servers ask the same provisioned `onepipeline` for a run's clock, so a
-    // difference in what they serve is this crate's rather than the sibling's.
-    // The document's own version has not moved across the adoption, so the older
-    // binary reads the newer CLI's document exactly as this one does.
+    // The older server may ask the provisioned `onepipeline` for a run's clock
+    // where this one folds it in-process; both read the engine's own document,
+    // so a difference in what they serve is this crate's rather than the
+    // sibling's.
     let sibling = provisioned_sibling();
     let older = ForeignServing::start(
         &baseline,
         &serving.runs_root(),
-        &[(onepipeline_ui::telemetry::BINARY_ENV, sibling.as_str())],
+        &[(sibling::BINARY_ENV, sibling.as_str())],
     );
 
     let mut compared = 0;

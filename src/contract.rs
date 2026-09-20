@@ -101,7 +101,22 @@ pub const API_VERSION: u32 = 2;
 /// member-name grammar and to nothing narrower, and the version moves because a
 /// client that switched on the closed vocabulary exhaustively misreads an open
 /// one.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 17;
+///
+/// **Schema 18 is what a run-list row says about where a run belongs and
+/// whether anything is waiting on it.** Four additive fields on every row:
+/// `project`, the qualified project id the run was launched with, absent where
+/// its summary recorded none; `project_name`, the plan's name as recorded,
+/// absent where none was; `liveness`, the SDK's own word for how the run is
+/// being driven, read through `views::liveness_of` over the bounded summary;
+/// and `unread_surfaces`, the surfaces the run raised that nobody has read,
+/// counted off its channel. Every field 17 served is served with
+/// the same meaning and the same value; the version moves because a client
+/// that has never seen `liveness` reads a run holding an unanswered question
+/// as one nothing is happening to, and one that has never seen `project`
+/// cannot group the list the way `onepipeline runs` does. The invalidation
+/// frames of the event stream name the `project` of the run that moved beside
+/// its `run_id`, on the same terms.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 18;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -225,17 +240,134 @@ pub mod routes {
     pub const RUN_ARTIFACT: &str = "/api/v2/runs/{run}/artifacts/{id}";
     /// The server-sent event stream; every connection opens with a fresh snapshot.
     pub const EVENTS: &str = "/api/v2/events";
+    /// The runs grouped by project, as `verbs::runs` groups them.
+    pub const PROJECTS: &str = "/api/v2/projects";
+    /// One project's group.
+    pub const PROJECT: &str = "/api/v2/projects/{project}";
+    /// The run's channel as it stands: `verbs::channel`.
+    pub const RUN_CHANNEL: &str = "/api/v2/runs/{run}/channel";
+    /// Claim the next surface: `verbs::next`.
+    pub const RUN_CHANNEL_NEXT: &str = "/api/v2/runs/{run}/channel/next";
+    /// Submit an envelope, byte for byte: `verbs::reply`.
+    pub const RUN_CHANNEL_REPLY: &str = "/api/v2/runs/{run}/channel/reply";
+    /// Raise a surface to the planner: `verbs::surface`.
+    pub const RUN_CHANNEL_SURFACE: &str = "/api/v2/runs/{run}/channel/surface";
+    /// Complete a ready human action: `verbs::attest`.
+    pub const RUN_ATTEST: &str = "/api/v2/runs/{run}/attest";
+    /// End the run and its dispatch tree: `verbs::stop`.
+    pub const RUN_STOP: &str = "/api/v2/runs/{run}/stop";
+    /// Retain this binary as a fresh driver: `verbs::adopt`.
+    pub const RUN_ADOPT: &str = "/api/v2/runs/{run}/adopt";
+    /// A watch on the run as a server-sent event stream: `verbs::watch`.
+    pub const RUN_WATCH: &str = "/api/v2/runs/{run}/watch";
+    /// Which of the acting session's runs nothing is watching: `verbs::unwatched`.
+    pub const UNWATCHED: &str = "/api/v2/unwatched";
+    /// Every live dispatch on this host: `verbs::host`.
+    pub const HOST: &str = "/api/v2/host";
+    /// One run's folded standing: `verbs::status`.
+    pub const RUN_STATUS: &str = "/api/v2/runs/{run}/status";
+    /// Per-node outcomes with their evidence: `verbs::results`.
+    pub const RUN_RESULTS: &str = "/api/v2/runs/{run}/results";
+    /// What every run is for: `verbs::goals` given no run.
+    pub const GOALS: &str = "/api/v2/goals";
+    /// What one run is for: `verbs::goals` given one.
+    pub const RUN_GOALS: &str = "/api/v2/runs/{run}/goals";
+    /// A dispatched turn's tools and reasoning: `verbs::transcript`.
+    pub const RUN_TRANSCRIPT: &str = "/api/v2/runs/{run}/transcript";
+    /// The run's timing and usage document: `verbs::telemetry`.
+    pub const RUN_TELEMETRY: &str = "/api/v2/runs/{run}/telemetry";
 
-    /// Every route above, in the order `docs/contract.md` lists them.
-    pub const ALL: [&str; 7] = [
-        HEALTHZ,
-        RUNS,
-        RUN,
-        RUN_TIMELINE,
-        RUN_CONVERSATION,
-        RUN_ARTIFACT,
-        EVENTS,
+    /// The HTTP method a route answers.
+    ///
+    /// Two, and only two: a read is a `GET`, and a verb that writes to the run —
+    /// claims a surface, submits an envelope, stops or adopts — is a `POST`, so
+    /// nothing a browser prefetches or a proxy retries can act on a run.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Method {
+        /// A read.
+        Get,
+        /// A write to the run.
+        Post,
+    }
+
+    impl Method {
+        /// The method as `docs/contract.md` spells it before the path.
+        #[must_use]
+        pub const fn as_str(self) -> &'static str {
+            match self {
+                Self::Get => "GET",
+                Self::Post => "POST",
+            }
+        }
+    }
+
+    /// One route: the method it answers and its path template.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Route {
+        /// The method.
+        pub method: Method,
+        /// The path template, as axum reads it and as the contract writes it.
+        pub path: &'static str,
+    }
+
+    const fn get(path: &'static str) -> Route {
+        Route {
+            method: Method::Get,
+            path,
+        }
+    }
+
+    const fn post(path: &'static str) -> Route {
+        Route {
+            method: Method::Post,
+            path,
+        }
+    }
+
+    /// How many routes the contract defines.
+    pub const COUNT: usize = 25;
+
+    /// Every route above with its method, in the order `docs/contract.md`
+    /// lists them.
+    pub const TABLE: [Route; COUNT] = [
+        get(HEALTHZ),
+        get(RUNS),
+        get(RUN),
+        get(RUN_TIMELINE),
+        get(RUN_CONVERSATION),
+        get(RUN_ARTIFACT),
+        get(EVENTS),
+        get(PROJECTS),
+        get(PROJECT),
+        get(RUN_CHANNEL),
+        post(RUN_CHANNEL_NEXT),
+        post(RUN_CHANNEL_REPLY),
+        post(RUN_CHANNEL_SURFACE),
+        post(RUN_ATTEST),
+        post(RUN_STOP),
+        post(RUN_ADOPT),
+        get(RUN_WATCH),
+        get(UNWATCHED),
+        get(HOST),
+        get(RUN_STATUS),
+        get(RUN_RESULTS),
+        get(GOALS),
+        get(RUN_GOALS),
+        get(RUN_TRANSCRIPT),
+        get(RUN_TELEMETRY),
     ];
+
+    /// Every route's path, in the same order — read off [`TABLE`] rather than
+    /// listed twice.
+    pub const ALL: [&str; COUNT] = {
+        let mut all = [""; COUNT];
+        let mut index = 0;
+        while index < COUNT {
+            all[index] = TABLE[index].path;
+            index += 1;
+        }
+        all
+    };
 }
 
 /// The response body of `GET /healthz`.
@@ -506,6 +638,257 @@ pub struct EventFrame {
     pub event: SseEvent,
     /// The frame's payload.
     pub data: Value,
+}
+
+/// The three frames `GET /api/v2/runs/{run}/watch` streams, named as the SSE
+/// `event:` line names them.
+///
+/// One per variant of the SDK's own `WatchFrame`: a meaningful event, a
+/// heartbeat, and the ending that closes the stream. The data beside each is
+/// the machine record `onepipeline watch` prints for that frame, rendered by
+/// the SDK, so a client of this stream and a script reading that verb read one
+/// shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WatchEvent {
+    /// One meaningful event of the run.
+    Event,
+    /// Nothing happened for a whole tick, and the watch is still there.
+    Tick,
+    /// The wait is over, and this says why; the stream closes after it.
+    Returned,
+}
+
+impl WatchEvent {
+    /// The name this frame is written as in an SSE `event:` line.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Event => "event",
+            Self::Tick => "tick",
+            Self::Returned => "returned",
+        }
+    }
+}
+
+/// One frame of `GET /api/v2/runs/{run}/watch`.
+///
+/// `data` is the machine record the SDK renders for the frame — a bare
+/// [`Value`], because the record's shape is the engine's own and this crate
+/// projects it rather than restating it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchFrame {
+    /// The server-issued cursor within the connection, from zero.
+    pub id: u64,
+    /// Which kind of frame this is.
+    pub event: WatchEvent,
+    /// The engine's own record for it.
+    pub data: Value,
+}
+
+/// The query of `GET /api/v2/runs/{run}/watch`: the shape of the wait, as the
+/// CLI's own flags take it.
+///
+/// Every field is the SDK's own type where the SDK declares one — a condition
+/// and a timeout are parsed by the engine's parsers, so a spelling the CLI
+/// refuses is refused here in the same words — and the filter is this crate's,
+/// resolved against the run being watched.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchQuery {
+    /// What ends the wait, beside the run finishing and nothing driving it.
+    pub until: Vec<onepipeline::cli::WatchUntil>,
+    /// How long to wait before giving up.
+    pub timeout: onepipeline::cli::WatchTimeout,
+    /// How long a silence may last before the stream says it is still there;
+    /// zero turns the heartbeat off.
+    pub tick: std::time::Duration,
+    /// Which events are reported.
+    pub filter: Option<FilterSpec>,
+    /// The cursor an earlier watch returned, to resume from. Placed against the
+    /// run by the engine, which is the one reading that decides it.
+    // llmlint: ignore[invalid_states_unrepresentable] the token is external input the engine's `WatchRequest` takes as a `String` for the reason the engine states on that field: whether it is a cursor is decided by placing it against *this run's journal*, which only the engine's own read can do, and a type here that claimed it without that read would be a second reading of a token whose one reading is the engine's. The boundary this crate keeps is the bound and the character set in `server::watch_query`.
+    pub cursor: Option<String>,
+}
+
+impl Default for WatchQuery {
+    fn default() -> Self {
+        Self {
+            until: vec![onepipeline::cli::WatchUntil::default()],
+            timeout: onepipeline::cli::WatchTimeout::Bounded(
+                onepipeline::cli::DEFAULT_WATCH_TIMEOUT_SECONDS,
+            ),
+            tick: std::time::Duration::from_secs(onepipeline::cli::DEFAULT_WATCH_TICK_SECONDS),
+            filter: None,
+            cursor: None,
+        }
+    }
+}
+
+/// The query of `POST /api/v2/runs/{run}/channel/next`: the profile the
+/// answered events are shaped through.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct NextQuery {
+    /// The profile or spec, resolved against the run. `None` shapes nothing,
+    /// which is every event the run holds.
+    pub filter: Option<FilterSpec>,
+}
+
+/// The query of `GET /api/v2/runs/{run}/transcript`: the one node asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TranscriptQuery {
+    /// The node, or every node with a record.
+    pub node: Option<NodeId>,
+}
+
+/// The body of `POST /api/v2/runs/{run}/channel/surface`.
+///
+/// The kind is the engine's own validated type, so a word its grammar refuses
+/// — `^[a-z][a-z0-9-]{0,63}$` — is refused while the body is read rather than
+/// carried to the channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SurfaceRequest {
+    /// What the surface is about.
+    pub kind: onepipeline::channel::SurfaceKind,
+    /// What it has to say. Blank once trimmed is the engine's refusal.
+    // llmlint: ignore[invalid_states_unrepresentable] the engine's `verbs::surface` takes the message as a `String`, trims it and refuses one with nothing in it in its own words — the refusal `docs/contract.md` promises this route serves verbatim. A type here that refused blank first would be a second statement of the engine's rule, with this crate's words in place of the engine's.
+    pub message: String,
+}
+
+/// The body of `POST /api/v2/runs/{run}/attest`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttestRequest {
+    /// The reference of the ready human action, as the run's decision names it.
+    // llmlint: ignore[invalid_states_unrepresentable] whether a reference names a ready human action is decided against the run's own decisions by the engine's `verbs::attest`, which refuses one nothing is waiting on in its own words; the only reading of a reference is that one, and a type here could hold it to nothing the engine does not already rule on.
+    pub reference: String,
+}
+
+/// The body of `POST /api/v2/runs/{run}/stop`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopRequest {
+    /// Stop a run another session owns, naming the owner. Omitted, `false`.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// The correlation a channel reply is answered under, as
+/// `POST /api/v2/runs/{run}/channel/reply?correlation=C` names it.
+///
+/// The bus's own token, parsed by the bus's own parser: this wraps
+/// [`onemessagebus::Correlation`] so the query crosses the same boundary the
+/// CLI's `--correlation` crosses, and never a second copy of that grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Correlation(onemessagebus::Correlation);
+
+impl Correlation {
+    /// The token, as the engine is handed it.
+    #[must_use]
+    pub fn inner(&self) -> &onemessagebus::Correlation {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for Correlation {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value
+            .parse::<onemessagebus::Correlation>()
+            .map(Self)
+            .map_err(|refused| ApiError::InvalidCorrelation(refused.to_string()))
+    }
+}
+
+impl fmt::Display for Correlation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
+/// A validated qualified project id: `<source>:<native>`.
+///
+/// The source is one of onetaskgraph's, under [`SOURCE_GRAMMAR`](Self::SOURCE_GRAMMAR),
+/// and the native id is a non-empty bare token carrying no separator — the
+/// same characters a run id may. Constructed only through [`TryFrom<&str>`], on
+/// the same terms every other `{...}` a route interpolates is: the wire carries
+/// it path-encoded, the router decodes it, and this is what the decoded segment
+/// has to be before it is compared against any group.
+///
+/// The grammar is quoted from `docs/contract.md`, which quotes it from the
+/// decision that fixed this route — onetaskgraph is no dependency of this
+/// crate, and the engine reaches it by subprocess — so the contract text is the
+/// one source, and `tests/contract.rs` holds this copy to it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ProjectId(String);
+
+impl ProjectId {
+    /// The separator between the source and the native id.
+    pub const SEPARATOR: char = ':';
+
+    /// The grammar a source name is held to, as the contract spells it.
+    pub const SOURCE_GRAMMAR: &'static str = "^[a-z0-9][a-z0-9-]*$";
+
+    /// The id as the engine records it on a launch and a summary.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for ProjectId {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let Some((source, native)) = value.split_once(Self::SEPARATOR) else {
+            return Err(ApiError::InvalidProjectId(
+                "must be <source>:<native>".to_owned(),
+            ));
+        };
+        let source_ok = source
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
+            && source
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !source_ok {
+            return Err(ApiError::InvalidProjectId(format!(
+                "the source must match {}",
+                Self::SOURCE_GRAMMAR
+            )));
+        }
+        if native.contains(Self::SEPARATOR) {
+            return Err(ApiError::InvalidProjectId(
+                "the native id must not carry a second ':'".to_owned(),
+            ));
+        }
+        check_identifier(native)
+            .map_err(|reason| ApiError::InvalidProjectId(format!("the native id {reason}")))?;
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl TryFrom<String> for ProjectId {
+    type Error = ApiError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<ProjectId> for String {
+    fn from(value: ProjectId) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for ProjectId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 /// The query of `GET /api/v2/runs`.

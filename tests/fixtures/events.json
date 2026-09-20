@@ -3,7 +3,7 @@
   "event": "snapshot",
   "data": {
     "api_version": 2,
-    "telemetry_schema_version": 17,
+    "telemetry_schema_version": 18,
     "observed_at": "2026-08-07T12:00:00Z",
     "runs": [
       {
@@ -49,7 +49,11 @@
           "launch_id": "run-20260807-a1b2c3",
           "launcher": "claude-code",
           "session_key": "f4a5b11c4e92"
-        }
+        },
+        "project": "authoring:contract-interface",
+        "project_name": "contract",
+        "liveness": "PARKED",
+        "unread_surfaces": 0
       },
       {
         "run_id": "run-20260807-d4e5f6",
@@ -94,7 +98,11 @@
           "launch_id": "run-20260807-d4e5f6",
           "launcher": "claude-code",
           "session_key": "f4a5b11c4e92"
-        }
+        },
+        "project": "authoring:contract-interface",
+        "project_name": "contract",
+        "liveness": "PARKED",
+        "unread_surfaces": 0
       }
     ]
   }

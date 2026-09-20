@@ -18,13 +18,24 @@ stub of the SDK: an SDK build that changed those files fails here rather than in
 production. Execution is continuous, so there is no per-round directory in that
 shape and a run being driven has no recorded result at all.
 
-One thing those journeys need that the tree does not carry: the `onepipeline`
-build whose telemetry document this server serves. `just bootstrap` provisions
-the version the lock pins into `.tools/`, and every tier is pointed at it by
-`ONEPIPELINE_UI_ONEPIPELINE_BIN` rather than at whatever is on PATH — a stray
-build speaks a different document version and is refused, which would leave every
-run served with no clock at all. `every_route_serves_the_payload_its_golden_pins`
-fails with that instruction rather than quietly pinning goldens full of nulls.
+One thing some journeys need that the tree does not carry: the `onepipeline`
+CLI they compare the server against. The server runs no `onepipeline` binary —
+every verb is a call into the SDK it links — so the CLI is there for the
+comparisons in `tests/e2e/server.rs` that hold what the server served to what
+`onepipeline telemetry`, `results`, `goals`, `transcript` and `unwatched` print
+over the same run. `just bootstrap` provisions the version the lock pins into
+`.tools/`, and `tests/support/sibling.rs` reaches it there — through
+`ONEPIPELINE_UI_ONEPIPELINE_BIN` where the justfile exports it, and at the same
+clone-local path otherwise — rather than at whatever is on PATH, because a
+different release prints a different document and a comparison against one
+proves nothing.
+
+The journeys that write to a run — a reply, a stop, an adoption — write to a
+copy under a temporary workspace and act as the session the fixture's launch
+record names, through `--session`. An adoption retains the compiled binary as
+the run's driver, a real process; `tests/support/fixture_run.rs`'s
+`write_awaiting_attestation` is the one run shape a driver can be retained over
+on this host, and the journey that adopts it ends every driver it started.
 
 ## What a read costs is a test, not a benchmark
 

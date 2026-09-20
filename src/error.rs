@@ -8,7 +8,7 @@
 use axum::http::StatusCode;
 use thiserror::Error;
 
-use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, RunId};
+use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, ProjectId, RunId};
 
 /// A failure of a read route.
 ///
@@ -41,6 +41,12 @@ pub enum ApiError {
     /// A payload carried a `dispatch_id` that is not a usable identifier.
     #[error("invalid dispatch id: {0}")]
     InvalidDispatchId(String),
+    /// The project identifier in the path is not a usable one.
+    #[error("invalid project id: {0}")]
+    InvalidProjectId(String),
+    /// `?correlation=` is not a token the bus's own parser accepts.
+    #[error("invalid correlation: {0}")]
+    InvalidCorrelation(String),
     /// `?filter=` named a profile the run being read does not have.
     ///
     /// Separate from [`InvalidRequest`](Self::InvalidRequest) because it is not
@@ -53,6 +59,40 @@ pub enum ApiError {
     /// No run is recorded under that identifier.
     #[error("no recorded run {0}")]
     RunNotFound(RunId),
+    /// No group of the listing carries that project id.
+    #[error("no recorded project {0}")]
+    ProjectNotFound(ProjectId),
+    /// The engine refused the verb, in its own words: a malformed envelope, an
+    /// op the author is not granted, a reference nothing is waiting on, a run
+    /// something is still driving. Served verbatim, never restated.
+    #[error("{0}")]
+    Refused(String),
+    /// The run belongs to another session, and the verb was not forced.
+    ///
+    /// The owner is named as the engine names it to a caller that is not it —
+    /// the launcher and an opaque digest of the session — so a manager can tell
+    /// whose run they are looking at without the raw session id being served.
+    #[error("run {run} belongs to {owner}, not to this session")]
+    NotOwner {
+        /// The run.
+        run: RunId,
+        /// How the engine names its owner.
+        owner: String,
+    },
+    /// Nothing is driving the run, and the verb needed something to be.
+    #[error("nothing is driving run {0}")]
+    NothingDriving(RunId),
+    /// Another writer holds the run's single-writer lock.
+    #[error("{0}")]
+    Locked(String),
+    /// A stop that reached the run and could not end all of it: journaled, and
+    /// not a stop, in the engine's own account of what it could not reach.
+    #[error("{0}")]
+    NotStopped(String),
+    /// The engine failed underneath the verb: a ledger it could not read or
+    /// write, or a sibling that refused.
+    #[error("engine failure: {0}")]
+    Engine(String),
     /// The run has no conversation under that identifier.
     #[error("no recorded conversation {0}")]
     ConversationNotFound(ConversationId),
@@ -68,6 +108,32 @@ pub enum ApiError {
 }
 
 impl ApiError {
+    /// The engine's refusal of a verb about `run`, as this contract serves it.
+    ///
+    /// The one mapping from the SDK's error to the wire, so no route can serve
+    /// a status and a code that disagree about what the engine said. The words
+    /// are the engine's own on every arm: a refusal restated is a second thing
+    /// to keep true, and the text is what a manager acts on.
+    #[must_use]
+    pub fn from_engine(run: &RunId, error: onepipeline::Error) -> Self {
+        match error {
+            onepipeline::Error::NoSuchRun { .. } => Self::RunNotFound(run.clone()),
+            onepipeline::Error::NotOwned { owner, .. } => Self::NotOwner {
+                run: run.clone(),
+                owner,
+            },
+            onepipeline::Error::NothingDriving { .. } => Self::NothingDriving(run.clone()),
+            refused @ (onepipeline::Error::Refused(_) | onepipeline::Error::Invalid(_)) => {
+                Self::Refused(refused.to_string())
+            }
+            locked @ onepipeline::Error::Locked { .. } => Self::Locked(locked.to_string()),
+            // `Queued`, `Sibling`, `Ledger`, and whatever a later engine adds
+            // to its non-exhaustive enum: a failure underneath the verb rather
+            // than a ruling on the request, served as the engine's own words.
+            failed => Self::Engine(failed.to_string()),
+        }
+    }
+
     /// The stable code a client branches on.
     #[must_use]
     pub fn code(&self) -> &'static str {
@@ -79,6 +145,15 @@ impl ApiError {
             Self::InvalidConversationId(_) => "invalid_conversation_id",
             Self::InvalidArtifactId(_) => "invalid_artifact_id",
             Self::InvalidDispatchId(_) => "invalid_dispatch_id",
+            Self::InvalidProjectId(_) => "invalid_project_id",
+            Self::InvalidCorrelation(_) => "invalid_correlation",
+            Self::ProjectNotFound(_) => "project_not_found",
+            Self::Refused(_) => "refused",
+            Self::NotOwner { .. } => "not_owner",
+            Self::NothingDriving(_) => "nothing_driving",
+            Self::Locked(_) => "locked",
+            Self::NotStopped(_) => "not_stopped",
+            Self::Engine(_) => "engine_error",
             Self::UnknownFilterProfile(_) => "unknown_filter_profile",
             Self::RunNotFound(_) => "run_not_found",
             Self::ConversationNotFound(_) => "conversation_not_found",
@@ -102,14 +177,22 @@ impl ApiError {
             | Self::InvalidNodeId(_)
             | Self::InvalidConversationId(_)
             | Self::InvalidArtifactId(_)
-            | Self::InvalidDispatchId(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::InvalidDispatchId(_)
+            | Self::InvalidProjectId(_)
+            | Self::InvalidCorrelation(_)
+            | Self::Refused(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoSuchRoute
             | Self::RunNotFound(_)
+            | Self::ProjectNotFound(_)
             | Self::ConversationNotFound(_)
             | Self::ArtifactNotFound(_)
             | Self::UnknownFilterProfile(_) => StatusCode::NOT_FOUND,
-            Self::ProjectionFailed(_) => StatusCode::CONFLICT,
-            Self::Read(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::ProjectionFailed(_)
+            | Self::NotOwner { .. }
+            | Self::NothingDriving(_)
+            | Self::Locked(_)
+            | Self::NotStopped(_) => StatusCode::CONFLICT,
+            Self::Read(_) | Self::Engine(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 

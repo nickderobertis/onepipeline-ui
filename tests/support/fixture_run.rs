@@ -59,6 +59,123 @@ pub fn graph_records_for(runs_root: &Path) -> PathBuf {
         .join(GRAPH_RECORDS_DIR)
 }
 
+/// Rewrite one run's launch record into one a driver on **this** host can
+/// adopt: launched from `dir`, and with no observer graph.
+///
+/// A fixture records a directory on the host that recorded it, which is not a
+/// directory here, and an observer graph file that host held — and a driver
+/// refuses to adopt a run whose working directory it cannot enter, and refuses
+/// to start over a graph it cannot read. A journey that adopts a run names a
+/// directory that exists and an observer of none, which is how the engine
+/// records a launch made with `--dag-graph off`: the field absent, read back as
+/// no observer at all. Everything else about the record is as recorded.
+pub fn adoptable_from(root: &Path, run: &str, dir: &Path) {
+    let record = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
+            .expect("the launch record is json");
+    launch["dir"] = json!(dir.display().to_string());
+    launch.as_object_mut().expect("a mapping").remove("graph");
+    fs::write(&record, pretty(&launch)).expect("rewrite the launch record");
+}
+
+/// Rewrite one run's launch record to name a driver on **this** host: `pid`,
+/// under the host name the reading under test resolves for itself.
+///
+/// The host is asked of the crate rather than named here, because the whole
+/// question the engine's pid probe answers is whether the recorded host is the
+/// one doing the reading — and a second way of naming it would be a fixture
+/// that passed while the two disagreed. A live pid is a run being driven; one
+/// nothing can be holding is a driver proved gone.
+pub fn driven_on_this_host(root: &Path, run: &str, pid: u32) {
+    let record = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
+            .expect("the launch record is json");
+    launch["pid"] = json!(pid);
+    launch["host"] = json!(onepipeline_ui::liveness::hostname());
+    fs::write(&record, pretty(&launch)).expect("rewrite the launch record");
+}
+
+/// The session the live run's launch record names as its owner.
+pub const LIVE_SESSION: &str = "codex-session-7f3a91c0";
+
+/// The one node of the run [`write_awaiting_attestation`] writes.
+pub const APPROVAL_NODE_ID: &str = "approve";
+
+/// A run nothing is driving whose whole graph is one human action nobody has
+/// taken, launched from `dir` on this host with no observer graph: the run a
+/// driver adopts and then **waits on**.
+///
+/// Every other fixture here either settled or is being driven elsewhere. This
+/// one is what an adoption needs to be about anything a journey can watch: the
+/// driver it retains finds a ready human action, settles it as waiting —
+/// dispatching nothing, because there is nothing to dispatch — and, with nothing
+/// left that can move without the channel, lets go of the run. Once somebody
+/// attests it, a second adoption drives the graph to completion. So each
+/// driver's life is short and observable, and a journey decides when each one
+/// begins.
+pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf {
+    let run_dir = root.join(run);
+    fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
+    fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
+    fs::write(
+        run_dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "project": PLAN_PROJECT,
+            "dir": dir.display().to_string(),
+            "launcher": "claude-code",
+            "session": SESSION,
+            // The node-scope graph every dispatch would launch — resolved at
+            // dispatch, and never here, because this graph dispatches nothing;
+            // a driver refuses a launch record naming none before it drives.
+            "node_graph": "graphs/node-scope.yaml",
+            // A driver recorded on **this** host under a pid nothing can be
+            // holding — above the kernel's own maximum on every platform this
+            // runs on — so the engine proves it gone rather than reading the
+            // run as driven: a run holding a ready human action is *waiting*
+            // rather than parked, and only a driver proved dead makes it one
+            // an adoption may take over.
+            "pid": 0x7FFF_FFF0_u32,
+            "host": onepipeline_ui::liveness::hostname(),
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "get the change approved" },
+        "name": "approval",
+        "concurrency": 1,
+        "tasks": [
+            { "id": APPROVAL_NODE_ID, "kind": "human", "task": "Approve the change." },
+        ],
+    });
+    fs::write(run_dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(
+        run_dir.join("events.jsonl"),
+        format!(
+            "{}\n",
+            json!({
+                "v": 1,
+                "ts": START,
+                "stream": "a-recording-host-4242",
+                "seq": 0,
+                "source": "pipeline",
+                "kind": "run-started",
+                "labels": { "run_id": run },
+                "payload": { "plan": plan },
+                "artifacts": [],
+            })
+        ),
+    )
+    .expect("the journal");
+    run_dir
+}
+
 /// The graph run one session id names: `{stream}.{member}`, as that library
 /// spells one, so the stream is everything before the last `.`.
 pub fn stream_of(session: &str) -> &str {
@@ -416,35 +533,50 @@ const LIVE_STREAM: &str = "a-recording-host-4243";
 /// Returns the run's directory, so a test can append to its journal and watch
 /// the server notice.
 pub fn write(root: &Path, run: &str) -> PathBuf {
+    write_in_project(root, run, Some(PLAN_PROJECT))
+}
+
+/// The same run, launched from `project` — or from no project at all, which is
+/// what a launch made before the store was where a plan came from recorded,
+/// and what the grouped listing lists under `(no project)`.
+///
+/// The one place a fixture's project is decided, so a journey about grouping
+/// writes its runs the way the engine writes one under each project rather
+/// than editing a record after the fact.
+pub fn write_in_project(root: &Path, run: &str, project: Option<&str>) -> PathBuf {
     let dir = root.join(run);
     fs::create_dir_all(dir.join("channel")).expect("the run directory");
     fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
+    // The dispatch registry every run driven by the engine keeps, through the
+    // SDK's own path for it: a stop reads it to find the work the driver
+    // started, and refuses a run whose registry it cannot read at all.
+    fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
 
-    fs::write(
-        dir.join("launch.json"),
-        pretty(&json!({
-            "run_id": run,
-            // The shape every run the engine launches now has: a plan's
-            // definition lives in the onetaskgraph store, and the launch record
-            // names the **project** it came from rather than a file. The runs
-            // this repository serves are overwhelmingly these, so this is the
-            // ordinary fixture; `write_launch_shapes` holds the four other
-            // shapes a reader of a real runs root still meets.
-            "project": PLAN_PROJECT,
-            "dir": "/a-recording-host/workspace",
-            "graph": "graphs/dag-scope.yaml",
-            "launcher": "claude-code",
-            "session": SESSION,
-            // A pid recorded on another host means nothing here, which is what
-            // keeps the liveness verdict off this machine's process table.
-            "pid": 4242,
-            "host": "a-recording-host",
-            "started_at": START,
-            "heartbeat_interval": 1_800,
-            "adoptions": 0,
-        })),
-    )
-    .expect("the launch record");
+    let mut launch = json!({
+        "run_id": run,
+        "dir": "/a-recording-host/workspace",
+        "graph": "graphs/dag-scope.yaml",
+        "launcher": "claude-code",
+        "session": SESSION,
+        // A pid recorded on another host means nothing here, which is what
+        // keeps the liveness verdict off this machine's process table.
+        "pid": 4242,
+        "host": "a-recording-host",
+        "started_at": START,
+        "heartbeat_interval": 1_800,
+        "adoptions": 0,
+    });
+    // The shape every run the engine launches now has: a plan's definition
+    // lives in the onetaskgraph store, and the launch record names the
+    // **project** it came from rather than a file — written as no field at all
+    // where the launch recorded none, which is how the engine writes an absent
+    // string. The runs this repository serves are overwhelmingly these, so this
+    // is the ordinary fixture; `write_launch_shapes` holds the four other shapes
+    // a reader of a real runs root still meets.
+    if let Some(project) = project {
+        launch["project"] = json!(project);
+    }
+    fs::write(dir.join("launch.json"), pretty(&launch)).expect("the launch record");
 
     let plan = plan();
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
@@ -1440,7 +1572,7 @@ pub fn write_live(root: &Path, run: &str) -> PathBuf {
             "dir": "/a-recording-host/workspace",
             "graph": "graphs/dag-scope.yaml",
             "launcher": "codex",
-            "session": "codex-session-7f3a91c0",
+            "session": LIVE_SESSION,
             "pid": 4243,
             "host": "a-recording-host",
             "started_at": START,

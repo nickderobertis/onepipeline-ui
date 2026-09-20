@@ -736,7 +736,16 @@ test("this repository's own served goldens parse through the public parsers", as
   // server in this repository actually does serve, pinned byte for byte by
   // `tests/contract.rs`. Reading both with the same parsers is what keeps the client
   // contract and `docs/contract.md` from drifting apart in either direction.
-  expect(parseRunList(await served("runs.json")).runs).toHaveLength(2);
+  const listed = parseRunList(await served("runs.json"));
+  expect(listed.runs).toHaveLength(2);
+  // Schema 18 on every served row: the group the run belongs to, its name, the
+  // engine's liveness word, and the channel's unread count.
+  for (const row of listed.runs) {
+    expect(row.project).toBe("authoring:contract-interface");
+    expect(row.project_name).toBe("contract");
+    expect(row.liveness).toBe("PARKED");
+    expect(row.unread_surfaces).toBe(0);
+  }
 
   const detail = parseRunDetail(await served("run.json"));
   expect(detail.run.run_id).toBe(detail.graph?.run_id);

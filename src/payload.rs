@@ -778,6 +778,23 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
+    // Schema 18: where the run belongs and whether anything waits on it, read
+    // off the fold exactly as `run_row` reads them off the summary — the launch
+    // record's project, the launched plan's name through the SDK's own loader
+    // (which is where the summary reads it, so a run whose journal holds no
+    // plan to fold still names it), the SDK's own liveness word, and the
+    // channel's unread count.
+    if !view.launch.project.is_empty() {
+        summary.insert("project".into(), json!(view.launch.project));
+    }
+    if let Some(name) = onepipeline::views::plan_of(&view.paths)
+        .ok()
+        .and_then(|plan| plan.name)
+    {
+        summary.insert("project_name".into(), json!(name));
+    }
+    summary.insert("liveness".into(), json!(view.liveness().as_str()));
+    summary.insert("unread_surfaces".into(), json!(view.unread_surfaces().0));
     Value::Object(summary)
 }
 
@@ -839,7 +856,51 @@ pub fn run_row(
         json!(summary_node_counts(summary, paths)),
     );
     row.insert("launch".into(), summary_launch(run, summary));
+    // Schema 18, off the document and the two bounded reads beside it: the
+    // project and name the summary records, the SDK's listing liveness over the
+    // document, and the channel's unread count — `verbs::channel` over the
+    // run, which is the queue the CLI's own `runs` line counts.
+    if !summary.project.is_empty() {
+        row.insert("project".into(), json!(summary.project));
+    }
+    if let Some(name) = &summary.name {
+        row.insert("project_name".into(), json!(name));
+    }
+    row.insert(
+        "liveness".into(),
+        json!(crate::liveness::driver(summary).as_str()),
+    );
+    row.insert("unread_surfaces".into(), json!(unread_surfaces(paths)));
     Value::Object(row)
+}
+
+/// How many surfaces the run has raised that nobody has read, off its channel.
+///
+/// The SDK's own queue, read through `verbs::channel` and counted the way the
+/// listing counts it — every surface still waiting whose reader has not gone
+/// away — so a row and the CLI's `runs` line say one number. A channel that
+/// cannot be read counts nothing rather than failing the row: a listing that
+/// refused a run over its queue would be a run that went missing for a reason
+/// the row cannot carry.
+///
+/// A run with no channel directory has raised nothing, and this read makes no
+/// directory in its place — the rule the SDK's own listing row keeps. It is
+/// stated here because `verbs::channel` is the whole `channel queue` verb, and
+/// opening every queue it reports creates the directory: a listing that reached
+/// it for every row would write into every run it listed, and a run being
+/// removed from under the server would come back as an empty directory.
+#[must_use]
+pub fn unread_surfaces(paths: &RunPaths) -> usize {
+    if !paths.channel_dir().is_dir() {
+        return 0;
+    }
+    onepipeline::verbs::channel(paths).map_or(0, |queue| {
+        queue
+            .waiting
+            .iter()
+            .filter(|surface| !surface.abandoned)
+            .count()
+    })
 }
 
 /// How the run is being driven, as one lowercase word, from its summary.
@@ -5919,4 +5980,119 @@ pub fn conversation_signature(
             out.push_str(&format!("{byte:02x}"));
             out
         })
+}
+
+/// The grouped listing `verbs::runs` answers, projected: one entry per group in
+/// the SDK's own order, each carrying the rows [`run_row`] serves.
+///
+/// `rows` builds one row per run, because building a row is the store's — it
+/// is where the run id is validated and the clock is read — and this module
+/// projects what it is handed. A run whose directory this API cannot name is
+/// dropped from its group and reported on `unreadable` by the store, on the
+/// terms the run list reports one.
+#[must_use]
+pub fn projects(
+    projects: &onepipeline::views::Projects,
+    rows: &dyn Fn(&RunSummary) -> Option<Value>,
+) -> Value {
+    Value::Array(
+        projects
+            .groups
+            .iter()
+            .map(|group| project_group(group, rows))
+            .collect(),
+    )
+}
+
+/// One group of the grouped listing: `{project, name, last_write_at, runs}`.
+///
+/// `project` is `null` for the runs whose summary recorded none — the
+/// `(no project)` group, an ordinary group — and `name` is the plan's name off
+/// the newest run that recorded one, as the SDK reads it for the group's header.
+#[must_use]
+pub fn project_group(
+    group: &onepipeline::views::ProjectGroup,
+    rows: &dyn Fn(&RunSummary) -> Option<Value>,
+) -> Value {
+    json!({
+        "project": group.project,
+        "name": group.name,
+        "last_write_at": group.last_write_at,
+        "runs": group.runs.iter().filter_map(rows).collect::<Vec<Value>>(),
+    })
+}
+
+/// The SDK's own text for one of its rendered verbs, beside the run it is about.
+///
+/// `status`, `results`, `goals` and `transcript` answer a folded view and a
+/// renderer over it, and the renderer is the presentation the SDK computed: an
+/// agent reading the CLI and a person reading the route read one text.
+#[must_use]
+pub fn rendered(run: &RunId, rendered: String) -> Value {
+    json!({ "run_id": run, "rendered": rendered })
+}
+
+/// `verbs::status(Some(run))`, projected: the run's driver liveness, its unread
+/// surfaces, every node's status as the run last settled it, its one-line
+/// summary, and the text `onepipeline status RUN` prints.
+#[must_use]
+pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: String) -> Value {
+    let (count, oldest_seconds) = status.view.unread_surfaces();
+    json!({
+        "run_id": run,
+        "liveness": status.view.liveness().as_str(),
+        "unread_surfaces": { "count": count, "oldest_seconds": oldest_seconds },
+        "node_status": status.view.state.statuses(),
+        "summary": status.view.summary(),
+        "rendered": rendered,
+    })
+}
+
+/// A verb rendered over the whole root — `host`, `goals` given no run — with
+/// the roots it refused beside the text, on the terms the run list reports one.
+#[must_use]
+pub fn rendered_root(rendered: String, skipped: &[onepipeline::views::Skipped]) -> Value {
+    let mut payload = Map::new();
+    payload.insert("rendered".into(), json!(rendered));
+    if !skipped.is_empty() {
+        payload.insert(
+            "unreadable".into(),
+            Value::Array(
+                skipped
+                    .iter()
+                    .map(|root| {
+                        json!({
+                            "path": root.path.to_string_lossy(),
+                            "reason": root.reason,
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(payload)
+}
+
+/// What `verbs::stop` did, projected field for field from the SDK's own result.
+#[must_use]
+pub fn stopped(run: &RunId, stopped: &onepipeline::verbs::Stopped) -> Value {
+    json!({
+        "run_id": run,
+        "stopped": stopped.clean,
+        "owner": stopped.owner,
+        "forced": stopped.forced,
+        "teardown": stopped.teardown,
+    })
+}
+
+/// A receipt `verbs::reply` or `verbs::attest` answered, with the engine's
+/// advice beside it — the sentences its binary prints on standard error, which
+/// say what a queued envelope is waiting for.
+#[must_use]
+pub fn receipt(run: &RunId, receipt: &onepipeline::verbs::Receipt) -> Value {
+    json!({
+        "run_id": run,
+        "receipt": receipt,
+        "advice": receipt.advice,
+    })
 }

@@ -1,0 +1,16 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 18,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "status": "surface",
+  "surface": {
+    "id": 0,
+    "kind": "finding",
+    "message": "the gate is red",
+    "source": "proposal",
+    "blocking": false,
+    "queued_at": 1786104000000
+  },
+  "events": [],
+  "run_id": "run-20260807-a1b2c3"
+}

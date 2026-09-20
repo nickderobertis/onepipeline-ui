@@ -22,35 +22,51 @@ anything new here is a proposal to make upstream first.
   The *schema* is still the SDK's `plan::Plan`; only the read is this crate's.
   Republishing a loader beside the path is the proposal.
 - **The eight-way timing breakdown, and the per-party usage.** Both are the
-  SDK's own fold and neither is recomputed here. **A run-list row now reads it
-  without starting anything**: the SDK's bounded summary document carries a whole
-  `views::RunTelemetry`, so `telemetry::of_aggregate` takes that document through
-  this crate's own validation and a page of fifty rows is no longer fifty
-  subprocesses. What is still fetched by process is the **detail** route's, and
-  only because the alternative costs more than it saves — asking for the summary
-  beside a view this route has already folded would refold the run whenever that
-  document is stale. So `onepipeline telemetry <run>` remains the seam
-  `src/telemetry.rs` owns, and there is one state in which a row and the detail
-  opened from it disagree: a host where that sibling is missing or refuses, where
-  the row carries the clock and the detail carries none. The server names that on
-  its own log, and `a_rows_clock_and_the_details_are_one_reading` holds the two
-  together everywhere else. The proposal that closes it is the same one as
-  before, narrowed: publish the *fold* — `telemetry::of_run` over a view a caller
-  already holds — so the detail reads what it has rather than asking a process
-  for it.
-- **How a run is being driven, over the bounded document.** `views::liveness`
-  takes a `RunState`, which is the fold of a run's whole merged store — and the
-  entire point of the summary is that a listing never takes one. The summary
-  carries every input that reading needs and the SDK publishes no entry point
-  over them, so `src/liveness.rs` restates it, held to `views::liveness_word` by
-  `tests/contract.rs`'s `a_row_read_from_the_summary_is_the_row_a_fold_produces`
-  over nine run shapes. **The proposal is `views::liveness_of(&RunSummary)`**, and
-  with it that module becomes a call. One half of the reading cannot be restated
-  at all: whether a *blocking surface* is outstanding is `channel::ChannelState`,
-  which is crate-private, so this asks the wider question the summary can answer
-  — any surface a planner has not consumed — which errs toward "still working",
-  the direction the SDK's own reading errs in for every input it cannot read.
-  Publishing that queue, or `decision_outstanding` over a summary, closes it.
+  SDK's own fold and neither is recomputed here, and neither is fetched by
+  process: a run-list row reads the `views::RunTelemetry` its bounded summary
+  carries through `telemetry::of_aggregate`, and the **detail** reads the
+  SDK's published fold, `onepipeline::telemetry::of_run`, over the view the
+  route already holds, through `telemetry::of_run`. No `onepipeline` binary is
+  run by this server, for anything. What is this crate's is the boundary —
+  `telemetry::validated` — that holds either document to the producer's own
+  contract before a timing is served out of it, so a row and the detail opened
+  from it read one document through one rule.
+- **How a run is being driven, over the bounded document.** The SDK's
+  `views::liveness_of(&RunSummary)`, which `src/liveness.rs` calls. **It reads
+  its answer partly out of the process environment**: the channel — the half
+  of the answer no summary carries, whether a *blocking* surface is
+  outstanding — is opened under the runs root `ONEPIPELINE_RUNS_DIR` names
+  rather than under one the caller hands it, and `verbs::adopt` judges
+  ownership by `ONEPIPELINE_LAUNCHER_SESSION` rather than by a session passed
+  in the way `verbs::stop` takes one; the driver an adoption retains resolves
+  its run through the same variable. So the binary exports both from
+  `--runs-root` and `--session` before it serves anything (`src/main.rs`), and
+  an in-process reader of the store — the contract suite — sets both for the
+  length of an adoption. Each exists because the 0.39.0 SDK answers out of the
+  environment there; an SDK that takes `liveness_of(root, &RunSummary)` and an
+  `Adopt` carrying the acting session removes them.
+- **A queue read that makes no directory.** `verbs::channel` is the whole
+  `channel queue` verb, and opening the queues it reports creates the run's
+  `channel/` directory when there is none — so a listing that reached for it on
+  every row would write into every run it listed, and a run being removed from
+  under the server would come back as an empty directory. The SDK's own listing
+  row keeps the rule its `ChannelState::queue` states — *a run with no channel
+  directory has no surfaces, and a read makes no directory in its place* —
+  behind a crate-private type, so `payload::unread_surfaces` keeps it here,
+  through the SDK's own `RunPaths::channel_dir()`, before it calls the verb.
+  A `channel` that reads without creating removes the check.
+- **The verbs a run is reached with after launch are the SDK's, wrapped.**
+  Every route after the read surface in `docs/contract.md` is
+  `onepipeline::verbs` over this crate's envelope, and nothing here
+  re-implements one. Where a verb's SDK result is a folded view with the SDK's
+  own renderer as its presentation — `status`, `results`, `goals`,
+  `transcript`, `host` — the route answers that **rendered** text beside a few
+  typed facts, because a typed projection of a `RunView` would be this crate
+  inventing the record the CLI does not print. The one thing this crate adds
+  beside a verb is process hygiene the SDK cannot do for a caller that lives
+  on: `store::Reaper` waits on the drivers `adopt` retained, because a child
+  nobody waits on is a zombie and a zombie answers the SDK's own liveness probe
+  as alive.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
   from the pair. Execution is continuous, so the pair is the whole of what
@@ -178,6 +194,25 @@ anything new here is a proposal to make upstream first.
   A smaller one beside it: `onepipeline` publishes `edits::Operation` and
   `edits::Delivery`, which `payload::edits` copies as wire strings for want of a
   type to gate against.
+
+## The server acts as one launching session, and writes to runs
+
+`onepipeline-api serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else
+unattributed) is the identity every stop and adoption is judged by, and
+`POST .../adopt` retains **this binary** at its own hidden `drive-run RUN
+--adopt` verb as the run's driver — so an adopted run is driven by the engine
+this crate links, and a host pinning the engine CLI and this reader separately
+has one pin that governs a dispatch. Two SDK calls answer out of the process
+environment rather than out of their arguments — the listing's liveness reads a
+run's channel under `ONEPIPELINE_RUNS_DIR`, and an adoption is judged by
+`ONEPIPELINE_LAUNCHER_SESSION` — so `serve` exports both, from `--runs-root`
+and the resolved session, before it serves anything, and a retained driver
+inherits them. A driver the server retains is its child: `store::Reaper` waits
+on its exit status, because a child nobody waits on is a zombie and a zombie
+answers the engine's liveness probe as alive. The two hidden verbs, `drive-run`
+and `drive`, are the engine's own argument shapes run through the engine's own
+entry point, which is where the engine records that this executable answers
+its command line and gives each dispatch a process of its own.
 
 ## Where a reader's filter may reach, and where it may not
 

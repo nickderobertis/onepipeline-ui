@@ -77,6 +77,33 @@ fn head(reader: &mut BufReader<TcpStream>) -> (u16, bool) {
     }
 }
 
+/// `POST path` with `body`, read to completion.
+///
+/// The body goes as bytes under a JSON content type, which is what a browser's
+/// `fetch` sends and what every verb route reads — the reply route as the
+/// envelope's bytes, verbatim, and the rest as the shape each documents.
+pub fn post(address: SocketAddr, path: &str, body: &str) -> Response {
+    let mut stream = connect(address);
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .expect("write the request");
+    stream.flush().expect("flush the request");
+    let mut reader = BufReader::new(stream);
+    let (status, chunked) = head(&mut reader);
+    let mut raw = Vec::new();
+    reader.read_to_end(&mut raw).expect("read the body");
+    let body = String::from_utf8_lossy(&raw).into_owned();
+    Response {
+        status,
+        body: if chunked { dechunk(&body) } else { body },
+    }
+}
+
 /// `GET path`, read to completion.
 ///
 /// The request asks the server to close when it is done, so "the whole body" is

@@ -156,8 +156,22 @@ export const API_V2_FILTER_PROFILES = {
  * the run recorded no declared member for carries none. The literal moves because
  * a client that switched on the closed vocabulary exhaustively misreads an open
  * one.
+ *
+ * `18` is what a run-list row says about where a run belongs and whether
+ * anything is waiting on it. Four additive fields on every row: `project`, the
+ * qualified project id the run was launched with, absent where its summary
+ * recorded none; `project_name`, the plan's name as recorded, absent where none
+ * was; `liveness`, the server's own word for how the run is being driven —
+ * `ACTIVE`, `DRIVER DEAD`, `PARKED` or `UNDRIVEN`, the reading `onepipeline
+ * runs` prints; and `unread_surfaces`, the surfaces the run raised that nobody
+ * has read, counted off its channel. Every field `17` served is served with the
+ * same meaning; the literal moves because a client that has never seen
+ * `liveness` shows a run holding an unanswered question as one nothing is
+ * happening to, and one that has never seen `project` cannot group the list the
+ * way the CLI does. A `run.changed` frame names the `project` of the run that
+ * moved beside its `run_id`, on the same terms.
  */
-export const TELEMETRY_SCHEMA_VERSION = 17;
+export const TELEMETRY_SCHEMA_VERSION = 18;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -478,6 +492,16 @@ export const runLaunchSchema = openObject({
   launcher_session_id: z.string().min(1).optional(),
 });
 
+/**
+ * The server's word for how a run is being driven, on the list row under schema 18.
+ *
+ * Open rather than a closed enum, on the terms `state` is: the vocabulary is the
+ * engine's — `ACTIVE`, `DRIVER DEAD`, `PARKED`, `UNDRIVEN` today — and a word a
+ * later engine adds has to reach a reader as itself rather than fail the whole
+ * list. Served whether or not the run has settled; `state` folds the settled case.
+ */
+export const runLivenessSchema = z.string().min(1);
+
 export const runSummarySchema = openObject({
   run_id: z.string().min(1),
   state: z.string().min(1),
@@ -489,6 +513,18 @@ export const runSummarySchema = openObject({
   timing: timingSchema,
   node_counts: z.record(z.string(), counter),
   launch: runLaunchSchema.optional(),
+  /**
+   * The qualified onetaskgraph project id the run was launched with — the group
+   * `GET /api/v2/projects` lists it under — absent for a run whose summary
+   * recorded none, which the server lists under the `(no project)` group.
+   */
+  project: z.string().min(1).optional(),
+  /** The plan's name as the run recorded it, absent where none was. */
+  project_name: z.string().min(1).optional(),
+  /** How the run is being driven, in the engine's own word. */
+  liveness: runLivenessSchema.optional(),
+  /** How many surfaces the run has raised that nobody has read. */
+  unread_surfaces: counter.optional(),
 });
 
 /**

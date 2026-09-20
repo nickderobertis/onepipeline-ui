@@ -118,6 +118,50 @@ test("validates and preserves additive run-list fields", () => {
   expect(parsed.extension).toBe(true);
 });
 
+test("reads where a run belongs and what waits on it off the list row", () => {
+  // Schema 18's four fields, exactly as the server serves them: the project and
+  // its name where the run recorded them, the engine's own liveness word, and
+  // the channel's unread count. Each is read as itself — a `liveness` word a
+  // later engine adds reaches a reader rather than failing the list — and a
+  // count that is not one is refused, because a row saying "-1 questions" is
+  // a row nothing can act on.
+  const row = {
+    run_id: "run-1",
+    state: "active",
+    phase: "surfacing",
+    last_event: "planner-surface-queued",
+    timing_quality: "partial",
+    linkage_quality: "labelled",
+    timing,
+    node_counts: { running: 1 },
+    project: "local-md:project-grouping",
+    project_name: "Project grouping",
+    liveness: "ACTIVE",
+    unread_surfaces: 2,
+  };
+  const parsed = runSummarySchema.parse(row);
+  expect(parsed.project).toBe("local-md:project-grouping");
+  expect(parsed.project_name).toBe("Project grouping");
+  expect(parsed.liveness).toBe("ACTIVE");
+  expect(parsed.unread_surfaces).toBe(2);
+  // A run that recorded no project carries neither field, and is still a row.
+  const unprojected = { ...row, project: undefined, project_name: undefined };
+  expect(runSummarySchema.parse(unprojected).project).toBeUndefined();
+  expect(runSummarySchema.parse(unprojected).project_name).toBeUndefined();
+  expect(
+    runSummarySchema.safeParse({ ...row, unread_surfaces: -1 }).success,
+  ).toBe(false);
+  expect(
+    runSummarySchema.safeParse({ ...row, unread_surfaces: 1.5 }).success,
+  ).toBe(false);
+  expect(runSummarySchema.safeParse({ ...row, liveness: "" }).success).toBe(
+    false,
+  );
+  expect(runSummarySchema.safeParse({ ...row, project: "" }).success).toBe(
+    false,
+  );
+});
+
 test("reads the launching session off the list row it is served on", () => {
   const row = {
     run_id: "run-1",

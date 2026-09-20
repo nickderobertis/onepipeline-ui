@@ -62,5 +62,7 @@ mod http;
 mod release_declaration;
 #[path = "../support/serving.rs"]
 mod serving;
+#[path = "../support/sibling.rs"]
+mod sibling;
 #[path = "../support/stub_bin.rs"]
 mod stub_bin;

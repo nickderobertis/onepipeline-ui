@@ -565,11 +565,13 @@ fn a_selection_touches_only_the_runs_it_names() {
 }
 
 #[test]
-fn a_run_detail_asks_its_sibling_once_per_run_rather_than_once_per_request() {
-    // The one process this server still starts, and the cache that keeps it to
-    // one. A run's detail reads its clock through `onepipeline telemetry`, held
-    // against that run's own change token — so a reader refreshing a run that
-    // has not moved starts nothing, and a run list starts nothing at all.
+fn a_run_detail_starts_no_process_and_folds_its_clock_once_per_change() {
+    // The one process this server used to start, and does not: a run's detail
+    // read its clock through `onepipeline telemetry`, and reads it now through
+    // the SDK's own fold over the view the route already holds. The cache that
+    // kept the process to one per change keeps the fold to one per change — so
+    // a reader refreshing a run that has not moved reads its journal once for
+    // the two details, rather than walking it again for the clock.
     let serving = Traced::start(|root| {
         fixture_run::write(root, FIRST_RUN);
     });
@@ -579,15 +581,14 @@ fn a_run_detail_asks_its_sibling_once_per_run_rather_than_once_per_request() {
         assert_eq!(detail["run"]["run_id"], json!(FIRST_RUN), "{detail}");
         assert!(
             !detail["run"]["timing"]["wall_ms"].is_null(),
-            "the sibling did not answer, so this journey is counting a process nobody \
-             started — run `just bootstrap`"
+            "the fold did not answer, so this journey is counting nothing"
         );
     }
     let cost = serving.finish().since(&marker);
     assert_eq!(
         cost.processes_started(),
-        1,
-        "the second read of an unmoved run started the sibling again"
+        0,
+        "a run's detail started a process for its clock"
     );
 }
 

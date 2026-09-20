@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -20,6 +21,7 @@ use crate::http;
 use crate::serving::Serving;
 #[cfg(unix)]
 use crate::serving::Stop;
+use crate::sibling;
 
 /// A server over one settled run and one more, so the list has rows to page.
 fn two_runs() -> Serving {
@@ -32,7 +34,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(17), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(18), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -242,24 +244,40 @@ fn the_run_list_pages_by_opaque_cursor() {
 /// stream and the unenveloped liveness apart by that template rather than by a
 /// string it spelled itself.
 fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'static str, String)> {
-    onepipeline_ui::contract::routes::ALL
+    use onepipeline_ui::contract::routes;
+    routes::TABLE
         .iter()
+        // The routes that write to the run are driven by the journeys about
+        // each verb, over runs built for what each one does; this is every
+        // route a reader opens.
+        .filter(|route| route.method == routes::Method::Get)
+        .map(|route| route.path)
         .map(|template| {
             let path = template
                 .replace("{run}", run)
+                .replace("{project}", &encoded(fixture_run::PLAN_PROJECT))
                 .replace(
                     "/conversations/{id}",
                     &format!("/conversations/{conversation}"),
                 )
                 .replace("/artifacts/{id}", &format!("/artifacts/{artifact}"));
-            let path = if *template == onepipeline_ui::contract::routes::RUN_TIMELINE {
-                format!("{path}?scope=run")
-            } else {
-                path
+            let path = match template {
+                routes::RUN_TIMELINE => format!("{path}?scope=run"),
+                // A watch of no seconds reads the run once and returns, which is
+                // the one shape of it a sweep over every route can read to the
+                // end.
+                routes::RUN_WATCH => format!("{path}?timeout=0"),
+                _ => path,
             };
-            (*template, path)
+            (template, path)
         })
         .collect()
+}
+
+/// A project id as a client sends it on the wire: path-encoded, so the `:`
+/// between the source and the native id reaches the route as `%3A`.
+fn encoded(project: &str) -> String {
+    project.replace(':', "%3A")
 }
 
 #[test]
@@ -315,6 +333,16 @@ fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
                     .any(|row| row["run_id"] == json!(fixture_run::RUN_ID)),
                 "{path} opens on a snapshot naming the run: {snapshot}"
             );
+            continue;
+        }
+        if template == onepipeline_ui::contract::routes::RUN_WATCH {
+            let mut stream = http::stream(serving.address, &path, None);
+            assert_eq!(stream.status, 200, "{path}");
+            let last = std::iter::from_fn(|| stream.next_frame())
+                .last()
+                .expect("a watch of no seconds returns");
+            assert_eq!(last.event, "returned", "{path}: {last:?}");
+            assert_eq!(last.json()["run_id"], json!(fixture_run::RUN_ID));
             continue;
         }
         let response = http::get(serving.address, &path);
@@ -5306,13 +5334,16 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     .json();
     let timing = &body["run"]["timing"];
 
-    // The same numbers `onepipeline telemetry` prints for this run, read through
-    // its own CLI rather than folded here a second time. Asserted against what
-    // that binary says right now, so a build whose attribution moves fails here
-    // instead of leaving two readings of one run's clock disagreeing.
+    // The same numbers `onepipeline telemetry` prints for this run. The server
+    // reads them through the SDK's own fold over the view it already holds and
+    // never through that CLI, so the CLI is the *comparison*: asserted against
+    // what the provisioned binary says right now, so a build whose attribution
+    // moves fails here instead of leaving two readings of one run's clock
+    // disagreeing.
+    let document = sibling::telemetry(&serving.runs_root(), fixture_run::RUN_ID);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
-    let document = onepipeline_ui::telemetry::of_run(&serving.runs_root(), &run)
-        .expect("the sibling aggregates the fixture run");
+    let document = telemetry::of_aggregate(&run, &document)
+        .expect("the CLI's document holds to the producer's own contract");
     assert_eq!(timing["wall_ms"], json!(document.wall_ms));
     for (lane, name) in [
         ("agent_seconds", telemetry::BucketName::Agent),
@@ -5371,27 +5402,40 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     assert_eq!(body["run"]["usage"]["llmlint"]["cost_usd"], json!(null));
 }
 
+// llmlint: ignore-block[tests_mirror_real_usage] the summary document is a file on disk
+// that another process wrote, and that file *is* the interface here: the engine that writes
+// a run store and this reader of it are pinned separately (the reason `/healthz` names its
+// release), so the document a listing reads is whatever the engine that last summarized the
+// run left there — a release ahead of or behind this one, or a file an operator edited. The
+// boundary under test, `telemetry::validated`, exists for exactly that document, and the
+// only way to hand it one the pinned engine does not write is to write it. Every other
+// journey over the clock reads a summary the pinned engine wrote.
 #[test]
-fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
-    // The sibling named but absent: the one condition under which this server
-    // knows nothing about where a run's time went. Every timing is then absent,
-    // and none of them is zero — a run nothing could be measured for must not
-    // read as a run that took no time.
-    let serving = Serving::start_with_env(
-        |root| {
-            fixture_run::write(root, fixture_run::RUN_ID);
-        },
-        &[(
-            onepipeline_ui::telemetry::BINARY_ENV,
-            "a-onepipeline-that-is-not-installed",
-        )],
-    );
-    let body = http::get(
-        serving.address,
-        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
-    )
-    .json();
-    let timing = &body["run"]["timing"];
+fn a_run_whose_summary_clock_cannot_be_read_still_serves_the_folds() {
+    // The one state in which a row and the detail opened from it read their
+    // clocks from different documents: the row's is the one the run's bounded
+    // summary carries, and the detail's is the SDK's fold over the view the
+    // route holds. A summary on disk carrying a telemetry document that breaks
+    // the producer's own contract — here a party present and reporting
+    // nothing, which the pinned engine never writes, so the document is one
+    // another release or a hand left behind — leaves the **row** with no clock
+    // at all: every timing absent, none of them zero, because a run nothing
+    // could be measured for must not read as a run that took no time. The
+    // detail, which asks no summary, still serves the fold. Neither route
+    // starts a process for it.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::summarize(root, fixture_run::RUN_ID);
+        let summary = root.join(fixture_run::RUN_ID).join("summary.json");
+        let mut document: Value =
+            serde_json::from_str(&fs::read_to_string(&summary).expect("the summary"))
+                .expect("a summary document");
+        document["timing"]["usage"]["judge"] = json!({});
+        fs::write(&summary, document.to_string()).expect("the summary is rewritten");
+    });
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = &listed["runs"][0];
+    assert_eq!(row["run_id"], json!(fixture_run::RUN_ID));
     for lane in [
         "agent_seconds",
         "judge_seconds",
@@ -5405,66 +5449,28 @@ fn a_run_whose_telemetry_cannot_be_read_is_served_with_no_clock_at_all() {
         "wall_ms",
         "unattributed_ms",
     ] {
-        assert_eq!(timing[lane], json!(null), "{lane} is not absent: {timing}");
+        assert_eq!(
+            row["timing"][lane],
+            json!(null),
+            "{lane} is not absent: {row}"
+        );
     }
-    // Including the three lanes this server would have folded for itself, which
-    // nothing measures either way.
-    assert_eq!(timing["agent_model_ms"], json!(null));
-    assert_eq!(body["run"]["usage"]["total"]["cost_usd"], json!(null));
-
-    // **The row the operator arrives on does not need the sibling at all**, which
-    // is the whole of why a list of fifty rows is no longer fifty subprocesses:
-    // the run's own bounded summary carries the document that command prints, so
-    // a row's clock is read rather than fetched. The detail above is the one
-    // reading that still asks the process, and with it missing the two say
-    // different things about the same run — a misconfiguration the server also
-    // names on its own log, and the only state in which they can differ.
-    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
-    let row = &listed["runs"][0];
-    assert_eq!(row["run_id"], json!(fixture_run::RUN_ID));
-    assert_eq!(row["timing"]["wall_seconds"], json!(30), "{row}");
-    assert_eq!(row["timing"]["agent_seconds"], json!(13), "{row}");
-    assert_eq!(row["node_counts"]["done"], json!(2), "a run all the same");
-
-    // The rest of the payload is untouched: a run with no clock is still a run.
-    assert_eq!(body["run"]["run_id"], json!(fixture_run::RUN_ID));
     assert_eq!(
-        body["node_details"][fixture_run::NODE_ID]["publication"]["merged"],
-        json!(true)
+        row["node_counts"]["done"],
+        json!(2),
+        "a run all the same: {row}"
     );
+
+    let body = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(body["run"]["timing"]["wall_seconds"], json!(30), "{body}");
+    assert_eq!(body["run"]["timing"]["agent_seconds"], json!(13), "{body}");
+    assert_eq!(body["run"]["run_id"], json!(fixture_run::RUN_ID));
 }
-
-#[test]
-fn a_sibling_that_cannot_answer_names_which_way_it_could_not() {
-    let (_workspace, runs) = fixture_run::workspace();
-    fixture_run::write(&runs, fixture_run::RUN_ID);
-
-    // Asked about a run it does not have: it ran, and refused. The reason names
-    // the command, because the alternative is a server serving no clock and no
-    // account of why.
-    let never_recorded = RunId::try_from("run-that-was-never-recorded").expect("a valid id");
-    let refused =
-        telemetry::of_run(&runs, &never_recorded).expect_err("the sibling has no such run");
-    assert!(
-        matches!(refused, telemetry::Unavailable::Refused(_)),
-        "{refused:?}"
-    );
-    assert!(refused.to_string().contains("telemetry"), "{refused}");
-
-    // Not startable at all, which is what a missing install looks like: the
-    // message says how to fix it rather than only that it broke.
-    let run = RunId::try_from(fixture_run::RUN_ID).expect("a valid id");
-    let missing = telemetry::of_run_from("a-onepipeline-that-is-not-installed", &runs, &run)
-        .expect_err("nothing to start");
-    assert!(
-        matches!(missing, telemetry::Unavailable::NoBinary(_)),
-        "{missing:?}"
-    );
-    assert!(
-        missing.to_string().contains(telemetry::BINARY_ENV),
-        "the refusal says how to point at one: {missing}"
-    );
-}
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 // Every filtering journey below drives the compiled binary over real HTTP against
 // a real recorded run, because `?filter=` is a query the server parses, resolves
@@ -6346,25 +6352,39 @@ fn a_surface_of_a_kind_no_vocabulary_declares_is_served_as_the_host_raised_it() 
         1
     );
 
-    // Counted with every other surface: a run holding nothing but an unread
-    // surface of a kind nobody declared is a run waiting on somebody, not one
-    // nobody is driving — and a run whose newest record is that surface is
-    // surfacing, whatever the kind.
+    // Counted with every other surface, and raised through the engine's own
+    // surface verb under the host's word: a kind nobody declared is queued on
+    // the run's channel and journalled exactly as a declared one is, so the row
+    // counts it unread, the run is being driven as far as its last write says,
+    // and the timeline serves the kind as the host raised it.
     let asked = Serving::start(|root| {
-        let dir = fixture_run::write_launched(root, fixture_run::RUN_ID);
-        fixture_run::append(
-            &dir,
-            "planner-surface-queued",
-            json!({
-                "kind": SENTINEL_LOST,
-                "message": "park or carry on?",
-                "source": SENTINEL,
-                "blocking": true,
-            }),
-        );
+        fixture_run::write_launched(root, fixture_run::RUN_ID);
     });
+    let raised = http::post(
+        asked.address,
+        &format!("/api/v2/runs/{}/channel/surface", fixture_run::RUN_ID),
+        &json!({ "kind": SENTINEL_LOST, "message": "park or carry on?" }).to_string(),
+    );
+    assert_eq!(raised.status, 200, "{}", raised.body);
     let waiting = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
     assert_eq!(waiting["state"], json!("active"), "{waiting}");
+    assert_eq!(waiting["unread_surfaces"], json!(1), "{waiting}");
+    assert_eq!(
+        waiting["last_event"],
+        json!("planner-surface-queued"),
+        "{waiting}"
+    );
+    let queued = http::get(
+        asked.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    assert!(
+        events_on(&queued)
+            .iter()
+            .any(|event| event["surface"]["kind"] == json!(SENTINEL_LOST)),
+        "{queued}"
+    );
     // A run with work still queued and no decision outstanding.
     let surfacing = Serving::start(|root| {
         let dir = fixture_run::write_held(root, fixture_run::HELD_RUN_ID);
@@ -8606,6 +8626,18 @@ fn a_journal_carrying_a_judges_decision_is_served_by_every_route() {
             assert_eq!(row["last_event"], json!("judge-decided"), "{path}: {row}");
             continue;
         }
+        if template == onepipeline_ui::contract::routes::RUN_WATCH {
+            // A watch shows the decision as one of the run's meaningful events
+            // only where the engine counts it as one; what it owes a run carrying
+            // the record is to read it to the end and return.
+            let mut stream = http::stream(serving.address, &path, None);
+            assert_eq!(stream.status, 200, "{path}");
+            let last = std::iter::from_fn(|| stream.next_frame())
+                .last()
+                .expect("a watch of no seconds returns");
+            assert_eq!(last.event, "returned", "{path}: {last:?}");
+            continue;
+        }
         let response = http::get(serving.address, &path);
         assert_eq!(response.status, 200, "{path}: {}", response.body);
         if template == onepipeline_ui::contract::routes::HEALTHZ {
@@ -9264,8 +9296,11 @@ fn a_dispatch_still_in_flight_serves_what_its_turn_is_saying_and_spending() {
     )
     .json();
     // No field is added by this reading and no vocabulary moves for it, so the
-    // envelope carrying it declares the version it already declared.
-    assert_eq!(served["telemetry_schema_version"], json!(17));
+    // envelope carrying it declares the version every other route declares.
+    assert_eq!(
+        served["telemetry_schema_version"],
+        json!(onepipeline_ui::contract::TELEMETRY_SCHEMA_VERSION)
+    );
     let turns = lane_transcript(&serving, fixture_run::WORKING_CONVERSATION_ID);
 
     let finished = &turns[0];
@@ -10521,49 +10556,1336 @@ fn a_run_directory_the_contract_cannot_name_is_reported_rather_than_listed() {
     assert_eq!(detail.status, 200);
 }
 
+// Every journey below drives one of the post-launch verbs over real HTTP against
+// the compiled server: the route, the engine's own answer projected into the
+// envelope, and at least one refusal a user can cause for each verb that writes.
+// The server acts as the session the journey names, and the engine judges every
+// stop and adoption by it exactly as `onepipeline` judges one by
+// `ONEPIPELINE_LAUNCHER_SESSION`.
+
+/// A session that owns nothing under any fixture root.
+const STRANGER: &str = "another-planner-session";
+
+/// How long a journey waits for a retained driver to write what it writes
+/// before calling it failed.
+///
+/// A ceiling on a **failure**, never a cost a passing journey pays: each wait
+/// returns the moment its condition holds, and the whole adoption journey below
+/// takes under two seconds on this host. The ceiling is generous because a
+/// driver is a process the kernel schedules, and a loaded host that took ten
+/// seconds to run one must not read as a driver that never wrote.
+///
+/// Unix-only with the adoption journey it paces, which is the one thing that
+/// waits on a retained driver.
+#[cfg(unix)]
+const DRIVER_PATIENCE: Duration = Duration::from_secs(60);
+
+/// Wait until `condition` holds, or fail the journey naming what never happened.
+#[cfg(unix)]
+fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
+    while !condition() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what} never happened within {DRIVER_PATIENCE:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Whether the process a pid names may still be there, asked the way the
+/// engine asks it: signal `0`, which delivers nothing.
+#[cfg(unix)]
+fn process_is_live(pid: u32) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 delivers nothing and touches no memory; it reports
+    // whether the pid could be signalled.
+    unsafe { libc::kill(raw, 0) == 0 }
+}
+
+/// A retained driver this journey started through the server, ended if the
+/// journey did not end it: the one process a suite may signal is one it
+/// started, and its pid is the one the adopt route answered.
+#[cfg(unix)]
+struct RetainedDriver(u32);
+
+#[cfg(unix)]
+impl Drop for RetainedDriver {
+    fn drop(&mut self) {
+        if process_is_live(self.0) {
+            let Ok(raw) = i32::try_from(self.0) else {
+                return;
+            };
+            // SAFETY: the pid is the driver the adopt route reported to this
+            // journey, which started it; a stale pid is not signalled because
+            // the probe above found nothing there.
+            unsafe {
+                libc::kill(raw, libc::SIGTERM);
+            }
+        }
+    }
+}
+
 #[test]
-fn a_quiet_run_with_a_surface_nobody_has_read_is_waiting_rather_than_parked() {
-    // A run holding a question is *waiting*, not parked: the loop that would be
-    // writing is deliberately holding a subtree back until somebody answers, and
-    // a run reported undriven there sends an operator to intervene in work whose
-    // next move is already sitting in their own queue.
-    //
-    // **This is the one reading that differs from the sibling's**, and the
-    // difference is deliberate. `src/liveness.rs` states it in full: the engine
-    // asks whether an outstanding surface is *blocking*, which lives in the
-    // channel rather than in the store and is not a question this crate can put
-    // to it, so this asks the wider one the run's own summary can answer — any
-    // surface sent and not consumed. That errs toward "still working", the
-    // direction the sibling's own reading errs in for every input it cannot
-    // read.
-    let quiet = Serving::start(|root| {
-        fixture_run::write_launched(root, fixture_run::RUN_ID);
+fn projects_are_grouped_as_the_engine_groups_them() {
+    // Three runs, two projects, one of them recorded none: the grouping the
+    // engine's own `runs` prints, served in its order — groups by newest
+    // activity, runs newest first, the `(no project)` group an ordinary group.
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        // The same shape launched from another project, and written to a
+        // minute later than every other run here, so its group leads.
+        let dir = fixture_run::write_in_project(
+            root,
+            "run-20260807-0a1b2c",
+            Some("local-md:another-plan"),
+        );
+        fixture_run::append(&dir, "run-progress", json!({}));
+        // And one whose launch recorded no project at all.
+        fixture_run::write_in_project(root, "run-20260807-9e8d7c", None);
     });
-    let parked = http::get(quiet.address, "/api/v2/runs").json()["runs"][0].clone();
+
+    let listed = http::get(serving.address, "/api/v2/projects").json();
+    assert_enveloped(&listed);
+    let groups = listed["projects"].as_array().expect("the groups");
+    let ids: Vec<Value> = groups
+        .iter()
+        .map(|group| group["project"].clone())
+        .collect();
+    // Newest activity first, then by id; the no-project group by its own
+    // recency like any other.
     assert_eq!(
-        parked["state"],
-        json!("parked"),
-        "a launch that has written nothing since is not being driven: {parked}"
+        ids,
+        json!(["local-md:another-plan", null, fixture_run::PLAN_PROJECT])
+            .as_array()
+            .cloned()
+            .unwrap(),
+        "{listed}"
+    );
+    let contract = &groups[2];
+    assert_eq!(contract["name"], json!("contract"));
+    assert_eq!(contract["last_write_at"], json!(1_786_104_030_000_u64));
+    let runs: Vec<&str> = contract["runs"]
+        .as_array()
+        .expect("the group's runs")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("an id"))
+        .collect();
+    // Runs newest first, ties on the id — the order the flat list serves.
+    assert_eq!(runs, vec![fixture_run::RUN_ID, fixture_run::OTHER_RUN_ID]);
+    // Each row is the run-list row, with schema 18's fields on it.
+    let row = &contract["runs"][0];
+    assert_eq!(row["state"], json!("settled"));
+    assert_eq!(row["phase"], json!("settled"));
+    assert_eq!(row["node_counts"]["done"], json!(2));
+    assert_eq!(row["liveness"], json!("PARKED"), "{row}");
+    assert_eq!(row["unread_surfaces"], json!(0));
+    assert_eq!(row["last_progress_at"], json!(1_786_104_030));
+    assert_eq!(row["project"], json!(fixture_run::PLAN_PROJECT));
+    assert_eq!(row["project_name"], json!("contract"));
+    let unprojected = &groups[1];
+    assert_eq!(unprojected["project"], json!(null));
+    assert!(
+        unprojected["runs"][0].get("project").is_none(),
+        "a run that recorded no project carries none: {unprojected}"
     );
 
-    let asked = Serving::start(|root| {
-        let dir = fixture_run::write_launched(root, fixture_run::RUN_ID);
-        // Sent, and never consumed: no `planner-surfaced` follows it.
-        fixture_run::append(
-            &dir,
-            "planner-surface-queued",
-            json!({ "kind": "decision", "message": "which way?", "blocking": true }),
-        );
-    });
-    let waiting = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
-    assert_eq!(
-        waiting["state"],
-        json!("active"),
-        "a run whose question nobody has read reads as abandoned: {waiting}"
+    // One group by its id, path-encoded on the wire.
+    let one = http::get(
+        serving.address,
+        &format!("/api/v2/projects/{}", encoded("local-md:another-plan")),
     );
-    // And nothing else moved with it: this run has recorded no graph, so what it
-    // is *doing* is `starting` whoever is waiting on whom. The surface changes
-    // how the run is being driven, which is the question `state` answers.
-    assert_eq!(waiting["phase"], parked["phase"], "{waiting}");
-    assert_eq!(parked["phase"], json!("starting"), "{parked}");
+    assert_eq!(one.status, 200, "{}", one.body);
+    let one = one.json();
+    assert_eq!(one["project"], json!("local-md:another-plan"));
+    assert_eq!(one["runs"][0]["run_id"], json!("run-20260807-0a1b2c"));
+    // And the flat list carries the same fields on the same rows.
+    let flat = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let flat_row = flat["runs"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["run_id"] == json!(fixture_run::RUN_ID))
+        .expect("the run");
+    assert_eq!(flat_row["project"], row["project"]);
+    assert_eq!(flat_row["liveness"], row["liveness"]);
+    assert_eq!(flat_row["unread_surfaces"], row["unread_surfaces"]);
+
+    // A project nobody launched from is not there; an id that is not one is
+    // refused before anything is compared against it.
+    let missing = http::get(
+        serving.address,
+        &format!("/api/v2/projects/{}", encoded("local-md:nowhere")),
+    );
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], json!("project_not_found"));
+    for malformed in ["no-separator", "Bad:source", "local-md:", "local-md:a:b"] {
+        let refused = http::get(
+            serving.address,
+            &format!("/api/v2/projects/{}", encoded(malformed)),
+        );
+        assert_eq!(refused.status, 422, "{malformed}: {}", refused.body);
+        assert_eq!(
+            refused.json()["error"]["code"],
+            json!("invalid_project_id"),
+            "{malformed}"
+        );
+    }
+}
+
+#[test]
+fn a_project_listing_reports_a_root_it_could_not_read_rather_than_omitting_it() {
+    // The flat list's rule, on the grouped one: a run root the reader refused is
+    // named on `unreadable` beside the groups rather than dropped from them,
+    // because a grouping that is silently short reads as a host with less
+    // running than it has — and the groups themselves are exactly what the
+    // readable runs make, unshortened by the refusal.
+    let refused = "run-20260807-unreadable";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        // A directory that claims to be a run and is not one: the launch record
+        // every reader needs is not a record at all.
+        let dir = root.join(refused);
+        std::fs::create_dir_all(&dir).expect("the run directory");
+        std::fs::write(dir.join("launch.json"), "{ this is not a launch record")
+            .expect("the launch record");
+    });
+    let listed = http::get(serving.address, "/api/v2/projects").json();
+    assert_enveloped(&listed);
+    let groups = listed["projects"].as_array().expect("the groups");
+    assert_eq!(groups.len(), 1, "{listed}");
+    assert_eq!(groups[0]["project"], json!(fixture_run::PLAN_PROJECT));
+    let served: Vec<&str> = groups[0]["runs"]
+        .as_array()
+        .expect("the group's runs")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("a run id"))
+        .collect();
+    assert_eq!(served, vec![fixture_run::RUN_ID], "{listed}");
+
+    let unreadable = listed["unreadable"].as_array().expect("the refused roots");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    let entry = &unreadable[0];
+    assert!(
+        entry["path"].as_str().expect("a path").ends_with(refused),
+        "the refusal names the directory it is about: {entry}"
+    );
+    assert!(
+        !entry["reason"].as_str().expect("a reason").is_empty(),
+        "a refusal a reader cannot act on: {entry}"
+    );
+
+    // And a root with nothing to refuse carries no such array at all, which is
+    // what every client written before this field reads.
+    let clean = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let listed = http::get(clean.address, "/api/v2/projects").json();
+    assert!(
+        listed.get("unreadable").is_none(),
+        "a grouping with nothing to report carries an empty array: {listed}"
+    );
+}
+
+#[test]
+fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
+    // The engine's own liveness reading over the bounded summary, served on the
+    // row: a run quiet past the parked threshold is `PARKED` — unless a
+    // **blocking** surface sits unread in its channel, which is a run waiting
+    // on somebody rather than one nobody is driving. Both readings are the
+    // engine's, so the row and the detail opened from it say one thing, and the
+    // row counts what is waiting. The threshold is the engine's own variable,
+    // set to the one second it will take, so a run written two seconds ago is
+    // already quiet.
+    let quiet = &[("ONEPIPELINE_PARKED_AFTER_SECONDS", "1")];
+    let parked = Serving::start_with_env(
+        |root| {
+            fixture_run::write_launched(root, fixture_run::RUN_ID);
+        },
+        quiet,
+    );
+    let row = http::get(parked.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(row["state"], json!("parked"), "{row}");
+    assert_eq!(row["liveness"], json!("PARKED"), "{row}");
+    assert_eq!(row["unread_surfaces"], json!(0), "{row}");
+
+    // A blocking finding, raised through the channel's own reply — applied by
+    // the call itself, because nothing is driving the run — is a question
+    // nobody has read.
+    let asked = Serving::start_with_env(
+        |root| {
+            fixture_run::write_launched(root, fixture_run::RUN_ID);
+        },
+        quiet,
+    );
+    let replied = http::post(
+        asked.address,
+        &format!("/api/v2/runs/{}/channel/reply", fixture_run::RUN_ID),
+        r#"{"version":3,"commands":[{"op":"finding","message":"which way?","blocking":true}]}"#,
+    );
+    assert_eq!(replied.status, 200, "{}", replied.body);
+    // Quiet is counted in whole seconds past the threshold, so a run written
+    // to this second is not yet quiet under a threshold of one.
+    std::thread::sleep(Duration::from_millis(2_200));
+    let row = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(row["state"], json!("active"), "{row}");
+    assert_eq!(row["liveness"], json!("ACTIVE"), "{row}");
+    assert_eq!(row["unread_surfaces"], json!(1), "{row}");
+    let status = http::get(
+        asked.address,
+        &format!("/api/v2/runs/{}/status", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(status["liveness"], row["liveness"], "{status}");
+    assert_eq!(status["unread_surfaces"]["count"], row["unread_surfaces"]);
+
+    // A surface that is not a request — a check-in, a finding raised at the
+    // surface verb — holds nothing back: unread, counted, and the run is parked
+    // all the same.
+    let told = Serving::start_with_env(
+        |root| {
+            fixture_run::write_launched(root, fixture_run::RUN_ID);
+        },
+        quiet,
+    );
+    let surfaced = http::post(
+        told.address,
+        &format!("/api/v2/runs/{}/channel/surface", fixture_run::RUN_ID),
+        r#"{"kind":"finding","message":"the gate is red"}"#,
+    );
+    assert_eq!(surfaced.status, 200, "{}", surfaced.body);
+    std::thread::sleep(Duration::from_millis(2_200));
+    let row = http::get(told.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(row["unread_surfaces"], json!(1), "{row}");
+    assert_eq!(row["liveness"], json!("PARKED"), "{row}");
+    assert_eq!(row["state"], json!("parked"), "{row}");
+}
+
+#[test]
+fn listing_a_run_that_predates_the_channel_makes_it_no_channel() {
+    // A run recorded before the channel existed has no channel directory, and
+    // never will unless something writes one. The row counts its unread
+    // surfaces as none — and the read that counted them left the run exactly
+    // as it found it: `channel queue` over a run makes the directory, so a
+    // listing that reached for it on every row would write into every run it
+    // listed, and a run an operator was removing at that moment would come back
+    // as an empty directory nothing can read.
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_only(root, fixture_run::RECORDED_ONLY_RUN_ID);
+    });
+    let channel = serving
+        .runs_root()
+        .join(fixture_run::RECORDED_ONLY_RUN_ID)
+        .join("channel");
+    assert!(!channel.exists(), "the fixture predates the channel");
+
+    let row =
+        http::get(serving.address, "/api/v2/runs?include_settled=true").json()["runs"][0].clone();
+    assert_eq!(
+        row["run_id"],
+        json!(fixture_run::RECORDED_ONLY_RUN_ID),
+        "{row}"
+    );
+    assert_eq!(row["unread_surfaces"], json!(0), "{row}");
+    let grouped = http::get(serving.address, "/api/v2/projects").json();
+    assert_eq!(
+        grouped["projects"][0]["runs"][0]["unread_surfaces"],
+        json!(0),
+        "{grouped}"
+    );
+    assert!(
+        !channel.exists(),
+        "listing the run wrote a channel directory into it"
+    );
+}
+
+#[test]
+fn the_channel_is_raised_read_and_claimed_over_http() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+
+    // Nothing raised yet: the queue is empty and a claim finds nothing — on a
+    // settled run, `finished`.
+    let empty = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_enveloped(&empty);
+    assert_eq!(empty["run_id"], json!(run));
+    assert_eq!(empty["surfaces"], json!([]));
+    assert_eq!(empty["waiting"], json!([]));
+    assert_eq!(empty["held"], json!(null));
+    let nothing = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next"),
+        "",
+    )
+    .json();
+    assert_eq!(nothing["status"], json!("finished"), "{nothing}");
+    assert_eq!(nothing["surface"], json!(null));
+
+    // A surface raised, in the engine's own words for it.
+    let raised = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/surface"),
+        r#"{"kind":"finding","message":"the gate is red"}"#,
+    );
+    assert_eq!(raised.status, 200, "{}", raised.body);
+    let raised = raised.json();
+    assert_enveloped(&raised);
+    assert_eq!(raised["state"], json!("queued"));
+    let id = raised["surface"].as_u64().expect("the surface's id");
+
+    // Read: it is waiting, and reading consumes nothing.
+    let queue = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(queue["waiting"][0]["id"], json!(id), "{queue}");
+    assert_eq!(queue["waiting"][0]["kind"], json!("finding"));
+    assert_eq!(queue["waiting"][0]["message"], json!("the gate is red"));
+    assert_eq!(queue["waiting"][0]["blocking"], json!(false));
+    let again = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(
+        again["waiting"], queue["waiting"],
+        "a read consumed a surface"
+    );
+
+    // Claimed: the channel's only consumer hands it out, shaped through the
+    // profile a reader named — the planner's, which is the decisions alone.
+    let claimed = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next?filter=planner"),
+        "",
+    );
+    assert_eq!(claimed.status, 200, "{}", claimed.body);
+    let claimed = claimed.json();
+    assert_enveloped(&claimed);
+    assert_eq!(claimed["status"], json!("surface"));
+    assert_eq!(claimed["surface"]["id"], json!(id));
+    assert_eq!(claimed["surface"]["message"], json!("the gate is red"));
+    assert!(
+        claimed["events"]
+            .as_array()
+            .expect("the shaped events")
+            .iter()
+            .all(|event| event["source"] == json!("pipeline")),
+        "the planner profile admits the decision vocabulary alone: {claimed}"
+    );
+    // And the claim is journalled: the run's own record says it was surfaced.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    assert!(
+        events_on(&timeline)
+            .iter()
+            .any(|event| event["kind"] == json!("planner-surfaced")
+                && event["surface"]["message"] == json!("the gate is red")),
+        "{timeline}"
+    );
+    // A finding holds nothing back, so a claim consumes it outright: raised,
+    // no longer waiting, and nothing in the pending slot.
+    let consumed = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(consumed["surfaces"][0]["id"], json!(id), "{consumed}");
+    assert_eq!(consumed["waiting"], json!([]));
+    assert_eq!(consumed["held"], json!(null));
+
+    // A **blocking** finding — raised through the channel's own reply, which is
+    // where a surface that means to stop a subtree comes from — outlives its
+    // claim: it is held, pending, until somebody answers it.
+    let asked = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/reply"),
+        r#"{"version":3,"commands":[{"op":"finding","message":"which way?","blocking":true}]}"#,
+    );
+    assert_eq!(asked.status, 200, "{}", asked.body);
+    let waiting = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(
+        waiting["waiting"][0]["message"],
+        json!("which way?"),
+        "{waiting}"
+    );
+    assert_eq!(waiting["waiting"][0]["blocking"], json!(true));
+    let claimed = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next"),
+        "",
+    )
+    .json();
+    assert_eq!(claimed["status"], json!("surface"), "{claimed}");
+    assert_eq!(claimed["surface"]["message"], json!("which way?"));
+    let held = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(held["held"]["message"], json!("which way?"), "{held}");
+    assert_eq!(held["waiting"], json!([]));
+
+    // The refusals a user can cause: a message with nothing in it, in the
+    // engine's words; a kind its grammar refuses; a body that is not the shape.
+    let blank = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/surface"),
+        r#"{"kind":"finding","message":"   "}"#,
+    );
+    assert_eq!(blank.status, 422, "{}", blank.body);
+    let blank = blank.json();
+    assert_eq!(blank["error"]["code"], json!("refused"));
+    assert!(
+        blank["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("carried nothing")),
+        "{blank}"
+    );
+    let unkind = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/surface"),
+        r#"{"kind":"Not A Kind","message":"hello"}"#,
+    );
+    assert_eq!(unkind.status, 422, "{}", unkind.body);
+    assert_eq!(unkind.json()["error"]["code"], json!("invalid_request"));
+    let shapeless = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/surface"),
+        "not json",
+    );
+    assert_eq!(shapeless.status, 422, "{}", shapeless.body);
+    assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
+    // A profile the run does not have, on the claim, is the same refusal the
+    // read routes make of it — before anything is claimed.
+    let unknown = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next?filter=nobody"),
+        "",
+    );
+    assert_eq!(unknown.status, 404, "{}", unknown.body);
+    assert_eq!(
+        unknown.json()["error"]["code"],
+        json!("unknown_filter_profile")
+    );
+    // And a run that is not there, on every verb.
+    for (method, path) in [
+        (
+            "GET",
+            "/api/v2/runs/run-that-is-not-there/channel".to_owned(),
+        ),
+        (
+            "POST",
+            "/api/v2/runs/run-that-is-not-there/channel/next".to_owned(),
+        ),
+        (
+            "POST",
+            "/api/v2/runs/run-that-is-not-there/channel/surface".to_owned(),
+        ),
+    ] {
+        let absent = if method == "GET" {
+            http::get(serving.address, &path)
+        } else {
+            http::post(
+                serving.address,
+                &path,
+                r#"{"kind":"finding","message":"x"}"#,
+            )
+        };
+        assert_eq!(absent.status, 404, "{path}: {}", absent.body);
+        assert_eq!(
+            absent.json()["error"]["code"],
+            json!("run_not_found"),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+
+    // Malformed: the engine's own refusal text, not this server's reading of
+    // the body — which it never makes.
+    let malformed = http::post(serving.address, &reply, r#"{"nope":"#);
+    assert_eq!(malformed.status, 422, "{}", malformed.body);
+    let malformed = malformed.json();
+    assert_eq!(malformed["error"]["code"], json!("refused"));
+    assert!(
+        malformed["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("the reply is malformed")),
+        "{malformed}"
+    );
+
+    // An author the run's launch never declared, issuing an op: judged by the
+    // launch configuration inside the engine, and refused naming the author —
+    // which is the proof the author reached it unrewritten.
+    let ungranted = http::post(
+        serving.address,
+        &reply,
+        r###"{"version": 2, "author": "sentinel", "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+    );
+    assert_eq!(ungranted.status, 422, "{}", ungranted.body);
+    let ungranted = ungranted.json();
+    assert_eq!(ungranted["error"]["code"], json!("refused"));
+    assert!(
+        ungranted["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("sentinel")),
+        "the refusal names the author the body named: {ungranted}"
+    );
+
+    // A correlation that is not one, refused at the boundary — through the
+    // bus's own parser, whose words say what a correlation is.
+    let uncorrelated = http::post(
+        serving.address,
+        &format!("{reply}?correlation=not%20a%20token"),
+        r#"{"version": 2, "commands": []}"#,
+    );
+    assert_eq!(uncorrelated.status, 422, "{}", uncorrelated.body);
+    let uncorrelated = uncorrelated.json();
+    assert_eq!(uncorrelated["error"]["code"], json!("invalid_correlation"));
+    assert!(
+        uncorrelated["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("is not a correlation")),
+        "{uncorrelated}"
+    );
+
+    // A correlation the bus's parser accepts reaches the engine beside the
+    // bytes, and the engine rules on the pair: a correlation names the question
+    // a verdict answers, so an envelope carrying no verdict under one is the
+    // engine's refusal — in its words, naming the token it was handed, which is
+    // the proof the token reached it unchanged.
+    let correlated = http::post(
+        serving.address,
+        &format!("{reply}?correlation=c-0123456789abcdef0123456789abcdef"),
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+    );
+    assert_eq!(correlated.status, 422, "{}", correlated.body);
+    let correlated = correlated.json();
+    assert_eq!(correlated["error"]["code"], json!("refused"));
+    assert!(
+        correlated["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("c-0123456789abcdef0123456789abcdef")
+                && said.contains("carries no verdict")),
+        "{correlated}"
+    );
+
+    // An edit, applied by the reply itself because nothing is driving the run,
+    // answered with the receipt — and the omitted author is the planner, by the
+    // engine's own contract, as the record the edit left says.
+    let applied = http::post(
+        serving.address,
+        &reply,
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+    );
+    assert_eq!(applied.status, 200, "{}", applied.body);
+    let applied = applied.json();
+    assert_enveloped(&applied);
+    assert_eq!(applied["run_id"], json!(run));
+    assert_eq!(applied["receipt"]["state"], json!("applied"), "{applied}");
+    assert_eq!(applied["receipt"]["commands"], json!("applied"));
+    assert_eq!(applied["receipt"]["reply"], json!(0));
+    assert_eq!(applied["advice"], json!([]));
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert!(
+        detail["graph"]["plan"]["tasks"]
+            .as_array()
+            .expect("the plan's tasks")
+            .iter()
+            .any(|task| task["id"] == json!("extra")),
+        "the edit reached the graph: {detail}"
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let committed: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .collect();
+    assert_eq!(committed.len(), 1, "{timeline}");
+    assert_eq!(
+        committed[0]["redirection"]["author"]
+            .as_str()
+            .or(committed[0]["author"].as_str()),
+        Some("planner"),
+        "an omitted author is the planner: {}",
+        committed[0]
+    );
+}
+
+#[test]
+fn an_attestation_completes_a_ready_human_action() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let attest = format!("/api/v2/runs/{run}/attest");
+
+    // A reference nothing is waiting on: the engine's refusal.
+    let unwaited = http::post(serving.address, &attest, r#"{"reference":"nobody-asked"}"#);
+    assert_eq!(unwaited.status, 422, "{}", unwaited.body);
+    let unwaited = unwaited.json();
+    assert_eq!(unwaited["error"]["code"], json!("refused"));
+    assert!(
+        unwaited["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("nobody-asked")),
+        "{unwaited}"
+    );
+    // And a body that is not the shape.
+    let shapeless = http::post(serving.address, &attest, r#"{"ref":"signoff"}"#);
+    assert_eq!(shapeless.status, 422, "{}", shapeless.body);
+    assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
+
+    // The ready human action the live run holds, attested: the receipt, and
+    // the decision gone from the graph.
+    let before = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert!(
+        before["graph"]["decisions"]
+            .as_array()
+            .expect("decisions")
+            .iter()
+            .any(|decision| decision["id"] == json!(fixture_run::SIGNOFF_NODE_ID)),
+        "{before}"
+    );
+    let attested = http::post(
+        serving.address,
+        &attest,
+        &json!({ "reference": fixture_run::SIGNOFF_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let attested = attested.json();
+    assert_enveloped(&attested);
+    assert_eq!(attested["receipt"]["state"], json!("applied"), "{attested}");
+    // Applied by the call itself, because nothing is driving the run: the
+    // engine's own fold now settles the action, and the run's record says who
+    // attested what. The decision's *clearing* is the driver's to journal on
+    // its next pass — `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`
+    // drives that half — so what a driverless run shows here is the
+    // attestation and the node's status as the engine folds it.
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(
+        status["node_status"][fixture_run::SIGNOFF_NODE_ID],
+        json!("done"),
+        "{status}"
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    assert!(
+        events_on(&timeline)
+            .iter()
+            .any(|event| event["kind"] == json!("human-attested")),
+        "{timeline}"
+    );
+    // And attested twice is refused: nothing is waiting on it any more.
+    let again = http::post(
+        serving.address,
+        &attest,
+        &json!({ "reference": fixture_run::SIGNOFF_NODE_ID }).to_string(),
+    );
+    assert_eq!(again.status, 422, "{}", again.body);
+    assert_eq!(again.json()["error"]["code"], json!("refused"));
+}
+
+#[test]
+fn a_stop_is_judged_by_the_acting_session() {
+    let run = fixture_run::RUN_ID;
+    let stop = format!("/api/v2/runs/{run}/stop");
+
+    // A stranger's server: refused, naming the owner as the engine names it —
+    // the launcher and a digest, never the session itself.
+    let stranger = Serving::start_as(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        STRANGER,
+    );
+    let refused = http::post(stranger.address, &stop, "");
+    assert_eq!(refused.status, 409, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("not_owner"));
+    let owner = refused["error"]["message"].as_str().expect("the refusal");
+    assert!(owner.contains("[claude-code:"), "{owner}");
+    assert!(
+        !owner.contains(fixture_run::SESSION),
+        "the raw session is never served: {owner}"
+    );
+    // Forced: the owner is named, and the run is stopped anyway — journalled
+    // forced, as `onepipeline stop --force` journals it.
+    let forced = http::post(stranger.address, &stop, r#"{"force": true}"#);
+    assert_eq!(forced.status, 200, "{}", forced.body);
+    let forced = forced.json();
+    assert_enveloped(&forced);
+    assert_eq!(forced["stopped"], json!(true));
+    assert_eq!(forced["forced"], json!(true));
+    assert!(
+        forced["owner"]
+            .as_str()
+            .is_some_and(|owner| owner.starts_with("[claude-code:")),
+        "{forced}"
+    );
+    let timeline = http::get(
+        stranger.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let stopped: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| event["kind"] == json!("run-stopped"))
+        .collect();
+    assert_eq!(stopped.len(), 1, "{timeline}");
+    let row =
+        http::get(stranger.address, "/api/v2/runs?include_settled=true").json()["runs"][0].clone();
+    assert_eq!(row["phase"], json!("finished"), "{row}");
+
+    // The owner's own server, named on the command line: stopped, not forced.
+    let owner = Serving::start_as(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        fixture_run::SESSION,
+    );
+    let stopped = http::post(owner.address, &stop, "");
+    assert_eq!(stopped.status, 200, "{}", stopped.body);
+    let stopped = stopped.json();
+    assert_eq!(stopped["forced"], json!(false));
+    assert_eq!(stopped["owner"], json!("[mine]"));
+    assert_eq!(stopped["teardown"], json!("elsewhere"));
+
+    // The same session from the environment the engine's own CLI reads, with
+    // no flag: the same answer.
+    let inherited = Serving::start_with_env(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        &[(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)],
+    );
+    let stopped = http::post(inherited.address, &stop, "");
+    assert_eq!(stopped.status, 200, "{}", stopped.body);
+    assert_eq!(stopped.json()["forced"], json!(false));
+
+    // An unattributed server owns nothing, so it is refused every stop it does
+    // not force.
+    let nobody = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let refused = http::post(nobody.address, &stop, "");
+    assert_eq!(refused.status, 409, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("not_owner"));
+    let forced = http::post(nobody.address, &stop, r#"{"force": true}"#);
+    assert_eq!(forced.status, 200, "{}", forced.body);
+    assert_eq!(forced.json()["forced"], json!(true));
+    // And a body that is not the shape is refused before the engine is asked.
+    let shapeless = http::post(nobody.address, &stop, r#"{"force": "yes"}"#);
+    assert_eq!(shapeless.status, 422, "{}", shapeless.body);
+    assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
+}
+
+// llmlint: ignore-block[tests_mirror_real_usage] the state is the one the engine itself
+// records for a run being driven — a launch record naming a live pid on this host, which is
+// what `onepipeline adopt` and the adopt route write — and the journey writes that record
+// rather than earning it through the adopt route, because a driver that stays driving for
+// as long as a journey needs is one dispatching a node, which takes a harness and a model.
+// The driver a deterministic fixture can earn settles its one human action as waiting and
+// lets go on its own clock, as `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`
+// below shows, so a second adoption raced against it would be refused or accepted by
+// timing. The pid named is this test's own instead: a process proven alive for the whole
+// journey, read by the engine's own probe, and the refusal is the engine's own.
+#[test]
+fn an_adoption_of_a_run_something_is_driving_is_refused() {
+    // A run whose driver is a live process on this host — this very test —
+    // is being driven, and the engine refuses to take it over: its own
+    // refusal, naming the way out, before anything is written.
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, std::process::id());
+        },
+        fixture_run::LIVE_SESSION,
+    );
+    let adoptions = |address| {
+        events_on(
+            &http::get(
+                address,
+                &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+            )
+            .json(),
+        )
+        .iter()
+        .filter(|event| event["kind"] == json!("driver-adopted"))
+        .count()
+    };
+    let before = adoptions(serving.address);
+    let driving = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{}/adopt", fixture_run::RUN_ID),
+        "",
+    );
+    assert_eq!(driving.status, 422, "{}", driving.body);
+    let driving = driving.json();
+    assert_eq!(driving["error"]["code"], json!("refused"));
+    assert!(
+        driving["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("still being driven")),
+        "{driving}"
+    );
+    assert_eq!(adoptions(serving.address), before, "nothing was written");
+    // And a run that is not there.
+    let absent = http::post(
+        serving.address,
+        "/api/v2/runs/run-that-is-not-there/adopt",
+        "",
+    );
+    assert_eq!(absent.status, 404, "{}", absent.body);
+    assert_eq!(absent.json()["error"]["code"], json!("run_not_found"));
+}
+// llmlint: ignore-end[tests_mirror_real_usage]
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey is not
+// expensive: it runs in under two seconds — three drivers, each settling a one-node graph
+// and exiting — and the sixty seconds beside it is `DRIVER_PATIENCE`, the ceiling a
+// *failing* wait reaches before it gives up, which no passing run pays. The tiers behind
+// edges of their own here are the ones that need something a checkout may lack (`strace`,
+// the base commit's server); this needs the compiled binary every other journey in this
+// module drives.
+#[cfg(unix)]
+#[test]
+fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
+    let run = fixture_run::RUN_ID;
+    let adopt = format!("/api/v2/runs/{run}/adopt");
+    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
+    let events = |address| {
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+    };
+    // How many times the run's own record says it was adopted: the journalled
+    // `driver-adopted`, which the driver writes once it holds the run.
+    let adoptions = |address| {
+        events(address)
+            .iter()
+            .filter(|event| event["kind"] == json!("driver-adopted"))
+            .count()
+    };
+
+    // Refused for a stranger, before anything is written.
+    let stranger = Serving::start_in_as(workspace, STRANGER);
+    let refused = http::post(stranger.address, &adopt, "");
+    assert_eq!(refused.status, 409, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("not_owner"));
+    assert_eq!(adoptions(stranger.address), 0);
+    let (_, workspace) = stranger.stop_keeping_workspace(Stop::Terminate);
+
+    // Adopted by the owner: the driver's pid answered, and **the server stopped
+    // at once** — before the driver has done anything but claim the run. The
+    // driver was never the server's to end: it goes on, drives the run, and
+    // everything it writes is written to a run no server is serving.
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let adopted = http::post(serving.address, &adopt, "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let adopted = adopted.json();
+    assert_enveloped(&adopted);
+    assert_eq!(adopted["run_id"], json!(run));
+    let pid = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    assert!(process_is_live(pid), "the pid answered is a process");
+    let (status, workspace) = serving.stop_keeping_workspace(Stop::Terminate);
+    assert!(status.success(), "{status}");
+
+    // What the driver does after that is the engine's own: it folds the graph,
+    // finds one human action nobody has taken, settles it as waiting — there is
+    // nothing to dispatch — and, with nothing left that can move without the
+    // channel, lets go of the run. All of it read off the run record by a
+    // server started afterwards, which held no handle on any of it.
+    let restarted = Serving::start_in_as(workspace, fixture_run::SESSION);
+    eventually("the driver settled the human action as waiting", || {
+        events(restarted.address).iter().any(|event| {
+            event["kind"] == json!("node-settled")
+                && event["node_id"] == json!(fixture_run::APPROVAL_NODE_ID)
+        })
+    });
+    assert!(
+        events(restarted.address)
+            .iter()
+            .any(|event| event["kind"] == json!("driver-adopted")),
+        "the adoption is journalled"
+    );
+    let driven = detail(restarted.address);
+    assert_eq!(
+        driven["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("waiting"),
+        "{driven}"
+    );
+    // The driver let go, and the reader proves it gone rather than leaving
+    // the run reading as driven for as long as any server lives: it was the
+    // server that retained it that would have had to reap it, and that server
+    // is gone, so `init` did. What the run reads as is what the engine's own
+    // rule makes of a driver on this host that is not there.
+    eventually("the driver let go of the run", || !process_is_live(pid));
+    eventually("the run reads as one nothing is driving", || {
+        detail(restarted.address)["run"]["state"] == json!("driver-dead")
+    });
+    drop(driver);
+
+    // The person answers. Nothing is driving the run, so the attestation is
+    // applied by the call itself — and a second adoption, retained by this
+    // server and reaped by it, drives the graph to completion.
+    let attested = http::post(
+        restarted.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    assert_eq!(attested.json()["receipt"]["state"], json!("applied"));
+    let again = http::post(restarted.address, &adopt, "");
+    assert_eq!(again.status, 200, "{}", again.body);
+    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let driver = RetainedDriver(second);
+    assert_ne!(second, pid);
+    eventually("the second adoption was journalled", || {
+        adoptions(restarted.address) == 2
+    });
+    eventually("the second driver completed the graph", || {
+        detail(restarted.address)["run"]["state"] == json!("settled")
+    });
+    let settled = detail(restarted.address);
+    assert_eq!(
+        settled["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("done"),
+        "{settled}"
+    );
+    // And this server, the driver's parent, reaped it: a driver that has gone
+    // is not a live process, so the run is adoptable again rather than read
+    // as driven by a zombie until the server exits.
+    eventually("the server reaped the driver it retained", || {
+        !process_is_live(second)
+    });
+    drop(driver);
+    // Adopting a settled run something is not driving is the engine's own
+    // answer — a fresh driver that settles it again at once — and never a
+    // refusal for a driver that is no longer there.
+    let third = http::post(restarted.address, &adopt, "");
+    assert_eq!(third.status, 200, "{}", third.body);
+    let third = u32::try_from(third.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let driver = RetainedDriver(third);
+    eventually("the third driver settled and was reaped", || {
+        !process_is_live(third)
+    });
+    drop(driver);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+#[test]
+fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
+    // Acting as the live run's owner, because `unwatched` answers for the runs
+    // the acting session owns and no other — and over a run whose summary
+    // document is current, because that verb decides settlement off the
+    // document alone and folds nothing, exactly as the CLI does.
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::summarize(root, fixture_run::RUN_ID);
+        },
+        fixture_run::LIVE_SESSION,
+    );
+    let run = fixture_run::RUN_ID;
+    let watch = format!("/api/v2/runs/{run}/watch");
+    let unwatched = |address| http::get(address, "/api/v2/unwatched").json();
+
+    // Nothing watches the live run: reported, by the server and by the CLI.
+    let before = unwatched(serving.address);
+    assert_enveloped(&before);
+    assert_eq!(before["reported"][0]["run"], json!(run), "{before}");
+    assert!(before["reported"][0]["why_not_watched"]
+        .as_str()
+        .is_some_and(|why| !why.is_empty()));
+    let said = sibling::run(
+        &serving.runs_root(),
+        Some(fixture_run::LIVE_SESSION),
+        &["unwatched"],
+    );
+    assert!(
+        String::from_utf8_lossy(&said.stdout).contains(run),
+        "the CLI reports the run too: {}",
+        String::from_utf8_lossy(&said.stderr)
+    );
+
+    // Held: the server is the watcher. The frames come as they happen — the
+    // run's meaningful events first, then a heartbeat every tick.
+    let mut stream = http::stream(
+        serving.address,
+        &format!("{watch}?timeout=none&tick=1&until=settled"),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    let first = stream.next_frame().expect("a frame");
+    assert_eq!(first.event, "event", "{first:?}");
+    assert_eq!(first.json()["watch"], json!("event"));
+    let tick = std::iter::from_fn(|| stream.next_frame())
+        .find(|frame| frame.event == "tick")
+        .expect("a heartbeat");
+    assert_eq!(tick.json()["run_id"], json!(run), "{tick:?}");
+    let during = unwatched(serving.address);
+    assert_eq!(during["reported"], json!([]), "{during}");
+    let said = sibling::run(
+        &serving.runs_root(),
+        Some(fixture_run::LIVE_SESSION),
+        &["unwatched"],
+    );
+    assert!(
+        !String::from_utf8_lossy(&said.stdout).contains(run),
+        "the CLI reads the run as watched while the stream is held: {}",
+        String::from_utf8_lossy(&said.stdout)
+    );
+
+    // Closed by the client: the record goes with it.
+    drop(stream);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let after = unwatched(serving.address);
+        if after["reported"][0]["run"] == json!(run) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the watcher record outlived the stream: {after}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // A watch of no seconds reads the run once and returns, ending the stream
+    // on the `returned` frame.
+    let mut once = http::stream(serving.address, &format!("{watch}?timeout=0"), None);
+    let frames: Vec<http::Frame> = std::iter::from_fn(|| once.next_frame()).collect();
+    let last = frames.last().expect("frames");
+    assert_eq!(last.event, "returned", "{frames:?}");
+    let returned = last.json();
+    assert_eq!(returned["condition"], json!("elapsed"), "{returned}");
+    assert!(returned["cursor"]
+        .as_str()
+        .is_some_and(|c| c.starts_with("1:")));
+    // And resumed from that cursor, nothing already reported is reported again.
+    let cursor = returned["cursor"].as_str().expect("a cursor").to_owned();
+    let mut resumed = http::stream(
+        serving.address,
+        &format!("{watch}?timeout=0&cursor={cursor}"),
+        None,
+    );
+    let frames: Vec<http::Frame> = std::iter::from_fn(|| resumed.next_frame()).collect();
+    assert!(
+        frames.iter().all(|frame| frame.event != "event"),
+        "{frames:?}"
+    );
+
+    // Shaped through a filter, as the CLI's `--filter` shapes a watch: a spec
+    // that excludes the settlements reports no event of them, and the stream
+    // still returns.
+    let mut shaped = http::stream(
+        serving.address,
+        &format!(
+            "{watch}?timeout=0&filter={}",
+            "%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22node-settled%22%7D%5D%7D"
+        ),
+        None,
+    );
+    let frames: Vec<http::Frame> = std::iter::from_fn(|| shaped.next_frame()).collect();
+    let settlements = |frames: &[http::Frame]| {
+        frames
+            .iter()
+            .filter(|frame| frame.event == "event")
+            .filter(|frame| frame.json()["event"]["kind"] == json!("node-settled"))
+            .count()
+    };
+    assert_eq!(
+        settlements(&frames),
+        0,
+        "the excluded settlements were reported: {frames:?}"
+    );
+    assert!(
+        frames.iter().any(|frame| frame.event == "event"),
+        "the events the spec admits are still reported: {frames:?}"
+    );
+    assert_eq!(
+        frames.last().map(|frame| frame.event.as_str()),
+        Some("returned")
+    );
+    let mut unshaped = http::stream(serving.address, &format!("{watch}?timeout=0"), None);
+    let frames: Vec<http::Frame> = std::iter::from_fn(|| unshaped.next_frame()).collect();
+    assert!(
+        settlements(&frames) > 0,
+        "unshaped, the settlements are reported: {frames:?}"
+    );
+
+    // Several conditions at once, comma-separated as a query string spells a
+    // repeatable flag: the wait returns on the first of them that fires and
+    // says which one did.
+    let mut several = http::stream(
+        serving.address,
+        &format!("{watch}?timeout=0&until=settled,node-settled"),
+        None,
+    );
+    let returned = std::iter::from_fn(|| several.next_frame())
+        .last()
+        .expect("a watch of no seconds returns")
+        .json();
+    assert!(
+        matches!(
+            returned["condition"].as_str(),
+            Some("settled" | "node-settled" | "elapsed")
+        ),
+        "{returned}"
+    );
+
+    // The refusals: a condition the verb does not return on and a wait that is
+    // not one, at the boundary; a cursor this run cannot place and a node it
+    // does not hold, in the engine's words, before the stream opens.
+    for (query, code) in [
+        ("until=whenever", "invalid_request"),
+        ("until=settled,whenever", "invalid_request"),
+        ("until=", "invalid_request"),
+        ("timeout=soon", "invalid_request"),
+        ("tick=often", "invalid_request"),
+        ("cursor=1:elsewhere:5", "refused"),
+        ("until=node=nope", "refused"),
+    ] {
+        let refused = http::get(serving.address, &format!("{watch}?{query}"));
+        assert_eq!(refused.status, 422, "{query}: {}", refused.body);
+        assert_eq!(refused.json()["error"]["code"], json!(code), "{query}");
+    }
+}
+
+#[test]
+fn the_read_verbs_serve_what_the_cli_prints() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let root = serving.runs_root();
+    let cli = |arguments: &[&str]| -> String {
+        let output = sibling::run(&root, None, arguments);
+        assert!(
+            output.status.success(),
+            "onepipeline {}: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    // Each rendered verb is byte for byte what the binary prints.
+    for (path, arguments) in [
+        (format!("/api/v2/runs/{run}/results"), vec!["results", run]),
+        (format!("/api/v2/runs/{run}/goals"), vec!["goals", run]),
+        (
+            format!(
+                "/api/v2/runs/{run}/transcript?node={}",
+                fixture_run::NODE_ID
+            ),
+            vec!["transcript", run, fixture_run::NODE_ID],
+        ),
+        ("/api/v2/goals".to_owned(), vec!["goals"]),
+    ] {
+        let served = http::get(serving.address, &path);
+        assert_eq!(served.status, 200, "{path}: {}", served.body);
+        let served = served.json();
+        assert_enveloped(&served);
+        assert_eq!(
+            served["rendered"],
+            json!(cli(&arguments)),
+            "{path} is not what `onepipeline {}` prints",
+            arguments.join(" ")
+        );
+    }
+    // `status` and `host` render the provider-health block the engine probes
+    // this host for, which moves between two reads; what is held is the
+    // standing, which the rendering opens with.
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(status["run_id"], json!(run));
+    assert_eq!(status["liveness"], json!("PARKED"), "{status}");
+    assert_eq!(status["unread_surfaces"]["count"], json!(0));
+    assert_eq!(status["node_status"][fixture_run::NODE_ID], json!("done"));
+    assert_eq!(status["summary"], json!("2/2 done"));
+    assert!(
+        status["rendered"]
+            .as_str()
+            .is_some_and(|text| text.starts_with(&format!("{run}  SETTLED  2/2 done"))),
+        "{status}"
+    );
+    assert!(
+        cli(&["status", run]).starts_with(&format!("{run}  SETTLED  2/2 done")),
+        "the CLI opens with the same standing"
+    );
+    let host = http::get(serving.address, "/api/v2/host").json();
+    assert!(
+        host["rendered"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("host ") && text.contains("no live dispatches")),
+        "{host}"
+    );
+    // The telemetry document is the SDK's own, as the CLI prints it.
+    let telemetry = http::get(serving.address, &format!("/api/v2/runs/{run}/telemetry")).json();
+    let printed: Value = serde_json::from_str(cli(&["telemetry", run]).trim()).expect("a document");
+    assert_eq!(telemetry["telemetry"], printed, "{telemetry}");
+
+    // A node the run never dispatched is the engine's refusal, not an empty
+    // transcript; a node that is not a name at all is the boundary's.
+    let unknown = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/transcript?node=nope"),
+    );
+    assert_eq!(unknown.status, 422, "{}", unknown.body);
+    let unknown = unknown.json();
+    assert_eq!(unknown["error"]["code"], json!("refused"));
+    assert!(
+        unknown["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("has recorded nothing for node 'nope'")),
+        "{unknown}"
+    );
+    let unnamed = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/transcript?node=../etc"),
+    );
+    assert_eq!(unnamed.status, 422, "{}", unnamed.body);
+    assert_eq!(unnamed.json()["error"]["code"], json!("invalid_node_id"));
+    // And a run that is not there, on every read verb.
+    for route in ["status", "results", "goals", "transcript", "telemetry"] {
+        let absent = http::get(
+            serving.address,
+            &format!("/api/v2/runs/run-that-is-not-there/{route}"),
+        );
+        assert_eq!(absent.status, 404, "{route}: {}", absent.body);
+        assert_eq!(
+            absent.json()["error"]["code"],
+            json!("run_not_found"),
+            "{route}"
+        );
+    }
+}
+
+#[test]
+fn an_invalidation_names_the_project_group_that_moved() {
+    let serving = two_runs();
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    let snapshot = stream.frames(1).remove(0);
+    assert_eq!(snapshot.event, "snapshot");
+    fixture_run::append(
+        &serving.run_dir(fixture_run::OTHER_RUN_ID),
+        "run-progress",
+        json!({}),
+    );
+    let changed = stream.next_frame().expect("the run moved");
+    assert_eq!(changed.event, "run.changed");
+    let data = changed.json();
+    assert_eq!(data["run_id"], json!(fixture_run::OTHER_RUN_ID));
+    assert_eq!(data["project"], json!(fixture_run::PLAN_PROJECT), "{data}");
 }
