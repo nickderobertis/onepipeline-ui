@@ -10574,9 +10574,14 @@ const STRANGER: &str = "another-planner-session";
 /// takes under two seconds on this host. The ceiling is generous because a
 /// driver is a process the kernel schedules, and a loaded host that took ten
 /// seconds to run one must not read as a driver that never wrote.
+///
+/// Unix-only with the adoption journey it paces, which is the one thing that
+/// waits on a retained driver.
+#[cfg(unix)]
 const DRIVER_PATIENCE: Duration = Duration::from_secs(60);
 
 /// Wait until `condition` holds, or fail the journey naming what never happened.
+#[cfg(unix)]
 fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
     while !condition() {
