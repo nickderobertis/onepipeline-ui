@@ -1,5 +1,5 @@
 import type { ProjectGroup, RunSummary } from "@onepipeline-ui/dag-model";
-import { NO_PROJECT_KEY } from "../../lib/useUrlSelection";
+import { NO_PROJECT_KEY } from "./useUrlSelection";
 
 /** The words the server groups runs by, read for a heading. */
 export const NO_PROJECT_LABEL = "(no project)";
@@ -59,9 +59,4 @@ export function runStateSummary(runs: readonly RunSummary[]): string {
 /** A count of runs, in words: `1 run`, `12 runs`. */
 export function runCount(runs: readonly RunSummary[]): string {
   return `${runs.length} ${runs.length === 1 ? "run" : "runs"}`;
-}
-
-/** An epoch-millisecond stamp as the ISO instant every `Timestamp` reads. */
-export function isoOfMillis(millis: number): string {
-  return new Date(millis).toISOString();
 }

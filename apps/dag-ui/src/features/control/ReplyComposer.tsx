@@ -1,17 +1,16 @@
 import { Button, Input, Label, Textarea } from "@oneharness/ui";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Send, Wand2 } from "lucide-react";
-import { useId, useState } from "react";
-import { Outcome, outcomeOf, type VerbOutcome } from "./Outcome";
+import { useId } from "react";
+import { Outcome } from "./Outcome";
 import {
-  composeEnvelope,
   isShortcut,
   SHORTCUT_FIELDS,
   SHORTCUTS,
-  type Shortcut,
   type ShortcutFields,
   VERDICT_SHORTCUTS,
 } from "./reply-shortcuts";
+import { useReplyComposer } from "./useReplyComposer";
 
 /** What each field asks for, in the words the engine's own schema uses. */
 const FIELD_LABELS: Readonly<Record<keyof ShortcutFields, string>> = {
@@ -69,43 +68,19 @@ export function ReplyComposer({
   readonly onSent: () => void;
 }) {
   const id = useId();
-  const [shortcut, setShortcut] = useState<Shortcut>("continue");
-  const [fields, setFields] = useState<ShortcutFields>({});
-  const [problem, setProblem] = useState<string>();
-  const [envelope, setEnvelope] = useState("");
-  const [correlation, setCorrelation] = useState("");
-  const [sending, setSending] = useState(false);
-  const [outcome, setOutcome] = useState<VerbOutcome>();
-
-  const compose = () => {
-    const composed = composeEnvelope(shortcut, {
-      ...CHOICE_DEFAULTS,
-      ...fields,
-    });
-    if ("problem" in composed) {
-      setProblem(composed.problem);
-      return;
-    }
-    setProblem(undefined);
-    setEnvelope(composed.bytes);
-  };
-
-  const send = async () => {
-    setSending(true);
-    const answered = await outcomeOf("Reply", () =>
-      client.reply(
-        runId,
-        envelope,
-        correlation.trim() === "" ? undefined : correlation.trim(),
-      ),
-    );
-    setOutcome(answered);
-    setSending(false);
-    if (answered.kind === "answered") onSent();
-  };
-
-  const set = (key: keyof ShortcutFields, value: string | boolean) =>
-    setFields((previous) => ({ ...previous, [key]: value }));
+  const {
+    shortcut,
+    setShortcut,
+    fields,
+    setField: set,
+    problem,
+    compose,
+    envelope,
+    setEnvelope,
+    correlation,
+    setCorrelation,
+    send,
+  } = useReplyComposer(client, runId, CHOICE_DEFAULTS, onSent);
 
   return (
     <section aria-labelledby={`${id}-heading`} className="composer">
@@ -235,18 +210,18 @@ export function ReplyComposer({
       </div>
       <div className="composer-actions">
         <Button
-          disabled={sending || envelope.trim() === ""}
-          onClick={() => void send()}
+          disabled={send.pending || envelope.trim() === ""}
+          onClick={() => void send.run()}
           size="sm"
           type="button"
         >
           <Send size={14} /> Send reply
         </Button>
         <span aria-live="polite" className="run-list-status">
-          {sending ? "Sending…" : ""}
+          {send.pending ? "Sending…" : ""}
         </span>
       </div>
-      <Outcome label="Reply" outcome={outcome} />
+      <Outcome label="Reply" outcome={send.outcome} />
     </section>
   );
 }

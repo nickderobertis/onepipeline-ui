@@ -124,8 +124,14 @@ export const BUSY_SESSIONS = 200;
 export const BUSY_LONG_SESSION = "engineer-sweep-7";
 /** How many turns that one recorded. */
 export const BUSY_LONG_TURNS = 30;
-/** More than one API page of cheap records, so paging is the real cursor boundary. */
-export const PAGE_RUNS = 43;
+/**
+ * More than one API page of cheap records, so paging is the real cursor boundary.
+ *
+ * Sized so the whole corpus is fifty-two runs — two past the page — which is the
+ * count the paging journeys read the second page in at; a run added to the corpus
+ * comes out of this number rather than moving that count.
+ */
+export const PAGE_RUNS = 40;
 
 /**
  * A run whose graphs declared members named by nothing built into this repository.
@@ -2129,10 +2135,12 @@ function writeSupervisedRun(root) {
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  // Written a minute ago rather than on the fixed calendar date, so the run reads
-  // as driven rather than parked: a driver that is quiet long enough is read as
-  // parked, and an adoption is offered on neither.
-  const start = Date.now() - 60 * 1000;
+  // Written ten minutes ago rather than on the fixed calendar date, so the run
+  // reads as driven rather than parked — a driver quiet for half an hour is read
+  // as parked, and an adoption is offered on neither — and still after the live
+  // run's last write, so the live run stays the newest activity the flat list
+  // leads with and every journey that opens the first run served opens it.
+  const start = Date.now() - 10 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(
@@ -2186,7 +2194,7 @@ function writeElsewhereRun(root) {
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  const start = Date.now() - 90 * 1000;
+  const start = Date.now() - 11 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(ELSEWHERE_RUN, "codex", CODEX_SESSION, stamp(start), 4252),
@@ -2230,7 +2238,7 @@ function writeAdoptableRun(root, workspace) {
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  const start = Date.now() - 2 * 60 * 1000;
+  const start = Date.now() - 12 * 60 * 1000;
   // No observer graph: a record naming one is a graph the adopted driver would
   // launch, and this fixture has none to launch. The node graph is named because
   // the driver refuses a record naming none before it drives, and never read,

@@ -15,9 +15,10 @@ import {
 import { RUN_LIVENESS_NOTHING_DRIVING } from "@onepipeline-ui/dag-model";
 import { TelemetryClientError } from "@onepipeline-ui/telemetry-client";
 import { Eye, EyeOff, LifeBuoy, OctagonX } from "lucide-react";
-import { useState } from "react";
-import { Outcome, outcomeOf, type VerbOutcome } from "./Outcome";
+import { useCallback, useState } from "react";
+import { Outcome } from "./Outcome";
 import type { RunControl } from "./useRunControl";
+import { useVerb } from "./useVerb";
 
 /**
  * The owner a refusal names, as the engine spells it — `[codex:160c290a]` —
@@ -47,36 +48,13 @@ export function RunActions({
   readonly runId: string;
   readonly control: RunControl;
 }) {
-  const [stopOpen, setStopOpen] = useState(false);
-  const [forceOpen, setForceOpen] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const [stopOutcome, setStopOutcome] = useState<VerbOutcome>();
-  const [adoptOutcome, setAdoptOutcome] = useState<VerbOutcome>();
-  const [adopting, setAdopting] = useState(false);
-
-  const refusal =
-    stopOutcome?.kind === "refused" &&
-    stopOutcome.error instanceof TelemetryClientError &&
-    stopOutcome.error.code === "not_owner"
-      ? stopOutcome.error
-      : undefined;
+  const { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal } =
+    useStop(control);
   const owner = refusal === undefined ? undefined : ownerNamed(refusal.message);
-
-  const stop = async (force: boolean) => {
-    setStopping(true);
-    const answered = await outcomeOf(force ? "Forced stop" : "Stop", () =>
-      control.stop(force),
-    );
-    setStopOutcome(answered);
-    setStopping(false);
-    setStopOpen(false);
-    setForceOpen(false);
-  };
-  const adopt = async () => {
-    setAdopting(true);
-    setAdoptOutcome(await outcomeOf("Adopt", () => control.adopt()));
-    setAdopting(false);
-  };
+  const adopt = useVerb("Adopt", control.adopt);
+  const stopOutcome = stop.outcome;
+  const adoptOutcome = adopt.outcome;
+  const stopping = stop.pending;
 
   const liveness = control.status.value?.liveness;
   const nothingDriving =
@@ -136,8 +114,8 @@ export function RunActions({
         </Button>
         {nothingDriving && (
           <Button
-            disabled={adopting}
-            onClick={() => void adopt()}
+            disabled={adopt.pending}
+            onClick={() => void adopt.run()}
             size="sm"
             type="button"
             variant="outline"
@@ -172,7 +150,7 @@ export function RunActions({
             </DialogClose>
             <Button
               disabled={stopping}
-              onClick={() => void stop(false)}
+              onClick={() => void stop.run(false)}
               type="button"
               variant="destructive"
             >
@@ -202,7 +180,7 @@ export function RunActions({
             </DialogClose>
             <Button
               disabled={stopping}
-              onClick={() => void stop(true)}
+              onClick={() => void stop.run(true)}
               type="button"
               variant="destructive"
             >
@@ -234,4 +212,37 @@ export function RunActions({
       )}
     </>
   );
+}
+
+/**
+ * The stop as a control offers it: two confirms, and the verb behind both.
+ *
+ * Both dialogs close on any answer, and the refusal that names another owner
+ * is picked out of the outcome here because it is what decides whether the
+ * second confirm — the forced one — is offered at all.
+ */
+function useStop(control: RunControl) {
+  const [stopOpen, setStopOpen] = useState(false);
+  const [forceOpen, setForceOpen] = useState(false);
+  const stop = useVerb(
+    (force: boolean) => (force ? "Forced stop" : "Stop"),
+    useCallback(
+      async (force: boolean) => {
+        try {
+          return await control.stop(force);
+        } finally {
+          setStopOpen(false);
+          setForceOpen(false);
+        }
+      },
+      [control.stop],
+    ),
+  );
+  const refusal =
+    stop.outcome?.kind === "refused" &&
+    stop.outcome.error instanceof TelemetryClientError &&
+    stop.outcome.error.code === "not_owner"
+      ? stop.outcome.error
+      : undefined;
+  return { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal };
 }

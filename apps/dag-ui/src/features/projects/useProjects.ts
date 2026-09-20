@@ -1,8 +1,8 @@
 import type { ProjectGroup, ProjectList } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useEffect, useState } from "react";
+import { groupForKey } from "../../lib/project-model";
 import { NO_PROJECT_KEY } from "../../lib/useUrlSelection";
-import { groupForKey } from "./project-model";
 
 export interface ProjectsState {
   readonly list?: ProjectList;

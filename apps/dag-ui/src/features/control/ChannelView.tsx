@@ -16,14 +16,14 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { CheckCheck, Inbox, MessageSquarePlus } from "lucide-react";
-import { useId, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { Timestamp } from "../../lib/Timestamp";
-import { formatDurationSeconds } from "../../lib/time";
-import { isoOfMillis } from "../projects/project-model";
-import { Outcome, outcomeOf, type VerbOutcome } from "./Outcome";
+import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
+import { Outcome } from "./Outcome";
 import { ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
 import { useRead } from "./useRead";
+import { useVerb } from "./useVerb";
 
 /**
  * The run's channel: the queue as the engine keeps it, the one consumer of it,
@@ -55,25 +55,12 @@ export function ChannelView({
   readonly observedAt: string;
   readonly invalidations: number;
 }) {
-  //: Bumped after every write here, so the queue re-reads without waiting on the stream.
-  const [writes, setWrites] = useState(0);
-  const queue = useRead(
-    runId,
-    () => client.getChannel(runId),
-    invalidations + writes,
+  const { queue, wrote } = useChannelQueue(client, runId, invalidations);
+  const next = useVerb(
+    "Next",
+    useCallback(() => client.claimNext(runId, filter), [client, runId, filter]),
+    wrote,
   );
-  const wrote = () => setWrites((current) => current + 1);
-  const [next, setNext] = useState<VerbOutcome>();
-  const [claiming, setClaiming] = useState(false);
-  const claim = async () => {
-    setClaiming(true);
-    const answered = await outcomeOf("Next", () =>
-      client.claimNext(runId, filter),
-    );
-    setNext(answered);
-    setClaiming(false);
-    wrote();
-  };
 
   return (
     <ScrollArea className="h-full">
@@ -87,8 +74,8 @@ export function ChannelView({
               <Inbox size={15} /> Channel queue
             </h3>
             <Button
-              disabled={claiming}
-              onClick={() => void claim()}
+              disabled={next.pending}
+              onClick={() => void next.run()}
               size="sm"
               type="button"
             >
@@ -113,7 +100,7 @@ export function ChannelView({
           ) : queue.value ? (
             <Queue observedAt={observedAt} queue={queue.value} />
           ) : null}
-          <Outcome label="Next" outcome={next} />
+          <Outcome label="Next" outcome={next.outcome} />
         </section>
         <Attestations
           client={client}
@@ -126,6 +113,28 @@ export function ChannelView({
       </div>
     </ScrollArea>
   );
+}
+
+/**
+ * The queue as `GET .../channel` serves it, read again on the stream and after
+ * every write made from this view — a surface raised, a claim, a reply, an
+ * attest — so what the reader wrote is on screen without waiting for the stream
+ * to say so.
+ */
+function useChannelQueue(
+  client: TelemetryClient,
+  runId: string,
+  invalidations: number,
+) {
+  //: Bumped after every write here, so the queue re-reads without waiting on the stream.
+  const [writes, setWrites] = useState(0);
+  const queue = useRead(
+    runId,
+    () => client.getChannel(runId),
+    invalidations + writes,
+  );
+  const wrote = useCallback(() => setWrites((current) => current + 1), []);
+  return { queue, wrote };
 }
 
 /**
@@ -358,17 +367,14 @@ function Attestations({
   readonly decisions: readonly Decision[];
   readonly onWrote: () => void;
 }) {
-  const [outcome, setOutcome] = useState<VerbOutcome>();
-  const [attesting, setAttesting] = useState<string>();
-  const attest = async (reference: string) => {
-    setAttesting(reference);
-    const answered = await outcomeOf(`Attest ${reference}`, () =>
-      client.attest(runId, reference),
-    );
-    setOutcome(answered);
-    setAttesting(undefined);
-    onWrote();
-  };
+  const attest = useVerb(
+    (reference: string) => `Attest ${reference}`,
+    useCallback(
+      (reference: string) => client.attest(runId, reference),
+      [client, runId],
+    ),
+    onWrote,
+  );
   return (
     <section aria-labelledby="attest-heading" className="channel-section">
       <h3 id="attest-heading">
@@ -391,8 +397,8 @@ function Attestations({
                 )}
               </span>
               <Button
-                disabled={attesting !== undefined}
-                onClick={() => void attest(decision.id)}
+                disabled={attest.pending}
+                onClick={() => void attest.run(decision.id)}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -403,7 +409,7 @@ function Attestations({
           ))}
         </ul>
       )}
-      <Outcome label="Attest" outcome={outcome} />
+      <Outcome label="Attest" outcome={attest.outcome} />
     </section>
   );
 }
@@ -421,20 +427,17 @@ function SurfaceForm({
   const id = useId();
   const [kind, setKind] = useState("");
   const [message, setMessage] = useState("");
-  const [outcome, setOutcome] = useState<VerbOutcome>();
-  const [raising, setRaising] = useState(false);
-  const raise = async () => {
-    setRaising(true);
-    const answered = await outcomeOf("Surface", () =>
-      client.surface(runId, { kind, message }),
-    );
-    setOutcome(answered);
-    setRaising(false);
-    if (answered.kind === "answered") {
+  const raise = useVerb(
+    "Surface",
+    useCallback(
+      () => client.surface(runId, { kind, message }),
+      [client, runId, kind, message],
+    ),
+    useCallback(() => {
       setMessage("");
       onRaised();
-    }
-  };
+    }, [onRaised]),
+  );
   return (
     <section aria-labelledby={`${id}-heading`} className="channel-section">
       <h3 id={`${id}-heading`}>
@@ -462,8 +465,8 @@ function SurfaceForm({
       </div>
       <div className="composer-actions">
         <Button
-          disabled={raising || kind.trim() === ""}
-          onClick={() => void raise()}
+          disabled={raise.pending || kind.trim() === ""}
+          onClick={() => void raise.run()}
           size="sm"
           type="button"
           variant="outline"
@@ -471,7 +474,7 @@ function SurfaceForm({
           Raise surface
         </Button>
       </div>
-      <Outcome label="Surface" outcome={outcome} />
+      <Outcome label="Surface" outcome={raise.outcome} />
     </section>
   );
 }

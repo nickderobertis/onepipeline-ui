@@ -9,25 +9,11 @@ import {
 } from "@oneharness/ui";
 import type { RunStatus } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import type { NodeView } from "../../lib/run-model";
 import { Outcome } from "./Outcome";
-import { type Read, useRead } from "./useRead";
-
-/** The rendered reads, in the order the verb table lists them. */
-const READS = {
-  status: "Status",
-  results: "Results",
-  goals: "Goals",
-  transcript: "Transcript",
-  telemetry: "Telemetry",
-  host: "Host",
-} as const;
-type ReadName = keyof typeof READS;
-
-function isReadName(value: string): value is ReadName {
-  return Object.hasOwn(READS, value);
-}
+import type { Read } from "./useRead";
+import { isReadName, READS, useRunReads } from "./useRunReads";
 
 /**
  * The read verbs, each a panel: status, results, goals, the transcript per
@@ -49,37 +35,17 @@ export function ReadsView({
   readonly status: Read<RunStatus>;
   readonly invalidations: number;
 }) {
-  const [read, setRead] = useState<ReadName>("status");
-  const [node, setNode] = useState<string>();
-  // Each read is keyed by what it is a reading of, and taken only while its
-  // panel is the one open: six verbs on every invalidation would be five reads
-  // nobody is looking at.
-  const results = useRead(
-    read === "results" ? runId : undefined,
-    () => client.getResults(runId),
-    invalidations,
-  );
-  const goals = useRead(
-    read === "goals" ? runId : undefined,
-    () => client.getRunGoals(runId),
-    invalidations,
-  );
-  // A run id never holds a slash, so the pair cannot spell another pair.
-  const transcript = useRead(
-    read === "transcript" ? `${runId}/${node ?? ""}` : undefined,
-    () => client.getTranscript(runId, node),
-    invalidations,
-  );
-  const telemetry = useRead(
-    read === "telemetry" ? runId : undefined,
-    () => client.getTelemetryDocument(runId),
-    invalidations,
-  );
-  const host = useRead(
-    read === "host" ? "host" : undefined,
-    () => client.host(),
-    invalidations,
-  );
+  const {
+    read,
+    setRead,
+    node,
+    setNode,
+    results,
+    goals,
+    transcript,
+    telemetry,
+    host,
+  } = useRunReads(client, runId, invalidations);
   return (
     <Tabs
       className="reads-view min-h-0 h-full gap-0"

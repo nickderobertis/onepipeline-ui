@@ -38,12 +38,12 @@ import { WatchView } from "../features/control/WatchView";
 import { DagGraph } from "../features/graph/DagGraph";
 import { RunNavigation } from "../features/navigation/RunNavigation";
 import { ProjectPage, ProjectsLanding } from "../features/projects/ProjectPage";
-import { groupForKey, projectLabel } from "../features/projects/project-model";
 import { useProject, useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
+import { groupForKey, projectLabel } from "../lib/project-model";
 import { graphOf, nodeViews } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
 import {

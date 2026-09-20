@@ -2781,7 +2781,10 @@ test("restores node tabs and moves between them from the keyboard", async ({
   await page.getByRole("tab", { name: "Overall" }).click();
   await expect(page).not.toHaveURL(/tab=/);
 
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard&tab=bogus`);
+  await openObservatory(
+    page,
+    `/?list=runs&run=${runs().live}&node=dashboard&tab=bogus`,
+  );
   await expect(page.getByRole("tab", { name: "Timeline" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -3215,7 +3218,7 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
 test("frames a different run from scratch when the reader moves to it", async ({
   page,
 }) => {
-  await openObservatory(page, `/?run=${runs().live}&view=overall`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&view=overall`);
   await expandGraphRows(page);
   const dashboard = graphRow(page, "dashboard");
   await dashboard.getByRole("button", { name: "Expand timeline" }).click();
@@ -3694,8 +3697,16 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
   // EventSource both fail for real, and the operator must be told rather than shown
   // an empty graph that looks like "no runs yet".
   await page.goto(OFFLINE_UI_URL);
-  const banner = page.getByRole("alert");
+  // The header's banner is about the run list and the stream; the projects the
+  // landing opens on report their own failed read beside it, so the banner is
+  // asked for by what it says.
+  const banner = page
+    .getByRole("alert")
+    .filter({ hasText: "Live telemetry issue" });
   await expect(banner).toContainText("Live telemetry issue");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "could not be read" }),
+  ).toBeVisible();
   // The banner names the failure as well as announcing one: an operator who cannot
   // see what broke cannot tell a wedged server from a mistyped API address.
   await expect(
@@ -4290,7 +4301,7 @@ test("never renders one run's detail under another run's name", async ({
   const staleRead = page.waitForResponse((response) =>
     new URL(response.url()).pathname.endsWith(`/runs/${runs().live}`),
   );
-  await page.goto(`/?run=${runs().live}&view=graph`);
+  await page.goto(`/?list=runs&run=${runs().live}&view=graph`);
   await expect(page.getByText("Loading execution history…")).toBeVisible();
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();

@@ -19,7 +19,7 @@ import { Activity, Bot, ChevronRight } from "lucide-react";
 import { launchLabel, nodeCountSummary } from "../../lib/run-model";
 import { stateDotClass } from "../../lib/StateBadge";
 import { LIST_MODES, type ListMode } from "../../lib/useUrlSelection";
-import { ProjectRows } from "../projects/ProjectRows";
+import { ProjectRows } from "./ProjectRows";
 
 /** The two lists, in the order they are offered: the landing first. */
 const LIST_LABELS: Readonly<Record<ListMode, string>> = {

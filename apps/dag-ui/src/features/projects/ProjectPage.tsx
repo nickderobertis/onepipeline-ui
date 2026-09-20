@@ -10,17 +10,17 @@ import {
 } from "@oneharness/ui";
 import type { ProjectGroup, RunSummary } from "@onepipeline-ui/dag-model";
 import { ChevronRight, FolderKanban, TriangleAlert } from "lucide-react";
-import { nodeCountSummary } from "../../lib/run-model";
-import { StateBadge } from "../../lib/StateBadge";
-import { Timestamp } from "../../lib/Timestamp";
 import {
-  isoOfMillis,
   projectDetailLine,
   projectKeyOf,
   projectLabel,
   runCount,
   runStateSummary,
-} from "./project-model";
+} from "../../lib/project-model";
+import { nodeCountSummary } from "../../lib/run-model";
+import { StateBadge } from "../../lib/StateBadge";
+import { Timestamp } from "../../lib/Timestamp";
+import { isoOfMillis } from "../../lib/time";
 
 /**
  * The landing view: every project the root holds, as cards, in the server's own

@@ -70,8 +70,10 @@ test("opens on the projects in the order the API serves them, and a project open
     );
   }
   // The navigation lists the same groups in the same order.
-  const navigation = page.getByRole("navigation", { name: "Projects" });
-  const rows = navigation.locator(".run-link");
+  const rows = page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("list", { name: "Project rows" })
+    .getByRole("listitem");
   await expect(rows).toHaveCount(groups.length);
   await expect(rows.nth(none)).toContainText("(no project)");
 
@@ -125,8 +127,12 @@ test("opens on the projects in the order the API serves them, and a project open
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Runs", exact: true }).click();
+  // Every run row is a button named by its mark — live or historical — and
+  // then its id, and the first page is fifty of them.
   await expect(
-    page.getByRole("navigation", { name: "DAG runs" }).locator(".run-link"),
+    page
+      .getByRole("navigation", { name: "DAG runs" })
+      .getByRole("button", { name: /^(Live|Historical) / }),
   ).toHaveCount(50);
 });
 
@@ -233,7 +239,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await composer.getByRole("button", { name: "Send reply" }).click();
   const refused = refusal(page, "Reply");
   await expect(refused).toContainText("422 refused");
-  await expect(refused.locator("pre")).toHaveText(error.message);
+  await expect(refused).toContainText(error.message);
 
   // And a shortcut whose form cannot compose an envelope the grammar reads says
   // which field, before anything is sent.
@@ -314,10 +320,12 @@ test("refuses to stop a run another session owns, naming the owner, and forces i
 
   const refused = refusal(page, "Stop");
   await expect(refused).toContainText("409 not_owner");
-  const message = (await refused.locator("pre").textContent()) ?? "";
-  expect(message).toMatch(
-    /belongs to \[codex:[0-9a-f]+\], not to this session$/,
-  );
+  const said = (await refused.textContent()) ?? "";
+  const message =
+    /run \S+ belongs to \[codex:[0-9a-f]+\], not to this session/.exec(
+      said,
+    )?.[0] ?? "";
+  expect(message).not.toBe("");
   const owner = /\[codex:[0-9a-f]+\]/.exec(message)?.[0] ?? "";
   expect(owner).not.toBe("");
   // The run is untouched: still driven, and the second confirm names the owner
@@ -388,7 +396,7 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
   )) as { rendered: string; liveness: string };
   const panel = page.getByRole("region", { name: "Status" });
   await expect(panel).toContainText(status.liveness);
-  await expect(panel.locator("pre")).toHaveText(status.rendered);
+  await expect(panel.getByText(status.rendered, { exact: true })).toBeVisible();
 
   const results = (await served(
     page,
@@ -396,8 +404,10 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
   )) as { rendered: string };
   await page.getByRole("tab", { name: "Results" }).click();
   await expect(
-    page.getByRole("region", { name: "Results" }).locator("pre"),
-  ).toHaveText(results.rendered);
+    page
+      .getByRole("region", { name: "Results" })
+      .getByText(results.rendered, { exact: true }),
+  ).toBeVisible();
 
   const goals = (await served(
     page,
@@ -405,8 +415,10 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
   )) as { rendered: string };
   await page.getByRole("tab", { name: "Goals" }).click();
   await expect(
-    page.getByRole("region", { name: "Goals" }).locator("pre"),
-  ).toHaveText(goals.rendered);
+    page
+      .getByRole("region", { name: "Goals" })
+      .getByText(goals.rendered, { exact: true }),
+  ).toBeVisible();
 
   const transcript = (await served(
     page,
@@ -414,7 +426,9 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
   )) as { rendered: string };
   await page.getByRole("tab", { name: "Transcript" }).click();
   const transcriptPanel = page.getByRole("region", { name: "Transcript" });
-  await expect(transcriptPanel.locator("pre")).toHaveText(transcript.rendered);
+  await expect(
+    transcriptPanel.getByText(transcript.rendered, { exact: true }),
+  ).toBeVisible();
   // A node this run dispatched nothing for is the engine's refusal rather than
   // an empty transcript, and it is shown as the API worded it.
   const refusedNode = await page.request.get(
@@ -425,20 +439,20 @@ test("reads status, results, goals, the transcript, telemetry and the host as th
     error: { message: string };
   };
   await transcriptPanel.getByLabel("Node").selectOption("prepare");
-  await expect(refusal(page, "Transcript").locator("pre")).toHaveText(
-    error.message,
-  );
+  await expect(refusal(page, "Transcript")).toContainText(error.message);
 
   await page.getByRole("tab", { name: "Telemetry" }).click();
-  await expect(
-    page.getByRole("region", { name: "Telemetry" }).locator("pre"),
-  ).toContainText(`"run_id": "${runs().supervised}"`);
+  await expect(page.getByRole("region", { name: "Telemetry" })).toContainText(
+    `"run_id": "${runs().supervised}"`,
+  );
 
   const host = (await served(page, "/api/v2/host")) as { rendered: string };
   await page.getByRole("tab", { name: "Host" }).click();
   await expect(
-    page.getByRole("region", { name: "Host" }).locator("pre"),
-  ).toHaveText(host.rendered);
+    page
+      .getByRole("region", { name: "Host" })
+      .getByText(host.rendered, { exact: true }),
+  ).toBeVisible();
 });
 
 test("stops a run the acting session owns on one confirm", async ({ page }) => {
