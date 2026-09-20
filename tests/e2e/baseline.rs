@@ -221,6 +221,15 @@ fn asked(run: &str) -> Vec<(&'static str, String)> {
         (routes::RUN_GOALS, for_run(routes::RUN_GOALS)),
         (routes::RUN_TRANSCRIPT, for_run(routes::RUN_TRANSCRIPT)),
         (routes::RUN_TELEMETRY, for_run(routes::RUN_TELEMETRY)),
+        (routes::RUN_AGENTS, for_run(routes::RUN_AGENTS)),
+        (
+            routes::RUN_NODE_AGENTS,
+            for_run(routes::RUN_NODE_AGENTS).replace("{node}", fixture_run::NODE_ID),
+        ),
+        (
+            routes::PROJECT_AGENTS,
+            routes::PROJECT_AGENTS.replace("{project}", fixture_run::PLAN_PROJECT),
+        ),
     ]
 }
 

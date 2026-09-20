@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::contract::{
     ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
-    Health, NextQuery, ProjectId, RunId, RunQuery, RunsQuery, StopRequest, SurfaceRequest,
+    Health, NextQuery, NodeId, ProjectId, RunId, RunQuery, RunsQuery, StopRequest, SurfaceRequest,
     TimelineQuery, TranscriptQuery, WatchFrame, WatchQuery,
 };
 use crate::error::ApiError;
@@ -139,4 +139,16 @@ pub trait RunApi {
 
     /// `GET /api/v2/runs/{run}/telemetry` — the run's own telemetry document.
     fn telemetry(&self, run: &RunId) -> Result<Envelope<Value>, ApiError>;
+
+    /// `GET /api/v2/runs/{run}/agents` — every oneharness session the run's
+    /// launches wrote, off the run's own pointer file.
+    fn agents(&self, run: &RunId) -> Result<Envelope<Value>, ApiError>;
+
+    /// `GET /api/v2/runs/{run}/nodes/{node}/agents` — the sessions one node's
+    /// dispatches wrote.
+    fn node_agents(&self, run: &RunId, node: &NodeId) -> Result<Envelope<Value>, ApiError>;
+
+    /// `GET /api/v2/projects/{project}/agents` — the union over the project's
+    /// runs.
+    fn project_agents(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError>;
 }

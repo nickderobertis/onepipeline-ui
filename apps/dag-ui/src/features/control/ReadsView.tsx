@@ -10,9 +10,9 @@ import {
 import type { RunStatus } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import type { ReactNode } from "react";
+import { Outcome } from "../../lib/Outcome";
 import type { NodeView } from "../../lib/run-model";
 import type { Read } from "../../lib/useRead";
-import { Outcome } from "./Outcome";
 import { isReadName, READS, useRunReads } from "./useRunReads";
 
 /**

@@ -2,8 +2,8 @@ import { Badge, Button, ScrollArea } from "@oneharness/ui";
 import type { Unwatched } from "@onepipeline-ui/dag-model";
 import type { WatchFrame } from "@onepipeline-ui/telemetry-client";
 import { Eye, EyeOff } from "lucide-react";
+import { Outcome } from "../../lib/Outcome";
 import { Timestamp } from "../../lib/Timestamp";
-import { Outcome } from "./Outcome";
 import type { WatchState } from "./useRunControl";
 
 /**

@@ -116,7 +116,15 @@ pub const API_VERSION: u32 = 2;
 /// cannot group the list the way `onepipeline runs` does. The invalidation
 /// frames of the event stream name the `project` of the run that moved beside
 /// its `run_id`, on the same terms.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 18;
+///
+/// **Schema 19 is the agent count.** The run detail's `run` and each project
+/// group gain `agent_count`: how many oneharness sessions the corresponding
+/// agents route answers, read off the run's own pointer file — `0` for a run
+/// with none, absent only where the file is there and could not be read.
+/// Every field 18 served is served with the same meaning and the same value;
+/// the version moves because a client that has never seen the field reads a
+/// run a dozen agents ran under as one nothing was launched for.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 19;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -276,6 +284,12 @@ pub mod routes {
     pub const RUN_TRANSCRIPT: &str = "/api/v2/runs/{run}/transcript";
     /// The run's timing and usage document: `verbs::telemetry`.
     pub const RUN_TELEMETRY: &str = "/api/v2/runs/{run}/telemetry";
+    /// Every oneharness session the run's launches wrote: `verbs::agents`.
+    pub const RUN_AGENTS: &str = "/api/v2/runs/{run}/agents";
+    /// The sessions one node's dispatches wrote: `verbs::agents` at node scope.
+    pub const RUN_NODE_AGENTS: &str = "/api/v2/runs/{run}/nodes/{node}/agents";
+    /// The union over a project's runs: `verbs::project_agents`.
+    pub const PROJECT_AGENTS: &str = "/api/v2/projects/{project}/agents";
 
     /// The HTTP method a route answers.
     ///
@@ -325,7 +339,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 25;
+    pub const COUNT: usize = 28;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -355,6 +369,9 @@ pub mod routes {
         get(RUN_GOALS),
         get(RUN_TRANSCRIPT),
         get(RUN_TELEMETRY),
+        get(RUN_AGENTS),
+        get(RUN_NODE_AGENTS),
+        get(PROJECT_AGENTS),
     ];
 
     /// Every route's path, in the same order — read off [`TABLE`] rather than

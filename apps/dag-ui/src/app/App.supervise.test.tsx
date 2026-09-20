@@ -11,11 +11,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   channelQueue,
+  DASHBOARD_HISTORY_ID,
+  DASHBOARD_TRANSCRIPT_TEXT,
   HISTORY_RUN,
   LIVE_PROJECT,
   LIVE_PROJECT_NAME,
   LIVE_RUN,
   receipt,
+  runAgents,
   runDetail,
   runStatus,
   unwatched,
@@ -609,5 +612,177 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     expect(
       await screen.findByRole("region", { name: "Pending surfaces" }),
     ).toHaveTextContent("Nothing is waiting on an answer.");
+  });
+});
+
+describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
+  beforeEach(() => window.history.replaceState(null, "", "/"));
+  afterEach(cleanup);
+
+  test("lists a run's sessions by scope and attempt, and opens one to its transcript", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=agents`);
+    const { client, fetch } = telemetryHarness();
+    render(<App client={client} />);
+    const panel = await screen.findByRole("region", { name: "Agents" });
+    // The count the run detail carries, beside the listing it counts.
+    await waitFor(() => expect(panel).toHaveTextContent("3 agents"));
+    // Grouped by which launch of the run each session was written under, in
+    // the engine's own scope order, and by attempt within a node's dispatches.
+    const groups = within(panel)
+      .getAllByRole("list")
+      .map((list) => list.getAttribute("aria-label"));
+    expect(groups.filter((name) => !name?.startsWith("Harness runs"))).toEqual([
+      "Node dispatch · attempt 1",
+      "Node dispatch · attempt 2",
+      "Observer",
+    ]);
+    const first = within(panel).getByRole("list", {
+      name: "Node dispatch · attempt 1",
+    });
+    // The labels a reader wants: the node the engine stamped, and the
+    // repository's own `role`, under the word it chose; the harness runs by
+    // their configured ids; and when it started.
+    expect(first).toHaveTextContent("engineer-dashboard");
+    expect(first).toHaveTextContent("node dashboard");
+    expect(first).toHaveTextContent("role engineer");
+    expect(first).toHaveTextContent("claude-code:alternate");
+    expect(first).toHaveTextContent("started");
+    // The second attempt's session recorded two harness runs, the second on
+    // another harness.
+    const retry = within(panel).getByRole("list", {
+      name: "Node dispatch · attempt 2",
+    });
+    expect(
+      within(retry).getAllByRole("button", { name: "Open transcript" }),
+    ).toHaveLength(2);
+    expect(retry).toHaveTextContent("codex");
+
+    // Opening one: the conversation view the app has for a oneharness session,
+    // asked for under the run the entry names and the harness run's history
+    // id, and nothing else — no path on the host reaches the wire.
+    await userEvent.click(
+      within(first).getByRole("button", { name: "Open transcript" }),
+    );
+    expect(
+      within(first).getByRole("button", { name: "Close transcript" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await within(first).findByText(DASHBOARD_TRANSCRIPT_TEXT, {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    expect(within(first).getByText("Oneharness conversation")).toBeVisible();
+    expect(
+      fetch.mock.calls.some(([url]) =>
+        String(url).endsWith(
+          `/api/v2/runs/${LIVE_RUN}/artifacts/${DASHBOARD_HISTORY_ID}`,
+        ),
+      ),
+    ).toBe(true);
+    await userEvent.click(
+      within(first).getByRole("button", { name: "Close transcript" }),
+    );
+    expect(within(first).queryByText("Oneharness conversation")).toBeNull();
+  });
+
+  test("shows a node's own sessions, and a node that dispatched nothing as none", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      `/?run=${LIVE_RUN}&node=dashboard&tab=agents`,
+    );
+    const { client } = telemetryHarness();
+    render(<App client={client} />);
+    const panel = await screen.findByRole("region", {
+      name: "Agents of dashboard",
+    });
+    await waitFor(() =>
+      expect(
+        within(panel).getAllByRole("button", { name: "Open transcript" }),
+      ).toHaveLength(3),
+    );
+    expect(within(panel).queryByText("Observer")).toBeNull();
+    // Another node of the same run, whose dispatches wrote no session, opened
+    // from the graph's own keyboard list.
+    await userEvent.click(screen.getByRole("button", { name: /Graph/ }));
+    await userEvent.click(
+      within(await screen.findByRole("list", { name: "DAG nodes" })).getByRole(
+        "button",
+        { name: /^foundation:/ },
+      ),
+    );
+    // The node's own tab strip — the run's views carry an Agents tab too.
+    await userEvent.click(
+      within(screen.getByRole("tablist", { name: "Node details" })).getByRole(
+        "tab",
+        { name: "Agents" },
+      ),
+    );
+    expect(
+      await screen.findByRole("region", { name: "Agents of foundation" }),
+    ).toHaveTextContent("No agents launched.");
+  });
+
+  test("shows the union across a project's runs on its page, with the count on its row, and says when it cannot be read", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      `/?project=${encodeURIComponent(LIVE_PROJECT)}`,
+    );
+    const { client } = telemetryHarness();
+    render(<App client={client} />);
+    const page = await screen.findByRole("region", {
+      name: `Agents of ${LIVE_PROJECT_NAME}`,
+    });
+    await waitFor(() =>
+      expect(
+        within(page).getAllByRole("button", { name: "Open transcript" }),
+      ).toHaveLength(4),
+    );
+    // The count the project group carries, on its row in the navigation and
+    // beside the listing.
+    expect(page).toHaveTextContent("3 agents");
+    const navigation = screen.getByRole("navigation", { name: "Projects" });
+    expect(
+      within(navigation).getByRole("button", { name: /observe-live-run/ }),
+    ).toHaveTextContent("3 agents");
+    // The `(no project)` group has no id, so no agents route and no panel.
+    await userEvent.click(
+      within(navigation).getByRole("button", { name: /\(no project\)/ }),
+    );
+    await screen.findByRole("list", { name: "Runs of (no project)" });
+    expect(screen.queryByRole("region", { name: /^Agents of/ })).toBeNull();
+    cleanup();
+
+    // A pointer file the server could not read is the engine's refusal, shown
+    // as returned, and a count the server left off is not shown as a zero.
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=agents`);
+    const refused = telemetryHarness((url) => {
+      if (verbOf(url) === "agents")
+        return Response.json(
+          {
+            error: {
+              code: "refused",
+              message: "invalid: cannot read the run's pointer file",
+            },
+          },
+          { status: 422 },
+        );
+      if (url.pathname.endsWith(`/runs/${LIVE_RUN}`)) {
+        const detail = runDetail(LIVE_RUN);
+        return Response.json({
+          ...detail,
+          run: { ...detail.run, agent_count: undefined },
+        });
+      }
+      return defaultResponder(url);
+    });
+    render(<App client={refused.client} />);
+    const panel = await screen.findByRole("region", { name: "Agents" });
+    expect(
+      await within(panel).findByRole("alert", { name: "Agents refused" }),
+    ).toHaveTextContent("cannot read the run's pointer file");
+    expect(panel).not.toHaveTextContent("agents");
+    expect(runAgents(LIVE_RUN).sessions).toHaveLength(3);
   });
 });

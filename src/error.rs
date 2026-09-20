@@ -123,6 +123,27 @@ impl ApiError {
                 owner,
             },
             onepipeline::Error::NothingDriving { .. } => Self::NothingDriving(run.clone()),
+            unscoped => Self::from_engine_unscoped(unscoped),
+        }
+    }
+
+    /// The engine's refusal of a verb that names no one run, as this contract
+    /// serves it.
+    ///
+    /// The arms of [`from_engine`](Self::from_engine) that do not need a run,
+    /// so a verb over a whole project classifies what the engine said the same
+    /// way the run beside it does rather than carrying a second reading of the
+    /// same enum. A pointer file that is there and cannot be read is `Invalid`,
+    /// which the contract calls the engine's refusal on every route that reads
+    /// one — a `500` there would tell a client this server broke over a file
+    /// the engine simply declined to read.
+    ///
+    /// The three run-scoped rulings reach the last arm, which is right for a
+    /// caller that named no run: a listing over the root meeting one is a
+    /// failure underneath the verb, not a ruling on the request.
+    #[must_use]
+    pub fn from_engine_unscoped(error: onepipeline::Error) -> Self {
+        match error {
             refused @ (onepipeline::Error::Refused(_) | onepipeline::Error::Invalid(_)) => {
                 Self::Refused(refused.to_string())
             }

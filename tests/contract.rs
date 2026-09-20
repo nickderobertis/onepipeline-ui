@@ -62,6 +62,9 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_GOALS, "run-goals.json"),
     (routes::RUN_TRANSCRIPT, "run-transcript.json"),
     (routes::RUN_TELEMETRY, "run-telemetry.json"),
+    (routes::RUN_AGENTS, "run-agents.json"),
+    (routes::RUN_NODE_AGENTS, "run-node-agents.json"),
+    (routes::PROJECT_AGENTS, "project-agents.json"),
 ];
 
 /// The binary that carries the hidden driver verb an adoption retains.
@@ -440,6 +443,9 @@ fn every_route_serves_the_payload_its_golden_pins() {
     let (_workspace, root) = fixture_run::workspace();
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    // The sessions the run's launches wrote, so the detail's `agent_count` is
+    // pinned over a run that launched some.
+    fixture_run::point_sessions(&root, fixture_run::RUN_ID);
     let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
 
@@ -573,16 +579,29 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     let (_workspace, root) = fixture_run::workspace();
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
+    // One run's launches wrote sessions and the other's wrote none, so the
+    // project's union and its count are pinned over both cases at once.
+    fixture_run::point_sessions(&root, fixture_run::RUN_ID);
     let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+    let node = NodeId::try_from(fixture_run::NODE_ID).expect("valid");
     let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
     let journal_end = fs::metadata(RunPaths::under(&root, fixture_run::RUN_ID).journal())
         .expect("the fixture run's journal")
         .len();
 
-    let served: [(&str, Value); 12] = [
+    let served: [(&str, Value); 15] = [
         ("projects.json", enveloped(store.projects())),
         ("project.json", enveloped(store.project(&project))),
+        ("run-agents.json", enveloped(store.agents(&run))),
+        (
+            "run-node-agents.json",
+            enveloped(store.node_agents(&run, &node)),
+        ),
+        (
+            "project-agents.json",
+            enveloped(store.project_agents(&project)),
+        ),
         ("run-channel.json", enveloped(store.channel(&run))),
         (
             "run-watch.json",
@@ -788,13 +807,24 @@ const SCRATCH: &str = "/a-scratch";
 /// The prefix is joined rather than formatted because the temporary directory
 /// is spelled with a trailing separator on some hosts — macOS's `TMPDIR` is one
 /// — and `tempfile` joins onto it exactly as this does, so the two spell the
-/// directory the same way. The separator after the drawn characters is
+/// directory the same way. The separators below the drawn characters are
 /// replaced too, so a path a Windows host recorded reads as the golden does.
 fn without_scratch(text: &str) -> String {
-    let prefix = std::env::temp_dir().join(".tmp").display().to_string();
+    scratch_replaced(
+        text,
+        &std::env::temp_dir().join(".tmp").display().to_string(),
+        std::path::MAIN_SEPARATOR,
+    )
+}
+
+/// [`without_scratch`]'s reading, over a `prefix` and a `separator` passed in
+/// rather than taken from the host — so the spelling a platform this suite is
+/// not running on would record can be held to the golden here, on the host that
+/// is running it.
+fn scratch_replaced(text: &str, prefix: &str, separator: char) -> String {
     let mut out = String::new();
     let mut rest = text;
-    while let Some(at) = rest.find(&prefix) {
+    while let Some(at) = rest.find(prefix) {
         out.push_str(&rest[..at]);
         out.push_str(SCRATCH);
         rest = &rest[at + prefix.len()..];
@@ -805,13 +835,59 @@ fn without_scratch(text: &str) -> String {
             .last()
             .map_or(0, |(index, c)| index + c.len_utf8());
         rest = &rest[drawn..];
-        if let Some(under) = rest.strip_prefix(std::path::MAIN_SEPARATOR) {
+        // Every separator below the scratch, not only the first: a session file
+        // sits under its store's project directory, so a served path reaches
+        // three components down and the golden spells all of them with `/`. The
+        // walk ends where a path component cannot continue, because a scratch
+        // path is also printed inside rendered prose.
+        while let Some(under) = rest.strip_prefix(separator) {
             out.push('/');
-            rest = under;
+            let end = under
+                .find(|c: char| c == separator || c.is_whitespace())
+                .unwrap_or(under.len());
+            out.push_str(&under[..end]);
+            rest = &under[end..];
         }
     }
     out.push_str(rest);
     out
+}
+
+/// A scratch path reads as the golden spells it whichever separator wrote it.
+///
+/// A session file sits under its store's project directory, so a served path
+/// reaches several components below the scratch and a Windows host records
+/// every one of those separators as `\`. The goldens spell one path for every
+/// platform, so this reading has to answer the same for both separators — and
+/// the leg that would otherwise catch it is one this suite cannot run on, which
+/// is why the separator is given rather than read off the host.
+#[test]
+fn a_scratch_path_reads_as_the_golden_whichever_separator_recorded_it() {
+    let session = |temp: &str, separator: char| {
+        let recorded = format!(
+            "{temp}{separator}.tmpA1b2C3{separator}oneharness-history{separator}\
+             a-recording-host-workspace{separator}monitor-20260807T120000Z-3163600.jsonl"
+        );
+        scratch_replaced(&recorded, &format!("{temp}{separator}.tmp"), separator)
+    };
+    let golden = "/a-scratch/oneharness-history/a-recording-host-workspace/\
+                  monitor-20260807T120000Z-3163600.jsonl";
+    assert_eq!(session("/tmp", '/'), golden);
+    assert_eq!(
+        session(r"C:\Users\runneradmin\AppData\Local\Temp", '\\'),
+        golden
+    );
+    // A scratch path is also printed inside rendered prose — a settled member's
+    // report is — so the walk stops where the path does rather than reading on
+    // into the words after it.
+    assert_eq!(
+        scratch_replaced(
+            "  report worker C:\\Temp\\.tmpA1b2C3\\report.json\n    user\n",
+            r"C:\Temp\.tmp",
+            '\\'
+        ),
+        "  report worker /a-scratch/report.json\n    user\n"
+    );
 }
 
 /// The name of the host a golden says did the reading.
@@ -1000,7 +1076,7 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 18);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 19);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1133,6 +1209,53 @@ fn the_browser_clients_copy_of_the_reference_vocabulary_matches_this_one() {
          from this crate's",
         path.display()
     );
+}
+
+/// The engine's label vocabulary for the sessions a launch writes is declared
+/// twice — in `onepipeline::agents` and in the browser client's model — because
+/// a Rust constant cannot be read from TypeScript.
+///
+/// The client groups a run's agents by the scope word and the attempt, and names
+/// the node and step off these keys, so a key the engine renamed would leave the
+/// panel grouping every session under nothing. Held to the engine's own
+/// constants and its own `Scope::ALL`, spelled by that type's `as_str`, never a
+/// third copy of either.
+#[test]
+fn the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines() {
+    use onepipeline::agents::{
+        Scope, ATTEMPT_LABEL, LABEL_PREFIX, NODE_LABEL, PROJECT_LABEL, RUN_ID_LABEL, SCOPE_LABEL,
+        STEP_LABEL,
+    };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let labels = format!(
+        "export const AGENT_LABELS = {{\n  runId: \"{RUN_ID_LABEL}\",\n  project: \
+         \"{PROJECT_LABEL}\",\n  scope: \"{SCOPE_LABEL}\",\n  node: \"{NODE_LABEL}\",\n  \
+         step: \"{STEP_LABEL}\",\n  attempt: \"{ATTEMPT_LABEL}\",\n}} as const;"
+    );
+    let prefix = format!("export const AGENT_LABEL_PREFIX = \"{LABEL_PREFIX}\";");
+    let scopes = format!(
+        "export const AGENT_SCOPES = [{}] as const;",
+        Scope::ALL
+            .iter()
+            .map(|scope| format!("\"{}\"", scope.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    for declaration in [labels, prefix, scopes] {
+        assert!(
+            source.contains(&declaration),
+            "{} does not declare `{declaration}`; the client's copy of the engine's agent \
+             label vocabulary has drifted",
+            path.display()
+        );
+    }
 }
 
 #[test]
@@ -1843,6 +1966,18 @@ impl RunApi for Unimplemented {
 
     fn telemetry(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn agents(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn node_agents(&self, run: &RunId, _node: &NodeId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn project_agents(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::ProjectNotFound(project.clone()))
     }
 }
 

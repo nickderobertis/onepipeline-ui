@@ -36,6 +36,9 @@ GET /api/v2/goals
 GET /api/v2/runs/{run}/goals
 GET /api/v2/runs/{run}/transcript     ?node=ID
 GET /api/v2/runs/{run}/telemetry
+GET /api/v2/runs/{run}/agents         # every oneharness session the run launched
+GET /api/v2/runs/{run}/nodes/{node}/agents
+GET /api/v2/projects/{project}/agents # the union over the project's runs
 ```
 
 The first seven are the read surface the browser view was written against;
@@ -46,8 +49,10 @@ outside this API; a reply on any run's channel is inside it. The server acts as
 one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
 which is what its stops and adoptions are judged by.
 
+<!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
+
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (18), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (19), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy

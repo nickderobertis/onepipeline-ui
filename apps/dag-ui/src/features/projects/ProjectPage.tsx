@@ -10,7 +10,9 @@ import {
 } from "@oneharness/ui";
 import type { ProjectGroup, RunSummary } from "@onepipeline-ui/dag-model";
 import { ChevronRight, FolderKanban, TriangleAlert } from "lucide-react";
+import type { ReactNode } from "react";
 import {
+  projectAgentCount,
   projectDetailLine,
   projectKeyOf,
   projectLabel,
@@ -81,6 +83,8 @@ export function ProjectsLanding({
                       {runCount(group.runs)}
                       {group.runs.length > 0 &&
                         ` · ${runStateSummary(group.runs)}`}
+                      {projectAgentCount(group) !== undefined &&
+                        ` · ${projectAgentCount(group)}`}
                     </p>
                     <p className="project-card-facts">
                       {group.last_write_at === null ? (
@@ -110,19 +114,29 @@ export function ProjectsLanding({
  * One project's page: every DAG launched against it, most recent activity first,
  * each with its settlement, its nodes counted, what is driving it, how many
  * surfaces nobody has read, and when it last wrote — every one of them the row
- * the run list serves, and each opening to the run view.
+ * the run list serves, and each opening to the run view. Under the runs, every
+ * agent those runs launched: the union the project's agents route serves,
+ * grouped as a run's own are, each opening to its transcript under the run the
+ * entry names.
  */
 export function ProjectPage({
   projectKey,
   group,
   error,
   loading,
+  agents,
   onSelectRun,
 }: {
   readonly projectKey: string;
   readonly group?: ProjectGroup;
   readonly error?: Error;
   readonly loading: boolean;
+  /**
+   * The agents panel for the group, composed by the app — another feature's
+   * reading, handed in rather than reached for — and nothing for the
+   * `(no project)` group, which has no id and so no agents route.
+   */
+  readonly agents?: ReactNode;
   readonly onSelectRun: (runId: string) => void;
 }) {
   return (
@@ -139,6 +153,8 @@ export function ProjectPage({
           <p className="projects-lede">
             {runCount(group.runs)}
             {group.runs.length > 0 && ` · ${runStateSummary(group.runs)}`}
+            {projectAgentCount(group) !== undefined &&
+              ` · ${projectAgentCount(group)}`}
             {group.last_write_at !== null && (
               <>
                 {" · last activity "}
@@ -155,16 +171,19 @@ export function ProjectPage({
             Loading project…
           </div>
         ) : group ? (
-          <ul
-            aria-label={`Runs of ${projectLabel(group)}`}
-            className="project-runs"
-          >
-            {group.runs.map((run) => (
-              <li key={run.run_id}>
-                <ProjectRunRow onSelect={onSelectRun} run={run} />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul
+              aria-label={`Runs of ${projectLabel(group)}`}
+              className="project-runs"
+            >
+              {group.runs.map((run) => (
+                <li key={run.run_id}>
+                  <ProjectRunRow onSelect={onSelectRun} run={run} />
+                </li>
+              ))}
+            </ul>
+            {agents}
+          </>
         ) : null}
       </section>
     </ScrollArea>

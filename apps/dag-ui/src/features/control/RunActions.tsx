@@ -16,7 +16,7 @@ import { RUN_LIVENESS_NOTHING_DRIVING } from "@onepipeline-ui/dag-model";
 import { TelemetryClientError } from "@onepipeline-ui/telemetry-client";
 import { Eye, EyeOff, LifeBuoy, OctagonX } from "lucide-react";
 import { useCallback, useState } from "react";
-import { Outcome } from "./Outcome";
+import { Outcome } from "../../lib/Outcome";
 import type { RunControl } from "./useRunControl";
 import { useVerb } from "./useVerb";
 

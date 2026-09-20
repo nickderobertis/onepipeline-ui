@@ -95,9 +95,22 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // Course corrections: the run noticing something and doing it differently. `cron`
     // is here because a scheduled fire is how a stalled member is nudged, which is the
     // same act as advancing a fallback rather than a lifecycle step of its own.
+    // `requeued` is a dispatch handed back to the queue before any work began:
+    // the run doing it again, which is the same act as a retry.
     [
       "recovery",
-      ["retry", "retried", "fallback", "resolution", "interrupted", "cron"],
+      [
+        "retry",
+        "retried",
+        // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the producer declares this kind and a drift gate reconciles this table to that declaration: `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reads `onepipeline::event::PIPELINE_KINDS` and matches `oneagentgraph::event::EventKind` with no wildcard, and fails naming every kind those libraries declare that this package files no category for. Removing this word's entry from the corpus makes that test fail naming `node-requeued` exactly; the entry exists because the gate demanded it, so this is the reconciled copy rather than a second source.
+        // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the producer owns the kind and this package owns the category, which are different facts. `src/index.test.ts` says so where it declares the gate: the category "is not gated and cannot be — which of the eleven a kind reads under is a decision rather than a fact about the producer". Keeping that decision with the producer would put it where nothing draws it, and this shared table is the domain that owns it — the app draws a glyph per category and `dag-ui-e2e` counts the scheme against the same list.
+        // llmlint: ignore[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary, because "a journey holding its own copy of `EVENT_CATEGORIES` passes while the app grows a category nobody draws". A per-kind journey would be exactly that copy. What the browser tier proves is the drawing, which adding this word does not change.
+        "requeued",
+        "fallback",
+        "resolution",
+        "interrupted",
+        "cron",
+      ],
     ],
     ["failure", ["failed", "died", "rejected", "exceeded", "conflict"]],
     ["human", ["human"]],
@@ -171,7 +184,7 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
 /**
  * The kinds the rules above would misfile, and nothing else.
  *
- * Both of these are pipeline records whose words no rule names — they would land in
+ * Each of these is a pipeline record whose words no rule names — they would land in
  * the default category, which is the right answer for a kind this build has never
  * seen and the wrong one for a kind it has. Adding their words to a rule instead
  * would be a rule that generalises to nothing.
@@ -191,6 +204,13 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // matched whole — and adding it to the verification rule would be adding a
   // word that names this kind and no other, which is what this table is for.
   "criterion-checked": "verification",
+  // The driver's sweep over the harness identity pool: housekeeping of the run's
+  // driving, like an adoption, and no node's work. Neither of its words names a
+  // rule, and neither generalises to one.
+  // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the producer declares this kind and a drift gate reconciles this table to that declaration: `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reads `onepipeline::event::PIPELINE_KINDS` and matches `oneagentgraph::event::EventKind` with no wildcard, and fails naming every kind those libraries declare that this package files no category for. Removing this entry from the corpus makes that test fail naming `pool-maintenance` exactly; the entry exists because the gate demanded it, so this is the reconciled copy rather than a second source.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the producer owns the kind and this package owns the category, which are different facts. `src/index.test.ts` says so where it declares the gate: the category "is not gated and cannot be — which of the eleven a kind reads under is a decision rather than a fact about the producer". This table is the one place that decision is made, and an exception is where a kind goes whose words name no rule — which is a statement about this build's rules, not about the producer.
+  // llmlint: ignore[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary, because "a journey holding its own copy of `EVENT_CATEGORIES` passes while the app grows a category nobody draws". A per-kind journey would be exactly that copy. What the browser tier proves is the drawing, which adding this exception does not change.
+  "pool-maintenance": "lifecycle",
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
