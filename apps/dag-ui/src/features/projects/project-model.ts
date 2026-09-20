@@ -4,9 +4,24 @@ import { NO_PROJECT_KEY } from "../../lib/useUrlSelection";
 /** The words the server groups runs by, read for a heading. */
 export const NO_PROJECT_LABEL = "(no project)";
 
-/** What a group is called: the plan's name where one was recorded, else its id. */
+/**
+ * What a group is called: the plan's name where one was recorded, else its id —
+ * and the `(no project)` group by that word, whatever plan name its newest run
+ * recorded, because a name there is the name of one run's plan and not of a
+ * project. The CLI heads that group the same way.
+ */
 export function projectLabel(group: ProjectGroup): string {
-  return group.name ?? group.project ?? NO_PROJECT_LABEL;
+  if (group.project === null) return NO_PROJECT_LABEL;
+  return group.name ?? group.project;
+}
+
+/**
+ * The line under a group's name: its qualified id for a project, and the plan
+ * name of its newest run for the group that has no id.
+ */
+export function projectDetailLine(group: ProjectGroup): string | undefined {
+  if (group.project === null) return group.name ?? undefined;
+  return group.name === null ? undefined : group.project;
 }
 
 /**

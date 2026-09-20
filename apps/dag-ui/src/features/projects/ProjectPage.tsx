@@ -15,6 +15,7 @@ import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import {
   isoOfMillis,
+  projectDetailLine,
   projectKeyOf,
   projectLabel,
   runCount,
@@ -71,8 +72,10 @@ export function ProjectsLanding({
                       </span>
                       <ChevronRight aria-hidden="true" size={14} />
                     </button>
-                    {group.project !== null && (
-                      <p className="project-card-id">{group.project}</p>
+                    {projectDetailLine(group) !== undefined && (
+                      <p className="project-card-id">
+                        {projectDetailLine(group)}
+                      </p>
                     )}
                     <p className="project-card-facts">
                       {runCount(group.runs)}
@@ -129,8 +132,8 @@ export function ProjectPage({
         <h2 id="project-heading">
           {group === undefined ? projectKey : projectLabel(group)}
         </h2>
-        {group?.project !== null && group?.project !== undefined && (
-          <p className="project-card-id">{group.project}</p>
+        {group !== undefined && projectDetailLine(group) !== undefined && (
+          <p className="project-card-id">{projectDetailLine(group)}</p>
         )}
         {group && (
           <p className="projects-lede">

@@ -16,6 +16,27 @@ import { asError, type Read, useRead } from "./useRead";
 /** How many frames a held watch keeps on screen; older ones scroll off. */
 const WATCH_FRAMES_KEPT = 200;
 
+/**
+ * The heartbeat a held watch asks for, in seconds.
+ *
+ * Not for the reader: a tick is how the server *notices* the browser has gone.
+ * The wait runs on a blocking worker and learns the connection closed only when
+ * a write to it fails, so a watch with no heartbeat keeps the watcher record —
+ * and the run reading as watched — for as long as the run stays quiet. Two
+ * seconds bounds that to the moment the toggle goes off.
+ */
+const WATCH_TICK_SECONDS = 2;
+
+/**
+ * How often the run's status is read again on its own, in milliseconds.
+ *
+ * Liveness is a reading of the host's process table, not of the journal: a
+ * driver that dies writes nothing, so the stream every other surface refreshes
+ * on announces nothing. The status read is the one that carries the word an
+ * adoption is offered on, so it is taken again on a clock as well.
+ */
+const STATUS_POLL_MS = 10_000;
+
 export interface WatchState {
   /** Whether this browser holds the stream now. */
   readonly held: boolean;
@@ -50,10 +71,20 @@ export function useRunControl(
   filter: string,
   invalidations: number,
 ): RunControl {
+  //: The clock the status re-reads on, beside the stream.
+  const [ticks, setTicks] = useState(0);
+  useEffect(() => {
+    if (runId === undefined) return;
+    const timer = setInterval(
+      () => setTicks((current) => current + 1),
+      STATUS_POLL_MS,
+    );
+    return () => clearInterval(timer);
+  }, [runId]);
   const status = useRead(
     runId,
     () => client.getStatus(runId ?? ""),
-    invalidations,
+    invalidations + ticks,
   );
   //: Bumped when the watch's own state changes what the unwatched report says.
   const [watchMoves, setWatchMoves] = useState(0);
@@ -64,10 +95,25 @@ export function useRunControl(
   );
   const [watch, setWatch] = useState<WatchState>({ held: false, frames: [] });
   const subscription = useRef<TelemetrySubscription | undefined>(undefined);
+  /**
+   * The unwatched report, read again once the server has had a heartbeat in
+   * which to notice the stream closed: the read taken at the close itself is
+   * before the release, and would show the run still watched.
+   */
+  const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reread = useCallback(() => {
+    setWatchMoves((current) => current + 1);
+    clearTimeout(settling.current);
+    settling.current = setTimeout(
+      () => setWatchMoves((current) => current + 1),
+      (WATCH_TICK_SECONDS + 1) * 1000,
+    );
+  }, []);
   const release = useCallback(() => {
     subscription.current?.close();
     subscription.current = undefined;
   }, []);
+  useEffect(() => () => clearTimeout(settling.current), []);
   // A watch belongs to the run it was opened on: moving to another run, or
   // leaving, lets it go — and with it the watcher record the server kept.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `runId` is what says the watch no longer belongs to what is on screen; the effect reads nothing else.
@@ -75,16 +121,16 @@ export function useRunControl(
     setWatch({ held: false, frames: [] });
     return () => {
       release();
-      setWatchMoves((current) => current + 1);
+      reread();
     };
-  }, [runId, release]);
+  }, [runId, release, reread]);
 
   const toggleWatch = useCallback(() => {
     if (runId === undefined) return;
     if (subscription.current !== undefined) {
       release();
       setWatch((previous) => ({ ...previous, held: false }));
-      setWatchMoves((current) => current + 1);
+      reread();
       return;
     }
     let first = true;
@@ -93,6 +139,7 @@ export function useRunControl(
       // Held open until the toggle is turned off or the run gives a reason to
       // stop waiting: the default condition, a surface, and no clock on it.
       timeout: "none",
+      tick: WATCH_TICK_SECONDS,
       filter,
       onFrame: (frame) => {
         if (first) {
@@ -107,7 +154,7 @@ export function useRunControl(
         }));
         if (frame.event === "returned") {
           subscription.current = undefined;
-          setWatchMoves((current) => current + 1);
+          reread();
         }
       },
       onError: (caught) => {
@@ -115,7 +162,7 @@ export function useRunControl(
       },
     });
     setWatch({ held: true, frames: [], ended: undefined });
-  }, [client, runId, filter, release]);
+  }, [client, runId, filter, release, reread]);
 
   const stop = useCallback(
     (force: boolean) => client.stop(runId ?? "", force),

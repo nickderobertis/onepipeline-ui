@@ -37,8 +37,10 @@ import {
   recordActivity,
   removePageRuns,
   removeRun,
+  SUPERVISOR_SESSION,
   settleDashboard,
 } from "./runs.mjs";
+import { thisHost } from "./this-host.mjs";
 
 /**
  * What every directory this script may delete is named with.
@@ -219,7 +221,7 @@ async function serve(workspace, port) {
   rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
-  buildRuns(runsRoot);
+  buildRuns(runsRoot, workspace);
   writeFileSync(
     join(workspace, FIXTURE_FACTS_NAME),
     `${JSON.stringify(facts(), null, 2)}\n`,
@@ -238,15 +240,24 @@ async function serve(workspace, port) {
       // notice a change on disk, and that wait is the slowest part of each of them.
       "--poll-interval-ms",
       "125",
+      // The session the server acts as: the one the supervising runs were
+      // launched by, so a stop on one of them is the owner's and a stop on any
+      // other run is refused naming its owner — and the unwatched report is
+      // about exactly those runs.
+      "--session",
+      SUPERVISOR_SESSION,
     ],
     {
       stdio: ["ignore", "inherit", "inherit"],
       // Where `runs.mjs` kept the graph records the server reads a run's declared
       // members from: the same variable the engine and `oneagentgraph` read,
-      // pointed at this workspace's rather than at the operator's own.
+      // pointed at this workspace's rather than at the operator's own. The host
+      // name is pinned to what the fixture wrote as this host, so the run
+      // recorded as driven here is read as driven here.
       env: {
         ...process.env,
         ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
+        HOSTNAME: thisHost(),
       },
     },
   );

@@ -104,7 +104,10 @@ async function tabTo(page: Page, target: Locator): Promise<void> {
  */
 async function open(page: Page, size: Viewport, path: string): Promise<void> {
   await page.setViewportSize({ width: size.width, height: size.height });
-  await page.goto(path);
+  // Under the flat run list: these journeys are about the shell around a run and
+  // the run list beside it, which is the list one toggle away from the projects a
+  // bare address opens on.
+  await page.goto(`${path}&list=runs`);
   await expect(navigation(page).locator(".run-link").first()).toBeVisible();
 }
 

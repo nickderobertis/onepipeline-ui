@@ -184,6 +184,7 @@ export function App({
               {/* The way back to the project a run was opened from, where it was. */}
               {selection.projectKey !== undefined && selectedRunId && (
                 <Button
+                  aria-label={`Back to ${openedProject ? projectLabel(openedProject) : "the project"}`}
                   className="topbar-back"
                   onClick={() => selection.selectProject(selection.projectKey)}
                   size="sm"

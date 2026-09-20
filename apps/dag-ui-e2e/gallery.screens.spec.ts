@@ -56,7 +56,7 @@ const SURFACES: readonly Surface[] = [
     name: "01-run-list-overall",
     title: "Run list and the overall view",
     open: async (page) => {
-      await page.goto(`/?run=${runs().live}&view=overall`);
+      await page.goto(`/?list=runs&run=${runs().live}&view=overall`);
       await expect(page.getByText("DAG Observatory")).toBeVisible();
       await expect(metrics(page)).toHaveCount(4);
       await expect(
@@ -215,6 +215,43 @@ const SURFACES: readonly Surface[] = [
       await expect(
         page.getByRole("region", { name: "Timeline item detail" }),
       ).toContainText("Why it was not delivered");
+    },
+  },
+  {
+    name: "11-project-list",
+    title: "The projects the app opens on",
+    open: async (page) => {
+      await page.goto("/");
+      const cards = page.getByRole("list", { name: "Projects" });
+      await expect(cards.getByRole("listitem").first()).toBeVisible();
+      // Photographed with every group's card drawn, the `(no project)` one
+      // among them.
+      await expect(cards).toContainText("(no project)");
+    },
+  },
+  {
+    name: "12-project-page",
+    title: "A project's page: its runs, newest activity first",
+    open: async (page) => {
+      await page.goto(
+        `/?project=${encodeURIComponent(fixture().projects.observatory)}`,
+      );
+      await expect(
+        page
+          .getByRole("list", { name: /^Runs of / })
+          .getByRole("button", { name: `Open ${runs().live}` }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "13-channel",
+    title: "The channel: the queue, the composer and the surface form",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().supervised}&view=channel`);
+      await expect(
+        page.getByRole("region", { name: "Channel queue" }),
+      ).toContainText("Replies");
+      await expect(page.getByRole("region", { name: "Reply" })).toBeVisible();
     },
   },
 ];

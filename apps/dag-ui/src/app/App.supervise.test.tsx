@@ -100,7 +100,7 @@ describe("projects", JOURNEY_TIMEOUT, () => {
       LIVE_PROJECT,
     );
     await userEvent.click(
-      screen.getByRole("button", { name: LIVE_PROJECT_NAME }),
+      screen.getByRole("button", { name: `Back to ${LIVE_PROJECT_NAME}` }),
     );
     expect(
       await screen.findByRole("list", { name: `Runs of ${LIVE_PROJECT_NAME}` }),

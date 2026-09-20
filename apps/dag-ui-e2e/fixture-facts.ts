@@ -20,6 +20,24 @@ const fixtureSchema = z.object({
     eventless: z.string().min(1),
     busy: z.string().min(1),
     named: z.string().min(1),
+    /**
+     * The three runs the supervising journeys act on: one the acting session
+     * owns and something else drives, one another session owns, and one the
+     * acting session owns that nothing drives.
+     */
+    supervised: z.string().min(1),
+    elsewhere: z.string().min(1),
+    adoptable: z.string().min(1),
+  }),
+  /** The session the served API acts as, which owns the supervised runs. */
+  supervisor_session: z.string().min(1),
+  /** The one human action the adoptable run holds. */
+  adoptable_action: z.string().min(1),
+  /** The qualified project ids the runs were launched against. */
+  projects: z.object({
+    observatory: z.string().min(1),
+    archive: z.string().min(1),
+    supervision: z.string().min(1),
   }),
   foundation_pr: z.string().min(1),
   /**

@@ -14,6 +14,7 @@
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */
 export const LIVE_RUN = "dag-ui-live";
@@ -76,6 +77,43 @@ export const LEGACY_RUN = "dag-ui-legacy";
 export const SIBLING_RUN = "dag-ui-sibling";
 /** A run with no launching session recorded at all. */
 export const UNATTRIBUTED_RUN = "dag-ui-unattributed";
+/**
+ * The run the supervising journeys write to: launched by the session the served
+ * API acts as, so the acting session owns it, and still being driven from another
+ * host, so nothing here can adopt it. Its channel starts empty and every surface,
+ * claim and reply on it is earned through the served routes.
+ */
+export const SUPERVISED_RUN = "dag-ui-supervised";
+/**
+ * A run another session owns, still driven elsewhere: the one a stop is refused
+ * on, naming that owner, and forced only behind the confirm that names it.
+ */
+export const ELSEWHERE_RUN = "dag-ui-elsewhere";
+/**
+ * A run the acting session owns whose driver is proved gone — recorded on **this**
+ * host under a pid nothing can be holding — so the engine reads it as one nothing
+ * is driving and an adoption may take it over. Its whole graph is one human
+ * action, which is what lets the adopted driver settle it and let go without a
+ * harness or a model.
+ */
+export const ADOPTABLE_RUN = "dag-ui-adoptable";
+/** The human action that run holds, which the driver settles as waiting. */
+export const ADOPTABLE_ACTION = "approve";
+/**
+ * The session the served API acts as, and the one the supervising runs were
+ * launched by. Distinct from the two sessions the rest of the corpus is launched
+ * under so the runs the acting session owns — and so the unwatched report — are
+ * exactly the two above.
+ */
+export const SUPERVISOR_SESSION = "claude-code-supervising-session";
+/**
+ * The projects the runs were launched against, as the qualified ids the launch
+ * record carries. Every run not named in `projectOf` recorded none, and the
+ * server lists those under the `(no project)` group.
+ */
+export const OBSERVATORY_PROJECT = "local-md:observatory";
+export const ARCHIVE_PROJECT = "local-md:archive";
+export const SUPERVISION_PROJECT = "local-md:supervision";
 /** A run whose plan is written and whose journal is still empty. */
 export const EVENTLESS_RUN = "dag-ui-eventless";
 /** One node whose recorded work is hundreds of dispatched sessions. */
@@ -441,10 +479,38 @@ function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+/** Which project each run belongs to, or none. */
+function projectOf(runId) {
+  switch (runId) {
+    case LIVE_RUN:
+    case SIBLING_RUN:
+    case BUSY_RUN:
+    case NAMED_RUN:
+      return OBSERVATORY_PROJECT;
+    case HISTORY_RUN:
+    case OUTCOMES_RUN:
+    case LEGACY_RUN:
+      return ARCHIVE_PROJECT;
+    // The adoptable run names no project: a driver writes a run's settlement
+    // back to the project store it was launched from, and this fixture has no
+    // store for it to write to — every attempt would be a surface on the run.
+    case SUPERVISED_RUN:
+    case ELSEWHERE_RUN:
+      return SUPERVISION_PROJECT;
+    default:
+      return undefined;
+  }
+}
+
 /** One launch record, in the shape the SDK's `LaunchRecord` deserializes. */
 function launch(runId, launcher, session, startedAt, pid) {
+  const project = projectOf(runId);
   return {
     run_id: runId,
+    // The project the plan came from, where the run was launched against one;
+    // omitted where it was not, as the SDK omits it, which is what puts the run
+    // under the `(no project)` group.
+    ...(project === undefined ? {} : { project }),
     plan: "plan.json",
     graph: "graphs/dag-scope.yaml",
     launcher,
@@ -2030,6 +2096,164 @@ function writeSiblingRun(root) {
   journal.write();
 }
 
+/**
+ * The run the supervising journeys write to: two nodes, one settled and one still
+ * running, driven from another host by the acting session's own launch. Not
+ * settled, so a verdict-only reply is queued rather than refused; nothing on its
+ * channel yet, so what the queue shows is what the journeys put there.
+ */
+function writeSupervisedRun(root) {
+  const run = { run_id: SUPERVISED_RUN };
+  const dir = runDir(root, SUPERVISED_RUN);
+  // The registry a stop reads to establish what the run is running: a run
+  // without one is refused every stop, because the engine will not signal what
+  // it cannot list.
+  mkdirSync(join(dir, "dispatches"), { recursive: true });
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Supervise the run from the browser" },
+    name: "supervised",
+    concurrency: 1,
+    tasks: [
+      {
+        id: "prepare",
+        persona: "worker",
+        task: "## What\nPrepare the ground.\n\n## Acceptance criteria\nThe ground is prepared",
+      },
+      {
+        id: "build",
+        persona: "worker",
+        deps: ["prepare"],
+        task: "## What\nBuild on it.\n\n## Acceptance criteria\nIt is built",
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  // Written a minute ago rather than on the fixed calendar date, so the run reads
+  // as driven rather than parked: a driver that is quiet long enough is read as
+  // parked, and an adoption is offered on neither.
+  const start = Date.now() - 60 * 1000;
+  writeJson(
+    join(dir, "launch.json"),
+    launch(
+      SUPERVISED_RUN,
+      "claude-code",
+      SUPERVISOR_SESSION,
+      stamp(start),
+      4251,
+    ),
+  );
+  const journal = new Journal(dir, streamOf(SUPERVISED_RUN), start);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "prepare",
+    persona: "worker",
+  });
+  journal
+    .advance(20)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node: "prepare" },
+      { status: "done", outcome: "merged", branch: "feature/prepare" },
+    );
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "build",
+    persona: "worker",
+  });
+  journal.write();
+}
+
+/** A run another session owns, driven elsewhere: the one a stop is refused on. */
+function writeElsewhereRun(root) {
+  const run = { run_id: ELSEWHERE_RUN };
+  const dir = runDir(root, ELSEWHERE_RUN);
+  mkdirSync(join(dir, "dispatches"), { recursive: true });
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Keep running under somebody else" },
+    name: "elsewhere",
+    concurrency: 1,
+    tasks: [
+      {
+        id: "elsewhere",
+        persona: "worker",
+        task: "## What\nRun under another session.\n\n## Acceptance criteria\nIt runs",
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  const start = Date.now() - 90 * 1000;
+  writeJson(
+    join(dir, "launch.json"),
+    launch(ELSEWHERE_RUN, "codex", CODEX_SESSION, stamp(start), 4252),
+  );
+  const journal = new Journal(dir, streamOf(ELSEWHERE_RUN), start);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "elsewhere",
+    persona: "worker",
+  });
+  journal.write();
+}
+
+/**
+ * A run nothing is driving, owned by the acting session, whose whole graph is one
+ * human action: what the adopt journey takes over, and what the attest journey
+ * then clears.
+ *
+ * Its launch record is the one the engine itself writes for a run being driven,
+ * and its driver is proved gone rather than unknown: recorded on this host, under
+ * a pid above the kernel's maximum on every platform this runs on, so the
+ * engine's own liveness reads `DRIVER DEAD` and an adoption is offered. The
+ * adopted driver is this repository's own binary at the engine's driver verb; it
+ * needs the run's working directory and a node graph the record names, which is
+ * why both are written even though this graph dispatches nothing.
+ */
+function writeAdoptableRun(root, workspace) {
+  const run = { run_id: ADOPTABLE_RUN };
+  const dir = runDir(root, ADOPTABLE_RUN);
+  mkdirSync(join(dir, "channel"), { recursive: true });
+  mkdirSync(join(dir, "dispatches"), { recursive: true });
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Get the change approved" },
+    name: "adoptable",
+    concurrency: 1,
+    tasks: [
+      { id: ADOPTABLE_ACTION, kind: "human", task: "Approve the change." },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  const start = Date.now() - 2 * 60 * 1000;
+  // No observer graph: a record naming one is a graph the adopted driver would
+  // launch, and this fixture has none to launch. The node graph is named because
+  // the driver refuses a record naming none before it drives, and never read,
+  // because this graph dispatches nothing.
+  const record = launch(
+    ADOPTABLE_RUN,
+    "claude-code",
+    SUPERVISOR_SESSION,
+    stamp(start),
+    0x7ffffff0,
+  );
+  delete record.graph;
+  writeJson(join(dir, "launch.json"), {
+    ...record,
+    dir: workspace,
+    node_graph: "graphs/node-scope.yaml",
+    host: thisHost(),
+  });
+  const journal = new Journal(dir, streamOf(ADOPTABLE_RUN), start);
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal.write();
+}
+
 /** One run with no launching session recorded, as every swept launch reads. */
 function writeUnattributedRun(root) {
   const run = { run_id: UNATTRIBUTED_RUN };
@@ -2426,8 +2650,11 @@ function writeNamedRun(root) {
 }
 
 /** Write every run this fixture serves, oldest first. */
-export function buildRuns(root) {
+export function buildRuns(root, workspace) {
   mkdirSync(root, { recursive: true });
+  writeSupervisedRun(root);
+  writeElsewhereRun(root);
+  writeAdoptableRun(root, workspace);
   writeEventlessRun(root);
   for (let index = 0; index < PAGE_RUNS; index += 1) {
     writeEventlessRun(
@@ -2460,6 +2687,17 @@ export function facts() {
       eventless: EVENTLESS_RUN,
       busy: BUSY_RUN,
       named: NAMED_RUN,
+      supervised: SUPERVISED_RUN,
+      elsewhere: ELSEWHERE_RUN,
+      adoptable: ADOPTABLE_RUN,
+    },
+    /** The session the served API acts as, which owns the supervised runs. */
+    supervisor_session: SUPERVISOR_SESSION,
+    adoptable_action: ADOPTABLE_ACTION,
+    projects: {
+      observatory: OBSERVATORY_PROJECT,
+      archive: ARCHIVE_PROJECT,
+      supervision: SUPERVISION_PROJECT,
     },
     named: {
       roles: NAMED_ROLES,

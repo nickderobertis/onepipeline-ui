@@ -205,7 +205,11 @@ export function ReplyComposer({
           <Wand2 size={14} /> Compose envelope
         </Button>
         {problem !== undefined && (
-          <p className="composer-problem" role="alert">
+          <p
+            aria-label="Envelope not composed"
+            className="composer-problem"
+            role="alert"
+          >
             {problem}
           </p>
         )}

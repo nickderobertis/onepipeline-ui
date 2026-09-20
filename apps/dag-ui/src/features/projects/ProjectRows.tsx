@@ -3,6 +3,7 @@ import { ChevronRight, FolderKanban } from "lucide-react";
 import { Timestamp } from "../../lib/Timestamp";
 import {
   isoOfMillis,
+  projectDetailLine,
   projectKeyOf,
   projectLabel,
   runCount,
@@ -48,9 +49,12 @@ export function ProjectRows({
             <ChevronRight aria-hidden="true" size={14} />
             {/* The qualified id under the name, so two plans called the same
                 thing in two stores are still two projects here. */}
-            {group.project !== null && group.name !== null && (
-              <span className="run-link-counts" title={group.project}>
-                {group.project}
+            {projectDetailLine(group) !== undefined && (
+              <span
+                className="run-link-counts"
+                title={projectDetailLine(group)}
+              >
+                {projectDetailLine(group)}
               </span>
             )}
             <span className="run-link-counts">
