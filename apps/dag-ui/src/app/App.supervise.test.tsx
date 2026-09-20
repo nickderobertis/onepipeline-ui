@@ -608,7 +608,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     const composer = await screen.findByRole("region", { name: "Reply" });
     expect(within(composer).getByLabelText("Shortcut")).toBeInTheDocument();
     expect(
-      screen.getByRole("region", { name: "Pending surfaces" }),
+      await screen.findByRole("region", { name: "Pending surfaces" }),
     ).toHaveTextContent("Nothing is waiting on an answer.");
   });
 });
