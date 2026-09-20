@@ -11036,6 +11036,27 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
         "{uncorrelated}"
     );
 
+    // A correlation the bus's parser accepts reaches the engine beside the
+    // bytes, and the engine rules on the pair: a correlation names the question
+    // a verdict answers, so an envelope carrying no verdict under one is the
+    // engine's refusal — in its words, naming the token it was handed, which is
+    // the proof the token reached it unchanged.
+    let correlated = http::post(
+        serving.address,
+        &format!("{reply}?correlation=c-0123456789abcdef0123456789abcdef"),
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+    );
+    assert_eq!(correlated.status, 422, "{}", correlated.body);
+    let correlated = correlated.json();
+    assert_eq!(correlated["error"]["code"], json!("refused"));
+    assert!(
+        correlated["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("c-0123456789abcdef0123456789abcdef")
+                && said.contains("carries no verdict")),
+        "{correlated}"
+    );
+
     // An edit, applied by the reply itself because nothing is driving the run,
     // answered with the receipt — and the omitted author is the planner, by the
     // engine's own contract, as the record the edit left says.
@@ -11531,11 +11552,72 @@ fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
         "{frames:?}"
     );
 
+    // Shaped through a filter, as the CLI's `--filter` shapes a watch: a spec
+    // that excludes the settlements reports no event of them, and the stream
+    // still returns.
+    let mut shaped = http::stream(
+        serving.address,
+        &format!(
+            "{watch}?timeout=0&filter={}",
+            "%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22node-settled%22%7D%5D%7D"
+        ),
+        None,
+    );
+    let frames: Vec<http::Frame> = std::iter::from_fn(|| shaped.next_frame()).collect();
+    let settlements = |frames: &[http::Frame]| {
+        frames
+            .iter()
+            .filter(|frame| frame.event == "event")
+            .filter(|frame| frame.json()["event"]["kind"] == json!("node-settled"))
+            .count()
+    };
+    assert_eq!(
+        settlements(&frames),
+        0,
+        "the excluded settlements were reported: {frames:?}"
+    );
+    assert!(
+        frames.iter().any(|frame| frame.event == "event"),
+        "the events the spec admits are still reported: {frames:?}"
+    );
+    assert_eq!(
+        frames.last().map(|frame| frame.event.as_str()),
+        Some("returned")
+    );
+    let mut unshaped = http::stream(serving.address, &format!("{watch}?timeout=0"), None);
+    let frames: Vec<http::Frame> = std::iter::from_fn(|| unshaped.next_frame()).collect();
+    assert!(
+        settlements(&frames) > 0,
+        "unshaped, the settlements are reported: {frames:?}"
+    );
+
+    // Several conditions at once, comma-separated as a query string spells a
+    // repeatable flag: the wait returns on the first of them that fires and
+    // says which one did.
+    let mut several = http::stream(
+        serving.address,
+        &format!("{watch}?timeout=0&until=settled,node-settled"),
+        None,
+    );
+    let returned = std::iter::from_fn(|| several.next_frame())
+        .last()
+        .expect("a watch of no seconds returns")
+        .json();
+    assert!(
+        matches!(
+            returned["condition"].as_str(),
+            Some("settled" | "node-settled" | "elapsed")
+        ),
+        "{returned}"
+    );
+
     // The refusals: a condition the verb does not return on and a wait that is
     // not one, at the boundary; a cursor this run cannot place and a node it
     // does not hold, in the engine's words, before the stream opens.
     for (query, code) in [
         ("until=whenever", "invalid_request"),
+        ("until=settled,whenever", "invalid_request"),
+        ("until=", "invalid_request"),
         ("timeout=soon", "invalid_request"),
         ("tick=often", "invalid_request"),
         ("cursor=1:elsewhere:5", "refused"),

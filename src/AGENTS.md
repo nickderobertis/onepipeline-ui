@@ -187,6 +187,25 @@ anything new here is a proposal to make upstream first.
   `edits::Delivery`, which `payload::edits` copies as wire strings for want of a
   type to gate against.
 
+## The server acts as one launching session, and writes to runs
+
+`onepipeline-api serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else
+unattributed) is the identity every stop and adoption is judged by, and
+`POST .../adopt` retains **this binary** at its own hidden `drive-run RUN
+--adopt` verb as the run's driver — so an adopted run is driven by the engine
+this crate links, and a host pinning the engine CLI and this reader separately
+has one pin that governs a dispatch. Two SDK calls answer out of the process
+environment rather than out of their arguments — the listing's liveness reads a
+run's channel under `ONEPIPELINE_RUNS_DIR`, and an adoption is judged by
+`ONEPIPELINE_LAUNCHER_SESSION` — so `serve` exports both, from `--runs-root`
+and the resolved session, before it serves anything, and a retained driver
+inherits them. A driver the server retains is its child: `store::Reaper` waits
+on its exit status, because a child nobody waits on is a zombie and a zombie
+answers the engine's liveness probe as alive. The two hidden verbs, `drive-run`
+and `drive`, are the engine's own argument shapes run through the engine's own
+entry point, which is where the engine records that this executable answers
+its command line and gives each dispatch a process of its own.
+
 ## Where a reader's filter may reach, and where it may not
 
 `?filter=` is this crate's own — the CLI is told once, at launch, what to put on
