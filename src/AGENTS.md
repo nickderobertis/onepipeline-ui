@@ -46,19 +46,17 @@ anything new here is a proposal to make upstream first.
   environment there; an SDK that takes `liveness_of(root, &RunSummary)` and an
   `Adopt` carrying the acting session removes them.
 - **The verbs a run is reached with after launch are the SDK's, wrapped.**
-  Every route after `/api/v2/events` in `docs/contract.md` is `onepipeline::verbs`
-  over this crate's envelope: `next`, `channel`, `reply`, `surface`, `attest`,
-  `stop`, `adopt`, `watch`, `unwatched`, `runs`, `status`, `host`, `results`,
-  `goals`, `transcript` and `telemetry`, with `monitor` on the existing
-  filtered routes. Nothing here re-implements one. Two of them answer a
-  **rendered** text beside a few typed facts — `status`, `results`, `goals`,
-  `transcript`, `host` — because their SDK results are folded views with the
-  SDK's own renderer as their presentation; a typed projection of a `RunView`
-  would be this crate inventing the record the CLI does not print. The one
-  thing this crate adds beside a verb is process hygiene the SDK cannot do for
-  a caller that lives on: `store::Reaper` waits on the drivers `adopt` retained,
-  because a child nobody waits on is a zombie and a zombie answers the SDK's own
-  liveness probe as alive.
+  Every route after the read surface in `docs/contract.md` is
+  `onepipeline::verbs` over this crate's envelope, and nothing here
+  re-implements one. Where a verb's SDK result is a folded view with the SDK's
+  own renderer as its presentation — `status`, `results`, `goals`,
+  `transcript`, `host` — the route answers that **rendered** text beside a few
+  typed facts, because a typed projection of a `RunView` would be this crate
+  inventing the record the CLI does not print. The one thing this crate adds
+  beside a verb is process hygiene the SDK cannot do for a caller that lives
+  on: `store::Reaper` waits on the drivers `adopt` retained, because a child
+  nobody waits on is a zombie and a zombie answers the SDK's own liveness probe
+  as alive.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
   from the pair. Execution is continuous, so the pair is the whole of what

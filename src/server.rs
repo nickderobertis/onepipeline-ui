@@ -519,6 +519,7 @@ async fn channel(State(serving): Store, Path(run): Path<String>) -> Response {
     answer(move || serving.store.channel(&run)).await
 }
 
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn channel_next(
     State(serving): Store,
     Path(run): Path<String>,
@@ -537,6 +538,7 @@ async fn channel_next(
 
 /// The envelope's bytes, verbatim: the engine parses them, so the only thing
 /// checked here is that they are text at all, which is what an envelope is.
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn channel_reply(
     State(serving): Store,
     Path(run): Path<String>,
@@ -572,6 +574,7 @@ fn body<T: serde::de::DeserializeOwned>(what: &str, body: &str) -> Result<T, Api
         .map_err(|error| ApiError::InvalidRequest(format!("the body is not {what}: {error}")))
 }
 
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn channel_surface(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
     let run = match run_id(&run) {
         Ok(run) => run,
@@ -584,6 +587,7 @@ async fn channel_surface(State(serving): Store, Path(run): Path<String>, raw: St
     answer(move || serving.store.channel_surface(&run, &request)).await
 }
 
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn attest(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
     let run = match run_id(&run) {
         Ok(run) => run,
@@ -596,6 +600,7 @@ async fn attest(State(serving): Store, Path(run): Path<String>, raw: String) -> 
     answer(move || serving.store.attest(&run, &request)).await
 }
 
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn stop(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
     let run = match run_id(&run) {
         Ok(run) => run,
@@ -614,6 +619,7 @@ async fn stop(State(serving): Store, Path(run): Path<String>, raw: String) -> Re
     answer(move || serving.store.stop(&run, &request)).await
 }
 
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn adopt(State(serving): Store, Path(run): Path<String>) -> Response {
     let run = match run_id(&run) {
         Ok(run) => run,
