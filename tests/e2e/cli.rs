@@ -159,3 +159,72 @@ fn a_command_the_cli_does_not_have_is_a_usage_error() {
 fn no_command_at_all_is_a_usage_error() {
     cli().assert().code(USAGE).stderr(contains("Usage"));
 }
+
+/// The two hidden driver verbs are the engine's own, and this is the drift
+/// gate on their spelling and their shape: the binary and the provisioned
+/// `onepipeline` are given the same arguments, and answer the same way.
+///
+/// A dispatch cannot be driven here — a graph's members are agents on a
+/// harness — so what is driven is everything before one: the verb parses the
+/// engine's own arguments, runs the engine's own entry, and refuses in the
+/// engine's own words with the engine's own exit code. A spelling the engine
+/// no longer answers would fail on its side of the comparison first, which is
+/// what makes the constants in `src/cli.rs` a reading of the SDK rather than a
+/// second copy of it.
+#[test]
+fn the_hidden_driver_verbs_answer_as_the_engines_own_do() {
+    let scratch = tempfile::tempdir().expect("temp dir");
+    let dir = scratch.path().to_str().expect("utf-8 path");
+    for (arguments, said) in [
+        (
+            vec!["drive", "graphs/nope.yaml", "--task", "do it", "--dir", dir],
+            "invalid config: cannot read graphs/nope.yaml",
+        ),
+        (
+            vec!["drive-run", "run-that-is-not-there", "--adopt"],
+            "no such run 'run-that-is-not-there'",
+        ),
+    ] {
+        let ours = cli()
+            .args(&arguments)
+            .env("ONEPIPELINE_RUNS_DIR", dir)
+            .output()
+            .expect("the binary runs");
+        let theirs = std::process::Command::new(crate::sibling::binary())
+            .args(&arguments)
+            .env("ONEPIPELINE_RUNS_DIR", dir)
+            .output()
+            .expect("the provisioned onepipeline runs — `just bootstrap` provisions it");
+        assert_eq!(
+            ours.status.code(),
+            theirs.status.code(),
+            "{}: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&ours.stderr)
+        );
+        assert_eq!(
+            ours.status.code(),
+            Some(USAGE),
+            "the engine's own refusal code"
+        );
+        // The one thing the two lines cannot share is the program's own name
+        // in front of the refusal.
+        let refusal = |output: &std::process::Output| {
+            String::from_utf8_lossy(&output.stderr)
+                .trim()
+                .split_once(": ")
+                .map(|(_, rest)| rest.to_owned())
+                .unwrap_or_default()
+        };
+        assert_eq!(refusal(&ours), refusal(&theirs), "{}", arguments.join(" "));
+        assert!(refusal(&ours).contains(said), "{}", refusal(&ours));
+    }
+    // Hidden: neither is a verb an operator is offered.
+    let help = cli().arg("--help").output().expect("the binary runs");
+    assert!(help.status.success());
+    assert!(
+        !String::from_utf8_lossy(&help.stdout).contains("drive"),
+        "{}",
+        String::from_utf8_lossy(&help.stdout)
+    );
+}

@@ -3,7 +3,7 @@
 //! [`docs/contract.md`](https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md)
 //! is the source of truth for the HTTP surface; everything here is its Rust
 //! rendering. [`contract`] is the wire vocabulary — routes, envelope,
-//! identifiers, queries and bodies — [`api::ReadApi`] is the trait one method
+//! identifiers, queries and bodies — [`api::RunApi`] is the trait one method
 //! per route, [`store::RunStore`] implements it over a runs root through the
 //! SDK's [`views`](onepipeline::views) and [`verbs`](onepipeline::verbs), and
 //! [`server`] is the axum router that serves it. Every route after the read

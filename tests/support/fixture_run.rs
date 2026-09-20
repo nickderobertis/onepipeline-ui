@@ -79,6 +79,24 @@ pub fn adoptable_from(root: &Path, run: &str, dir: &Path) {
     fs::write(&record, pretty(&launch)).expect("rewrite the launch record");
 }
 
+/// Rewrite one run's launch record to name a driver on **this** host: `pid`,
+/// under the host name the reading under test resolves for itself.
+///
+/// The host is asked of the crate rather than named here, because the whole
+/// question the engine's pid probe answers is whether the recorded host is the
+/// one doing the reading — and a second way of naming it would be a fixture
+/// that passed while the two disagreed. A live pid is a run being driven; one
+/// nothing can be holding is a driver proved gone.
+pub fn driven_on_this_host(root: &Path, run: &str, pid: u32) {
+    let record = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
+            .expect("the launch record is json");
+    launch["pid"] = json!(pid);
+    launch["host"] = json!(onepipeline_ui::liveness::hostname());
+    fs::write(&record, pretty(&launch)).expect("rewrite the launch record");
+}
+
 /// The session the live run's launch record names as its owner.
 pub const LIVE_SESSION: &str = "codex-session-7f3a91c0";
 

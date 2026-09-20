@@ -76,12 +76,17 @@ pub enum Command {
 /// The engine's hidden retained-driver verb, as it spells it on a command line.
 ///
 /// Restated because the engine declares the name privately and spells it on the
-/// command line it builds for the process it retains — `tests/e2e/server.rs`
-/// holds this spelling to the one `verbs::adopt` is handed, which is the one
-/// the adopt route builds.
+/// command line it builds for the process it retains. The drift gate is
+/// `tests/e2e/cli.rs`'s `the_hidden_driver_verbs_answer_as_the_engines_own_do`,
+/// which hands this binary and the provisioned `onepipeline` the same verb and
+/// holds their answers together: a spelling the engine no longer answers fails
+/// on the engine's side of that comparison.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the one source is a private `const` in the engine (`engine::DRIVE_VERB`, `agentgraph::DRIVE_VERB`), so there is no declaration to import; the journey named above is the drift gate, over the engine's own binary.
 pub const DRIVE_RUN_VERB: &str = "drive-run";
 
-/// The engine's hidden per-dispatch verb, on the same terms.
+/// The engine's hidden per-dispatch verb, on the same terms and under the same
+/// gate.
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] as `DRIVE_RUN_VERB` above: the engine declares it privately, and the same journey drives both binaries at this verb.
 pub const DRIVE_VERB: &str = "drive";
 
 impl Command {

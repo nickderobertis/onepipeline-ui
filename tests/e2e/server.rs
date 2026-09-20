@@ -11260,6 +11260,49 @@ fn a_stop_is_judged_by_the_acting_session() {
     assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
 }
 
+#[test]
+fn an_adoption_of_a_run_something_is_driving_is_refused() {
+    // A run whose driver is a live process on this host — this very test —
+    // is being driven, and the engine refuses to take it over: its own
+    // refusal, naming the way out, before anything is written.
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, std::process::id());
+        },
+        fixture_run::LIVE_SESSION,
+    );
+    let launch_record = serving.run_dir(fixture_run::RUN_ID).join("launch.json");
+    let before = fs::read_to_string(&launch_record).expect("the record");
+    let driving = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{}/adopt", fixture_run::RUN_ID),
+        "",
+    );
+    assert_eq!(driving.status, 422, "{}", driving.body);
+    let driving = driving.json();
+    assert_eq!(driving["error"]["code"], json!("refused"));
+    assert!(
+        driving["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("still being driven")),
+        "{driving}"
+    );
+    assert_eq!(
+        fs::read_to_string(&launch_record).expect("the record"),
+        before,
+        "nothing was written"
+    );
+    // And a run that is not there.
+    let absent = http::post(
+        serving.address,
+        "/api/v2/runs/run-that-is-not-there/adopt",
+        "",
+    );
+    assert_eq!(absent.status, 404, "{}", absent.body);
+    assert_eq!(absent.json()["error"]["code"], json!("run_not_found"));
+}
+
 #[cfg(unix)]
 #[test]
 fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {

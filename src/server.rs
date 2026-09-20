@@ -1,7 +1,7 @@
 //! The axum server: `docs/contract.md`'s routes, and nothing else.
 //!
 //! Every handler is the same three steps — validate the path, the query and
-//! the body at the trust boundary, ask the [`ReadApi`] for the payload, render
+//! the body at the trust boundary, ask the [`RunApi`] for the payload, render
 //! the envelope or the error contract — so a route cannot serve a status and a
 //! code that disagree, and a raw `String` from a URL never reaches storage.
 //! The one body that is *not* parsed here is a channel reply's: it is the
@@ -33,7 +33,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::api::ReadApi;
+use crate::api::RunApi;
 use crate::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventsQuery,
     NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
@@ -239,8 +239,9 @@ async fn healthz(State(serving): Store) -> Json<crate::contract::Health> {
     Json(serving.store.health())
 }
 
-/// Run one blocking read on a worker, and render whatever it produced.
-async fn read<F>(work: F) -> Response
+/// Run one blocking call — a read, or a verb that writes to the run — on a
+/// worker, and render whatever it produced.
+async fn answer<F>(work: F) -> Response
 where
     F: FnOnce() -> Result<Envelope<Value>, ApiError> + Send + 'static,
 {
@@ -259,7 +260,7 @@ async fn runs(State(serving): Store, Query(raw): Query<HashMap<String, String>>)
         Ok(query) => query,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.runs(&query)).await
+    answer(move || serving.store.runs(&query)).await
 }
 
 async fn run(
@@ -283,7 +284,7 @@ async fn run(
         include_conversations,
         filter,
     };
-    read(move || serving.store.run(&run, &query)).await
+    answer(move || serving.store.run(&run, &query)).await
 }
 
 async fn timeline(
@@ -299,7 +300,7 @@ async fn timeline(
         Ok(query) => query,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.timeline(&run, &query)).await
+    answer(move || serving.store.timeline(&run, &query)).await
 }
 
 async fn conversation(State(serving): Store, Path((run, id)): Path<(String, String)>) -> Response {
@@ -311,7 +312,7 @@ async fn conversation(State(serving): Store, Path((run, id)): Path<(String, Stri
         Ok(id) => id,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.conversation(&run, &id)).await
+    answer(move || serving.store.conversation(&run, &id)).await
 }
 
 async fn artifact(State(serving): Store, Path((run, id)): Path<(String, String)>) -> Response {
@@ -323,7 +324,7 @@ async fn artifact(State(serving): Store, Path((run, id)): Path<(String, String)>
         Ok(id) => id,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.artifact(&run, &id)).await
+    answer(move || serving.store.artifact(&run, &id)).await
 }
 
 async fn events(
@@ -492,7 +493,7 @@ fn events_query(
 }
 
 async fn projects(State(serving): Store) -> Response {
-    read(move || serving.store.projects()).await
+    answer(move || serving.store.projects()).await
 }
 
 async fn project(State(serving): Store, Path(project): Path<String>) -> Response {
@@ -502,7 +503,7 @@ async fn project(State(serving): Store, Path(project): Path<String>) -> Response
         Ok(project) => project,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.project(&project)).await
+    answer(move || serving.store.project(&project)).await
 }
 
 /// The run a verb route is about, validated.
@@ -515,7 +516,7 @@ async fn channel(State(serving): Store, Path(run): Path<String>) -> Response {
         Ok(run) => run,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.channel(&run)).await
+    answer(move || serving.store.channel(&run)).await
 }
 
 async fn channel_next(
@@ -531,7 +532,7 @@ async fn channel_next(
         Ok(filter) => NextQuery { filter },
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.channel_next(&run, &query)).await
+    answer(move || serving.store.channel_next(&run, &query)).await
 }
 
 /// The envelope's bytes, verbatim: the engine parses them, so the only thing
@@ -553,7 +554,7 @@ async fn channel_reply(
             Err(error) => return error.into_response(),
         },
     };
-    read(move || {
+    answer(move || {
         serving
             .store
             .channel_reply(&run, correlation.as_ref(), &body)
@@ -580,7 +581,7 @@ async fn channel_surface(State(serving): Store, Path(run): Path<String>, raw: St
         Ok(request) => request,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.channel_surface(&run, &request)).await
+    answer(move || serving.store.channel_surface(&run, &request)).await
 }
 
 async fn attest(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
@@ -592,7 +593,7 @@ async fn attest(State(serving): Store, Path(run): Path<String>, raw: String) -> 
         Ok(request) => request,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.attest(&run, &request)).await
+    answer(move || serving.store.attest(&run, &request)).await
 }
 
 async fn stop(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
@@ -610,7 +611,7 @@ async fn stop(State(serving): Store, Path(run): Path<String>, raw: String) -> Re
             Err(error) => return error.into_response(),
         }
     };
-    read(move || serving.store.stop(&run, &request)).await
+    answer(move || serving.store.stop(&run, &request)).await
 }
 
 async fn adopt(State(serving): Store, Path(run): Path<String>) -> Response {
@@ -618,7 +619,7 @@ async fn adopt(State(serving): Store, Path(run): Path<String>) -> Response {
         Ok(run) => run,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.adopt(&run)).await
+    answer(move || serving.store.adopt(&run)).await
 }
 
 async fn watch(
@@ -728,11 +729,11 @@ fn watch_query(raw: &HashMap<String, String>) -> Result<WatchQuery, ApiError> {
 const CURSOR_MAX_LEN: usize = 256;
 
 async fn unwatched(State(serving): Store) -> Response {
-    read(move || serving.store.unwatched()).await
+    answer(move || serving.store.unwatched()).await
 }
 
 async fn host(State(serving): Store) -> Response {
-    read(move || serving.store.host()).await
+    answer(move || serving.store.host()).await
 }
 
 async fn status(State(serving): Store, Path(run): Path<String>) -> Response {
@@ -740,7 +741,7 @@ async fn status(State(serving): Store, Path(run): Path<String>) -> Response {
         Ok(run) => run,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.status(&run)).await
+    answer(move || serving.store.status(&run)).await
 }
 
 async fn results(State(serving): Store, Path(run): Path<String>) -> Response {
@@ -748,11 +749,11 @@ async fn results(State(serving): Store, Path(run): Path<String>) -> Response {
         Ok(run) => run,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.results(&run)).await
+    answer(move || serving.store.results(&run)).await
 }
 
 async fn goals(State(serving): Store) -> Response {
-    read(move || serving.store.goals()).await
+    answer(move || serving.store.goals()).await
 }
 
 async fn run_goals(State(serving): Store, Path(run): Path<String>) -> Response {
@@ -760,7 +761,7 @@ async fn run_goals(State(serving): Store, Path(run): Path<String>) -> Response {
         Ok(run) => run,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.run_goals(&run)).await
+    answer(move || serving.store.run_goals(&run)).await
 }
 
 async fn transcript(
@@ -780,7 +781,7 @@ async fn transcript(
         },
     };
     let query = TranscriptQuery { node };
-    read(move || serving.store.transcript(&run, &query)).await
+    answer(move || serving.store.transcript(&run, &query)).await
 }
 
 async fn telemetry(State(serving): Store, Path(run): Path<String>) -> Response {
@@ -788,5 +789,5 @@ async fn telemetry(State(serving): Store, Path(run): Path<String>) -> Response {
         Ok(run) => run,
         Err(error) => return error.into_response(),
     };
-    read(move || serving.store.telemetry(&run)).await
+    answer(move || serving.store.telemetry(&run)).await
 }

@@ -22,30 +22,29 @@ anything new here is a proposal to make upstream first.
   The *schema* is still the SDK's `plan::Plan`; only the read is this crate's.
   Republishing a loader beside the path is the proposal.
 - **The eight-way timing breakdown, and the per-party usage.** Both are the
-  SDK's own fold and neither is recomputed here — and neither is fetched by
-  process any more. A run-list row reads the `views::RunTelemetry` its bounded
-  summary carries through `telemetry::of_aggregate`, and the **detail** reads
-  the SDK's published fold, `onepipeline::telemetry::of_run`, over the view the
-  route already holds, through `telemetry::of_run`. That closed the proposal
-  the previous release of this crate carried here, and with it the one state
-  in which a row and the detail opened from it could disagree: no `onepipeline`
-  binary is run by this server, for anything. What is still this crate's is the
-  boundary — `telemetry::validated` — that holds either document to the
-  producer's own contract before a timing is served out of it.
-- **How a run is being driven, over the bounded document.** Closed: the SDK
-  publishes `views::liveness_of(&RunSummary)`, and `src/liveness.rs` is a call
-  to it. **One thing about its shape is worth a proposal**: it reads the run's
-  channel — the half of the answer no summary carries, whether a *blocking*
-  surface is outstanding — under the runs root the SDK's own environment names,
-  `ONEPIPELINE_RUNS_DIR`, rather than under one the caller hands it; so does
-  `verbs::adopt`, which judges ownership by the session the environment names
-  rather than one passed in the way `verbs::stop` takes one. The binary
-  therefore exports both from `--runs-root` and `--session` before it serves
-  anything (`src/main.rs`), and an in-process reader of the store — the
-  contract suite — has to do the same for the length of an adoption. The
-  proposal is `liveness_of(root, &RunSummary)` and an `Adopt` that carries the
-  acting session, so a consumer that is not the binary is not answered out of
-  the binary's environment — the rule `verbs` states for itself.
+  SDK's own fold and neither is recomputed here, and neither is fetched by
+  process: a run-list row reads the `views::RunTelemetry` its bounded summary
+  carries through `telemetry::of_aggregate`, and the **detail** reads the
+  SDK's published fold, `onepipeline::telemetry::of_run`, over the view the
+  route already holds, through `telemetry::of_run`. No `onepipeline` binary is
+  run by this server, for anything. What is this crate's is the boundary —
+  `telemetry::validated` — that holds either document to the producer's own
+  contract before a timing is served out of it, so a row and the detail opened
+  from it read one document through one rule.
+- **How a run is being driven, over the bounded document.** The SDK's
+  `views::liveness_of(&RunSummary)`, which `src/liveness.rs` calls. **It reads
+  its answer partly out of the process environment**: the channel — the half
+  of the answer no summary carries, whether a *blocking* surface is
+  outstanding — is opened under the runs root `ONEPIPELINE_RUNS_DIR` names
+  rather than under one the caller hands it, and `verbs::adopt` judges
+  ownership by `ONEPIPELINE_LAUNCHER_SESSION` rather than by a session passed
+  in the way `verbs::stop` takes one; the driver an adoption retains resolves
+  its run through the same variable. So the binary exports both from
+  `--runs-root` and `--session` before it serves anything (`src/main.rs`), and
+  an in-process reader of the store — the contract suite — sets both for the
+  length of an adoption. Each exists because the 0.39.0 SDK answers out of the
+  environment there; an SDK that takes `liveness_of(root, &RunSummary)` and an
+  `Adopt` carrying the acting session removes them.
 - **The verbs a run is reached with after launch are the SDK's, wrapped.**
   Every route after `/api/v2/events` in `docs/contract.md` is `onepipeline::verbs`
   over this crate's envelope: `next`, `channel`, `reply`, `surface`, `attest`,

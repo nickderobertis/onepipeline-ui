@@ -1,5 +1,5 @@
 //! The trait the server is built over: one method per route in
-//! [`contract::routes`](crate::contract::routes).
+//! [`contract::routes`](crate::contract::routes), reads and verbs alike.
 //!
 //! [`RunStore`](crate::store::RunStore) is the implementation, reading the
 //! onepipeline SDK; [`server`](crate::server) is the axum router written against
@@ -22,11 +22,12 @@ use crate::error::ApiError;
 /// The surface `docs/contract.md` defines: the read routes the browser view
 /// was copied against, and the post-launch verbs wrapped after them.
 ///
-/// Still one trait, and still one method per route: a verb that writes to the
-/// run is a method that takes what the route's body and query carried, already
-/// validated, and answers the engine's own result in the envelope. The store
-/// behind it is a thin call into `onepipeline::verbs` on every one of them.
-pub trait ReadApi {
+/// One trait over one runs root, and one method per route. A verb that writes
+/// to the run is a method that takes what the route's body and query carried,
+/// already validated, and answers the engine's own result in the envelope; a
+/// read answers a projection of the SDK's records. The store behind it is a
+/// thin call into `onepipeline::verbs` on every one of the verbs.
+pub trait RunApi {
     /// The frames one `GET /api/v2/events` connection serves. The first is
     /// always a fresh snapshot.
     ///

@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use onepipeline::views::{RunPaths, RunSummary, RunView};
-use onepipeline_ui::api::ReadApi;
+use onepipeline_ui::api::RunApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
@@ -1448,7 +1448,7 @@ fn the_software_failure_status_is_distinct_from_success_and_usage() {
 /// to hold a real store and that its method shapes line up with the contract.
 struct Unimplemented;
 
-impl ReadApi for Unimplemented {
+impl RunApi for Unimplemented {
     type Events = std::vec::IntoIter<EventFrame>;
 
     fn health(&self) -> Health {

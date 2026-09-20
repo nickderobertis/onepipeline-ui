@@ -1,4 +1,4 @@
-//! The SDK-backed read store: [`ReadApi`] over one runs root.
+//! The SDK-backed read store: [`RunApi`] over one runs root.
 //!
 //! **Every read is proportional to what was asked for, and this module is where
 //! that is decided.** The SDK offers two readings of a run and they cost
@@ -50,7 +50,7 @@ use onepipeline::verbs;
 use onepipeline::views::{Listing, RunPaths, RunSummary, RunView, Skipped};
 use serde_json::{json, Value};
 
-use crate::api::ReadApi;
+use crate::api::RunApi;
 use crate::cli::{RunsRoot, SessionId};
 use crate::contract::{
     ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
@@ -698,7 +698,7 @@ impl RunStore {
     }
 }
 
-impl ReadApi for RunStore {
+impl RunApi for RunStore {
     type Events = Frames;
 
     fn health(&self) -> Health {

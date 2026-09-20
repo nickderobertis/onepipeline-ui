@@ -92,8 +92,14 @@ the identity every stop and adoption is judged by, and `POST .../adopt` retains
 **this binary** at its own hidden `drive-run RUN --adopt` verb as the run's
 driver — so an adopted run is driven by the engine this crate links, and a host
 pinning the engine CLI and this reader separately has one pin that governs a
-dispatch. `docs/contract.md` states the process model; `src/AGENTS.md` records
-the two SDK shapes the binary has to answer out of its environment for.
+dispatch. Two SDK calls answer out of the process environment rather than out
+of their arguments — the listing's liveness reads a run's channel under
+`ONEPIPELINE_RUNS_DIR`, and an adoption is judged by `ONEPIPELINE_LAUNCHER_SESSION`
+— so `serve` exports both, from `--runs-root` and the resolved session, before
+it serves anything, and a retained driver inherits them. A driver the server
+retains is its child: the server waits on its exit status, because a child
+nobody waits on is a zombie and a zombie answers the engine's liveness probe as
+alive.
 
 **One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
 edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the

@@ -18,10 +18,36 @@ GET /api/v2/runs/{run}/timeline       ?scope=run|node&node=ID
 GET /api/v2/runs/{run}/conversations/{id}
 GET /api/v2/runs/{run}/artifacts/{id}
 GET /api/v2/events                    # SSE; fresh snapshot per connection
+GET /api/v2/projects                  # runs grouped by project, as `onepipeline runs` groups them
+GET /api/v2/projects/{project}
+GET /api/v2/runs/{run}/channel        # the channel, consuming nothing
+POST /api/v2/runs/{run}/channel/next  # claim the next surface
+POST /api/v2/runs/{run}/channel/reply # the envelope's bytes, verbatim; ?correlation=C
+POST /api/v2/runs/{run}/channel/surface
+POST /api/v2/runs/{run}/attest
+POST /api/v2/runs/{run}/stop          # as the session `--session` names
+POST /api/v2/runs/{run}/adopt         # retains this binary as the driver
+GET /api/v2/runs/{run}/watch          # SSE over `onepipeline watch`
+GET /api/v2/unwatched
+GET /api/v2/host
+GET /api/v2/runs/{run}/status
+GET /api/v2/runs/{run}/results
+GET /api/v2/goals
+GET /api/v2/runs/{run}/goals
+GET /api/v2/runs/{run}/transcript     ?node=ID
+GET /api/v2/runs/{run}/telemetry
 ```
 
+The first seven are the read surface the browser view was written against;
+the rest are every verb the `onepipeline` CLI has once a plan is running,
+wrapped — each a thin call into `onepipeline::verbs`, never a re-implementation
+and never the binary. Launching a plan and driving the planning stage are
+outside this API; a reply on any run's channel is inside it. The server acts as
+one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
+which is what its stops and adoptions are judged by.
+
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (16), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (18), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy
