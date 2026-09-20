@@ -1588,6 +1588,19 @@ button.graph-row-name {
   font-family: var(--font-mono);
 }
 
+/*
+ * The supervising controls are icons below the widest desktop: the header is a
+ * fixed-height row the timeline region's own share of the window is measured
+ * against, and at a laptop the four words beside the reading's own controls
+ * wrapped it past that height. Each button keeps its name for a reader without
+ * a pointer, and says it on hover for one with.
+ */
+@media (max-width: 1440px) {
+  .run-action-label {
+    display: none;
+  }
+}
+
 /* The supervising controls and the way back, in the header beside the run. */
 .topbar-title {
   display: flex;
@@ -1717,6 +1730,12 @@ button.graph-row-name {
 
   .run-outcomes {
     padding: 10px 14px;
+  }
+
+  /* The header keeps one row of controls at this width: the badges' words are
+     on the Watch tab, and the buttons keep their names on the icon. */
+  .run-actions-badge {
+    display: none;
   }
 
   /* One column, so the run id keeps the width instead of sharing it with a state pill

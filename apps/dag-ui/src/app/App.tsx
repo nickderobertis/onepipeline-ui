@@ -354,6 +354,7 @@ export function App({
                     <WatchView
                       onToggle={control.toggleWatch}
                       runId={selectedRunId}
+                      unwatched={control.unwatched.value}
                       watch={control.watch}
                     />
                   ) : selection.view === "reads" ? (

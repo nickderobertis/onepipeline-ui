@@ -72,8 +72,16 @@ export function RunActions({
   return (
     <>
       <div className="run-actions">
+        {/* The two badges and the button labels leave the header at the phone,
+            where five rows of header left the node view's collapsed plot no
+            room: the words move to the Watch tab and the buttons keep their
+            names on the icon. */}
         {liveness !== undefined && (
-          <Badge aria-label={`Liveness ${liveness}`} variant="outline">
+          <Badge
+            aria-label={`Liveness ${liveness}`}
+            className="run-actions-badge"
+            variant="outline"
+          >
             {liveness}
           </Badge>
         )}
@@ -82,6 +90,7 @@ export function RunActions({
             <TooltipTrigger asChild>
               <Badge
                 aria-label={`${unwatched.reported.length} unwatched`}
+                className="run-actions-badge"
                 variant={
                   unwatched.reported.length > 0 ? "secondary" : "outline"
                 }
@@ -103,34 +112,44 @@ export function RunActions({
           </Tooltip>
         )}
         <Button
+          aria-label={control.watch.held ? "Watching" : "Watch"}
           aria-pressed={control.watch.held}
           onClick={control.toggleWatch}
           size="sm"
+          title={control.watch.held ? "Watching" : "Watch"}
           type="button"
           variant={control.watch.held ? "default" : "outline"}
         >
           {control.watch.held ? <Eye size={14} /> : <EyeOff size={14} />}
-          {control.watch.held ? "Watching" : "Watch"}
+          <span className="run-action-label">
+            {control.watch.held ? "Watching" : "Watch"}
+          </span>
         </Button>
         {nothingDriving && (
           <Button
+            aria-label="Adopt"
             disabled={adopt.pending}
             onClick={() => void adopt.run()}
             size="sm"
+            title="Adopt"
             type="button"
             variant="outline"
           >
-            <LifeBuoy size={14} /> Adopt
+            <LifeBuoy size={14} />
+            <span className="run-action-label">Adopt</span>
           </Button>
         )}
         <Button
+          aria-label="Stop"
           disabled={stopping}
           onClick={() => setStopOpen(true)}
           size="sm"
+          title="Stop"
           type="button"
           variant="destructive"
         >
-          <OctagonX size={14} /> Stop
+          <OctagonX size={14} />
+          <span className="run-action-label">Stop</span>
         </Button>
       </div>
       <Dialog onOpenChange={setStopOpen} open={stopOpen}>

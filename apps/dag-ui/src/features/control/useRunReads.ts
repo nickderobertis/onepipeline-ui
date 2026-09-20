@@ -6,7 +6,7 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useState } from "react";
-import { type Read, useRead } from "./useRead";
+import { type Read, useRead } from "../../lib/useRead";
 
 /** The rendered reads, in the order the verb table lists them. */
 export const READS = {

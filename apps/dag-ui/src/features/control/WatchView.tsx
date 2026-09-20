@@ -1,4 +1,5 @@
 import { Badge, Button, ScrollArea } from "@oneharness/ui";
+import type { Unwatched } from "@onepipeline-ui/dag-model";
 import type { WatchFrame } from "@onepipeline-ui/telemetry-client";
 import { Eye, EyeOff } from "lucide-react";
 import { Timestamp } from "../../lib/Timestamp";
@@ -14,10 +15,13 @@ import type { WatchState } from "./useRunControl";
 export function WatchView({
   runId,
   watch,
+  unwatched,
   onToggle,
 }: {
   readonly runId: string;
   readonly watch: WatchState;
+  /** The acting session's unwatched report, as the header's badge reads it. */
+  readonly unwatched?: Unwatched;
   readonly onToggle: () => void;
 }) {
   return (
@@ -45,6 +49,15 @@ export function WatchView({
                 ? `The wait ended: ${watch.ended.condition}.`
                 : "Not watching. Hold the stream to become this run's watcher."}
           </p>
+          {unwatched !== undefined && (
+            <p className="watch-standing">
+              {unwatched.reported.length} unwatched
+              {unwatched.reported.some((run) => run.run === runId) &&
+                " · this run"}
+              {unwatched.reported.length > 0 &&
+                `: ${unwatched.reported.map((run) => run.run).join(", ")}`}
+            </p>
+          )}
           {watch.error && (
             <Outcome
               label="Watch"

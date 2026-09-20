@@ -19,10 +19,10 @@ import { CheckCheck, Inbox, MessageSquarePlus } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
+import { useRead } from "../../lib/useRead";
 import { Outcome } from "./Outcome";
 import { ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
-import { useRead } from "./useRead";
 import { useVerb } from "./useVerb";
 
 /**

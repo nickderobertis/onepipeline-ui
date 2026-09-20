@@ -21,7 +21,11 @@ import {
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { API_V2_PATHS, parseRunTimeline } from "@onepipeline-ui/dag-model";
+import {
+  API_V2_PATHS,
+  parseRunList,
+  parseRunTimeline,
+} from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -2637,7 +2641,7 @@ test("recovers when loading another run-list page fails", async ({
 test("restores a bookmarked view and refreshes through the read API", async ({
   page,
 }) => {
-  await openObservatory(page, `/?run=${runs().live}&view=overall`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&view=overall`);
   const metric = (label: string) => metricTile(page, label);
   await expect(metric("Status")).toContainText("active");
   await expect(metric("Nodes")).toContainText(/[1-9]\d*/);
@@ -2696,7 +2700,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   await expect(graphNodes(page)).toHaveCount(0);
 
   // Every address that does name where it is going still opens there.
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
   await expect(
     page.getByRole("region", { name: "Timeline for dashboard" }),
   ).toBeVisible();
@@ -3306,13 +3310,19 @@ test("connects to the server's event stream on load", async ({ page }) => {
 test("recovers the selection when a bookmarked run is not being served", async ({
   page,
 }) => {
+  // The run the fallback lands on is whichever the server serves first — its
+  // newest activity, which the supervising journeys' writes decide — so it is
+  // read off the list rather than assumed.
+  const listed = await page.request.get(
+    `${RUN_LIST_PATH}?include_settled=true&limit=1`,
+  );
+  const first = parseRunList(await listed.json()).runs[0]?.run_id ?? "";
+  expect(first).not.toBe("");
   await openObservatory(page, "/?run=absent-run&node=dashboard");
   // The server serves no such run, so the view falls back to a real one and
   // rewrites the address rather than stranding the operator on an empty graph.
-  await expect(graphNodes(page, "running")).toContainText("dashboard");
-  await expect
-    .poll(() => new URL(page.url()).search)
-    .toContain(`run=${runs().live}`);
+  await expect(graphNodes(page).first()).toBeVisible();
+  await expect.poll(() => new URL(page.url()).search).toContain(`run=${first}`);
 
   // The same fallback from the overall reading keeps the operator in it: only the
   // run under the view is rewritten, so a stale bookmark never also moves them.
@@ -3322,9 +3332,7 @@ test("recovers the selection when a bookmarked run is not being served", async (
     "aria-selected",
     "true",
   );
-  await expect
-    .poll(() => new URL(page.url()).search)
-    .toContain(`run=${runs().live}`);
+  await expect.poll(() => new URL(page.url()).search).toContain(`run=${first}`);
 });
 
 test("reflows navigation, detail, and metrics at a narrow viewport", async ({
@@ -3353,7 +3361,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
     });
 
   await page.setViewportSize({ width: 1400, height: 900 });
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
   expect(await viewportOverflow()).toEqual({
     overflowsX: false,
     overflowsY: false,
@@ -3380,7 +3388,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
   expect(new Set(wideRows).size).toBe(1);
 
   await page.setViewportSize({ width: 800, height: 700 });
-  await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
+  await openObservatory(page, `/?list=runs&run=${runs().live}&node=dashboard`);
   // Below the layout's breakpoint the six named readings wrap onto a second row
   // rather than widening the view that holds them — and rather than overflowing a
   // centred row, which spilled the first and last of them past both edges of a

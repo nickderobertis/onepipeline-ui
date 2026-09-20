@@ -11,7 +11,7 @@ import type {
   WatchFrame,
 } from "@onepipeline-ui/telemetry-client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { asError, type Read, useRead } from "./useRead";
+import { asError, type Read, useRead } from "../../lib/useRead";
 
 /** How many frames a held watch keeps on screen; older ones scroll off. */
 const WATCH_FRAMES_KEPT = 200;

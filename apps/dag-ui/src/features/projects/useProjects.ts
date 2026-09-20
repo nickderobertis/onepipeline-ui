@@ -1,7 +1,7 @@
 import type { ProjectGroup, ProjectList } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useEffect, useState } from "react";
 import { groupForKey } from "../../lib/project-model";
+import { useRead } from "../../lib/useRead";
 import { NO_PROJECT_KEY } from "../../lib/useUrlSelection";
 
 export interface ProjectsState {
@@ -22,25 +22,12 @@ export function useProjects(
   invalidations: number,
   enabled: boolean,
 ): ProjectsState {
-  const [state, setState] = useState<ProjectsState>({});
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `invalidations` is not read by this effect — it is what asks for the same list to be read again when the stream says a run moved, exactly as `revision` does in useDagTelemetry. Dropping it would leave the projects showing the first read.
-  useEffect(() => {
-    if (!enabled) return;
-    let current = true;
-    client
-      .listProjects()
-      .then((list) => {
-        if (current) setState({ list });
-      })
-      .catch((caught: unknown) => {
-        if (current)
-          setState((previous) => ({ ...previous, error: asError(caught) }));
-      });
-    return () => {
-      current = false;
-    };
-  }, [client, invalidations, enabled]);
-  return state;
+  const { value, error } = useRead(
+    enabled ? "projects" : undefined,
+    () => client.listProjects(),
+    invalidations,
+  );
+  return { list: value, error };
 }
 
 export interface ProjectState {
@@ -60,16 +47,9 @@ export function useProject(
   projectKey: string | undefined,
   invalidations: number,
 ): ProjectState {
-  const [state, setState] = useState<{
-    readonly key?: string;
-    readonly group?: ProjectGroup;
-    readonly error?: Error;
-  }>({});
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `invalidations` is not read by this effect — it is what asks for the same group to be read again when the stream says a run moved, exactly as `revision` does in useDagTelemetry.
-  useEffect(() => {
-    if (projectKey === undefined) return;
-    let current = true;
-    const read =
+  const { value, error, loading } = useRead(
+    projectKey,
+    () =>
       projectKey === NO_PROJECT_KEY
         ? client.listProjects().then((list) => {
             const group = groupForKey(list.projects, NO_PROJECT_KEY);
@@ -77,36 +57,8 @@ export function useProject(
               throw new Error("no runs without a project");
             return group;
           })
-        : client.getProject(projectKey);
-    read
-      .then((group) => {
-        if (current) setState({ key: projectKey, group });
-      })
-      .catch((caught: unknown) => {
-        if (current)
-          setState((previous) => ({
-            // A group already on screen stays while a re-read fails; a different
-            // project's group never stands in for the one asked for.
-            ...(previous.key === projectKey ? previous : {}),
-            key: projectKey,
-            error: asError(caught),
-          }));
-      });
-    return () => {
-      current = false;
-    };
-  }, [client, projectKey, invalidations]);
-  const shown = state.key === projectKey ? state : undefined;
-  return {
-    group: shown?.group,
-    error: shown?.error,
-    loading:
-      projectKey !== undefined &&
-      shown?.group === undefined &&
-      shown?.error === undefined,
-  };
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
+        : client.getProject(projectKey ?? ""),
+    invalidations,
+  );
+  return { group: value, error, loading };
 }

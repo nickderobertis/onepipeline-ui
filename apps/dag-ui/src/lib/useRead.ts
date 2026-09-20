@@ -16,12 +16,14 @@ export interface Read<T> {
  * is moving. A different key never shows the previous key's value — the key is
  * part of what the value is a reading of.
  *
- * A read is **never discarded for being overtaken**: a re-read asked for while
- * one is out does not cancel it, because on a run that is moving the stream
- * can ask faster than a slow verb answers, and a read cancelled on every ask
- * never lands at all. Reads land in the order they were started instead — one
- * that started earlier than the last to land is dropped, so the screen cannot
- * step backwards — and only a read for a key no longer on screen is ignored.
+ * **One read of a key is out at a time**, on the terms `useDagTelemetry` keeps
+ * for the run's detail: an invalidation that arrives while a read is out is
+ * remembered rather than obeyed, and obeyed once that read lands. A read is
+ * never discarded for being overtaken — on a run that is moving the stream can
+ * ask faster than a slow verb answers, and a read cancelled on every ask never
+ * lands — and never doubled, because a verb that takes seconds asked for twice
+ * a second is a browser out of connections for every other read. Only a read
+ * for a key no longer on screen is ignored.
  */
 export function useRead<T>(
   key: string | undefined,
@@ -33,32 +35,47 @@ export function useRead<T>(
     readonly value?: T;
     readonly error?: Error;
   }>({});
-  /** Which key is on screen, and the order reads were started and landed in. */
-  const reads = useRef({ key, started: 0, landed: 0 });
+  /**
+   * Which key is on screen, the read out for it, and whether something asked
+   * for it again while that read was out.
+   */
+  const reads = useRef<{
+    key?: string;
+    out?: { readonly key: string; again: boolean };
+  }>({ key });
   useEffect(() => {
     reads.current.key = key;
   }, [key]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `read` is a closure over the key and the client — the key is what says it changed, and `invalidations` is what asks for the same read again; listing the closure would re-read on every render.
   useEffect(() => {
     if (key === undefined) return;
-    const mine = ++reads.current.started;
-    const current = () =>
-      reads.current.key === key && mine > reads.current.landed;
-    read()
-      .then((value) => {
-        if (!current()) return;
-        reads.current.landed = mine;
-        setState({ key, value });
-      })
-      .catch((caught: unknown) => {
-        if (!current()) return;
-        reads.current.landed = mine;
-        setState((previous) => ({
-          ...(previous.key === key ? previous : {}),
-          key,
-          error: asError(caught),
-        }));
-      });
+    const out = reads.current.out;
+    if (out?.key === key) {
+      out.again = true;
+      return;
+    }
+    const take = () => {
+      const mine = { key, again: false };
+      reads.current.out = mine;
+      const landed = (settle: () => void) => {
+        if (reads.current.out === mine) reads.current.out = undefined;
+        if (reads.current.key !== key) return;
+        settle();
+        if (mine.again) take();
+      };
+      read()
+        .then((value) => landed(() => setState({ key, value })))
+        .catch((caught: unknown) =>
+          landed(() =>
+            setState((previous) => ({
+              ...(previous.key === key ? previous : {}),
+              key,
+              error: asError(caught),
+            })),
+          ),
+        );
+    };
+    take();
   }, [key, invalidations]);
   const shown = state.key === key ? state : undefined;
   return {
