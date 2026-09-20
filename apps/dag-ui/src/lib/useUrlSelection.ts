@@ -158,10 +158,14 @@ export function isNodeTab(value: string | null): value is NodeTab {
  * where an unnamed one does rather than raising the client's refusal.
  */
 function isOpaqueId(value: string): boolean {
+  const hasControlCharacter = [...value].some(
+    (character) => character.charCodeAt(0) < 32,
+  );
   return (
     value.length > 0 &&
     value.length <= 512 &&
-    !/[\u0000-\u001f/?#]/u.test(value)
+    !hasControlCharacter &&
+    !/[/?#]/u.test(value)
   );
 }
 
