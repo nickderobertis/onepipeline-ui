@@ -2079,11 +2079,12 @@ export const agentRunSchema = openObject({
 export const agentSessionSchema = openObject({
   history_session: z.string().min(1),
   name: z.string().min(1),
-  // llmlint: ignore[secrets_stay_server_side] the store, the file and the working directory are the SDK's own fields for the entry, named one by one in `docs/contract.md` and printed by `onepipeline agents RUN` to the same operator: they say where the operator's own transcripts are, and are not a credential. The browser opens nothing by them — a transcript is asked for by the run and the history id alone, and the server resolves the store's path itself.
+  // llmlint: ignore-block[secrets_stay_server_side] the store, the project slug, the file and the working directory are the SDK's own fields for the entry, named one by one in `docs/contract.md` and printed by `onepipeline agents RUN` to the same operator: they say where the operator's own transcripts are, and are not a credential. The browser opens nothing by them — a transcript is asked for by the run and the history id alone, and the server resolves the store's path itself.
   history_dir: z.string().min(1),
   history_project: z.string().min(1),
   history_file: z.string().min(1),
   project: z.string().min(1),
+  // llmlint: ignore-end[secrets_stay_server_side]
   started: timestamp,
   labels: z.record(z.string(), z.string()),
   runs: z.array(agentRunSchema),
