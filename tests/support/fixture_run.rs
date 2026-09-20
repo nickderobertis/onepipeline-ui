@@ -109,11 +109,12 @@ pub const APPROVAL_NODE_ID: &str = "approve";
 ///
 /// Every other fixture here either settled or is being driven elsewhere. This
 /// one is what an adoption needs to be about anything a journey can watch: the
-/// driver it retains finds a ready human action, records the decision point,
-/// and holds — dispatching nothing, because there is nothing to dispatch — until
-/// somebody attests it, at which point the graph completes and the driver lets
-/// go. So the driver's life is exactly the interval between the adoption and
-/// the attestation, and a journey decides both.
+/// driver it retains finds a ready human action, settles it as waiting —
+/// dispatching nothing, because there is nothing to dispatch — and, with nothing
+/// left that can move without the channel, lets go of the run. Once somebody
+/// attests it, a second adoption drives the graph to completion. So each
+/// driver's life is short and observable, and a journey decides when each one
+/// begins.
 pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf {
     let run_dir = root.join(run);
     fs::create_dir_all(run_dir.join("channel")).expect("the run directory");

@@ -5402,17 +5402,26 @@ fn the_run_clock_is_the_document_the_sibling_aggregates() {
     assert_eq!(body["run"]["usage"]["llmlint"]["cost_usd"], json!(null));
 }
 
+// llmlint: ignore-block[tests_mirror_real_usage] the summary document is a file on disk
+// that another process wrote, and that file *is* the interface here: the engine that writes
+// a run store and this reader of it are pinned separately (the reason `/healthz` names its
+// release), so the document a listing reads is whatever the engine that last summarized the
+// run left there — a release ahead of or behind this one, or a file an operator edited. The
+// boundary under test, `telemetry::validated`, exists for exactly that document, and the
+// only way to hand it one the pinned engine does not write is to write it. Every other
+// journey over the clock reads a summary the pinned engine wrote.
 #[test]
 fn a_run_whose_summary_clock_cannot_be_read_still_serves_the_folds() {
     // The one state in which a row and the detail opened from it read their
     // clocks from different documents: the row's is the one the run's bounded
     // summary carries, and the detail's is the SDK's fold over the view the
-    // route holds. A summary carrying a telemetry document that breaks the
-    // producer's own contract — here a party present and reporting nothing,
-    // which the producer states it never writes — leaves the **row** with no
-    // clock at all: every timing absent, none of them zero, because a run
-    // nothing could be measured for must not read as a run that took no time.
-    // The detail, which asks no summary, still serves the fold. Neither route
+    // route holds. A summary on disk carrying a telemetry document that breaks
+    // the producer's own contract — here a party present and reporting
+    // nothing, which the pinned engine never writes, so the document is one
+    // another release or a hand left behind — leaves the **row** with no clock
+    // at all: every timing absent, none of them zero, because a run nothing
+    // could be measured for must not read as a run that took no time. The
+    // detail, which asks no summary, still serves the fold. Neither route
     // starts a process for it.
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
@@ -5461,6 +5470,7 @@ fn a_run_whose_summary_clock_cannot_be_read_still_serves_the_folds() {
     assert_eq!(body["run"]["timing"]["agent_seconds"], json!(13), "{body}");
     assert_eq!(body["run"]["run_id"], json!(fixture_run::RUN_ID));
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 // Every filtering journey below drives the compiled binary over real HTTP against
 // a real recorded run, because `?filter=` is a query the server parses, resolves
@@ -10715,6 +10725,60 @@ fn projects_are_grouped_as_the_engine_groups_them() {
 }
 
 #[test]
+fn a_project_listing_reports_a_root_it_could_not_read_rather_than_omitting_it() {
+    // The flat list's rule, on the grouped one: a run root the reader refused is
+    // named on `unreadable` beside the groups rather than dropped from them,
+    // because a grouping that is silently short reads as a host with less
+    // running than it has — and the groups themselves are exactly what the
+    // readable runs make, unshortened by the refusal.
+    let refused = "run-20260807-unreadable";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        // A directory that claims to be a run and is not one: the launch record
+        // every reader needs is not a record at all.
+        let dir = root.join(refused);
+        std::fs::create_dir_all(&dir).expect("the run directory");
+        std::fs::write(dir.join("launch.json"), "{ this is not a launch record")
+            .expect("the launch record");
+    });
+    let listed = http::get(serving.address, "/api/v2/projects").json();
+    assert_enveloped(&listed);
+    let groups = listed["projects"].as_array().expect("the groups");
+    assert_eq!(groups.len(), 1, "{listed}");
+    assert_eq!(groups[0]["project"], json!(fixture_run::PLAN_PROJECT));
+    let served: Vec<&str> = groups[0]["runs"]
+        .as_array()
+        .expect("the group's runs")
+        .iter()
+        .map(|row| row["run_id"].as_str().expect("a run id"))
+        .collect();
+    assert_eq!(served, vec![fixture_run::RUN_ID], "{listed}");
+
+    let unreadable = listed["unreadable"].as_array().expect("the refused roots");
+    assert_eq!(unreadable.len(), 1, "{listed}");
+    let entry = &unreadable[0];
+    assert!(
+        entry["path"].as_str().expect("a path").ends_with(refused),
+        "the refusal names the directory it is about: {entry}"
+    );
+    assert!(
+        !entry["reason"].as_str().expect("a reason").is_empty(),
+        "a refusal a reader cannot act on: {entry}"
+    );
+
+    // And a root with nothing to refuse carries no such array at all, which is
+    // what every client written before this field reads.
+    let clean = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let listed = http::get(clean.address, "/api/v2/projects").json();
+    assert!(
+        listed.get("unreadable").is_none(),
+        "a grouping with nothing to report carries an empty array: {listed}"
+    );
+}
+
+#[test]
 fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
     // The engine's own liveness reading over the bounded summary, served on the
     // row: a run quiet past the parked threshold is `PARKED` — unless a
@@ -11273,6 +11337,16 @@ fn a_stop_is_judged_by_the_acting_session() {
     assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
 }
 
+// llmlint: ignore-block[tests_mirror_real_usage] the state is the one the engine itself
+// records for a run being driven — a launch record naming a live pid on this host, which is
+// what `onepipeline adopt` and the adopt route write — and the journey writes that record
+// rather than earning it through the adopt route, because a driver that stays driving for
+// as long as a journey needs is one dispatching a node, which takes a harness and a model.
+// The driver a deterministic fixture can earn settles its one human action as waiting and
+// lets go on its own clock, as `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`
+// below shows, so a second adoption raced against it would be refused or accepted by
+// timing. The pid named is this test's own instead: a process proven alive for the whole
+// journey, read by the engine's own probe, and the refusal is the engine's own.
 #[test]
 fn an_adoption_of_a_run_something_is_driving_is_refused() {
     // A run whose driver is a live process on this host — this very test —
@@ -11322,6 +11396,7 @@ fn an_adoption_of_a_run_something_is_driving_is_refused() {
     assert_eq!(absent.status, 404, "{}", absent.body);
     assert_eq!(absent.json()["error"]["code"], json!("run_not_found"));
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 #[cfg(unix)]
 #[test]
