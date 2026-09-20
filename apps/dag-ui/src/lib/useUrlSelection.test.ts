@@ -158,3 +158,15 @@ test("reads a project key that is neither the reserved word nor a qualified id a
   const { result: named } = renderHook(() => useUrlSelection());
   expect(named.current.projectKey).toBe("local-md:observatory");
 });
+
+test("reads a run, node or item the API could never serve as unnamed", () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/?run=a%2Fb&node=build%3Fx&event=bad%23id",
+  );
+  const { result } = renderHook(() => useUrlSelection());
+  expect(result.current.runId).toBeUndefined();
+  expect(result.current.nodeId).toBeUndefined();
+  expect(result.current.itemId).toBeUndefined();
+});

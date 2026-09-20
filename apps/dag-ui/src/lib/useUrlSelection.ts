@@ -150,6 +150,27 @@ export function isNodeTab(value: string | null): value is NodeTab {
   return value !== null && Object.hasOwn(NODE_TAB_LABELS, value);
 }
 
+/**
+ * Whether an address value can be the opaque identifier the read API takes: a
+ * run, a node or a timeline item is a non-empty token with no control character
+ * and none of `/?#`, which is exactly what the telemetry client refuses to put
+ * in a path. Checked here so a shared address that could never be served lands
+ * where an unnamed one does rather than raising the client's refusal.
+ */
+function isOpaqueId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 512 &&
+    !/[\u0000-\u001f/?#]/u.test(value)
+  );
+}
+
+/** The value of one address parameter, where it is an identifier at all. */
+function identifier(params: URLSearchParams, key: string): string | undefined {
+  const named = params.get(key);
+  return named !== null && isOpaqueId(named) ? named : undefined;
+}
+
 export function useUrlSelection(): UrlSelection {
   const query = useSyncExternalStore(subscribe, currentQuery, currentQuery);
   const params = new URLSearchParams(query);
@@ -164,9 +185,9 @@ export function useUrlSelection(): UrlSelection {
     (namedProject === NO_PROJECT_KEY || isProjectId(namedProject))
       ? namedProject
       : undefined;
-  const runId = params.get("run") ?? undefined;
-  const nodeId = params.get("node") ?? undefined;
-  const itemId = params.get("event") ?? undefined;
+  const runId = identifier(params, "run");
+  const nodeId = identifier(params, "node");
+  const itemId = identifier(params, "event");
   const named = params.get("view");
   const namedTab = params.get("tab");
   const namedDetail = params.get("detail");

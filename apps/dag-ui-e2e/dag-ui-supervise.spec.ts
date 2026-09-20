@@ -20,8 +20,11 @@ import { fixture, runs } from "./fixture-facts";
  * a run adopted, two runs stopped — so they act on runs written for them alone:
  * the supervised run the acting session owns, the run another session owns, and
  * the run nothing is driving. The live run every other journey reads is left as
- * it was. They share the fixture server with `dag-ui.spec.ts`, whose last journeys
- * take the served runs away one at a time, and sort ahead of it by name.
+ * it was — but a write is a write *now*, and the run written to becomes the
+ * newest activity the flat list leads with, which is why the journeys over the
+ * live run name it rather than opening whatever is served first. They share the
+ * fixture server with `dag-ui.spec.ts`, whose last journeys take every served run
+ * away, these three included, and sort ahead of it by name.
  *
  * The order within this file matters too: the adoption is what puts the human
  * action in front of the attest, the watch is held before the run it watches is

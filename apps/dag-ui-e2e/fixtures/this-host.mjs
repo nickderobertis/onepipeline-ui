@@ -10,13 +10,28 @@ import { readFileSync } from "node:fs";
 export function thisHost() {
   for (const key of ["HOSTNAME", "COMPUTERNAME"]) {
     const value = process.env[key];
-    if (value !== undefined && value !== "") return value;
+    if (value !== undefined && isHostName(value)) return value;
   }
   try {
     const named = readFileSync("/etc/hostname", "utf8").trim();
-    if (named !== "") return named;
+    if (isHostName(named)) return named;
   } catch {
     // No such file: the engine falls back the same way.
   }
   return "localhost";
+}
+
+/**
+ * Whether a string is a host name this fixture will write into a launch record
+ * and hand a server as its own: labels of letters, digits and hyphens joined by
+ * dots, at most 253 characters. Anything else — a blank, a path, a line of
+ * something that is not a name — falls through to the next source, as a value
+ * nothing could have recorded as a host.
+ */
+function isHostName(value) {
+  return (
+    /^[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*$/u.test(
+      value,
+    ) && value.length <= 253
+  );
 }

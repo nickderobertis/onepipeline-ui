@@ -59,15 +59,18 @@ import { DESKTOP, PHONE } from "./viewports";
  * graph journey here would otherwise have to walk out of first.
  */
 /**
- * Open the app under the flat run list, on the graph of the first run served.
+ * Open the app under the flat run list, on the graph of the live run.
  *
  * The projects are what a bare address opens on now, and these journeys are about
- * runs: the flat list is the reading that opens the newest one with nothing else
- * named, which is what they were written against.
+ * the live run: they used to open on whatever run was served first, which was it,
+ * until the supervising journeys began writing to a run of their own — a write is
+ * a write *now*, and the run written to becomes the newest activity the flat list
+ * leads with. So the run is named, and the one journey about landing on the first
+ * run served says so itself.
  */
 async function openObservatory(
   page: Page,
-  path = "/?list=runs&view=graph",
+  path = `/?list=runs&run=${runs().live}&view=graph`,
 ): Promise<void> {
   await page.goto(path);
   await expect(page.getByText("DAG Observatory")).toBeVisible();
@@ -2669,7 +2672,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   // An address that names the flat list and no view is an operator arriving at
   // the runs, and what they came to read is the newest one as a whole — not the
   // shape of its graph. A bare address opens on the projects instead, which
-  // `supervise.spec.ts` holds.
+  // `dag-ui-supervise.spec.ts` holds.
   await page.goto("/?list=runs");
   await expect(page.getByText("DAG Observatory")).toBeVisible();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
@@ -4406,6 +4409,9 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
     runs().eventless,
     runs().busy,
     runs().named,
+    runs().supervised,
+    runs().elsewhere,
+    runs().adoptable,
   ]) {
     changeServedRuns(["--remove-run", runId]);
     await expect(page.getByText("No DAG runs found")).toHaveCount(0);
