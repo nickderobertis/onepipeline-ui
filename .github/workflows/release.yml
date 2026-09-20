@@ -17,6 +17,13 @@ name: Release
 #                     never publish.
 #   * upload        — build each target on a native runner and attach the archive
 #                     + sha256 checksum to the Release.
+#
+#   Every job that compiles the binary — upload, build-wheels, build-npm —
+#   builds the browser view first (`just build`) and compiles with the
+#   `bundled-ui` feature, so the binary embeds the view of this same release
+#   and refuses to build without it (see build.rs). tests/packaging.rs holds
+#   each of those jobs to both halves; the frontend package publish-npm ships
+#   is assembled from the same `just build`.
 #   * verify-assets — download what `upload` attached, under the names it
 #                     publishes, check the checksum, and smoke-test the binary.
 #                     Ungated: a GitHub Release always publishes.
@@ -163,6 +170,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      # The view the binary embeds, built before the binary is: with the
+      # feature below on, a build that finds none fails here rather than
+      # attaching an archive whose `--ui` refuses.
+      - name: Build the browser view
+        run: just build
       - name: Build, archive, checksum, and upload
         # Same rule as the wheel and npm builds: four of these targets are
         # compiled nowhere else, so a warning specific to one has no other job
@@ -172,6 +190,7 @@ jobs:
         uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: onepipeline-api
+          features: bundled-ui
           target: ${{ matrix.target }}
           # The asset-naming contract. `verify-assets` below downloads under
           # exactly this template, so a change to one that is not made in the
@@ -313,6 +332,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      # Built on the runner, before maturin compiles — inside a manylinux
+      # container on Linux, which sees the checkout and so the built view, and
+      # needs no node of its own.
+      - name: Build the browser view
+        run: just build
       - name: Build wheel
         # The gate denies warnings on Linux only; these targets are compiled
         # nowhere else, so deny them here too rather than let a
@@ -322,7 +352,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist
+          args: --release --locked --out dist --features bundled-ui
           manylinux: auto
           maturin-version: v1.14.1
       - uses: actions/upload-artifact@v4
@@ -466,6 +496,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Build the browser view
+        run: just build
       - name: Build the platform binary
         env:
           TARGET: ${{ matrix.target }}
@@ -474,7 +509,7 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: |
           rustup target add "$TARGET"
-          cargo build --release --locked --target "$TARGET"
+          cargo build --release --locked --target "$TARGET" --features bundled-ui
       - name: Assemble and pack the platform npm package
         env:
           TARGET: ${{ matrix.target }}
