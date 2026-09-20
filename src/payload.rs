@@ -882,8 +882,18 @@ pub fn run_row(
 /// cannot be read counts nothing rather than failing the row: a listing that
 /// refused a run over its queue would be a run that went missing for a reason
 /// the row cannot carry.
+///
+/// A run with no channel directory has raised nothing, and this read makes no
+/// directory in its place — the rule the SDK's own listing row keeps. It is
+/// stated here because `verbs::channel` is the whole `channel queue` verb, and
+/// opening every queue it reports creates the directory: a listing that reached
+/// it for every row would write into every run it listed, and a run being
+/// removed from under the server would come back as an empty directory.
 #[must_use]
 pub fn unread_surfaces(paths: &RunPaths) -> usize {
+    if !paths.channel_dir().is_dir() {
+        return 0;
+    }
     onepipeline::verbs::channel(paths).map_or(0, |queue| {
         queue
             .waiting

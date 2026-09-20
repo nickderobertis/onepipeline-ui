@@ -45,6 +45,16 @@ anything new here is a proposal to make upstream first.
   length of an adoption. Each exists because the 0.39.0 SDK answers out of the
   environment there; an SDK that takes `liveness_of(root, &RunSummary)` and an
   `Adopt` carrying the acting session removes them.
+- **A queue read that makes no directory.** `verbs::channel` is the whole
+  `channel queue` verb, and opening the queues it reports creates the run's
+  `channel/` directory when there is none — so a listing that reached for it on
+  every row would write into every run it listed, and a run being removed from
+  under the server would come back as an empty directory. The SDK's own listing
+  row keeps the rule its `ChannelState::queue` states — *a run with no channel
+  directory has no surfaces, and a read makes no directory in its place* —
+  behind a crate-private type, so `payload::unread_surfaces` keeps it here,
+  through the SDK's own `RunPaths::channel_dir()`, before it calls the verb.
+  A `channel` that reads without creating removes the check.
 - **The verbs a run is reached with after launch are the SDK's, wrapped.**
   Every route after the read surface in `docs/contract.md` is
   `onepipeline::verbs` over this crate's envelope, and nothing here

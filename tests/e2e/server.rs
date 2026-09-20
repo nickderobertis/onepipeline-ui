@@ -10865,6 +10865,44 @@ fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
 }
 
 #[test]
+fn listing_a_run_that_predates_the_channel_makes_it_no_channel() {
+    // A run recorded before the channel existed has no channel directory, and
+    // never will unless something writes one. The row counts its unread
+    // surfaces as none — and the read that counted them left the run exactly
+    // as it found it: `channel queue` over a run makes the directory, so a
+    // listing that reached for it on every row would write into every run it
+    // listed, and a run an operator was removing at that moment would come back
+    // as an empty directory nothing can read.
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_only(root, fixture_run::RECORDED_ONLY_RUN_ID);
+    });
+    let channel = serving
+        .runs_root()
+        .join(fixture_run::RECORDED_ONLY_RUN_ID)
+        .join("channel");
+    assert!(!channel.exists(), "the fixture predates the channel");
+
+    let row =
+        http::get(serving.address, "/api/v2/runs?include_settled=true").json()["runs"][0].clone();
+    assert_eq!(
+        row["run_id"],
+        json!(fixture_run::RECORDED_ONLY_RUN_ID),
+        "{row}"
+    );
+    assert_eq!(row["unread_surfaces"], json!(0), "{row}");
+    let grouped = http::get(serving.address, "/api/v2/projects").json();
+    assert_eq!(
+        grouped["projects"][0]["runs"][0]["unread_surfaces"],
+        json!(0),
+        "{grouped}"
+    );
+    assert!(
+        !channel.exists(),
+        "listing the run wrote a channel directory into it"
+    );
+}
+
+#[test]
 fn the_channel_is_raised_read_and_claimed_over_http() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
