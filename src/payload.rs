@@ -4294,7 +4294,7 @@ fn report_path(view: &RunView, settlement: &Envelope) -> std::path::PathBuf {
 ///
 /// What is served is [`history::read_session_display`]'s record rather than the
 /// file's bytes, which is what `docs/contract.md` names this artifact as.
-// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes recorded, and the store, project and session are read off that envelope — and what the record names is confined below before it is opened.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
 fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
     session_record(
