@@ -1290,9 +1290,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.37.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11b5d5b7b24370654b81c634c6b958323f30846d34e65bdf4e87873079cda478"
+checksum = "201922308600b50b69fcc7d459b6dd80c5ff93d65ad7d394d35a4e49a38747d8"
 dependencies = [
  "clap",
  "libc",
@@ -1341,9 +1341,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.24.2"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cb5524521befad4e6da4585a5e6fce496da28e93dd3bf4ee8ed4b822d71c284"
+checksum = "4edbb7be15ba666f4cc2bc0cfa35c180e29356f8db530a45e470144c52f88f35"
 dependencies = [
  "clap",
  "dunce",
