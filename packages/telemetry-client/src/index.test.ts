@@ -285,3 +285,89 @@ test("validates SSE snapshots before notifying subscribers", () => {
   subscription.close();
   expect(closed).toBe(true);
 });
+
+test("holds a watch as its three frames, and closes the source on the frame that ends it", () => {
+  const listeners = new Map<string, EventListener>();
+  const opened: string[] = [];
+  let closed = 0;
+  const source = {
+    addEventListener: (
+      name: string,
+      listener: EventListenerOrEventListenerObject,
+    ) => listeners.set(name, listener as EventListener),
+    close: () => {
+      closed += 1;
+    },
+    onerror: null,
+  } as unknown as EventSource;
+  const frames: unknown[] = [];
+  const errors: unknown[] = [];
+  const client = new TelemetryClient("http://localhost", {
+    eventSource: (url) => {
+      opened.push(url);
+      return source;
+    },
+  });
+  client.watch({
+    runId: "run-1",
+    until: ["surface", "node=docs"],
+    timeout: "none",
+    tick: 5,
+    filter: "planner",
+    onFrame: (frame) => frames.push(frame),
+    onError: (error) => errors.push(error),
+  });
+  // Every condition is repeated on the query rather than joined, as the route
+  // takes them.
+  expect(opened).toEqual([
+    "http://localhost/api/v2/runs/run-1/watch?until=surface&until=node%3Ddocs&timeout=none&tick=5&filter=planner",
+  ]);
+  listeners.get("event")?.(
+    new MessageEvent("event", {
+      data: JSON.stringify({ watch: "event", event: { kind: "node-settled" } }),
+      lastEventId: "0",
+    }),
+  );
+  listeners.get("tick")?.(
+    new MessageEvent("tick", {
+      data: JSON.stringify({
+        watch: "heartbeat",
+        run_id: "run-1",
+        unread: { count: 0, oldest_seconds: null, kinds: [] },
+      }),
+      lastEventId: "1",
+    }),
+  );
+  // A frame that is not the engine's record is an error, never a frame.
+  listeners.get("tick")?.(
+    new MessageEvent("tick", { data: JSON.stringify({ watch: "nope" }) }),
+  );
+  expect(closed).toBe(0);
+  listeners.get("returned")?.(
+    new MessageEvent("returned", {
+      data: JSON.stringify({
+        watch: "return",
+        run_id: "run-1",
+        condition: "surface-waiting",
+        exit: 0,
+        cursor: "1:run-1:40",
+        unread: {
+          count: 1,
+          oldest_seconds: 2,
+          kinds: [{ kind: "finding", count: 1 }],
+        },
+      }),
+      lastEventId: "2",
+    }),
+  );
+  expect(frames).toHaveLength(3);
+  expect(frames[2]).toMatchObject({
+    id: "2",
+    event: "returned",
+    data: { condition: "surface-waiting" },
+  });
+  expect(errors).toHaveLength(1);
+  // The wait is over, so the browser must not reopen it: closed on the frame
+  // itself, before the listener is told.
+  expect(closed).toBe(1);
+});
