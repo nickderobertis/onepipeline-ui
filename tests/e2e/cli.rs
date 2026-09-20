@@ -145,6 +145,22 @@ fn a_bind_address_is_validated_at_the_edge() {
         .stderr(contains("not-an-address"));
 }
 
+/// The session the environment names crosses the same boundary the flag does:
+/// a value the flag would refuse is a usage error rather than a server acting
+/// as nobody, which would be a quiet change of identity.
+#[test]
+fn a_session_the_environment_names_that_is_not_one_is_a_usage_error() {
+    let runs = tempfile::tempdir().expect("temp dir");
+    cli()
+        .args(["serve", "--runs-root"])
+        .arg(runs.path())
+        .env(onepipeline_ui::cli::SESSION_ENV, "has a space")
+        .assert()
+        .code(USAGE)
+        .stderr(contains("ONEPIPELINE_LAUNCHER_SESSION is not a session id"))
+        .stderr(contains("ACTION:"));
+}
+
 #[test]
 fn a_command_the_cli_does_not_have_is_a_usage_error() {
     cli()

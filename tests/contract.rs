@@ -1171,6 +1171,45 @@ fn every_error_maps_to_its_code_and_status() {
     );
 }
 
+/// The project id's source grammar is the contract's, and the code's copy is
+/// held to the text.
+///
+/// onetaskgraph is no dependency of this crate — the engine reaches it by
+/// subprocess — so there is no declaration to import; what there is, is the
+/// grammar the contract quotes, and this reads the code's copy back against it
+/// and drives it at the edges the grammar draws.
+#[test]
+fn the_project_id_grammar_is_the_one_the_contract_quotes() {
+    let contract = contract_text();
+    assert!(
+        contract.contains(&format!("`{}`", ProjectId::SOURCE_GRAMMAR)),
+        "docs/contract.md does not spell the source grammar {}",
+        ProjectId::SOURCE_GRAMMAR
+    );
+    for accepted in ["local-md:plan", "a0:run-1", "github-projects:x.y_z"] {
+        assert_eq!(
+            ProjectId::try_from(accepted).map(|id| id.as_str().to_owned()),
+            Ok(accepted.to_owned())
+        );
+    }
+    for refused in [
+        "no-separator",
+        "Upper:plan",
+        "-leading:plan",
+        "under_score:plan",
+        "local-md:",
+        "local-md:a:b",
+        "local-md:.dot",
+        "local-md:a/b",
+    ] {
+        assert_eq!(
+            ProjectId::try_from(refused).expect_err(refused).code(),
+            "invalid_project_id",
+            "{refused}"
+        );
+    }
+}
+
 #[test]
 fn identifiers_accept_a_bare_path_segment() {
     for value in ["run-20260807-a1b2c3", "node_1", "a.b", "x"] {

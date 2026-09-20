@@ -706,6 +706,7 @@ pub struct WatchQuery {
     pub filter: Option<FilterSpec>,
     /// The cursor an earlier watch returned, to resume from. Placed against the
     /// run by the engine, which is the one reading that decides it.
+    // llmlint: ignore[invalid_states_unrepresentable] the token is external input the engine's `WatchRequest` takes as a `String` for the reason the engine states on that field: whether it is a cursor is decided by placing it against *this run's journal*, which only the engine's own read can do, and a type here that claimed it without that read would be a second reading of a token whose one reading is the engine's. The boundary this crate keeps is the bound and the character set in `server::watch_query`.
     pub cursor: Option<String>,
 }
 
@@ -750,6 +751,7 @@ pub struct SurfaceRequest {
     /// What the surface is about.
     pub kind: onepipeline::channel::SurfaceKind,
     /// What it has to say. Blank once trimmed is the engine's refusal.
+    // llmlint: ignore[invalid_states_unrepresentable] the engine's `verbs::surface` takes the message as a `String`, trims it and refuses one with nothing in it in its own words — the refusal `docs/contract.md` promises this route serves verbatim. A type here that refused blank first would be a second statement of the engine's rule, with this crate's words in place of the engine's.
     pub message: String,
 }
 
@@ -758,6 +760,7 @@ pub struct SurfaceRequest {
 #[serde(deny_unknown_fields)]
 pub struct AttestRequest {
     /// The reference of the ready human action, as the run's decision names it.
+    // llmlint: ignore[invalid_states_unrepresentable] whether a reference names a ready human action is decided against the run's own decisions by the engine's `verbs::attest`, which refuses one nothing is waiting on in its own words; the only reading of a reference is that one, and a type here could hold it to nothing the engine does not already rule on.
     pub reference: String,
 }
 
@@ -806,12 +809,17 @@ impl fmt::Display for Correlation {
 
 /// A validated qualified project id: `<source>:<native>`.
 ///
-/// The source is one of onetaskgraph's, under `^[a-z0-9][a-z0-9-]*$`, and the
-/// native id is a non-empty bare token carrying no separator — the same
-/// characters a run id may. Constructed only through [`TryFrom<&str>`], on the
-/// same terms every other `{...}` a route interpolates is: the wire carries it
-/// path-encoded, the router decodes it, and this is what the decoded segment
+/// The source is one of onetaskgraph's, under [`SOURCE_GRAMMAR`](Self::SOURCE_GRAMMAR),
+/// and the native id is a non-empty bare token carrying no separator — the
+/// same characters a run id may. Constructed only through [`TryFrom<&str>`], on
+/// the same terms every other `{...}` a route interpolates is: the wire carries
+/// it path-encoded, the router decodes it, and this is what the decoded segment
 /// has to be before it is compared against any group.
+///
+/// The grammar is quoted from `docs/contract.md`, which quotes it from the
+/// decision that fixed this route — onetaskgraph is no dependency of this
+/// crate, and the engine reaches it by subprocess — so the contract text is the
+/// one source, and `tests/contract.rs` holds this copy to it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ProjectId(String);
@@ -819,6 +827,9 @@ pub struct ProjectId(String);
 impl ProjectId {
     /// The separator between the source and the native id.
     pub const SEPARATOR: char = ':';
+
+    /// The grammar a source name is held to, as the contract spells it.
+    pub const SOURCE_GRAMMAR: &'static str = "^[a-z0-9][a-z0-9-]*$";
 
     /// The id as the engine records it on a launch and a summary.
     #[must_use]
@@ -844,9 +855,10 @@ impl TryFrom<&str> for ProjectId {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
         if !source_ok {
-            return Err(ApiError::InvalidProjectId(
-                "the source must match ^[a-z0-9][a-z0-9-]*$".to_owned(),
-            ));
+            return Err(ApiError::InvalidProjectId(format!(
+                "the source must match {}",
+                Self::SOURCE_GRAMMAR
+            )));
         }
         if native.contains(Self::SEPARATOR) {
             return Err(ApiError::InvalidProjectId(

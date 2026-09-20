@@ -10614,24 +10614,16 @@ fn projects_are_grouped_as_the_engine_groups_them() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
         fixture_run::write(root, fixture_run::OTHER_RUN_ID);
-        // The same shape under another project, and written to a minute later
-        // than every other run here, so its group leads.
-        let dir = fixture_run::write(root, "run-20260807-0a1b2c");
-        let record = dir.join("launch.json");
-        let mut launch: Value =
-            serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
-                .expect("json");
-        launch["project"] = json!("local-md:another-plan");
-        fs::write(&record, launch.to_string()).expect("rewrite the launch record");
+        // The same shape launched from another project, and written to a
+        // minute later than every other run here, so its group leads.
+        let dir = fixture_run::write_in_project(
+            root,
+            "run-20260807-0a1b2c",
+            Some("local-md:another-plan"),
+        );
         fixture_run::append(&dir, "run-progress", json!({}));
         // And one whose launch recorded no project at all.
-        let dir = fixture_run::write(root, "run-20260807-9e8d7c");
-        let record = dir.join("launch.json");
-        let mut launch: Value =
-            serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
-                .expect("json");
-        launch.as_object_mut().expect("a mapping").remove("project");
-        fs::write(&record, launch.to_string()).expect("rewrite the launch record");
+        fixture_run::write_in_project(root, "run-20260807-9e8d7c", None);
     });
 
     let listed = http::get(serving.address, "/api/v2/projects").json();
@@ -11272,8 +11264,19 @@ fn an_adoption_of_a_run_something_is_driving_is_refused() {
         },
         fixture_run::LIVE_SESSION,
     );
-    let launch_record = serving.run_dir(fixture_run::RUN_ID).join("launch.json");
-    let before = fs::read_to_string(&launch_record).expect("the record");
+    let adoptions = |address| {
+        events_on(
+            &http::get(
+                address,
+                &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+            )
+            .json(),
+        )
+        .iter()
+        .filter(|event| event["kind"] == json!("driver-adopted"))
+        .count()
+    };
+    let before = adoptions(serving.address);
     let driving = http::post(
         serving.address,
         &format!("/api/v2/runs/{}/adopt", fixture_run::RUN_ID),
@@ -11288,11 +11291,7 @@ fn an_adoption_of_a_run_something_is_driving_is_refused() {
             .is_some_and(|said| said.contains("still being driven")),
         "{driving}"
     );
-    assert_eq!(
-        fs::read_to_string(&launch_record).expect("the record"),
-        before,
-        "nothing was written"
-    );
+    assert_eq!(adoptions(serving.address), before, "nothing was written");
     // And a run that is not there.
     let absent = http::post(
         serving.address,
@@ -11311,14 +11310,17 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
     let run = fixture_run::RUN_ID;
     let adopt = format!("/api/v2/runs/{run}/adopt");
-    let launch_record = root.join(run).join("launch.json");
-    let record = || -> Value {
-        serde_json::from_str(&fs::read_to_string(&launch_record).expect("the record"))
-            .expect("json")
-    };
     let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
     let events = |address| {
         events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+    };
+    // How many times the run's own record says it was adopted: the journalled
+    // `driver-adopted`, which the driver writes once it holds the run.
+    let adoptions = |address| {
+        events(address)
+            .iter()
+            .filter(|event| event["kind"] == json!("driver-adopted"))
+            .count()
     };
 
     // Refused for a stranger, before anything is written.
@@ -11326,7 +11328,7 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     let refused = http::post(stranger.address, &adopt, "");
     assert_eq!(refused.status, 409, "{}", refused.body);
     assert_eq!(refused.json()["error"]["code"], json!("not_owner"));
-    assert_eq!(record()["adoptions"], json!(0));
+    assert_eq!(adoptions(stranger.address), 0);
     let (_, workspace) = stranger.stop_keeping_workspace(Stop::Terminate);
 
     // Adopted by the owner: the driver's pid answered, and **the server stopped
@@ -11341,8 +11343,7 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     assert_eq!(adopted["run_id"], json!(run));
     let pid = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
     let driver = RetainedDriver(pid);
-    assert_eq!(record()["pid"], json!(pid), "the record names the driver");
-    assert_eq!(record()["adoptions"], json!(1));
+    assert!(process_is_live(pid), "the pid answered is a process");
     let (status, workspace) = serving.stop_keeping_workspace(Stop::Terminate);
     assert!(status.success(), "{status}");
 
@@ -11370,11 +11371,6 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
         json!("waiting"),
         "{driven}"
     );
-    assert_eq!(
-        record()["pid"],
-        json!(pid),
-        "the record still names the driver"
-    );
     // The driver let go, and the reader proves it gone rather than leaving
     // the run reading as driven for as long as any server lives: it was the
     // server that retained it that would have had to reap it, and that server
@@ -11401,7 +11397,9 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
     let driver = RetainedDriver(second);
     assert_ne!(second, pid);
-    assert_eq!(record()["adoptions"], json!(2));
+    eventually("the second adoption was journalled", || {
+        adoptions(restarted.address) == 2
+    });
     eventually("the second driver completed the graph", || {
         detail(restarted.address)["run"]["state"] == json!("settled")
     });

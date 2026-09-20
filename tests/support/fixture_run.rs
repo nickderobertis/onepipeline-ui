@@ -532,6 +532,17 @@ const LIVE_STREAM: &str = "a-recording-host-4243";
 /// Returns the run's directory, so a test can append to its journal and watch
 /// the server notice.
 pub fn write(root: &Path, run: &str) -> PathBuf {
+    write_in_project(root, run, Some(PLAN_PROJECT))
+}
+
+/// The same run, launched from `project` — or from no project at all, which is
+/// what a launch made before the store was where a plan came from recorded,
+/// and what the grouped listing lists under `(no project)`.
+///
+/// The one place a fixture's project is decided, so a journey about grouping
+/// writes its runs the way the engine writes one under each project rather
+/// than editing a record after the fact.
+pub fn write_in_project(root: &Path, run: &str, project: Option<&str>) -> PathBuf {
     let dir = root.join(run);
     fs::create_dir_all(dir.join("channel")).expect("the run directory");
     fs::create_dir_all(dir.join("artifacts")).expect("the artifact directory");
@@ -540,31 +551,31 @@ pub fn write(root: &Path, run: &str) -> PathBuf {
     // started, and refuses a run whose registry it cannot read at all.
     fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
 
-    fs::write(
-        dir.join("launch.json"),
-        pretty(&json!({
-            "run_id": run,
-            // The shape every run the engine launches now has: a plan's
-            // definition lives in the onetaskgraph store, and the launch record
-            // names the **project** it came from rather than a file. The runs
-            // this repository serves are overwhelmingly these, so this is the
-            // ordinary fixture; `write_launch_shapes` holds the four other
-            // shapes a reader of a real runs root still meets.
-            "project": PLAN_PROJECT,
-            "dir": "/a-recording-host/workspace",
-            "graph": "graphs/dag-scope.yaml",
-            "launcher": "claude-code",
-            "session": SESSION,
-            // A pid recorded on another host means nothing here, which is what
-            // keeps the liveness verdict off this machine's process table.
-            "pid": 4242,
-            "host": "a-recording-host",
-            "started_at": START,
-            "heartbeat_interval": 1_800,
-            "adoptions": 0,
-        })),
-    )
-    .expect("the launch record");
+    let mut launch = json!({
+        "run_id": run,
+        "dir": "/a-recording-host/workspace",
+        "graph": "graphs/dag-scope.yaml",
+        "launcher": "claude-code",
+        "session": SESSION,
+        // A pid recorded on another host means nothing here, which is what
+        // keeps the liveness verdict off this machine's process table.
+        "pid": 4242,
+        "host": "a-recording-host",
+        "started_at": START,
+        "heartbeat_interval": 1_800,
+        "adoptions": 0,
+    });
+    // The shape every run the engine launches now has: a plan's definition
+    // lives in the onetaskgraph store, and the launch record names the
+    // **project** it came from rather than a file — written as no field at all
+    // where the launch recorded none, which is how the engine writes an absent
+    // string. The runs this repository serves are overwhelmingly these, so this
+    // is the ordinary fixture; `write_launch_shapes` holds the four other shapes
+    // a reader of a real runs root still meets.
+    if let Some(project) = project {
+        launch["project"] = json!(project);
+    }
+    fs::write(dir.join("launch.json"), pretty(&launch)).expect("the launch record");
 
     let plan = plan();
     fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
