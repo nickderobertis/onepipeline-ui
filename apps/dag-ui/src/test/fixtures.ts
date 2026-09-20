@@ -82,6 +82,145 @@ export const runList = {
   ],
 };
 
+/** The project the live run was launched against; the history run recorded none. */
+export const LIVE_PROJECT = "local-md:observatory";
+export const LIVE_PROJECT_NAME = "observe-live-run";
+
+/**
+ * The grouped listing the projects route serves over the same two runs: the live
+ * run under its project and the history run in the `(no project)` group, newest
+ * activity first — which puts the live run's project ahead.
+ */
+export const projectList = {
+  api_version: 2,
+  telemetry_schema_version: 18,
+  observed_at: "2026-07-26T12:00:00Z",
+  projects: [
+    {
+      project: LIVE_PROJECT,
+      name: LIVE_PROJECT_NAME,
+      last_write_at: 1_785_000_000_000,
+      runs: [
+        {
+          ...runList.runs[0],
+          project: LIVE_PROJECT,
+          project_name: LIVE_PROJECT_NAME,
+          liveness: "ACTIVE",
+          unread_surfaces: 2,
+          last_progress_at: 1_785_000_000,
+        },
+      ],
+    },
+    {
+      project: null,
+      name: null,
+      last_write_at: 1_784_000_000_000,
+      runs: [
+        {
+          ...runList.runs[1],
+          liveness: "DRIVER DEAD",
+          unread_surfaces: 0,
+          last_progress_at: 1_784_000_000,
+        },
+      ],
+    },
+  ],
+};
+
+/** The envelope every wrapped verb answers under. */
+const verbEnvelope = {
+  api_version: 2,
+  telemetry_schema_version: 18,
+  observed_at: "2026-07-26T12:00:00Z",
+};
+
+/** `GET .../status` for a run: the live run is driven, the history run is not. */
+export function runStatus(runId: string = LIVE_RUN) {
+  return {
+    ...verbEnvelope,
+    run_id: runId,
+    liveness: runId === HISTORY_RUN ? "DRIVER DEAD" : "ACTIVE",
+    unread_surfaces: {
+      count: runId === HISTORY_RUN ? 0 : 2,
+      oldest_seconds: 40,
+    },
+    node_status: { dashboard: "running" },
+    summary: "1/8 done",
+    rendered: `${runId}  ACTIVE  1/8 done\n`,
+  };
+}
+
+/** `GET /api/v2/unwatched`: the live run is owned and nobody watches it. */
+export function unwatched(reported: readonly string[] = [LIVE_RUN]) {
+  return {
+    ...verbEnvelope,
+    reported: reported.map((run) => ({
+      run,
+      standing: "ACTIVE",
+      why_not_watched: "no watcher record",
+    })),
+    unresolved: [],
+  };
+}
+
+/** One surface on the channel, as the engine records it. */
+export function channelSurface(
+  id: number,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id,
+    kind: "finding",
+    message: `the gate went red ${id}`,
+    source: "sentinel",
+    blocking: false,
+    queued_at: 1_784_000_000_000,
+    ...overrides,
+  };
+}
+
+/** `GET .../channel`: one waiting surface, one held, one answered, one reply. */
+export function channelQueue(runId: string = LIVE_RUN) {
+  return {
+    ...verbEnvelope,
+    run_id: runId,
+    surfaces: [
+      channelSurface(0),
+      channelSurface(1, {
+        kind: "ask-manager",
+        blocking: true,
+        workstream: "dashboard",
+      }),
+      channelSurface(2, { kind: "check-in" }),
+    ],
+    waiting: [channelSurface(2, { kind: "check-in" })],
+    held: channelSurface(1, {
+      kind: "ask-manager",
+      blocking: true,
+      workstream: "dashboard",
+    }),
+    replies: [
+      {
+        id: 0,
+        reply: { completion: false, message: "carry on" },
+        at: 1_784_000_100_000,
+      },
+    ],
+    commands: [],
+    outcomes: [{ id: 0, applied: true }],
+  };
+}
+
+/** A receipt the engine answers a reply or an attest with. */
+export function receipt(runId: string = LIVE_RUN) {
+  return {
+    ...verbEnvelope,
+    run_id: runId,
+    receipt: { reply: 3, state: "delivered", verdict: "delivered" },
+    advice: ["nothing is driving the run; adopt it for the reply to be read"],
+  };
+}
+
 export function runDetail(runId: string = LIVE_RUN) {
   const historical = runId === HISTORY_RUN;
   const tasks = historical

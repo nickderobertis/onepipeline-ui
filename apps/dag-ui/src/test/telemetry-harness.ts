@@ -2,14 +2,19 @@ import { API_V2_PATHS, API_V2_QUERY } from "@onepipeline-ui/dag-model";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { vi } from "vitest";
 import {
+  channelQueue,
   HISTORY_RUN,
   LIVE_RUN,
   LONG_SESSION,
   longConversation,
+  projectList,
+  receipt,
   runDetail,
   runList,
   runScopeTimeline,
+  runStatus,
   runTimeline,
+  unwatched,
 } from "./fixtures";
 
 /**
@@ -49,7 +54,7 @@ export interface TelemetryHarness {
   readonly fetch: ReturnType<typeof vi.fn>;
 }
 
-type Responder = (url: URL) => Response | Promise<Response>;
+type Responder = (url: URL, init?: RequestInit) => Response | Promise<Response>;
 
 /** True for the run-list path the packages publish, whatever it is. */
 export const isRunList = (url: URL): boolean =>
@@ -128,7 +133,108 @@ export const fixtureRunFor = (url: URL): string =>
  * serves the field empty rather than omitting it — so a client that opts out here is
  * opting out of the same payload it would opt out of in production.
  */
+/** True for the grouped project listing. */
+export const isProjectList = (url: URL): boolean =>
+  url.pathname === API_V2_PATHS.projects;
+
+/** The project a `/api/v2/projects/<id>` path names, decoded, or `undefined`. */
+export const projectOf = (url: URL): string | undefined =>
+  url.pathname.startsWith(`${API_V2_PATHS.projects}/`)
+    ? decodeURIComponent(url.pathname.slice(API_V2_PATHS.projects.length + 1))
+    : undefined;
+
+/** The verb a `/api/v2/runs/<id>/<verb>` path names — `status`, `channel/next` — or `undefined`. */
+export const verbOf = (url: URL): string | undefined => {
+  const parts = url.pathname.split("/");
+  return parts[3] === "runs" && parts.length > 5
+    ? parts.slice(5).join("/")
+    : undefined;
+};
+
+/**
+ * The wrapped verbs, answered the way the server answers them over the two
+ * recorded runs: the projects, the status and channel of a run, the acting
+ * session's unwatched runs, and a receipt for anything written.
+ */
+function verbResponder(url: URL): Response | undefined {
+  if (isProjectList(url)) return Response.json(projectList);
+  const project = projectOf(url);
+  if (project !== undefined) {
+    const group = projectList.projects.find((g) => g.project === project);
+    return group
+      ? Response.json({ ...projectList, ...group })
+      : Response.json(
+          { error: { code: "project_not_found", message: "no such project" } },
+          { status: 404 },
+        );
+  }
+  if (url.pathname === API_V2_PATHS.unwatched)
+    return Response.json(unwatched());
+  if (url.pathname === API_V2_PATHS.host)
+    return Response.json({
+      ...unwatched(),
+      reported: undefined,
+      unresolved: undefined,
+      rendered: "host a-host\n  no live dispatches\n",
+    });
+  const verb = verbOf(url);
+  const runId = fixtureRunFor(url);
+  switch (verb) {
+    case "status":
+      return Response.json(runStatus(runId));
+    case "channel":
+      return Response.json(channelQueue(runId));
+    case "channel/reply":
+    case "attest":
+      return Response.json(receipt(runId));
+    case "channel/surface":
+      return Response.json({
+        ...receipt(runId),
+        receipt: undefined,
+        advice: undefined,
+        surface: 4,
+        state: "queued",
+      });
+    case "channel/next":
+      return Response.json({
+        ...receipt(runId),
+        receipt: undefined,
+        advice: undefined,
+        status: "surface",
+        surface: channelQueue(runId).waiting[0],
+        events: [],
+      });
+    case "results":
+    case "goals":
+      return Response.json({
+        ...receipt(runId),
+        receipt: undefined,
+        advice: undefined,
+        rendered: `${runId}  rendered ${verb}\n`,
+      });
+    case "transcript":
+      return Response.json({
+        ...receipt(runId),
+        receipt: undefined,
+        advice: undefined,
+        node: url.searchParams.get("node"),
+        rendered: `${runId}  transcript\n`,
+      });
+    case "telemetry":
+      return Response.json({
+        ...receipt(runId),
+        receipt: undefined,
+        advice: undefined,
+        telemetry: { schema_version: 2, run_id: runId },
+      });
+    default:
+      return undefined;
+  }
+}
+
 export function defaultResponder(url: URL): Response {
+  const verb = verbResponder(url);
+  if (verb !== undefined) return verb;
   if (isRunList(url)) {
     const named = selectedRuns(url);
     return Response.json(
@@ -168,8 +274,9 @@ export function telemetryHarness(
   responder: Responder = defaultResponder,
 ): TelemetryHarness {
   const sources: FakeEventSource[] = [];
-  const fetchDouble = vi.fn(async (input: URL | RequestInfo) =>
-    responder(new URL(String(input), window.location.origin)),
+  const fetchDouble = vi.fn(
+    async (input: URL | RequestInfo, init?: RequestInit) =>
+      responder(new URL(String(input), window.location.origin), init),
   );
   const client = new TelemetryClient(window.location.origin, {
     // `typeof fetch` carries overloads and a `preconnect` property that no

@@ -557,6 +557,17 @@ export const runLaunchSchema = openObject({
  */
 export const runLivenessSchema = z.string().min(1);
 
+/**
+ * The liveness words under which nothing is driving the run — the two the
+ * engine's own `adopt` will take over. `ACTIVE` is a driver holding the run and
+ * `PARKED` a live driver that has gone quiet, and neither is one an adoption may
+ * displace; a client offering one there is offering the engine's refusal.
+ */
+export const RUN_LIVENESS_NOTHING_DRIVING: readonly string[] = [
+  "DRIVER DEAD",
+  "UNDRIVEN",
+];
+
 export const runSummarySchema = openObject({
   run_id: z.string().min(1),
   state: z.string().min(1),
