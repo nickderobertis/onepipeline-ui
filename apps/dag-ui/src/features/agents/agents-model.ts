@@ -22,18 +22,21 @@ export interface AgentGroup {
   readonly sessions: readonly AgentSession[];
 }
 
-/** The word a scope is read under. */
+/** The word each scope the engine declares is read under. */
+const SCOPE_LABELS: Readonly<Record<AgentScope, string>> = {
+  node: "Node dispatch",
+  observer: "Observer",
+  "pr-author": "Change request author",
+};
+
+/** Whether a stamped scope word is one the engine declares. */
+function isAgentScope(scope: string): scope is AgentScope {
+  return AGENT_SCOPES.some((known) => known === scope);
+}
+
+/** The word a scope is read under: its own, where this build has none for it. */
 export function scopeLabel(scope: string): string {
-  switch (scope as AgentScope) {
-    case "node":
-      return "Node dispatch";
-    case "observer":
-      return "Observer";
-    case "pr-author":
-      return "Change request author";
-    default:
-      return scope;
-  }
+  return isAgentScope(scope) ? SCOPE_LABELS[scope] : scope;
 }
 
 /** The heading one group is read under: its scope, and its attempt where it has one. */
@@ -65,10 +68,8 @@ export function groupAgentSessions(
       groups.set(key, { ...group, sessions: [...group.sessions, session] });
     }
   }
-  const rank = (scope: string): number => {
-    const index = AGENT_SCOPES.indexOf(scope as AgentScope);
-    return index === -1 ? AGENT_SCOPES.length : index;
-  };
+  const rank = (scope: string): number =>
+    isAgentScope(scope) ? AGENT_SCOPES.indexOf(scope) : AGENT_SCOPES.length;
   return [...groups.values()].sort(
     (a, b) =>
       rank(a.scope) - rank(b.scope) ||

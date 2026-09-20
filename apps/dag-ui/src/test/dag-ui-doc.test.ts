@@ -120,11 +120,12 @@ describe("docs/dag-ui.md", () => {
       "{id}": "ID",
       "{history_id}": "ID",
     };
+    // Each entry is a path or a function of one or two ids; read as a function
+    // of any number, which every one of them is, and given the two.
     const produced = new Set(
-      Object.values(API_V2_PATHS).map((path) =>
-        typeof path === "string"
-          ? path
-          : (path as (...ids: string[]) => string)("RUN", "ID"),
+      Object.values(API_V2_PATHS).map(
+        (path: string | ((...ids: string[]) => string)) =>
+          typeof path === "string" ? path : path("RUN", "ID"),
       ),
     );
     // A route taking a node or a project is produced with that id in its place,
