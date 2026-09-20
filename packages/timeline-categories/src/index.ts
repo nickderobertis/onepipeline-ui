@@ -95,9 +95,19 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // Course corrections: the run noticing something and doing it differently. `cron`
     // is here because a scheduled fire is how a stalled member is nudged, which is the
     // same act as advancing a fallback rather than a lifecycle step of its own.
+    // `requeued` is a dispatch handed back to the queue before any work began:
+    // the run doing it again, which is the same act as a retry.
     [
       "recovery",
-      ["retry", "retried", "fallback", "resolution", "interrupted", "cron"],
+      [
+        "retry",
+        "retried",
+        "requeued",
+        "fallback",
+        "resolution",
+        "interrupted",
+        "cron",
+      ],
     ],
     ["failure", ["failed", "died", "rejected", "exceeded", "conflict"]],
     ["human", ["human"]],
@@ -171,7 +181,7 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
 /**
  * The kinds the rules above would misfile, and nothing else.
  *
- * Both of these are pipeline records whose words no rule names — they would land in
+ * Each of these is a pipeline record whose words no rule names — they would land in
  * the default category, which is the right answer for a kind this build has never
  * seen and the wrong one for a kind it has. Adding their words to a rule instead
  * would be a rule that generalises to nothing.
@@ -191,6 +201,10 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // matched whole — and adding it to the verification rule would be adding a
   // word that names this kind and no other, which is what this table is for.
   "criterion-checked": "verification",
+  // The driver's sweep over the harness identity pool: housekeeping of the run's
+  // driving, like an adoption, and no node's work. Neither of its words names a
+  // rule, and neither generalises to one.
+  "pool-maintenance": "lifecycle",
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
