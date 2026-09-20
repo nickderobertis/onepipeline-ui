@@ -1622,8 +1622,11 @@ export const REPLY_ENVELOPE_VERSION = 3;
 export const noteAddresseeSchema = z.enum(["worker", "supervisor", "both"]);
 /** Whether a note is attempted on the running turn (`live`) or held for the next dispatch. */
 export const noteDeliverSchema = z.enum(["live", "next"]);
-/** What a dropped node's direct dependents become. */
-export const dropDependentsSchema = z.enum(["drop", "detach"]);
+/**
+ * What a dropped node's direct dependents become. Detaching first: a form that
+ * offers the two in this order defaults to the one that loses nothing.
+ */
+export const dropDependentsSchema = z.enum(["detach", "drop"]);
 /** How a `settle` closes a node out. */
 export const settleOutcomeSchema = z.enum(["done", "failed"]);
 

@@ -1,4 +1,10 @@
 import { Button, Input, Label, Textarea } from "@oneharness/ui";
+import {
+  dropDependentsSchema,
+  noteAddresseeSchema,
+  noteDeliverSchema,
+  settleOutcomeSchema,
+} from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Send, Wand2 } from "lucide-react";
 import { useId } from "react";
@@ -32,12 +38,15 @@ const FIELD_LABELS: Readonly<Record<keyof ShortcutFields, string>> = {
   json: "Mapping (JSON)",
 };
 
-/** The closed choices some fields take, as the engine's enums spell them. */
+/**
+ * The closed choices some fields take, read off the grammar's own enums so the
+ * form cannot offer a word the envelope would be refused for.
+ */
 const CHOICES: Partial<Record<keyof ShortcutFields, readonly string[]>> = {
-  addressee: ["worker", "supervisor", "both"],
-  deliver: ["live", "next"],
-  dependents: ["detach", "drop"],
-  outcome: ["done", "failed"],
+  addressee: noteAddresseeSchema.options,
+  deliver: noteDeliverSchema.options,
+  dependents: dropDependentsSchema.options,
+  outcome: settleOutcomeSchema.options,
 };
 
 /**
