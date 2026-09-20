@@ -99,12 +99,21 @@ impl Serving {
     pub fn start_as(build: impl FnOnce(&Path), session: &str) -> Self {
         let (workspace, runs) = fixture_run::workspace();
         build(&runs);
-        Self::spawn_as(workspace, &[], false, None, Some(session))
+        Self::spawn_as(workspace, &[], false, None, Some(session), &[])
+    }
+
+    /// The same, with `arguments` after the ones every server here is started
+    /// with — `--ui`, and what qualifies it — read off the address it announces
+    /// like any other.
+    pub fn start_with_args(build: impl FnOnce(&Path), arguments: &[&str]) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_as(workspace, &[], false, None, None, arguments)
     }
 
     /// The same, acting as `session` over a workspace the caller already built.
     pub fn start_in_as(workspace: TempDir, session: &str) -> Self {
-        Self::spawn_as(workspace, &[], false, None, Some(session))
+        Self::spawn_as(workspace, &[], false, None, Some(session), &[])
     }
 
     /// The same, reading the server's own log rather than letting it through to
@@ -139,7 +148,7 @@ impl Serving {
         capture: bool,
         home: Option<&Path>,
     ) -> Self {
-        Self::spawn_as(workspace, environment, capture, home, None)
+        Self::spawn_as(workspace, environment, capture, home, None, &[])
     }
 
     fn spawn_as(
@@ -148,6 +157,7 @@ impl Serving {
         capture: bool,
         home: Option<&Path>,
         session: Option<&str>,
+        arguments: &[&str],
     ) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
         let runs = workspace.path().join(fixture_run::RUNS_DIR);
@@ -168,6 +178,7 @@ impl Serving {
         if let Some(session) = session {
             command.args(["--session", session]);
         }
+        command.args(arguments);
         match home {
             // Where the fixtures keep the graph records the server reads a run's
             // declared members from: the same variable the engine and the

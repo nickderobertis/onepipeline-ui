@@ -20,7 +20,8 @@
     },
     "build-api-server": {
       "command": "cargo build --locked --quiet --bin onepipeline-api",
-      "cache": false
+      "cache": false,
+      "dependsOn": ["build"]
     },
     "lint": {
       "command": "npx biome check apps/dag-ui && npx eslint --max-warnings 0 apps/dag-ui"

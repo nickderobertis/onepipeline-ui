@@ -61,6 +61,20 @@ fn serve(args: &ServeArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Resolved before the port is taken, like the session: a `--ui` this build
+    // cannot honour is a refusal at the command line rather than a server that
+    // answers `/` with nothing.
+    let view = match args.view() {
+        Ok(view) => view,
+        Err(message) => {
+            eprintln!(
+                "onepipeline-api: {message}\n\
+                 ACTION: serve a built view with --ui-dist DIR, or install a prebuilt \
+                 onepipeline-api of this release, which carries it."
+            );
+            return ExitCode::from(EXIT_SOFTWARE);
+        }
+    };
     // Exported before anything else runs, on one thread, because two things
     // read them out of this process's environment rather than being handed
     // them: the SDK's own listing reading, which asks a run's channel under the
@@ -115,14 +129,22 @@ fn serve(args: &ServeArgs) -> ExitCode {
     // address the kernel actually gave: a supervisor that waits for this line
     // can connect on the next one, and `--bind 127.0.0.1:0` reports the port it
     // was handed rather than the zero it asked for.
-    match listener.local_addr() {
-        Ok(address) => println!(
-            "onepipeline-api: serving {} on http://{address}",
-            args.runs_root.as_path().display()
+    // The view, when there is one, is named on the same line — before the
+    // address, which stays last so a supervisor reading the address off the
+    // end of the line reads the same line whether or not the view is served.
+    let what = match &view {
+        Some(view) => format!(
+            "{} and {}",
+            args.runs_root.as_path().display(),
+            view.describe()
         ),
+        None => args.runs_root.as_path().display().to_string(),
+    };
+    match listener.local_addr() {
+        Ok(address) => println!("onepipeline-api: serving {what} on http://{address}"),
         Err(err) => eprintln!("onepipeline-api: bound, but cannot name the address: {err}"),
     }
-    match runtime.block_on(server::serve(store, listener, stop)) {
+    match runtime.block_on(server::serve_with_view(store, listener, stop, view)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("onepipeline-api: {message}\nACTION: check the server log above.");

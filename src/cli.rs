@@ -25,6 +25,8 @@ use std::str::FromStr;
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
+use crate::ui::{UiDist, View};
+
 /// Exit status when a command parsed but this process could not carry it out.
 ///
 /// `sysexits.h`'s `EX_SOFTWARE`. It is the third of the three statuses AGENTS.md
@@ -143,6 +145,27 @@ pub struct ServeArgs {
     #[arg(long, value_name = "ID")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionId>,
+
+    /// Also serve the browser view, at every path the API does not own.
+    ///
+    /// Off by default, so every caller that asked for the read API alone gets
+    /// exactly that. On, the same address serves the DAG Observatory built
+    /// into this binary — the view of this same release — at `/`, with
+    /// `/api/v2/…` and `/healthz` unchanged, and every path the bundle has no
+    /// file for answered with its `index.html` so a deep link opens. A binary
+    /// built without the bundle refuses this flag naming what is missing.
+    #[arg(long)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ui: bool,
+
+    /// Serve the browser view from this directory instead of the built-in one.
+    ///
+    /// For developing the view against a real runs root — a rebuild reaches
+    /// the browser without a restart — and the only way to serve a bundle of
+    /// another release. Checked for its `index.html` before the port is taken.
+    #[arg(long, value_name = "DIR", requires = "ui")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_dist: Option<UiDist>,
 }
 
 /// The variable the launching session is read from when `--session` names
@@ -181,6 +204,21 @@ impl ServeArgs {
                 .map_err(|why| format!("{SESSION_ENV} is not a session id: {why}")),
             _ => Ok(None),
         }
+    }
+
+    /// The browser view this server serves beside the API, or `None` for the
+    /// API alone.
+    ///
+    /// `--ui-dist` over the bundle built into this binary, and neither without
+    /// `--ui`. Resolved once, before the port is taken, for the same reason the
+    /// session is: a refusal belongs at the command line.
+    ///
+    /// # Errors
+    ///
+    /// When `--ui` asks for a view this build does not carry and no `--ui-dist`
+    /// names one — see [`View::resolve`].
+    pub fn view(&self) -> Result<Option<View>, String> {
+        View::resolve(self.ui, self.ui_dist.as_ref(), crate::ui::EMBEDDED)
     }
 }
 

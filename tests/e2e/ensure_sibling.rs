@@ -49,6 +49,22 @@ const TIERS: &str = "test,test-baseline";
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 
+/// Every task that compiles the read API for a suite to drive.
+///
+/// The binary embeds the browser view `dag-ui:build` produces (`build.rs`),
+/// and the `ui::` journeys and the browser tier's `--ui` origin read that
+/// view back off a port — so a binary compiled before the view was built is
+/// one that refuses `--ui`, and the tier fails in a clean clone naming a
+/// missing bundle rather than proving anything.
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 3] = [
+    "onepipeline-ui:test",
+    "onepipeline-ui:test-baseline",
+    "dag-ui:build-api-server",
+];
+
+/// What builds the view the binary embeds.
+const VIEW_BUILD: &str = "dag-ui:build";
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -327,6 +343,42 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
         "the provisioning is more than one task, so two of them can install into \
          `.tools/` at once"
     );
+}
+
+/// Every task that compiles the read API for a suite builds the view first,
+/// through the same graph.
+///
+/// The same question as above, asked of the other thing a clean clone lacks:
+/// `build.rs` embeds whatever `apps/dag-ui/dist` holds when the binary is
+/// compiled, and only Nx's own resolution of the edge says whether the build
+/// that fills it runs first.
+#[test]
+fn every_suite_that_compiles_the_read_api_builds_the_view_first() {
+    let output = Command::new("just")
+        .args(["nx", "run-many", "-t", TIERS, "--graph=stdout"])
+        .current_dir(repo_root())
+        .output()
+        .expect("just is on PATH");
+    assert!(
+        output.status.success(),
+        "Nx could not build the task graph for `{TIERS}` ({}):\n{}{}",
+        output.status,
+        stderr(&output),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let dependencies = task_dependencies(&output.stdout);
+    for task in TASKS_THAT_COMPILE_THE_READ_API {
+        assert!(
+            dependencies.contains_key(task),
+            "{task} is not in the graph `{TIERS}` runs; the list here names a task \
+             nothing reaches any more"
+        );
+        assert!(
+            reaches(&dependencies, task, VIEW_BUILD),
+            "{task} compiles the read API and does not depend on {VIEW_BUILD}, so the \
+             binary it compiles in a clean clone embeds no browser view"
+        );
+    }
 }
 
 /// The graph's `task -> its dependencies` edges, as Nx answered them.

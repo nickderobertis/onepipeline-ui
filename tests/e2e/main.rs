@@ -18,9 +18,10 @@
 //! `semver_check` runs the reading the release takes of this crate's public
 //! surface, `release_probe` runs the probe a consumer waiting on a release of
 //! this repository asks, `report_workflow_failure` runs the reporter that is the
-//! only alarm on a published-smoke failure, and `ensure_sibling` runs the recipe
+//! only alarm on a published-smoke failure, `ensure_sibling` runs the recipe
 //! the gate provisions the sibling CLI with, plus the task graph Nx itself builds
-//! for `test`.
+//! for `test`, and `ui` starts the binary with `--ui` and reads the browser view
+//! it serves beside the API against the bundle it embedded.
 //!
 //! What is under test in every one of them is the real script, recipe or binary,
 //! over a real tree. Where a journey cannot let one of them reach a program for
@@ -49,6 +50,7 @@ mod release_status;
 mod report_workflow_failure;
 mod semver_check;
 mod server;
+mod ui;
 
 #[path = "../support/cost.rs"]
 mod cost_support;

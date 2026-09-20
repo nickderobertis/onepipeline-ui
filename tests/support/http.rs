@@ -54,6 +54,88 @@ fn request(address: SocketAddr, path: &str, headers: &[(&str, &str)]) -> BufRead
     BufReader::new(stream)
 }
 
+/// One complete response with its headers and its body as the bytes it came
+/// as — for what is not JSON: a page, a stylesheet, a script.
+pub struct Raw {
+    /// The status line's code.
+    pub status: u16,
+    /// Every header, lower-cased name and trimmed value, in the order sent.
+    pub headers: Vec<(String, String)>,
+    /// The body, undecoded.
+    pub body: Vec<u8>,
+}
+
+impl Raw {
+    /// The value of the header `name`, or `None` when none was sent.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(sent, _)| sent == &name.to_ascii_lowercase())
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// `GET path`, read to completion as bytes, headers kept.
+///
+/// What [`get`] is for a JSON route this is for the browser view: the body is
+/// compared byte for byte against a file on disk, and the content type beside
+/// it is part of what is asserted.
+pub fn get_raw(address: SocketAddr, path: &str) -> Raw {
+    let mut reader = request(address, path, &[]);
+    let (status, headers) = head_with_headers(&mut reader);
+    let mut body = Vec::new();
+    reader.read_to_end(&mut body).expect("read the body");
+    let chunked = headers
+        .iter()
+        .any(|(name, value)| name == "transfer-encoding" && value.contains("chunked"));
+    Raw {
+        status,
+        headers,
+        body: if chunked { dechunk_bytes(&body) } else { body },
+    }
+}
+
+/// The status line and every header, leaving the reader positioned at the body.
+fn head_with_headers(reader: &mut BufReader<TcpStream>) -> (u16, Vec<(String, String)>) {
+    let mut line = String::new();
+    reader.read_line(&mut line).expect("read the status line");
+    let status: u16 = line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("not an HTTP status line: {line:?}"));
+    let mut headers = Vec::new();
+    loop {
+        let mut header = String::new();
+        reader.read_line(&mut header).expect("read a header");
+        if header.trim().is_empty() {
+            return (status, headers);
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_owned()));
+        }
+    }
+}
+
+/// [`dechunk`], over bytes: a body that is not text cannot be joined as one.
+fn dechunk_bytes(raw: &[u8]) -> Vec<u8> {
+    let mut rest = raw;
+    let mut out = Vec::new();
+    while let Some(end) = rest.windows(2).position(|pair| pair == b"\r\n") {
+        let Ok(size) = usize::from_str_radix(String::from_utf8_lossy(&rest[..end]).trim(), 16)
+        else {
+            break;
+        };
+        let tail = &rest[end + 2..];
+        if size == 0 || tail.len() < size {
+            break;
+        }
+        out.extend_from_slice(&tail[..size]);
+        rest = tail[size..].strip_prefix(b"\r\n").unwrap_or(&[]);
+    }
+    out
+}
+
 /// The status line and headers, leaving the reader positioned at the body.
 fn head(reader: &mut BufReader<TcpStream>) -> (u16, bool) {
     let mut line = String::new();

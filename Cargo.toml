@@ -45,8 +45,10 @@ categories = ["command-line-utilities", "development-tools", "web-programming"]
 # Anchored with a leading `/` where a bare name would also match a nested one.
 include = [
   # The read API itself: what crates.io serves, and what every prebuilt binary
-  # in the wheels and the npm platform packages is compiled from.
+  # in the wheels and the npm platform packages is compiled from — the build
+  # script included, since it is what puts the browser view inside that binary.
   "/src/**/*.rs",
+  "/build.rs",
   "/Cargo.toml",
   "/README.md",
   "/LICENSE",
@@ -92,6 +94,19 @@ path = "src/main.rs"
 [lib]
 name = "onepipeline_ui"
 path = "src/lib.rs"
+
+# `build.rs` embeds the built browser view (`apps/dag-ui/dist`) in the binary,
+# so `onepipeline-api serve --ui` serves the DAG Observatory of this release
+# from the one artifact a host installs. Without this feature a build embeds
+# the view when it has been built and refuses `--ui` at run time when it has
+# not — which is what lets a `cargo check`, a clippy run or a `cargo install`
+# from crates.io need no frontend toolchain. With it, a missing view is a build
+# error: every prebuilt distribution `release.yml` builds turns it on after
+# building the view, so a release that stopped building the bundle before the
+# binary fails there rather than shipping an `--ui` nobody can use.
+# `tests/packaging.rs` holds every job that compiles the binary to that.
+[features]
+bundled-ui = []
 
 [dependencies]
 axum = "0.8"
