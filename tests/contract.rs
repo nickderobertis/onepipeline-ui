@@ -564,12 +564,21 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
         "ONEPIPELINE_ONEAGENTGRAPH_BIN",
         "/nonexistent/onepipeline-ui-contract/oneagentgraph",
     );
+    // `host` opens with the name of the host doing the reading, which the
+    // engine takes from `HOSTNAME` before it asks the system — so the golden
+    // pins a named host rather than whichever machine ran the suite. No
+    // fixture run was recorded on this name, so every liveness verdict below
+    // is the one a reader on any other host reaches.
+    std::env::set_var("HOSTNAME", READING_HOST);
     let (_workspace, root) = fixture_run::workspace();
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
     let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
     let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
+    let journal_end = fs::metadata(RunPaths::under(&root, fixture_run::RUN_ID).journal())
+        .expect("the fixture run's journal")
+        .len();
 
     let served: [(&str, Value); 12] = [
         ("projects.json", enveloped(store.projects())),
@@ -577,19 +586,22 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
         ("run-channel.json", enveloped(store.channel(&run))),
         (
             "run-watch.json",
-            serde_json::to_value(
-                store
-                    .watch(
-                        &run,
-                        &WatchQuery {
-                            timeout: onepipeline::cli::WatchTimeout::Bounded(0),
-                            ..WatchQuery::default()
-                        },
-                    )
-                    .expect("a watch of no seconds reads the run once")
-                    .collect::<Vec<_>>(),
-            )
-            .expect("serialize the frames"),
+            at_journal_end(
+                serde_json::to_value(
+                    store
+                        .watch(
+                            &run,
+                            &WatchQuery {
+                                timeout: onepipeline::cli::WatchTimeout::Bounded(0),
+                                ..WatchQuery::default()
+                            },
+                        )
+                        .expect("a watch of no seconds reads the run once")
+                        .collect::<Vec<_>>(),
+                )
+                .expect("serialize the frames"),
+                journal_end,
+            ),
         ),
         ("unwatched.json", enveloped(store.unwatched())),
         ("host.json", enveloped(store.host())),
@@ -772,8 +784,14 @@ const SCRATCH: &str = "/a-scratch";
 /// `text` with every temporary directory `tempfile` made replaced by
 /// [`SCRATCH`]: the process's temporary directory, `.tmp`, and the six
 /// characters that library draws.
+///
+/// The prefix is joined rather than formatted because the temporary directory
+/// is spelled with a trailing separator on some hosts — macOS's `TMPDIR` is one
+/// — and `tempfile` joins onto it exactly as this does, so the two spell the
+/// directory the same way. The separator after the drawn characters is
+/// replaced too, so a path a Windows host recorded reads as the golden does.
 fn without_scratch(text: &str) -> String {
-    let prefix = format!("{}/.tmp", std::env::temp_dir().display());
+    let prefix = std::env::temp_dir().join(".tmp").display().to_string();
     let mut out = String::new();
     let mut rest = text;
     while let Some(at) = rest.find(&prefix) {
@@ -787,9 +805,64 @@ fn without_scratch(text: &str) -> String {
             .last()
             .map_or(0, |(index, c)| index + c.len_utf8());
         rest = &rest[drawn..];
+        if let Some(under) = rest.strip_prefix(std::path::MAIN_SEPARATOR) {
+            out.push('/');
+            rest = under;
+        }
     }
     out.push_str(rest);
     out
+}
+
+/// The name of the host a golden says did the reading.
+///
+/// A rendered verb names the host it ran on — `host` opens with it — and the
+/// engine reads that name from `HOSTNAME` before it asks the system, so the
+/// test that pins the rendering names one rather than pinning the machine the
+/// suite happened to run on.
+const READING_HOST: &str = "a-reading-host";
+
+/// Where a golden says a watch's cursor stood: at the end of the journal.
+///
+/// A cursor is a byte offset into the run's journal, and the fixture journal's
+/// length is a property of the host that wrote it — a settled member records
+/// the path its producer's scratch had, and a temporary directory is spelled
+/// differently on every platform. So the offset is replaced by this where it
+/// equals the journal's length, and kept where it does not: what the golden pins
+/// is that a watch of no seconds read the whole journal and says so, not how
+/// many bytes that was.
+const JOURNAL_END: &str = "end-of-journal";
+
+/// `frames` with every `cursor` standing at `journal_end` replaced by
+/// [`JOURNAL_END`].
+fn at_journal_end(frames: Value, journal_end: u64) -> Value {
+    let whole = format!(":{journal_end}");
+    match frames {
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, value)| {
+                    if key != "cursor" {
+                        return (key, at_journal_end(value, journal_end));
+                    }
+                    if let Some(run) = value
+                        .as_str()
+                        .and_then(|cursor| cursor.strip_suffix(&whole))
+                    {
+                        return (key, Value::String(format!("{run}:{JOURNAL_END}")));
+                    }
+                    (key, value)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| at_journal_end(item, journal_end))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// The same document with the read's own instant — and a retained driver's
