@@ -10566,7 +10566,14 @@ fn a_run_directory_the_contract_cannot_name_is_reported_rather_than_listed() {
 /// A session that owns nothing under any fixture root.
 const STRANGER: &str = "another-planner-session";
 
-/// How long a journey waits for a retained driver to write what it writes.
+/// How long a journey waits for a retained driver to write what it writes
+/// before calling it failed.
+///
+/// A ceiling on a **failure**, never a cost a passing journey pays: each wait
+/// returns the moment its condition holds, and the whole adoption journey below
+/// takes under two seconds on this host. The ceiling is generous because a
+/// driver is a process the kernel schedules, and a loaded host that took ten
+/// seconds to run one must not read as a driver that never wrote.
 const DRIVER_PATIENCE: Duration = Duration::from_secs(60);
 
 /// Wait until `condition` holds, or fail the journey naming what never happened.
@@ -11398,6 +11405,13 @@ fn an_adoption_of_a_run_something_is_driving_is_refused() {
 }
 // llmlint: ignore-end[tests_mirror_real_usage]
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey is not
+// expensive: it runs in under two seconds — three drivers, each settling a one-node graph
+// and exiting — and the sixty seconds beside it is `DRIVER_PATIENCE`, the ceiling a
+// *failing* wait reaches before it gives up, which no passing run pays. The tiers behind
+// edges of their own here are the ones that need something a checkout may lack (`strace`,
+// the base commit's server); this needs the compiled binary every other journey in this
+// module drives.
 #[cfg(unix)]
 #[test]
 fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
@@ -11524,6 +11538,7 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     });
     drop(driver);
 }
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 #[test]
 fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
