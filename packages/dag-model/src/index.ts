@@ -35,6 +35,45 @@ export const API_V2_PATHS = {
   artifact: (runId: string, artifactId: string) =>
     `/api/v2/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`,
   events: "/api/v2/events",
+  /**
+   * The post-launch verbs, wrapped: every route below `events` is a thin call
+   * into `onepipeline::verbs`, one row of the contract's verb table each. A run
+   * is reached by these once a plan is running — launching one and driving its
+   * planning stage are outside this API, so no path here starts anything.
+   */
+  projects: "/api/v2/projects",
+  /**
+   * One project's group. The id is `<source>:<native>` and is **path-encoded on
+   * the wire** — `local-md%3Aproject` — which `encodeURIComponent` spells for it,
+   * so the route reads the id back through its own parser rather than splitting
+   * a path segment on the colon.
+   */
+  project: (projectId: string) =>
+    `/api/v2/projects/${encodeURIComponent(projectId)}`,
+  channel: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/channel`,
+  channelNext: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/channel/next`,
+  channelReply: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/channel/reply`,
+  channelSurface: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/channel/surface`,
+  attest: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/attest`,
+  stop: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/stop`,
+  adopt: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/adopt`,
+  watch: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/watch`,
+  unwatched: "/api/v2/unwatched",
+  host: "/api/v2/host",
+  status: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/status`,
+  results: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/results`,
+  goals: "/api/v2/goals",
+  runGoals: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/goals`,
+  transcript: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/transcript`,
+  telemetry: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/telemetry`,
 } as const;
 export const API_V2_QUERY = {
   includeSettled: "include_settled",
@@ -75,6 +114,22 @@ export const API_V2_QUERY = {
    * a change of attention rather than a different account of what happened.
    */
   filter: "filter",
+  /**
+   * The question a reply's verdict answers, on `POST .../channel/reply`. Parsed by
+   * the bus's own correlation parser server-side and refused as
+   * `422 invalid_correlation` where it is not one, so nothing here shapes it.
+   */
+  correlation: "correlation",
+  /**
+   * What ends a watch, beside the run finishing and nothing driving it: the CLI's
+   * own conditions — `settled`, `surface`, `nothing-driving`, `node-settled`,
+   * `node=<ID>` — repeatable, defaulting to `surface`.
+   */
+  until: "until",
+  /** How long a watch waits: whole seconds, `0` to read once, `none` to never give up. */
+  timeout: "timeout",
+  /** The heartbeat interval of a watch in whole seconds, `0` to turn it off. */
+  tick: "tick",
 } as const;
 export const API_V2_TIMELINE_SCOPES = {
   run: "run",
@@ -1441,6 +1496,450 @@ export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
 });
 export const liveActivityListSchema = z.array(liveActivitySchema);
 
+/**
+ * A project group of `GET /api/v2/projects`, and the body of
+ * `GET /api/v2/projects/{project}`: `{project, name, last_write_at, runs}`.
+ *
+ * `project` is `null` for the **`(no project)` group** — an ordinary group whose
+ * runs recorded no project, ordered by its own recency and never hidden or last by
+ * rule — and it is not addressable by id, because it has none. `name` is the plan's
+ * name off the newest run that recorded one. `last_write_at` is the newest write in
+ * the group in milliseconds since the epoch, or `null` where none of its runs has
+ * written. Each row is **the same row `GET /api/v2/runs` serves**, so it carries the
+ * run's settlement, node counts, liveness, unread surfaces and last write.
+ */
+export const projectGroupSchema = openObject({
+  project: z.string().min(1).nullable(),
+  name: z.string().min(1).nullable(),
+  last_write_at: nonnegative.nullable(),
+  runs: z.array(runSummarySchema),
+});
+
+/**
+ * `GET /api/v2/projects`: the SDK's own grouping, newest activity first — by the
+ * group's `last_write_at`, then by project id — with each group's runs newest
+ * first, exactly as the flat listing orders them. The order is the server's and a
+ * client never recomputes it.
+ */
+export const projectListSchema = openObject({
+  api_version: z.literal(2),
+  telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
+  observed_at: timestamp,
+  projects: z.array(projectGroupSchema),
+  unreadable: z.array(unreadableRunRootSchema).optional(),
+});
+
+/** `GET /api/v2/projects/{project}`: one group, enveloped. */
+export const projectDetailSchema = projectGroupSchema.extend({
+  api_version: z.literal(2),
+  telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
+  observed_at: timestamp,
+});
+
+/**
+ * The envelope every wrapped verb answers under, beside the run it is about.
+ *
+ * Every mutation and every rendered read carries these, so a client can hold a
+ * receipt to the schema it was served under exactly as it holds a list.
+ */
+const verbEnvelope = {
+  api_version: z.literal(2),
+  telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
+  observed_at: timestamp,
+} as const;
+
+/**
+ * One surface the run raised, as the engine's own channel records it.
+ *
+ * `kind` and `source` are the host's own words, relayed as recorded: the engine
+ * relays any well-formed kind a host's observer binding defines and any author its
+ * launch declared, so neither is an enum here. `blocking` says whether the run is
+ * waiting on the answer — a blocking surface is a decision point holding the
+ * subtree under `workstream`. `abandoned` is set when the process serving the
+ * surface exited without an answer, and omitted from the wire while false.
+ */
+export const channelSurfaceSchema = openObject({
+  id: counter,
+  kind: z.string().min(1),
+  message: z.string(),
+  source: z.string().min(1),
+  blocking: z.boolean(),
+  queued_at: nonnegative,
+  workstream: z.string().min(1).optional(),
+  abandoned: z.boolean().optional(),
+});
+
+/**
+ * The reply envelope, as the engine's `Reply` schema states it.
+ *
+ * Two halves with two readers. The **verdict** — `completion`, `message`,
+ * `reason` — answers a pending surface; the **commands** are the reconciler's,
+ * reconciled against the graph in order. An envelope carrying commands must name
+ * `version` {@link REPLY_ENVELOPE_VERSION}, which the engine refuses otherwise; a
+ * verdict alone needs none. `author` omitted is `planner`, and any other author
+ * is judged by the run's launch configuration inside the engine.
+ *
+ * Declared here rather than in the browser because the composer's shortcuts
+ * render to it: a shape this client did not declare is one it cannot hold a form
+ * to. The engine still reads the bytes it is sent, not this parse — a client
+ * sends the envelope verbatim and shows the engine's refusal verbatim.
+ */
+export const REPLY_ENVELOPE_VERSION = 3;
+
+/** Who a note is for: the worker's task, the supervisor's, or both parties. */
+export const noteAddresseeSchema = z.enum(["worker", "supervisor", "both"]);
+/** Whether a note is attempted on the running turn (`live`) or held for the next dispatch. */
+export const noteDeliverSchema = z.enum(["live", "next"]);
+/** What a dropped node's direct dependents become. */
+export const dropDependentsSchema = z.enum(["drop", "detach"]);
+/** How a `settle` closes a node out. */
+export const settleOutcomeSchema = z.enum(["done", "failed"]);
+
+/**
+ * One graph edit, discriminated on `op`, with exactly the required fields the
+ * engine's `Command` declares. Every object is closed: the engine refuses a field
+ * it does not declare by name, and a composer that let one through would be
+ * composing a refusal.
+ */
+export const replyCommandSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("add"), node: planTaskSchema }).strict(),
+  z
+    .object({
+      op: z.literal("drop"),
+      id: z.string().min(1),
+      dependents: dropDependentsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("reparent"),
+      id: z.string().min(1),
+      deps: z.array(z.string().min(1)),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("retry"),
+      id: z.string().min(1),
+      node: planTaskSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("cancel"),
+      id: z.string().min(1),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("requeue"),
+      id: z.string().min(1),
+      amend: arbitraryRecord.optional(),
+    })
+    .strict(),
+  z.object({ op: z.literal("attest"), ref: z.string().min(1) }).strict(),
+  z.object({ op: z.literal("complete"), reason: z.string().min(1) }).strict(),
+  z
+    .object({
+      op: z.literal("amend"),
+      id: z.string().min(1),
+      text: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("note"),
+      id: z.string().min(1),
+      addressee: noteAddresseeSchema,
+      text: z.string().min(1),
+      criterion: z.string().min(1).optional(),
+      deliver: noteDeliverSchema.optional(),
+      persist: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("finding"),
+      message: z.string().min(1),
+      blocking: z.boolean().optional(),
+      id: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("settle"),
+      id: z.string().min(1),
+      outcome: settleOutcomeSchema,
+      evidence: z.string().min(1),
+      landing: z.string().min(1).optional(),
+      release: z
+        .object({ target: z.string().min(1), version: z.string().min(1) })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+]);
+
+/** The ops the envelope may carry, in the order the composer offers them. */
+export const REPLY_OPS = replyCommandSchema.options.map(
+  (option) => option.shape.op.value,
+);
+
+export const replyEnvelopeSchema = z
+  .object({
+    version: counter.optional(),
+    author: z.string().min(1).optional(),
+    completion: z.boolean().optional(),
+    message: z.string().optional(),
+    reason: z.string().optional(),
+    commands: z.array(replyCommandSchema).optional(),
+  })
+  .strict();
+
+/**
+ * One reply the planner wrote, as the channel keeps it: the envelope, when, and
+ * the question it was bound to where it was.
+ *
+ * The recorded envelope is read **open** rather than through
+ * {@link replyEnvelopeSchema}: it is what an earlier build wrote, possibly under a
+ * vocabulary this one does not spell, and a queue that fails to parse for one old
+ * reply is a queue nobody can read.
+ */
+export const queuedReplySchema = openObject({
+  id: counter,
+  reply: arbitraryRecord,
+  at: nonnegative,
+  correlation: z.string().min(1).optional(),
+});
+
+/** One submitted edit envelope awaiting the reconciler: its author and its commands, open. */
+export const queuedCommandsSchema = openObject({
+  id: counter,
+  author: z.string().min(1).optional(),
+  commands: z.array(arbitraryRecord),
+});
+
+/** What became of one command of an envelope, in the reconciler's own words. */
+export const commandResultSchema = openObject({
+  op: z.string().min(1).optional(),
+  outcome: z.string().min(1).optional(),
+  reason: z.string().optional(),
+});
+
+/**
+ * The reconciler's answer to one envelope: all-or-nothing on `applied`, with one
+ * entry per command in `results` where this build writes them.
+ */
+export const commandOutcomeSchema = openObject({
+  id: counter,
+  applied: z.boolean(),
+  reason: z.string().optional(),
+  results: z.array(commandResultSchema).optional(),
+});
+
+/**
+ * `GET /api/v2/runs/{run}/channel`: the queue, read and never consumed — every
+ * surface raised, the ones nobody has read, whatever the pending slot holds, every
+ * reply written, the edit envelopes the reconciler has not claimed, and its answers
+ * to the ones it has.
+ */
+export const channelQueueSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  surfaces: z.array(channelSurfaceSchema),
+  waiting: z.array(channelSurfaceSchema),
+  held: channelSurfaceSchema.nullable(),
+  replies: z.array(queuedReplySchema),
+  commands: z.array(queuedCommandsSchema),
+  outcomes: z.array(commandOutcomeSchema),
+});
+
+/** Whether `next` claimed a surface, and if not, whether the run is over. */
+export const nextStatusSchema = z.enum(["surface", "running", "finished"]);
+
+/**
+ * `POST /api/v2/runs/{run}/channel/next`: the channel's only consumer. `surface`
+ * is the one claimed by this read, and `events` the run's store shaped through
+ * the reader's profile — the engine's own machine records, passed through.
+ */
+export const channelNextSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  status: nextStatusSchema,
+  surface: channelSurfaceSchema.nullable(),
+  events: z.array(arbitraryRecord),
+});
+
+/**
+ * The receipt `reply` and `attest` answer with — entry 64 of the engine's
+ * divergence record — under `receipt`, with the engine's `advice` beside it as
+ * the sentences its binary prints, in order.
+ *
+ * `state` is the engine's word for what the envelope became, and `verdict` and
+ * `commands` are present exactly when that half was carried. Open words, because
+ * they are the engine's to extend and a receipt is shown as served.
+ */
+export const replyReceiptSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  receipt: openObject({
+    reply: counter,
+    state: z.string().min(1),
+    verdict: z.string().min(1).optional(),
+    commands: z.string().min(1).optional(),
+  }),
+  advice: z.array(z.string()),
+});
+
+/** `POST /api/v2/runs/{run}/channel/surface`: the queued surface's id and `queued`. */
+export const surfacedSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  surface: counter,
+  state: z.string().min(1),
+});
+
+/**
+ * `POST /api/v2/runs/{run}/stop`: `verbs::Stopped`. `owner` is the owner as the
+ * engine names it to the caller — `[mine]` for the acting session's own run, and
+ * the launcher with a digest for another's, never the raw session. `stopped` is
+ * whether every process the run named was reached or none was left to; a teardown
+ * that was not clean is not a stop and is refused as `409 not_stopped` instead.
+ */
+export const stoppedSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  stopped: z.boolean(),
+  owner: z.string().min(1),
+  forced: z.boolean(),
+  teardown: z.string().min(1),
+});
+
+/** `POST /api/v2/runs/{run}/adopt`: the retained driver's pid. */
+export const adoptedSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  pid: counter.positive(),
+});
+
+/**
+ * The three frames `GET /api/v2/runs/{run}/watch` streams, by their SSE `event`
+ * name: one meaningful event, a heartbeat, and the ending that closes the stream.
+ */
+export const watchEventNameSchema = z.enum(["event", "tick", "returned"]);
+
+/**
+ * A run's unread accounting as a watch frame carries it: how many surfaces nobody
+ * has read, the age of the oldest in seconds — `null` rather than zero where
+ * there is none — and the count per kind.
+ */
+export const watchUnreadSchema = openObject({
+  count: counter,
+  oldest_seconds: nonnegative.nullable(),
+  kinds: z.array(openObject({ kind: z.string().min(1), count: counter })),
+});
+
+/**
+ * The data of each frame, discriminated on the engine's own `watch` tag — the
+ * record `onepipeline watch` prints on standard output for that frame, rendered
+ * by the SDK, so a client of this stream and a script reading that verb read one
+ * shape. The event under an `event` frame is the engine's machine record, open.
+ */
+export const watchFrameDataSchema = z.discriminatedUnion("watch", [
+  openObject({ watch: z.literal("event"), event: arbitraryRecord }),
+  openObject({
+    watch: z.literal("heartbeat"),
+    run_id: z.string().min(1),
+    unread: watchUnreadSchema,
+  }),
+  openObject({
+    watch: z.literal("return"),
+    run_id: z.string().min(1),
+    condition: z.string().min(1),
+    exit: z.number().int(),
+    node: z.string().min(1).optional(),
+    cursor: z.string().min(1),
+    unread: watchUnreadSchema,
+  }),
+]);
+
+/**
+ * `GET /api/v2/unwatched`: one entry per run the acting session owns that is not
+ * proven settled and that nothing is watching, and what could not be resolved in
+ * the engine's words. An unattributed server owns no run and reports none.
+ */
+export const unwatchedSchema = openObject({
+  ...verbEnvelope,
+  reported: z.array(
+    openObject({
+      run: z.string().min(1),
+      standing: z.string().min(1),
+      why_not_watched: z.string(),
+    }),
+  ),
+  unresolved: z.array(z.string()),
+});
+
+/**
+ * A verb rendered over the whole root — `host`, and `goals` given no run: the
+ * SDK's own text, byte for byte what the binary prints, with the roots it refused
+ * beside it on the terms the run list names one.
+ */
+export const renderedRootSchema = openObject({
+  ...verbEnvelope,
+  rendered: z.string(),
+  unreadable: z.array(unreadableRunRootSchema).optional(),
+});
+
+/** A verb rendered over one run — `results`, and `goals` given a run. */
+export const renderedRunSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  rendered: z.string(),
+});
+
+/**
+ * `GET /api/v2/runs/{run}/status`: the run's driver liveness in the engine's own
+ * word, its unread surfaces, every node's status as the run last settled it, its
+ * one-line summary, and the text `onepipeline status RUN` prints.
+ */
+export const runStatusSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  liveness: runLivenessSchema,
+  unread_surfaces: openObject({
+    count: counter,
+    oldest_seconds: nonnegative.nullable(),
+  }),
+  node_status: z.record(z.string(), z.string().min(1)),
+  summary: z.string(),
+  rendered: z.string(),
+});
+
+/**
+ * `GET /api/v2/runs/{run}/transcript?node=ID`: the CLI's rendering of a node's
+ * transcript. A node the run never dispatched is the engine's refusal, never an
+ * empty rendering.
+ */
+export const runTranscriptSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  node: z.string().min(1).nullable().optional(),
+  rendered: z.string(),
+});
+
+/**
+ * `GET /api/v2/runs/{run}/telemetry`: the SDK's own document for the run, the one
+ * `onepipeline telemetry RUN` prints, carrying its own `schema_version`. Open past
+ * that, because the document is the engine's and is shown as served.
+ */
+export const runTelemetryDocumentSchema = openObject({
+  ...verbEnvelope,
+  run_id: z.string().min(1),
+  telemetry: openObject({ schema_version: counter }),
+});
+
 export type Timing = z.infer<typeof timingSchema>;
 export type FailureClass = z.infer<typeof failureClassSchema>;
 export type Failure = z.infer<typeof failureSchema>;
@@ -1503,6 +2002,32 @@ export type SseEventName = z.infer<typeof sseEventNameSchema>;
  * run's launch config may define names this client has never heard of, and those
  * are passed through as the strings they are.
  */
+export type ProjectGroup = z.infer<typeof projectGroupSchema>;
+export type ProjectList = z.infer<typeof projectListSchema>;
+export type ProjectDetail = z.infer<typeof projectDetailSchema>;
+export type ChannelSurface = z.infer<typeof channelSurfaceSchema>;
+export type ReplyCommand = z.infer<typeof replyCommandSchema>;
+export type ReplyOp = ReplyCommand["op"];
+export type ReplyEnvelope = z.infer<typeof replyEnvelopeSchema>;
+export type NoteAddressee = z.infer<typeof noteAddresseeSchema>;
+export type QueuedReply = z.infer<typeof queuedReplySchema>;
+export type QueuedCommands = z.infer<typeof queuedCommandsSchema>;
+export type CommandOutcome = z.infer<typeof commandOutcomeSchema>;
+export type ChannelQueue = z.infer<typeof channelQueueSchema>;
+export type ChannelNext = z.infer<typeof channelNextSchema>;
+export type ReplyReceipt = z.infer<typeof replyReceiptSchema>;
+export type Surfaced = z.infer<typeof surfacedSchema>;
+export type Stopped = z.infer<typeof stoppedSchema>;
+export type Adopted = z.infer<typeof adoptedSchema>;
+export type WatchEventName = z.infer<typeof watchEventNameSchema>;
+export type WatchFrameData = z.infer<typeof watchFrameDataSchema>;
+export type WatchUnread = z.infer<typeof watchUnreadSchema>;
+export type Unwatched = z.infer<typeof unwatchedSchema>;
+export type RenderedRoot = z.infer<typeof renderedRootSchema>;
+export type RenderedRun = z.infer<typeof renderedRunSchema>;
+export type RunStatus = z.infer<typeof runStatusSchema>;
+export type RunTranscript = z.infer<typeof runTranscriptSchema>;
+export type RunTelemetryDocument = z.infer<typeof runTelemetryDocumentSchema>;
 export type FilterProfile =
   (typeof API_V2_FILTER_PROFILES)[keyof typeof API_V2_FILTER_PROFILES];
 

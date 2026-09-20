@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This verifies the package export as a consumer uses it.
 import {
+  adoptedSchema,
+  channelNextSchema,
+  channelQueueSchema,
   conversationSchema,
   conversationTurnSchema,
   dagConversationSchema,
@@ -12,15 +15,32 @@ import {
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
+  projectDetailSchema,
+  projectListSchema,
+  REPLY_ENVELOPE_VERSION,
+  REPLY_OPS,
+  renderedRootSchema,
+  renderedRunSchema,
+  replyEnvelopeSchema,
+  replyReceiptSchema,
   runConversationsSchema,
   runDetailSchema,
+  runStatusSchema,
   runSummarySchema,
+  runTelemetryDocumentSchema,
+  runTranscriptSchema,
   sessionLinkSchema,
   sseEventNameSchema,
+  stoppedSchema,
+  surfacedSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
+  unwatchedSchema,
+  watchEventNameSchema,
+  watchFrameDataSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "vitest";
+import { z } from "zod";
 
 /**
  * One document of the client contract corpus beside this file.
@@ -785,4 +805,175 @@ test("this repository's own served goldens parse through the public parsers", as
     detail.node_details[verification?.node_id ?? ""]?.verification.records[0]
       ?.artifact_id,
   );
+});
+
+test("the projects and every wrapped verb this repository serves parse through the public parsers", async () => {
+  // The grouped listing: newest activity first, each row the same row the flat
+  // list serves, and one group addressable by id.
+  const projects = projectListSchema.parse(await served("projects.json"));
+  expect(projects.projects.map((group) => group.project)).toEqual([
+    "authoring:contract-interface",
+  ]);
+  const [group] = projects.projects;
+  expect(group?.name).toBe("contract");
+  expect(group?.runs.map((run) => run.liveness)).toEqual(["PARKED", "PARKED"]);
+  const project = projectDetailSchema.parse(await served("project.json"));
+  expect(project.project).toBe(group?.project);
+  expect(project.runs).toEqual(group?.runs);
+  // And the no-project group is an ordinary group whose id is null — never a
+  // group the parser turns away.
+  expect(
+    projectListSchema.parse({
+      ...projects,
+      projects: [{ ...group, project: null, name: null, last_write_at: null }],
+    }).projects[0]?.project,
+  ).toBeNull();
+
+  // The channel, read and consumed, and what a reply and an attest come back as.
+  const queue = channelQueueSchema.parse(await served("run-channel.json"));
+  expect(queue.held).toBeNull();
+  expect(queue.surfaces).toEqual([]);
+  const next = channelNextSchema.parse(await served("run-channel-next.json"));
+  expect(next.status).toBe("surface");
+  expect(next.surface?.kind).toBe("finding");
+  expect(next.surface?.blocking).toBe(false);
+  const receipt = replyReceiptSchema.parse(
+    await served("run-channel-reply.json"),
+  );
+  expect(receipt.receipt.state).toBe("applied");
+  expect(receipt.receipt.commands).toBe("applied");
+  expect(receipt.receipt.verdict).toBeUndefined();
+  expect(receipt.advice).toEqual([]);
+  expect(
+    replyReceiptSchema.parse(await served("run-attest.json")).receipt,
+  ).toEqual(receipt.receipt);
+  const surfaced = surfacedSchema.parse(
+    await served("run-channel-surface.json"),
+  );
+  expect(surfaced.state).toBe("queued");
+
+  // Stopping and adopting.
+  const stopped = stoppedSchema.parse(await served("run-stop.json"));
+  expect(stopped).toMatchObject({
+    stopped: true,
+    owner: "[mine]",
+    forced: false,
+    teardown: "elsewhere",
+  });
+  expect(adoptedSchema.parse(await served("run-adopt.json")).pid).toBe(4242);
+
+  // The watch stream's three frames, each named by its SSE event and carrying
+  // the record the engine prints for it.
+  const frames = z
+    .array(
+      z.object({
+        id: z.number(),
+        event: watchEventNameSchema,
+        data: watchFrameDataSchema,
+      }),
+    )
+    .parse(await served("run-watch.json"));
+  expect(frames.map((frame) => frame.event)).toEqual([
+    "event",
+    "event",
+    "returned",
+  ]);
+  const ending = frames.at(-1)?.data;
+  expect(ending?.watch).toBe("return");
+  if (ending?.watch === "return") {
+    expect(ending.condition).toBe("settled");
+    expect(ending.cursor).toMatch(/^1:/);
+    expect(ending.unread.oldest_seconds).toBeNull();
+  }
+  expect(
+    watchFrameDataSchema.parse({
+      watch: "heartbeat",
+      run_id: "run-20260807-a1b2c3",
+      unread: {
+        count: 1,
+        oldest_seconds: 4,
+        kinds: [{ kind: "finding", count: 1 }],
+      },
+    }).watch,
+  ).toBe("heartbeat");
+  expect(unwatchedSchema.parse(await served("unwatched.json"))).toMatchObject({
+    reported: [],
+    unresolved: [],
+  });
+
+  // The rendered reads: the SDK's own text, byte for byte what the binary prints.
+  expect(renderedRootSchema.parse(await served("host.json")).rendered).toMatch(
+    /^host /,
+  );
+  const status = runStatusSchema.parse(await served("run-status.json"));
+  expect(status.liveness).toBe("PARKED");
+  expect(status.unread_surfaces.oldest_seconds).toBeNull();
+  expect(status.node_status).toEqual({
+    "contract-interface": "done",
+    review: "done",
+  });
+  expect(
+    renderedRunSchema.parse(await served("run-results.json")).rendered,
+  ).toContain("contract-interface");
+  expect(renderedRootSchema.parse(await served("goals.json")).rendered).toMatch(
+    /^== /,
+  );
+  expect(renderedRunSchema.parse(await served("run-goals.json")).run_id).toBe(
+    status.run_id,
+  );
+  const transcript = runTranscriptSchema.parse(
+    await served("run-transcript.json"),
+  );
+  expect(transcript.node).toBe("contract-interface");
+  const telemetry = runTelemetryDocumentSchema.parse(
+    await served("run-telemetry.json"),
+  );
+  expect(telemetry.telemetry.schema_version).toBe(2);
+});
+
+test("a reply envelope composed against the engine's grammar carries what the engine reads, and nothing else", () => {
+  // A verdict alone needs no version; an edit envelope names the one the engine
+  // reads, and every op the engine declares is one the grammar spells.
+  expect(
+    replyEnvelopeSchema.parse({ completion: false, message: "go on" }),
+  ).toEqual({ completion: false, message: "go on" });
+  expect(REPLY_OPS).toEqual([
+    "add",
+    "drop",
+    "reparent",
+    "retry",
+    "cancel",
+    "requeue",
+    "attest",
+    "complete",
+    "amend",
+    "note",
+    "finding",
+    "settle",
+  ]);
+  const edit = replyEnvelopeSchema.parse({
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      { op: "note", id: "docs", addressee: "worker", text: "measure it too" },
+      { op: "drop", id: "obsolete", dependents: "detach" },
+      { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
+    ],
+  });
+  expect(edit.version).toBe(3);
+  expect(edit.commands).toHaveLength(3);
+  // The field the engine retired is refused by name, as the engine refuses it,
+  // and an op the engine does not declare never reaches the wire.
+  expect(
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [{ op: "context", id: "docs", note: "hi" }],
+    }).success,
+  ).toBe(false);
+  expect(replyEnvelopeSchema.safeParse({ bogus: true }).success).toBe(false);
+  expect(
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [{ op: "drop", id: "obsolete" }],
+    }).success,
+  ).toBe(false);
 });
