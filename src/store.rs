@@ -1081,8 +1081,11 @@ impl RunApi for RunStore {
         {
             return Err(ApiError::ProjectNotFound(project.clone()));
         }
+        // The engine's own ruling, classified as it is on the run routes: a
+        // pointer file it could not read is the contract's `refused`, which is
+        // what the run beside this one answers for the same file.
         let agents = verbs::project_agents(&self.root, project.as_str())
-            .map_err(|error| ApiError::Engine(error.to_string()))?;
+            .map_err(ApiError::from_engine_unscoped)?;
         Self::agents_payload(&AgentsScope::Project(project), &agents)
     }
 }

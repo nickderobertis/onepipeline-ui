@@ -3511,6 +3511,11 @@ fn the_agents_a_run_launched_are_served_off_its_pointer_file_and_open_to_their_t
 /// A pointer file the engine's own reader cannot read is the engine's refusal
 /// on the agents route, and leaves the count beside the run absent rather
 /// than a zero a reader would take for "nothing launched".
+///
+/// The project the run is under answers the same way, on all three of its
+/// routes: a group's count is the union over its runs, so one run it cannot
+/// read is a count it cannot state, and the listing itself is the engine's
+/// refusal rather than a union quietly missing a run's share of it.
 #[test]
 fn a_pointer_file_that_cannot_be_read_is_refused_and_leaves_the_count_absent() {
     let serving = Serving::start(|root| {
@@ -3535,6 +3540,33 @@ fn a_pointer_file_that_cannot_be_read_is_refused_and_leaves_the_count_absent() {
     assert!(
         detail["run"].get("agent_count").is_none(),
         "a count nothing could read is served absent, not as a zero: {detail}"
+    );
+
+    // The project the run is under: the listing is the same refusal, and both
+    // routes that carry the group's count leave it absent for the same reason.
+    let encoded = fixture_run::PLAN_PROJECT.replace(':', "%3A");
+    let listing = http::get(
+        serving.address,
+        &format!("/api/v2/projects/{encoded}/agents"),
+    );
+    assert_eq!(listing.status, 422, "{}", listing.body);
+    assert_eq!(listing.json()["error"]["code"], json!("refused"));
+    let group = http::get(serving.address, &format!("/api/v2/projects/{encoded}")).json();
+    assert!(
+        group.get("agent_count").is_none(),
+        "the group's count is the union over its runs, and one it could not read leaves \
+         it absent rather than short: {group}"
+    );
+    let groups = http::get(serving.address, "/api/v2/projects").json();
+    let listed = groups["projects"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .find(|group| group["project"] == json!(fixture_run::PLAN_PROJECT))
+        .expect("the fixture's project");
+    assert!(
+        listed.get("agent_count").is_none(),
+        "the row carries the same absent count as the group: {groups}"
     );
 }
 
