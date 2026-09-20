@@ -10,7 +10,7 @@
       "history_dir": "/a-scratch/oneharness-history",
       "history_project": "a-recording-host-workspace",
       "history_file": "/a-scratch/oneharness-history/a-recording-host-workspace/monitor-20260807T120000Z-3163600.jsonl",
-      "project": "/a-recording-host/workspace",
+      "project": "//a-recording-host/workspace",
       "started": "2026-08-07T12:00:00Z",
       "labels": {
         "onepipeline.project": "authoring:contract-interface",
@@ -34,7 +34,7 @@
       "history_dir": "/a-scratch/oneharness-history",
       "history_project": "a-recording-host-workspace",
       "history_file": "/a-scratch/oneharness-history/a-recording-host-workspace/contract-interface-worker-20260807T120003Z-3163646.jsonl",
-      "project": "/a-recording-host/workspace",
+      "project": "//a-recording-host/workspace",
       "started": "2026-08-07T12:00:03Z",
       "labels": {
         "onepipeline.attempt": "1",

@@ -807,13 +807,24 @@ const SCRATCH: &str = "/a-scratch";
 /// The prefix is joined rather than formatted because the temporary directory
 /// is spelled with a trailing separator on some hosts — macOS's `TMPDIR` is one
 /// — and `tempfile` joins onto it exactly as this does, so the two spell the
-/// directory the same way. The separator after the drawn characters is
+/// directory the same way. The separators below the drawn characters are
 /// replaced too, so a path a Windows host recorded reads as the golden does.
 fn without_scratch(text: &str) -> String {
-    let prefix = std::env::temp_dir().join(".tmp").display().to_string();
+    scratch_replaced(
+        text,
+        &std::env::temp_dir().join(".tmp").display().to_string(),
+        std::path::MAIN_SEPARATOR,
+    )
+}
+
+/// [`without_scratch`]'s reading, over a `prefix` and a `separator` passed in
+/// rather than taken from the host — so the spelling a platform this suite is
+/// not running on would record can be held to the golden here, on the host that
+/// is running it.
+fn scratch_replaced(text: &str, prefix: &str, separator: char) -> String {
     let mut out = String::new();
     let mut rest = text;
-    while let Some(at) = rest.find(&prefix) {
+    while let Some(at) = rest.find(prefix) {
         out.push_str(&rest[..at]);
         out.push_str(SCRATCH);
         rest = &rest[at + prefix.len()..];
@@ -824,13 +835,59 @@ fn without_scratch(text: &str) -> String {
             .last()
             .map_or(0, |(index, c)| index + c.len_utf8());
         rest = &rest[drawn..];
-        if let Some(under) = rest.strip_prefix(std::path::MAIN_SEPARATOR) {
+        // Every separator below the scratch, not only the first: a session file
+        // sits under its store's project directory, so a served path reaches
+        // three components down and the golden spells all of them with `/`. The
+        // walk ends where a path component cannot continue, because a scratch
+        // path is also printed inside rendered prose.
+        while let Some(under) = rest.strip_prefix(separator) {
             out.push('/');
-            rest = under;
+            let end = under
+                .find(|c: char| c == separator || c.is_whitespace())
+                .unwrap_or(under.len());
+            out.push_str(&under[..end]);
+            rest = &under[end..];
         }
     }
     out.push_str(rest);
     out
+}
+
+/// A scratch path reads as the golden spells it whichever separator wrote it.
+///
+/// A session file sits under its store's project directory, so a served path
+/// reaches several components below the scratch and a Windows host records
+/// every one of those separators as `\`. The goldens spell one path for every
+/// platform, so this reading has to answer the same for both separators — and
+/// the leg that would otherwise catch it is one this suite cannot run on, which
+/// is why the separator is given rather than read off the host.
+#[test]
+fn a_scratch_path_reads_as_the_golden_whichever_separator_recorded_it() {
+    let session = |temp: &str, separator: char| {
+        let recorded = format!(
+            "{temp}{separator}.tmpA1b2C3{separator}oneharness-history{separator}\
+             a-recording-host-workspace{separator}monitor-20260807T120000Z-3163600.jsonl"
+        );
+        scratch_replaced(&recorded, &format!("{temp}{separator}.tmp"), separator)
+    };
+    let golden = "/a-scratch/oneharness-history/a-recording-host-workspace/\
+                  monitor-20260807T120000Z-3163600.jsonl";
+    assert_eq!(session("/tmp", '/'), golden);
+    assert_eq!(
+        session(r"C:\Users\runneradmin\AppData\Local\Temp", '\\'),
+        golden
+    );
+    // A scratch path is also printed inside rendered prose — a settled member's
+    // report is — so the walk stops where the path does rather than reading on
+    // into the words after it.
+    assert_eq!(
+        scratch_replaced(
+            "  report worker C:\\Temp\\.tmpA1b2C3\\report.json\n    user\n",
+            r"C:\Temp\.tmp",
+            '\\'
+        ),
+        "  report worker /a-scratch/report.json\n    user\n"
+    );
 }
 
 /// The name of the host a golden says did the reading.

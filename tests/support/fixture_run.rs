@@ -1484,7 +1484,16 @@ pub fn point_sessions(root: &Path, run: &str) -> PathBuf {
         .parent()
         .expect("a workspace's runs root has the workspace above it")
         .join(POINTED_STORE_DIR);
-    let cwd = "/a-recording-host/workspace";
+    // `PointerSession` refuses a project directory that is not absolute, and
+    // what counts as absolute is the host's own question: a leading separator
+    // is enough on POSIX, while Windows wants a volume or a share. One fixed
+    // spelling has to satisfy both, because the slug this directory names is a
+    // store directory the goldens pin. `//host/share` is that spelling — the
+    // share on the recording host — read as rooted on POSIX and parsed as a UNC
+    // prefix on Windows, where `/` and `\` are both separators. Its slug is
+    // `a-recording-host-workspace` either way, the leading dashes being
+    // trimmed, so the goldens pin one store layout on every platform.
+    let cwd = "//a-recording-host/workspace";
     let session = |name: &str, stem: &str, launched: Launched<'_>| {
         let labels = compose_labels(
             Some("role=engineer"),
