@@ -37,6 +37,13 @@ use serde_json::json;
 pub struct Recorded {
     /// Also the artifact id the event carries.
     pub history_id: String,
+    /// The store, in the spelling the writer records it in — which is the
+    /// resolved one, because `HistoryWriter::open` canonicalizes the directory
+    /// it opens and every path it writes down is under that. Not the caller's
+    /// argument: a temporary directory reached through a symlink is spelled
+    /// two ways, and macOS reaches `/var/folders/…` through one, so a caller
+    /// holding the path it passed in holds the spelling the pointer line does
+    /// not carry.
     pub dir: PathBuf,
     pub project: String,
     pub session: String,
@@ -167,7 +174,9 @@ fn record_session(
     let path = writer.path().to_path_buf();
     Recorded {
         history_id: history_id.to_string(),
-        dir: dir.to_path_buf(),
+        // The writer's own step, over a directory it has now made: the store as
+        // every path it records spells it.
+        dir: fs::canonicalize(dir).expect("the store the writer opened"),
         project: named(path.parent().expect("the project directory")),
         session: path
             .file_stem()

@@ -3371,9 +3371,13 @@ fn the_agents_a_run_launched_are_served_off_its_pointer_file_and_open_to_their_t
         }),
         "{body}"
     );
+    // The store the journey wrote into, in the spelling the writer records —
+    // the resolved one, which is not the path passed in wherever a temporary
+    // directory is reached through a symlink.
     assert_eq!(
         sessions[0]["history_dir"],
-        json!(store.display().to_string())
+        json!(worker.dir.display().to_string()),
+        "{body}"
     );
     assert!(
         sessions[0]["project"]
