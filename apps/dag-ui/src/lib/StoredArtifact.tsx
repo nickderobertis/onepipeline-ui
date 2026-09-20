@@ -1,6 +1,7 @@
 import { Button } from "@oneharness/ui";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useRead } from "./useRead";
 
 /** How much of a stored artifact is shown before the reader asks for the rest. */
 const ARTIFACT_PREVIEW_CHARS = 4000;
@@ -14,6 +15,10 @@ const ARTIFACT_PREVIEW_CHARS = 4000;
  * that again until the reader asks for the rest. A read that failed is *said*,
  * never left blank: the two sentences a caller gives are what tells "nothing was
  * recorded" from "something was, and this run has no readable copy of it".
+ *
+ * In `lib` because two features open one: the timeline's detail panel opens the
+ * report a settlement stored and the session a member's turn relayed, and the
+ * agents panel opens the session a pointer line names.
  */
 export function StoredArtifact({
   artifactId,
@@ -35,41 +40,28 @@ export function StoredArtifact({
   /** What to say when the artifact was named and the read did not answer. */
   readonly unreadable: string;
 }) {
-  const [content, setContent] = useState<string | null>();
-  const [artifactFailed, setArtifactFailed] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const servable = servableArtifact(artifactId);
-  useEffect(() => {
-    let active = true;
-    setContent(undefined);
-    setArtifactFailed(false);
-    setExpanded(false);
-    if (servable === undefined) return;
-    void client
-      .getArtifact(runId, servable)
-      .then((artifact) => {
-        if (active) setContent(artifact.content);
-      })
-      .catch(() => {
-        if (active) {
-          setArtifactFailed(true);
-          setContent(null);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, runId, servable]);
+  // A run id never holds a slash, so the pair cannot spell another pair; a
+  // stored artifact does not move, so nothing invalidates the read.
+  const artifact = useRead(
+    servable === undefined ? undefined : `${runId}/${servable}`,
+    () => client.getArtifact(runId, servable ?? ""),
+    0,
+  );
+  // Which artifact the reader expanded, so opening another opens it folded.
+  const [expandedFor, setExpandedFor] = useState<string>();
+  const expanded = expandedFor === servable;
+  const content = artifact.value?.content;
   return (
     <>
       <h3 className="detail-heading">{heading}</h3>
       {servable === undefined ? (
         <p className="detail-note">{missing}</p>
-      ) : content === undefined ? (
+      ) : artifact.loading ? (
         <p aria-live="polite" className="detail-note">
           Loading {noun}…
         </p>
-      ) : artifactFailed || content === null ? (
+      ) : content === undefined ? (
         <p aria-live="polite" className="detail-note">
           {unreadable}
         </p>
@@ -80,7 +72,7 @@ export function StoredArtifact({
           </pre>
           {content.length > ARTIFACT_PREVIEW_CHARS && (
             <Button
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => setExpandedFor(expanded ? undefined : servable)}
               size="sm"
               type="button"
               variant="outline"

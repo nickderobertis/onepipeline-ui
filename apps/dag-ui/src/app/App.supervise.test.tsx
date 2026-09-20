@@ -706,15 +706,17 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
     // from the graph's own keyboard list.
     await userEvent.click(screen.getByRole("button", { name: /Graph/ }));
     await userEvent.click(
-      within(
-        await screen.findByRole("list", { name: "DAG nodes" }),
-      ).getByRole("button", { name: /^foundation:/ }),
+      within(await screen.findByRole("list", { name: "DAG nodes" })).getByRole(
+        "button",
+        { name: /^foundation:/ },
+      ),
     );
     // The node's own tab strip — the run's views carry an Agents tab too.
     await userEvent.click(
-      within(
-        screen.getByRole("tablist", { name: "Node details" }),
-      ).getByRole("tab", { name: "Agents" }),
+      within(screen.getByRole("tablist", { name: "Node details" })).getByRole(
+        "tab",
+        { name: "Agents" },
+      ),
     );
     expect(
       await screen.findByRole("region", { name: "Agents of foundation" }),

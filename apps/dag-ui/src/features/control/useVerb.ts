@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { outcomeOf, type VerbOutcome } from "./Outcome";
+import { outcomeOf, type VerbOutcome } from "../../lib/Outcome";
 
 export interface Verb<A extends readonly unknown[]> {
   /** Call the verb; the outcome is kept whether it answered or refused. */

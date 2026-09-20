@@ -3,8 +3,8 @@ import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { vi } from "vitest";
 import {
   channelQueue,
-  harnessTranscript,
   HISTORY_RUN,
+  harnessTranscript,
   LIVE_RUN,
   LONG_SESSION,
   longConversation,

@@ -2,10 +2,10 @@ import { Badge, Button, Card, CardContent, Skeleton } from "@oneharness/ui";
 import type { AgentSession } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useState } from "react";
+import { Outcome } from "../../lib/Outcome";
+import { StoredArtifact } from "../../lib/StoredArtifact";
 import { Timestamp } from "../../lib/Timestamp";
 import type { Read } from "../../lib/useRead";
-import { Outcome } from "../control/Outcome";
-import { StoredArtifact } from "../timeline/StoredArtifact";
 import {
   agentCountLabel,
   groupAgentSessions,

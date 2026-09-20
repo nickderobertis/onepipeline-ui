@@ -137,7 +137,8 @@ const verbEnvelope = {
 
 /** The history ids of the live run's harness runs: the artifact id each transcript is served under. */
 export const DASHBOARD_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000001";
-export const DASHBOARD_RETRY_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000002";
+export const DASHBOARD_RETRY_HISTORY_ID =
+  "0198a5b3-2c4d-7e60-8f01-000000000002";
 export const OBSERVER_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000000";
 export const PUBLISH_HISTORY_ID = "0198a5b3-2c4d-7e60-8f01-000000000003";
 /** What the dashboard worker's first harness run said, which is what a reader opens it to read. */
@@ -151,6 +152,24 @@ export const DASHBOARD_TRANSCRIPT_TEXT =
  * harness — the run's observer, and the drafting turn for the publish node.
  * Stamped with the engine's keys and the repository's own `role`.
  */
+/**
+ * The labels one launch under `runId` stamped its sessions with: the engine's
+ * run and project keys, the repository's own `role`, and the keys the launch's
+ * scope carries. An open record, because a session's labels are whatever the
+ * repository and the engine put there.
+ */
+function stamped(
+  runId: string,
+  labels: Record<string, string>,
+): Record<string, string> {
+  return {
+    "onepipeline.project": LIVE_PROJECT,
+    "onepipeline.run_id": runId,
+    role: "engineer",
+    ...labels,
+  };
+}
+
 export function runAgents(runId: string = LIVE_RUN) {
   const store = "/a-host/.local/state/oneharness/history";
   const project = "a-host-workspace";
@@ -171,12 +190,7 @@ export function runAgents(runId: string = LIVE_RUN) {
     history_file: `${store}/${project}/${stem}.jsonl`,
     project: "/a-host/workspace",
     started: runs[0]?.started ?? "2026-07-26T11:57:00Z",
-    labels: {
-      "onepipeline.project": LIVE_PROJECT,
-      "onepipeline.run_id": runId,
-      role: "engineer",
-      ...labels,
-    } as Record<string, string>,
+    labels: stamped(runId, labels),
     runs: runs.map((run) => ({
       ...run,
       harness: run.harness_id.split(":")[0] ?? run.harness_id,

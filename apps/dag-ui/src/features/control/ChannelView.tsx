@@ -17,10 +17,10 @@ import type {
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { CheckCheck, Inbox, MessageSquarePlus } from "lucide-react";
 import { useCallback, useId, useState } from "react";
+import { Outcome } from "../../lib/Outcome";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
-import { Outcome } from "./Outcome";
 import { ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
 import { useVerb, type Verb } from "./useVerb";

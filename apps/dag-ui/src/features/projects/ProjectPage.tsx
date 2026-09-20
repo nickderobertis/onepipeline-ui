@@ -9,8 +9,8 @@ import {
   Skeleton,
 } from "@oneharness/ui";
 import type { ProjectGroup, RunSummary } from "@onepipeline-ui/dag-model";
-import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ChevronRight, FolderKanban, TriangleAlert } from "lucide-react";
+import type { ReactNode } from "react";
 import {
   projectAgentCount,
   projectDetailLine,
@@ -23,8 +23,6 @@ import { nodeCountSummary } from "../../lib/run-model";
 import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import { isoOfMillis } from "../../lib/time";
-import { AgentsPanel } from "../agents/AgentsPanel";
-import { useProjectAgents } from "../agents/useAgents";
 
 /**
  * The landing view: every project the root holds, as cards, in the server's own
@@ -122,29 +120,25 @@ export function ProjectsLanding({
  * entry names.
  */
 export function ProjectPage({
-  client,
   projectKey,
   group,
   error,
   loading,
-  invalidations,
+  agents,
   onSelectRun,
 }: {
-  readonly client: TelemetryClient;
   readonly projectKey: string;
   readonly group?: ProjectGroup;
   readonly error?: Error;
   readonly loading: boolean;
-  readonly invalidations: number;
+  /**
+   * The agents panel for the group, composed by the app — another feature's
+   * reading, handed in rather than reached for — and nothing for the
+   * `(no project)` group, which has no id and so no agents route.
+   */
+  readonly agents?: ReactNode;
   readonly onSelectRun: (runId: string) => void;
 }) {
-  // Only a project with an id has an agents route: the `(no project)` group
-  // has none, and its page shows its runs alone.
-  const agents = useProjectAgents(
-    client,
-    group?.project ?? undefined,
-    invalidations,
-  );
   return (
     <ScrollArea className="h-full">
       <section aria-labelledby="project-heading" className="projects-landing">
@@ -188,14 +182,7 @@ export function ProjectPage({
                 </li>
               ))}
             </ul>
-            {group.project !== null && (
-              <AgentsPanel
-                agents={agents}
-                client={client}
-                count={group.agent_count}
-                title={`Agents of ${projectLabel(group)}`}
-              />
-            )}
+            {agents}
           </>
         ) : null}
       </section>

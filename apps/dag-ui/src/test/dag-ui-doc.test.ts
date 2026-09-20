@@ -1,3 +1,8 @@
+import {
+  API_V2_PATHS,
+  projectGroupSchema,
+  runTelemetrySchema,
+} from "@onepipeline-ui/dag-model";
 import { describe, expect, it } from "vitest";
 import { EVENT_CATEGORIES } from "../features/timeline/event-category";
 import { repoFile } from "./repo-file";
@@ -98,6 +103,56 @@ describe("docs/dag-ui.md", () => {
       `a scheme of ${EVENT_CATEGORIES.length} belongs in a table rather than in a sentence`,
     ).toBeDefined();
     expect(documentation).toContain(`which of ${spelled} **categories**`);
+  });
+
+  /**
+   * The document names the routes a panel reads by their whole path, so each one
+   * it spells is held to the client's own route table: a placeholder in the
+   * prose stands for the id the table's function takes, and a path the table
+   * cannot produce is a route the document promises and nothing serves.
+   */
+  it("spells no whole route the client's route table does not produce", () => {
+    const placeholders: Record<string, string> = {
+      "{run}": "RUN",
+      "{run_id}": "RUN",
+      "{node}": "NODE",
+      "{project}": "PROJECT",
+      "{id}": "ID",
+      "{history_id}": "ID",
+    };
+    const produced = new Set(
+      Object.values(API_V2_PATHS).map((path) =>
+        typeof path === "string"
+          ? path
+          : (path as (...ids: string[]) => string)("RUN", "ID"),
+      ),
+    );
+    // A route taking a node or a project is produced with that id in its place,
+    // as the prose spells it, so the two sides read the same shape.
+    produced.add(API_V2_PATHS.nodeAgents("RUN", "NODE"));
+    produced.add(API_V2_PATHS.project("PROJECT"));
+    produced.add(API_V2_PATHS.projectAgents("PROJECT"));
+    const spelled = [
+      ...documentation.matchAll(/\/api\/v2\/[A-Za-z0-9_{}/-]+/g),
+    ].map(([path]) =>
+      Object.entries(placeholders).reduce(
+        (route, [placeholder, id]) => route.replaceAll(placeholder, id),
+        path,
+      ),
+    );
+    expect(spelled.length).toBeGreaterThan(0);
+    for (const route of spelled) {
+      expect(produced, `docs/dag-ui.md spells ${route}`).toContain(route);
+    }
+  });
+
+  it("names the agent count by the field the model declares", () => {
+    // The prose says the run's Agents tab shows the run detail's `agent_count`
+    // and a project's row its group's; both are fields of those schemas, so a
+    // rename there is a document naming a field nothing serves.
+    expect(documentation).toContain("`agent_count`");
+    expect(Object.keys(runTelemetrySchema.shape)).toContain("agent_count");
+    expect(Object.keys(projectGroupSchema.shape)).toContain("agent_count");
   });
 
   it("tabulates exactly the surfaces the gallery photographs", () => {

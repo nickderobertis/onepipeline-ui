@@ -32,11 +32,11 @@ import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { NodeView } from "../../lib/run-model";
+import { StoredArtifact, servableArtifact } from "../../lib/StoredArtifact";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
-import { StoredArtifact, servableArtifact } from "./StoredArtifact";
 import {
   dispatchRoleLabel,
   editAuthor,
