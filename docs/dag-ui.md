@@ -13,8 +13,8 @@ as they are outside the API it reads: `start`, `plan check` and the planning
 conversation are what make a run, and the browser is what a run is reached with
 afterwards. A planner's conversation is read here and never continued here. What
 the browser *can* do is everything the CLI does once a plan is running — the
-[supervising surface](#supervising-a-run) below — each verb wired to the route
-`docs/contract.md`'s verb table names for it and no other.
+[supervising surface](#supervising-a-run) below — each verb wired to its one
+route under `/api/v2` and no other.
 
 ## Design system
 
@@ -176,8 +176,8 @@ position you chose while the session keeps being written below.
 ## Supervising a run
 
 A manager supervising a plan used to read run ids here and leave for a terminal to
-act. The run view now offers every post-launch verb, each wired to the route
-`docs/contract.md`'s verb table names and nothing else, and every receipt and
+act. The run view now offers every post-launch verb, each wired to its one route
+and nothing else — the routes are named verb by verb below — and every receipt and
 refusal is shown **as the API returned it** — the engine's own object, the engine's
 own words — never restated. The header of a run carries the controls that are about
 the run as a whole; three tabs beside Graph and Overall carry the rest.
