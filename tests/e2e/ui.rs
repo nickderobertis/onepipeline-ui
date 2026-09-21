@@ -396,40 +396,178 @@ fn ui_dist_without_ui_is_a_usage_error() {
         .stderr(contains("--ui"));
 }
 
-/// A build that carries no bundle refuses `--ui` naming what is missing — and
-/// serves one from `--ui-dist` regardless.
+/// Where the build of this crate from its own packaged tree goes: under this
+/// clone's `target`, so the dependencies it compiles once are reused by every
+/// later run, and never beside another clone's.
+fn no_bundle_target() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("target/no-bundle")
+}
+
+/// Build `onepipeline-api` the way `cargo install onepipeline-ui` from
+/// crates.io does, and answer the binary: out of the crate tarball `cargo
+/// package` makes — which carries the view's sources and never its build — with
+/// no `bundled-ui` feature.
 ///
-/// This test binary embeds the bundle (the journeys above prove it), so the
-/// build that carries none is driven at the one seam the binary decides it at:
-/// [`onepipeline_ui::ui::View::resolve`] given what such a build's `EMBEDDED`
-/// is, `None`. `src/main.rs` exits `EXIT_SOFTWARE` on its refusal, as it does
-/// on every command that parsed and cannot be carried out.
+/// The tarball is the tree a crates.io install compiles, so a build of it is the
+/// one real way to a binary that embedded nothing: `apps/dag-ui/dist` is not in
+/// it however recently this checkout built the view. That absence is asserted
+/// rather than assumed, since a widened `include` would otherwise turn this
+/// into a second build of the bundled binary that proves nothing.
+fn a_build_without_the_bundle() -> PathBuf {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let target = no_bundle_target();
+    let crate_dir = format!("{}-{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    let packages = target.join("package");
+    let tree = packages.join(&crate_dir);
+    // A build of a tree is its own: whatever the suite's own compile was told
+    // — coverage instrumentation above all — is not what a host installing the
+    // crate compiles it with, and the target directory is this one alone.
+    let cargo_in = |dir: &Path| {
+        let mut command = std::process::Command::new(&cargo);
+        command.current_dir(dir);
+        for variable in [
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_RUSTFLAGS",
+            "RUSTC_WRAPPER",
+            "RUSTC_WORKSPACE_WRAPPER",
+            "CARGO_TARGET_DIR",
+            "CARGO_BUILD_TARGET_DIR",
+            "LLVM_PROFILE_FILE",
+        ] {
+            command.env_remove(variable);
+        }
+        command
+    };
+    let run = |mut command: std::process::Command, what: &str| {
+        let output = command
+            .output()
+            .unwrap_or_else(|err| panic!("{what} could not start: {err}"));
+        assert!(
+            output.status.success(),
+            "{what} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    // `--offline` and `--locked` as `tests/packaging.rs` lists the same
+    // tarball; `--no-verify` because the build below is the verification, run
+    // where its binary can be found.
+    let mut package = cargo_in(Path::new(env!("CARGO_MANIFEST_DIR")));
+    package
+        .args([
+            "package",
+            "--no-verify",
+            "--offline",
+            "--locked",
+            "--allow-dirty",
+            "--target-dir",
+        ])
+        .arg(&target);
+    run(package, "cargo package");
+
+    // Unpacked afresh at one stable path, so the build below reuses its own
+    // last compile rather than starting over under a new name. Relative paths
+    // throughout, which every platform's `tar` reads the same way.
+    if tree.exists() {
+        fs::remove_dir_all(&tree).expect("clear the last unpacked tree");
+    }
+    let mut unpack = std::process::Command::new("tar");
+    unpack
+        .current_dir(&packages)
+        .args(["-xzf", &format!("{crate_dir}.crate")]);
+    run(unpack, "tar");
+    assert!(
+        tree.join("build.rs").is_file() && tree.join("apps/dag-ui/src").is_dir(),
+        "the unpacked crate is not this crate's tree: {}",
+        tree.display()
+    );
+    assert!(
+        !tree.join("apps/dag-ui/dist").exists(),
+        "the crate tarball carries a built view, so a build of it is not a build without one"
+    );
+
+    let mut build = cargo_in(&tree);
+    build
+        .args([
+            "build",
+            "--offline",
+            "--locked",
+            "--bin",
+            "onepipeline-api",
+            "--target-dir",
+        ])
+        .arg(&target);
+    run(build, "cargo build of the packaged crate");
+    target
+        .join("debug")
+        .join(format!("onepipeline-api{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// A binary built without the bundle refuses `--ui` naming what is missing —
+/// exit `70`, before it takes a port — and is otherwise a whole server: the API
+/// alone without the flag, and a view from `--ui-dist` with it.
+///
+/// Driven through a real build of the crate as crates.io serves it, since that
+/// is the one way a host ends up with such a binary; every other journey here
+/// runs the binary this suite built beside a built view, which embedded it.
 #[test]
 fn a_build_without_the_bundle_refuses_ui_naming_what_is_missing() {
-    use onepipeline_ui::ui::{UiDist, View};
-    let refusal = View::resolve(true, None, None).expect_err("refused");
-    assert!(
-        refusal.contains("built without the bundle at apps/dag-ui/dist"),
-        "{refusal}"
+    let binary = a_build_without_the_bundle();
+    let (_workspace, runs) = fixture_run::workspace();
+    fixture_run::write(&runs, fixture_run::RUN_ID);
+
+    Command::new(&binary)
+        .args(["serve", "--runs-root"])
+        .arg(&runs)
+        .args(["--bind", "127.0.0.1:0", "--ui"])
+        .env_remove(onepipeline_ui::cli::SESSION_ENV)
+        // A binary that did not refuse would serve until killed; this bound
+        // turns that into a failed assertion rather than a hung suite.
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .code(i32::from(onepipeline_ui::cli::EXIT_SOFTWARE))
+        .stdout("")
+        .stderr(contains(
+            "this build carries no browser view: it was built without the bundle at \
+             apps/dag-ui/dist",
+        ))
+        .stderr(contains(
+            "ACTION: serve a built view with --ui-dist DIR, or install a prebuilt \
+             onepipeline-api of this release",
+        ));
+
+    // Without the flag it is the read API, as every build is.
+    let api = Serving::start_binary_with_args(
+        &binary,
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        &[],
     );
-    assert!(refusal.contains("prebuilt distributions"), "{refusal}");
-    assert!(refusal.contains("just build"), "{refusal}");
-    // Not asked for a view, it does not matter what the build carries.
-    assert!(View::resolve(false, None, None)
-        .expect("no view asked for")
-        .is_none());
-    // And a directory on disk serves whatever the build carries.
+    let health = http::get(api.address, "/healthz");
+    assert_eq!(health.status, 200, "{}", health.body);
+    let run = http::get(
+        api.address,
+        &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+    );
+    assert_eq!(run.status, 200, "{}", run.body);
+    assert!(run.body.contains(fixture_run::RUN_ID), "{}", run.body);
+    drop(api);
+
+    // And a view on disk is served whatever the build carries.
     let dist = a_view_on_disk();
-    let on_disk = UiDist::try_from(dist.path().to_path_buf()).expect("a built view");
-    match View::resolve(true, Some(&on_disk), None).expect("a view") {
-        Some(View::Directory(served)) => assert_eq!(served, on_disk),
-        other => panic!("not the directory named: {other:?}"),
-    }
-    // This build does carry one, and that is what `--ui` alone serves.
-    match View::resolve(true, None, onepipeline_ui::ui::EMBEDDED).expect("a view") {
-        Some(View::Embedded(files)) => assert!(files.iter().any(|file| file.path == "index.html")),
-        other => panic!("not the embedded bundle: {other:?}"),
-    }
+    let dist_arg = dist.path().to_str().expect("a UTF-8 temp path");
+    let viewed = Serving::start_binary_with_args(
+        &binary,
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        &["--ui", "--ui-dist", dist_arg],
+    );
+    let page = http::get_raw(viewed.address, "/");
+    assert_eq!(page.status, 200);
+    assert_eq!(page.body, b"<!doctype html><title>another release</title>");
 }
 
 /// A configuration file is the other way into the same arguments: it carries

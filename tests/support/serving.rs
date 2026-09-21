@@ -111,6 +111,19 @@ impl Serving {
         Self::spawn_as(workspace, &[], false, None, None, arguments)
     }
 
+    /// The same, served by `binary` rather than the one this suite was built
+    /// beside — a build of this crate from another tree, such as one that never
+    /// had the browser view to embed.
+    pub fn start_binary_with_args(
+        binary: &Path,
+        build: impl FnOnce(&Path),
+        arguments: &[&str],
+    ) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_from(binary, workspace, &[], false, None, None, arguments)
+    }
+
     /// The same, acting as `session` over a workspace the caller already built.
     pub fn start_in_as(workspace: TempDir, session: &str) -> Self {
         Self::spawn_as(workspace, &[], false, None, Some(session), &[])
@@ -160,6 +173,26 @@ impl Serving {
         arguments: &[&str],
     ) -> Self {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        Self::spawn_from(
+            &binary,
+            workspace,
+            environment,
+            capture,
+            home,
+            session,
+            arguments,
+        )
+    }
+
+    fn spawn_from(
+        binary: &Path,
+        workspace: TempDir,
+        environment: &[(&str, &str)],
+        capture: bool,
+        home: Option<&Path>,
+        session: Option<&str>,
+        arguments: &[&str],
+    ) -> Self {
         let runs = workspace.path().join(fixture_run::RUNS_DIR);
         let mut command = Command::new(binary);
         command
