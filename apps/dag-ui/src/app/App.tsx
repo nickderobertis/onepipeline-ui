@@ -44,6 +44,13 @@ import { RunNavigation } from "../features/navigation/RunNavigation";
 import { ProjectPage, ProjectsLanding } from "../features/projects/ProjectPage";
 import { useProject, useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
+import {
+  HostShutdownButtons,
+  ShutdownRunButton,
+  useHostShutdowns,
+  useRunShutdown,
+} from "../features/shutdown/ShutdownControls";
+import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
@@ -141,6 +148,10 @@ export function App({
     filter,
     telemetry.invalidations,
   );
+  // Held here rather than under the run's view: a shutdown is minutes long, and
+  // what it is doing stays on screen whichever run or list the reader moves to.
+  const runShutdown = useRunShutdown(client, selectedRunId);
+  const hostShutdowns = useHostShutdowns(client);
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
   const liveRunIds = useMemo(
@@ -191,6 +202,15 @@ export function App({
           loadingMore={telemetry.loadingMore}
           onLoadMore={telemetry.loadMore}
           onSelect={selection.selectRun}
+          hostActions={
+            <HostShutdownButtons
+              client={client}
+              list={telemetry.list}
+              loadMore={telemetry.loadMore}
+              loadingMore={telemetry.loadingMore}
+              shutdowns={hostShutdowns}
+            />
+          }
         />
         <main className="workspace">
           <header className="topbar">
@@ -224,7 +244,19 @@ export function App({
             </div>
             <div className="topbar-actions">
               {selectedRunId !== undefined && (
-                <RunActions control={control} runId={selectedRunId} />
+                <RunActions control={control} runId={selectedRunId}>
+                  <ShutdownRunButton
+                    launched={
+                      runs.find(({ run_id }) => run_id === selectedRunId) ??
+                      (detail?.run.run_id === selectedRunId
+                        ? detail
+                        : undefined)
+                    }
+                    runId={selectedRunId}
+                    shutdown={runShutdown}
+                    unwatched={control.unwatched}
+                  />
+                </RunActions>
               )}
               <span className="connection">
                 <Satellite size={15} />
@@ -270,6 +302,24 @@ export function App({
               <AlertDescription>{telemetry.error.message}</AlertDescription>
             </Alert>
           )}
+          <ShutdownStatus
+            label="Run shutdown"
+            onDismiss={runShutdown.dismiss}
+            rows={runs}
+            state={runShutdown.state}
+          />
+          <ShutdownStatus
+            label="Shutdown of all my runs"
+            onDismiss={hostShutdowns.mine.dismiss}
+            rows={runs}
+            state={hostShutdowns.mine.state}
+          />
+          <ShutdownStatus
+            label="Shutdown of the entire host"
+            onDismiss={hostShutdowns.host.dismiss}
+            rows={runs}
+            state={hostShutdowns.host.state}
+          />
           {selectedRunId === undefined && selection.projectKey !== undefined ? (
             <ProjectPage
               agents={

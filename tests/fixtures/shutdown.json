@@ -1,0 +1,31 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 20,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "scope": "host",
+  "root": "/a-workspace/runs",
+  "grace_seconds": 30,
+  "forced": false,
+  "complete": true,
+  "runs": [
+    {
+      "run_id": "run-20260807-a1b2c3",
+      "owner": "[mine]",
+      "forced_over_owner": false,
+      "dispatches": [],
+      "teardown": "elsewhere",
+      "branches": []
+    },
+    {
+      "run_id": "run-20260807-d4e5f6",
+      "owner": "[codex:35425371]",
+      "forced_over_owner": true,
+      "dispatches": [],
+      "teardown": "elsewhere",
+      "branches": []
+    }
+  ],
+  "not_pushed": [],
+  "not_pushed_unread": null,
+  "rendered": "shutdown  scope host  grace 30s  runs root /a-workspace/runs\n  run-20260807-a1b2c3  owner [mine]  selected by --host\n    no live dispatch to interrupt\n    teardown: elsewhere — every process this run named was reached\n    no branch this run's records name\n  run-20260807-d4e5f6  owner [codex:35425371]  selected by --host, which is another session's run\n    no live dispatch to interrupt\n    teardown: elsewhere — every process this run named was reached\n    no branch this run's records name\n  other unpublished branches on this host: none\n"
+}

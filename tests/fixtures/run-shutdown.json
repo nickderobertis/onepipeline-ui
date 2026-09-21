@@ -1,0 +1,23 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 20,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "scope": "run",
+  "root": "/a-workspace/runs",
+  "grace_seconds": 600,
+  "forced": false,
+  "complete": true,
+  "runs": [
+    {
+      "run_id": "run-20260807-a1b2c3",
+      "owner": "[mine]",
+      "forced_over_owner": false,
+      "dispatches": [],
+      "teardown": "elsewhere",
+      "branches": []
+    }
+  ],
+  "not_pushed": [],
+  "not_pushed_unread": null,
+  "rendered": "shutdown  scope run  grace 600s  runs root /a-workspace/runs\n  run-20260807-a1b2c3  owner [mine]  selected by --run\n    no live dispatch to interrupt\n    teardown: elsewhere — every process this run named was reached\n    no branch this run's records name\n  other unpublished branches on this host: none\n"
+}

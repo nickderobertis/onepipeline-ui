@@ -24,9 +24,10 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
     EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
-    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, SseEvent, StopRequest,
-    SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery, WatchQuery, API_VERSION,
-    RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    ReferenceKind, Release, RunId, RunQuery, RunShutdownRequest, RunsPage, RunsQuery,
+    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineQuery,
+    TimelineScope, TranscriptQuery, WatchQuery, API_VERSION, RUNS_PAGE_LIMIT,
+    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -53,6 +54,8 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_ATTEST, "run-attest.json"),
     (routes::RUN_STOP, "run-stop.json"),
     (routes::RUN_ADOPT, "run-adopt.json"),
+    (routes::RUN_SHUTDOWN, "run-shutdown.json"),
+    (routes::SHUTDOWN, "shutdown.json"),
     (routes::RUN_WATCH, "run-watch.json"),
     (routes::UNWATCHED, "unwatched.json"),
     (routes::HOST, "host.json"),
@@ -622,7 +625,19 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
                 journal_end,
             ),
         ),
-        ("unwatched.json", enveloped(store.unwatched())),
+        // As the session the fixture runs were launched by, so the golden pins
+        // the acting session's key the report names beside what it reports.
+        (
+            "unwatched.json",
+            enveloped(
+                store_over(&root)
+                    .acting_as(Some(
+                        &SessionId::try_from(fixture_run::SESSION.to_owned())
+                            .expect("the fixture's session"),
+                    ))
+                    .unwatched(),
+            ),
+        ),
         ("host.json", enveloped(store.host())),
         ("run-status.json", enveloped(store.status(&run))),
         ("run-results.json", enveloped(store.results(&run))),
@@ -723,6 +738,46 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
         "run-stop.json",
         enveloped(stopping.stop(&run, &StopRequest::default())),
     );
+
+    // A shutdown of the one run, as its owner, with the default body; and one
+    // of the whole host, over this session's run and another session's. Each
+    // over a copy of its own, reading an `onevcs` state root of its own — empty,
+    // so the report's last section is pinned as none rather than as whatever
+    // this host holds. The engine reads that root off its environment, so this
+    // process names it for the length of the calls, as it names the session
+    // for the adoption below.
+    let onevcs_home = tempfile::tempdir().expect("an empty onevcs state root");
+    std::env::set_var("ONEVCS_HOME", onevcs_home.path());
+    let (_shutting, shutdown_root) = fixture_run::workspace();
+    fixture_run::write(&shutdown_root, fixture_run::RUN_ID);
+    let shutting = store_over(&shutdown_root).acting_as(Some(
+        &SessionId::try_from(fixture_run::SESSION.to_owned()).expect("the fixture's session"),
+    ));
+    let one = enveloped(shutting.run_shutdown(&run, &RunShutdownRequest::default()));
+    let (_host, host_root) = fixture_run::workspace();
+    fixture_run::write(&host_root, fixture_run::RUN_ID);
+    fixture_run::write(&host_root, fixture_run::OTHER_RUN_ID);
+    fixture_run::launched_by(
+        &host_root,
+        fixture_run::OTHER_RUN_ID,
+        "codex",
+        fixture_run::LIVE_SESSION,
+    );
+    let host = enveloped(
+        store_over(&host_root)
+            .acting_as(Some(
+                &SessionId::try_from(fixture_run::SESSION.to_owned())
+                    .expect("the fixture's session"),
+            ))
+            .shutdown(&ShutdownRequest {
+                scope: ShutdownScope::Host,
+                grace: Some(30),
+                force: false,
+            }),
+    );
+    std::env::remove_var("ONEVCS_HOME");
+    pin_under("run-shutdown.json", one, Some(&shutdown_root));
+    pin_under("shutdown.json", host, Some(&host_root));
 
     // An adoption, retaining the compiled binary as the driver of the complete
     // run — which settles it and lets go, so nothing is left running behind
@@ -1073,10 +1128,48 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
     }
 }
 
+/// `session_key` on the unwatched report: present exactly when the server acts
+/// as a session — the key that session's own runs carry on their run-list rows —
+/// and absent, not `null`, when it acts as none. Either way the served document
+/// round-trips through the envelope byte for byte.
+#[test]
+fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent() {
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write(&root, fixture_run::RUN_ID);
+    let session = SessionId::try_from(fixture_run::SESSION.to_owned()).expect("a session");
+    let acting = store_over(&root).acting_as(Some(&session));
+    let nobody = store_over(&root);
+
+    let row_key = enveloped(acting.runs(&RunsQuery::Page(RunsPage {
+        include_settled: true,
+        ..RunsPage::default()
+    })))["runs"][0]["launch"]["session_key"]
+        .clone();
+    assert!(row_key.is_string(), "the fixture run names its session");
+
+    for (store, expected) in [(&acting, Some(row_key)), (&nobody, None)] {
+        let served = store.unwatched().expect("the unwatched report");
+        let text = canonical(&served);
+        let read: Envelope<Value> = serde_json::from_str(&text).expect("it reads back");
+        assert_eq!(canonical(&read), text, "the report round-trips");
+        assert_eq!(read.telemetry_schema_version, TELEMETRY_SCHEMA_VERSION);
+        match expected {
+            Some(key) => assert_eq!(read.payload["session_key"], key, "{text}"),
+            None => {
+                assert!(
+                    read.payload.get("session_key").is_none(),
+                    "an unattributed server names no session, not a null one: {text}"
+                );
+                assert!(!text.contains("session_key"), "{text}");
+            }
+        }
+    }
+}
+
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 19);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 20);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1926,6 +2019,18 @@ impl RunApi for Unimplemented {
 
     fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn run_shutdown(
+        &self,
+        run: &RunId,
+        _request: &RunShutdownRequest,
+    ) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn shutdown(&self, _request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
     }
 
     fn watch(&self, _run: &RunId, _query: &WatchQuery) -> Result<Self::Watch, ApiError> {

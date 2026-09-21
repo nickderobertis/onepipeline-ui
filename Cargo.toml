@@ -142,7 +142,7 @@ onejudge = "0.13.1"
 # copy of this library is linked rather than two; `tests/packaging.rs`
 # reconciles the edges the lockfile records.
 onemessagebus = "0.7.0"
-onepipeline = "=0.41.0"
+onepipeline = "=0.42.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -174,7 +174,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.27.0"
+onevcs = "0.29.1"
 predicates = "3"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in

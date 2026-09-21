@@ -211,6 +211,21 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the producer owns the kind and this package owns the category, which are different facts. `src/index.test.ts` says so where it declares the gate: the category "is not gated and cannot be — which of the eleven a kind reads under is a decision rather than a fact about the producer". This table is the one place that decision is made, and an exception is where a kind goes whose words name no rule — which is a statement about this build's rules, not about the producer.
   // llmlint: ignore[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary, because "a journey holding its own copy of `EVENT_CATEGORIES` passes while the app grows a category nobody draws". A per-kind journey would be exactly that copy. What the browser tier proves is the drawing, which adding this exception does not change.
   "pool-maintenance": "lifecycle",
+  // A host shutdown's two records: one per live dispatch it acted on, saying how
+  // that dispatch was asked and how it ended, and one per run it put down, after
+  // its teardown and its pushes. Both are the run being put down mid-flight to be
+  // picked up again — the same boundary of the run's driving `run-stopped` and
+  // `driver-adopted` are — and no node's work. `stopped`, `dispatch`, `host` and
+  // `shutdown` name no rule, and none of them generalises to one: `stopped` alone
+  // says nothing of whose stop it was.
+  // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the producer declares these kinds and a drift gate reconciles this table to that declaration: `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reads `onepipeline::event::PIPELINE_KINDS` and fails naming every kind it declares that this package files no category for — it named exactly these two when the engine pin moved to the release that declares them, so these entries are the reconciled copy rather than a second source.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the producer owns the kind and this package owns the category, which are different facts. `src/index.test.ts` says so where it declares the gate: the category "is not gated and cannot be — which of the eleven a kind reads under is a decision rather than a fact about the producer". This table is the one place that decision is made.
+  // llmlint: ignore-block[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary. What the browser tier proves is the drawing, which filing these two kinds does not change.
+  "dispatch-stopped": "lifecycle",
+  "host-shutdown": "lifecycle",
+  // llmlint: ignore-end[changed_behavior_has_e2e]
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */

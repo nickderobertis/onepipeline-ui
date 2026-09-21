@@ -61,6 +61,11 @@ export const API_V2_PATHS = {
   attest: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/attest`,
   stop: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/stop`,
   adopt: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/adopt`,
+  /** The engine's host shutdown over one run, as the acting session. */
+  runShutdown: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/shutdown`,
+  /** The engine's host shutdown over every run the session owns, or the host. */
+  shutdown: "/api/v2/shutdown",
   watch: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/watch`,
   unwatched: "/api/v2/unwatched",
   host: "/api/v2/host",
@@ -244,7 +249,7 @@ export const API_V2_FILTER_PROFILES = {
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 19;
+export const TELEMETRY_SCHEMA_VERSION = 20;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -1908,6 +1913,97 @@ export const adoptedSchema = openObject({
 });
 
 /**
+ * The grace the engine gives a dispatch to end itself when a shutdown names
+ * none, in seconds: the default its own binary takes without `--grace`. A client
+ * offering a grace starts from this so that the default it shows is the one the
+ * engine would have applied.
+ */
+export const SHUTDOWN_DEFAULT_GRACE_SECONDS = 600;
+
+/** Which runs a shutdown acts on: one run, the session's own, or the host's. */
+export const shutdownScopeSchema = z.enum(["run", "mine", "host"]);
+
+/** The two scopes `POST /api/v2/shutdown` takes; one run is the run route's. */
+export const hostShutdownScopeSchema = z.enum(["mine", "host"]);
+
+/**
+ * What a dispatch's interrupt was answered with. None is a failure of the
+ * shutdown: `no-turn` is a dispatch with nothing to redirect, `failed` a lever
+ * that broke, and `not-asked` the forced path, where nothing was asked at all.
+ */
+export const shutdownInterruptSchema = z.enum([
+  "delivered",
+  "no-turn",
+  "failed",
+  "not-asked",
+]);
+
+/** How a dispatch the shutdown acted on ended. */
+export const dispatchEndingSchema = z.enum([
+  "graceful",
+  "killed",
+  "still-running",
+]);
+
+/** What preserving one branch found to do. */
+export const branchPreservedSchema = z.enum([
+  "pushed",
+  "already-on-origin",
+  "no-remote",
+  "refused",
+]);
+
+/**
+ * `POST /api/v2/runs/{run}/shutdown` and `POST /api/v2/shutdown`: the engine's
+ * report of a shutdown it performed, whatever it found.
+ *
+ * `complete` is false when a dispatch was killed at the deadline, a teardown was
+ * not clean, or a branch could not be preserved — a report a client must never
+ * read as a plain success. `teardown` is `stop`'s own vocabulary and open on the
+ * terms {@link stoppedSchema} keeps it. `not_pushed_unread` is set when the host's
+ * other unpublished branches could not be read, and is never a count of zero.
+ */
+export const shutdownReportSchema = openObject({
+  ...verbEnvelope,
+  scope: shutdownScopeSchema,
+  root: z.string(),
+  grace_seconds: counter,
+  forced: z.boolean(),
+  complete: z.boolean(),
+  runs: z.array(
+    openObject({
+      run_id: z.string().min(1),
+      owner: z.string().min(1),
+      forced_over_owner: z.boolean(),
+      dispatches: z.array(
+        openObject({
+          node: z.string().min(1),
+          pid: counter,
+          interrupt: shutdownInterruptSchema,
+          detail: z.string(),
+          ended: dispatchEndingSchema,
+          waited_ms: counter,
+        }),
+      ),
+      teardown: z.string().min(1),
+      branches: z.array(
+        openObject({
+          identity: z.string(),
+          branch: z.string(),
+          result: branchPreservedSchema,
+          remote: z.string().nullable(),
+          commit: z.string().nullable(),
+          detail: z.string(),
+        }),
+      ),
+    }),
+  ),
+  not_pushed: z.array(openObject({ identity: z.string(), branch: z.string() })),
+  not_pushed_unread: z.string().nullable(),
+  rendered: z.string(),
+});
+
+/**
  * The three frames `GET /api/v2/runs/{run}/watch` streams, by their SSE `event`
  * name: one meaningful event, a heartbeat, and the ending that closes the stream.
  */
@@ -1955,6 +2051,13 @@ export const watchFrameDataSchema = z.discriminatedUnion("watch", [
  */
 export const unwatchedSchema = openObject({
   ...verbEnvelope,
+  /**
+   * The acting session's own key — the digest a run-list row carries at
+   * `launch.session_key` — and so the one way a client can say which of the runs
+   * it lists this server's session owns, under schema 20. Absent for an
+   * unattributed server, which owns no run.
+   */
+  session_key: z.string().min(1).optional(),
   reported: z.array(
     openObject({
       run: z.string().min(1),
@@ -2195,6 +2298,9 @@ export type ReplyReceipt = z.infer<typeof replyReceiptSchema>;
 export type Surfaced = z.infer<typeof surfacedSchema>;
 export type Stopped = z.infer<typeof stoppedSchema>;
 export type Adopted = z.infer<typeof adoptedSchema>;
+export type ShutdownScope = z.infer<typeof shutdownScopeSchema>;
+export type HostShutdownScope = z.infer<typeof hostShutdownScopeSchema>;
+export type ShutdownReport = z.infer<typeof shutdownReportSchema>;
 export type WatchEventName = z.infer<typeof watchEventNameSchema>;
 export type WatchFrameData = z.infer<typeof watchFrameDataSchema>;
 export type WatchUnread = z.infer<typeof watchUnreadSchema>;

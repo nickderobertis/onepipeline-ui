@@ -3084,3 +3084,183 @@ export function removePageRuns(root) {
     });
   }
 }
+
+/**
+ * The shutdown corpus: what `dag-ui-shutdown.spec.ts` confirms real shutdowns
+ * against, on a server of its own so no other journey reads what a shutdown
+ * leaves behind — the `shutting-down.json` hold and the journal records.
+ *
+ * **Nothing here names a process a shutdown could signal**, except the one a
+ * journey spawned for that purpose and names with `livePid`. Every launch record
+ * is on another host, so the engine's teardown reads each driver as `elsewhere`
+ * and signals nothing; there is no ownership lock; and a dispatch registry holds
+ * an entry only for `livePid`, stamped with that process's own start token, on
+ * this host. The one branch a run names is on an identity no registry holds —
+ * and the server runs under an empty `ONEVCS_HOME` — so preserving it is
+ * refused before any repository is touched: the report's incomplete case,
+ * reached without a push.
+ */
+export const SHUTDOWN_RUNS = {
+  /** The acting session's run with work in flight and a branch it cannot preserve. */
+  mine: "shutdown-mine",
+  /** The acting session's run with nothing live and nothing to push. */
+  idle: "shutdown-idle",
+  /** A run another session owns, which only the host's shutdown acts on. */
+  elsewhere: "shutdown-elsewhere",
+  /** A run that recorded no launching session, owned by nobody. */
+  unattributed: "shutdown-unattributed",
+};
+
+/** The identity the in-flight run's branch names, which no registry holds. */
+export const SHUTDOWN_IDENTITY = "unregistered-shutdown-fixture";
+/** The branch its settled node left behind. */
+export const SHUTDOWN_BRANCH = "feature/shutdown-kept";
+/** The node whose dispatch a journey's own process stands for. */
+export const SHUTDOWN_LIVE_NODE = "work";
+
+/**
+ * A process's start token as the engine reads it on Linux — field 22 of
+ * `/proc/<pid>/stat`, after the parenthesised command — or `undefined` where
+ * there is no such record. Spelled here because a `.mjs` fixture cannot link the
+ * crate that owns it; a token that disagrees with the engine's reads as a pid the
+ * host reissued, which the engine leaves alone, so a drift here fails the
+ * journey that expects the dispatch killed rather than signalling anything else.
+ */
+function startToken(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const started = stat
+      .slice(stat.lastIndexOf(")") + 1)
+      .trim()
+      .split(/\s+/u)[19];
+    return started === undefined ? undefined : `linux-proc-stat:${started}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** One run of the shutdown corpus. */
+function writeShutdownRun(root, runId, launcher, session, tasks, record) {
+  const dir = runDir(root, runId);
+  mkdirSync(join(dir, "dispatches"), { recursive: true });
+  const plan = {
+    schema_version: 2,
+    goal: { text: `Be put down by a shutdown: ${runId}` },
+    name: runId,
+    concurrency: 1,
+    tasks,
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  const start = Date.now() - 5 * 60 * 1000;
+  writeJson(
+    join(dir, "launch.json"),
+    launch(runId, launcher, session, stamp(start), 4260),
+  );
+  const journal = new Journal(dir, streamOf(runId), start);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  journal.emit("pipeline", "run-started", { run_id: runId }, { plan });
+  record(journal, { run_id: runId }, dir);
+  journal.write();
+}
+
+const shutdownTask = (id, extra = {}) => ({
+  id,
+  persona: "worker",
+  task: `## What\nDo ${id}.\n\n## Acceptance criteria\n${id} is done`,
+  ...extra,
+});
+
+/**
+ * Write the shutdown corpus under `root`. `livePid`, when given, is a process
+ * the journey started and will see ended: it is recorded as the in-flight
+ * dispatch of {@link SHUTDOWN_RUNS.mine} on this host, under its own start
+ * token, and refused when that token cannot be read — a registry entry with no
+ * token is one the engine will not act on, and a journey expecting it killed
+ * would be reading something else.
+ */
+export function buildShutdownRuns(root, livePid) {
+  mkdirSync(root, { recursive: true });
+  writeShutdownRun(
+    root,
+    SHUTDOWN_RUNS.mine,
+    "claude-code",
+    SUPERVISOR_SESSION,
+    [
+      shutdownTask("kept", { repo: SHUTDOWN_IDENTITY }),
+      shutdownTask(SHUTDOWN_LIVE_NODE, { deps: ["kept"] }),
+    ],
+    (journal, run, dir) => {
+      journal.advance(1).emit("pipeline", "node-dispatched", {
+        ...run,
+        node: "kept",
+        persona: "worker",
+      });
+      journal
+        .advance(20)
+        .emit(
+          "pipeline",
+          "node-settled",
+          { ...run, node: "kept" },
+          { status: "done", branch: SHUTDOWN_BRANCH },
+        );
+      journal.advance(1).emit("pipeline", "node-dispatched", {
+        ...run,
+        node: SHUTDOWN_LIVE_NODE,
+        persona: "worker",
+      });
+      if (livePid === undefined) return;
+      const started = startToken(livePid);
+      if (started === undefined)
+        throw new Error(
+          `pid ${livePid} has no start token this host will give, so it cannot be recorded as a dispatch the engine will act on`,
+        );
+      writeJson(join(dir, "dispatches", `${livePid}-0.json`), {
+        node: SHUTDOWN_LIVE_NODE,
+        pid: livePid,
+        host: thisHost(),
+        dispatched_at: stamp(journal.at),
+        started,
+      });
+    },
+  );
+  writeShutdownRun(
+    root,
+    SHUTDOWN_RUNS.idle,
+    "claude-code",
+    SUPERVISOR_SESSION,
+    [shutdownTask("rest")],
+    () => undefined,
+  );
+  writeShutdownRun(
+    root,
+    SHUTDOWN_RUNS.elsewhere,
+    "codex",
+    CODEX_SESSION,
+    [shutdownTask("theirs")],
+    (journal, run) => {
+      journal.advance(1).emit("pipeline", "node-dispatched", {
+        ...run,
+        node: "theirs",
+        persona: "worker",
+      });
+    },
+  );
+  writeShutdownRun(
+    root,
+    SHUTDOWN_RUNS.unattributed,
+    "a-plain-shell",
+    "",
+    [shutdownTask("nobodys")],
+    () => undefined,
+  );
+}
+
+/** What the shutdown corpus wrote, published beside it as `facts()` is beside the main one. */
+export function shutdownFacts() {
+  return {
+    runs: SHUTDOWN_RUNS,
+    identity: SHUTDOWN_IDENTITY,
+    branch: SHUTDOWN_BRANCH,
+    live_node: SHUTDOWN_LIVE_NODE,
+  };
+}

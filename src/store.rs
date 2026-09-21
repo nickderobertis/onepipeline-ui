@@ -56,8 +56,9 @@ use crate::cli::{RunsRoot, SessionId};
 use crate::contract::{
     ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
     Health, HealthStatus, NextQuery, NodeId, ProjectId, Release, RunId, RunQuery, RunSelection,
-    RunsPage, RunsQuery, SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope,
-    TranscriptQuery, WatchEvent, WatchFrame, WatchQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    RunShutdownRequest, RunsPage, RunsQuery, ShutdownRequest, ShutdownScope, SseEvent, StopRequest,
+    SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery, WatchEvent, WatchFrame,
+    WatchQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
@@ -139,7 +140,7 @@ pub fn graph_records_from_env() -> PathBuf {
 // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the one source is `ledger::RUNS_DIR_ENV` in a private module of the engine, so there is no declaration a gate could import; the journey named above is the drift gate, because a spelling the engine did not read would leave every channel-held run served as parked.
 pub const RUNS_DIR_ENV: &str = "ONEPIPELINE_RUNS_DIR";
 
-/// A read-only view of one runs root.
+/// The read API over one runs root, and the verbs that act on its runs.
 #[derive(Debug, Clone)]
 pub struct RunStore {
     root: PathBuf,
@@ -649,6 +650,32 @@ impl RunStore {
         Ok(paths)
     }
 
+    /// The engine's host shutdown over `scope`, as the acting session.
+    ///
+    /// Every decision in it — the interrupt, the wait, the teardown, the
+    /// preserving push, what is journalled — is the engine's: this names the
+    /// runs, the session and the grace, and nothing else. An omitted grace is
+    /// the engine's own default, the one its binary takes when `--grace` is not
+    /// given.
+    fn shut_down(
+        &self,
+        scope: verbs::ShutdownScope,
+        grace: Option<u64>,
+        force: bool,
+    ) -> onepipeline::Result<verbs::Shutdown> {
+        verbs::shutdown(
+            &self.root,
+            verbs::ShutdownRequest {
+                scope,
+                session: self.session().to_owned(),
+                grace: Duration::from_secs(
+                    grace.unwrap_or(onepipeline::cli::DEFAULT_SHUTDOWN_GRACE_SECONDS),
+                ),
+                force,
+            },
+        )
+    }
+
     /// The engine's own refusal of a verb about `run`, on the wire.
     fn refused(run: &RunId, error: onepipeline::Error) -> ApiError {
         ApiError::from_engine(run, error)
@@ -944,6 +971,35 @@ impl RunApi for RunStore {
         Ok(Self::envelope(json!({ "run_id": run, "pid": pid })))
     }
 
+    // llmlint: ignore-block[authorization_enforced_server_side] the principal is the server's one acting session, which `docs/contract.md` fixes for every write this API makes — shutdown included, in the words of the plan the shutdown section quotes: "the same principal every other write here is made under, resolved once at startup from `--session`". The ownership rule under that session is the engine's own, applied inside `verbs::shutdown` (the run and `mine` scopes refuse another session's run; `host` proceeds over owners by the engine's decision and names each), and the routes validate the path and the body before this is reached. An authentication layer would be a change to that contract, which its owner decides, and `--bind` stays on loopback by default as it does for `stop` and `adopt`.
+    fn run_shutdown(
+        &self,
+        run: &RunId,
+        request: &RunShutdownRequest,
+    ) -> Result<Envelope<Value>, ApiError> {
+        self.present(run)?;
+        let shutdown = self
+            .shut_down(
+                verbs::ShutdownScope::Run(run.as_str().to_owned()),
+                request.grace,
+                request.force,
+            )
+            .map_err(|error| Self::refused(run, error))?;
+        Ok(Self::envelope(payload::shutdown(&shutdown)))
+    }
+
+    fn shutdown(&self, request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError> {
+        let scope = match request.scope {
+            ShutdownScope::Mine => verbs::ShutdownScope::Mine,
+            ShutdownScope::Host => verbs::ShutdownScope::Host,
+        };
+        let shutdown = self
+            .shut_down(scope, request.grace, request.force)
+            .map_err(ApiError::from_engine_unscoped)?;
+        Ok(Self::envelope(payload::shutdown(&shutdown)))
+    }
+    // llmlint: ignore-end[authorization_enforced_server_side]
+
     fn watch(&self, run: &RunId, query: &WatchQuery) -> Result<Self::Watch, ApiError> {
         let paths = self.present(run)?;
         let filter = self.engine_filter(run, query.filter.as_ref())?;
@@ -960,7 +1016,7 @@ impl RunApi for RunStore {
     fn unwatched(&self) -> Result<Envelope<Value>, ApiError> {
         let unwatched = verbs::unwatched(&self.root, self.session())
             .map_err(|error| ApiError::Engine(error.to_string()))?;
-        Ok(Self::envelope(json!({
+        let mut answered = json!({
             "reported": unwatched
                 .reported
                 .iter()
@@ -971,7 +1027,15 @@ impl RunApi for RunStore {
                 }))
                 .collect::<Vec<Value>>(),
             "unresolved": unwatched.unresolved,
-        })))
+        });
+        // Which session this report is for, under the key a run-list row names
+        // its launcher's session by, so a client can tell this session's runs
+        // from another's before it acts on them. Absent for an unattributed
+        // server, which owns no run.
+        if let Some(session) = &self.session {
+            answered["session_key"] = json!(payload::session_key(session.as_str()));
+        }
+        Ok(Self::envelope(answered))
     }
 
     fn host(&self) -> Result<Envelope<Value>, ApiError> {

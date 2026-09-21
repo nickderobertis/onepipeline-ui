@@ -1,7 +1,8 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 19,
+  "telemetry_schema_version": 20,
   "observed_at": "2026-08-07T12:00:00Z",
   "reported": [],
-  "unresolved": []
+  "unresolved": [],
+  "session_key": "f4a5b11c4e92"
 }

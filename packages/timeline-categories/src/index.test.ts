@@ -73,6 +73,11 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // The driver's own sweep over the harness identity pool — housekeeping of the
   // run's driving, like an adoption, and no node's work.
   "pool-maintenance": "lifecycle",
+  // A host shutdown putting the run down mid-flight: one record per live
+  // dispatch it acted on, and one for the run once its teardown and pushes are
+  // done — the run's driving ending, like a stop, and no node's work.
+  "dispatch-stopped": "lifecycle",
+  "host-shutdown": "lifecycle",
   // `agentgraph` — the members and turns under each node.
   "graph-started": "lifecycle",
   "graph-settled": "lifecycle",

@@ -15,7 +15,7 @@ import {
 import { RUN_LIVENESS_NOTHING_DRIVING } from "@onepipeline-ui/dag-model";
 import { TelemetryClientError } from "@onepipeline-ui/telemetry-client";
 import { Eye, EyeOff, LifeBuoy, OctagonX } from "lucide-react";
-import { useCallback, useState } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 import { Outcome } from "../../lib/Outcome";
 import type { RunControl } from "./useRunControl";
 import { useVerb } from "./useVerb";
@@ -39,14 +39,19 @@ function ownerNamed(message: string): string | undefined {
  * shown as the engine worded it, and only then is a forced stop offered, behind
  * a second confirm that names the owner it would override. It is never the
  * default. **Adopt** is offered only when the run's own status says nothing is
- * driving it, and shows the driver pid the API answers.
+ * driving it, and shows the driver pid the API answers. `children` are the
+ * run's further actions, set beside Stop by the app that composes them — the
+ * run's shutdown.
  */
 export function RunActions({
   runId,
   control,
+  children,
 }: {
   readonly runId: string;
   readonly control: RunControl;
+  /** Further actions on the run, after Stop. */
+  readonly children?: ReactNode;
 }) {
   const { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal } =
     useStop(control);
@@ -142,6 +147,7 @@ export function RunActions({
           <OctagonX size={14} />
           <span className="run-action-label">Stop</span>
         </Button>
+        {children}
       </div>
       <Dialog onOpenChange={setStopOpen} open={stopOpen}>
         <DialogContent>

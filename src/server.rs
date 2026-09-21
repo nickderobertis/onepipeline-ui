@@ -38,8 +38,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::RunApi;
 use crate::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventsQuery,
-    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
-    StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery, WatchQuery,
+    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunShutdownRequest,
+    RunsPage, RunsQuery, ShutdownRequest, StopRequest, SurfaceRequest, TimelineQuery,
+    TimelineScope, TranscriptQuery, WatchQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -99,6 +100,8 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN_ATTEST, post(attest))
         .route(routes::RUN_STOP, post(stop))
         .route(routes::RUN_ADOPT, post(adopt))
+        .route(routes::RUN_SHUTDOWN, post(run_shutdown))
+        .route(routes::SHUTDOWN, post(shutdown))
         .route(routes::RUN_WATCH, get(watch))
         .route(routes::UNWATCHED, get(unwatched))
         .route(routes::HOST, get(host))
@@ -664,6 +667,34 @@ async fn adopt(State(serving): Store, Path(run): Path<String>) -> Response {
         Err(error) => return error.into_response(),
     };
     answer(move || serving.store.adopt(&run)).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
+async fn run_shutdown(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    // An empty body is the default shutdown — the engine's own grace, nothing
+    // forced — as an empty body on `stop` is a stop that forces nothing.
+    let request: RunShutdownRequest = if raw.trim().is_empty() {
+        RunShutdownRequest::default()
+    } else {
+        match body("{grace?, force?}", &raw) {
+            Ok(request) => request,
+            Err(error) => return error.into_response(),
+        }
+    };
+    answer(move || serving.store.run_shutdown(&run, &request)).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
+async fn shutdown(State(serving): Store, raw: String) -> Response {
+    let request: ShutdownRequest = match body("{scope, grace?, force?}", &raw) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    answer(move || serving.store.shutdown(&request)).await
 }
 
 async fn watch(

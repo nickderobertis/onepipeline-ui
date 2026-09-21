@@ -14,8 +14,11 @@
  *
  * Usage:
  *   serve-fixture.mjs --workspace DIR --port N [--ui]
+ *                     [--shutdown-corpus [--live-dispatch-pid PID]]
  *                                                  build the fixture and serve it,
- *                                                  the browser view beside it with --ui
+ *                                                  the browser view beside it with --ui;
+ *                                                  the shutdown journeys' own runs
+ *                                                  with --shutdown-corpus
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -32,6 +35,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildRuns,
+  buildShutdownRuns,
   churnLive,
   facts,
   graphRecordsFor,
@@ -41,6 +45,7 @@ import {
   removeRun,
   SUPERVISOR_SESSION,
   settleDashboard,
+  shutdownFacts,
 } from "./runs.mjs";
 import { thisHost } from "./this-host.mjs";
 
@@ -227,14 +232,23 @@ function bound(server, port, purpose) {
  * same either way, which every other journey holds through the Vite preview
  * proxying to this same server.
  */
-async function serve(workspace, port, ui) {
+async function serve(workspace, port, ui, shutdown) {
   rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
-  buildRuns(runsRoot, workspace);
+  if (shutdown === undefined) buildRuns(runsRoot, workspace);
+  else buildShutdownRuns(runsRoot, shutdown.livePid);
+  // The `onevcs` state this server reads and writes, empty and inside the
+  // workspace. A shutdown pushes every branch a run names through `onevcs` and
+  // lists every other unpublished branch it knows of; left to the default, that
+  // is the operator's own registry — their identities, their checkouts, their
+  // origins. Empty, every identity is one no registry holds, so a preservation
+  // is refused before any repository is touched.
+  const onevcsHome = join(workspace, "onevcs-home");
+  mkdirSync(onevcsHome, { recursive: true });
   writeFileSync(
     join(workspace, FIXTURE_FACTS_NAME),
-    `${JSON.stringify(facts(), null, 2)}\n`,
+    `${JSON.stringify(shutdown === undefined ? facts() : shutdownFacts(), null, 2)}\n`,
   );
 
   const binary = serverBinary();
@@ -271,6 +285,7 @@ async function serve(workspace, port, ui) {
         ...process.env,
         ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
         HOSTNAME: thisHost(),
+        ONEVCS_HOME: onevcsHome,
       },
     },
   );
@@ -288,6 +303,7 @@ function parseArgs(argv) {
     "--remove-page-runs",
     "--stall",
     "--ui",
+    "--shutdown-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -299,6 +315,7 @@ function parseArgs(argv) {
     "--record-activity",
     "--activity-detail",
     "--refuse-port",
+    "--live-dispatch-pid",
   ]);
   const out = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -345,6 +362,18 @@ if (args.ui && asked.length > 0) {
   die(
     `--ui serves; it means nothing beside --${asked[0]}`,
     "pass --ui with --workspace and --port alone",
+  );
+}
+if (args["shutdown-corpus"] && asked.length > 0) {
+  die(
+    `--shutdown-corpus serves; it means nothing beside --${asked[0]}`,
+    "pass --shutdown-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (args["live-dispatch-pid"] !== undefined && !args["shutdown-corpus"]) {
+  die(
+    "--live-dispatch-pid names a dispatch of the shutdown corpus",
+    "pass it beside --shutdown-corpus",
   );
 }
 if (asked.length > 1) {
@@ -473,7 +502,22 @@ if (args.stall) {
         "pass --record-activity the name of the tool the summary came from",
       );
     } else {
-      process.exit(await serve(workspace, port, args.ui === true));
+      let shutdown;
+      if (args["shutdown-corpus"]) {
+        const pid = args["live-dispatch-pid"];
+        const livePid = pid === undefined ? undefined : Number(pid);
+        if (
+          livePid !== undefined &&
+          (!Number.isInteger(livePid) || livePid < 1)
+        ) {
+          die(
+            `'${pid}' is not a pid`,
+            "pass --live-dispatch-pid the pid of a process this caller started",
+          );
+        }
+        shutdown = { livePid };
+      }
+      process.exit(await serve(workspace, port, args.ui === true, shutdown));
     }
   } catch (refused) {
     die(

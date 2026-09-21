@@ -27,6 +27,8 @@ POST /api/v2/runs/{run}/channel/surface
 POST /api/v2/runs/{run}/attest
 POST /api/v2/runs/{run}/stop          # as the session `--session` names
 POST /api/v2/runs/{run}/adopt         # retains this binary as the driver
+POST /api/v2/runs/{run}/shutdown      # `onepipeline shutdown RUN`; {grace?, force?}
+POST /api/v2/shutdown                 # `--mine` or `--host`; {scope, grace?, force?}
 GET /api/v2/runs/{run}/watch          # SSE over `onepipeline watch`
 GET /api/v2/unwatched
 GET /api/v2/host
@@ -47,12 +49,12 @@ wrapped — each a thin call into `onepipeline::verbs`, never a re-implementatio
 and never the binary. Launching a plan and driving the planning stage are
 outside this API; a reply on any run's channel is inside it. The server acts as
 one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
-which is what its stops and adoptions are judged by.
+which is what its stops, adoptions and shutdowns are judged by.
 
 <!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (19), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (20), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy
@@ -62,7 +64,11 @@ the UI sees; this crate owns the envelope, not the records.
 ## The view
 
 [`apps/dag-ui`](docs/dag-ui.md) is the DAG Observatory: the browser view of the
-same runs, reading nothing but the contract above. It declares no schema, event
+same runs, reading nothing but the contract above — and acting through nothing
+else either. It is not only a read: beside replying, stopping and adopting, it
+shuts down a run, every run this session owns, or the whole host, behind a
+confirm dialog that names each run it will act on and whose it is before
+anything is sent. It declares no schema, event
 name, or API path of its own — `packages/dag-model` holds the contract's client
 half, `packages/telemetry-client` is the only thing that speaks HTTP, and
 `packages/dag-layout` is the graph geometry. [`docs/dag-ui.md`](docs/dag-ui.md)

@@ -16,6 +16,7 @@ import {
 } from "@oneharness/ui";
 import type { ProjectGroup, RunSummary } from "@onepipeline-ui/dag-model";
 import { Activity, Bot, ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
 import { launchLabel, nodeCountSummary } from "../../lib/run-model";
 import { stateDotClass } from "../../lib/StateBadge";
 import { LIST_MODES, type ListMode } from "../../lib/useUrlSelection";
@@ -58,6 +59,7 @@ export function RunNavigation({
   hasMore,
   loadingMore,
   onLoadMore,
+  hostActions,
 }: {
   readonly list: ListMode;
   readonly onSelectList: (list: ListMode) => void;
@@ -71,6 +73,11 @@ export function RunNavigation({
   readonly hasMore: boolean;
   readonly loadingMore: boolean;
   readonly onLoadMore: () => Promise<void>;
+  /**
+   * What acts on the runs listed as a whole rather than on one of them — the
+   * session's and the host's shutdown — under both lists alike.
+   */
+  readonly hostActions?: ReactNode;
 }) {
   return (
     <nav
@@ -99,6 +106,7 @@ export function RunNavigation({
             </div>
           </div>
           <Separator className="my-[22px]" />
+          {hostActions}
           {/* Which list, as one control rather than two loose buttons, on the
               terms the reading switch keeps: a fieldset says the pair is a
               choice and the pressed state says which is taken. */}

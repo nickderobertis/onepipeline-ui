@@ -651,7 +651,7 @@ pub fn millis_of(ts: &str) -> Option<i128> {
 ///
 /// The raw launching session id may be sensitive and is never served; this is
 /// what lets a client group runs by the planner that launched them without it.
-fn session_key(session: &str) -> String {
+pub(crate) fn session_key(session: &str) -> String {
     let digest = Sha256::digest(session.as_bytes());
     digest[..6].iter().fold(String::new(), |mut out, byte| {
         out.push_str(&format!("{byte:02x}"));
@@ -4295,7 +4295,7 @@ fn report_path(view: &RunView, settlement: &Envelope) -> std::path::PathBuf {
 ///
 /// What is served is [`history::read_session_display`]'s record rather than the
 /// file's bytes, which is what `docs/contract.md` names this artifact as.
-// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated server acting as one session, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
 fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
     session_record(
@@ -6234,6 +6234,73 @@ pub fn stopped(run: &RunId, stopped: &onepipeline::verbs::Stopped) -> Value {
         "owner": stopped.owner,
         "forced": stopped.forced,
         "teardown": stopped.teardown,
+    })
+}
+
+/// The report `verbs::shutdown` answered, field for field.
+///
+/// Every value here is the engine's: which runs it acted on and whose they
+/// are, each dispatch's answer and ending, each teardown in `stop`'s own words,
+/// each branch's preservation, and the host's other unpublished branches. The
+/// words for an ending and a preservation are the ones the engine journals the
+/// same facts under on `dispatch-stopped` and `host-shutdown`, matched
+/// exhaustively so an ending a later engine adds is a compile error here rather
+/// than a word nobody spelled. `complete` is the engine's own exit status read
+/// as a flag — nothing here re-decides it — and `rendered` is the report its
+/// binary prints.
+#[must_use]
+pub fn shutdown(shutdown: &onepipeline::verbs::Shutdown) -> Value {
+    use onepipeline::verbs::{DispatchEnding, Preserved, ShutdownScope};
+    let scope = match &shutdown.scope {
+        ShutdownScope::Run(_) => "run",
+        ShutdownScope::Mine => "mine",
+        ShutdownScope::Host => "host",
+    };
+    let ended = |ending: DispatchEnding| match ending {
+        DispatchEnding::Graceful => "graceful",
+        DispatchEnding::Killed => "killed",
+        DispatchEnding::StillRunning => "still-running",
+    };
+    let result = |outcome: Preserved| match outcome {
+        Preserved::Pushed => "pushed",
+        Preserved::AlreadyOnOrigin => "already-on-origin",
+        Preserved::NoRemote => "no-remote",
+        Preserved::Refused => "refused",
+    };
+    json!({
+        "scope": scope,
+        "root": shutdown.root.display().to_string(),
+        "grace_seconds": shutdown.grace.as_secs(),
+        "forced": shutdown.forced,
+        "complete": shutdown.exit_code() == onepipeline::error::EXIT_SUCCESS,
+        "runs": shutdown.runs.iter().map(|run| json!({
+            "run_id": run.run,
+            "owner": run.owner,
+            "forced_over_owner": run.forced_over_owner,
+            "dispatches": run.dispatches.iter().map(|stopped| json!({
+                "node": stopped.node,
+                "pid": stopped.pid,
+                "interrupt": stopped.interrupt,
+                "detail": stopped.detail,
+                "ended": ended(stopped.ended),
+                "waited_ms": u64::try_from(stopped.waited.as_millis()).unwrap_or(u64::MAX),
+            })).collect::<Vec<Value>>(),
+            "teardown": run.teardown,
+            "branches": run.branches.iter().map(|branch| json!({
+                "identity": branch.identity,
+                "branch": branch.branch,
+                "result": result(branch.outcome),
+                "remote": branch.remote,
+                "commit": branch.commit,
+                "detail": branch.detail,
+            })).collect::<Vec<Value>>(),
+        })).collect::<Vec<Value>>(),
+        "not_pushed": shutdown.not_pushed.iter().map(|(identity, branch)| json!({
+            "identity": identity,
+            "branch": branch,
+        })).collect::<Vec<Value>>(),
+        "not_pushed_unread": shutdown.not_pushed_unread,
+        "rendered": onepipeline::verbs::render_shutdown(shutdown),
     })
 }
 
