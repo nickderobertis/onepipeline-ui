@@ -82,7 +82,7 @@ fn env(name: &str) -> String {
 /// bundle is the error a release build has to stop on, naming the directory and
 /// what builds it.
 ///
-/// Public so `tests/e2e/packaging.rs` can drive it over real directories
+/// Public so `tests/packaging.rs` can drive it over real directories
 /// without a cargo invocation around it: the cargo half is the two `env` reads
 /// above, and the decision is here.
 pub fn embed(bundle: &Path, required: bool, generated: &Path) -> Result<Option<usize>, String> {
