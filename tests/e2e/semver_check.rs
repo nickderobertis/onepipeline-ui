@@ -25,7 +25,9 @@
 //! is the release path's job rather than the gate's — and the `cargo-semver-checks`
 //! the script probes for before asking for that. The stand-in hands `cargo
 //! package --list` straight to the real cargo, because which files this crate
-//! packages is exactly what these cases are about.
+//! packages is exactly what these cases are about — and, where a case is about
+//! whether each side *builds*, it builds both with the real cargo and the feature
+//! set the reading asked for, over a crate carrying this one's `build.rs`.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -204,17 +206,25 @@ impl Fixture {
     /// baseline tag and then carried forward by `pending` — beside the worktree of
     /// that tag the workflow hands the reading.
     fn of(pending: &[Commit]) -> Self {
-        Self::built(pending, "")
+        Self::built(pending, "", false)
+    }
+
+    /// The same, over a crate that carries this crate's own `build.rs` and its
+    /// `[features]` table — so `bundled-ui` is declared and asking for it runs the
+    /// real refusal — and no built browser view beside it, as the release job's
+    /// checkout has none.
+    fn of_a_crate_with_this_crates_build_script(pending: &[Commit]) -> Self {
+        Self::built(pending, "", true)
     }
 
     /// The same, over a crate that also packages a file whose name git would read
     /// as pathspec magic. Unix-only, with [`PATHSPEC_MAGIC`] it plants.
     #[cfg(unix)]
     fn of_a_crate_packaging_pathspec_magic(pending: &[Commit]) -> Self {
-        Self::built(pending, PATHSPEC_MAGIC)
+        Self::built(pending, PATHSPEC_MAGIC, false)
     }
 
-    fn built(pending: &[Commit], magic: &str) -> Self {
+    fn built(pending: &[Commit], magic: &str, build_script: bool) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let repo = dir.path().join("history");
         fs::create_dir_all(repo.join("src")).expect("create the crate's sources");
@@ -239,6 +249,16 @@ impl Fixture {
                     ),
                 );
             fs::write(&manifest, widened).expect("widen what the crate packages");
+        }
+        if build_script {
+            let this_crate = Path::new(env!("CARGO_MANIFEST_DIR"));
+            fs::copy(this_crate.join("build.rs"), repo.join("build.rs"))
+                .expect("copy this crate's build script");
+            let mut manifest =
+                fs::read_to_string(repo.join("Cargo.toml")).expect("read the manifest");
+            manifest.push('\n');
+            manifest.push_str(&this_crates_features());
+            fs::write(repo.join("Cargo.toml"), manifest).expect("declare this crate's features");
         }
         // The script lists the packaged files with `--locked`, which is a lockfile
         // this crate has not got until one is resolved for it.
@@ -288,7 +308,12 @@ impl Fixture {
         git(&repo, &["tag", PENDING_REF]);
 
         // Records every call, answers the reading with the status the case under
-        // test is about, and hands the packaged-file list to the real cargo.
+        // test is about, and hands the packaged-file list to the real cargo. Given
+        // `SEMVER_BUILDS`, it first builds each side with the real cargo and the
+        // feature set the reading asked for — every feature unless the arguments
+        // name the feature set, which is cargo-semver-checks' own guess for a crate
+        // whose only feature is `bundled-ui` — and answers a build that failed
+        // with the 101 the real tool returns for one.
         //
         // llmlint: ignore-block[e2e_not_mocked] the real reading builds two
         // rustdocs from two downloaded dependency trees, so it is the one thing a
@@ -319,6 +344,20 @@ impl Fixture {
                  ;;\n\
                semver-checks)\n\
                  printf 'offline=%s\\n' \"${CARGO_NET_OFFLINE:-unset}\" >> \"$CARGO_CALLS\"\n\
+                 if [ -n \"${SEMVER_BUILDS:-}\" ]; then\n\
+                   features=--all-features\n\
+                   case \" $* \" in\n\
+                     *' --default-features '*|*' --only-explicitly-listed-features '*) features= ;;\n\
+                   esac\n\
+                   baseline_root=\n\
+                   previous=\n\
+                   for argument in \"$@\"; do\n\
+                     [ \"$previous\" != --baseline-root ] || baseline_root=\"$argument\"\n\
+                     previous=\"$argument\"\n\
+                   done\n\
+                   \"$REAL_CARGO\" check --offline --quiet --manifest-path Cargo.toml --target-dir \"$SEMVER_BUILDS/current\" $features || exit 101\n\
+                   \"$REAL_CARGO\" check --offline --quiet --manifest-path \"$baseline_root/Cargo.toml\" --target-dir \"$SEMVER_BUILDS/baseline\" $features || exit 101\n\
+                 fi\n\
                  exit \"${SEMVER_STATUS:-0}\"\n\
                  ;;\n\
                *)\n\
@@ -515,6 +554,20 @@ impl ThisCrate {
 
         Self { root, baseline }
     }
+}
+
+/// This crate's `[features]` table, as its manifest declares it — the one
+/// feature a build of this crate can be asked for, and the one whose refusal the
+/// reading has to stay clear of.
+fn this_crates_features() -> String {
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("read this crate's manifest");
+    let start = manifest
+        .find("\n[features]\n")
+        .expect("this crate declares its features");
+    let table = &manifest[start + 1..];
+    let end = table[1..].find("\n[").map_or(table.len(), |end| end + 2);
+    table[..end].to_owned()
 }
 
 /// Copy every file the checkout at `from` tracks into `into`, directories and
@@ -1288,4 +1341,102 @@ fn a_packaged_path_that_reads_as_pathspec_magic_does_not_select_the_release() {
         "the failure does not say the check returned no verdict:\n{}",
         stderr(&output)
     );
+}
+
+/// A tree with no built browser view is read to a verdict. `bundled-ui` makes
+/// `build.rs` refuse exactly that tree, and cargo-semver-checks left to guess a
+/// feature set turns it on — which is how every reading after the merge that
+/// added the feature exited 101 and no release could be cut (Release-plz run
+/// 35576409661). The reading names the default features instead; the refusal is
+/// still there for a build that asks for the bundle.
+#[test]
+fn a_tree_with_no_built_browser_view_is_read_to_a_verdict() {
+    let fixture = Fixture::of_a_crate_with_this_crates_build_script(A_COMPATIBLE_RELEASE);
+    let view = fixture.repo.join("apps/dag-ui/dist");
+    assert!(
+        !view.exists(),
+        "the fixture carries a built view: {}",
+        view.display()
+    );
+    let builds = fixture.dir.path().join("reading-builds");
+
+    let output = fixture.run_with(
+        &fixture.baseline.clone(),
+        &[
+            ("SEMVER_STATUS", COMPATIBLE),
+            ("SEMVER_BUILDS", builds.to_str().expect("utf-8 path")),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "a tree with no built browser view produced no verdict:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stdout(&output).contains("the public surface is compatible"),
+        "the run does not report the verdict it reached:\n{}",
+        stdout(&output)
+    );
+    assert!(
+        fixture.calls().contains("--default-features"),
+        "the reading left the feature set to cargo-semver-checks' guess:\n{}",
+        fixture.calls()
+    );
+
+    // The reading got past the refusal by not asking for the bundle, not by the
+    // refusal going away: a build that asks for it still stops, naming the view.
+    let refused = Command::new(real_cargo())
+        .args(["build", "--offline", "--quiet", "--features", "bundled-ui"])
+        .arg("--target-dir")
+        .arg(builds.join("bundled"))
+        .current_dir(&fixture.repo)
+        .output()
+        .expect("cargo is on PATH");
+    let refusal = stderr(&refused);
+    // Matched from the fixture's own directory down rather than as the whole
+    // path: cargo names the crate by the directory it resolved, which on macOS
+    // is `/private/var/...` for a temporary directory the test knows as `/var/...`.
+    let named = Path::new("history").join("apps/dag-ui/dist");
+    assert!(
+        !refused.status.success(),
+        "a build asking for the bundle succeeded without one"
+    );
+    assert!(
+        refusal.contains("the `bundled-ui` feature is on, but there is no built browser view at")
+            && refusal.contains(&named.display().to_string()),
+        "the build did not refuse naming the missing view:\n{refusal}"
+    );
+}
+
+/// The reading takes the default features on the strength of `bundled-ui`
+/// gating no item: if a feature ever gates one, the surface read would miss it,
+/// and the reading has to name that feature instead.
+#[test]
+fn no_feature_gates_an_item_the_reading_leaves_out() {
+    fn sources(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).expect("read the sources") {
+            let path = entry.expect("a source entry").path();
+            if path.is_dir() {
+                sources(&path, found);
+            } else if path.extension() == Some(OsStr::new("rs")) {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    sources(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
+    assert!(!found.is_empty(), "no sources were read");
+    for path in found {
+        let source = fs::read_to_string(&path).expect("read a source");
+        assert!(
+            !source.replace(' ', "").contains("feature="),
+            "{} gates something on a feature, which the reading of the default \
+             features in scripts/semver-check.sh does not cover",
+            path.display()
+        );
+    }
 }
