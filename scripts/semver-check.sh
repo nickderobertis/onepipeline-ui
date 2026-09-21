@@ -25,6 +25,18 @@
 #   * Fail on a check that did not happen *only while the pending release claims
 #     compatibility*. See `reading_not_taken` below for why, and for the release
 #     that stood still until it did.
+#   * Read the surface a consumer compiles — the crate's default features — rather
+#     than cargo-semver-checks' own guess at a feature set, which turns on every
+#     feature it does not recognise as unstable. That guess turned on `bundled-ui`,
+#     whose one effect is to make `build.rs` refuse a build with no built browser
+#     view beside it; the release job builds none, so every reading after the
+#     merge that added the feature exited 101 without a verdict and no release
+#     could be cut (Release-plz run 35576409661). A reading without the bundle is
+#     the intended one because the feature gates no item: nothing in `src/` is
+#     `cfg(feature)`, so the surface read is the surface every build ships — and
+#     `tests/e2e/semver_check.rs` fails the day a feature starts gating one, since
+#     the reading would then have to name it. The refusal itself stays exactly
+#     what it is: a release build asking for the bundle still stops without it.
 #
 # Usage: bash scripts/semver-check.sh <baseline-root> <baseline-ref>
 #
@@ -175,7 +187,7 @@ fi
 
 set +e
 # llmlint: ignore[tool_output_is_signal] this report *is* the reading — on 100 it names every item that broke, on 0 it says how many checks ran — and the release is versioned from it, so a verdict whose evidence was swallowed is the thing this script exists to stop.
-CARGO_NET_OFFLINE=true cargo semver-checks --baseline-root "$baseline" --color never
+CARGO_NET_OFFLINE=true cargo semver-checks --baseline-root "$baseline" --default-features --color never
 status=$?
 set -e
 
