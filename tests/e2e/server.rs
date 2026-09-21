@@ -12062,7 +12062,7 @@ impl Drop for Orphan {
     }
 }
 
-// llmlint: ignore-block[tests_mirror_real_usage] the dispatch registry entry is the one a
+// llmlint: ignore-block[tests_mirror_real_usage] in both journeys below, the dispatch registry entry is the one a
 // driver writes when it starts a node's process — node, pid, this host and the process's own
 // start token — and the journey writes it rather than earning it through a driver, because a
 // driver that keeps a dispatch alive for as long as a journey needs is one running a harness
@@ -12131,9 +12131,6 @@ fn a_shutdown_that_killed_a_dispatch_answers_its_whole_report_as_not_complete() 
     assert!(!worker.alive(), "the teardown ended the dispatch");
 }
 
-// llmlint: ignore-block[tests_mirror_real_usage] as the journey above: the registry entry is
-// the one a driver writes, naming a real process this test started, and everything after it is
-// the engine's.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_forced_shutdown_asks_nothing_and_its_teardown_is_complete() {
