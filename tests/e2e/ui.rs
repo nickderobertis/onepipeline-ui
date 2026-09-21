@@ -570,6 +570,41 @@ fn a_build_without_the_bundle_refuses_ui_naming_what_is_missing() {
     assert_eq!(page.body, b"<!doctype html><title>another release</title>");
 }
 
+/// The decision the journey above drives through a real bundle-less binary,
+/// held in this process as well: [`onepipeline_ui::ui::View::resolve`] given
+/// what such a build's `EMBEDDED` is, `None`. The journey's binary is compiled
+/// apart from this suite and so is not coverage-instrumented; this is what
+/// counts the refusal's lines, and it pins the precedence around it — no view
+/// unless asked, `--ui-dist` over whatever the build carries, and this build's
+/// own embedded bundle for `--ui` alone.
+#[test]
+fn resolve_refuses_ui_for_a_build_that_embedded_nothing() {
+    use onepipeline_ui::ui::{UiDist, View};
+    let refusal = View::resolve(true, None, None).expect_err("refused");
+    assert!(
+        refusal.contains("built without the bundle at apps/dag-ui/dist"),
+        "{refusal}"
+    );
+    assert!(refusal.contains("prebuilt distributions"), "{refusal}");
+    assert!(refusal.contains("just build"), "{refusal}");
+    // Not asked for a view, it does not matter what the build carries.
+    assert!(View::resolve(false, None, None)
+        .expect("no view asked for")
+        .is_none());
+    // And a directory on disk serves whatever the build carries.
+    let dist = a_view_on_disk();
+    let on_disk = UiDist::try_from(dist.path().to_path_buf()).expect("a built view");
+    match View::resolve(true, Some(&on_disk), None).expect("a view") {
+        Some(View::Directory(served)) => assert_eq!(served, on_disk),
+        other => panic!("not the directory named: {other:?}"),
+    }
+    // This build does carry one, and that is what `--ui` alone serves.
+    match View::resolve(true, None, onepipeline_ui::ui::EMBEDDED).expect("a view") {
+        Some(View::Embedded(files)) => assert!(files.iter().any(|file| file.path == "index.html")),
+        other => panic!("not the embedded bundle: {other:?}"),
+    }
+}
+
 /// A configuration file is the other way into the same arguments: it carries
 /// the view flags on the same terms, and leaves them out when they are off so a
 /// consumer reading the shape before them reads what it always read.
