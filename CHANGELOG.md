@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.10.1...v0.11.0) - 2026-09-20
+
+### Added
+
+- *(agents)* show every agent a run, node or project launched ([#75](https://github.com/nickderobertis/onepipeline-ui/pull/75))
+
 ## [0.10.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.10.0...v0.10.1) - 2026-09-20
 
 ### Added

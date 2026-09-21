@@ -18,6 +18,7 @@ use std::fs;
 use std::path::Path;
 
 use oneharness_core::io::history;
+use onepipeline::agents::{AgentScope, AgentSession, Agents, RUN_ID_LABEL};
 // Under the name of the library that writes them. Three vocabularies here are
 // spelled alike and mean different things: `judge::Role` is who wrote a message,
 // `judge::TelemetryRole` is which side ran, and this module's `Party` is what a
@@ -2198,6 +2199,7 @@ pub fn run_detail(
     declared: &DeclaredMembers,
     include_conversations: bool,
     telemetry: Option<&RunTelemetry>,
+    agents: Option<usize>,
     filter: &EventFilter,
 ) -> Value {
     let mut payload = Map::new();
@@ -2212,7 +2214,15 @@ pub fn run_detail(
     // the *run* is, and a reader narrowing their attention must be shown the same
     // one. The transcripts are the detail's own event listing, and are the one
     // thing here a filter narrows.
-    payload.insert("run".into(), run_telemetry(view, telemetry, &transcripts));
+    let mut run = run_telemetry(view, telemetry, &transcripts);
+    // How many sessions `GET .../agents` answers for the run — zero for a run
+    // with no pointer file, and absent only where the file is there and this
+    // build could not read it, on the terms every unmeasured figure here is
+    // served absent rather than as a zero.
+    if let Some(count) = agents {
+        run["agent_count"] = json!(count);
+    }
+    payload.insert("run".into(), run);
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),
@@ -4181,19 +4191,33 @@ pub fn conversation(
 ///
 /// The id has already crossed the trust boundary as an [`ArtifactId`], so it is
 /// a bare path segment; it is still resolved only against the ids the run's own
-/// envelopes recorded, so a well-formed id naming a file the run never produced
-/// reads nothing.
+/// records name — the artifacts its envelopes recorded, and the sessions its
+/// pointer file names — so a well-formed id naming a file the run never
+/// produced reads nothing.
 #[must_use]
 pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
-    let (event, recorded) = view.events.iter().find_map(|event| {
+    let recorded = view.events.iter().find_map(|event| {
         event
             .artifacts
             .iter()
             .find(|artifact| artifact.id == id.as_str())
             .map(|artifact| (event, artifact))
-    })?;
-    let kind = ReferenceKind::of(&recorded.kind);
-    let bytes = artifact_bytes(view, event, id, kind)?;
+    });
+    let (kind, bytes) = match recorded {
+        Some((event, recorded)) => {
+            let kind = ReferenceKind::of(&recorded.kind);
+            (kind, artifact_bytes(view, event, id, kind)?)
+        }
+        // No envelope recorded it, so it is a session only the run's pointer
+        // file names — a nested harness turn, or a judge's own — which the
+        // agents routes serve an entry for and this resolves on the same terms
+        // as a relayed one, through the three fields the pointer line spells
+        // exactly as the `oneharness-session` record does.
+        None => (
+            ReferenceKind::OneharnessSession,
+            pointed_session(&view.paths, id)?,
+        ),
+    };
     let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
     let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
     Some(json!({
@@ -4271,19 +4295,61 @@ fn report_path(view: &RunView, settlement: &Envelope) -> std::path::PathBuf {
 ///
 /// What is served is [`history::read_session_display`]'s record rather than the
 /// file's bytes, which is what `docs/contract.md` names this artifact as.
-// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes recorded, and the store, project and session are read off that envelope — and what the record names is confined below before it is opened.
+// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated read-only server, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
 fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
+    session_record(
+        field("history_dir"),
+        field("history_project")?,
+        field("history_session")?,
+        id,
+    )
+}
+
+/// The session a run's pointer file names for `id`, resolved exactly as a
+/// relayed `oneharness-session` record is.
+///
+/// The pointer line carries `history_dir`, `history_project` and
+/// `history_session` in the same spelling as that record, so the one resolver
+/// serves both; the file is read through the SDK's own `verbs::agents`, which
+/// opens the pointer file and nothing else. A run with no pointer file names
+/// nothing, and so does a file this build cannot read: an artifact route
+/// answers a session that is there or `404`, never the file's own refusal.
+fn pointed_session(paths: &RunPaths, id: &ArtifactId) -> Option<Vec<u8>> {
+    let agents = onepipeline::verbs::agents(paths, AgentScope::Run).ok()?;
+    let session = agents.sessions.iter().find(|session| {
+        session
+            .runs
+            .iter()
+            .any(|run| run.history_id.to_string() == id.as_str())
+    })?;
+    session_record(
+        Some(&session.history_dir),
+        &session.history_project,
+        &session.history_session,
+        id,
+    )
+}
+
+/// One record of a oneharness session file, found through the three fields
+/// every pointer at one carries, and read only once its path is proved to
+/// land under the store the pointer named.
+fn session_record(
+    history_dir: Option<&str>,
+    history_project: &str,
+    history_session: &str,
+    id: &ArtifactId,
+) -> Option<Vec<u8>> {
     // An empty value names no store, which is what oneharness itself reads
     // `history_dir = ""` as, so it falls back rather than being refused.
-    let named = match field("history_dir").filter(|value| !value.is_empty()) {
+    let named = match history_dir.filter(|value| !value.is_empty()) {
         Some(named) => Some(NamedStore::try_from(named).ok()?),
         None => None,
     };
     let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
     let store = StoreRoot::read(&dir)?;
-    let project = PathSegment::try_from(field("history_project")?).ok()?;
-    let session = PathSegment::try_from(field("history_session")?).ok()?;
+    let project = PathSegment::try_from(history_project).ok()?;
+    let session = PathSegment::try_from(history_session).ok()?;
     let listed = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
         .ok()
         .flatten()?;
@@ -5994,32 +6060,118 @@ pub fn conversation_signature(
 pub fn projects(
     projects: &onepipeline::views::Projects,
     rows: &dyn Fn(&RunSummary) -> Option<Value>,
+    agents: &dyn Fn(&onepipeline::views::ProjectGroup) -> Option<usize>,
 ) -> Value {
     Value::Array(
         projects
             .groups
             .iter()
-            .map(|group| project_group(group, rows))
+            .map(|group| project_group(group, rows, agents))
             .collect(),
     )
 }
 
-/// One group of the grouped listing: `{project, name, last_write_at, runs}`.
+/// One group of the grouped listing: `{project, name, last_write_at, runs,
+/// agent_count}`.
 ///
 /// `project` is `null` for the runs whose summary recorded none — the
 /// `(no project)` group, an ordinary group — and `name` is the plan's name off
 /// the newest run that recorded one, as the SDK reads it for the group's header.
+/// `agent_count` is how many sessions `GET /api/v2/projects/{project}/agents`
+/// answers for the group, absent only where a pointer file of its runs could
+/// not be read.
 #[must_use]
 pub fn project_group(
     group: &onepipeline::views::ProjectGroup,
     rows: &dyn Fn(&RunSummary) -> Option<Value>,
+    agents: &dyn Fn(&onepipeline::views::ProjectGroup) -> Option<usize>,
 ) -> Value {
-    json!({
+    let mut payload = json!({
         "project": group.project,
         "name": group.name,
         "last_write_at": group.last_write_at,
         "runs": group.runs.iter().filter_map(rows).collect::<Vec<Value>>(),
-    })
+    });
+    if let Some(count) = agents(group) {
+        payload["agent_count"] = json!(count);
+    }
+    payload
+}
+
+/// `verbs::agents` or `verbs::project_agents`, projected: one entry per
+/// oneharness session as the SDK serves it, and the lines it counted and did
+/// not read.
+///
+/// Each entry is the SDK's own record — the session's id, name, store, project
+/// slug, file, working directory, start, labels and harness runs — with one
+/// field beside it: `run_id`, the run whose pointer file the line is in, which
+/// is the run `GET /api/v2/runs/{run}/artifacts/{history_id}` opens each harness
+/// run's transcript through. A run's or a node's listing already knows it; a
+/// project's is the union over its runs, so there it is read off the
+/// `onepipeline.run_id` label the engine stamps on every launch, and left off an
+/// entry that carries none — a session with no run to open it through.
+///
+/// # Errors
+///
+/// A record of the SDK's that does not serialize, which no session it reads
+/// back can be.
+pub fn agents(scope: &AgentsScope<'_>, agents: &Agents) -> Result<Value, serde_json::Error> {
+    let mut payload = Map::new();
+    match scope {
+        AgentsScope::Run { run, node } => {
+            payload.insert("run_id".into(), json!(run));
+            if let Some(node) = node {
+                payload.insert("node".into(), json!(node));
+            }
+        }
+        AgentsScope::Project(project) => {
+            payload.insert("project".into(), json!(project));
+        }
+    }
+    let sessions = agents
+        .sessions
+        .iter()
+        .map(|session| agent_entry(scope, session))
+        .collect::<Result<Vec<Value>, _>>()?;
+    payload.insert("sessions".into(), Value::Array(sessions));
+    payload.insert("skipped".into(), json!(agents.skipped));
+    Ok(Value::Object(payload))
+}
+
+/// Which listing the agents payload is: a run's (or one node's of it), which
+/// names the run every entry is under, or a project's, which does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentsScope<'a> {
+    /// The run's pointer file, whole or at one node.
+    Run {
+        /// The run.
+        run: &'a RunId,
+        /// The node, where the listing is one node's.
+        node: Option<&'a NodeId>,
+    },
+    /// The union over a project's runs.
+    Project(&'a crate::contract::ProjectId),
+}
+
+fn agent_entry(
+    scope: &AgentsScope<'_>,
+    session: &AgentSession,
+) -> Result<Value, serde_json::Error> {
+    // llmlint: ignore[secrets_stay_server_side] the record is served whole on purpose: `history_dir`, `history_file` and `project` are the SDK's own `AgentSession` fields, which `docs/contract.md` names one by one and `onepipeline agents RUN` prints to the same operator on the same host — they locate the operator's own transcripts, not a credential, and the rule this crate keeps is that the agent reading the CLI sees at least what the human here sees. Nothing opens a file by them: a transcript is opened through the artifact route, which resolves the pointer's fields through the confined `session_record` and never a path a reader sent.
+    let mut entry = serde_json::to_value(session)?;
+    let run = match scope {
+        AgentsScope::Run { run, .. } => Some(run.as_str().to_owned()),
+        AgentsScope::Project(_) => session
+            .labels
+            .as_map()
+            .get(RUN_ID_LABEL)
+            .and_then(|stamped| RunId::try_from(stamped.as_str()).ok())
+            .map(|run| run.as_str().to_owned()),
+    };
+    if let Some(run) = run {
+        entry["run_id"] = json!(run);
+    }
+    Ok(entry)
 }
 
 /// The SDK's own text for one of its rendered verbs, beside the run it is about.

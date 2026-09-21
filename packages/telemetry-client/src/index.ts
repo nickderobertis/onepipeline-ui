@@ -13,13 +13,16 @@ import {
   channelQueueSchema,
   type DagConversation,
   dagConversationSchema,
+  type ProjectAgents,
   type ProjectDetail,
   type ProjectList,
+  projectAgentsSchema,
   projectDetailSchema,
   projectListSchema,
   type RenderedRoot,
   type RenderedRun,
   type ReplyReceipt,
+  type RunAgents,
   type RunDetail,
   type RunList,
   type RunStatus,
@@ -29,6 +32,7 @@ import {
   renderedRootSchema,
   renderedRunSchema,
   replyReceiptSchema,
+  runAgentsSchema,
   runDetailSchema,
   runListSchema,
   runStatusSchema,
@@ -524,6 +528,37 @@ export class TelemetryClient {
     return this.#request(
       this.#url(API_V2_PATHS.telemetry(runId)),
       runTelemetryDocumentSchema.parse,
+    );
+  }
+
+  /**
+   * Every oneharness session the run's launches wrote, off the run's own
+   * pointer file. A run with no pointer file is an empty list.
+   */
+  async getAgents(runId: string): Promise<RunAgents> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.agents(runId)),
+      runAgentsSchema.parse,
+    );
+  }
+
+  /** The sessions one node's dispatches wrote; a node that dispatched nothing is an empty list. */
+  async getNodeAgents(runId: string, nodeId: string): Promise<RunAgents> {
+    requireOpaqueId(runId, "run ID");
+    requireOpaqueId(nodeId, "node ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.nodeAgents(runId, nodeId)),
+      runAgentsSchema.parse,
+    );
+  }
+
+  /** The union over a project's runs, under the same id {@link getProject} takes. */
+  async getProjectAgents(projectId: string): Promise<ProjectAgents> {
+    requireOpaqueId(projectId, "project ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.projectAgents(projectId)),
+      projectAgentsSchema.parse,
     );
   }
 

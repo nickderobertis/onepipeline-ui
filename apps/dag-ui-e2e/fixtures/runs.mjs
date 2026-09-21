@@ -379,6 +379,19 @@ export const HARNESS_SESSION_TEXT =
 const HARNESS_PROJECT = "tmp-dag-ui-e2e-project";
 /** The session file inside it, as oneharness names one: name, instant, pid. */
 const HARNESS_SESSION_FILE = "engineer-dashboard-20260817T001158Z-3163805";
+/** The directory the harness ran in, which every record and pointer line names. */
+const HARNESS_CWD = "/tmp/dag-ui-e2e/project";
+/**
+ * The live run's observer session, and the sibling run's one worker: two more
+ * sessions the store holds, each named by a pointer line and nothing else — no
+ * envelope relays them, which is what the agents listing exists to show.
+ */
+const OBSERVER_SESSION_FILE = "monitor-20260817T001100Z-3163800";
+export const OBSERVER_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c00";
+const SIBLING_SESSION_FILE = "worker-sibling-20260817T000500Z-3163700";
+export const SIBLING_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c01";
+/** What the sibling's worker said, which opening its entry on the project page reads. */
+export const SIBLING_SESSION_TEXT = "ran beside the dashboard work and settled";
 
 /**
  * One oneharness history record, in the line format that library writes.
@@ -391,14 +404,18 @@ const HARNESS_SESSION_FILE = "engineer-dashboard-20260817T001158Z-3163805";
  * through the served route — plus the journey below, which stops finding this
  * conversation the moment either side moves.
  */
-function harnessSessionRecord() {
+function harnessSessionRecord(
+  historyId = HARNESS_SESSION_ARTIFACT,
+  session = HARNESS_SESSION_FILE,
+  text = HARNESS_SESSION_TEXT,
+) {
   return `${JSON.stringify({
     type: "run",
     schema_version: "1.1",
-    history_id: HARNESS_SESSION_ARTIFACT,
-    session: HARNESS_SESSION_FILE,
-    name: "engineer-dashboard",
-    project: "/tmp/dag-ui-e2e/project",
+    history_id: historyId,
+    session,
+    name: session.replace(/-\d{8}T\d{6}Z-\d+$/u, ""),
+    project: HARNESS_CWD,
     timestamp: "2026-08-17T00:11:58Z",
     harness: "claude-code",
     variant: "alternate",
@@ -410,7 +427,7 @@ function harnessSessionRecord() {
     exit_code: 0,
     duration_ms: 4200,
     finished_at: null,
-    text: HARNESS_SESSION_TEXT,
+    text,
     text_source: "json:result",
     usage: {
       input_tokens: 1200,
@@ -437,7 +454,77 @@ function writeHarnessHistory(root) {
   mkdirSync(join(dir, HARNESS_PROJECT), { recursive: true });
   const path = join(dir, HARNESS_PROJECT, `${HARNESS_SESSION_FILE}.jsonl`);
   writeFileSync(path, harnessSessionRecord());
+  for (const [id, session, text] of [
+    [OBSERVER_HISTORY_ID, OBSERVER_SESSION_FILE, "nothing has been quiet"],
+    [SIBLING_HISTORY_ID, SIBLING_SESSION_FILE, SIBLING_SESSION_TEXT],
+  ]) {
+    writeFileSync(
+      join(dir, HARNESS_PROJECT, `${session}.jsonl`),
+      harnessSessionRecord(id, session, text),
+    );
+  }
   return { dir, bytes: readFileSync(path).length };
+}
+
+/**
+ * One line of a run's pointer file, in the shape `oneharness-core`'s
+ * `HistoryPointer` writes and its reader re-checks: the store, the project slug,
+ * the session stem and the file they compose into, the session's name and
+ * working directory, the harness identity in both spellings, when the harness
+ * run began, and the labels the engine stamped the launch with.
+ *
+ * The third place this repository spells another crate's line format, for the
+ * reason `harnessSessionRecord` gives; what holds it is the Rust side, where
+ * `tests/support/fixture_run.rs` builds the same line through that crate's own
+ * constructors and `tests/e2e/server.rs` reads a writer's own back. A line the
+ * reader refuses is counted as skipped, which the journey over this file holds
+ * to zero.
+ */
+function pointerLine(store, session, historyId, harnessId, started, labels) {
+  const [harness, variant] = harnessId.split(":");
+  return `${JSON.stringify({
+    schema_version: "1.0",
+    history_id: historyId,
+    history_dir: store,
+    history_project: HARNESS_PROJECT,
+    history_session: session,
+    history_file: join(store, HARNESS_PROJECT, `${session}.jsonl`),
+    name: session.replace(/-\d{8}T\d{6}Z-\d+$/u, ""),
+    project: HARNESS_CWD,
+    harness,
+    ...(variant === undefined ? {} : { variant }),
+    harness_id: harnessId,
+    started,
+    labels,
+  })}\n`;
+}
+
+/**
+ * The labels the engine stamps on a launch under `runId`, key by key as its
+ * `compose_labels` renders them: the run, the project, the scope, and for a
+ * node's dispatch the node and the attempt — with the repository's own `role`
+ * surviving beside them.
+ */
+function agentLabels(runId, scope, node, attempt) {
+  return {
+    ...(node === undefined
+      ? {}
+      : { "onepipeline.attempt": String(attempt), "onepipeline.node": node }),
+    "onepipeline.project": projectOf(runId),
+    "onepipeline.run_id": runId,
+    "onepipeline.scope": scope,
+    role: "engineer",
+  };
+}
+
+/**
+ * The run's pointer file, `oneharness-sessions.jsonl` under its root: one line
+ * per harness run every oneharness under the run's launches began, which is
+ * the whole of what the agents routes read. Written beside the run's journal
+ * because that is where the engine has every launch write it.
+ */
+function writePointerFile(dir, lines) {
+  writeFileSync(join(dir, "oneharness-sessions.jsonl"), lines.join(""));
 }
 
 /**
@@ -1696,6 +1783,29 @@ function writeLiveRun(root) {
     },
   );
 
+  // What the engine's overlay had every oneharness under this run's launches
+  // append to the run's own pointer file: the observer's session, and the
+  // dashboard worker's — the latter also relayed as the artifact below, so one
+  // session opens from the timeline and from the agents listing to one record.
+  writePointerFile(dir, [
+    pointerLine(
+      harnessHistory.dir,
+      OBSERVER_SESSION_FILE,
+      OBSERVER_HISTORY_ID,
+      "claude-code",
+      "2026-08-17T00:11:00Z",
+      agentLabels(LIVE_RUN, "observer"),
+    ),
+    pointerLine(
+      harnessHistory.dir,
+      HARNESS_SESSION_FILE,
+      HARNESS_SESSION_ARTIFACT,
+      "claude-code:alternate",
+      "2026-08-17T00:11:58Z",
+      agentLabels(LIVE_RUN, "node", "dashboard", 1),
+    ),
+  ]);
+
   // Where that worker's conversation was actually written down. Published once
   // per oneharness invocation, carrying the pointer at the record and one
   // artifact naming it — and carrying **no** `session` label, because the
@@ -2100,6 +2210,19 @@ function writeSiblingRun(root) {
   // state here outside the vocabulary the UI gives a meaning to.
   journal.advance(2).emit("pipeline", "run-stopped", { run_id: SIBLING_RUN });
   journal.write();
+  // The one session its dispatch wrote, in the store beside the runs root — the
+  // same store the live run's sessions are in, because one oneharness on one
+  // host keeps one history — so the project's union reads across both runs.
+  writePointerFile(dir, [
+    pointerLine(
+      join(root, "..", "oneharness-history"),
+      SIBLING_SESSION_FILE,
+      SIBLING_HISTORY_ID,
+      "codex",
+      "2026-08-17T00:05:00Z",
+      agentLabels(SIBLING_RUN, "node", "sibling", 1),
+    ),
+  ]);
 }
 
 /**
@@ -2712,6 +2835,29 @@ export function facts() {
       nodes: NAMED_NODES,
     },
     foundation_pr: FOUNDATION_PR,
+    /**
+     * What the pointer files name: how many sessions each recorded run's file
+     * names — none for the history run, which has no file — and the project's
+     * union over the observatory's runs; the dashboard worker's session, by
+     * the history id its line carries and the words its record ends on; and
+     * the sibling's, on the project page.
+     */
+    agents: {
+      live: 2,
+      sibling: 1,
+      history: 0,
+      observatory: 3,
+      worker: {
+        history_id: HARNESS_SESSION_ARTIFACT,
+        node: "dashboard",
+        text: HARNESS_SESSION_TEXT,
+      },
+      sibling_worker: {
+        history_id: SIBLING_HISTORY_ID,
+        node: "sibling",
+        text: SIBLING_SESSION_TEXT,
+      },
+    },
     unfiled_kind: UNFILED_KIND,
     sentinel: {
       node: "local-direct",

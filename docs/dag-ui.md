@@ -139,6 +139,10 @@ record at all reads as `Unattributed`. Select a run, then:
 - **Channel**, **Watch** and **Reads** are the supervising surface, described in
   [Supervising a run](#supervising-a-run): every verb the CLI has once a plan is
   running, from the run it is about.
+- **Agents** is every agent the run launched, described in
+  [The agents a run launched](#the-agents-a-run-launched): each oneharness session
+  under any of its launches, whatever the repository's agent structure, opening to
+  its transcript.
 
 **One reading, at three scopes.** The same plot, the same lane words and the same
 clock are used for the whole run, for one node, and for one conversation, and each
@@ -180,7 +184,8 @@ act. The run view now offers every post-launch verb, each wired to its one route
 and nothing else — the routes are named verb by verb below — and every receipt and
 refusal is shown **as the API returned it** — the engine's own object, the engine's
 own words — never restated. The header of a run carries the controls that are about
-the run as a whole; three tabs beside Graph and Overall carry the rest.
+the run as a whole; three tabs beside Graph and Overall carry the rest, and a
+fourth, **Agents**, is the section after this one.
 
 - **Status and liveness** in the header are `GET .../status`: the engine's own word
   for how the run is being driven, read again on every stream invalidation and on a
@@ -248,6 +253,51 @@ the run as a whole; three tabs beside Graph and Overall carry the rest.
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
 every other journey reads is left as it was.
+
+## The agents a run launched
+
+The engine stamps every dispatch it starts — a node's, each step of a lifecycle
+node, the observer graph, the drafting graph — so that every oneharness turn under
+it, however the repository wired it, appends one line to the run's own **pointer
+file** saying where its session went. **The transcripts stay in each oneharness's
+own store**: the engine names no store, a repository's own `history_dir` or the
+platform default is honoured untouched, and the pointer line says which. The
+**Agents** panel is that file read back through `GET /api/v2/runs/{run}/agents`,
+and it shows every agent the run launched without the repository having configured
+anything for it.
+
+- **The run's Agents tab** lists every session, **grouped by scope and attempt**:
+  the node dispatches by their attempt, then the observer, then the change request
+  author, in the engine's own scope order — a word the engine stamps that this build
+  has never seen heads a group of its own rather than being dropped. Each session
+  shows its name, the labels a reader wants — the node and the step the engine
+  stamped, and every label the repository stamped beside them, such as a `role`,
+  under the word it chose — the harness runs it recorded by their configured
+  harness ids, and when it started. The count beside the heading is the run
+  detail's own `agent_count`, so a reader can hold the listing to it: a run with no
+  pointer file is `0 agents` and `No agents launched.`, never an error, and a
+  pointer file the server could not read is the engine's refusal, shown as returned,
+  with no count beside it rather than a zero.
+- **A node's Agents tab** is `GET .../nodes/{node}/agents`: the sessions that
+  node's dispatches wrote, and none for a node that dispatched nothing.
+- **A project's page** ends with the union across its runs,
+  `GET /api/v2/projects/{project}/agents`, grouped the same way, and its row in the
+  navigation and its card on the landing carry the group's `agent_count`. The
+  `(no project)` group has no id and so no route, and its page shows its runs
+  alone.
+- **Open transcript** on a harness run opens it through the conversation view the
+  app already has for a `oneharness_session` artifact — `GET
+  /api/v2/runs/{run}/artifacts/{history_id}`, asked for under the run the entry
+  names and by the harness run's history id alone. The server resolves that
+  through the three fields the pointer line carries in the same spelling as a
+  relayed session record, in the store the line names; no path on the host reaches
+  the browser, and a session the store no longer holds says so in place of the
+  conversation.
+
+`e2e/dag-ui-supervise.spec.ts` drives the run's, a node's and a project's agents
+against the real API over runs whose pointer files the fixture wrote beside their
+journals, opening one session's transcript from the run and another from the
+project page, and holds both counts to the sessions those files name.
 
 ## The graph timeline
 
@@ -473,9 +523,9 @@ Escape key. It is a **timeline over a transcript**, both projected from
   An **edit** by an author other than the planner is named by that author on its
   row and in its facts, and the engine's own report of it is a surface like any
   other, `edit-applied`, raised by that author.
-- the node's **task, completion criteria, dependencies, PR and gate result** are
-  tabs beside the timeline, one selection away rather than a wall of blocks. Six
-  names do not fit every width, so below the breakpoint they wrap onto a second
+- the node's **task, completion criteria, dependencies, PR, gate result and
+  agents** are tabs beside the timeline, one selection away rather than a wall of
+  blocks. Seven names do not fit every width, so below the breakpoint they wrap onto a second
   row rather than hiding the ones past the edge behind a scroller — down to the
   phone, where the same names need four rows and 170px of an 844px screen, and
   the strip scrolls again so the timeline the view opens on has room to be drawn.

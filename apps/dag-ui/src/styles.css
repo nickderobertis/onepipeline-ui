@@ -264,8 +264,16 @@ p {
  * `fieldset` with a legend is what says the pair is a choice, and the pressed
  * state is what says which one is taken. Borderless because the buttons carry
  * their own.
+ *
+ * Positioned so the legend — visually hidden, which is to say absolutely
+ * positioned — is placed against the fieldset rather than against whatever
+ * positioned ancestor lies outside the strip that scrolls. Placed outside it, the
+ * legend's one pixel sat wherever the fieldset's static position put it, which
+ * once the strip held six views was past the right edge of a narrow viewport —
+ * and a pixel outside the scroller is a document with somewhere to scroll to.
  */
 .detail-switch {
+  position: relative;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;

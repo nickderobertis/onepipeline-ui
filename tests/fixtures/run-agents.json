@@ -1,0 +1,66 @@
+{
+  "api_version": 2,
+  "telemetry_schema_version": 19,
+  "observed_at": "2026-08-07T12:00:00Z",
+  "run_id": "run-20260807-a1b2c3",
+  "sessions": [
+    {
+      "history_session": "monitor-20260807T120000Z-3163600",
+      "name": "monitor",
+      "history_dir": "/a-scratch/oneharness-history",
+      "history_project": "a-recording-host-workspace",
+      "history_file": "/a-scratch/oneharness-history/a-recording-host-workspace/monitor-20260807T120000Z-3163600.jsonl",
+      "project": "//a-recording-host/workspace",
+      "started": "2026-08-07T12:00:00Z",
+      "labels": {
+        "onepipeline.project": "authoring:contract-interface",
+        "onepipeline.run_id": "run-20260807-a1b2c3",
+        "onepipeline.scope": "observer",
+        "role": "engineer"
+      },
+      "runs": [
+        {
+          "history_id": "0198a5b3-2c4d-7e60-8f01-000000000000",
+          "harness": "claude-code",
+          "harness_id": "claude-code",
+          "started": "2026-08-07T12:00:00Z"
+        }
+      ],
+      "run_id": "run-20260807-a1b2c3"
+    },
+    {
+      "history_session": "contract-interface-worker-20260807T120003Z-3163646",
+      "name": "contract-interface-worker",
+      "history_dir": "/a-scratch/oneharness-history",
+      "history_project": "a-recording-host-workspace",
+      "history_file": "/a-scratch/oneharness-history/a-recording-host-workspace/contract-interface-worker-20260807T120003Z-3163646.jsonl",
+      "project": "//a-recording-host/workspace",
+      "started": "2026-08-07T12:00:03Z",
+      "labels": {
+        "onepipeline.attempt": "1",
+        "onepipeline.node": "contract-interface",
+        "onepipeline.project": "authoring:contract-interface",
+        "onepipeline.run_id": "run-20260807-a1b2c3",
+        "onepipeline.scope": "node",
+        "role": "engineer"
+      },
+      "runs": [
+        {
+          "history_id": "0198a5b3-2c4d-7e60-8f01-000000000001",
+          "harness": "claude-code",
+          "variant": "alternate",
+          "harness_id": "claude-code:alternate",
+          "started": "2026-08-07T12:00:03Z"
+        },
+        {
+          "history_id": "0198a5b3-2c4d-7e60-8f01-000000000002",
+          "harness": "codex",
+          "harness_id": "codex",
+          "started": "2026-08-07T12:00:10Z"
+        }
+      ],
+      "run_id": "run-20260807-a1b2c3"
+    }
+  ],
+  "skipped": 0
+}

@@ -41,6 +41,27 @@ const fixtureSchema = z.object({
   }),
   foundation_pr: z.string().min(1),
   /**
+   * What the recorded runs' pointer files name: the sessions per run — none for
+   * a run with no file — the project's union, and the two sessions a journey
+   * opens to their transcripts, by the history id each line carries.
+   */
+  agents: z.object({
+    live: z.number().int().nonnegative(),
+    sibling: z.number().int().nonnegative(),
+    history: z.literal(0),
+    observatory: z.number().int().positive(),
+    worker: z.object({
+      history_id: z.string().min(1),
+      node: z.string().min(1),
+      text: z.string().min(1),
+    }),
+    sibling_worker: z.object({
+      history_id: z.string().min(1),
+      node: z.string().min(1),
+      text: z.string().min(1),
+    }),
+  }),
+  /**
    * The run whose graphs declared members named by nothing built in: the words
    * its payload serves, in the order it serves them, and the nodes its node
    * graph's member ran under — so the journey over its lanes reads the run's own

@@ -108,6 +108,9 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN_GOALS, get(run_goals))
         .route(routes::RUN_TRANSCRIPT, get(transcript))
         .route(routes::RUN_TELEMETRY, get(telemetry))
+        .route(routes::RUN_AGENTS, get(agents))
+        .route(routes::RUN_NODE_AGENTS, get(node_agents))
+        .route(routes::PROJECT_AGENTS, get(project_agents))
         .fallback(fallback)
         .with_state(Serving {
             store: Arc::new(store),
@@ -831,4 +834,33 @@ async fn telemetry(State(serving): Store, Path(run): Path<String>) -> Response {
         Err(error) => return error.into_response(),
     };
     answer(move || serving.store.telemetry(&run)).await
+}
+
+async fn agents(State(serving): Store, Path(run): Path<String>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    answer(move || serving.store.agents(&run)).await
+}
+
+async fn node_agents(State(serving): Store, Path((run, node)): Path<(String, String)>) -> Response {
+    let run = match run_id(&run) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let node = match NodeId::try_from(node.as_str()) {
+        Ok(node) => node,
+        Err(error) => return error.into_response(),
+    };
+    answer(move || serving.store.node_agents(&run, &node)).await
+}
+
+async fn project_agents(State(serving): Store, Path(project): Path<String>) -> Response {
+    // Decoded by the router and parsed here, exactly as the project route does.
+    let project = match ProjectId::try_from(project.as_str()) {
+        Ok(project) => project,
+        Err(error) => return error.into_response(),
+    };
+    answer(move || serving.store.project_agents(&project)).await
 }

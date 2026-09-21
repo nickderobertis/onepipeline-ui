@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  AGENT_LABELS,
+  AGENT_SCOPES,
   agentRoleSchema,
+  agentSessionSchema,
   dagConversationSchema,
   graphPayloadSchema,
   graphResultItemSchema,
@@ -10,6 +13,9 @@ import {
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
+  projectAgentsSchema,
+  projectGroupSchema,
+  runAgentsSchema,
   runDetailSchema,
   runListSchema,
   runSummarySchema,
@@ -306,6 +312,114 @@ test("accepts a run that has recorded no last event, and still rejects a blank o
     lint: 0,
   });
   expect(telemetryResult.success).toBe(true);
+});
+
+describe("agents", () => {
+  const envelope = {
+    api_version: 2,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
+    observed_at: "2026-08-07T12:00:00Z",
+  };
+  /** One session as the SDK serves it, under the engine's labels and one of the repository's. */
+  const session = {
+    history_session: "contract-interface-worker-20260807T120003Z-3163646",
+    name: "contract-interface-worker",
+    history_dir: "/a-scratch/oneharness-history",
+    history_project: "a-recording-host-workspace",
+    history_file:
+      "/a-scratch/oneharness-history/a-recording-host-workspace/contract-interface-worker-20260807T120003Z-3163646.jsonl",
+    project: "/a-recording-host/workspace",
+    started: "2026-08-07T12:00:03Z",
+    labels: {
+      [AGENT_LABELS.attempt]: "1",
+      [AGENT_LABELS.node]: "contract-interface",
+      [AGENT_LABELS.project]: "authoring:contract-interface",
+      [AGENT_LABELS.runId]: "run-20260807-a1b2c3",
+      [AGENT_LABELS.scope]: "node",
+      role: "engineer",
+    },
+    runs: [
+      {
+        history_id: "0198a5b3-2c4d-7e60-8f01-000000000001",
+        harness: "claude-code",
+        variant: "alternate",
+        harness_id: "claude-code:alternate",
+        started: "2026-08-07T12:00:03Z",
+      },
+      {
+        history_id: "0198a5b3-2c4d-7e60-8f01-000000000002",
+        harness: "codex",
+        harness_id: "codex",
+        started: "2026-08-07T12:00:10Z",
+      },
+    ],
+    run_id: "run-20260807-a1b2c3",
+  };
+
+  test("reads a run's, a node's and a project's sessions as the SDK serves them", () => {
+    const run = runAgentsSchema.parse({
+      ...envelope,
+      run_id: "run-20260807-a1b2c3",
+      sessions: [session],
+      skipped: 0,
+    });
+    expect(run.sessions[0]?.runs[1]?.variant).toBeUndefined();
+    expect(run.sessions[0]?.labels[AGENT_LABELS.scope]).toBe("node");
+    expect(run.sessions[0]?.labels.role).toBe("engineer");
+    expect(run.node).toBeUndefined();
+    const node = runAgentsSchema.parse({
+      ...envelope,
+      run_id: "run-20260807-a1b2c3",
+      node: "contract-interface",
+      sessions: [],
+      skipped: 0,
+    });
+    expect(node.node).toBe("contract-interface");
+    expect(node.sessions).toEqual([]);
+    // A project's union names the run each entry is under only where the engine
+    // stamped it; an entry carrying none is still an entry.
+    const unstamped = Object.fromEntries(
+      Object.entries(session).filter(([key]) => key !== "run_id"),
+    );
+    const project = projectAgentsSchema.parse({
+      ...envelope,
+      project: "authoring:contract-interface",
+      sessions: [session, unstamped],
+      skipped: 1,
+    });
+    expect(project.sessions.map((entry) => entry.run_id)).toEqual([
+      "run-20260807-a1b2c3",
+      undefined,
+    ]);
+    expect(project.skipped).toBe(1);
+    expect(AGENT_SCOPES).toContain(session.labels[AGENT_LABELS.scope]);
+  });
+
+  test("refuses a session missing one of the three fields its transcript resolves through", () => {
+    for (const field of ["history_dir", "history_project", "history_session"]) {
+      const missing = Object.fromEntries(
+        Object.entries(session).filter(([key]) => key !== field),
+      );
+      expect(() => agentSessionSchema.parse(missing)).toThrow();
+    }
+    expect(() =>
+      agentSessionSchema.parse({ ...session, runs: [{ history_id: "x" }] }),
+    ).toThrow();
+  });
+
+  test("reads the agent count beside a run and a project group, and its absence", () => {
+    const run = runTelemetrySchema.parse({ ...RUN_TELEMETRY, agent_count: 0 });
+    expect(runTelemetrySchema.parse(RUN_TELEMETRY).agent_count).toBeUndefined();
+    expect(run.agent_count).toBe(0);
+    const group = { project: null, name: null, last_write_at: null, runs: [] };
+    expect(projectGroupSchema.parse(group).agent_count).toBeUndefined();
+    expect(
+      projectGroupSchema.parse({ ...group, agent_count: 3 }).agent_count,
+    ).toBe(3);
+    expect(() =>
+      projectGroupSchema.parse({ ...group, agent_count: -1 }),
+    ).toThrow();
+  });
 });
 
 describe("schema compatibility", () => {

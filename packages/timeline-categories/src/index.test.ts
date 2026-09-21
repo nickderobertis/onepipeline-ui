@@ -40,6 +40,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-ready": "lifecycle",
   "node-dispatched": "lifecycle",
   "node-settled": "lifecycle",
+  // A dispatch that ended before any work began, for the host's reason rather
+  // than the node's, hands the node back to the queue: the run doing it again
+  // rather than a step of the node's life.
+  "node-requeued": "recovery",
   "boundary-retried": "recovery",
   "edit-committed": "repository",
   "command-accepted": "planning",
@@ -66,6 +70,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "run-hook-fired": "lifecycle",
   "run-hook-finished": "lifecycle",
   "run-hook-withheld": "lifecycle",
+  // The driver's own sweep over the harness identity pool — housekeeping of the
+  // run's driving, like an adoption, and no node's work.
+  "pool-maintenance": "lifecycle",
   // `agentgraph` — the members and turns under each node.
   "graph-started": "lifecycle",
   "graph-settled": "lifecycle",

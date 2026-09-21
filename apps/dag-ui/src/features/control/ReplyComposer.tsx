@@ -8,7 +8,7 @@ import {
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Send, Wand2 } from "lucide-react";
 import { useId } from "react";
-import { Outcome } from "./Outcome";
+import { Outcome } from "../../lib/Outcome";
 import {
   isShortcut,
   SHORTCUT_FIELDS,

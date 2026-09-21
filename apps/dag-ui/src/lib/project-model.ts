@@ -60,3 +60,13 @@ export function runStateSummary(runs: readonly RunSummary[]): string {
 export function runCount(runs: readonly RunSummary[]): string {
   return `${runs.length} ${runs.length === 1 ? "run" : "runs"}`;
 }
+
+/**
+ * How many agents a group's runs launched, in words, where the server carried
+ * the count: `3 agents`, `1 agent`. Nothing where a pointer file of the group
+ * could not be read, which the server serves as no count rather than a zero.
+ */
+export function projectAgentCount(group: ProjectGroup): string | undefined {
+  if (group.agent_count === undefined) return undefined;
+  return `${group.agent_count} ${group.agent_count === 1 ? "agent" : "agents"}`;
+}
