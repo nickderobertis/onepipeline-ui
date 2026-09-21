@@ -8,7 +8,8 @@ the run's graph with React Flow, using the exact coordinates from
 validated by `@onepipeline-ui/dag-model` through `@onepipeline-ui/telemetry-client`;
 the app declares no schema, event name, or API path of its own.
 
-**What stays read-only.** Launching a plan and authoring one are outside this app,
+**What this app does not do.** It is not only a read — it supervises runs, and it
+can shut them down — but launching a plan and authoring one are outside this app,
 as they are outside the API it reads: `start`, `plan check` and the planning
 conversation are what make a run, and the browser is what a run is reached with
 afterwards. A planner's conversation is read here and never continued here. What
@@ -25,7 +26,7 @@ its `ScrollArea`; the node's task and context are its `Accordion`; the telemetry
 `Alert`; the loading view is its `Skeleton`; and every secondary action is its
 `Button`, with `Badge`, `Separator`, `Tooltip` and the `cn` helper where they fit.
 `ConversationView` is still not adopted, for a reason that has changed. It used to
-be that it requires a reply handler and this app was read-only. The app now takes
+be that it requires a reply handler and this app only read runs. The app now takes
 a reply — on the run's channel — and the decision was revisited on those terms:
 the component is a whole page for continuing one *harness session* with a free-text
 follow-up (its form is labelled "Continue this session", its help line says it
@@ -39,8 +40,8 @@ Rendering the channel through `ConversationView` would put the run's surfaces on
 the `user` side and the manager's envelopes on the `assistant` side of a session
 that never existed, and its uncontrolled textarea gives a shortcut nothing to fill.
 The composer is built from the package's `Textarea`, `Input`, `Label`, `Button`,
-`Card`, `Badge` and `Dialog` instead, and the planner's own conversations stay
-read-only under `ConversationTimeline` and `TurnCard`, exactly as before.
+`Card`, `Badge` and `Dialog` instead, and the planner's own conversations are
+still only shown, under `ConversationTimeline` and `TurnCard`, exactly as before.
 
 Status is the one place the package's components are not used unchanged.
 `StatusBadge` is the right component for a conversation, whose state really is one
@@ -82,7 +83,7 @@ tree rather than rely on the installer filling peers in implicitly.
 
 ## Run locally
 
-Start the read-only telemetry API, then start Vite in a second shell:
+Start the read API, then start Vite in a second shell:
 
 ```sh
 just bootstrap
@@ -253,6 +254,51 @@ fourth, **Agents**, is the section after this one.
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
 every other journey reads is left as it was.
+
+### Shutting down a run, all my runs, or the host
+
+The view can end the running work it shows, through the engine's own host
+shutdown — the same verb as `onepipeline shutdown`, and nothing decided here: the
+interrupt that asks each dispatch to wrap up and commit, the wait, the teardown of
+whatever is still standing, and the push that preserves every branch are all the
+engine's.
+
+- **Shut down this run** sits in a run's header beside Stop and Adopt, and is
+  `POST .../runs/{run}/shutdown`.
+- **Shut down all my runs** and **Shut down the entire host** sit at the top of the
+  runs listing, and are `POST /api/v2/shutdown` with `scope` `mine` or `host`.
+
+Every one opens a **confirm dialog before anything is sent**, and nothing is sent
+unless it is confirmed; cancelling, or Escape, sends nothing. The dialog names,
+by run id, **exactly which runs it will act on and who owns each**, read off the
+runs listing the view already holds — read to its end first — and told apart by
+the acting session's own key, which `GET /api/v2/unwatched` serves: this session's
+runs as *this session's*, and every other run under its launcher and session key.
+*All my runs* acts on this session's runs and no other's. *The entire host* says
+in words that it acts on runs other sessions own, over their owners, and lists
+them apart from this session's. The dialog offers the **grace** — ten minutes by
+default, the engine's own, as a number with a minutes or seconds unit, sent as
+whole seconds — and a **force** option, never on by default, whose label says what
+it gives up: it skips the interrupt and the wait and goes straight to the
+teardown, and whatever a worker had not committed is lost.
+
+A shutdown waits out its grace, which is minutes, so while its request is open the
+control says it is **still proceeding and shows its evidence**: the time elapsed,
+the grace it is waiting out and until when, and every run in scope whose own
+record has reached the view saying it was put down (`dispatch-stopped`,
+`host-shutdown`). A request that ends without the server's answer — the connection
+dropped, the server gone — is shown **lost**, never as still proceeding, with the
+warning that the engine may still be carrying the shutdown out; a refusal is shown
+in the server's words. When it answers, the **report** is shown run by run: the
+owner, each dispatch with what its interrupt was answered and how it ended, the
+teardown, each branch and where it went, and the host's other unpublished branches
+it did not push. A shutdown the engine says was not complete reads **Shutdown
+incomplete**, never as a success.
+
+`e2e/dag-ui-shutdown.spec.ts` confirms real shutdowns, so each journey starts a
+server of its own over a corpus written for it alone, under an empty
+`ONEVCS_HOME`, where nothing names a process except the one a journey spawns to be
+killed.
 
 ## The agents a run launched
 

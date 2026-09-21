@@ -1,6 +1,6 @@
 # Telemetry client
 
-Typed fetch and server-sent-event access to the read-only telemetry API. Every
+Typed fetch and server-sent-event access to the read API and the verbs beside it. Every
 JSON response and SSE payload is validated with `@onepipeline-ui/dag-model`
 before callbacks or callers receive it.
 
