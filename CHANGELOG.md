@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.11.0...v0.11.1) - 2026-09-21
+
+### Added
+
+- *(serve)* serve the browser bundle and the read API on one origin ([#79](https://github.com/nickderobertis/onepipeline-ui/pull/79))
+
 ## [0.11.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.10.1...v0.11.0) - 2026-09-20
 
 ### Added
