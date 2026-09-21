@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,11 +148,35 @@ function shutdownsSent(page: Page): Sent[] {
   return sent;
 }
 
-/** The runs root's hold files: what a shutdown the engine began leaves behind. */
-function heldRuns(server: ShutdownServer): string[] {
-  return Object.values(server.facts.runs).filter((run) =>
-    existsSync(join(server.workspace, "runs", run, "shutting-down.json")),
+/** A run timeline, as far as this file reads one: the kinds of its events. */
+const timelineSchema = z.object({
+  spans: z.array(
+    z.object({
+      events: z.array(z.object({ kind: z.string() })).optional(),
+    }),
+  ),
+});
+
+/**
+ * The corpus runs whose own record, read through the API, says a host shutdown
+ * put them down — the `host-shutdown` the engine journals once it is done with
+ * a run.
+ */
+async function shutDownRuns(server: ShutdownServer): Promise<string[]> {
+  const runs = Object.values(server.facts.runs);
+  const recorded = await Promise.all(
+    runs.map(async (run) => {
+      const response = await fetch(
+        `${server.origin}/api/v2/runs/${run}/timeline?scope=run`,
+      );
+      expect(response.status).toBe(200);
+      const timeline = timelineSchema.parse(await response.json());
+      return timeline.spans.some((span) =>
+        (span.events ?? []).some(({ kind }) => kind === "host-shutdown"),
+      );
+    }),
   );
+  return runs.filter((_, index) => recorded[index]);
 }
 
 const FORCE_WORDS =
@@ -212,6 +236,7 @@ test.afterEach(async () => {
   sleeper = undefined;
 });
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: the eight journeys below took 26.4 s together on this host (2.3 s to 5.8 s each, the longest waiting out a real three-second grace), the same per-journey cost as the rest of this project (133 journeys in 4.7 min). Each needs only what `dag-ui-e2e:test` already depends on — the built bundle and the API server — and what they exercise is the app's header, navigation and shutdown feature, so an edge narrower than `dag-ui` would drop them out of `nx affected` for exactly the changes they exist to catch.
 test("shuts one run down: the dialog names it and its owner, cancel sends nothing, and the grace confirmed is the grace sent", async ({
   page,
 }) => {
@@ -288,7 +313,7 @@ test("shuts one run down: the dialog names it and its owner, cancel sends nothin
       body: '{"grace":45,"force":false}',
     },
   ]);
-  expect(heldRuns(server)).toEqual([runs.mine]);
+  expect(await shutDownRuns(server)).toEqual([runs.mine]);
 });
 
 test("shuts one run down forced when the force is ticked, and a complete shutdown reads as complete", async ({
@@ -366,7 +391,9 @@ test("shuts down all my runs: the dialog names exactly the runs this session own
       body: '{"scope":"mine","grace":60,"force":false}',
     },
   ]);
-  expect(heldRuns(server).sort()).toEqual([runs.idle, runs.mine].sort());
+  expect((await shutDownRuns(server)).sort()).toEqual(
+    [runs.idle, runs.mine].sort(),
+  );
 });
 
 test("shuts the entire host down: the dialog says in words it acts on runs other sessions own, and names them and their owners", async ({
@@ -424,7 +451,9 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
       body: '{"scope":"host","grace":30,"force":false}',
     },
   ]);
-  expect(heldRuns(server).sort()).toEqual(Object.values(runs).sort());
+  expect((await shutDownRuns(server)).sort()).toEqual(
+    Object.values(runs).sort(),
+  );
 });
 
 test("cancelling any of the three sends nothing and holds no run", async ({
@@ -457,9 +486,9 @@ test("cancelling any of the three sends nothing and holds no run", async ({
   await expect(dialogOf(page)).toBeHidden();
 
   // A confirm sends as it is clicked, so a dialog that sent anything has done
-  // so by now; nothing did, and no run carries a shutdown's hold.
+  // so by now; nothing did, and no run records having been shut down.
   expect(sent).toEqual([]);
-  expect(heldRuns(server)).toEqual([]);
+  expect(await shutDownRuns(server)).toEqual([]);
   // And no control shows a shutdown under way: every status region is absent.
   await expect(page.getByRole("region", { name: /shutdown/i })).toHaveCount(0);
 });
@@ -594,3 +623,4 @@ test("a live dispatch that outlasts the grace is killed, and the report says so 
   await ended;
   expect(sleeper.signalCode).toBe("SIGTERM");
 });
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]

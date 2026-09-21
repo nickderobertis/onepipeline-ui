@@ -11770,12 +11770,6 @@ fn a_stop_is_judged_by_the_acting_session() {
     assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
 }
 
-/// Whether a shutdown has begun for a run: the hold the engine writes before it
-/// signals anything, which only an adoption lifts.
-fn held_for_shutdown(serving: &Serving, run: &str) -> bool {
-    serving.run_dir(run).join("shutting-down.json").exists()
-}
-
 /// The `host-shutdown` records one run's journal carries.
 fn host_shutdowns(serving: &Serving, run: &str) -> Vec<Value> {
     events_on(
@@ -11788,6 +11782,12 @@ fn host_shutdowns(serving: &Serving, run: &str) -> Vec<Value> {
     .into_iter()
     .filter(|event| event["kind"] == json!("host-shutdown"))
     .collect()
+}
+
+/// Whether a run's own record, read through the API, says a host shutdown put
+/// it down.
+fn held_for_shutdown(serving: &Serving, run: &str) -> bool {
+    !host_shutdowns(serving, run).is_empty()
 }
 
 #[test]
