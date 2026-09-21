@@ -1696,9 +1696,11 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
     );
     for (path, file) in [
         ("index.html", view.path().join("index.html")),
+        // Joined a component at a time: the script writes the path the
+        // filesystem walk returns, which uses the platform's separator.
         (
             "assets/index-abc123.js",
-            view.path().join("assets/index-abc123.js"),
+            view.path().join("assets").join("index-abc123.js"),
         ),
     ] {
         assert!(
