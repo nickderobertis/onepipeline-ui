@@ -11770,6 +11770,504 @@ fn a_stop_is_judged_by_the_acting_session() {
     assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
 }
 
+/// Whether a shutdown has begun for a run: the hold the engine writes before it
+/// signals anything, which only an adoption lifts.
+fn held_for_shutdown(serving: &Serving, run: &str) -> bool {
+    serving.run_dir(run).join("shutting-down.json").exists()
+}
+
+/// The `host-shutdown` records one run's journal carries.
+fn host_shutdowns(serving: &Serving, run: &str) -> Vec<Value> {
+    events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    )
+    .into_iter()
+    .filter(|event| event["kind"] == json!("host-shutdown"))
+    .collect()
+}
+
+#[test]
+fn a_run_shutdown_is_the_engines_report_under_the_acting_session() {
+    let run = fixture_run::RUN_ID;
+    let shutdown = format!("/api/v2/runs/{run}/shutdown");
+    let owner = Serving::start_as(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+            fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        },
+        fixture_run::SESSION,
+    );
+
+    // An empty body is the default shutdown: the engine's own grace, nothing
+    // forced — answered with the engine's report of this one run.
+    let answered = http::post(owner.address, &shutdown, "");
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let report = answered.json();
+    assert_enveloped(&report);
+    assert_eq!(report["scope"], json!("run"), "{report}");
+    assert_eq!(report["complete"], json!(true), "{report}");
+    assert_eq!(
+        report["grace_seconds"],
+        json!(onepipeline::cli::DEFAULT_SHUTDOWN_GRACE_SECONDS)
+    );
+    assert_eq!(report["forced"], json!(false));
+    assert_eq!(
+        report["root"],
+        json!(owner.runs_root().display().to_string()),
+        "the report names the runs root it read"
+    );
+    let runs = report["runs"].as_array().expect("the runs acted on");
+    assert_eq!(runs.len(), 1, "one run, and only the one named: {report}");
+    assert_eq!(runs[0]["run_id"], json!(run));
+    assert_eq!(runs[0]["owner"], json!("[mine]"));
+    assert_eq!(runs[0]["forced_over_owner"], json!(false));
+    assert_eq!(
+        runs[0]["dispatches"],
+        json!([]),
+        "nothing live to interrupt"
+    );
+    // The driver was recorded on another host, so this one signals nothing and
+    // says so in `stop`'s own word.
+    assert_eq!(runs[0]["teardown"], json!("elsewhere"));
+    assert!(report["not_pushed"].is_array(), "{report}");
+    let rendered = report["rendered"].as_str().expect("the engine's own text");
+    assert!(
+        rendered.starts_with("shutdown  scope run  grace 600s"),
+        "{rendered}"
+    );
+    assert!(rendered.contains(run), "{rendered}");
+    // The run's own record says a host shutdown put it down — and it is not a
+    // stop: no `run-stopped` is journalled, and the run stays adoptable.
+    let recorded = host_shutdowns(&owner, run);
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert!(held_for_shutdown(&owner, run));
+    assert!(
+        !held_for_shutdown(&owner, fixture_run::OTHER_RUN_ID),
+        "a run scope acts on the run it names and no other"
+    );
+
+    // A grace and a force, as the body names them.
+    let forced = http::post(owner.address, &shutdown, r#"{"grace": 30, "force": true}"#);
+    assert_eq!(forced.status, 200, "{}", forced.body);
+    let forced = forced.json();
+    assert_eq!(forced["grace_seconds"], json!(30), "{forced}");
+    assert_eq!(forced["forced"], json!(true));
+    // And a grace of zero is the engine's force path, without the flag.
+    let zero = http::post(owner.address, &shutdown, r#"{"grace": 0}"#).json();
+    assert_eq!(zero["grace_seconds"], json!(0), "{zero}");
+    assert_eq!(zero["forced"], json!(true), "{zero}");
+}
+
+#[test]
+fn a_refused_shutdown_is_the_engines_refusal_and_signals_nothing() {
+    let run = fixture_run::RUN_ID;
+    let shutdown = format!("/api/v2/runs/{run}/shutdown");
+    let stranger = Serving::start_as(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        },
+        STRANGER,
+    );
+
+    // Another session's run, under the run scope: `409 not_owner`, naming the
+    // owner as the engine names it, and nothing held or journalled.
+    let refused = http::post(stranger.address, &shutdown, "");
+    assert_eq!(refused.status, 409, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("not_owner"));
+    let said = refused["error"]["message"].as_str().expect("the refusal");
+    assert!(said.contains("[claude-code:"), "{said}");
+    assert!(!said.contains(fixture_run::SESSION), "{said}");
+    // Not even forced: `force` skips the wait, never the ownership rule.
+    let forced = http::post(stranger.address, &shutdown, r#"{"force": true}"#);
+    assert_eq!(forced.status, 409, "{}", forced.body);
+    assert!(!held_for_shutdown(&stranger, run), "nothing was signalled");
+    assert_eq!(host_shutdowns(&stranger, run), Vec::<Value>::new());
+
+    // A run that is not there.
+    let absent = http::post(
+        stranger.address,
+        "/api/v2/runs/run-that-is-not-there/shutdown",
+        "",
+    );
+    assert_eq!(absent.status, 404, "{}", absent.body);
+    assert_eq!(absent.json()["error"]["code"], json!("run_not_found"));
+
+    // Bodies that are not the shape, refused before the engine is asked.
+    for body in [
+        r#"{"grace": -1}"#,
+        r#"{"grace": "ten minutes"}"#,
+        r#"{"grace": 1.5}"#,
+        r#"{"force": "yes"}"#,
+        r#"{"scope": "host"}"#,
+        "not json",
+    ] {
+        let shapeless = http::post(stranger.address, &shutdown, body);
+        assert_eq!(shapeless.status, 422, "{body}: {}", shapeless.body);
+        assert_eq!(
+            shapeless.json()["error"]["code"],
+            json!("invalid_request"),
+            "{body}"
+        );
+    }
+    for body in [
+        "",
+        "{}",
+        r#"{"scope": "run"}"#,
+        r#"{"scope": "host", "grace": -5}"#,
+    ] {
+        let shapeless = http::post(stranger.address, "/api/v2/shutdown", body);
+        assert_eq!(shapeless.status, 422, "{body}: {}", shapeless.body);
+        assert_eq!(
+            shapeless.json()["error"]["code"],
+            json!("invalid_request"),
+            "{body}"
+        );
+    }
+    // A grace this host's clock cannot count to: the engine's own refusal.
+    let unbounded = http::post(
+        stranger.address,
+        "/api/v2/shutdown",
+        &json!({ "scope": "host", "grace": u64::MAX }).to_string(),
+    );
+    assert_eq!(unbounded.status, 422, "{}", unbounded.body);
+    assert_eq!(unbounded.json()["error"]["code"], json!("refused"));
+    assert!(!held_for_shutdown(&stranger, run), "nothing was signalled");
+}
+
+#[test]
+fn mine_acts_on_this_sessions_runs_and_host_on_every_run_naming_each_owner() {
+    let mine = fixture_run::RUN_ID;
+    let theirs = fixture_run::OTHER_RUN_ID;
+    let build = |root: &Path| {
+        fixture_run::write(root, mine);
+        fixture_run::write(root, theirs);
+        fixture_run::launched_by(root, theirs, "codex", fixture_run::LIVE_SESSION);
+    };
+
+    // `mine`: this session's run, and never another's — which is left exactly
+    // as it was.
+    let serving = Serving::start_as(build, fixture_run::SESSION);
+    let answered = http::post(
+        serving.address,
+        "/api/v2/shutdown",
+        r#"{"scope": "mine", "grace": 45}"#,
+    );
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let report = answered.json();
+    assert_enveloped(&report);
+    assert_eq!(report["scope"], json!("mine"), "{report}");
+    assert_eq!(report["grace_seconds"], json!(45));
+    let acted: Vec<&Value> = report["runs"]
+        .as_array()
+        .expect("the runs acted on")
+        .iter()
+        .map(|run| &run["run_id"])
+        .collect();
+    assert_eq!(acted, vec![&json!(mine)], "{report}");
+    assert_eq!(report["runs"][0]["owner"], json!("[mine]"));
+    assert!(held_for_shutdown(&serving, mine));
+    assert!(
+        !held_for_shutdown(&serving, theirs),
+        "another session's run"
+    );
+    assert_eq!(host_shutdowns(&serving, theirs), Vec::<Value>::new());
+
+    // `host`: every run under the root, whoever owns it — acting over the
+    // ownership rule and naming the owner it acted over.
+    let serving = Serving::start_as(build, fixture_run::SESSION);
+    let answered = http::post(serving.address, "/api/v2/shutdown", r#"{"scope": "host"}"#);
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let report = answered.json();
+    assert_eq!(report["scope"], json!("host"), "{report}");
+    assert_eq!(
+        report["grace_seconds"],
+        json!(onepipeline::cli::DEFAULT_SHUTDOWN_GRACE_SECONDS)
+    );
+    let runs = report["runs"].as_array().expect("the runs acted on");
+    assert_eq!(runs.len(), 2, "{report}");
+    let other = runs
+        .iter()
+        .find(|run| run["run_id"] == json!(theirs))
+        .unwrap_or_else(|| panic!("the other session's run was acted on: {report}"));
+    assert_eq!(other["forced_over_owner"], json!(true), "{other}");
+    let owner = other["owner"].as_str().expect("the owner");
+    assert!(owner.starts_with("[codex:"), "the owner is named: {owner}");
+    assert!(!owner.contains(fixture_run::LIVE_SESSION), "{owner}");
+    let own = runs
+        .iter()
+        .find(|run| run["run_id"] == json!(mine))
+        .expect("this session's own run");
+    assert_eq!(own["forced_over_owner"], json!(false));
+    assert!(
+        report["rendered"]
+            .as_str()
+            .is_some_and(|said| said.contains("which is another session's run")),
+        "{report}"
+    );
+    assert!(held_for_shutdown(&serving, mine));
+    assert!(held_for_shutdown(&serving, theirs));
+    assert_eq!(host_shutdowns(&serving, theirs).len(), 1);
+}
+
+/// A process that outlives the shell that started it, so that nothing in this
+/// test is its parent: `init` reaps it the moment a teardown ends it, which is
+/// what a dispatch whose driver has gone looks like to the host.
+#[cfg(target_os = "linux")]
+struct Orphan(u32);
+
+#[cfg(target_os = "linux")]
+impl Orphan {
+    fn start() -> Self {
+        let said = std::process::Command::new("sh")
+            .args(["-c", "sleep 300 >/dev/null 2>&1 & echo $!"])
+            .output()
+            .expect("sh runs");
+        let pid: u32 = String::from_utf8_lossy(&said.stdout)
+            .trim()
+            .parse()
+            .expect("the orphan's pid");
+        Self(pid)
+    }
+
+    /// Its start token as the kernel records it, in the spelling a dispatch
+    /// registry entry carries on Linux: the start time `/proc/PID/stat` gives.
+    fn started(&self) -> String {
+        let stat = fs::read_to_string(format!("/proc/{}/stat", self.0)).expect("its stat");
+        let ticks = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+            .expect("the start time");
+        format!("linux-proc-stat:{ticks}")
+    }
+
+    fn alive(&self) -> bool {
+        Path::new(&format!("/proc/{}", self.0)).exists()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Orphan {
+    fn drop(&mut self) {
+        if self.alive() {
+            // This test started it; it is the one process the test may end.
+            let _ = std::process::Command::new("kill")
+                .arg(self.0.to_string())
+                .status();
+        }
+    }
+}
+
+// llmlint: ignore-block[tests_mirror_real_usage] the dispatch registry entry is the one a
+// driver writes when it starts a node's process — node, pid, this host and the process's own
+// start token — and the journey writes it rather than earning it through a driver, because a
+// driver that keeps a dispatch alive for as long as a journey needs is one running a harness
+// and a model. The process it names is real, started here and proven alive by the engine's own
+// probe, and everything after the entry — the ask, the wait, the teardown that kills it, and
+// the report — is the engine's, reached through the route.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_shutdown_that_killed_a_dispatch_answers_its_whole_report_as_not_complete() {
+    let run = fixture_run::RUN_ID;
+    let shutdown = format!("/api/v2/runs/{run}/shutdown");
+    let worker = Orphan::start();
+    let started = worker.started();
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write(root, run);
+            fixture_run::dispatching_on_this_host(
+                root,
+                run,
+                fixture_run::NODE_ID,
+                worker.0,
+                &started,
+            );
+        },
+        fixture_run::SESSION,
+    );
+
+    // A dispatch that is asked, waited on for a second, and does not go: the
+    // deadline reaps it. That is a shutdown that did not do what it was asked,
+    // and it is answered `200` with the whole report saying so.
+    let answered = http::post(serving.address, &shutdown, r#"{"grace": 1}"#);
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let report = answered.json();
+    assert_enveloped(&report);
+    assert_eq!(report["complete"], json!(false), "{report}");
+    let dispatches = report["runs"][0]["dispatches"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the dispatches acted on: {report}"));
+    assert_eq!(dispatches.len(), 1, "{report}");
+    let stopped = &dispatches[0];
+    assert_eq!(stopped["node"], json!(fixture_run::NODE_ID));
+    assert_eq!(stopped["pid"], json!(worker.0));
+    // Asked: the turn the run's records named was sent the redirection, and
+    // what the lever answered — no turn there, or a lever that broke — is the
+    // engine's own word. Neither is a failure of the shutdown; the deadline
+    // applies either way.
+    assert!(
+        matches!(
+            stopped["interrupt"].as_str(),
+            Some("no-turn" | "failed" | "delivered")
+        ),
+        "{stopped}"
+    );
+    assert_eq!(stopped["ended"], json!("killed"), "{stopped}");
+    assert!(
+        stopped["waited_ms"]
+            .as_u64()
+            .is_some_and(|waited| waited >= 1_000),
+        "the grace was waited out: {stopped}"
+    );
+    assert_eq!(
+        report["runs"][0]["teardown"],
+        json!("signalled"),
+        "{report}"
+    );
+    assert!(!worker.alive(), "the teardown ended the dispatch");
+}
+
+// llmlint: ignore-block[tests_mirror_real_usage] as the journey above: the registry entry is
+// the one a driver writes, naming a real process this test started, and everything after it is
+// the engine's.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_forced_shutdown_asks_nothing_and_its_teardown_is_complete() {
+    let run = fixture_run::RUN_ID;
+    let worker = Orphan::start();
+    let started = worker.started();
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write(root, run);
+            fixture_run::dispatching_on_this_host(
+                root,
+                run,
+                fixture_run::NODE_ID,
+                worker.0,
+                &started,
+            );
+        },
+        fixture_run::SESSION,
+    );
+    let answered = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/shutdown"),
+        r#"{"force": true}"#,
+    );
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let report = answered.json();
+    // Torn down without being asked is exactly what a forced shutdown asks
+    // for, so the engine counts it complete.
+    assert_eq!(report["complete"], json!(true), "{report}");
+    let stopped = &report["runs"][0]["dispatches"][0];
+    assert_eq!(stopped["interrupt"], json!("not-asked"), "{report}");
+    assert_eq!(stopped["ended"], json!("killed"), "{report}");
+    assert!(!worker.alive(), "the teardown ended the dispatch");
+}
+// llmlint: ignore-end[tests_mirror_real_usage]
+
+#[test]
+fn a_shutdown_that_could_not_preserve_a_branch_answers_its_whole_report_as_not_complete() {
+    // The live run's records name the branch its pr-author node works on, in a
+    // repository this host's `onevcs` state root has never heard of — the
+    // served workspace's own, empty. The push is refused, and the shutdown
+    // says so rather than failing: `200`, the whole report, not complete.
+    let run = fixture_run::RUN_ID;
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write_live(root, run);
+            fs::create_dir_all(onepipeline::views::RunPaths::under(root, run).dispatches())
+                .expect("the dispatch registry");
+        },
+        fixture_run::LIVE_SESSION,
+    );
+    let answered = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/shutdown"),
+        r#"{"force": true}"#,
+    );
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let report = answered.json();
+    assert_enveloped(&report);
+    assert_eq!(report["complete"], json!(false), "{report}");
+    let branch = &report["runs"][0]["branches"][0];
+    assert_eq!(
+        branch["identity"],
+        json!("nickderobertis/onepipeline-ui"),
+        "{report}"
+    );
+    assert_eq!(branch["branch"], json!("feature/ship"), "{report}");
+    assert_eq!(branch["result"], json!("refused"), "{report}");
+    assert_eq!(branch["remote"], Value::Null, "{report}");
+    assert!(
+        branch["detail"]
+            .as_str()
+            .is_some_and(|why| why.contains("not a registered repository")),
+        "the refusal is the sibling's own words: {branch}"
+    );
+    assert!(
+        report["rendered"]
+            .as_str()
+            .is_some_and(|said| said.contains("could not be preserved")),
+        "{report}"
+    );
+    // The teardown itself was clean: what the report withholds success over is
+    // the branch alone.
+    assert_eq!(
+        report["runs"][0]["teardown"],
+        json!("elsewhere"),
+        "{report}"
+    );
+    assert_eq!(report["not_pushed"], json!([]), "{report}");
+}
+
+#[test]
+fn the_acting_sessions_key_is_the_one_its_own_runs_rows_carry() {
+    let build = |root: &Path| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        fixture_run::launched_by(
+            root,
+            fixture_run::OTHER_RUN_ID,
+            "codex",
+            fixture_run::LIVE_SESSION,
+        );
+    };
+    let serving = Serving::start_as(build, fixture_run::SESSION);
+    let unwatched = http::get(serving.address, "/api/v2/unwatched").json();
+    let key = unwatched["session_key"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the acting session's key: {unwatched}"));
+    assert!(
+        !key.contains(fixture_run::SESSION),
+        "the raw session is never served: {key}"
+    );
+    // A client reading the run list tells this session's run from another's
+    // by that key, which is the key the rows name their launcher's session by.
+    let rows = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let key_of = |run: &str| {
+        rows["runs"]
+            .as_array()
+            .expect("the rows")
+            .iter()
+            .find(|row| row["run_id"] == json!(run))
+            .and_then(|row| row["launch"]["session_key"].as_str())
+            .unwrap_or_else(|| panic!("{run} names its session: {rows}"))
+            .to_owned()
+    };
+    assert_eq!(key_of(fixture_run::RUN_ID), key, "{rows}");
+    assert_ne!(key_of(fixture_run::OTHER_RUN_ID), key, "{rows}");
+
+    // An unattributed server owns no run, and names no session.
+    let nobody = Serving::start(build);
+    let unwatched = http::get(nobody.address, "/api/v2/unwatched").json();
+    assert!(unwatched.get("session_key").is_none(), "{unwatched}");
+}
+
 // llmlint: ignore-block[tests_mirror_real_usage] the state is the one the engine itself
 // records for a run being driven — a launch record naming a live pid on this host, which is
 // what `onepipeline adopt` and the adopt route write — and the journey writes that record

@@ -14,8 +14,9 @@ use serde_json::Value;
 
 use crate::contract::{
     ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
-    Health, NextQuery, NodeId, ProjectId, RunId, RunQuery, RunsQuery, StopRequest, SurfaceRequest,
-    TimelineQuery, TranscriptQuery, WatchFrame, WatchQuery,
+    Health, NextQuery, NodeId, ProjectId, RunId, RunQuery, RunShutdownRequest, RunsQuery,
+    ShutdownRequest, StopRequest, SurfaceRequest, TimelineQuery, TranscriptQuery, WatchFrame,
+    WatchQuery,
 };
 use crate::error::ApiError;
 
@@ -106,6 +107,24 @@ pub trait RunApi {
 
     /// `POST /api/v2/runs/{run}/adopt` — retain this binary as a fresh driver.
     fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError>;
+
+    /// `POST /api/v2/runs/{run}/shutdown` — the engine's host shutdown, over
+    /// this one run, as the acting session.
+    ///
+    /// A shutdown the engine made answers its report whatever it found — a
+    /// dispatch killed at the deadline, a survivor, a branch that could not be
+    /// preserved — because the report is what an operator reads in exactly that
+    /// case. Only a request the engine refused is an error.
+    fn run_shutdown(
+        &self,
+        run: &RunId,
+        request: &RunShutdownRequest,
+    ) -> Result<Envelope<Value>, ApiError>;
+
+    /// `POST /api/v2/shutdown` — the engine's host shutdown over every run the
+    /// acting session owns, or over the whole host, on the terms
+    /// [`run_shutdown`](Self::run_shutdown) states.
+    fn shutdown(&self, request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError>;
 
     /// `GET /api/v2/runs/{run}/watch` — the engine's wait, as frames.
     ///

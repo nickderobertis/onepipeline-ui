@@ -24,9 +24,10 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
     EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
-    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, SseEvent, StopRequest,
-    SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery, WatchQuery, API_VERSION,
-    RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    ReferenceKind, Release, RunId, RunQuery, RunShutdownRequest, RunsPage, RunsQuery,
+    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineQuery,
+    TimelineScope, TranscriptQuery, WatchQuery, API_VERSION, RUNS_PAGE_LIMIT,
+    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -53,6 +54,8 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_ATTEST, "run-attest.json"),
     (routes::RUN_STOP, "run-stop.json"),
     (routes::RUN_ADOPT, "run-adopt.json"),
+    (routes::RUN_SHUTDOWN, "run-shutdown.json"),
+    (routes::SHUTDOWN, "shutdown.json"),
     (routes::RUN_WATCH, "run-watch.json"),
     (routes::UNWATCHED, "unwatched.json"),
     (routes::HOST, "host.json"),
@@ -723,6 +726,46 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
         "run-stop.json",
         enveloped(stopping.stop(&run, &StopRequest::default())),
     );
+
+    // A shutdown of the one run, as its owner, with the default body; and one
+    // of the whole host, over this session's run and another session's. Each
+    // over a copy of its own, reading an `onevcs` state root of its own — empty,
+    // so the report's last section is pinned as none rather than as whatever
+    // this host holds. The engine reads that root off its environment, so this
+    // process names it for the length of the calls, as it names the session
+    // for the adoption below.
+    let onevcs_home = tempfile::tempdir().expect("an empty onevcs state root");
+    std::env::set_var("ONEVCS_HOME", onevcs_home.path());
+    let (_shutting, shutdown_root) = fixture_run::workspace();
+    fixture_run::write(&shutdown_root, fixture_run::RUN_ID);
+    let shutting = store_over(&shutdown_root).acting_as(Some(
+        &SessionId::try_from(fixture_run::SESSION.to_owned()).expect("the fixture's session"),
+    ));
+    let one = enveloped(shutting.run_shutdown(&run, &RunShutdownRequest::default()));
+    let (_host, host_root) = fixture_run::workspace();
+    fixture_run::write(&host_root, fixture_run::RUN_ID);
+    fixture_run::write(&host_root, fixture_run::OTHER_RUN_ID);
+    fixture_run::launched_by(
+        &host_root,
+        fixture_run::OTHER_RUN_ID,
+        "codex",
+        fixture_run::LIVE_SESSION,
+    );
+    let host = enveloped(
+        store_over(&host_root)
+            .acting_as(Some(
+                &SessionId::try_from(fixture_run::SESSION.to_owned())
+                    .expect("the fixture's session"),
+            ))
+            .shutdown(&ShutdownRequest {
+                scope: ShutdownScope::Host,
+                grace: Some(30),
+                force: false,
+            }),
+    );
+    std::env::remove_var("ONEVCS_HOME");
+    pin_under("run-shutdown.json", one, Some(&shutdown_root));
+    pin_under("shutdown.json", host, Some(&host_root));
 
     // An adoption, retaining the compiled binary as the driver of the complete
     // run — which settles it and lets go, so nothing is left running behind
@@ -1926,6 +1969,18 @@ impl RunApi for Unimplemented {
 
     fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn run_shutdown(
+        &self,
+        run: &RunId,
+        _request: &RunShutdownRequest,
+    ) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::RunNotFound(run.clone()))
+    }
+
+    fn shutdown(&self, _request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError> {
+        Err(ApiError::Read("not implemented".to_owned()))
     }
 
     fn watch(&self, _run: &RunId, _query: &WatchQuery) -> Result<Self::Watch, ApiError> {

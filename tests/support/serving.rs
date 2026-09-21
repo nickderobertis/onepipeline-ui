@@ -32,6 +32,12 @@ pub const STOP_DEADLINE: Duration = Duration::from_secs(20);
 /// server's shutdown rather than about this poll.
 const WAIT_POLL: Duration = Duration::from_millis(10);
 
+/// The variable `onevcs` reads its state root from.
+pub const ONEVCS_HOME_ENV: &str = "ONEVCS_HOME";
+
+/// Where under a served workspace that state root is.
+pub const ONEVCS_HOME_DIR: &str = "onevcs-home";
+
 /// The two ways a caller asks this process to stop.
 ///
 /// Both mean the same thing to the server, and it installs a handler for each:
@@ -100,6 +106,18 @@ impl Serving {
         let (workspace, runs) = fixture_run::workspace();
         build(&runs);
         Self::spawn_as(workspace, &[], false, None, Some(session), &[])
+    }
+
+    /// The same, acting as `session` in an environment changed by
+    /// `environment`.
+    pub fn start_as_with_env(
+        build: impl FnOnce(&Path),
+        session: &str,
+        environment: &[(&str, &str)],
+    ) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_as(workspace, environment, false, None, Some(session), &[])
     }
 
     /// The same, with `arguments` after the ones every server here is started
@@ -194,6 +212,8 @@ impl Serving {
         arguments: &[&str],
     ) -> Self {
         let runs = workspace.path().join(fixture_run::RUNS_DIR);
+        std::fs::create_dir_all(workspace.path().join(ONEVCS_HOME_DIR))
+            .expect("an empty onevcs state root");
         let mut command = Command::new(binary);
         command
             .arg("serve")
@@ -207,7 +227,13 @@ impl Serving {
             // inside a planner's own dispatch, whose environment names that
             // planner's session, and a server that inherited it would own the
             // planner's runs. A journey that wants a session names one.
-            .env_remove(onepipeline_ui::cli::SESSION_ENV);
+            .env_remove(onepipeline_ui::cli::SESSION_ENV)
+            // The `onevcs` state root a host shutdown's preserving push and its
+            // enumeration of this host's unpublished branches read: this
+            // workspace's own, empty, rather than the operator's — a journey
+            // that shuts a fixture run down must never push, or list, a branch
+            // of the host running it.
+            .env(ONEVCS_HOME_ENV, workspace.path().join(ONEVCS_HOME_DIR));
         if let Some(session) = session {
             command.args(["--session", session]);
         }

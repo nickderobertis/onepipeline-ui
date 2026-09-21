@@ -266,6 +266,11 @@ pub mod routes {
     pub const RUN_STOP: &str = "/api/v2/runs/{run}/stop";
     /// Retain this binary as a fresh driver: `verbs::adopt`.
     pub const RUN_ADOPT: &str = "/api/v2/runs/{run}/adopt";
+    /// Shut one run down, gently: `verbs::shutdown` at run scope.
+    pub const RUN_SHUTDOWN: &str = "/api/v2/runs/{run}/shutdown";
+    /// Shut down every run this session owns, or the whole host:
+    /// `verbs::shutdown` at `mine` or `host` scope.
+    pub const SHUTDOWN: &str = "/api/v2/shutdown";
     /// A watch on the run as a server-sent event stream: `verbs::watch`.
     pub const RUN_WATCH: &str = "/api/v2/runs/{run}/watch";
     /// Which of the acting session's runs nothing is watching: `verbs::unwatched`.
@@ -294,7 +299,8 @@ pub mod routes {
     /// The HTTP method a route answers.
     ///
     /// Two, and only two: a read is a `GET`, and a verb that writes to the run —
-    /// claims a surface, submits an envelope, stops or adopts — is a `POST`, so
+    /// claims a surface, submits an envelope, stops, adopts or shuts down — is a
+    /// `POST`, so
     /// nothing a browser prefetches or a proxy retries can act on a run.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Method {
@@ -339,7 +345,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 28;
+    pub const COUNT: usize = 30;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -360,6 +366,8 @@ pub mod routes {
         post(RUN_ATTEST),
         post(RUN_STOP),
         post(RUN_ADOPT),
+        post(RUN_SHUTDOWN),
+        post(SHUTDOWN),
         get(RUN_WATCH),
         get(UNWATCHED),
         get(HOST),
@@ -786,6 +794,52 @@ pub struct AttestRequest {
 #[serde(deny_unknown_fields)]
 pub struct StopRequest {
     /// Stop a run another session owns, naming the owner. Omitted, `false`.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// The body of `POST /api/v2/runs/{run}/shutdown`.
+///
+/// Empty or absent is the default shutdown — the engine's own default grace,
+/// nothing forced — exactly as an empty body on `stop` is a stop that forces
+/// nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunShutdownRequest {
+    /// How long, in integer seconds, a dispatch has to end itself after it is
+    /// asked. Omitted, the engine's own default; `0` is the engine's force path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grace: Option<u64>,
+    /// Skip the interrupt and the wait and go straight to the teardown.
+    /// Omitted, `false`.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Which runs `POST /api/v2/shutdown` acts on.
+///
+/// The engine's two scopes that name no one run. One run is the run route's,
+/// so a body cannot name a run here and a path there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShutdownScope {
+    /// Every run the acting session owns, as `runs --mine` selects them.
+    Mine,
+    /// Every run under the runs root, whoever owns it.
+    Host,
+}
+
+/// The body of `POST /api/v2/shutdown`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShutdownRequest {
+    /// Which runs. Required: a shutdown that named none is refused before
+    /// anything is signalled, as the engine's own verb refuses one.
+    pub scope: ShutdownScope,
+    /// As [`RunShutdownRequest::grace`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grace: Option<u64>,
+    /// As [`RunShutdownRequest::force`].
     #[serde(default)]
     pub force: bool,
 }

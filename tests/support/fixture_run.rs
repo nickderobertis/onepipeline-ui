@@ -97,6 +97,42 @@ pub fn driven_on_this_host(root: &Path, run: &str, pid: u32) {
     fs::write(&record, pretty(&launch)).expect("rewrite the launch record");
 }
 
+/// Rewrite one run's launch record to name `session`, launched through
+/// `launcher`, as its owner — the record another planner's launch writes.
+pub fn launched_by(root: &Path, run: &str, launcher: &str, session: &str) {
+    let record = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
+            .expect("the launch record is json");
+    launch["launcher"] = json!(launcher);
+    launch["session"] = json!(session);
+    fs::write(&record, pretty(&launch)).expect("rewrite the launch record");
+}
+
+/// Register a live dispatch of `node` in one run's dispatch registry: the
+/// entry a driver writes when it starts the process a node's work is in —
+/// `pid`, on **this** host, under the start token `started` that proves the
+/// pid is still that process.
+///
+/// Named `{pid}-{claim}.json` as the engine names one, with a claim of `0`: the
+/// claim only tells apart dispatches sharing one process, and a journey
+/// registers one per process.
+pub fn dispatching_on_this_host(root: &Path, run: &str, node: &str, pid: u32, started: &str) {
+    let registry = RunPaths::under(root, run).dispatches();
+    fs::create_dir_all(&registry).expect("the dispatch registry");
+    fs::write(
+        registry.join(format!("{pid}-0.json")),
+        pretty(&json!({
+            "node": node,
+            "pid": pid,
+            "host": onepipeline_ui::liveness::hostname(),
+            "dispatched_at": START,
+            "started": started,
+        })),
+    )
+    .expect("the dispatch record");
+}
+
 /// The session the live run's launch record names as its owner.
 pub const LIVE_SESSION: &str = "codex-session-7f3a91c0";
 
