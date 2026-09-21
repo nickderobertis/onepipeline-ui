@@ -249,7 +249,7 @@ export const API_V2_FILTER_PROFILES = {
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 19;
+export const TELEMETRY_SCHEMA_VERSION = 20;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -2054,8 +2054,8 @@ export const unwatchedSchema = openObject({
   /**
    * The acting session's own key — the digest a run-list row carries at
    * `launch.session_key` — and so the one way a client can say which of the runs
-   * it lists this server's session owns. Absent for an unattributed server,
-   * which owns no run.
+   * it lists this server's session owns, under schema 20. Absent for an
+   * unattributed server, which owns no run.
    */
   session_key: z.string().min(1).optional(),
   reported: z.array(

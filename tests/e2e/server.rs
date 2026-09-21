@@ -34,7 +34,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(19), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(20), "{body}");
     assert!(
         body["observed_at"]
             .as_str()

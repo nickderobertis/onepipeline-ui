@@ -124,7 +124,18 @@ pub const API_VERSION: u32 = 2;
 /// Every field 18 served is served with the same meaning and the same value;
 /// the version moves because a client that has never seen the field reads a
 /// run a dozen agents ran under as one nothing was launched for.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 19;
+///
+/// **Schema 20 is shutting runs down, and knowing which of them are yours
+/// first.** Two verb routes answer the engine's host shutdown report —
+/// `{scope, root, grace_seconds, forced, complete, runs, not_pushed,
+/// not_pushed_unread, rendered}` — and `GET /api/v2/unwatched` gains
+/// `session_key`, the acting session under the key a run-list row names its
+/// launcher's session by, **absent** for an unattributed server rather than
+/// `null`. Every field 19 served is served with the same meaning and the same
+/// value; the version moves because a client that has never seen `session_key`
+/// cannot tell this session's runs from another's before it acts on them, and
+/// would name a colleague's run as its own in a confirm.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 20;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
