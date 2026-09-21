@@ -131,8 +131,17 @@ check-affected:
 # OS. Naming that subset once is what keeps CI from re-listing tiers inline and
 # drifting away from this file.
 # The gate's platform-sensitive tiers, without the Linux-only coverage floor.
-check-cross: fmt-check lint _ensure-sibling test-quick
+check-cross: fmt-check lint _ensure-sibling _ensure-bundle test-quick
     @echo "check-cross: ok"
+
+# The built browser view, which the crate's own build embeds in the binary and
+# the `ui::` journeys read back off the port. Behind an Nx target so a bundle
+# already built is a cache hit rather than a second Vite run; the crate's test
+# targets declare it a dependency, and `check-cross` reaches it here because
+# that recipe drives cargo directly.
+# Build the browser view the binary embeds, if it is not built already.
+_ensure-bundle:
+    @bash scripts/nx.sh run dag-ui:build
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free

@@ -83,16 +83,28 @@ npm install -g onepipeline-api-cli     # prebuilt binary, no Rust toolchain
 All three install one command, `onepipeline-api`:
 
 ```bash
-onepipeline-api serve --runs-root ./runs
+onepipeline-api serve --runs-root ./runs        # the read API
+onepipeline-api serve --runs-root ./runs --ui   # and the browser view, on the same address
 ```
 
-The view, as a static bundle on npm alone:
+`--ui` serves the DAG Observatory at `/` beside the API, with `/api/v2/…` and
+`/healthz` unchanged and every path the bundle has no file for answered with
+its `index.html`, so a deep link opens. The view is **built into the binary**
+— the prebuilt wheels, npm packages and release archives all carry the bundle
+of their own release — so a host that installed only the command needs no npm
+package to open it. `cargo install` from crates.io compiles from source and
+embeds the view only where `apps/dag-ui/dist` has been built beforehand; a
+binary without one refuses `--ui` and says so. `--ui-dist DIR` serves a bundle
+on disk instead, for developing the view against a real runs root.
+
+The view is also published on its own, as a static bundle on npm:
 
 ```bash
 npm install onepipeline-ui             # the built frontend under dist/
 ```
 
-That package installs no command — it is `dist/`, to be served statically.
+That package installs no command — it is `dist/`, to be served statically or
+handed to `--ui-dist`. It is the same bundle `--ui` serves.
 
 Prebuilt archives and their `.sha256` checksums are also attached to every
 [GitHub Release](https://github.com/nickderobertis/onepipeline-ui/releases).

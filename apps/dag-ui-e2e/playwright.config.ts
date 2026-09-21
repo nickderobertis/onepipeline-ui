@@ -146,6 +146,15 @@ function currentSession(): Session {
 const session = currentSession();
 
 /**
+ * The read API's own origin, which serves the browser view too: the fixture
+ * server below starts it with `--ui`, so this is the view and the API from one
+ * `onepipeline-api serve` with no static server in front — the way a host that
+ * installed the binary alone opens it. `dag-ui-served.spec.ts` drives it;
+ * every other journey reaches the same server through the Vite preview below,
+ * which is what holds the API to answering the same with the view beside it.
+ */
+export const SERVED_UI_URL = `http://${LOOPBACK}:${session.api}`;
+/**
  * A second UI origin whose proxy points at a port where every connection is dropped
  * as it arrives. It is how the unreachable-API journey reaches the real failure — a
  * real browser making real requests that really fail — without mocking anything. The
@@ -220,7 +229,7 @@ export default defineConfig({
     {
       name: "fixture-api",
       cwd: APP,
-      command: `node ${SERVE_FIXTURE} --workspace ${FIXTURE_WORKSPACE} --port ${session.api}`,
+      command: `node ${SERVE_FIXTURE} --workspace ${FIXTURE_WORKSPACE} --port ${session.api} --ui`,
       url: `http://${LOOPBACK}:${session.api}/healthz`,
       reuseExistingServer: false,
       stdout: "pipe",

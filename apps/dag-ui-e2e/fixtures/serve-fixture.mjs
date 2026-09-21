@@ -13,7 +13,9 @@
  * removes, so a browser run never reads or writes the operator's own runs.
  *
  * Usage:
- *   serve-fixture.mjs --workspace DIR --port N     build the fixture and serve it
+ *   serve-fixture.mjs --workspace DIR --port N [--ui]
+ *                                                  build the fixture and serve it,
+ *                                                  the browser view beside it with --ui
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -216,8 +218,16 @@ function bound(server, port, purpose) {
   });
 }
 
-/** Build the fixture in `workspace` and serve it on a loopback port. */
-async function serve(workspace, port) {
+/**
+ * Build the fixture in `workspace` and serve it on a loopback port — and, with
+ * `ui`, the browser view the binary embeds beside it, on the same port.
+ *
+ * That is the origin `dag-ui-served.spec.ts` opens: the view and the API from
+ * one `onepipeline-api serve --ui`, with nothing in front of it. The API is the
+ * same either way, which every other journey holds through the Vite preview
+ * proxying to this same server.
+ */
+async function serve(workspace, port, ui) {
   rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
@@ -246,6 +256,9 @@ async function serve(workspace, port) {
       // about exactly those runs.
       "--session",
       SUPERVISOR_SESSION,
+      // The binary `dag-ui:build-api-server` compiled after `dag-ui:build`, so
+      // the view it embeds is the bundle every other origin here previews.
+      ...(ui ? ["--ui"] : []),
     ],
     {
       stdio: ["ignore", "inherit", "inherit"],
@@ -274,6 +287,7 @@ function parseArgs(argv) {
     "--settle-dashboard",
     "--remove-page-runs",
     "--stall",
+    "--ui",
   ]);
   const valued = new Set([
     "--workspace",
@@ -327,6 +341,12 @@ const ACTIONS = [
   "record-activity",
 ];
 const asked = ACTIONS.filter((action) => args[action] !== undefined);
+if (args.ui && asked.length > 0) {
+  die(
+    `--ui serves; it means nothing beside --${asked[0]}`,
+    "pass --ui with --workspace and --port alone",
+  );
+}
 if (asked.length > 1) {
   die(
     `${asked.map((action) => `--${action}`).join(" and ")} are more than one change`,
@@ -453,7 +473,7 @@ if (args.stall) {
         "pass --record-activity the name of the tool the summary came from",
       );
     } else {
-      process.exit(await serve(workspace, port));
+      process.exit(await serve(workspace, port, args.ui === true));
     }
   } catch (refused) {
     die(

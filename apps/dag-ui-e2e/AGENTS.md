@@ -13,6 +13,12 @@ real `onepipeline-api serve` over a recorded run directory. Nothing between the
 browser and the read model is doubled. A dev server is not what any reader loads,
 and a bundle can differ from what Vite serves unbuilt.
 
+One journey, `dag-ui-served.spec.ts`, opens the view the other way a reader
+gets it: from the read API's own origin, which `serve-fixture.mjs` starts with
+`--ui` so the binary serves the bundle it embedded beside the data. Every other
+journey reaches that same server through the Vite preview, which is what holds
+the API to answering the same with the view beside it as without.
+
 `test` is the journeys, and `test-isolation` is the one check that *runs* the
 tier rather than being run by it: it launches two whole tiers at once to prove
 they stay out of each other's way, which costs more than everything else here

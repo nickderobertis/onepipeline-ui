@@ -6,7 +6,8 @@
 //! identifiers, queries and bodies — [`api::RunApi`] is the trait one method
 //! per route, [`store::RunStore`] implements it over a runs root through the
 //! SDK's [`views`](onepipeline::views) and [`verbs`](onepipeline::verbs), and
-//! [`server`] is the axum router that serves it. Every route after the read
+//! [`server`] is the axum router that serves it — and, asked to with `--ui`,
+//! the browser view [`ui`] holds beside it. Every route after the read
 //! surface the browser view was copied against is a post-launch CLI verb,
 //! wrapped: a thin call into `onepipeline::verbs` with this crate's envelope
 //! around the engine's own result, and the server never runs the `onepipeline`
@@ -37,5 +38,6 @@ pub mod payload;
 pub mod server;
 pub mod store;
 pub mod telemetry;
+pub mod ui;
 
 pub use error::ApiError;

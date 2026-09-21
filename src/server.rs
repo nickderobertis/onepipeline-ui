@@ -1,4 +1,6 @@
-//! The axum server: `docs/contract.md`'s routes, and nothing else.
+//! The axum server: `docs/contract.md`'s routes, and nothing else — unless it
+//! was started with `--ui`, in which case every path those routes do not own is
+//! the browser view's ([`crate::ui`]).
 //!
 //! Every handler is the same three steps — validate the path, the query and
 //! the body at the trust boundary, ask the [`RunApi`] for the payload, render
@@ -23,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Uri};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -42,6 +44,7 @@ use crate::contract::{
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
+use crate::ui::View;
 
 /// How many frames the stream may buffer ahead of the client.
 ///
@@ -50,17 +53,21 @@ use crate::store::{RunStore, HEARTBEAT_INTERVAL};
 /// an unbounded backlog of them in this process.
 const FRAME_BUFFER: usize = 8;
 
-/// What every handler shares: the store, and whether this process has been
-/// asked to stop.
+/// What every handler shares: the store, whether this process has been asked
+/// to stop, and the browser view — if it was asked to serve one.
 #[derive(Clone)]
 struct Serving {
     store: Arc<RunStore>,
     /// Set once, when the process is asked to stop. An open event stream watches
     /// it, so a shutdown is not held open by a browser that is still subscribed.
     stopping: Arc<AtomicBool>,
+    /// What answers every path the API does not own: the view under `--ui`,
+    /// and the error contract's 404 without it.
+    view: Option<Arc<View>>,
 }
 
-/// The router serving one runs root, ending its streams when `stopping` is set.
+/// The router serving one runs root, ending its streams when `stopping` is set,
+/// and serving `view` at every path the contract's routes do not own.
 // llmlint: ignore-block[authorization_enforced_server_side] there is no authorization to
 // enforce here and no place to enforce it from. This is `docs/contract.md`'s whole surface
 // over a directory of runs, with no accounts and no principal but the **one** session the
@@ -74,7 +81,7 @@ struct Serving {
 // above: each `{...}` a route interpolates is an identifier newtype, every query and every
 // body is parsed before a run is opened, the one body that is not parsed is handed to the
 // engine that rules on it, and no raw `String` reaches storage.
-fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
+fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<View>) -> Router {
     Router::new()
         .route(routes::HEALTHZ, get(healthz))
         .route(routes::RUNS, get(runs))
@@ -104,10 +111,11 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>) -> Router {
         .route(routes::RUN_AGENTS, get(agents))
         .route(routes::RUN_NODE_AGENTS, get(node_agents))
         .route(routes::PROJECT_AGENTS, get(project_agents))
-        .fallback(not_found)
+        .fallback(fallback)
         .with_state(Serving {
             store: Arc::new(store),
             stopping,
+            view: view.map(Arc::new),
         })
 }
 // llmlint: ignore-end[authorization_enforced_server_side]
@@ -138,8 +146,28 @@ pub async fn bind(address: SocketAddr) -> Result<TcpListener, String> {
 ///
 /// Returns why the accept loop ended when it ended for any other reason.
 pub async fn serve(store: RunStore, listener: TcpListener, stop: StopSignal) -> Result<(), String> {
+    serve_with_view(store, listener, stop, None).await
+}
+
+/// [`serve`], with the browser view served beside the API when `view` is one.
+///
+/// The view answers every path the contract's routes do not own — and only
+/// those: the routes are matched first, and the fallback below hands the API's
+/// prefixes to the error contract rather than to the view, so a request under
+/// `/api` or for `/healthz` is never answered by a bundle, and a request for
+/// the bundle is never answered by the API.
+///
+/// # Errors
+///
+/// As [`serve`].
+pub async fn serve_with_view(
+    store: RunStore,
+    listener: TcpListener,
+    stop: StopSignal,
+    view: Option<View>,
+) -> Result<(), String> {
     let stopping = Arc::new(AtomicBool::new(false));
-    let router = router_stopping_on(store, Arc::clone(&stopping));
+    let router = router_stopping_on(store, Arc::clone(&stopping), view);
     let shutdown = async move {
         stop.asked().await;
         stopping.store(true, Ordering::Relaxed);
@@ -232,10 +260,17 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// A route nothing serves. The body is still the error contract: a client
-/// parsing every response the same way must not meet a framework's own 404.
-async fn not_found() -> Response {
-    ApiError::NoSuchRoute.into_response()
+/// A path no route serves: the browser view's, when one is being served and
+/// the path is not the API's, and the contract's 404 otherwise.
+///
+/// The body of that 404 is still the error contract: a client parsing every
+/// response the same way must not meet a framework's own — and under `--ui`
+/// a client under `/api` must not meet a page.
+async fn fallback(State(serving): Store, uri: Uri) -> Response {
+    match &serving.view {
+        Some(view) if !crate::ui::is_api_path(uri.path()) => view.answer(uri.path()).await,
+        _ => ApiError::NoSuchRoute.into_response(),
+    }
 }
 
 async fn healthz(State(serving): Store) -> Json<crate::contract::Health> {

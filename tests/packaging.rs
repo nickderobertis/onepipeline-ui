@@ -1524,3 +1524,224 @@ fn no_manifest_names_a_sibling_with_a_protocol_this_npm_refuses() {
         }
     }
 }
+
+// The build script, as a module: `embed` is the decision it makes over a
+// directory, and the two `env` reads in its `main` are the whole of what cargo
+// adds. Driven here over real directories rather than through a `cargo build`,
+// which would recompile the crate under test into the target directory every
+// other test in this run is spawning the binary from.
+#[allow(
+    dead_code,
+    reason = "the script's `main` is cargo's entry point, not this test's"
+)]
+#[path = "../build.rs"]
+mod build_script;
+
+/// The one directory the view is built into, read from each thing that names
+/// it: the build script that embeds it, the script that publishes it as the
+/// `onepipeline-ui` npm package, and the Nx target that produces it. Three
+/// readers of one directory, held together so the view a host opens through
+/// `--ui` is byte for byte the one the release published beside it.
+#[test]
+fn the_binary_embeds_the_bundle_the_frontend_package_publishes() {
+    let embedded = build_script_constant("BUNDLE_DIR");
+    let npm_build = read("scripts/npm-build.mjs");
+    let (_, default) = npm_build
+        .split_once("const bundle = resolve(args.bundle || join(REPO_ROOT, ")
+        .expect(
+            "scripts/npm-build.mjs defaults the bundle to a directory under the repository root",
+        );
+    let published: Vec<&str> = default
+        .split_once("))")
+        .expect("an unterminated join")
+        .0
+        .split(", ")
+        .map(|segment| segment.trim_matches('"'))
+        .collect();
+    assert_eq!(
+        embedded,
+        published.join("/"),
+        "build.rs embeds one directory and scripts/npm-build.mjs publishes another"
+    );
+    let nx: serde_json::Value =
+        serde_json::from_str(&read("apps/dag-ui/project.json")).expect("parse the app's project");
+    assert_eq!(
+        nx["targets"]["build"]["outputs"],
+        serde_json::json!(["{projectRoot}/dist"]),
+        "dag-ui:build writes somewhere other than the directory the binary embeds"
+    );
+    assert_eq!(nx["sourceRoot"], "apps/dag-ui/src");
+    assert!(
+        embedded.starts_with("apps/dag-ui/"),
+        "build.rs embeds {embedded}, which is not under the app dag-ui:build builds"
+    );
+}
+
+/// A string constant of `build.rs`, by name.
+fn build_script_constant(name: &str) -> String {
+    let source = read("build.rs");
+    let (_, rest) = source
+        .split_once(&format!("const {name}: &str = \""))
+        .unwrap_or_else(|| panic!("build.rs declares no `{name}`"));
+    rest.split_once('"')
+        .expect("an unterminated constant")
+        .0
+        .to_owned()
+}
+
+/// The feature that makes a missing view a build error, read from the build
+/// script that reads it and held to the manifest that declares it.
+fn required_feature() -> String {
+    let source = read("build.rs");
+    let (_, rest) = source
+        .split_once("CARGO_FEATURE_")
+        .expect("build.rs reads no cargo feature, so no build can refuse to ship without the view");
+    let feature = rest
+        .split_once('"')
+        .expect("an unterminated variable name")
+        .0
+        .to_ascii_lowercase()
+        .replace('_', "-");
+    let cargo = read("Cargo.toml");
+    let (_, features) = cargo
+        .split_once("[features]")
+        .expect("Cargo.toml declares no features");
+    assert!(
+        features
+            .lines()
+            .any(|line| line.trim_start().starts_with(&format!("{feature} = "))),
+        "build.rs reads the `{feature}` feature and Cargo.toml does not declare it, so no \
+         build can turn it on"
+    );
+    feature
+}
+
+/// Every release job that compiles the binary builds the view first and
+/// compiles with the feature that refuses to build without it.
+///
+/// Each job is read for what compiles in it rather than looked up by name, so a
+/// job added to the workflow that compiles the binary some new way fails here
+/// until it is taught, instead of shipping a binary whose `--ui` refuses. The
+/// order matters as much as the presence: a view built after the compile is a
+/// view the compile did not see.
+#[test]
+fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
+    let workflow = read(".github/workflows/release.yml");
+    let feature = required_feature();
+    // How each way of compiling the binary is asked to turn the feature on.
+    let compiles: &[(&str, &str)] = &[
+        ("taiki-e/upload-rust-binary-action", "features: {feature}"),
+        ("PyO3/maturin-action", "--features {feature}"),
+        ("cargo build", "--features {feature}"),
+    ];
+    let mut compiling = Vec::new();
+    for job in workflow_jobs(&workflow) {
+        let block = workflow_job(&workflow, &job);
+        // `cargo publish` compiles too — to verify the crate — but what it
+        // uploads is source, and a crates.io consumer builds their own.
+        let Some((marker, spelled)) = compiles
+            .iter()
+            .find(|(marker, _)| block.contains(marker) && !block.contains("cargo publish"))
+        else {
+            continue;
+        };
+        compiling.push(job.clone());
+        let built = block.find("just build").unwrap_or_else(|| {
+            panic!(
+                "release.yml's `{job}` job compiles the binary and never builds the browser view, \
+                 so what it ships refuses `--ui`"
+            )
+        });
+        let compiled = block.find(marker).expect("the marker was found above");
+        assert!(
+            built < compiled,
+            "release.yml's `{job}` job builds the browser view after compiling the binary, so \
+             the binary it ships embeds nothing"
+        );
+        let spelled = spelled.replace("{feature}", &feature);
+        assert!(
+            block.contains(&spelled),
+            "release.yml's `{job}` job compiles the binary without `{spelled}`, so a release \
+             that stopped building the view would ship an `--ui` that refuses rather than fail"
+        );
+    }
+    compiling.sort();
+    assert_eq!(
+        compiling,
+        ["build-npm", "build-wheels", "upload"],
+        "the set of release jobs that compile the binary has changed; every prebuilt \
+         distribution has to embed the view"
+    );
+}
+
+/// The build script's own decision, driven over real directories: a built view
+/// is embedded whole, a missing one is `None` unless the feature makes it an
+/// error naming the directory and what builds it.
+#[test]
+fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_required() {
+    let out = tempfile::tempdir().expect("temp dir");
+    let generated = out.path().join("embedded_ui.rs");
+
+    // A view: an index and a hashed asset under assets/, as Vite emits them.
+    let view = tempfile::tempdir().expect("temp dir");
+    fs::write(view.path().join("index.html"), "<!doctype html>").expect("index");
+    fs::create_dir(view.path().join("assets")).expect("assets");
+    fs::write(view.path().join("assets/index-abc123.js"), "1").expect("script");
+    let embedded = build_script::embed(view.path(), true, &generated).expect("embedded");
+    assert_eq!(embedded, Some(2));
+    let table = fs::read_to_string(&generated).expect("the generated table");
+    assert!(
+        table.contains("pub const EMBEDDED: Option<&[EmbeddedFile]> = Some(&["),
+        "{table}"
+    );
+    for (path, file) in [
+        ("index.html", view.path().join("index.html")),
+        // Joined a component at a time: the script writes the path the
+        // filesystem walk returns, which uses the platform's separator.
+        (
+            "assets/index-abc123.js",
+            view.path().join("assets").join("index-abc123.js"),
+        ),
+    ] {
+        assert!(
+            table.contains(&format!(
+                "EmbeddedFile {{ path: {path:?}, bytes: include_bytes!({:?}) }}",
+                file.display().to_string()
+            )),
+            "{table}"
+        );
+    }
+    // Sorted, so the same view generates the same table on every filesystem.
+    assert!(
+        table.find("assets/index-abc123.js") < table.find("\"index.html\""),
+        "{table}"
+    );
+
+    // No view, not required: a table of nothing, and the binary refuses at run time.
+    let missing = tempfile::tempdir().expect("temp dir");
+    let embedded =
+        build_script::embed(&missing.path().join("dist"), false, &generated).expect("tolerated");
+    assert_eq!(embedded, None);
+    assert_eq!(
+        fs::read_to_string(&generated).expect("the generated table"),
+        "/// No browser view was built when this binary was.\n\
+         pub const EMBEDDED: Option<&[EmbeddedFile]> = None;\n"
+    );
+    // A directory with no index is no view either.
+    fs::write(missing.path().join("stray.txt"), "").expect("a stray file");
+    assert_eq!(
+        build_script::embed(missing.path(), false, &generated).expect("tolerated"),
+        None
+    );
+
+    // No view, required: the error a release build stops on.
+    let refusal =
+        build_script::embed(&missing.path().join("dist"), true, &generated).expect_err("refused");
+    assert!(
+        refusal.contains(&missing.path().join("dist").display().to_string()),
+        "the refusal does not name the missing directory: {refusal}"
+    );
+    assert!(refusal.contains("bundled-ui"), "{refusal}");
+    assert!(refusal.contains("just build"), "{refusal}");
+    assert!(refusal.contains("ACTION:"), "{refusal}");
+}

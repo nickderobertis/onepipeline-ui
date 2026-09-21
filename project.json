@@ -30,11 +30,11 @@
     },
     "test": {
       "command": "just _crate-test",
-      "dependsOn": ["ensure-sibling"]
+      "dependsOn": ["ensure-sibling", { "projects": ["dag-ui"], "target": "build" }]
     },
     "test-cost": {
       "command": "just _crate-test-cost",
-      "dependsOn": ["ensure-sibling"],
+      "dependsOn": ["ensure-sibling", { "projects": ["dag-ui"], "target": "build" }],
       "inputs": [
         "apiServerSurface",
         "{projectRoot}/tests/e2e/main.rs",
@@ -49,7 +49,11 @@
     },
     "test-baseline": {
       "command": "just _crate-test-baseline",
-      "dependsOn": ["ensure-sibling", "ensure-baseline"],
+      "dependsOn": [
+        "ensure-sibling",
+        "ensure-baseline",
+        { "projects": ["dag-ui"], "target": "build" }
+      ],
       "inputs": [
         "apiServerSurface",
         "{projectRoot}/tests/e2e/main.rs",

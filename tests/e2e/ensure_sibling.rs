@@ -49,6 +49,34 @@ const TIERS: &str = "test,test-baseline";
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 
+/// Every task that compiles the read API for a suite to drive.
+///
+/// The binary embeds the browser view `dag-ui:build` produces (`build.rs`),
+/// and the `ui::` journeys and the browser tier's `--ui` origin read that
+/// view back off a port — so a binary compiled before the view was built is
+/// one that refuses `--ui`, and the tier fails in a clean clone naming a
+/// missing bundle rather than proving anything.
+///
+/// The cost tier is here for a reason of its own: its journeys never ask for
+/// the view, but they compile the same binary into the same target directory
+/// as the tiers that do, and `check` runs them beside each other. A tier that
+/// compiled a bundle-less binary there would leave the next one to rebuild it,
+/// which is minutes of the gate spent producing a binary that was already
+/// correct the run before.
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 4] = [
+    "onepipeline-ui:test",
+    "onepipeline-ui:test-baseline",
+    "onepipeline-ui:test-cost",
+    "dag-ui:build-api-server",
+];
+
+/// The targets those tasks are reached through — the sibling's two and the
+/// cost tier, which has an edge to the view build and none to the sibling.
+const COMPILING_TIERS: &str = "test,test-baseline,test-cost";
+
+/// What builds the view the binary embeds.
+const VIEW_BUILD: &str = "dag-ui:build";
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -326,6 +354,89 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
         1,
         "the provisioning is more than one task, so two of them can install into \
          `.tools/` at once"
+    );
+}
+
+/// Every task that compiles the read API for a suite builds the view first,
+/// through the same graph.
+///
+/// The same question as above, asked of the other thing a clean clone lacks:
+/// `build.rs` embeds whatever `apps/dag-ui/dist` holds when the binary is
+/// compiled, and only Nx's own resolution of the edge says whether the build
+/// that fills it runs first.
+#[test]
+fn every_suite_that_compiles_the_read_api_builds_the_view_first() {
+    let output = Command::new("just")
+        .args(["nx", "run-many", "-t", COMPILING_TIERS, "--graph=stdout"])
+        .current_dir(repo_root())
+        .output()
+        .expect("just is on PATH");
+    assert!(
+        output.status.success(),
+        "Nx could not build the task graph for `{COMPILING_TIERS}` ({}):\n{}{}",
+        output.status,
+        stderr(&output),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let dependencies = task_dependencies(&output.stdout);
+    for task in TASKS_THAT_COMPILE_THE_READ_API {
+        assert!(
+            dependencies.contains_key(task),
+            "{task} is not in the graph `{COMPILING_TIERS}` runs; the list here names a task \
+             nothing reaches any more"
+        );
+        assert!(
+            reaches(&dependencies, task, VIEW_BUILD),
+            "{task} compiles the read API and does not depend on {VIEW_BUILD}, so the \
+             binary it compiles in a clean clone embeds no browser view"
+        );
+    }
+}
+
+/// The one tier the graph above cannot answer for: `check-cross`, which drives
+/// cargo itself.
+///
+/// The cross-platform legs run that recipe rather than `onepipeline-ui:test`,
+/// so no Nx edge puts the view build in front of their compile — the recipe
+/// has to, and `_ensure-bundle` is how. Order is the whole of it: a view built
+/// after the compile is a view the compile did not see, and the leg would pass
+/// having proved the `ui::` journeys against a binary carrying nothing.
+///
+/// Asked of `just` rather than of the justfile's text, because what a recipe
+/// runs and in what order is `just`'s own resolution of its dependencies and
+/// not something a reading of the file can settle. `--dry-run` prints those
+/// lines, to stderr, and runs none of them.
+#[test]
+fn check_cross_builds_the_view_before_it_compiles_the_read_api() {
+    let output = Command::new("just")
+        .args(["--dry-run", "check-cross"])
+        .current_dir(repo_root())
+        .output()
+        .expect("just is on PATH");
+    assert!(
+        output.status.success(),
+        "`just --dry-run check-cross` failed ({}):\n{}",
+        output.status,
+        stderr(&output)
+    );
+    // `--dry-run` prints the recipe to stderr and leaves stdout to the recipe,
+    // which runs nothing here.
+    let planned = stderr(&output);
+    let built = planned
+        .find(&format!("run {VIEW_BUILD}"))
+        .unwrap_or_else(|| {
+            panic!(
+                "check-cross never builds the browser view, so the cross-platform legs compile a \
+             binary that embeds nothing:\n{planned}"
+            )
+        });
+    let compiled = planned.find("cargo nextest run").unwrap_or_else(|| {
+        panic!("check-cross no longer compiles the read API's suite:\n{planned}")
+    });
+    assert!(
+        built < compiled,
+        "check-cross builds the browser view after compiling the suite that reads it back, so \
+         the binary under test embeds nothing:\n{planned}"
     );
 }
 
