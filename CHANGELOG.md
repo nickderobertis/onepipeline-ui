@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.11.1...v0.11.2) - 2026-09-21
+
+### Added
+
+- *(shutdown)* shut down a run, this session's runs, or the host, behind a confirm ([#83](https://github.com/nickderobertis/onepipeline-ui/pull/83))
+
 ## [0.11.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.11.0...v0.11.1) - 2026-09-21
 
 ### Added
