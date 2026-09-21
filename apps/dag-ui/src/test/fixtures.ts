@@ -58,8 +58,8 @@ const CODEX_LAUNCH = "c0de".repeat(8);
 const CLAUDE_LAUNCH = "c1a0".repeat(8);
 // The opaque, stable name of the session each launch came from. Two runs of one
 // session share theirs, which is what makes them one group in the navigation.
-const CODEX_SESSION = "5e551040".repeat(4);
-const CLAUDE_SESSION = "5e5510c1".repeat(4);
+export const CODEX_SESSION = "5e551040".repeat(4);
+export const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
