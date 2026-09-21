@@ -1353,7 +1353,11 @@ fn a_packaged_path_that_reads_as_pathspec_magic_does_not_select_the_release() {
 fn a_tree_with_no_built_browser_view_is_read_to_a_verdict() {
     let fixture = Fixture::of_a_crate_with_this_crates_build_script(A_COMPATIBLE_RELEASE);
     let view = fixture.repo.join("apps/dag-ui/dist");
-    assert!(!view.exists(), "the fixture carries a built view: {}", view.display());
+    assert!(
+        !view.exists(),
+        "the fixture carries a built view: {}",
+        view.display()
+    );
     let builds = fixture.dir.path().join("reading-builds");
 
     let output = fixture.run_with(
@@ -1417,7 +1421,10 @@ fn no_feature_gates_an_item_the_reading_leaves_out() {
         }
     }
     let mut found = Vec::new();
-    sources(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+    sources(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
     assert!(!found.is_empty(), "no sources were read");
     for path in found {
         let source = fs::read_to_string(&path).expect("read a source");
