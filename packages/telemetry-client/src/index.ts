@@ -13,6 +13,7 @@ import {
   channelQueueSchema,
   type DagConversation,
   dagConversationSchema,
+  type HostShutdownScope,
   type ProjectAgents,
   type ProjectDetail,
   type ProjectList,
@@ -39,9 +40,11 @@ import {
   runTelemetryDocumentSchema,
   runTimelineSchema,
   runTranscriptSchema,
+  type ShutdownReport,
   type SseEventName,
   type Stopped,
   type Surfaced,
+  shutdownReportSchema,
   sseEventDataSchema,
   sseEventNameSchema,
   stoppedSchema,
@@ -121,6 +124,21 @@ export interface WatchOptions {
   readonly cursor?: string;
   readonly onFrame: (frame: WatchFrame) => void;
   readonly onError?: (error: unknown) => void;
+}
+
+/** How a shutdown is asked for. */
+export interface ShutdownOptions {
+  /**
+   * How long, in whole seconds, a dispatch has to end itself once asked. Omitted,
+   * the engine's own default (`SHUTDOWN_DEFAULT_GRACE_SECONDS`); `0` is the
+   * engine's force path.
+   */
+  readonly grace?: number;
+  /**
+   * Skip the interrupt and the wait and go straight to the teardown: whatever a
+   * worker had not committed is lost.
+   */
+  readonly force?: boolean;
 }
 
 type EventSourceFactory = (url: string) => EventSource;
@@ -418,6 +436,44 @@ export class TelemetryClient {
     );
   }
 
+  /**
+   * The engine's host shutdown over one run, as the acting session: each live
+   * dispatch asked to stop and given `grace` seconds, the run torn down, and every
+   * branch its records name pushed. A run another session owns is refused
+   * `409 not_owner` before anything is signalled.
+   *
+   * The answer is the engine's report whatever it found — read `complete`, never
+   * the status, for whether it all went as asked. The request is held for as long
+   * as the grace runs, which is minutes by default.
+   */
+  async shutdownRun(
+    runId: string,
+    options: ShutdownOptions = {},
+  ): Promise<ShutdownReport> {
+    requireOpaqueId(runId, "run ID");
+    return this.#request(
+      this.#url(API_V2_PATHS.runShutdown(runId)),
+      shutdownReportSchema.parse,
+      json("POST", shutdownBody(options)),
+    );
+  }
+
+  /**
+   * The engine's host shutdown over every run the acting session owns (`mine`),
+   * or over every run on the host whoever owns it (`host`), on the terms
+   * {@link shutdownRun} states.
+   */
+  async shutdown(
+    scope: HostShutdownScope,
+    options: ShutdownOptions = {},
+  ): Promise<ShutdownReport> {
+    return this.#request(
+      this.#url(API_V2_PATHS.shutdown),
+      shutdownReportSchema.parse,
+      json("POST", { scope, ...shutdownBody(options) }),
+    );
+  }
+
   /** Adopt a run nothing is driving; the answer names the retained driver's pid. */
   async adopt(runId: string): Promise<Adopted> {
     requireOpaqueId(runId, "run ID");
@@ -627,6 +683,22 @@ export class TelemetryClient {
       );
     }
   }
+}
+
+/**
+ * The body a shutdown sends: the grace when one was chosen, in whole seconds as
+ * the route takes it, and the force exactly as given. An omitted grace is the
+ * engine's own default.
+ */
+function shutdownBody(options: ShutdownOptions): {
+  grace?: number;
+  force: boolean;
+} {
+  const { grace, force = false } = options;
+  if (grace === undefined) return { force };
+  if (!Number.isSafeInteger(grace) || grace < 0)
+    throw new TelemetryClientError("Invalid grace: whole seconds, 0 or more");
+  return { grace, force };
 }
 
 /** A JSON request body with the header that says so. */

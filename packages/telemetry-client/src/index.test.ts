@@ -217,6 +217,46 @@ describe("TelemetryClient fetch boundary", () => {
     );
   });
 
+  test("refuses a grace the route could not mean before anything is sent", async () => {
+    let sent = 0;
+    const client = new TelemetryClient("http://localhost", {
+      fetch: async () => {
+        sent += 1;
+        return Response.json({});
+      },
+    });
+    for (const grace of [-1, 1.5, Number.NaN]) {
+      await expect(client.shutdownRun("run-1", { grace })).rejects.toThrow(
+        "Invalid grace",
+      );
+      await expect(client.shutdown("host", { grace })).rejects.toThrow(
+        "Invalid grace",
+      );
+    }
+    await expect(client.shutdownRun("bad/id")).rejects.toThrow(
+      "Invalid run ID",
+    );
+    expect(sent).toBe(0);
+  });
+
+  test("reads a shutdown report that violates the model as a failed validation, not as a report", async () => {
+    const client = new TelemetryClient("http://localhost", {
+      fetch: async () =>
+        Response.json({
+          api_version: 2,
+          telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
+          observed_at: "2026-07-26T12:00:00Z",
+          scope: "host",
+          // No `complete`: a report that cannot say whether it all went as asked.
+          runs: [],
+        }),
+    });
+    await expect(client.shutdown("host")).rejects.toMatchObject({
+      status: 200,
+      message: "Telemetry response failed contract validation",
+    });
+  });
+
   test("surfaces the typed server error", async () => {
     const client = new TelemetryClient("http://localhost", {
       fetch: async () =>

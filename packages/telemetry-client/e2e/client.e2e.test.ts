@@ -560,3 +560,110 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
     await server.stop();
   }
 });
+
+test("a package consumer shuts down one run, its own runs or the host, and reads the engine's report or refusal", async () => {
+  const received: { method: string; path: string; body: string }[] = [];
+  const report = (scope: string, grace: number, forced: boolean) => ({
+    ...enveloped,
+    scope,
+    root: "/runs",
+    grace_seconds: grace,
+    forced,
+    complete: false,
+    runs: [
+      {
+        run_id: "run-1",
+        owner: "[mine]",
+        forced_over_owner: false,
+        dispatches: [
+          {
+            node: "build",
+            pid: 4242,
+            interrupt: forced ? "not-asked" : "no-turn",
+            detail: "nothing to ask",
+            ended: "killed",
+            waited_ms: grace * 1000,
+          },
+        ],
+        teardown: "signalled",
+        branches: [],
+      },
+    ],
+    not_pushed: [],
+    not_pushed_unread: "ONEVCS_HOME could not be read",
+    rendered: `shutdown  scope ${scope}\n`,
+  });
+  const server = await serveLoopback(async (request) => {
+    const url = new URL(request.url);
+    const body = await request.text();
+    received.push({ method: request.method, path: url.pathname, body });
+    const sent = JSON.parse(body || "{}") as {
+      scope?: string;
+      grace?: number;
+      force?: boolean;
+    };
+    if (url.pathname === "/api/v2/runs/elsewhere/shutdown")
+      return Response.json(
+        {
+          error: {
+            code: "not_owner",
+            message: "run elsewhere belongs to [codex:160c290a]",
+          },
+        },
+        { status: 409 },
+      );
+    if (url.pathname === "/api/v2/runs/run-1/shutdown")
+      return Response.json(
+        report("run", sent.grace ?? 600, sent.force === true),
+      );
+    if (url.pathname === "/api/v2/shutdown")
+      return Response.json(
+        report(sent.scope ?? "", sent.grace ?? 600, sent.force === true),
+      );
+    return Response.json(
+      { error: { code: "not_found", message: "Not found" } },
+      { status: 404 },
+    );
+  });
+  try {
+    const client = new TelemetryClient(`http://127.0.0.1:${server.port}`);
+    const one = await client.shutdownRun("run-1", { grace: 90 });
+    expect(one).toMatchObject({ scope: "run", grace_seconds: 90 });
+    expect(one.complete).toBe(false);
+    expect(one.not_pushed_unread).toBe("ONEVCS_HOME could not be read");
+    expect((await client.shutdown("mine")).grace_seconds).toBe(600);
+    expect(
+      (await client.shutdown("host", { grace: 5, force: true })).runs[0]
+        ?.dispatches[0]?.interrupt,
+    ).toBe("not-asked");
+    await expect(client.shutdownRun("elsewhere")).rejects.toMatchObject({
+      status: 409,
+      code: "not_owner",
+      message: "run elsewhere belongs to [codex:160c290a]",
+    });
+    expect(received).toEqual([
+      {
+        method: "POST",
+        path: "/api/v2/runs/run-1/shutdown",
+        body: '{"grace":90,"force":false}',
+      },
+      {
+        method: "POST",
+        path: "/api/v2/shutdown",
+        body: '{"scope":"mine","force":false}',
+      },
+      {
+        method: "POST",
+        path: "/api/v2/shutdown",
+        body: '{"scope":"host","grace":5,"force":true}',
+      },
+      {
+        method: "POST",
+        path: "/api/v2/runs/elsewhere/shutdown",
+        body: '{"force":false}',
+      },
+    ]);
+  } finally {
+    await server.stop();
+  }
+});

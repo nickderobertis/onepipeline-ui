@@ -3,12 +3,14 @@ import { describe, expect, test } from "vitest";
 import {
   AGENT_LABELS,
   AGENT_SCOPES,
+  API_V2_PATHS,
   agentRoleSchema,
   agentSessionSchema,
   dagConversationSchema,
   graphPayloadSchema,
   graphResultItemSchema,
   graphStateSchema,
+  hostShutdownScopeSchema,
   nodeTelemetrySchema,
   parseRunList,
   parseRunTimeline,
@@ -20,13 +22,16 @@ import {
   runListSchema,
   runSummarySchema,
   runTelemetrySchema,
+  SHUTDOWN_DEFAULT_GRACE_SECONDS,
   sessionLinkSchema,
+  shutdownReportSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
   timelineEventSchema,
   timelineReferenceSchema,
   timelineSpanSchema,
   timingSchema,
+  unwatchedSchema,
 } from "./index.js";
 
 const timing = {
@@ -1149,5 +1154,113 @@ describe("run timeline", () => {
         spans: [],
       }),
     ).toThrow();
+  });
+});
+
+describe("shutdown", () => {
+  const envelope = {
+    api_version: 2,
+    telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
+    observed_at: "2026-09-21T12:00:00Z",
+  };
+  const report = {
+    ...envelope,
+    scope: "host",
+    root: "/runs",
+    grace_seconds: 600,
+    forced: false,
+    complete: false,
+    runs: [
+      {
+        run_id: "run-1",
+        owner: "[codex:160c290a]",
+        forced_over_owner: true,
+        dispatches: [
+          {
+            node: "build",
+            pid: 4242,
+            interrupt: "no-turn",
+            detail: "nothing of this dispatch has named a turn to interrupt",
+            ended: "killed",
+            waited_ms: 600_000,
+          },
+        ],
+        teardown: "signalled",
+        branches: [
+          {
+            identity: "work",
+            branch: "feature/build",
+            result: "refused",
+            remote: null,
+            commit: null,
+            detail: "no such identity",
+          },
+        ],
+      },
+    ],
+    not_pushed: [{ identity: "work", branch: "feature/other" }],
+    not_pushed_unread: null,
+    rendered: "shutdown  scope host  grace 600s\n",
+  };
+
+  test("reads the engine's report of a shutdown, incomplete as well as complete", () => {
+    const parsed = shutdownReportSchema.parse(report);
+    expect(parsed.complete).toBe(false);
+    expect(parsed.runs[0]?.dispatches[0]?.ended).toBe("killed");
+    expect(parsed.runs[0]?.branches[0]?.remote).toBeNull();
+    expect(parsed.not_pushed).toEqual([
+      { identity: "work", branch: "feature/other" },
+    ]);
+    // A list that could not be read travels as the reason, never as none.
+    expect(
+      shutdownReportSchema.parse({
+        ...report,
+        not_pushed: [],
+        not_pushed_unread: "ONEVCS_HOME is not readable",
+      }).not_pushed_unread,
+    ).toBe("ONEVCS_HOME is not readable");
+  });
+
+  test("refuses a report whose closed words are outside the engine's", () => {
+    const withDispatch = (patch: Record<string, unknown>) => ({
+      ...report,
+      runs: [
+        {
+          ...report.runs[0],
+          dispatches: [{ ...report.runs[0]?.dispatches[0], ...patch }],
+        },
+      ],
+    });
+    expect(() =>
+      shutdownReportSchema.parse(withDispatch({ ended: "vanished" })),
+    ).toThrow();
+    expect(() =>
+      shutdownReportSchema.parse(withDispatch({ interrupt: "ignored" })),
+    ).toThrow();
+    expect(() =>
+      shutdownReportSchema.parse({ ...report, scope: "everything" }),
+    ).toThrow();
+    expect(() =>
+      shutdownReportSchema.parse({ ...report, complete: "yes" }),
+    ).toThrow();
+  });
+
+  test("names the routes, the two scopes a body takes, and the engine's default grace", () => {
+    expect(API_V2_PATHS.runShutdown("run/1")).toBe(
+      "/api/v2/runs/run%2F1/shutdown",
+    );
+    expect(API_V2_PATHS.shutdown).toBe("/api/v2/shutdown");
+    expect(hostShutdownScopeSchema.options).toEqual(["mine", "host"]);
+    expect(SHUTDOWN_DEFAULT_GRACE_SECONDS).toBe(600);
+  });
+
+  test("reads the acting session's key off the unwatched report, and its absence", () => {
+    const base = { ...envelope, reported: [], unresolved: [] };
+    expect(
+      unwatchedSchema.parse({ ...base, session_key: "5e551040abcd" })
+        .session_key,
+    ).toBe("5e551040abcd");
+    expect(unwatchedSchema.parse(base).session_key).toBeUndefined();
+    expect(() => unwatchedSchema.parse({ ...base, session_key: "" })).toThrow();
   });
 });
