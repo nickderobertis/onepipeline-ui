@@ -310,7 +310,7 @@ export function App({
             state={hostShutdowns.mine.state}
           />
           <ShutdownStatus
-            label="Host shutdown"
+            label="Shutdown of the entire host"
             onDismiss={hostShutdowns.host.dismiss}
             rows={runs}
             state={hostShutdowns.host.state}

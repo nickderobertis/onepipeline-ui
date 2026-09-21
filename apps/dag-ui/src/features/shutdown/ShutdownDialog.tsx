@@ -74,6 +74,7 @@ export function ShutdownDialog({
   const ready = runs !== undefined && blocked === undefined;
   const others = runs?.filter((run) => !run.mine) ?? [];
   const own = runs?.filter((run) => run.mine) ?? [];
+  const unowned = others.filter((run) => run.unowned).length;
 
   // Every closing — cancelled, escaped or confirmed — puts the defaults back, so
   // the next opening starts from them: a force left ticked from an earlier dialog
@@ -126,7 +127,7 @@ export function ShutdownDialog({
             <>
               {others.length > 0 ? (
                 <RunList
-                  caption={`It acts on ${countOf(others.length)} other sessions own, over their owners — each is interrupted, torn down and pushed as if it were yours:`}
+                  caption={`It acts on ${countOf(others.length)} other sessions own${unowned > 0 ? " (or that no session is recorded as owning)" : ""}, over their owners — each is interrupted, torn down and pushed as if it were yours:`}
                   label="Runs other sessions own"
                   runs={others}
                   warning

@@ -382,7 +382,9 @@ describe("shutdown", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    const host = await screen.findByRole("region", { name: "Host shutdown" });
+    const host = await screen.findByRole("group", {
+      name: "Shut down runs on this host",
+    });
     await userEvent.click(
       within(host).getByRole("button", { name: "Shut down all my runs" }),
     );
@@ -450,7 +452,9 @@ describe("shutdown", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    const host = await screen.findByRole("region", { name: "Host shutdown" });
+    const host = await screen.findByRole("group", {
+      name: "Shut down runs on this host",
+    });
     await userEvent.click(
       within(host).getByRole("button", { name: "Shut down the entire host" }),
     );
@@ -474,7 +478,7 @@ describe("shutdown", JOURNEY_TIMEOUT, () => {
       within(dialog).getByRole("button", { name: "Shut down the host" }),
     );
     const done = await screen.findByRole("alert", {
-      name: "Host shutdown report",
+      name: "Shutdown of the entire host report",
     });
     expect(done).toHaveTextContent("Shutdown incomplete");
     expect(done).not.toHaveTextContent("Shutdown complete");
@@ -503,7 +507,9 @@ describe("shutdown", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    const host = await screen.findByRole("region", { name: "Host shutdown" });
+    const host = await screen.findByRole("group", {
+      name: "Shut down runs on this host",
+    });
     await userEvent.click(
       within(host).getByRole("button", { name: "Shut down all my runs" }),
     );
@@ -546,7 +552,9 @@ describe("shutdown", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    const host = await screen.findByRole("region", { name: "Host shutdown" });
+    const host = await screen.findByRole("group", {
+      name: "Shut down runs on this host",
+    });
     await userEvent.click(
       within(host).getByRole("button", { name: "Shut down the entire host" }),
     );

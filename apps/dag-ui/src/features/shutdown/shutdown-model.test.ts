@@ -17,7 +17,12 @@ const [live, history] = rows;
 
 const sent: SentShutdown = {
   scope: "host",
-  runs: rows.map((row) => ({ runId: row.run_id, owner: "x", mine: false })),
+  runs: rows.map((row) => ({
+    runId: row.run_id,
+    owner: "x",
+    mine: false,
+    unowned: false,
+  })),
   grace: 600,
   force: false,
   sentAt: 0,

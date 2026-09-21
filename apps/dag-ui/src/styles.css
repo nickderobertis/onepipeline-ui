@@ -1639,7 +1639,10 @@ button.graph-row-name {
 .host-shutdown {
   display: grid;
   gap: 8px;
-  margin-bottom: 18px;
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
 }
 
 .host-shutdown-actions {

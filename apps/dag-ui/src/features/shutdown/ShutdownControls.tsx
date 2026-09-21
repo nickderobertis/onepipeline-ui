@@ -183,7 +183,13 @@ export function HostShutdownButtons({
     shutdowns.mine.state.phase === "sending" ||
     shutdowns.host.state.phase === "sending";
   return (
-    <section aria-label="Host shutdown" className="host-shutdown">
+    // A fieldset rather than a section: it sits in the runs navigation, whose
+    // own sections are the listing's groups, and it is a group of controls
+    // rather than a region of the page.
+    <fieldset
+      aria-label="Shut down runs on this host"
+      className="host-shutdown"
+    >
       <p className="eyebrow">This host</p>
       <div className="host-shutdown-actions">
         <Button
@@ -219,7 +225,7 @@ export function HostShutdownButtons({
           unreadable={unreadable.length}
         />
       ))}
-    </section>
+    </fieldset>
   );
 }
 

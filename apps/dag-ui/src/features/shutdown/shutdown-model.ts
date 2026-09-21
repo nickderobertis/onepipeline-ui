@@ -81,6 +81,8 @@ export interface ScopedRun {
    * session's key has been read, and never guessed otherwise.
    */
   readonly mine: boolean;
+  /** Whether its launch recorded no session at all, so no session owns it. */
+  readonly unowned: boolean;
 }
 
 /**
@@ -113,6 +115,7 @@ export function scopedRun(
     runId,
     owner: mine ? `this session (${launchLabel(launch)})` : launchLabel(launch),
     mine,
+    unowned: launch?.session_key === undefined,
   };
 }
 
