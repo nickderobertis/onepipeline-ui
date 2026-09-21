@@ -1,5 +1,10 @@
 import { Button } from "@oneharness/ui";
-import type { RunLaunch, RunList, Unwatched } from "@onepipeline-ui/dag-model";
+import type {
+  HostShutdownScope,
+  RunLaunch,
+  RunList,
+  Unwatched,
+} from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Power } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -8,6 +13,9 @@ import { ShutdownDialog } from "./ShutdownDialog";
 import { type ScopedRun, scopedRun } from "./shutdown-model";
 import { actingOf, useHostShutdownDialog } from "./useHostShutdownDialog";
 import { type Shutdown, useShutdown } from "./useShutdown";
+
+/** The listing's two scopes, in the order their controls are offered. */
+const HOST_SCOPES: readonly HostShutdownScope[] = ["mine", "host"];
 
 /**
  * *Shut down this run*: the control beside Stop and Adopt, and its dialog.
@@ -160,7 +168,7 @@ export function HostShutdownButtons({
           <Power size={14} /> Shut down the entire host
         </Button>
       </div>
-      {(["mine", "host"] as const).map((scope) => (
+      {HOST_SCOPES.map((scope) => (
         <ShutdownDialog
           blocked={blocked}
           key={scope}

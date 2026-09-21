@@ -20,11 +20,11 @@ import { launchLabel } from "../../lib/run-model";
  */
 
 /** The two units a grace is offered in: a person thinks in minutes, a test in seconds. */
-export const GRACE_UNITS = {
+export type GraceUnit = "minutes" | "seconds";
+export const GRACE_UNITS: Readonly<Record<GraceUnit, number>> = {
   minutes: 60,
   seconds: 1,
-} as const;
-export type GraceUnit = keyof typeof GRACE_UNITS;
+};
 
 export const isGraceUnit = (value: string): value is GraceUnit =>
   Object.hasOwn(GRACE_UNITS, value);
@@ -194,15 +194,19 @@ export function settleFailure(
 }
 
 /** The journal kinds a shutdown writes on each run it acts on. */
-export const SHUTDOWN_RECORDS = {
+export type ShutdownRecord = "dispatch-stopped" | "host-shutdown";
+export const SHUTDOWN_RECORDS: {
+  readonly dispatchStopped: ShutdownRecord;
+  readonly hostShutdown: ShutdownRecord;
+} = {
   dispatchStopped: "dispatch-stopped",
   hostShutdown: "host-shutdown",
-} as const;
+};
 
 /** What a run in scope has recorded of this shutdown so far. */
 export interface RunProgress {
   readonly runId: string;
-  readonly recorded: (typeof SHUTDOWN_RECORDS)[keyof typeof SHUTDOWN_RECORDS];
+  readonly recorded: ShutdownRecord;
 }
 
 /**
