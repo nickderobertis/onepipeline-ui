@@ -12,16 +12,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@oneharness/ui";
-import {
-  RUN_LIVENESS_NOTHING_DRIVING,
-  type RunLaunch,
-} from "@onepipeline-ui/dag-model";
+import { RUN_LIVENESS_NOTHING_DRIVING } from "@onepipeline-ui/dag-model";
 import { TelemetryClientError } from "@onepipeline-ui/telemetry-client";
 import { Eye, EyeOff, LifeBuoy, OctagonX } from "lucide-react";
-import { useCallback, useState } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 import { Outcome } from "../../lib/Outcome";
-import { ShutdownRunButton } from "../shutdown/ShutdownControls";
-import type { Shutdown } from "../shutdown/useShutdown";
 import type { RunControl } from "./useRunControl";
 import { useVerb } from "./useVerb";
 
@@ -44,24 +39,19 @@ function ownerNamed(message: string): string | undefined {
  * shown as the engine worded it, and only then is a forced stop offered, behind
  * a second confirm that names the owner it would override. It is never the
  * default. **Adopt** is offered only when the run's own status says nothing is
- * driving it, and shows the driver pid the API answers. **Shut down** is the
- * engine's host shutdown over this run alone, behind a dialog naming the run
- * and its owner; what it is doing and what it answered show beneath the header.
+ * driving it, and shows the driver pid the API answers. `children` are the
+ * run's further actions, set beside Stop by the app that composes them — the
+ * run's shutdown.
  */
 export function RunActions({
   runId,
   control,
-  launched,
-  shutdown,
+  children,
 }: {
   readonly runId: string;
   readonly control: RunControl;
-  /**
-   * What the view has read of the run — its listing row or its detail — which
-   * its shutdown names the owner from.
-   */
-  readonly launched?: { readonly launch?: RunLaunch };
-  readonly shutdown: Shutdown;
+  /** Further actions on the run, after Stop. */
+  readonly children?: ReactNode;
 }) {
   const { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal } =
     useStop(control);
@@ -157,12 +147,7 @@ export function RunActions({
           <OctagonX size={14} />
           <span className="run-action-label">Stop</span>
         </Button>
-        <ShutdownRunButton
-          launched={launched}
-          runId={runId}
-          shutdown={shutdown}
-          unwatched={control.unwatched}
-        />
+        {children}
       </div>
       <Dialog onOpenChange={setStopOpen} open={stopOpen}>
         <DialogContent>

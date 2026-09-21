@@ -1,4 +1,4 @@
-import type { RunSummary } from "@onepipeline-ui/dag-model";
+import { parseRunList } from "@onepipeline-ui/dag-model";
 import { TelemetryClientError } from "@onepipeline-ui/telemetry-client";
 import { describe, expect, test } from "vitest";
 import { runList } from "../../test/fixtures";
@@ -12,7 +12,8 @@ import {
   settleFailure,
 } from "./shutdown-model";
 
-const rows = runList.runs as unknown as RunSummary[];
+// Parsed through the model, as the client parses a served listing.
+const rows = parseRunList(runList).runs;
 const [live, history] = rows;
 
 const sent: SentShutdown = {

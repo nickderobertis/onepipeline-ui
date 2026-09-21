@@ -1,19 +1,15 @@
 import { Alert, AlertDescription, AlertTitle, Button } from "@oneharness/ui";
 import type { RunSummary, ShutdownReport } from "@onepipeline-ui/dag-model";
 import { CheckCircle2, Loader2, TriangleAlert, Unplug } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 import { formatDuration } from "../../lib/time";
 import {
   clockTime,
   graceWords,
-  progressOf,
   type SentShutdown,
   SHUTDOWN_RECORDS,
   type ShutdownState,
 } from "./shutdown-model";
-
-/** How often the in-flight clock is read again, in milliseconds. */
-const TICK_MS = 1000;
+import { useShutdownProgress } from "./useShutdownProgress";
 
 /**
  * What one shutdown control's request is doing, or came back with.
@@ -107,26 +103,10 @@ function InFlight({
   readonly sent: SentShutdown;
   readonly rows: readonly RunSummary[];
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
-  // The rows as they stood when the request went, so an earlier shutdown's
-  // record on a run is not read as this one's progress.
-  const before = useRef(
-    new Map(
-      rows
-        .filter((row) => sent.runs.some(({ runId }) => runId === row.run_id))
-        .map((row) => [row.run_id, row]),
-    ),
+  const { now, progress, done, deadline, asks } = useShutdownProgress(
+    sent,
+    rows,
   );
-  const progress = progressOf(sent, before.current, rows);
-  const done = progress.filter(
-    ({ recorded }) => recorded === SHUTDOWN_RECORDS.hostShutdown,
-  ).length;
-  const deadline = sent.sentAt + sent.grace * 1000;
-  const asks = !sent.force && sent.grace > 0;
   return (
     <div aria-live="polite" className="shutdown-inflight" role="status">
       <p className="shutdown-inflight-head">

@@ -46,6 +46,7 @@ import { useProject, useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
   HostShutdownButtons,
+  ShutdownRunButton,
   useHostShutdowns,
   useRunShutdown,
 } from "../features/shutdown/ShutdownControls";
@@ -243,15 +244,19 @@ export function App({
             </div>
             <div className="topbar-actions">
               {selectedRunId !== undefined && (
-                <RunActions
-                  control={control}
-                  launched={
-                    runs.find(({ run_id }) => run_id === selectedRunId) ??
-                    (detail?.run.run_id === selectedRunId ? detail : undefined)
-                  }
-                  runId={selectedRunId}
-                  shutdown={runShutdown}
-                />
+                <RunActions control={control} runId={selectedRunId}>
+                  <ShutdownRunButton
+                    launched={
+                      runs.find(({ run_id }) => run_id === selectedRunId) ??
+                      (detail?.run.run_id === selectedRunId
+                        ? detail
+                        : undefined)
+                    }
+                    runId={selectedRunId}
+                    shutdown={runShutdown}
+                    unwatched={control.unwatched}
+                  />
+                </RunActions>
               )}
               <span className="connection">
                 <Satellite size={15} />
