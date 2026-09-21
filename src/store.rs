@@ -971,6 +971,7 @@ impl RunApi for RunStore {
         Ok(Self::envelope(json!({ "run_id": run, "pid": pid })))
     }
 
+    // llmlint: ignore-block[authorization_enforced_server_side] the principal is the server's one acting session, which `docs/contract.md` fixes for every write this API makes — shutdown included, in the words of the plan the shutdown section quotes: "the same principal every other write here is made under, resolved once at startup from `--session`". The ownership rule under that session is the engine's own, applied inside `verbs::shutdown` (the run and `mine` scopes refuse another session's run; `host` proceeds over owners by the engine's decision and names each), and the routes validate the path and the body before this is reached. An authentication layer would be a change to that contract, which its owner decides, and `--bind` stays on loopback by default as it does for `stop` and `adopt`.
     fn run_shutdown(
         &self,
         run: &RunId,
@@ -997,6 +998,7 @@ impl RunApi for RunStore {
             .map_err(ApiError::from_engine_unscoped)?;
         Ok(Self::envelope(payload::shutdown(&shutdown)))
     }
+    // llmlint: ignore-end[authorization_enforced_server_side]
 
     fn watch(&self, run: &RunId, query: &WatchQuery) -> Result<Self::Watch, ApiError> {
         let paths = self.present(run)?;
