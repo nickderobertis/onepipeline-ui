@@ -1394,13 +1394,17 @@ fn a_tree_with_no_built_browser_view_is_read_to_a_verdict() {
         .output()
         .expect("cargo is on PATH");
     let refusal = stderr(&refused);
+    // Matched from the fixture's own directory down rather than as the whole
+    // path: cargo names the crate by the directory it resolved, which on macOS
+    // is `/private/var/...` for a temporary directory the test knows as `/var/...`.
+    let named = Path::new("history").join("apps/dag-ui/dist");
     assert!(
         !refused.status.success(),
         "a build asking for the bundle succeeded without one"
     );
     assert!(
         refusal.contains("the `bundled-ui` feature is on, but there is no built browser view at")
-            && refusal.contains(&view.display().to_string()),
+            && refusal.contains(&named.display().to_string()),
         "the build did not refuse naming the missing view:\n{refusal}"
     );
 }
