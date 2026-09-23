@@ -61,21 +61,21 @@ const UNPACKAGED: &str = "scripts/tool.sh";
 /// touching it is one release-plz versions this repository's release from.
 const PACKAGED_BY_THIS_CRATE: &str = "src/lib.rs";
 const README: &str = "README.md";
-/// What this repository's own `.gitattributes` says, carried by the fixture
-/// crate so that the reading over it goes through the filters a reading over
-/// this crate goes through.
+/// This repository's own attributes, which the fixture crate is given a copy of
+/// so that a reading over it goes through the filters a reading over this crate
+/// goes through. Copied from the file by [`this_repositorys_attributes`] rather
+/// than restated here, so there is nothing for the two to part over.
 ///
-/// It is not decoration. `text=auto eol=lf` puts every path through the
-/// end-of-line filter, and deciding line endings for a path means fetching the
-/// blob its index entry names — so this attribute is one half of what turns a
-/// racy-clean entry into a read of the object database, [`stamp`] being what
-/// removes the other. Measured on a copy of the fixture crate's tree, with an
-/// index the racy-clean rule fires on: 0 blobs are read without this line, 9
-/// with it.
-/// Without it, [`a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_release`]
-/// could not fail however the fixture was built.
+/// They are not decoration. Putting a path under an end-of-line filter means
+/// deciding line endings for it, and deciding them means fetching the blob its
+/// index entry names — so this file is one half of what turns a racy-clean entry
+/// into a read of the object database, [`stamp`] being what removes the other.
+/// Measured on a copy of the fixture crate's tree, with an index the racy-clean
+/// rule fires on: 0 blobs are read without it, 9 with it. What this repository's
+/// copy says is therefore a premise of two journeys here, and
+/// [`refuse_a_tree_outside_the_eol_filter`] is what fails when it stops holding
+/// — those journeys would otherwise go quiet rather than red.
 const ATTRIBUTES: &str = ".gitattributes";
-const THIS_REPOSITORYS_ATTRIBUTES: &str = "* text=auto eol=lf\n";
 /// A packaged path git would read as pathspec magic if it were handed one: a
 /// directory named `:!src` puts `:!src/lib.rs` on the list, and `:!<path>`
 /// *excludes* that path — here, the very file a release is made of.
@@ -277,7 +277,7 @@ impl Fixture {
         fs::write(repo.join(PACKAGED), "pub fn read() {}\n").expect("write the packaged file");
         fs::write(repo.join(UNPACKAGED), "echo tool\n").expect("write the unpackaged file");
         fs::write(repo.join(README), "# fixture-crate\n").expect("write the readme");
-        fs::write(repo.join(ATTRIBUTES), THIS_REPOSITORYS_ATTRIBUTES)
+        fs::write(repo.join(ATTRIBUTES), this_repositorys_attributes())
             .expect("write the attributes this repository carries");
         if !magic.is_empty() {
             let path = repo.join(magic);
@@ -747,8 +747,8 @@ const CARRIED_FORWARD_SECONDS: u64 = TREE_SECONDS + 86_400;
 /// timestamp is at or after the index's own, and a fixture writes its whole
 /// tree and commits it inside one clock second, so which entries those are is
 /// decided by whether the clock happened to tick in between. Deciding one means
-/// fetching the blob its index entry names, because [`THIS_REPOSITORYS_ATTRIBUTES`]
-/// puts every path through the end-of-line filter and that filter reads the
+/// fetching the blob its index entry names, because [`ATTRIBUTES`] puts
+/// every path through the end-of-line filter and that filter reads the
 /// index object to see which endings it is converting from. The reading's answer
 /// then came to rest on hundreds of blobs it is asking nothing about, out of an
 /// object database built moments earlier: Release-plz run 35839314712 is one of
@@ -802,6 +802,32 @@ fn when_this_run_began() -> SystemTime {
 /// to write it gave 245 and 0 on one run and can give anything on the next.
 fn the_index_as_if_written_at(repo: &Path, when: SystemTime) {
     stamp_at(&repo.join(".git").join("index"), when);
+}
+
+/// This repository's own [`ATTRIBUTES`], read rather than restated.
+fn this_repositorys_attributes() -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(ATTRIBUTES))
+        .expect("read this repository's attributes")
+}
+
+/// Refuse a fixture whose `path` is under no end-of-line filter, which is half
+/// of what sends a racy-clean entry to the object database — [`ATTRIBUTES`] has
+/// the rest.
+///
+/// Asked of git over the repository itself, so this gates what the attributes
+/// *do* rather than restating what they say. It is a gate rather than a comment
+/// because losing the premise is silent: with no filter on a path, no blob is
+/// fetched to decide it, so the two journeys that forget a blob would pass
+/// whatever the fixture was built like, and go on reporting a property nothing
+/// was holding.
+fn refuse_a_tree_outside_the_eol_filter(repo: &Path, path: &str) {
+    let said = git_says(repo, &["check-attr", "text", "eol", "--", path]);
+    assert!(
+        said.lines().any(|line| !line.ends_with("unspecified")),
+        "{path} carries neither a `text` nor an `eol` attribute, so nothing \
+         fetches the blob its index entry names to decide its line endings and \
+         forgetting that blob decides nothing:\n{said}"
+    );
 }
 
 /// [`stamp`] over every file under `root`, which is how a tree is stamped
@@ -1905,6 +1931,7 @@ fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
         AN_EARLIER_ENGINE_LINKED,
         "fix: serve the empty timeline as an empty one",
     );
+    refuse_a_tree_outside_the_eol_filter(&released.root, PACKAGED_BY_THIS_CRATE);
     the_index_as_if_written_at(&released.root, began);
     forget_the_blob_of(&released.root, PACKAGED_BY_THIS_CRATE);
 
@@ -1940,8 +1967,8 @@ fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
 ///
 /// Its tree is six files rather than every file this checkout tracks, and that
 /// is the only difference that matters: the reading takes the same status over
-/// it, through the same end-of-line filter — [`THIS_REPOSITORYS_ATTRIBUTES`] is
-/// why — and so fetches its blobs out of the same kind of temporary object
+/// it, through the same end-of-line filter — [`ATTRIBUTES`] is why — and so
+/// fetches its blobs out of the same kind of temporary object
 /// database to take it. [`the_index_as_if_written_at`] is what makes it do so
 /// on every run rather than on the runs the clock obliges, and without
 /// [`stamp`] this journey fails on `the files this crate packages could not be
@@ -1951,6 +1978,7 @@ fn a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_r
     let began = when_this_run_began();
     let fixture = Fixture::of(A_BREAKING_RELEASE);
     let repo = fixture.repo.clone();
+    refuse_a_tree_outside_the_eol_filter(&repo, PACKAGED);
     the_index_as_if_written_at(&repo, began);
     forget_the_blob_of(&repo, PACKAGED);
 
