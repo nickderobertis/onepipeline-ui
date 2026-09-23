@@ -29,6 +29,7 @@
 //! whether each side *builds*, it builds both with the real cargo and the feature
 //! set the reading asked for, over a crate carrying this one's `build.rs`.
 
+use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -166,7 +167,24 @@ struct Fixture {
     baseline: String,
     stub_dir: PathBuf,
     search_path: OsString,
+    /// Whether this fixture has been put in a state where cargo cannot list the
+    /// packaged files. Exactly one journey does that on purpose; for every
+    /// other, that ending is a repository that was not built rather than a
+    /// decision about a release, and [`Fixture::finish`] refuses it.
+    listing_broken_on_purpose: Cell<bool>,
 }
+
+/// The script's own words for the ending no journey here is about, unless it
+/// said so: the packaged files could not be listed, so nothing downstream of
+/// them was decided.
+///
+/// Two journeys of this file went red on it in one Release-plz run over one
+/// commit — `a_release_moving_the_engine_without_announcing_it_is_refused` and
+/// `an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_
+/// compatibility` — and neither said so, because a run that ends here exits 1
+/// exactly as a refusal does. [`stamp`] is what stops the repository being
+/// unreadable; this is what stops that ending ever being read as an answer.
+const LISTING_FAILED: &str = "the files this crate packages could not be listed";
 
 /// Run `git` in `repo`, failing the test with what it said if it will not.
 fn git(repo: &Path, arguments: &[&str]) {
@@ -395,6 +413,7 @@ impl Fixture {
             stub_dir,
             dir,
             search_path,
+            listing_broken_on_purpose: Cell::new(false),
         }
     }
 
@@ -467,7 +486,19 @@ impl Fixture {
         for (name, value) in environment {
             command.env(name, value);
         }
-        command.output().expect("the program is on PATH")
+        let output = command.output().expect("the program is on PATH");
+        // Every journey in this file reaches the script through this one call,
+        // so this is the one place that can hold all of them to having read a
+        // repository at all. See [`LISTING_FAILED`].
+        assert!(
+            self.listing_broken_on_purpose.get()
+                || !String::from_utf8_lossy(&output.stderr).contains(LISTING_FAILED),
+            "the run ended on a repository that could not be read rather than on a \
+             decision about the release, so whatever this journey asserts next is \
+             about a fixture that was not built:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
     }
 
     /// Leave the history with no commit on HEAD, so the range between the tag and
@@ -485,6 +516,7 @@ impl Fixture {
     /// from cannot be known, while everything asked of cargo before it still can.
     fn forget_the_readme(&self) {
         fs::remove_file(self.repo.join(README)).expect("remove the readme");
+        self.listing_broken_on_purpose.set(true);
     }
 
     /// The same search path with nothing on it called `cargo-semver-checks` —
@@ -1478,8 +1510,9 @@ fn a_packaged_path_that_reads_as_pathspec_magic_does_not_select_the_release() {
         stdout(&output)
     );
     assert!(
-        stderr(&output).contains("::error::"),
-        "the failure does not say the check returned no verdict:\n{}",
+        stderr(&output).contains("::error::") && stderr(&output).contains(NO_VERDICT),
+        "the failure does not say the check returned no verdict, or which status it \
+         returned — and a run that ended for some other reason exits this way too:\n{}",
         stderr(&output)
     );
 }
@@ -1797,6 +1830,10 @@ fn several_readings_of_this_crate_at_once_each_get_their_own_answer() {
 /// reading is about which files `include` selects, and [`stamp`] is what keeps
 /// the status that answers it from going to the object database for 270 blobs
 /// to find out.
+///
+/// The ending itself is refused for every journey in this file rather than
+/// here: see [`LISTING_FAILED`]. What this one adds is that the release is
+/// still decided, and decided by the move, with that database short a blob.
 #[test]
 fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release() {
     let linked = this_crates_engine_requirement();
@@ -1825,17 +1862,44 @@ fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
         fixture.calls()
     );
     assert!(
-        !stderr.contains("could not be listed"),
-        "which files this crate packages was answered out of the object database \
-         rather than out of `include`:\n{stderr}"
-    );
-    assert!(
         !output.status.success() && stderr.contains("announce no break"),
         "the unannounced engine move is not what this release ended on:\n{stderr}"
     );
     assert!(
         stderr.contains(AN_EARLIER_ENGINE) && stderr.contains(&linked),
         "the failure names neither side of the move:\n{stderr}"
+    );
+}
+
+/// The same over the fixture crate every other journey here builds a repository
+/// from, which is the repository the defect is a property of rather than the
+/// crate copied into it: two journeys of one Release-plz run went red on it,
+/// and the twenty-five built on this fixture could have gone red on it next.
+///
+/// Its tree is five files rather than two hundred and seventy-six, and that is
+/// the only difference: the reading takes the same status over it and, left to
+/// the timestamps a fixture happened to be built at, fetches its blobs out of
+/// the same kind of temporary object database to take it.
+#[test]
+fn a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_release() {
+    let fixture = Fixture::of(A_BREAKING_RELEASE);
+    forget_the_blob_of(&fixture.repo.clone(), PACKAGED);
+
+    let output = fixture.run(NO_VERDICT);
+    let stderr = stderr(&output);
+
+    assert!(
+        fixture.calls().contains("package --list"),
+        "the packaged files were never listed:\n{}",
+        fixture.calls()
+    );
+    assert!(
+        output.status.success() && stderr.contains("::warning::"),
+        "the breaking release did not read past the baseline it cannot build:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("announce a break"),
+        "what the packaged commits announce is not what this run decided on:\n{stderr}"
     );
 }
 
