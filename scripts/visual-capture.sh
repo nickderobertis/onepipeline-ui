@@ -61,10 +61,16 @@ esac
 # second thing to keep in step between here and CI.
 if [ -n "${SHOTS_OUT:-}" ]; then
   shots_out="$SHOTS_OUT"
+  minted=""
   mkdir -p "$shots_out"
 else
   mkdir -p shots/local
   shots_out="$(mktemp -d "$repo_root/shots/local/capture-XXXXXXXX")"
+  # Remembered, so a run that captured nothing at all can take its own empty
+  # directory away again rather than leaving a trail of them behind every failure.
+  # Only ever the one this invocation minted: a destination the caller named is the
+  # caller's, empty or not.
+  minted="$shots_out"
 fi
 # Absolute, because the spec is handed this path and a relative one would scatter
 # images wherever the process happened to start — and then said again the way the
@@ -150,7 +156,12 @@ if [ "$status" -eq 0 ]; then
   echo "visual-capture: $arch capture in $shots_out"
   exit 0
 fi
+if [ -n "$minted" ] && [ -z "$(ls -A "$minted")" ]; then
+  rmdir "$minted"
+  echo "visual-capture: playwright exited $status without capturing anything; the surface it stopped on, or the server that would not start, is named in its output above" >&2
+  exit 1
+fi
 # Named on the failing ending too, so a capture that died part way through still says
-# where its partial images are and which surface it stopped on is in the output above.
+# where its partial images are, and which surface it stopped on is in the output above.
 echo "visual-capture: playwright exited $status; whatever it captured is in $shots_out" >&2
 exit 1
