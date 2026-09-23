@@ -3,7 +3,7 @@
 #
 # A fresh clone and a freshly created worktree both have no `node_modules` at all,
 # and two different callers need one: `scripts/nx.sh`, because Nx itself lives
-# there, and `scripts/dag-ui-screens.sh`, because Playwright does. This is that one
+# there, and `scripts/visual-capture.sh`, because a capture needs the Playwright that drives it. This is that one
 # step, so neither caller can quietly repair what the other reports missing.
 #
 # Quiet and idempotent when the install is already present. Installer chatter goes

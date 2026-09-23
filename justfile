@@ -57,8 +57,15 @@ default:
 # Every project's `bootstrap` target, so one clean-clone command provisions the
 # whole graph rather than the crate alone. Serialized: projects share installers,
 # and two of them recreating the same tool directory at once race each other.
+#
+# The hook activation comes first and is not a project's: `core.hooksPath` is
+# per-clone state git cannot commit, so the committed screencomp guard runs nothing
+# until a clone points at it, and a guard nobody activated is what lets the visual
+# baseline drift until CI says so. `scripts/enable-hooks.sh` holds what it points at
+# and what it deliberately does not wire in.
 # Set up the project from a clean clone.
 bootstrap:
+    @bash scripts/enable-hooks.sh
     @bash scripts/nx.sh run-many -t bootstrap --parallel=1
 
 # The Rust crate's own provisioning (the `onepipeline-ui:bootstrap` target).
@@ -314,11 +321,13 @@ run *ARGS:
     cargo run --locked --quiet -- {{ARGS}}
 
 # The operator iterates on this UI visually and cannot otherwise see it while a
-# change is being made; the script's own header explains the per-invocation
-# gallery. Not in `check`: it asserts nothing and writes images.
-# Photograph the DAG Observatory at every viewport into a fresh gallery.
+# change is being made, and these are also the pictures README.md carries. The
+# script's own header explains the container, the per-invocation destination and the
+# two halves. Not in `check` and not in `gate`: it asserts nothing, it writes images,
+# and it wants Docker.
+# Photograph the DAG Observatory at every viewport, reproducibly.
 dag-ui-screens *ARGS:
-    @bash scripts/dag-ui-screens.sh {{ARGS}}
+    @bash scripts/visual-capture.sh {{ARGS}}
 
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.
