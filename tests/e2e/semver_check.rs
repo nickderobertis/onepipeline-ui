@@ -61,6 +61,21 @@ const UNPACKAGED: &str = "scripts/tool.sh";
 /// touching it is one release-plz versions this repository's release from.
 const PACKAGED_BY_THIS_CRATE: &str = "src/lib.rs";
 const README: &str = "README.md";
+/// What this repository's own `.gitattributes` says, carried by the fixture
+/// crate so that the reading over it goes through the filters a reading over
+/// this crate goes through.
+///
+/// It is not decoration. `text=auto eol=lf` puts every path through the
+/// end-of-line filter, and deciding line endings for a path means fetching the
+/// blob its index entry names — so this attribute is one half of what turns a
+/// racy-clean entry into a read of the object database, [`stamp`] being what
+/// removes the other. Measured on a copy of the fixture crate's tree, with an
+/// index the racy-clean rule fires on: 0 blobs are read without this line, 9
+/// with it.
+/// Without it, [`a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_release`]
+/// could not fail however the fixture was built.
+const ATTRIBUTES: &str = ".gitattributes";
+const THIS_REPOSITORYS_ATTRIBUTES: &str = "* text=auto eol=lf\n";
 /// A packaged path git would read as pathspec magic if it were handed one: a
 /// directory named `:!src` puts `:!src/lib.rs` on the list, and `:!<path>`
 /// *excludes* that path — here, the very file a release is made of.
@@ -262,6 +277,8 @@ impl Fixture {
         fs::write(repo.join(PACKAGED), "pub fn read() {}\n").expect("write the packaged file");
         fs::write(repo.join(UNPACKAGED), "echo tool\n").expect("write the unpackaged file");
         fs::write(repo.join(README), "# fixture-crate\n").expect("write the readme");
+        fs::write(repo.join(ATTRIBUTES), THIS_REPOSITORYS_ATTRIBUTES)
+            .expect("write the attributes this repository carries");
         if !magic.is_empty() {
             let path = repo.join(magic);
             fs::create_dir_all(path.parent().expect("a directory to package"))
@@ -728,20 +745,30 @@ const CARRIED_FORWARD_SECONDS: u64 = TREE_SECONDS + 86_400;
 /// of the tree it is packaging to do it. Git's racy-clean rule makes that
 /// status compare *content* — rather than stat data — for every entry whose
 /// timestamp is at or after the index's own, and a fixture writes its whole
-/// tree and commits it inside one clock second, so that is every entry. The
-/// reading then fetched all 270 blobs of a copy of this crate out of an object
-/// database built moments earlier, and the journey's answer came to rest on 270
-/// reads it is asking nothing about: Release-plz run 35839314712 is one of them
-/// coming back `an object with id ... could not be found`, which reached the
-/// journey as `the files this crate packages could not be listed` and failed a
-/// release over a question nobody had asked. Measured on this tree: 270 blobs
-/// read without this, none with it.
+/// tree and commits it inside one clock second, so which entries those are is
+/// decided by whether the clock happened to tick in between. Deciding one means
+/// fetching the blob its index entry names, because [`THIS_REPOSITORYS_ATTRIBUTES`]
+/// puts every path through the end-of-line filter and that filter reads the
+/// index object to see which endings it is converting from. The reading's answer
+/// then came to rest on hundreds of blobs it is asking nothing about, out of an
+/// object database built moments earlier: Release-plz run 35839314712 is one of
+/// them coming back `an object with id ... could not be found`, which reached
+/// the journey as `the files this crate packages could not be listed` and failed
+/// a release over a question nobody had asked.
 ///
-/// A fixed instant in the past leaves every entry stat-clean, so the status is
-/// the stat comparison it is meant to be and the reading is about the packaged
-/// files alone.
+/// A fixed instant in the past leaves every entry stat-clean against any index
+/// git could write, because git writes one at the wall clock and this is a
+/// quarter of a century behind it. So the status is the stat comparison it is
+/// meant to be and the reading is about the packaged files alone. Measured over
+/// a copy of this crate whose index sits where
+/// [`the_index_as_if_written_at`] puts it: 277 blobs read without this, none
+/// with it.
 fn stamp(path: &Path, seconds: u64) {
-    let when = SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+    stamp_at(path, SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
+}
+
+/// [`stamp`], at an instant rather than at a count of seconds.
+fn stamp_at(path: &Path, when: SystemTime) {
     // Opened for writing because that is what a platform asks for before it
     // will let a process set a file's times.
     let file = fs::File::options()
@@ -750,6 +777,31 @@ fn stamp(path: &Path, seconds: u64) {
         .unwrap_or_else(|error| panic!("open {} to stamp it: {error}", path.display()));
     file.set_times(fs::FileTimes::new().set_accessed(when).set_modified(when))
         .unwrap_or_else(|error| panic!("stamp {}: {error}", path.display()));
+}
+
+/// The whole second this run is in, to be captured *before* a fixture writes its
+/// tree — so every file that tree carries is written at or after it.
+fn when_this_run_began() -> SystemTime {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("a clock set after the epoch");
+    SystemTime::UNIX_EPOCH + Duration::from_secs(now.as_secs())
+}
+
+/// Leave `repo`'s index carrying `when`, which is how a journey asks git's
+/// racy-clean rule its question rather than waiting to be asked it.
+///
+/// Handed [`when_this_run_began`], this is the index a machine fast enough to
+/// write the whole tree and commit it inside one tick produces — the hostile end
+/// of what a real host does, and the end Release-plz run 35839314712 was at.
+/// Nothing about it is unfair to [`stamp`]: an index git wrote at the wall clock
+/// is still a quarter of a century ahead of a stamped entry, so a stamped tree
+/// is stat-clean against it and an unstamped one is racy against it, every time
+/// rather than when the clock obliges. Measured over a copy of this crate: 277
+/// blobs read here unstamped, 0 stamped, where the index left where git happened
+/// to write it gave 245 and 0 on one run and can give anything on the next.
+fn the_index_as_if_written_at(repo: &Path, when: SystemTime) {
+    stamp_at(&repo.join(".git").join("index"), when);
 }
 
 /// [`stamp`] over every file under `root`, which is how a tree is stamped
@@ -1828,14 +1880,23 @@ fn several_readings_of_this_crate_at_once_each_get_their_own_answer() {
 /// was not the one being read: the run reported `the files this crate packages
 /// could not be listed`, which is a true sentence about the wrong thing. The
 /// reading is about which files `include` selects, and [`stamp`] is what keeps
-/// the status that answers it from going to the object database for 270 blobs
-/// to find out.
+/// the status that answers it from going to the object database for hundreds of
+/// blobs to find out.
+///
+/// Both halves of that state are built here rather than waited for.
+/// [`the_index_as_if_written_at`] puts the index where a machine that wrote the
+/// tree and the index inside one tick leaves it, which is what makes every entry
+/// racy-clean; [`forget_the_blob_of`] then takes away the object one of them
+/// names. Without [`stamp`] this journey fails on `the files this crate packages
+/// could not be listed`, every run rather than the one in ten a stranded release
+/// was found on.
 ///
 /// The ending itself is refused for every journey in this file rather than
 /// here: see [`LISTING_FAILED`]. What this one adds is that the release is
 /// still decided, and decided by the move, with that database short a blob.
 #[test]
 fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release() {
+    let began = when_this_run_began();
     let linked = this_crates_engine_requirement();
     let fixture = Fixture::new();
     let checkout = TempDir::new().expect("temp dir");
@@ -1844,6 +1905,7 @@ fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
         AN_EARLIER_ENGINE_LINKED,
         "fix: serve the empty timeline as an empty one",
     );
+    the_index_as_if_written_at(&released.root, began);
     forget_the_blob_of(&released.root, PACKAGED_BY_THIS_CRATE);
 
     let output = fixture.run_recipe_in(
@@ -1876,14 +1938,21 @@ fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
 /// crate copied into it: two journeys of one Release-plz run went red on it,
 /// and the twenty-five built on this fixture could have gone red on it next.
 ///
-/// Its tree is five files rather than two hundred and seventy-six, and that is
-/// the only difference: the reading takes the same status over it and, left to
-/// the timestamps a fixture happened to be built at, fetches its blobs out of
-/// the same kind of temporary object database to take it.
+/// Its tree is six files rather than every file this checkout tracks, and that
+/// is the only difference that matters: the reading takes the same status over
+/// it, through the same end-of-line filter — [`THIS_REPOSITORYS_ATTRIBUTES`] is
+/// why — and so fetches its blobs out of the same kind of temporary object
+/// database to take it. [`the_index_as_if_written_at`] is what makes it do so
+/// on every run rather than on the runs the clock obliges, and without
+/// [`stamp`] this journey fails on `the files this crate packages could not be
+/// listed`.
 #[test]
 fn a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_release() {
+    let began = when_this_run_began();
     let fixture = Fixture::of(A_BREAKING_RELEASE);
-    forget_the_blob_of(&fixture.repo.clone(), PACKAGED);
+    let repo = fixture.repo.clone();
+    the_index_as_if_written_at(&repo, began);
+    forget_the_blob_of(&repo, PACKAGED);
 
     let output = fixture.run(NO_VERDICT);
     let stderr = stderr(&output);
