@@ -7,7 +7,14 @@
 //! that come back.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+// The journeys that write a config chain and a harness stand-in are `cfg(unix)`
+// — they chmod a script and stop the server with a signal — and they are the
+// only callers here that name this type rather than spelling it in full. So the
+// import is gated with them, exactly as `Stop` is below: an import left ungated
+// is an unused one on Windows, which this crate's gate denies.
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{json, Value};
