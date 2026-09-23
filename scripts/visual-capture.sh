@@ -94,9 +94,11 @@ fi
 
 # --- the host half: build what is photographed -------------------------------
 # `dag-ui:build-api-server` depends on `dag-ui:build`, so this is the bundle and the
-# binary that embeds it. Not `dag-ui-e2e:screens`, whose dependencies include the
-# sibling `onepipeline` CLI: the journeys that compare the two need it and a capture
-# never does, and provisioning it here would be minutes of build per photograph.
+# binary that embeds it, and it is deliberately the narrowest target that produces
+# both. The browser tier's own `test` target additionally provisions the sibling
+# `onepipeline` CLI into `.tools/`, because the journeys that hold what this server
+# serves to what that one prints cannot run without it — a capture never reads it, and
+# building it here would be minutes of cargo per photograph.
 bash "$script_dir/workspace-install.sh"
 bash "$script_dir/nx.sh" run dag-ui:build-api-server
 
