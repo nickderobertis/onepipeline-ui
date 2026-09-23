@@ -1973,40 +1973,135 @@ fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
 /// on every run rather than on the runs the clock obliges, and without
 /// [`stamp`] this journey fails on `the files this crate packages could not be
 /// listed`.
+///
+/// Being the cheap one of the two, it is also the one that drives both shapes a
+/// store can keep that blob in — see [`OBJECT_STORES`] — so neither is left for
+/// a platform to discover.
 #[test]
 fn a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_release() {
-    let began = when_this_run_began();
-    let fixture = Fixture::of(A_BREAKING_RELEASE);
-    let repo = fixture.repo.clone();
-    refuse_a_tree_outside_the_eol_filter(&repo, PACKAGED);
-    the_index_as_if_written_at(&repo, began);
-    forget_the_blob_of(&repo, PACKAGED);
+    for (store, packed) in OBJECT_STORES {
+        let began = when_this_run_began();
+        let fixture = Fixture::of(A_BREAKING_RELEASE);
+        let repo = fixture.repo.clone();
+        refuse_a_tree_outside_the_eol_filter(&repo, PACKAGED);
+        if *packed {
+            git(&repo, &["repack", "-a", "-d", "--quiet"]);
+        }
+        the_index_as_if_written_at(&repo, began);
+        forget_the_blob_of(&repo, PACKAGED);
 
-    let output = fixture.run(NO_VERDICT);
-    let stderr = stderr(&output);
+        let output = fixture.run(NO_VERDICT);
+        let stderr = stderr(&output);
 
-    assert!(
-        fixture.calls().contains("package --list"),
-        "the packaged files were never listed:\n{}",
-        fixture.calls()
-    );
-    assert!(
-        output.status.success() && stderr.contains("::warning::"),
-        "the breaking release did not read past the baseline it cannot build:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("announce a break"),
-        "what the packaged commits announce is not what this run decided on:\n{stderr}"
-    );
+        assert!(
+            fixture.calls().contains("package --list"),
+            "the packaged files were never listed, with the store {store}:\n{}",
+            fixture.calls()
+        );
+        assert!(
+            output.status.success() && stderr.contains("::warning::"),
+            "the breaking release did not read past the baseline it cannot build, \
+             with the store {store}:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("announce a break"),
+            "what the packaged commits announce is not what this run decided on, \
+             with the store {store}:\n{stderr}"
+        );
+    }
 }
+
+/// The two shapes a fixture's object database can be in by the time a journey
+/// takes a blob out of it, both driven rather than whichever one the host
+/// happens to hand over.
+///
+/// Which shape a fresh repository of a few hundred files ends up in is the
+/// host's git's business and not a property of anything under test here: the
+/// Linux and macOS legs of the gate left this fixture's blobs loose where the
+/// Windows leg of the same commit had packed them, so [`forget_the_blob_of`]
+/// reached for a `.git/objects/73` that runner had never made and the journey
+/// died on `os error 3` rather than on anything about a release. A journey that
+/// only knows how to take a loose object out is one a platform can decide, and
+/// which platform that is is not visible from here — so both shapes are built
+/// on every platform, and `packed` is the one this repository's own gate
+/// otherwise never saw.
+const OBJECT_STORES: &[(&str, bool)] = &[
+    ("as the commits that wrote it left it", false),
+    ("packed into one file", true),
+];
 
 /// Take the blob `path` is committed as out of `repo`'s object database,
 /// leaving its index and its commits naming it.
+///
+/// Where that blob is stored is asked rather than assumed. A loose object is one
+/// file to remove; a packed one is a file holding hundreds of objects, out of
+/// which nothing removes one — so every pack is exploded back into loose objects
+/// first, by [`explode_every_pack`], and only then is the one blob taken away.
+/// What the store will hand back afterwards is then asked of git, because the
+/// state this journey is about is exactly that answer and nothing else here
+/// would notice it going missing.
 fn forget_the_blob_of(repo: &Path, path: &str) {
     let object = git_says(repo, &["rev-parse", &format!("HEAD:{path}")]);
+    explode_every_pack(repo);
     let (directory, file) = object.split_at(2);
     let blob = repo.join(".git/objects").join(directory).join(file);
     fs::remove_file(&blob).unwrap_or_else(|error| panic!("forget {blob:?}: {error}"));
+    assert!(
+        !the_object_database_holds(repo, &object),
+        "the object database still hands back {object}, so this fixture is not in \
+         the state the journey is about and whatever it asserts next is about \
+         something else"
+    );
+}
+
+/// Rewrite `repo`'s object database so every object in it is loose: each pack is
+/// taken out of the store and unpacked back into it.
+///
+/// Taking the packs out first is what makes the unpacking happen at all —
+/// `git unpack-objects` passes over an object the store already holds, and while
+/// the pack is still in the store it holds all of them.
+///
+/// Nothing here asks a fixture to hold a pack; this is about coping with one
+/// that does, for the reason [`OBJECT_STORES`] gives.
+fn explode_every_pack(repo: &Path) {
+    let packs = repo.join(".git").join("objects").join("pack");
+    if !packs.is_dir() {
+        return;
+    }
+    let taken_out = repo.join(".git").join("packs-taken-out");
+    fs::rename(&packs, &taken_out).expect("take the packs out of the object database");
+    fs::create_dir_all(&packs).expect("leave the object database its pack directory");
+    let entries = fs::read_dir(&taken_out).expect("read the packs taken out");
+    for entry in entries {
+        let pack = entry.expect("read a pack directory entry").path();
+        if pack.extension() != Some(OsStr::new("pack")) {
+            continue;
+        }
+        let reading = fs::File::open(&pack).expect("read the pack being exploded");
+        let unpacked = Command::new("git")
+            .args(["unpack-objects", "-q"])
+            .stdin(reading)
+            .current_dir(repo)
+            .output()
+            .expect("git is on PATH");
+        assert!(
+            unpacked.status.success(),
+            "git unpack-objects over {pack:?} failed:\n{}",
+            String::from_utf8_lossy(&unpacked.stderr)
+        );
+    }
+    fs::remove_dir_all(&taken_out).expect("drop the packs that were exploded");
+}
+
+/// Whether `repo`'s object database will hand `object` back.
+fn the_object_database_holds(repo: &Path, object: &str) -> bool {
+    Command::new("git")
+        .args(["cat-file", "-e", object])
+        .current_dir(repo)
+        .output()
+        .expect("git is on PATH")
+        .status
+        .success()
 }
 
 /// A requirement the script cannot read fails a release claiming compatibility,
