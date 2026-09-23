@@ -29,10 +29,12 @@
 //! whether each side *builds*, it builds both with the real cargo and the feature
 //! set the reading asked for, over a crate carrying this one's `build.rs`.
 
+use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::{Duration, SystemTime};
 
 use tempfile::TempDir;
 
@@ -59,6 +61,21 @@ const UNPACKAGED: &str = "scripts/tool.sh";
 /// touching it is one release-plz versions this repository's release from.
 const PACKAGED_BY_THIS_CRATE: &str = "src/lib.rs";
 const README: &str = "README.md";
+/// This repository's own attributes, which the fixture crate is given a copy of
+/// so that a reading over it goes through the filters a reading over this crate
+/// goes through. Copied from the file by [`this_repositorys_attributes`] rather
+/// than restated here, so there is nothing for the two to part over.
+///
+/// They are not decoration. Putting a path under an end-of-line filter means
+/// deciding line endings for it, and deciding them means fetching the blob its
+/// index entry names — so this file is one half of what turns a racy-clean entry
+/// into a read of the object database, [`stamp`] being what removes the other.
+/// Measured on a copy of the fixture crate's tree, with an index the racy-clean
+/// rule fires on: 0 blobs are read without it, 9 with it. What this repository's
+/// copy says is therefore a premise of two journeys here, and
+/// [`refuse_a_tree_outside_the_eol_filter`] is what fails when it stops holding
+/// — those journeys would otherwise go quiet rather than red.
+const ATTRIBUTES: &str = ".gitattributes";
 /// A packaged path git would read as pathspec magic if it were handed one: a
 /// directory named `:!src` puts `:!src/lib.rs` on the list, and `:!<path>`
 /// *excludes* that path — here, the very file a release is made of.
@@ -165,10 +182,33 @@ struct Fixture {
     baseline: String,
     stub_dir: PathBuf,
     search_path: OsString,
+    /// Whether this fixture has been put in a state where cargo cannot list the
+    /// packaged files. Exactly one journey does that on purpose; for every
+    /// other, that ending is a repository that was not built rather than a
+    /// decision about a release, and [`Fixture::finish`] refuses it.
+    listing_broken_on_purpose: Cell<bool>,
 }
+
+/// The script's own words for the ending no journey here is about, unless it
+/// said so: the packaged files could not be listed, so nothing downstream of
+/// them was decided.
+///
+/// Two journeys of this file went red on it in one Release-plz run over one
+/// commit — `a_release_moving_the_engine_without_announcing_it_is_refused` and
+/// `an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_
+/// compatibility` — and neither said so, because a run that ends here exits 1
+/// exactly as a refusal does. [`stamp`] is what stops the repository being
+/// unreadable; this is what stops that ending ever being read as an answer.
+const LISTING_FAILED: &str = "the files this crate packages could not be listed";
 
 /// Run `git` in `repo`, failing the test with what it said if it will not.
 fn git(repo: &Path, arguments: &[&str]) {
+    git_says(repo, arguments);
+}
+
+/// The same, with what it printed — trimmed, because every caller here wants
+/// one line rather than the newline git ends it with.
+fn git_says(repo: &Path, arguments: &[&str]) -> String {
     let output = Command::new("git")
         .args([
             "-c",
@@ -187,6 +227,10 @@ fn git(repo: &Path, arguments: &[&str]) {
         "git {arguments:?} failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8(output.stdout)
+        .expect("git answered in utf-8")
+        .trim()
+        .to_owned()
 }
 
 /// The cargo running this suite, which is the one the stand-in hands `cargo
@@ -233,6 +277,8 @@ impl Fixture {
         fs::write(repo.join(PACKAGED), "pub fn read() {}\n").expect("write the packaged file");
         fs::write(repo.join(UNPACKAGED), "echo tool\n").expect("write the unpackaged file");
         fs::write(repo.join(README), "# fixture-crate\n").expect("write the readme");
+        fs::write(repo.join(ATTRIBUTES), this_repositorys_attributes())
+            .expect("write the attributes this repository carries");
         if !magic.is_empty() {
             let path = repo.join(magic);
             fs::create_dir_all(path.parent().expect("a directory to package"))
@@ -273,6 +319,7 @@ impl Fixture {
             String::from_utf8_lossy(&locked.stderr)
         );
 
+        stamp_tree(&repo);
         git(&repo, &["init", "--quiet", "--initial-branch=main"]);
         git(&repo, &["add", "--all"]);
         git(&repo, &["commit", "--quiet", "-m", "chore: release"]);
@@ -298,6 +345,7 @@ impl Fixture {
             let mut carried = fs::read_to_string(&touched).expect("read the file to carry forward");
             carried.push_str("// carried forward\n");
             fs::write(&touched, carried).expect("carry the file forward");
+            stamp(&touched, CARRIED_FORWARD_SECONDS);
             git(&repo, &["add", "--all"]);
             let mut arguments = vec!["commit", "--quiet"];
             for message in commit.messages {
@@ -382,6 +430,7 @@ impl Fixture {
             stub_dir,
             dir,
             search_path,
+            listing_broken_on_purpose: Cell::new(false),
         }
     }
 
@@ -454,7 +503,19 @@ impl Fixture {
         for (name, value) in environment {
             command.env(name, value);
         }
-        command.output().expect("the program is on PATH")
+        let output = command.output().expect("the program is on PATH");
+        // Every journey in this file reaches the script through this one call,
+        // so this is the one place that can hold all of them to having read a
+        // repository at all. See [`LISTING_FAILED`].
+        assert!(
+            self.listing_broken_on_purpose.get()
+                || !String::from_utf8_lossy(&output.stderr).contains(LISTING_FAILED),
+            "the run ended on a repository that could not be read rather than on a \
+             decision about the release, so whatever this journey asserts next is \
+             about a fixture that was not built:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
     }
 
     /// Leave the history with no commit on HEAD, so the range between the tag and
@@ -472,6 +533,7 @@ impl Fixture {
     /// from cannot be known, while everything asked of cargo before it still can.
     fn forget_the_readme(&self) {
         fs::remove_file(self.repo.join(README)).expect("remove the readme");
+        self.listing_broken_on_purpose.set(true);
     }
 
     /// The same search path with nothing on it called `cargo-semver-checks` —
@@ -561,6 +623,7 @@ impl ThisCrate {
                 .expect("wind the engine requirement back to the baseline's");
         }
 
+        stamp_tree(&root);
         git(&root, &["init", "--quiet", "--initial-branch=main"]);
         git(&root, &["add", "--all"]);
         git(&root, &["commit", "--quiet", "-m", "chore: release"]);
@@ -583,11 +646,13 @@ impl ThisCrate {
         if baseline_linking.is_some() {
             fs::write(&manifest_path, &manifest)
                 .expect("carry the engine requirement this tree links forward");
+            stamp(&manifest_path, CARRIED_FORWARD_SECONDS);
         } else {
             let touched = root.join(PACKAGED_BY_THIS_CRATE);
             let mut carried = fs::read_to_string(&touched).expect("read the file to carry forward");
             carried.push_str("\n// carried forward\n");
             fs::write(&touched, carried).expect("carry the file forward");
+            stamp(&touched, CARRIED_FORWARD_SECONDS);
         }
         git(&root, &["add", "--all"]);
         git(&root, &["commit", "--quiet", "-m", subject]);
@@ -660,6 +725,128 @@ fn copy_tracked_files(from: &Path, into: &Path) {
         copied += 1;
     }
     assert!(copied > 0, "this checkout tracks no files to copy");
+}
+
+/// The instant a fixture's tree carries, and the one the file a pending release
+/// carries forward carries instead — a day later, so that change is visible to
+/// git through the timestamp as well as through `ctime`, whatever a host's
+/// `core.trustctime` says.
+///
+/// Both are fixed and both are in the past, which is the whole point. See
+/// [`stamp`].
+const TREE_SECONDS: u64 = 1_000_000_000;
+const CARRIED_FORWARD_SECONDS: u64 = TREE_SECONDS + 86_400;
+
+/// Give `path` a fixed timestamp, so the repository a fixture builds out of it
+/// is the same repository however fast the machine that built it was.
+///
+/// `scripts/semver-check.sh` learns which commits release-plz versions a
+/// release from by running `cargo package --list`, and cargo takes a git status
+/// of the tree it is packaging to do it. Git's racy-clean rule makes that
+/// status compare *content* — rather than stat data — for every entry whose
+/// timestamp is at or after the index's own, and a fixture writes its whole
+/// tree and commits it inside one clock second, so which entries those are is
+/// decided by whether the clock happened to tick in between. Deciding one means
+/// fetching the blob its index entry names, because [`ATTRIBUTES`] puts
+/// every path through the end-of-line filter and that filter reads the
+/// index object to see which endings it is converting from. The reading's answer
+/// then came to rest on hundreds of blobs it is asking nothing about, out of an
+/// object database built moments earlier: Release-plz run 35839314712 is one of
+/// them coming back `an object with id ... could not be found`, which reached
+/// the journey as `the files this crate packages could not be listed` and failed
+/// a release over a question nobody had asked.
+///
+/// A fixed instant in the past leaves every entry stat-clean against any index
+/// git could write, because git writes one at the wall clock and this is a
+/// quarter of a century behind it. So the status is the stat comparison it is
+/// meant to be and the reading is about the packaged files alone. Measured over
+/// a copy of this crate whose index sits where
+/// [`the_index_as_if_written_at`] puts it: 277 blobs read without this, none
+/// with it.
+fn stamp(path: &Path, seconds: u64) {
+    stamp_at(path, SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
+}
+
+/// [`stamp`], at an instant rather than at a count of seconds.
+fn stamp_at(path: &Path, when: SystemTime) {
+    // Opened for writing because that is what a platform asks for before it
+    // will let a process set a file's times.
+    let file = fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap_or_else(|error| panic!("open {} to stamp it: {error}", path.display()));
+    file.set_times(fs::FileTimes::new().set_accessed(when).set_modified(when))
+        .unwrap_or_else(|error| panic!("stamp {}: {error}", path.display()));
+}
+
+/// The whole second this run is in, to be captured *before* a fixture writes its
+/// tree — so every file that tree carries is written at or after it.
+fn when_this_run_began() -> SystemTime {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("a clock set after the epoch");
+    SystemTime::UNIX_EPOCH + Duration::from_secs(now.as_secs())
+}
+
+/// Leave `repo`'s index carrying `when`, which is how a journey asks git's
+/// racy-clean rule its question rather than waiting to be asked it.
+///
+/// Handed [`when_this_run_began`], this is the index a machine fast enough to
+/// write the whole tree and commit it inside one tick produces — the hostile end
+/// of what a real host does, and the end Release-plz run 35839314712 was at.
+/// Nothing about it is unfair to [`stamp`]: an index git wrote at the wall clock
+/// is still a quarter of a century ahead of a stamped entry, so a stamped tree
+/// is stat-clean against it and an unstamped one is racy against it, every time
+/// rather than when the clock obliges. Measured over a copy of this crate: 277
+/// blobs read here unstamped, 0 stamped, where the index left where git happened
+/// to write it gave 245 and 0 on one run and can give anything on the next.
+fn the_index_as_if_written_at(repo: &Path, when: SystemTime) {
+    stamp_at(&repo.join(".git").join("index"), when);
+}
+
+/// This repository's own [`ATTRIBUTES`], read rather than restated.
+fn this_repositorys_attributes() -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(ATTRIBUTES))
+        .expect("read this repository's attributes")
+}
+
+/// Refuse a fixture whose `path` is under no end-of-line filter, which is half
+/// of what sends a racy-clean entry to the object database — [`ATTRIBUTES`] has
+/// the rest.
+///
+/// Asked of git over the repository itself, so this gates what the attributes
+/// *do* rather than restating what they say. It is a gate rather than a comment
+/// because losing the premise is silent: with no filter on a path, no blob is
+/// fetched to decide it, so the two journeys that forget a blob would pass
+/// whatever the fixture was built like, and go on reporting a property nothing
+/// was holding.
+fn refuse_a_tree_outside_the_eol_filter(repo: &Path, path: &str) {
+    let said = git_says(repo, &["check-attr", "text", "eol", "--", path]);
+    assert!(
+        said.lines().any(|line| !line.ends_with("unspecified")),
+        "{path} carries neither a `text` nor an `eol` attribute, so nothing \
+         fetches the blob its index entry names to decide its line endings and \
+         forgetting that blob decides nothing:\n{said}"
+    );
+}
+
+/// [`stamp`] over every file under `root`, which is how a tree is stamped
+/// before a repository is made of it — `.git` is not there yet, and is never
+/// stamped.
+fn stamp_tree(root: &Path) {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry.expect("read a directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                stamp(&path, TREE_SECONDS);
+            }
+        }
+    }
 }
 
 fn stdout(output: &Output) -> String {
@@ -1401,8 +1588,9 @@ fn a_packaged_path_that_reads_as_pathspec_magic_does_not_select_the_release() {
         stdout(&output)
     );
     assert!(
-        stderr(&output).contains("::error::"),
-        "the failure does not say the check returned no verdict:\n{}",
+        stderr(&output).contains("::error::") && stderr(&output).contains(NO_VERDICT),
+        "the failure does not say the check returned no verdict, or which status it \
+         returned — and a run that ended for some other reason exits this way too:\n{}",
         stderr(&output)
     );
 }
@@ -1578,78 +1766,342 @@ fn a_release_of_this_crate(
 /// state where it decides anything.
 #[test]
 fn a_release_moving_the_engine_without_announcing_it_is_refused() {
-    let linked = engine_requirement(
+    let linked = this_crates_engine_requirement();
+    for (tree, linking, subject, expected) in ENGINE_TREES {
+        read_one_engine_tree(tree, *linking, subject, expected, &linked);
+    }
+}
+
+/// The trees the journey above distinguishes, named once: an engine that did
+/// not move, the two manifest spellings of one that moved under a release
+/// announcing no break, and a move that was announced. Held here rather than in
+/// that journey's body because the concurrent journey below drives the same
+/// trees, and two lists would let one of them quietly stop covering a case.
+const ENGINE_TREES: &[(&str, Option<&str>, &str, Engine)] = &[
+    (
+        "an engine that did not move",
+        None,
+        "fix: serve the empty timeline as an empty one",
+        Engine::ReadOn,
+    ),
+    (
+        "an engine moved by a release announcing no break",
+        Some(AN_EARLIER_ENGINE_LINKED),
+        "fix: serve the empty timeline as an empty one",
+        Engine::RefusedAsAMoveNothingAnnounces,
+    ),
+    (
+        "the same move, with the baseline declaring its requirement as a table",
+        Some(AN_EARLIER_ENGINE_LINKED_AS_A_TABLE),
+        "fix: serve the empty timeline as an empty one",
+        Engine::RefusedAsAMoveNothingAnnounces,
+    ),
+    (
+        "an engine moved by a release that announces one",
+        Some(AN_EARLIER_ENGINE_LINKED),
+        "feat!: follow the engine's semver across an adoption",
+        Engine::ReadOn,
+    ),
+];
+
+/// The requirement this tree's own manifest declares for the engine — the side
+/// of a move the refusal has to name.
+fn this_crates_engine_requirement() -> String {
+    engine_requirement(
         &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
             .expect("read this crate's manifest"),
+    )
+}
+
+/// Drive one of [`ENGINE_TREES`] through the recipe and hold the script to what
+/// it decides about it. Everything it touches is under the two temporary
+/// directories it makes here, so a second call running beside it — in another
+/// thread, another test or another process — reads and writes nothing this one
+/// does.
+fn read_one_engine_tree(
+    tree: &str,
+    linking: Option<&str>,
+    subject: &str,
+    expected: &Engine,
+    linked: &str,
+) {
+    let fixture = Fixture::new();
+    let checkout = TempDir::new().expect("temp dir");
+    let output = a_release_of_this_crate(&fixture, &checkout, linking, subject);
+    let stderr = stderr(&output);
+
+    assert_eq!(
+        !output.status.success(),
+        *expected == Engine::RefusedAsAMoveNothingAnnounces,
+        "{tree} ended the wrong way:\n{stderr}"
     );
-    for (tree, linking, subject, expected) in [
-        (
-            "an engine that did not move",
-            None,
-            "fix: serve the empty timeline as an empty one",
-            Engine::ReadOn,
-        ),
-        (
-            "an engine moved by a release announcing no break",
-            Some(AN_EARLIER_ENGINE_LINKED),
-            "fix: serve the empty timeline as an empty one",
-            Engine::RefusedAsAMoveNothingAnnounces,
-        ),
-        (
-            "the same move, with the baseline declaring its requirement as a table",
-            Some(AN_EARLIER_ENGINE_LINKED_AS_A_TABLE),
-            "fix: serve the empty timeline as an empty one",
-            Engine::RefusedAsAMoveNothingAnnounces,
-        ),
-        (
-            "an engine moved by a release that announces one",
-            Some(AN_EARLIER_ENGINE_LINKED),
-            "feat!: follow the engine's semver across an adoption",
-            Engine::ReadOn,
-        ),
-    ] {
-        let fixture = Fixture::new();
-        let checkout = TempDir::new().expect("temp dir");
-        let output = a_release_of_this_crate(&fixture, &checkout, linking, subject);
+    if *expected == Engine::RefusedAsAMoveNothingAnnounces {
+        assert!(
+            stderr.contains("::error::") && stderr.contains("announce no break"),
+            "the failure does not say the release moved the engine while announcing \
+             nothing:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(AN_EARLIER_ENGINE) && stderr.contains(linked),
+            "the failure names neither side of the move, so nobody can see which \
+             move it is about:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("ACTION:") && stderr.contains("BREAKING CHANGE"),
+            "the failure does not say how to announce the break it is holding:\n{stderr}"
+        );
+        assert!(
+            !fixture.calls().contains("semver-checks"),
+            "a surface was read for a release whose claim was already false:\n{}",
+            fixture.calls()
+        );
+    } else {
+        assert!(
+            stdout(&output).contains("the public surface is compatible"),
+            "{tree} never reached the reading:\n{}",
+            stdout(&output)
+        );
+        assert!(
+            !stderr.contains("::error::"),
+            "{tree} was failed for a move it did not make, or did announce:\n{stderr}"
+        );
+    }
+}
+
+/// Every tree above, twice over, all of them being read at once.
+///
+/// The journey used to go red for what the suite around it was doing rather
+/// than for what the script decided, so the isolation it rests on is exercised
+/// here rather than asserted in a comment: each reading builds its own history,
+/// its own baseline worktree and its own stand-in `cargo` under temporary
+/// directories of its own, and has to come back with its own answer while every
+/// other one is running. Twice over because a run of this journey racing
+/// *another run of itself* is the case that matters — the suite runs these
+/// trees from several tests at once.
+#[test]
+fn several_readings_of_this_crate_at_once_each_get_their_own_answer() {
+    let linked = this_crates_engine_requirement();
+    std::thread::scope(|scope| {
+        let readings: Vec<_> = ENGINE_TREES
+            .iter()
+            .chain(ENGINE_TREES)
+            .map(|(tree, linking, subject, expected)| {
+                let linked = linked.as_str();
+                scope.spawn(move || read_one_engine_tree(tree, *linking, subject, expected, linked))
+            })
+            .collect();
+        for reading in readings {
+            // The assertion that failed has already said what it saw; this only
+            // stops a panicked reading from being counted as one that passed.
+            reading.join().expect("a reading of this crate panicked");
+        }
+    });
+}
+
+/// A blob the fixture's own object database no longer holds does not decide a
+/// release.
+///
+/// This is the state Release-plz run 35839314712 stopped in — an object the
+/// index names and the store would not hand back — and the release it stopped
+/// was not the one being read: the run reported `the files this crate packages
+/// could not be listed`, which is a true sentence about the wrong thing. The
+/// reading is about which files `include` selects, and [`stamp`] is what keeps
+/// the status that answers it from going to the object database for hundreds of
+/// blobs to find out.
+///
+/// Both halves of that state are built here rather than waited for.
+/// [`the_index_as_if_written_at`] puts the index where a machine that wrote the
+/// tree and the index inside one tick leaves it, which is what makes every entry
+/// racy-clean; [`forget_the_blob_of`] then takes away the object one of them
+/// names. Without [`stamp`] this journey fails on `the files this crate packages
+/// could not be listed`, every run rather than the one in ten a stranded release
+/// was found on.
+///
+/// The ending itself is refused for every journey in this file rather than
+/// here: see [`LISTING_FAILED`]. What this one adds is that the release is
+/// still decided, and decided by the move, with that database short a blob.
+#[test]
+fn a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release() {
+    let began = when_this_run_began();
+    let linked = this_crates_engine_requirement();
+    let fixture = Fixture::new();
+    let checkout = TempDir::new().expect("temp dir");
+    let released = ThisCrate::with_the_baseline_linking(
+        checkout.path(),
+        AN_EARLIER_ENGINE_LINKED,
+        "fix: serve the empty timeline as an empty one",
+    );
+    refuse_a_tree_outside_the_eol_filter(&released.root, PACKAGED_BY_THIS_CRATE);
+    the_index_as_if_written_at(&released.root, began);
+    forget_the_blob_of(&released.root, PACKAGED_BY_THIS_CRATE);
+
+    let output = fixture.run_recipe_in(
+        &released.root,
+        &[
+            released.baseline.to_str().expect("utf-8 path"),
+            BASELINE_REF,
+        ],
+        &[("SEMVER_STATUS", COMPATIBLE)],
+    );
+    let stderr = stderr(&output);
+
+    assert!(
+        fixture.calls().contains("package --list"),
+        "the packaged files were never listed:\n{}",
+        fixture.calls()
+    );
+    assert!(
+        !output.status.success() && stderr.contains("announce no break"),
+        "the unannounced engine move is not what this release ended on:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(AN_EARLIER_ENGINE) && stderr.contains(&linked),
+        "the failure names neither side of the move:\n{stderr}"
+    );
+}
+
+/// The same over the fixture crate every other journey here builds a repository
+/// from, which is the repository the defect is a property of rather than the
+/// crate copied into it: two journeys of one Release-plz run went red on it,
+/// and the twenty-five built on this fixture could have gone red on it next.
+///
+/// Its tree is six files rather than every file this checkout tracks, and that
+/// is the only difference that matters: the reading takes the same status over
+/// it, through the same end-of-line filter — [`ATTRIBUTES`] is why — and so
+/// fetches its blobs out of the same kind of temporary object
+/// database to take it. [`the_index_as_if_written_at`] is what makes it do so
+/// on every run rather than on the runs the clock obliges, and without
+/// [`stamp`] this journey fails on `the files this crate packages could not be
+/// listed`.
+///
+/// Being the cheap one of the two, it is also the one that drives both shapes a
+/// store can keep that blob in — see [`OBJECT_STORES`] — so neither is left for
+/// a platform to discover.
+#[test]
+fn a_blob_the_fixture_crates_object_database_no_longer_holds_does_not_decide_a_release() {
+    for (store, packed) in OBJECT_STORES {
+        let began = when_this_run_began();
+        let fixture = Fixture::of(A_BREAKING_RELEASE);
+        let repo = fixture.repo.clone();
+        refuse_a_tree_outside_the_eol_filter(&repo, PACKAGED);
+        if *packed {
+            git(&repo, &["repack", "-a", "-d", "--quiet"]);
+        }
+        the_index_as_if_written_at(&repo, began);
+        forget_the_blob_of(&repo, PACKAGED);
+
+        let output = fixture.run(NO_VERDICT);
         let stderr = stderr(&output);
 
-        assert_eq!(
-            !output.status.success(),
-            expected == Engine::RefusedAsAMoveNothingAnnounces,
-            "{tree} ended the wrong way:\n{stderr}"
+        assert!(
+            fixture.calls().contains("package --list"),
+            "the packaged files were never listed, with the store {store}:\n{}",
+            fixture.calls()
         );
-        if expected == Engine::RefusedAsAMoveNothingAnnounces {
-            assert!(
-                stderr.contains("::error::") && stderr.contains("announce no break"),
-                "the failure does not say the release moved the engine while announcing \
-                 nothing:\n{stderr}"
-            );
-            assert!(
-                stderr.contains(AN_EARLIER_ENGINE) && stderr.contains(&linked),
-                "the failure names neither side of the move, so nobody can see which \
-                 move it is about:\n{stderr}"
-            );
-            assert!(
-                stderr.contains("ACTION:") && stderr.contains("BREAKING CHANGE"),
-                "the failure does not say how to announce the break it is holding:\n{stderr}"
-            );
-            assert!(
-                !fixture.calls().contains("semver-checks"),
-                "a surface was read for a release whose claim was already false:\n{}",
-                fixture.calls()
-            );
-        } else {
-            assert!(
-                stdout(&output).contains("the public surface is compatible"),
-                "{tree} never reached the reading:\n{}",
-                stdout(&output)
-            );
-            assert!(
-                !stderr.contains("::error::"),
-                "{tree} was failed for a move it did not make, or did announce:\n{stderr}"
-            );
-        }
+        assert!(
+            output.status.success() && stderr.contains("::warning::"),
+            "the breaking release did not read past the baseline it cannot build, \
+             with the store {store}:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("announce a break"),
+            "what the packaged commits announce is not what this run decided on, \
+             with the store {store}:\n{stderr}"
+        );
     }
+}
+
+/// The two shapes a fixture's object database can be in by the time a journey
+/// takes a blob out of it, both driven rather than whichever one the host
+/// happens to hand over.
+///
+/// Which shape a fresh repository of a few hundred files ends up in is the
+/// host's git's business and not a property of anything under test here: the
+/// Linux and macOS legs of the gate left this fixture's blobs loose where the
+/// Windows leg of the same commit had packed them, so [`forget_the_blob_of`]
+/// reached for a `.git/objects/73` that runner had never made and the journey
+/// died on `os error 3` rather than on anything about a release. A journey that
+/// only knows how to take a loose object out is one a platform can decide, and
+/// which platform that is is not visible from here — so both shapes are built
+/// on every platform, and `packed` is the one this repository's own gate
+/// otherwise never saw.
+const OBJECT_STORES: &[(&str, bool)] = &[
+    ("as the commits that wrote it left it", false),
+    ("packed into one file", true),
+];
+
+/// Take the blob `path` is committed as out of `repo`'s object database,
+/// leaving its index and its commits naming it.
+///
+/// Where that blob is stored is asked rather than assumed. A loose object is one
+/// file to remove; a packed one is a file holding hundreds of objects, out of
+/// which nothing removes one — so every pack is exploded back into loose objects
+/// first, by [`explode_every_pack`], and only then is the one blob taken away.
+/// What the store will hand back afterwards is then asked of git, because the
+/// state this journey is about is exactly that answer and nothing else here
+/// would notice it going missing.
+fn forget_the_blob_of(repo: &Path, path: &str) {
+    let object = git_says(repo, &["rev-parse", &format!("HEAD:{path}")]);
+    explode_every_pack(repo);
+    let (directory, file) = object.split_at(2);
+    let blob = repo.join(".git/objects").join(directory).join(file);
+    fs::remove_file(&blob).unwrap_or_else(|error| panic!("forget {blob:?}: {error}"));
+    assert!(
+        !the_object_database_holds(repo, &object),
+        "the object database still hands back {object}, so this fixture is not in \
+         the state the journey is about and whatever it asserts next is about \
+         something else"
+    );
+}
+
+/// Rewrite `repo`'s object database so every object in it is loose: each pack is
+/// taken out of the store and unpacked back into it.
+///
+/// Taking the packs out first is what makes the unpacking happen at all —
+/// `git unpack-objects` passes over an object the store already holds, and while
+/// the pack is still in the store it holds all of them.
+///
+/// Nothing here asks a fixture to hold a pack; this is about coping with one
+/// that does, for the reason [`OBJECT_STORES`] gives.
+fn explode_every_pack(repo: &Path) {
+    let packs = repo.join(".git").join("objects").join("pack");
+    if !packs.is_dir() {
+        return;
+    }
+    let taken_out = repo.join(".git").join("packs-taken-out");
+    fs::rename(&packs, &taken_out).expect("take the packs out of the object database");
+    fs::create_dir_all(&packs).expect("leave the object database its pack directory");
+    let entries = fs::read_dir(&taken_out).expect("read the packs taken out");
+    for entry in entries {
+        let pack = entry.expect("read a pack directory entry").path();
+        if pack.extension() != Some(OsStr::new("pack")) {
+            continue;
+        }
+        let reading = fs::File::open(&pack).expect("read the pack being exploded");
+        let unpacked = Command::new("git")
+            .args(["unpack-objects", "-q"])
+            .stdin(reading)
+            .current_dir(repo)
+            .output()
+            .expect("git is on PATH");
+        assert!(
+            unpacked.status.success(),
+            "git unpack-objects over {pack:?} failed:\n{}",
+            String::from_utf8_lossy(&unpacked.stderr)
+        );
+    }
+    fs::remove_dir_all(&taken_out).expect("drop the packs that were exploded");
+}
+
+/// Whether `repo`'s object database will hand `object` back.
+fn the_object_database_holds(repo: &Path, object: &str) -> bool {
+    Command::new("git")
+        .args(["cat-file", "-e", object])
+        .current_dir(repo)
+        .output()
+        .expect("git is on PATH")
+        .status
+        .success()
 }
 
 /// A requirement the script cannot read fails a release claiming compatibility,
