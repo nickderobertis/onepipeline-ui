@@ -276,6 +276,17 @@ fans one uniformly-named target across all of them.
   a failure. Every other release still fails on a reading that did not happen,
   which is the accidental incompatibility the check exists for. That is the whole
   of the exception; do not widen it to make a patch release go through.
+- **Moving the linked `onepipeline` is a break of this crate's own surface, and
+  the same script refuses one nothing announced.** This crate's public items
+  carry the engine's types — `ApiError::from_engine` takes an
+  `onepipeline::Error` — so a `0.x` minor move stops a consumer compiling
+  however this crate's own signatures read, and the reading cannot see it:
+  both sides' rustdoc spells the same path while the type behind it changed
+  identity. `scripts/semver-check.sh` reads the requirement off both manifests
+  and fails a release that moved it while the packaged commits announce no
+  break; announcing the break is what clears it. v0.11.2's `=0.42.0` became
+  `=0.44.2` with nothing said, and the release stopped instead on the
+  unbuildable baseline above, which says nothing about the move.
 - **release-plz authenticates with `RELEASE_PLZ_TOKEN`, a PAT, not the default
   `GITHUB_TOKEN`.** A tag or Release created by `GITHUB_TOKEN` triggers no
   workflow, so `release.yml` would never run and the release would ship nothing.
