@@ -70,12 +70,6 @@ with the declarations, so a surface or a width can reach neither list without
 reaching the other. Each surface is photographed only once its real reads have landed
 — never mid-skeleton — which is what makes a capture worth looking at.
 
-That set is what it was before this capture was pointed at screencomp. The adoption
-re-targeted the tier rather than rebuilding it: at `1916225`, the commit this work
-branched from, the same thirteen surfaces were photographed at the same five viewports,
-and nothing was dropped from either list to make the gate pass. What changed is where
-the images go, what they are compared against, and that they are reproducible.
-
 The README carries a handful of them rather than all sixty-five: the overall view as
 the hero, the graph, a node's detail, a conversation, the project list and a project
 page, the channel, and one phone-width shot. A screen that would say less than the

@@ -645,6 +645,12 @@ it is the control the rendered gallery offers over them.
 | 1024x768 | the smallest desktop layout still in use |
 | 390x844 | a phone — the only entry where the shell's two columns stop fitting |
 
+Both this table and the surface table below are **floors rather than snapshots**. An
+entry may be added to either; an entry removed is a width, or a screen, that the
+gallery stops documenting and the README can no longer show — which is a decision
+about what this app is held to, not a way to make a capture pass. The floors are the
+thirteen surfaces and five widths the gallery has covered since `1916225`.
+
 The **surfaces** are declared once too, as `SURFACES` in `e2e/gallery.screens.spec.ts`,
 and each one names the PNG it writes at every viewport — so the table below is also how
 to find a capture in the gallery directory. `src/test/dag-ui-doc.test.ts`
