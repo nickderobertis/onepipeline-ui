@@ -75,7 +75,8 @@ jobs:
       # A developer's machine already has a toolchain and scripts/visual-capture.sh
       # builds both on the host before it starts the same container; this lane is a
       # fresh root container that has neither, which is the whole of the difference
-      # between the two.
+      # between the two — and the reason the first lines below are a C compiler and a
+      # Rust toolchain rather than a capture.
       #
       # Nothing below reaches a network once the build is done: the fixture is
       # generated on disk, every server is on loopback, and no credential, model or
@@ -86,6 +87,16 @@ jobs:
         # glyph edge can differ across microarchitectures. This line is what turns
         # "same commit, passed then failed" into something readable. Renders no bytes.
         echo "runner CPU: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+        # rustc drives a C linker for the final link and `ring`'s build script wants a
+        # C compiler outright, and the Playwright image ships neither: without this the
+        # cargo build below stops at "error: linker `cc` not found" before a single
+        # pixel is rendered. gcc and the C library's headers are the whole of it —
+        # build-essential would add make and dpkg-dev for nothing. This lane runs as
+        # root, which is what makes apt available here and is a property of a GitHub
+        # `container:` job rather than of the container in scripts/visual-capture.sh,
+        # where the toolchain is the host's and the container installs nothing.
+        apt-get update -qq
+        apt-get install -y --no-install-recommends gcc libc6-dev
         npm ci
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
           | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
