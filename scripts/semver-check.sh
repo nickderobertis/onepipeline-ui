@@ -147,6 +147,108 @@ elif grep -Eq '^[A-Za-z]+(\([^()]+\))?!: ' <<<"$subjects" \
 fi
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
+# The engine move a reading of this crate's own surface cannot see.
+#
+# This crate's public surface is made of `onepipeline`'s types: `src/error.rs`'s
+# `from_engine` takes an `onepipeline::Error`, `src/filter.rs`'s `to_engine`
+# returns an `onepipeline::filter::EventFilter`, `src/payload.rs`'s `status`
+# takes an `onepipeline::verbs::RunStatus`, and `src/telemetry.rs`'s `of_run`
+# takes an `onepipeline::views::RunView`. A consumer naming any of those holds
+# the engine's own type, so a requirement crossing the engine's semver boundary
+# stops that consumer compiling against this crate — whatever this crate's own
+# signatures did, and for a `0.x` engine a minor bump is that boundary.
+#
+# cargo-semver-checks cannot answer this one. It reads this crate's rustdoc, and
+# both sides of the move still spell the path `onepipeline::Error`; the type
+# behind it changed identity, which is a fact about a crate it was never asked
+# about. So the move is read off the two manifests instead, and — like the
+# reading itself — only where it decides something: a release claiming
+# compatibility. A release announcing a break has already said what this would
+# make it say.
+#
+# That is what Release-plz run 35826130541 was made of. v0.11.2 links `=0.42.0`,
+# the merge adopting the extends-resolving engine moved it to `=0.44.2`, and its
+# squash subject announced nothing. Nothing failed for the move: the release
+# stopped on a baseline that no longer builds, which is a true fact about a
+# different thing, and left the unannounced break to be noticed by hand.
+engine="onepipeline"
+
+# The requirement `$1`'s `[dependencies]` table declares for the engine, or
+# nothing where it declares none — which is a move of its own, and read as one
+# below. Both spellings a manifest can carry: the bare string this crate uses,
+# and the table whose `version` key is the requirement. Exit 3 where the entry is
+# there and no requirement can be read out of it: a manifest spelling this has to
+# be taught is not a release to rule on.
+engine_requirement() {
+  awk -v engine="$engine" '
+    /^\[/ { dependencies = ($0 == "[dependencies]"); next }
+    !dependencies || $1 != engine { next }
+    {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      if (substr(value, 1, 1) == "{") {
+        if (!match(value, /version[[:space:]]*=[[:space:]]*"[^"]*"/)) exit 3
+        value = substr(value, RSTART, RLENGTH)
+        sub(/^version[[:space:]]*=[[:space:]]*/, "", value)
+      }
+      if (!match(value, /"[^"]*"/)) exit 3
+      print substr(value, RSTART + 1, RLENGTH - 2)
+      exit 0
+    }
+  ' "$1"
+}
+
+# The part of a requirement cargo will not cross without every caller
+# recompiling: the leading non-zero component, so `0.42` and `0.44` are two of
+# these and `0.44.1` and `0.44.2` are one. A side declaring no engine at all has
+# none, which compares equal to no version. Exit 3 on a requirement that is not
+# one optional comparator and one version — a range spans these classes rather
+# than naming one, and guessing which it meant is not this check's to do.
+engine_class() {
+  local version major minor patch
+  [ -n "$1" ] || { printf 'none'; return 0; }
+  version="$(sed -nE 's/^[[:space:]]*[=^~]?[[:space:]]*([0-9]+(\.[0-9]+){0,2})[[:space:]]*$/\1/p' <<<"$1")"
+  [ -n "$version" ] || return 3
+  IFS=. read -r major minor patch <<<"$version"
+  if [ "$major" != 0 ]; then
+    printf '%s' "$major"
+  elif [ "${minor:-0}" != 0 ]; then
+    printf '0.%s' "$minor"
+  else
+    printf '0.0.%s' "${patch:-0}"
+  fi
+}
+
+# A requirement written the way this reads, so a failure names the line rather
+# than the absence it could not tell that line apart from.
+engine_shown() {
+  if [ -n "$1" ]; then
+    printf '%s' "$1"
+  else
+    printf 'no %s dependency at all' "$engine"
+  fi
+}
+
+unreadable_requirement() {
+  echo "::error::the $engine requirement in $1 could not be read, so whether this release moves the engine under its own public surface is unknown" >&2
+  echo "ACTION: teach 'scripts/semver-check.sh' that spelling — it reads one optional comparator and one version out of the [dependencies] entry — and take the reading again with 'just semver-check $baseline $baseline_ref'" >&2
+  exit 1
+}
+
+if [ -z "$read_past" ]; then
+  tree_requirement="$(engine_requirement Cargo.toml)" || unreadable_requirement "this tree's Cargo.toml"
+  baseline_requirement="$(engine_requirement "$baseline/Cargo.toml")" \
+    || unreadable_requirement "the Cargo.toml of $baseline_ref at $baseline"
+  tree_class="$(engine_class "$tree_requirement")" || unreadable_requirement "this tree's Cargo.toml"
+  baseline_class="$(engine_class "$baseline_requirement")" \
+    || unreadable_requirement "the Cargo.toml of $baseline_ref at $baseline"
+  if [ "$tree_class" != "$baseline_class" ]; then
+    echo "::error::the $engine requirement moved from $(engine_shown "$baseline_requirement") at $baseline_ref to $(engine_shown "$tree_requirement"), which no consumer of this crate's surface can cross without recompiling, while the commits release-plz versions this release from announce no break" >&2
+    echo "ACTION: announce it — give a commit that touches a packaged file a '<type>!: ' subject or a 'BREAKING CHANGE: ' footer saying this crate's surface follows $engine's, naming a public item that carries one of its types; or move the requirement back to $(engine_shown "$baseline_requirement")" >&2
+    exit 1
+  fi
+fi
+
 # What to do about a reading that was never taken — a baseline that will not
 # fetch, or one cargo-semver-checks could not build a surface out of.
 #
