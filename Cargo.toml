@@ -123,7 +123,7 @@ futures-core = "0.3"
 # library writes, and a requirement string cannot say "the same release" — so
 # `tests/packaging.rs` reconciles the two edges the lockfile records instead.
 # Why the store is linked at all, and read without a lock: `src/AGENTS.md`.
-oneharness-core = "0.17.0"
+oneharness-core = "0.18.0"
 # The run record `oneagentgraph` writes for every graph it runs, linked rather
 # than re-read by hand: a session's `agent_role` is served only where that
 # record's `declared_members` names the member the session was stamped with, so
@@ -141,8 +141,8 @@ onejudge = "0.13.1"
 # grammar. Held at the version the SDK's own requirement resolves to, so one
 # copy of this library is linked rather than two; `tests/packaging.rs`
 # reconciles the edges the lockfile records.
-onemessagebus = "0.7.0"
-onepipeline = "=0.42.0"
+onemessagebus = "0.8.0"
+onepipeline = "=0.44.2"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -174,7 +174,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.29.1"
+onevcs = "0.30.2"
 predicates = "3"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in

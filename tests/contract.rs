@@ -908,6 +908,75 @@ fn scratch_replaced(text: &str, prefix: &str, separator: char) -> String {
     out
 }
 
+/// Where a golden says this host's free space was.
+///
+/// The engine's `host` and `status` renderings carry a `free space:` line for
+/// each filesystem among the runs root and the directory the linked `onevcs`
+/// cuts its lifecycle worktrees under. Both readings are the machine's rather
+/// than the payload's: how much is free changes between two reads on one host,
+/// and the workspaces root is that host's own path. So a golden that pinned the
+/// bytes would pass on the machine that wrote it and nowhere else.
+///
+/// What the goldens keep is that the reading is served and where in the
+/// rendering it sits. What it *says* is the engine's own contract, held there
+/// rather than here: this crate's is the envelope around it.
+const FREE_SPACE: &str = "free space: <this host's own reading>";
+
+/// `text` with every `free space:` line replaced by [`FREE_SPACE`], keeping the
+/// indentation the engine gave it.
+///
+/// Matched on the line's opening words rather than on what follows them,
+/// because what follows differs by case — one measurement, two roots that share
+/// a device, or a sentence saying a root could not be read at all — and every
+/// one of those is an answer about this host.
+fn without_free_space(text: &str) -> String {
+    text.split_inclusive('\n')
+        .map(|line| {
+            let body = line.trim_start_matches(' ');
+            if !body.starts_with("free space:") {
+                return line.to_owned();
+            }
+            let indent = &line[..line.len() - body.len()];
+            let terminator = if line.ends_with('\n') { "\n" } else { "" };
+            format!("{indent}{FREE_SPACE}{terminator}")
+        })
+        .collect()
+}
+
+/// A free-space reading is redacted in every shape the engine renders one.
+///
+/// The three cases are one code path in the engine and three sentences out of
+/// it, so a reading that redacted only the one this host happens to produce
+/// would leave the other two to fail on a host that produces them — which is
+/// the whole failure this redaction exists to prevent, arriving later.
+#[test]
+fn every_shape_of_a_free_space_reading_is_redacted() {
+    let redacted = |line: &str| without_free_space(&format!("host a-reading-host\n{line}"));
+    let expected = format!("host a-reading-host\n  {FREE_SPACE}\n");
+    assert_eq!(
+        redacted(
+            "  free space: 52.2 GiB of 289.6 GiB (18% free) on the filesystem holding the runs \
+             root /a-workspace/runs and the lifecycle workspaces under /home/someone/.onevcs\n"
+        ),
+        expected
+    );
+    assert_eq!(
+        redacted("  free space: 1.0 GiB of 2.0 GiB (50% free) on the filesystem holding the runs root /a-workspace/runs\n"),
+        expected
+    );
+    assert_eq!(
+        redacted(
+            "  free space: could not be read for the lifecycle workspaces, because the linked \
+             onevcs could not resolve its state root: no home, so what is free there is unknown\n"
+        ),
+        expected
+    );
+    // And a line that merely mentions the words is not one of them: the reading
+    // is a line of its own, and prose about it is a settled member's to write.
+    let prose = "  report worker said the free space: line was missing\n";
+    assert_eq!(redacted(prose), format!("host a-reading-host\n{prose}"));
+}
+
 /// A scratch path reads as the golden spells it whichever separator wrote it.
 ///
 /// A session file sits under its store's project directory, so a served path
@@ -1023,10 +1092,10 @@ fn normalized_under(document: Value, root: Option<&Path>) -> Value {
                 .map(|item| normalized_under(item, root))
                 .collect(),
         ),
-        Value::String(text) => Value::String(without_scratch(&match root {
+        Value::String(text) => Value::String(without_free_space(&without_scratch(&match root {
             Some(root) => text.replace(&root.display().to_string(), RUNS_ROOT),
             None => text,
-        })),
+        }))),
         other => other,
     }
 }
