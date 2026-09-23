@@ -53,3 +53,91 @@ Every server runs from the app directory (`cwd`), because that is where its
 Nothing in that readiness window may build: the bundle and the API binary are
 this project's `test` dependencies, and a compile there is reported only as a server
 that would not start.
+
+## The screens: what they are, and why they cannot quietly change
+
+`gallery.screens.spec.ts` drives the same surfaces against the same stack as the
+journeys beside it, but it asserts nothing and writes images. Those images are two
+things at once. They are the operator's eyes — a column that crowds its neighbour or
+a panel clipped at one width is invisible to an assertion nobody wrote — and they are
+the pictures `README.md` carries, which is the only way somebody deciding whether to
+install this can see the product.
+
+Thirteen surfaces at five viewports, sixty-five shots. The surface list is
+`SURFACES`, the matrix is `viewports.ts`, and `docs/dag-ui.md` tabulates both with
+what each one shows; `apps/dag-ui/src/test/dag-ui-doc.test.ts` reconciles the tables
+with the declarations, so a surface or a width can reach neither list without
+reaching the other. Each surface is photographed only once its real reads have landed
+— never mid-skeleton — which is what makes a capture worth looking at.
+
+That set is what it was before this capture was pointed at screencomp. The adoption
+re-targeted the tier rather than rebuilding it: at `1916225`, the commit this work
+branched from, the same thirteen surfaces were photographed at the same five viewports,
+and nothing was dropped from either list to make the gate pass. What changed is where
+the images go, what they are compared against, and that they are reproducible.
+
+The README carries a handful of them rather than all sixty-five: the overall view as
+the hero, the graph, a node's detail, a conversation, the project list and a project
+page, the channel, and one phone-width shot. A screen that would say less than the
+prose beside it is left to the gallery.
+
+### Why it is byte-reproducible, and what it is pinned to
+
+screencomp gates on the content hash of every image, so two captures of one build
+have to be byte-identical or the gate is noise. Four things otherwise put the host in
+the pixels, and each is answered here rather than by a flag added to a tool for a
+screenshot's convenience:
+
+- **The renderer.** Chromium comes from `mcr.microsoft.com/playwright:v<version>-noble`,
+  pinned to the `@playwright/test` in this project's own `package.json` — glyph
+  rasterisation, the font stack and the browser build all decide bytes.
+  `scripts/visual-capture.sh` derives that tag from the manifest and
+  `.github/workflows/visual-docs.yml` names the same one, so CI and the local guard
+  render in the same image; `apps/dag-ui/src/test/visual-docs.test.ts` fails when the
+  two part, which matters because the guard is what regenerates the baseline CI gates
+  against. `screenshots.config.ts` carries Chromium's determinism flags — the GPU out
+  of the render path, a pinned colour profile, no hinting or subpixel anti-aliasing.
+- **The clock.** `capture-clock.ts` names one instant; `fixtures/runs.mjs` stamps the
+  whole corpus relative to it through `DAG_UI_FIXTURE_NOW`, and the spec pins the
+  browser's `Date` to the same one. That file explains why the instant is in the
+  future: the read API stamps `observed_at` from its own clock and nothing may change
+  that, so a corpus ahead of any host's clock is what makes the plotted range the
+  corpus's own.
+- **Reads still landing.** `settleReads` waits until the markup and every scroll
+  offset have held still for four samples. A transcript that grows by one row after
+  the wait and before the shot moves the whole panel, because the panel follows its
+  own bottom.
+- **Transitions.** Playwright's `animations: "disabled"` freezes CSS animations at the
+  shot; a style set from JavaScript can still be caught part way, so every transition
+  and animation is cut outright first.
+
+Nothing in the capture reaches a network beyond loopback, and nothing in it costs
+anything: the corpus is generated on disk, the API is the real binary over it, and
+the bundle is the real built one.
+
+### The commands, and the loop when the view legitimately changes
+
+```sh
+just dag-ui-screens                        # capture into a directory of this invocation's own
+just dag-ui-screens --grep "at 390x844"    # one width; extra arguments reach Playwright
+```
+
+The guard is what re-blesses. `just bootstrap` points `core.hooksPath` at
+`.githooks/` (`scripts/enable-hooks.sh`), so a provisioned clone has it active and
+`screencomp doctor --env` says so. Then the whole loop is: **change the view, then
+`git push`.** If nothing matching `[guard].paths` in `screencomp.toml` changed, the
+hook is a no-op. If something did, it re-captures in the pinned container and
+compares against `shots/baseline/x86_64.json`:
+
+- unchanged — it says so and the push goes through;
+- changed — it regenerates that baseline, builds a review gallery at `shots/review/`,
+  and **blocks the push**. Look at the gallery. If the change is what you meant,
+  `git add shots/baseline/x86_64.json`, commit, and push again; if any of it is in
+  `README.md`, copy the new image over the committed one under `docs/screens/` in the
+  same commit, because those are what a reader sees. If it is not what you meant, you
+  have just found a visual regression nothing else in this repository would have
+  caught.
+
+Never bypass it with `--no-verify` to get a push through: the baseline is the only
+record of what this app looked like, and a bypassed push leaves CI red for the next
+person instead.

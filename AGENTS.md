@@ -149,6 +149,25 @@ to `oneagentgraph`'s own declaration of it rather than to a second reading of th
 wire. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
+**The screenshots of the browser view are gated on their own bytes, and that gate is
+the only thing in this repository with a git hook behind it.** `just dag-ui-screens`
+drives every surface of the DAG Observatory at every viewport through
+`scripts/visual-capture.sh` — the one capture path — which builds the bundle and the
+binary here and renders inside a browser container pinned to this repository's own
+`@playwright/test`, because pixels are not portable and the gate compares content
+hashes. `README.md` leads with those pictures, so the images a reader sees are the
+ones the gate hashes. `.github/workflows/visual-docs.yml` is a workflow of its own and
+nothing in it is reachable from `check`, from `gate` or from `ci.yml`'s gate job: it
+asserts nothing, it costs a container and a build, and informational tiers live
+outside the bar here. What *is* new is `.githooks/pre-push`, which `just bootstrap`
+activates through `scripts/enable-hooks.sh` — a committed guard nothing points
+`core.hooksPath` at runs nothing, and a visual baseline nobody regenerates is one CI
+fails on rather than one a change deliberately moved. That directory carries the
+screencomp guard **alone**; `just gate` stays unhooked and is still run deliberately.
+`apps/dag-ui-e2e/AGENTS.md` holds the rest, `docs/dag-ui.md` tabulates the surfaces
+and the widths, and `apps/dag-ui/src/test/visual-docs.test.ts` is what fails when the
+pinned versions in CI, in the guard and in the manifest part.
+
 **The judged tier is memoized.** `just lint-llm-diff <base>` runs the cached Nx
 target `onepipeline-ui:lint-llm-diff` rather than llmlint directly, so one tree
 judged against one base with one judge configuration gets **one** verdict rather

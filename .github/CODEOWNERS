@@ -29,6 +29,14 @@
 /npm/onepipeline-api-cli/ @nickderobertis
 /pyproject.toml          @nickderobertis
 
+# The visual-docs gate: the capture's configuration, the committed digest baseline,
+# and the pictures README.md embeds. A change to any of them changes what a reader
+# sees of this app, which is the one thing here nobody can check by reading a diff.
+/screencomp.toml         @nickderobertis
+/shots/                  @nickderobertis
+/docs/screens/           @nickderobertis
+/.githooks/              @nickderobertis
+
 # The orchestration and release surfaces, where a mistake is repo-wide.
 /.github/                @nickderobertis
 /scripts/                @nickderobertis

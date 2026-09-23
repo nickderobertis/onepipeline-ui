@@ -715,6 +715,69 @@ fn every_file_a_published_artifact_ships_is_a_packaged_file() {
     );
 }
 
+/// The pictures `README.md` embeds, by their path from the repository root.
+///
+/// Read out of the document rather than listed here: the set is whichever images the
+/// README actually references, and a list beside it is a second one to keep in step.
+fn readme_pictures() -> Vec<String> {
+    let readme = read("README.md");
+    let mut found = Vec::new();
+    for line in readme.lines() {
+        let Some((_, rest)) = line.split_once("](") else {
+            continue;
+        };
+        let Some((path, _)) = rest.split_once(')') else {
+            continue;
+        };
+        if path.ends_with(".png") {
+            found.push(path.to_owned());
+        }
+    }
+    found
+}
+
+/// Every picture the README embeds is committed here, and none of them ships.
+///
+/// Two decisions, and they are the same decision read from both ends.
+///
+/// The paths are **relative**, so each one resolves to a file of this repository and
+/// the document renders from a checkout — which is also what makes the capture gate
+/// mean anything, since the images a reader sees are the ones `screencomp classify`
+/// hashes rather than a copy somebody uploaded somewhere.
+///
+/// They are deliberately **not** in `include`, which is the one place in this
+/// repository where leaving something out is the considered answer rather than the
+/// oversight that stranded v0.2.0 and v0.3.0. Two reasons, pointing the same way.
+/// crates.io resolves a relative link in a rendered README against the repository, so
+/// the pictures appear there without a megabyte and a half of PNG riding along in
+/// every `cargo install` — `llmlint` ships its README and not its `docs/screenshots`
+/// for exactly this reason. And `include` is release-plz's release trigger: packaging
+/// them would cut a version for a re-blessed screenshot that changed no byte any
+/// artifact runs, while leaving them out lets the rendered README pick up a new
+/// picture from the default branch with no release at all.
+#[test]
+fn every_readme_picture_is_committed_here_and_none_of_them_ships() {
+    let pictures = readme_pictures();
+    assert!(
+        pictures.len() >= 2,
+        "README.md embeds no pictures; the view it documents is the one thing in this \
+         repository a reader looks at rather than reads"
+    );
+    let packaged = packaged_files();
+    for picture in &pictures {
+        assert!(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(picture).is_file(),
+            "README.md embeds {picture}, which is not a file of this repository"
+        );
+        assert!(
+            !packaged.contains(picture),
+            "{picture} is packaged; the README's pictures are resolved from the \
+             repository rather than shipped, and packaging one makes a re-blessed \
+             screenshot cut a release"
+        );
+    }
+}
+
 fn npm_build(args: &[&str]) -> std::process::Output {
     std::process::Command::new("node")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/npm-build.mjs"))

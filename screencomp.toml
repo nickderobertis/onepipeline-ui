@@ -1,0 +1,66 @@
+# screencomp configuration. See https://github.com/nickderobertis/screencomp.
+#
+# What this gates is the DAG Observatory's own pixels: `just dag-ui-screens` drives
+# every surface of the app at every viewport in the matrix, against the real
+# `onepipeline-api serve --ui` over a generated fixture runs root, and hands the
+# result here as a content hash per image. `apps/dag-ui-e2e/AGENTS.md` is the durable
+# note — what the screens are, why the capture is byte-reproducible, and what to do
+# when the view legitimately changes.
+
+[capture]
+# The CPU architectures this repository maintains screenshots for, and the only
+# source of that list: the capture lanes in .github/workflows/visual-docs.yml are
+# read from here, the committed baseline is shots/baseline/<arch>.json, and
+# .githooks/pre-push detects the host's arch and lets screencomp refuse one this
+# list does not name. Rendering happens in a pinned Linux container, so nothing but
+# the CPU varies — and every entry adds a CI job to each run.
+arches = ["x86_64"]
+
+[comment]
+title = "Visual changes"
+marker = "screencomp"        # [A-Za-z0-9_-]; one sticky comment per marker
+embed_limit = 10             # embed images inline when <= N shots differ (0 disables)
+
+# The one dimension this capture varies over. Each value is a viewport name from
+# `apps/dag-ui-e2e/viewports.ts`, which is the matrix's single declaration — the
+# gallery then renders one card per screen that toggles through its five widths
+# instead of sixty-five unrelated cards. `apps/dag-ui/src/test/visual-docs.test.ts`
+# reconciles this list with that declaration, so a width can reach neither list
+# without reaching the other. The first value is the gallery's default.
+#
+# There is deliberately **no `theme` toggle**. This app is dark-only: the document
+# element carries `class="dark"`, there is no light variant in `apps/dag-ui/src` and
+# no switch anywhere in it, so a light/dark matrix would mean building a feature
+# rather than documenting one.
+[[toggle]]
+key = "viewport"
+label = "Viewport"
+values = ["1920x1080", "1440x900", "1280x800", "1024x768", "390x844"]
+
+[guard]
+# Local pre-push guard (.githooks/pre-push): re-capture only when these globs change.
+# Everything whose bytes can reach a pixel is here and nothing else, because the
+# capture is a minute of Docker that the common push must not pay. That is wider than
+# the frontend: the view draws whatever the read API serves, so the crate's own
+# sources are in the set, and so is the lockfile that pins what Vite inlines into the
+# bundle. The corpus and the capture's own machinery are in it for the same reason —
+# a fixture that records one more event is a picture with one more row in it.
+paths = [
+  "src/**",
+  "apps/dag-ui/index.html",
+  "apps/dag-ui/src/**",
+  "apps/dag-ui/vite.config.ts",
+  "packages/*/src/**",
+  "apps/dag-ui-e2e/capture-clock.ts",
+  "apps/dag-ui-e2e/fixtures/**",
+  "apps/dag-ui-e2e/gallery.screens.spec.ts",
+  "apps/dag-ui-e2e/observatory-locators.ts",
+  "apps/dag-ui-e2e/playwright.config.ts",
+  "apps/dag-ui-e2e/screenshots.config.ts",
+  "apps/dag-ui-e2e/viewports.ts",
+  "scripts/visual-capture.sh",
+  "screencomp.toml",
+  "package-lock.json",
+  "**/*.{css,scss,html}",
+]
+gallery = "shots/review"

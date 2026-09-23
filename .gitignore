@@ -14,7 +14,6 @@ node_modules/
 /apps/*/dist
 /apps/*/test-results
 /apps/*/playwright-report
-/apps/*/.screenshots
 /packages/*/dist
 # Assembled by scripts/npm-build.mjs and by maturin; the committed sources are
 # npm/onepipeline-api-cli/ and pyproject.toml.
@@ -30,3 +29,13 @@ llmlint.buildout.yml
 REPO_PLAN.md
 # Local sync bookkeeping for gh-secrets (per-machine; the manifest itself is tracked)
 .gh-secrets-state.json
+
+# screencomp: commit the digest baselines (shots/baseline/*.json), not the generated PNGs.
+shots/current/
+shots/verify/
+shots/review/
+# A capture nobody named a destination for: `scripts/visual-capture.sh` makes one of
+# these per invocation, so two operators photographing at once neither overwrite each
+# other's images nor dirty the tree.
+shots/local/
+/site/
