@@ -1845,12 +1845,7 @@ fn forget_the_blob_of(repo: &Path, path: &str) {
     let object = git_says(repo, &["rev-parse", &format!("HEAD:{path}")]);
     let (directory, file) = object.split_at(2);
     let blob = repo.join(".git/objects").join(directory).join(file);
-    fs::remove_file(&blob).unwrap_or_else(|error| {
-        panic!(
-            "take {} out of the object database: {error}",
-            blob.display()
-        )
-    });
+    fs::remove_file(&blob).unwrap_or_else(|error| panic!("forget {blob:?}: {error}"));
 }
 
 /// A requirement the script cannot read fails a release claiming compatibility,
