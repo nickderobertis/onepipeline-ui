@@ -766,7 +766,9 @@ fn every_readme_picture_is_committed_here_and_none_of_them_ships() {
     let packaged = packaged_files();
     for picture in &pictures {
         assert!(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join(picture).is_file(),
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(picture)
+                .is_file(),
             "README.md embeds {picture}, which is not a file of this repository"
         );
         assert!(
