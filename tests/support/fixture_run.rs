@@ -5799,3 +5799,78 @@ pub fn summary_len(root: &Path, run: &str) -> u64 {
         .expect("the run has a summary")
         .len()
 }
+
+/// The one node of the run [`write_awaiting_dispatch`] writes: an agent node,
+/// so a driver that adopts the run dispatches it rather than waiting on a
+/// person.
+pub const DISPATCH_NODE_ID: &str = "resolve";
+
+/// A run nothing is driving whose whole graph is one **agent** node, launched
+/// from `dir` on this host with no observer graph, dispatched over the
+/// node-scope graph at `node_graph`.
+///
+/// [`write_awaiting_attestation`]'s counterpart, and the difference is the whole
+/// point of it: that run's one node is a human action, so the driver it retains
+/// settles it as waiting and dispatches nothing. This one's node is work, so an
+/// adoption of it composes a real dispatch over the graph the launch names —
+/// which is how a journey observes what a dispatch runs *under*.
+///
+/// The graph is named absolutely rather than relative to `dir`, because what a
+/// journey is asking about here is the config chain that graph reaches, and a
+/// relative reference would put the resolution of the graph itself between the
+/// question and the answer.
+pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &Path) -> PathBuf {
+    let run_dir = root.join(run);
+    fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
+    fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
+    fs::write(
+        run_dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "project": PLAN_PROJECT,
+            "dir": dir.display().to_string(),
+            "launcher": "claude-code",
+            "session": SESSION,
+            "node_graph": node_graph.display().to_string(),
+            // A driver recorded on this host under a pid nothing can be
+            // holding, exactly as [`write_awaiting_attestation`] records one, so
+            // the engine proves it gone and the run is one an adoption may take
+            // over.
+            "pid": 0x7FFF_FFF0_u32,
+            "host": onepipeline_ui::liveness::hostname(),
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "resolve the config chain" },
+        "name": "dispatch",
+        "concurrency": 1,
+        "tasks": [
+            { "id": DISPATCH_NODE_ID, "task": "Do the work the graph dispatches." },
+        ],
+    });
+    fs::write(run_dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(
+        run_dir.join("events.jsonl"),
+        format!(
+            "{}\n",
+            json!({
+                "v": 1,
+                "ts": START,
+                "stream": "a-recording-host-4242",
+                "seq": 0,
+                "source": "pipeline",
+                "kind": "run-started",
+                "labels": { "run_id": run },
+                "payload": { "plan": plan },
+                "artifacts": [],
+            })
+        ),
+    )
+    .expect("the journal");
+    run_dir
+}

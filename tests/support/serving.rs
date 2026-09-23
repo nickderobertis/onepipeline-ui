@@ -147,6 +147,19 @@ impl Serving {
         Self::spawn_as(workspace, &[], false, None, Some(session), &[])
     }
 
+    /// The same, in an environment changed by `environment`.
+    ///
+    /// [`start_as_with_env`](Self::start_as_with_env)'s counterpart for a
+    /// workspace the caller already built, which is what a journey holds when
+    /// the fixture's own directory is what the environment has to name.
+    pub fn start_in_as_with_env(
+        workspace: TempDir,
+        session: &str,
+        environment: &[(&str, &str)],
+    ) -> Self {
+        Self::spawn_as(workspace, environment, false, None, Some(session), &[])
+    }
+
     /// The same, reading the server's own log rather than letting it through to
     /// the terminal.
     ///

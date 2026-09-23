@@ -8,6 +8,13 @@
 
 use std::fs;
 use std::path::Path;
+// The journeys that write a config chain and a harness stand-in are `cfg(unix)`
+// — they chmod a script and stop the server with a signal — and they are the
+// only callers here that name this type rather than spelling it in full. So the
+// import is gated with them, exactly as `Stop` is below: an import left ungated
+// is an unused one on Windows, which this crate's gate denies.
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -12460,6 +12467,225 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     drop(driver);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The harness stand-in a dispatch here runs: it records the argv it was given
+/// and answers as the adapter expects, so a journey can read back *that* it ran
+/// and *what as*.
+///
+/// The harness program is the one process this suite stands in for, and it is
+/// the narrowest place to cut: everything above it — the adopt route, the
+/// driver, the executor, the graph run, and the oneharness config loader that
+/// picks this program — is the linked engine doing its own work. Standing in
+/// for the engine instead, at `ONEPIPELINE_ONEAGENTGRAPH_BIN`, would be asking
+/// a double whether the engine resolves a config chain.
+#[cfg(unix)]
+fn write_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("fake-harness");
+    // The log path is written into the script rather than read from the
+    // environment, because what this journey may not assume is anything about
+    // the environment the engine composes for a dispatch — that composition is
+    // part of what is under test.
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\nprintf '{{\"type\":\"result\",\
+             \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
+             \"session_id\":\"standin\"}}\\n'\n",
+            log.display().to_string()
+        ),
+    )
+    .expect("the harness stand-in");
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod the harness stand-in");
+    standin
+}
+
+/// A oneharness config chain: `child.toml` names no harness of its own and
+/// declares `parent.toml`, which names the one — and points it at the stand-in.
+///
+/// Split exactly the way an operator splits one, and the split is the assertion:
+/// a reader that stopped at the child finds a config selecting no harness at
+/// all, so a dispatch composed from it cannot run under `claude-code` by
+/// accident. Only a reader that followed `extends` reaches the selection.
+#[cfg(unix)]
+fn write_extending_config(dir: &Path, standin: &Path) {
+    fs::write(
+        dir.join("parent.toml"),
+        format!(
+            "harnesses = [\"claude-code\"]\n\n[harness.claude-code]\nbin = {:?}\n",
+            standin.display().to_string()
+        ),
+    )
+    .expect("the parent config");
+    fs::write(dir.join("child.toml"), "extends = \"./parent.toml\"\n").expect("the child config");
+}
+
+/// The node-scope graph a dispatch of the run's one node runs: one single-sided
+/// member, naming the child of the config chain above.
+///
+/// Single-sided rather than the shipped default's two-party member, because a
+/// single-sided member's turn is an `oneharness_core` library call — so the
+/// chain is followed by the loader this binary links. The dispatch runs it in a
+/// process of its own, and that process is *this executable* at its `drive`
+/// verb rather than an installed sibling, which is what makes the resolution
+/// under test this build's rather than whatever the host has on PATH.
+#[cfg(unix)]
+fn write_node_scope_graph(dir: &Path) -> PathBuf {
+    let graph = dir.join("node-scope.yaml");
+    fs::write(
+        &graph,
+        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    \
+         oneharness_config: ./child.toml\n",
+    )
+    .expect("the node-scope graph");
+    graph
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey needs
+// nothing a checkout may lack — the compiled binary every other journey in this module
+// drives, and a `/bin/sh` script it writes itself — which is what the tiers behind edges
+// of their own here need (`strace`, the base commit's server). It is the slowest journey
+// in this module at about 27 seconds, and that is the engine's own: the adopt route
+// dispatches in 0.1s and the member is composed at once, and what the time is spent on
+// is inside the turn the linked engine prepares before it spawns a harness. Measured
+// rather than estimated, and the failure half below — which settles in 0.2s — is what
+// says the cost is the successful turn rather than this fixture.
+#[cfg(unix)]
+#[test]
+fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    let standin = write_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_dispatch(&root, run, &dir, &graph);
+
+    // The directory a dispatch of a direct node runs in, named rather than left
+    // to default: that default is the server's own working directory, which for
+    // this suite is the checkout it was built in — so a journey that dispatches
+    // for real must say where, or the dispatch runs over this repository.
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string())],
+    );
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    // The run's own record says the adopt route reached a real dispatch: the
+    // node went ready, was dispatched, and the graph that dispatch composed
+    // started a member. Nothing here is the journey's to write — each is the
+    // engine's, read back off the timeline the server serves.
+    let kinds = |address| {
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+            .iter()
+            .map(|event| event["kind"].clone())
+            .collect::<Vec<_>>()
+    };
+    eventually(
+        "the adoption dispatched the node over its node-scope graph",
+        || kinds(serving.address).contains(&json!("member-started")),
+    );
+    assert!(
+        kinds(serving.address).contains(&json!("node-dispatched")),
+        "{:?}",
+        kinds(serving.address)
+    );
+
+    // And the member that started ran the harness the **parent** config names,
+    // reached only by following the child's `extends`. The stand-in records the
+    // argv it was given, so what is asserted is the whole answer: the program
+    // the chain selected, composed by the `claude-code` adapter the parent
+    // asked for, carrying this node's own task.
+    eventually(
+        "the dispatch ran the harness the parent config names",
+        || fs::read_to_string(&log).is_ok_and(|ran| ran.contains("fake-harness")),
+    );
+    let ran = fs::read_to_string(&log).expect("the harness stand-in's record");
+    assert!(
+        ran.contains(&standin.display().to_string()),
+        "the dispatch ran a harness the parent config did not name: {ran}"
+    );
+    assert!(
+        ran.contains("Do the work the graph dispatches."),
+        "the harness was not given this node's task: {ran}"
+    );
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+#[cfg(unix)]
+#[test]
+fn a_dispatch_whose_config_names_a_parent_that_is_not_there_settles_the_node() {
+    // The recovery half of the journey above, over the same route and the same
+    // chain: the child still declares a parent, and the parent is gone. A reader
+    // that followed `extends` has nothing to fold and says so; the node settles
+    // rather than the dispatch running under some default harness, and the run
+    // stays readable over the API throughout.
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    let standin = write_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    fs::remove_file(dir.join("parent.toml")).expect("take the parent away");
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_dispatch(&root, run, &dir, &graph);
+
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string())],
+    );
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    eventually(
+        "the node settled rather than running under a harness",
+        || detail()["graph"]["node_status"][fixture_run::DISPATCH_NODE_ID] == json!("failed"),
+    );
+    // Settled as the engine settles a dispatch that could not start: the member
+    // died where it was composed, and the node carries that outcome rather than
+    // a harness's.
+    assert_eq!(
+        detail()["graph"]["node_results"][fixture_run::DISPATCH_NODE_ID]["outcome"],
+        json!("dispatch-died"),
+        "{}",
+        detail()
+    );
+    let kinds = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    )
+    .iter()
+    .map(|event| event["kind"].clone())
+    .collect::<Vec<_>>();
+    assert!(kinds.contains(&json!("member-died")), "{kinds:?}");
+    // And the whole of the point: no harness ran at all. A chain that cannot be
+    // read selects nothing, rather than falling back to whatever the host has.
+    assert!(
+        !log.exists(),
+        "a harness ran for a config chain that could not be read: {}",
+        fs::read_to_string(&log).unwrap_or_default()
+    );
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
 
 #[test]
 fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
