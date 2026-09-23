@@ -563,8 +563,51 @@ const FOUNDATION_REPORT = `${JSON.stringify(
   2,
 )}\n`;
 
+/**
+ * The instant this whole corpus is written relative to.
+ *
+ * Wall clock by default, which is what the browser journeys want: a run stamped a
+ * few minutes before the read is a run the server reads as driven, and the journeys
+ * assert against readings — "3 minutes ago", a driver that has not gone quiet — that
+ * are only true of a corpus written just now.
+ *
+ * `DAG_UI_FIXTURE_NOW` replaces it with a named instant, and that is what the
+ * screenshot tier sets. A capture screencomp gates on the content hash of has to be
+ * byte-identical between two runs of one build, and every stamp below reaching the
+ * browser through a real read means the wall clock is in the pixels: a relative
+ * reading, a clock time, the width of a plotted segment. Naming the instant takes the
+ * host's clock out of all three. `apps/dag-ui-e2e/capture-clock.ts` holds the instant
+ * the tier names and why it is the one it is; nothing here chooses it.
+ */
+const CORPUS_NOW = (() => {
+  const named = process.env.DAG_UI_FIXTURE_NOW;
+  if (named === undefined) return Date.now();
+  const parsed = Date.parse(named);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(
+      `DAG_UI_FIXTURE_NOW must be an instant Date.parse reads, not '${named}'`,
+    );
+  }
+  return parsed;
+})();
+
+/** This corpus's own "now", so nothing below reads the host's clock directly. */
+const now = () => CORPUS_NOW;
+
+/**
+ * How long before that instant the settled runs were recorded.
+ *
+ * An age rather than a calendar date, because the whole corpus has to move together:
+ * a settled run pinned to a fixed date and a live run stamped from `now` drift apart
+ * by a day for every day that passes, and under the named instant above they would
+ * land decades apart — which the run list would show as an age in years and the
+ * column formatter would spell with the year attached. Two months is what puts these
+ * runs in the same year as the live one and still plainly behind it.
+ */
+const HISTORIC_AGE_MS = 59 * 24 * 60 * 60 * 1000;
+
 /** The clock every recorded run but the live one is stamped from. */
-const HISTORIC = Date.parse("2026-07-26T09:00:00.000Z");
+const HISTORIC = now() - HISTORIC_AGE_MS;
 
 const stamp = (millis) => new Date(millis).toISOString();
 
@@ -708,7 +751,7 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
   const seq = existing.split("\n").filter(Boolean).length;
   const line = JSON.stringify({
     v: 1,
-    ts: new Date().toISOString(),
+    ts: stamp(now()),
     stream: `a-recording-host-${labels.run_id}`,
     seq,
     source,
@@ -937,7 +980,7 @@ function writeLiveRun(root) {
   // enough to now that the plotted range is mostly the run: it ends at the server's
   // `observed_at`, so dead time before the read is dead width every segment in every
   // row is squeezed into.
-  const start = Date.now() - 3 * 60 * 1000;
+  const start = now() - 3 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(LIVE_RUN, "codex", CODEX_SESSION, stamp(start), 4242),
@@ -2263,7 +2306,7 @@ function writeSupervisedRun(root) {
   // as parked, and an adoption is offered on neither — and still after the live
   // run's last write, so the live run stays the newest activity the flat list
   // leads with and every journey that opens the first run served opens it.
-  const start = Date.now() - 10 * 60 * 1000;
+  const start = now() - 10 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(
@@ -2317,7 +2360,7 @@ function writeElsewhereRun(root) {
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  const start = Date.now() - 11 * 60 * 1000;
+  const start = now() - 11 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(ELSEWHERE_RUN, "codex", CODEX_SESSION, stamp(start), 4252),
@@ -2361,7 +2404,7 @@ function writeAdoptableRun(root, workspace) {
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
-  const start = Date.now() - 12 * 60 * 1000;
+  const start = now() - 12 * 60 * 1000;
   // No observer graph: a record naming one is a graph the adopted driver would
   // launch, and this fixture has none to launch. The node graph is named because
   // the driver refuses a record naming none before it drives, and never read,
@@ -3050,7 +3093,7 @@ export function growTranscript(root, turns) {
       turn: numbered,
       role: "assistant",
       instruction: "Keep going.",
-      started_at: new Date().toISOString(),
+      started_at: stamp(now()),
       model: "a-model",
     });
     appendEvent(dir, "agentgraph", "turn-message", labels, {
@@ -3151,7 +3194,7 @@ function writeShutdownRun(root, runId, launcher, session, tasks, record) {
     tasks,
   };
   writeJson(join(dir, "plan.json"), plan);
-  const start = Date.now() - 5 * 60 * 1000;
+  const start = now() - 5 * 60 * 1000;
   writeJson(
     join(dir, "launch.json"),
     launch(runId, launcher, session, stamp(start), 4260),

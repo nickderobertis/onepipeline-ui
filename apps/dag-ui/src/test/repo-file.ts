@@ -30,4 +30,13 @@ function repoRoot(): string {
 
 /** A file of this repository, by its path from the root. */
 export const repoFile = (path: string): string =>
-  readFileSync(resolve(repoRoot(), path), "utf8");
+  readFileSync(repoPath(path), "utf8");
+
+/**
+ * The absolute path of a file of this repository.
+ *
+ * The same resolution as `repoFile`, for the one reader that wants the bytes rather
+ * than the text: a committed screenshot is hashed, and decoding a PNG as UTF-8 to
+ * hash the result would not be the file's digest.
+ */
+export const repoPath = (path: string): string => resolve(repoRoot(), path);

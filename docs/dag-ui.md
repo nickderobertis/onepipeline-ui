@@ -591,24 +591,39 @@ reported where the timeline would have been rather than leaving an empty pane.
 
 The operator iterates on this surface visually, and a polish problem at one width is
 invisible until somebody starts the app by hand at that width. `just dag-ui-screens`
-removes that step:
+removes that step — and the same capture is where the pictures in `README.md` come
+from, which is the only way somebody deciding whether to install this can see the
+product at all:
 
 ```sh
 just dag-ui-screens                       # every surface at every viewport
 just dag-ui-screens --grep "at 390x844"   # one width; extra arguments reach Playwright
 ```
 
-It boots the browser tier's own stack — `apps/dag-ui/screenshots.config.ts` reuses
-`playwright.config.ts` wholesale, so the fixture server, Vite, the free ports and the
-throwaway fixture directory are all chosen exactly as they are for the e2e run — drives
-`e2e/gallery.screens.spec.ts`, and prints the gallery it wrote: one PNG per surface per
-viewport, plus an `index.html` contact sheet that puts every viewport of one surface in
-a row. Galleries land under the gitignored `apps/dag-ui/.screenshots/`, one
-directory per invocation, because the gallery is the one thing the Playwright configs do
-not already keep apart — so two operators, or two agents, capturing at the same time
-neither collide nor dirty the tree. `scripts/dag-ui-screens.sh` is that path's one
-source: the spec is handed it in `DAG_UI_SCREENSHOT_DIR` and refuses to run without one,
-so there is no second place a gallery can land.
+`scripts/visual-capture.sh` is that path's one source and there is deliberately no
+second. It builds what is photographed on this machine — the workspace install, the
+Vite bundle, and the `onepipeline-api` binary that serves it — and then renders inside
+a browser container pinned to this repository's own `@playwright/test`, because glyph
+rasterisation and the browser build decide bytes and the capture is gated on the
+content hash of every image. `screenshots.config.ts` reuses `playwright.config.ts`
+wholesale, so the fixture server, Vite, the free ports and the throwaway fixture
+directory are all chosen exactly as they are for the e2e run, and it adds what makes a
+capture reproducible: Chromium's determinism flags and the fixed instant the corpus and
+the browser clock are both pinned to.
+
+The capture lands in the directory `SHOTS_OUT` names — which is how the pre-push guard
+and `.github/workflows/visual-docs.yml` point it at `shots/current/<arch>` — and, when
+nothing names one, in a directory of that invocation's own under the gitignored
+`shots/local/`, so two operators or two agents capturing at the same time neither
+collide nor dirty the tree. It writes one PNG per surface per viewport plus
+`captures.json`, screencomp's index: each shot's name, the viewport it was taken at,
+its SHA-256 and its path. `screencomp gallery --input <directory>` renders that into
+one card per screen you toggle through its five widths, which is also what the guard
+builds at `shots/review/` when it blocks a push.
+
+`apps/dag-ui-e2e/AGENTS.md` is the durable note on all of it: why the capture is
+byte-reproducible, what it is pinned to, how the guard is activated, and what to do
+when this view legitimately changes.
 
 The **viewport matrix** is declared once, in `e2e/viewports.ts`, and used twice: the
 gallery captures at every entry, and `e2e/dag-ui-navigation.spec.ts` drives the journeys
@@ -617,7 +632,10 @@ whose outcome depends on width at the widest and narrowest of them.
 Each entry's name is what a captured file and a journey title are called, so the table
 below reads in the same words the gallery does. `src/test/dag-ui-doc.test.ts`
 reconciles it with that declaration, so a width can neither reach the gallery without
-reaching this table nor be promised here without being photographed.
+reaching this table nor be promised here without being photographed — and
+`src/test/visual-docs.test.ts` reconciles the same declaration with the `viewport`
+toggle in `screencomp.toml`, which is the third place these names have to agree because
+it is the control the rendered gallery offers over them.
 
 | Viewport | What it stands for |
 | --- | --- |
@@ -626,6 +644,12 @@ reaching this table nor be promised here without being photographed.
 | 1280x800 | a common laptop |
 | 1024x768 | the smallest desktop layout still in use |
 | 390x844 | a phone — the only entry where the shell's two columns stop fitting |
+
+Both this table and the surface table below are **floors rather than snapshots**. An
+entry may be added to either; an entry removed is a width, or a screen, that the
+gallery stops documenting and the README can no longer show — which is a decision
+about what this app is held to, not a way to make a capture pass. The floors are the
+thirteen surfaces and five widths the gallery has covered since `1916225`.
 
 The **surfaces** are declared once too, as `SURFACES` in `e2e/gallery.screens.spec.ts`,
 and each one names the PNG it writes at every viewport — so the table below is also how
@@ -739,8 +763,10 @@ unreachable-API journey has a real failure to observe, is held bound but unliste
 by the stall server (`serve-fixture.mjs --refuse-port`): leaving it merely free would
 let a concurrent run's own API server take it.
 
-That gallery is deliberately outside `just check`: its product is images a reviewer
-reads for clipping, overlap and reflow, which no selector describes. It is what found
+That capture is deliberately outside `just check`, outside `just gate` and outside
+ci.yml's gate job — `.github/workflows/visual-docs.yml` is a workflow of its own: its
+product is images a reviewer reads for clipping, overlap and reflow, which no selector
+describes, and it costs a container and a build to make them. It is what found
 the tab list widening the working area past the viewport, the pinned timeline leaving
 the transcript no room at ten expanded lanes, and the document that scrolled out from
 under `scrollIntoView`. It went on to find the axis sliced through the middle of its own

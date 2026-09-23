@@ -1,9 +1,109 @@
 # onepipeline-ui
 
+![The DAG Observatory at desktop width: a dark three-column shell with the projects and runs rail on the left, a header of telemetry tiles over the selected run, and the graph timeline drawn underneath as a single collapsed line of coloured work segments across the run's clock](docs/screens/01-run-list-overall-1920x1080.png)
+
 The read API and browser view for [onepipeline](https://github.com/nickderobertis/onepipeline)
 runs: an axum server wrapping the onepipeline SDK, plus the frontend that reads it.
 
-## The contract
+```bash
+npm install -g onepipeline-api-cli               # or pip, or cargo — see Install
+onepipeline-api serve --runs-root ./runs --ui    # the API, and the view above at /
+```
+
+## The DAG Observatory
+
+[`apps/dag-ui`](docs/dag-ui.md) is that view: every run under a runs root, read as a
+whole and then one level at a time. It opens on the **projects** — one card per plan,
+newest activity first, each counting its runs in the server's own words — and a run
+opened from one keeps that page a step back. The **Overall** view above is the run
+read as a whole: its telemetry tiles over the graph timeline, which is the same plot,
+the same lane words and the same clock used at three scopes — the whole run, one node,
+one conversation — each a single click into the last.
+
+It is not only a read. Every verb the `onepipeline` CLI has once a plan is running is
+here, from the run it is about: stop, adopt, attest, reply on the channel, and shut
+down a run, every run this session owns, or the whole host — each behind a confirm
+that names what it will act on, and each showing the engine's own receipt or refusal
+verbatim rather than a restatement of it. [`docs/dag-ui.md`](docs/dag-ui.md) is the
+design record; what follows is what the screens are.
+
+### The graph
+
+![The Graph view: a directed graph of node cards laid out left to right on a dark canvas, edges joining them, each card headed by its node id and its state — green where a node succeeded, red where one failed, and an acid highlight around the one still running](docs/screens/04-graph-1920x1080.png)
+
+Status and progress at a glance. Green nodes succeeded, red ones failed or were
+cancelled, and an animated highlight marks the work still running. The canvas arrives
+**fitted whole** — every card inside it — at every width the view is read at, and its
+own controls zoom in from there; a floor on the fit rather than a fixed scale, because
+the scale that fits a plan of six on a desktop shows a third of it on a phone with the
+rest off both sides of a canvas that says nothing about having more beside it.
+Selecting a node here, or from the keyboard-accessible node list beside it, opens that
+node's timeline.
+
+### A node: its timeline over its transcript
+
+![The node view for a node named dashboard: a breadcrumb back to the graph, a legend of event categories, a collapsed timeline plot of that node's work across its own clock, and underneath it the node's transcript as a list of turn and event rows](docs/screens/05-node-collapsed-1440x900.png)
+
+One node, read the way the run was. The plot at the top is the node's own work on the
+node's own clock, collapsed to one line and expandable into a row per category; the
+list underneath is what the node recorded, turn by turn. The two are one reading —
+selecting in either moves the other — and the vocabulary does not change on the way
+down, so a segment labelled `worker · judge` at the graph scope sits in the `worker`
+lane here and heads the conversation opened from it with the same words.
+
+### A conversation
+
+![A conversation open in the right panel: its heading naming the worker · judge session and reading still running, a plot of that session's own turns, then the turns themselves — a prompt, the model's reply, and a row of input, output, cache and cost readings under it](docs/screens/08-conversation-1440x900.png)
+
+The third scope. A transcript opens beside the timeline it came from, with that
+session's own turns plotted above them and each turn's tokens and cost read underneath
+it. A transcript is re-read only when the served timeline says *that* session recorded
+something, so a run whose other nodes are busy costs an open conversation nothing; when
+the session it belongs to is live, new turns are appended underneath the ones already
+on the page rather than replacing them, and the panel follows that growth only while
+the reader is at the end of it.
+
+### Projects
+
+![The project list the app opens on: a grid of cards, each naming a plan and its qualified id, how many runs it holds, their states counted, and when it last wrote — with a card headed "(no project)" among them for the runs whose launch recorded none](docs/screens/11-project-list-1440x900.png)
+
+![A single project's page: its name and id, then the DAGs launched against it as rows, most recent first, each carrying its settlement, its nodes counted, what is driving it and when it last wrote](docs/screens/12-project-page-1440x900.png)
+
+A bare address is the project list, in the server's own order. The runs whose launch
+recorded no project are a card like any other, headed by that word rather than by the
+plan name of whichever run in them wrote last. A project's page is every DAG launched
+against it, each row the same row the flat run list serves. Nothing here recomputes an
+order or a count: the tallies are of the served rows, in the served words.
+
+### The channel
+
+![The Channel tab: the queue showing a waiting surface with its kind, its source, a blocking badge and its age, the replies written under it, and a reply composer with a free-text editor and the verdict shortcuts above it](docs/screens/13-channel-1440x900.png)
+
+The run's channel, shown as the engine keeps it: the pending surface nobody has given
+up on, the waiting ones nobody has read, an abandoned one where the process serving it
+exited without an answer, and the answered ones. Reading it consumes nothing. The
+composer sends the editor's text **byte for byte** — never a parse of it — so a manager
+can type an envelope this app has never heard of and the engine's refusal of a
+malformed one is the engine's own.
+
+### At the width it is actually read
+
+![The same overall view at phone width: the two columns of the shell stacked into one, the run's telemetry tiles wrapped to fit, and the graph timeline still plotted whole across the narrow column](docs/screens/01-run-list-overall-390x844.png)
+
+The shell is exactly one viewport tall and every region inside it scrolls on its own,
+which is a thing that fails silently — a region that overflows reports nothing, it just
+puts content where no scroll can reach it. So the view is held to five widths down to a
+phone, and a journey drives the ones whose outcome depends on width at both extremes.
+The phone is where the two columns stop being a comfortable fit, which makes it the
+width every reflow defect shows up at first.
+
+Every screen above is a real capture of this app, driven by
+[`just dag-ui-screens`](apps/dag-ui-e2e/AGENTS.md) against the real
+`onepipeline-api serve --ui` over a generated run corpus, and gated on the content hash
+of each image by [screencomp](https://github.com/nickderobertis/screencomp) — so a
+picture here cannot quietly stop being true of the app.
+
+## The read API
 
 [`docs/contract.md`](docs/contract.md) is the source of truth, quoted verbatim
 from the task that commissioned this repository. `tests/contract.rs` reconciles
@@ -61,18 +161,9 @@ Payloads themselves come from the onepipeline SDK. Anything presentation-worthy
 lands there first, so the agent reading the CLI sees at least what the human in
 the UI sees; this crate owns the envelope, not the records.
 
-## The view
-
-[`apps/dag-ui`](docs/dag-ui.md) is the DAG Observatory: the browser view of the
-same runs, reading nothing but the contract above — and acting through nothing
-else either. It is not only a read: beside replying, stopping and adopting, it
-shuts down a run, every run this session owns, or the whole host, behind a
-confirm dialog that names each run it will act on and whose it is before
-anything is sent. It declares no schema, event
-name, or API path of its own — `packages/dag-model` holds the contract's client
-half, `packages/telemetry-client` is the only thing that speaks HTTP, and
-`packages/dag-layout` is the graph geometry. [`docs/dag-ui.md`](docs/dag-ui.md)
-is its design record.
+The view declares no schema, event name, or API path of its own —
+`packages/dag-model` holds the contract's client half, `packages/telemetry-client`
+is the only thing that speaks HTTP, and `packages/dag-layout` is the graph geometry.
 
 ## Install
 
@@ -118,14 +209,17 @@ Prebuilt archives and their `.sha256` checksums are also attached to every
 ## Develop
 
 ```bash
-just bootstrap        # from a clean clone
+just bootstrap        # from a clean clone; also activates the visual pre-push guard
 just check            # the deterministic gate, every project
 just gate             # `check` plus the llmlint LLM-judge tier — the pre-push bar
-just dag-ui-screens   # photograph the view at every viewport into a gallery
+just dag-ui-screens   # re-photograph every screen above, in the pinned browser container
 ```
 
 `just --list` is the full command surface. [`AGENTS.md`](AGENTS.md) is the
-durable instruction layer for humans and agents working here.
+durable instruction layer for humans and agents working here, and
+[`apps/dag-ui-e2e/AGENTS.md`](apps/dag-ui-e2e/AGENTS.md) is the note on the
+screens: what they are, why the capture is byte-reproducible, and what to do when
+the view legitimately changes.
 
 ## License
 
