@@ -528,16 +528,21 @@ impl ThisCrate {
     }
 
     /// The same, with the pending release moving the engine requirement: the
-    /// baseline links `engine` where this tree's own manifest links what it
-    /// links, and the commit that carries the manifest forward announces
+    /// baseline declares `linking` where this tree's own manifest declares what
+    /// it declares, and the commit that carries the manifest forward announces
     /// `subject`. That commit touches `Cargo.toml`, which this crate packages,
     /// so release-plz versions a release from it and `subject` is what that
     /// release announces.
-    fn with_the_engine_moved_from(dir: &Path, engine: &str, subject: &str) -> Self {
-        Self::released(dir, Some(engine), subject)
+    ///
+    /// `linking` is the whole right-hand side rather than a version, because the
+    /// spelling is part of what is under test: a manifest may declare the
+    /// requirement as a bare string or as a table, and may declare something
+    /// that names no single version at all.
+    fn with_the_baseline_linking(dir: &Path, linking: &str, subject: &str) -> Self {
+        Self::released(dir, Some(linking), subject)
     }
 
-    fn released(dir: &Path, baseline_engine: Option<&str>, subject: &str) -> Self {
+    fn released(dir: &Path, baseline_linking: Option<&str>, subject: &str) -> Self {
         let root = dir.join("history");
         copy_tracked_files(Path::new(env!("CARGO_MANIFEST_DIR")), &root);
         let manifest_path = root.join("Cargo.toml");
@@ -545,9 +550,9 @@ impl ThisCrate {
 
         // The release being read against: this tree, with the engine requirement
         // wound back where the case is about a move.
-        if let Some(engine) = baseline_engine {
+        if let Some(linking) = baseline_linking {
             let linked = engine_requirement_line(&manifest);
-            let wound_back = format!("onepipeline = \"={engine}\"");
+            let wound_back = format!("onepipeline = {linking}");
             assert_ne!(
                 linked, wound_back,
                 "the baseline links what this tree links, so no move is staged"
@@ -575,7 +580,7 @@ impl ThisCrate {
 
         // The pending release itself: the engine requirement this tree really
         // links, or — where nothing moves — a packaged source carried forward.
-        if baseline_engine.is_some() {
+        if baseline_linking.is_some() {
             fs::write(&manifest_path, &manifest)
                 .expect("carry the engine requirement this tree links forward");
         } else {
@@ -1504,7 +1509,57 @@ fn no_feature_gates_an_item_the_reading_leaves_out() {
 /// extends-resolving engine moved off. Two semver classes for a `0.x`
 /// dependency, so a consumer holding this crate's surface across the move does
 /// not recompile.
-const AN_EARLIER_ENGINE: &str = "0.42.0";
+const AN_EARLIER_ENGINE: &str = "=0.42.0";
+/// That requirement as a manifest declares it, in each of the two spellings one
+/// can: the bare string this crate's own manifest uses, and the table whose
+/// `version` key is the requirement.
+const AN_EARLIER_ENGINE_LINKED: &str = "\"=0.42.0\"";
+const AN_EARLIER_ENGINE_LINKED_AS_A_TABLE: &str = "{ version = \"=0.42.0\" }";
+/// Two a manifest can carry that name no one version to compare against: a range
+/// spans the semver classes rather than naming one, and a git dependency names
+/// no version at all.
+const A_RANGE: &str = "\">=0.42, <0.45\"";
+const A_GIT_DEPENDENCY: &str = "{ git = \"https://example.invalid/onepipeline\" }";
+
+/// What the script does with a tree whose baseline links what it links.
+#[derive(PartialEq)]
+enum Engine {
+    /// On to the reading: nothing moved, or the move is announced.
+    ReadOn,
+    /// Refused: the engine moved under a release announcing no break.
+    RefusedAsAMoveNothingAnnounces,
+    /// Refused: the requirement could not be read, so whether it moved is
+    /// unknown — and an unknown move is not one to release past.
+    RefusedAsUnreadable,
+}
+
+/// Run the recipe over a tree of this crate whose baseline links `linking` and
+/// whose pending release announces `subject`, with the reading answering that
+/// the surface is compatible.
+///
+/// Every tree here is this crate — the real manifest whose `include` says which
+/// commits release-plz versions from, the real `cargo package --list` of it, and
+/// the recipe `.github/workflows/release-plz.yml` runs. Only the history is
+/// built rather than found, for the reason [`ThisCrate`] gives.
+fn a_release_of_this_crate(
+    fixture: &Fixture,
+    checkout: &TempDir,
+    linking: Option<&str>,
+    subject: &str,
+) -> Output {
+    let released = match linking {
+        Some(linking) => ThisCrate::with_the_baseline_linking(checkout.path(), linking, subject),
+        None => ThisCrate::with_the_engine_where_it_was(checkout.path(), subject),
+    };
+    fixture.run_recipe_in(
+        &released.root,
+        &[
+            released.baseline.to_str().expect("utf-8 path"),
+            BASELINE_REF,
+        ],
+        &[("SEMVER_STATUS", COMPATIBLE)],
+    )
+}
 
 /// A release that moves the engine under this crate's own public surface and
 /// announces no break is refused; one that moved nothing, and one that moved it
@@ -1521,60 +1576,49 @@ const AN_EARLIER_ENGINE: &str = "0.42.0";
 /// cargo-semver-checks was never asked about. So it is read off the two
 /// manifests, and only while the release claims compatibility, which is the one
 /// state where it decides anything.
-///
-/// Every tree here is this crate — the real manifest whose `include` says which
-/// commits release-plz versions from, the real `cargo package --list` of it, and
-/// the recipe `.github/workflows/release-plz.yml` runs. Only the history is
-/// built rather than found, for the reason [`ThisCrate`] gives.
 #[test]
 fn a_release_moving_the_engine_without_announcing_it_is_refused() {
     let linked = engine_requirement(
         &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
             .expect("read this crate's manifest"),
     );
-    for (tree, baseline_engine, subject, refused) in [
+    for (tree, linking, subject, expected) in [
         (
             "an engine that did not move",
             None,
             "fix: serve the empty timeline as an empty one",
-            false,
+            Engine::ReadOn,
         ),
         (
             "an engine moved by a release announcing no break",
-            Some(AN_EARLIER_ENGINE),
+            Some(AN_EARLIER_ENGINE_LINKED),
             "fix: serve the empty timeline as an empty one",
-            true,
+            Engine::RefusedAsAMoveNothingAnnounces,
+        ),
+        (
+            "the same move, with the baseline declaring its requirement as a table",
+            Some(AN_EARLIER_ENGINE_LINKED_AS_A_TABLE),
+            "fix: serve the empty timeline as an empty one",
+            Engine::RefusedAsAMoveNothingAnnounces,
         ),
         (
             "an engine moved by a release that announces one",
-            Some(AN_EARLIER_ENGINE),
+            Some(AN_EARLIER_ENGINE_LINKED),
             "feat!: follow the engine's semver across an adoption",
-            false,
+            Engine::ReadOn,
         ),
     ] {
         let fixture = Fixture::new();
         let checkout = TempDir::new().expect("temp dir");
-        let released = match baseline_engine {
-            Some(engine) => ThisCrate::with_the_engine_moved_from(checkout.path(), engine, subject),
-            None => ThisCrate::with_the_engine_where_it_was(checkout.path(), subject),
-        };
-
-        let output = fixture.run_recipe_in(
-            &released.root,
-            &[
-                released.baseline.to_str().expect("utf-8 path"),
-                BASELINE_REF,
-            ],
-            &[("SEMVER_STATUS", COMPATIBLE)],
-        );
-
+        let output = a_release_of_this_crate(&fixture, &checkout, linking, subject);
         let stderr = stderr(&output);
+
         assert_eq!(
             !output.status.success(),
-            refused,
+            expected == Engine::RefusedAsAMoveNothingAnnounces,
             "{tree} ended the wrong way:\n{stderr}"
         );
-        if refused {
+        if expected == Engine::RefusedAsAMoveNothingAnnounces {
             assert!(
                 stderr.contains("::error::") && stderr.contains("announce no break"),
                 "the failure does not say the release moved the engine while announcing \
@@ -1603,6 +1647,81 @@ fn a_release_moving_the_engine_without_announcing_it_is_refused() {
             assert!(
                 !stderr.contains("::error::"),
                 "{tree} was failed for a move it did not make, or did announce:\n{stderr}"
+            );
+        }
+    }
+}
+
+/// A requirement the script cannot read fails a release claiming compatibility,
+/// rather than passing as a release that moved nothing.
+///
+/// Both spellings that name no one version to compare: a range, which spans the
+/// semver classes rather than naming one, and a git dependency, which names none
+/// at all. Guessing which a range meant is what would let a real move through,
+/// so it is a manifest spelling to be taught rather than a release to rule on —
+/// and the failure says exactly that. A release announcing a break is read on
+/// even so, for the reason the move itself is: it has already said what the
+/// refusal would make it say.
+#[test]
+fn an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility() {
+    for (spelling, linking, subject, expected) in [
+        (
+            "a range",
+            A_RANGE,
+            "fix: serve the empty timeline as an empty one",
+            Engine::RefusedAsUnreadable,
+        ),
+        (
+            "a git dependency",
+            A_GIT_DEPENDENCY,
+            "fix: serve the empty timeline as an empty one",
+            Engine::RefusedAsUnreadable,
+        ),
+        (
+            "a range under a release that announces a break",
+            A_RANGE,
+            "feat!: follow the engine's semver across an adoption",
+            Engine::ReadOn,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let checkout = TempDir::new().expect("temp dir");
+        let output = a_release_of_this_crate(&fixture, &checkout, Some(linking), subject);
+        let stderr = stderr(&output);
+
+        assert_eq!(
+            !output.status.success(),
+            expected == Engine::RefusedAsUnreadable,
+            "{spelling} ended the wrong way:\n{stderr}"
+        );
+        if expected == Engine::RefusedAsUnreadable {
+            assert!(
+                stderr.contains("::error::") && stderr.contains("could not be read"),
+                "the failure does not say the requirement could not be read:\n{stderr}"
+            );
+            assert!(
+                stderr.contains(BASELINE_REF),
+                "the failure does not name the side whose requirement it could not \
+                 read:\n{stderr}"
+            );
+            assert!(
+                stderr.contains("ACTION:") && stderr.contains("scripts/semver-check.sh"),
+                "the failure does not say what to do about {spelling}:\n{stderr}"
+            );
+            assert!(
+                !stderr.contains("::warning::"),
+                "a requirement nothing could read was read past as well as failed:\n{stderr}"
+            );
+            assert!(
+                !fixture.calls().contains("semver-checks"),
+                "a surface was read for a release whose move was never established:\n{}",
+                fixture.calls()
+            );
+        } else {
+            assert!(
+                stdout(&output).contains("the public surface is compatible"),
+                "{spelling} never reached the reading:\n{}",
+                stdout(&output)
             );
         }
     }
