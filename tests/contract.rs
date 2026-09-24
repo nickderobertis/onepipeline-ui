@@ -3430,21 +3430,24 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
 /// This crate's copy of the stack's shared filter grammar, held to the wire the
 /// grammar fixes.
 ///
-/// The grammar is `onemessagebus-agent`'s now — every producer in the stack
-/// re-exports that one `EventFilter` and `Matcher` — and this crate keeps a copy
-/// of it because a read API asks the grammar a per-request question of its own.
-/// So this is the drift gate that stands in for linking the declaration. It is a
-/// **type** gate, like the event vocabulary above: the copy is held to the bus's
-/// own serialization, reached through `oneagentgraph`'s re-export, rather than
-/// to a second reading of the wire alone. Which is why the sibling's resolution
-/// is the SDK's to decide: a tree that cannot reach that declaration has only
-/// the wire to compare against.
+/// The grammar is `onepipeline`'s now — the one crate that names every producer
+/// declares it as `onepipeline::filter::{EventFilter, Matcher}` over its own
+/// vocabulary, and publishes it as `agent.event-filter@1` in
+/// `schemas/events.json` — and this crate keeps a copy of it because a read API
+/// asks the grammar a per-request question of its own. So this is the drift gate
+/// that stands in for linking the declaration. It is a **type** gate, like the
+/// event vocabulary above: the copy is held to the engine's own serialization
+/// and to the document the engine publishes, rather than to a second reading of
+/// the wire alone. Both are reached through the engine this crate links at its
+/// exact pin, so the source the copy is held to is the one at the linked release.
 ///
 /// One field is deliberately *not* shared: this grammar has no `round` matcher.
 /// Execution is continuous, the label is deprecated and stamped by nothing, and a
 /// matcher over it would be a filter that silently matched nothing.
 #[test]
 fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
+    use std::collections::BTreeSet;
+
     use onepipeline_ui::filter::{EventFilter, Matcher};
 
     // Every field a matcher may name, and exactly those, under exactly these
@@ -3475,17 +3478,17 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         "the shared grammar's matcher has drifted"
     );
 
-    // And the same document off the bus's own type, filled the same way: this
+    // And the same document off the engine's own type, filled the same way: this
     // is what makes the gate read that library's declaration rather than a
-    // second transcription of what it happens to emit. The bus keeps the
+    // second transcription of what it happens to emit. The engine keeps the
     // dimension and the reserved labels behind `fields`, and flattens them onto
     // the wire beside `source` and `kind`.
     assert_eq!(
         mine,
-        serde_json::to_value(oneagentgraph::event::Matcher {
-            source: Some(oneagentgraph::event::Source::Agentgraph),
+        serde_json::to_value(onepipeline::filter::Matcher {
+            source: Some(onepipeline::event::Source::Agentgraph),
             kind: Some("turn-*".into()),
-            fields: oneagentgraph::event::MatchFields {
+            fields: onepipeline::vocabulary::MatchFields {
                 phase: Some(onepipeline::event::Phase::Review),
                 run_id: Some("run-1".into()),
                 node: Some("build".into()),
@@ -3494,14 +3497,45 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
                 persona: Some("engineer".into()),
             },
         })
-        .expect("the bus's matcher serializes"),
-        "this crate's matcher has drifted from the one the bus declares"
+        .expect("the engine's matcher serializes"),
+        "this crate's matcher has drifted from the one the engine declares"
     );
-    // And read back through the bus's own reader, the same document is the same
-    // matcher: the fields this copy names are exactly the ones the bus admits.
-    let theirs: oneagentgraph::event::Matcher =
-        serde_json::from_value(mine.clone()).expect("the bus reads this crate's matcher");
+    // And read back through the engine's own reader, the same document is the
+    // same matcher: the fields this copy names are exactly the ones it admits.
+    let theirs: onepipeline::filter::Matcher =
+        serde_json::from_value(mine.clone()).expect("the engine reads this crate's matcher");
     assert_eq!(serde_json::to_value(theirs).expect("serializes"), mine);
+
+    // And the document the engine publishes for the grammar names the same
+    // matcher fields and the same two lists, so a reader validating against
+    // `agent.event-filter@1` rather than linking the type reaches this copy too.
+    let bundle = serde_json::to_value(onepipeline::vocabulary::events_bundle())
+        .expect("the engine's events bundle serializes");
+    let published = bundle["schemas"]
+        .as_array()
+        .expect("the bundle lists its schemas")
+        .iter()
+        .find(|document| document["id"] == "agent.event-filter@1")
+        .map(|document| &document["schema"])
+        .expect("the engine publishes `agent.event-filter@1`");
+    let names = |properties: &Value| -> BTreeSet<String> {
+        properties
+            .as_object()
+            .expect("a schema's properties are an object")
+            .keys()
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        names(&published["$defs"]["Matcher"]["properties"]),
+        names(&mine),
+        "this crate's matcher names different fields from `agent.event-filter@1`"
+    );
+    assert_eq!(
+        names(&published["properties"]),
+        BTreeSet::from(["exclude".to_owned(), "include".to_owned()]),
+        "`agent.event-filter@1` names lists this crate's filter does not have"
+    );
 
     // A matcher that names nothing serializes to nothing, so a spec round-trips
     // as the file wrote it rather than gaining every key it left unasked — which
@@ -3511,8 +3545,8 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         serde_json::json!({})
     );
     assert_eq!(
-        serde_json::to_value(oneagentgraph::event::EventFilter::default())
-            .expect("the sibling's filter serializes"),
+        serde_json::to_value(onepipeline::filter::EventFilter::default())
+            .expect("the engine's filter serializes"),
         serde_json::json!({})
     );
 

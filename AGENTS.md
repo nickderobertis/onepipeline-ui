@@ -143,10 +143,12 @@ coverage — it is a property of the payload, not of the platform.
 lock follows.** Cargo unifies one version of it across this crate and
 `onepipeline`, and that library has shipped a breaking field in a *patch*
 release, so `cargo update` on it can hand the pinned SDK a sibling it does not
-compile against. Move it only by moving the SDK. Sharing one resolution is also
-what lets `tests/contract.rs` hold this crate's copy of the shared filter grammar
-to `oneagentgraph`'s own declaration of it rather than to a second reading of the
-wire. `just deps-check` is deliberately outside the gate: it needs a network
+compile against. Move it only by moving the SDK. The shared filter grammar is
+not this library's to declare: `tests/contract.rs` holds this crate's copy of it
+to the engine's own declaration, `onepipeline::filter`, and to the
+`agent.event-filter@1` document the engine publishes, rather than to a second
+reading of the wire, so the source that copy answers to moves with the exact
+engine pin. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
 **The screenshots of the browser view are gated on their own bytes, and that gate is

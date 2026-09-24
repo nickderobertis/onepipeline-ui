@@ -131,17 +131,17 @@ oneharness-core = "0.18.0"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.4.4"
+oneagentgraph = "0.5.2"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.13.1"
+onejudge = "0.14.0"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
 # grammar. Held at the version the SDK's own requirement resolves to, so one
 # copy of this library is linked rather than two; `tests/packaging.rs`
 # reconciles the edges the lockfile records.
-onemessagebus = "0.8.0"
+onemessagebus = "0.9.0"
 # This crate's own public surface is made of this library's types:
 # `error::ApiError::from_engine` takes an `onepipeline::Error`,
 # `filter::EventFilter::to_engine` returns an `onepipeline::filter::EventFilter`,
@@ -155,7 +155,7 @@ onemessagebus = "0.8.0"
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
-onepipeline = "=0.44.2"
+onepipeline = "=0.45.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -187,7 +187,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.30.2"
+onevcs = "0.32.1"
 predicates = "3"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in

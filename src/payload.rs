@@ -574,7 +574,7 @@ fn named_transport_role(event: &Envelope) -> Option<Party> {
 
 /// The graph member a record was stamped for, wherever its producer put it.
 ///
-/// The bus's envelope carries `member` in a typed slot of its own, which is
+/// The engine's envelope carries `member` in a typed slot of its own, which is
 /// where every producer linked here writes it; a record written before that
 /// slot existed carries it among the extras under the same key, and those runs
 /// are still opened. A blank stamp is no stamp.
