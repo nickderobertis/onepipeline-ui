@@ -537,6 +537,48 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
     }
 }
 
+/// One copy of the message bus core is linked, and it is the one the pinned
+/// engine resolves.
+///
+/// This crate requires `onemessagebus` in its own right, because a channel
+/// reply's correlation is parsed by that library's own parser, and the engine
+/// links it too. Two resolutions would parse a token here with a release other
+/// than the one that wrote it. The lockfile records both edges, so this reads
+/// them rather than trusting the requirement strings to agree. The agent crate
+/// that used to sit beside the core, `onemessagebus-agent`, was retired when its
+/// vocabulary moved to the libraries that own it. Reaching it again through any
+/// edge would link a second declaration of the filter grammar `src/filter.rs` is
+/// held to, so its absence is asserted as well.
+#[test]
+fn one_bus_core_is_linked_and_it_is_the_one_the_pinned_engine_resolves() {
+    let lock = read("Cargo.lock");
+    let resolutions = |package: &str| {
+        lock.lines()
+            .filter(|line| *line == format!("name = \"{package}\""))
+            .count()
+    };
+    for package in ["onemessagebus", "onepipeline"] {
+        assert_eq!(
+            resolutions(package),
+            1,
+            "Cargo.lock resolves {package} {} times, so this binary links more than one copy",
+            resolutions(package)
+        );
+    }
+    assert_eq!(
+        resolutions("onemessagebus-agent"),
+        0,
+        "Cargo.lock resolves the retired `onemessagebus-agent` again, so some edge links \
+         the vocabulary its owners now declare"
+    );
+    let ours = locked_dependency(&lock, "onepipeline-ui", "onemessagebus");
+    let theirs = locked_dependency(&lock, "onepipeline", "onemessagebus");
+    assert_eq!(
+        ours, theirs,
+        "this crate resolves onemessagebus {ours} and the pinned onepipeline resolves {theirs}"
+    );
+}
+
 /// The oneharness history store is read by linking its library, never by
 /// spawning its CLI.
 ///

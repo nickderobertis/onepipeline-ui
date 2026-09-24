@@ -3,12 +3,15 @@
 //!
 //! The grammar is the one `onevcs`, `oneagentgraph`, and `onepipeline` already
 //! read — `include`/`exclude` matcher lists over the envelope's addressing, with
-//! `exclude` winning and an absent `include` admitting everything. The three of
-//! them now read it through one implementation, `onemessagebus-agent`'s, which
-//! each re-exports; this crate keeps its own copy of the grammar because a read
-//! API asks a different question of it (which envelopes a *response* carries,
-//! per request) and `tests/contract.rs` holds the copy to the bus's own matcher
-//! document rather than to a second reading of the wire.
+//! `exclude` winning and an absent `include` admitting everything. Its owner is
+//! `onepipeline`, which declares it as `onepipeline::filter::{EventFilter,
+//! Matcher}` and publishes it as `agent.event-filter@1` in its
+//! `schemas/events.json`; each sibling declares the same grammar over its own
+//! vocabulary and crosses to the engine's at its JSON form. This crate keeps its
+//! own copy of the grammar because a read API asks a different question of it
+//! (which envelopes a *response* carries, per request), and `tests/contract.rs`
+//! holds the copy to the engine's own matcher type and published document
+//! rather than to a second reading of the wire.
 //!
 //! What is this crate's own is where a filter comes from. On the CLI a producer
 //! is told once, at launch, what to put on its stream. A read API is asked per
@@ -111,8 +114,8 @@ impl EventFilter {
     /// The same filter as the engine's own type, for the verbs that take one.
     ///
     /// The two are one grammar — `tests/contract.rs` holds this copy to the
-    /// bus's own declaration — so the conversion is the wire: serialized by this
-    /// crate's derives and read back by the engine's, which is what a filter a
+    /// engine's own declaration — so the conversion is the wire: serialized by
+    /// this crate's derives and read back by the engine's, which is what a filter a
     /// caller wrote on a command line goes through too. A copy the engine
     /// refused would be a drift the gate has not caught, and is a projection
     /// failure rather than a served answer.
@@ -226,7 +229,7 @@ impl Matcher {
         if self.phase.is_some_and(|named| Some(named) != phase) {
             return false;
         }
-        // Every reserved label has a typed slot on the bus's envelope, `member`
+        // Every reserved label has a typed slot on the engine's envelope, `member`
         // included, and [`stamped`] falls back to the extras for each of them
         // anyway — which is where a producer that predates the slot stamped it.
         let typed = [
@@ -565,7 +568,7 @@ impl LaunchProfiles {
     pub fn of(sets: &[String], filters: &onepipeline::filter::Filters) -> Self {
         let mut defined = BTreeMap::new();
         for (name, filter) in &filters.profiles {
-            // The block's filter is the bus's own type and this crate's copy is
+            // The block's filter is the engine's own type and this crate's copy is
             // held to it, so the wire document is the one reading both share.
             let Ok(filter) =
                 serde_json::to_value(filter).and_then(serde_json::from_value::<EventFilter>)
