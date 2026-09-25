@@ -114,6 +114,15 @@ impl ApiError {
     /// a status and a code that disagree about what the engine said. The words
     /// are the engine's own on every arm: a refusal restated is a second thing
     /// to keep true, and the text is what a manager acts on.
+    ///
+    /// Its signature takes the engine's own [`onepipeline::Error`], so this
+    /// crate's public surface follows `onepipeline`'s: a consumer calling it
+    /// has to hand it a value of the very type this crate links. That is why
+    /// `Cargo.toml` pins the engine with an exact `onepipeline = "=…"`
+    /// requirement — it is what holds the two surfaces together — and why
+    /// moving that requirement across a `0.x` minor release is a breaking
+    /// change of this crate however its own signatures read, to be announced
+    /// as one.
     #[must_use]
     pub fn from_engine(run: &RunId, error: onepipeline::Error) -> Self {
         match error {
