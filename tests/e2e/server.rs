@@ -6031,7 +6031,7 @@ fn an_inline_spec_is_read_in_the_grammar_the_stack_shares() {
         "{one_node:?}"
     );
 
-    // `member` has a typed slot of its own on the bus's envelope, which is where
+    // `member` has a typed slot of its own on the engine's envelope, which is where
     // every producer linked here stamps it: a matcher over it reaches the records
     // of one member and none of the run's own.
     let one_member = kinds_on(&timeline_under(
@@ -6081,7 +6081,7 @@ fn a_matcher_over_the_phase_reaches_the_records_a_producer_stamped_one_on() {
     ));
     assert!(released.is_empty(), "{released:?}");
     // And it is refused where every other field is, in the grammar's own terms: a
-    // phase the bus does not spell is not a matcher, and an empty one matches
+    // phase the engine does not spell is not a matcher, and an empty one matches
     // nothing on the stream.
     for spec in [
         r#"{"include":[{"phase":"gate"}]}"#,
