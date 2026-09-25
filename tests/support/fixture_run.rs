@@ -1360,7 +1360,7 @@ pub fn append_relayed_at_phase(
         "artifacts": [],
     });
     // Parsed back through the SDK's own envelope before it is written, so a
-    // phase the bus does not spell fails here rather than being served as a
+    // phase the engine does not spell fails here rather than being served as a
     // record the producing library never wrote.
     let _: Envelope = serde_json::from_value(line.clone()).expect("the phased envelope");
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");

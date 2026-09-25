@@ -493,6 +493,10 @@ impl ForeignServing {
             .arg(root)
             .args(["--bind", "127.0.0.1:0"])
             .args(["--poll-interval-ms", "50"])
+            // Unattributed, as `Serving` is and for its reason: a server that
+            // inherited a planner dispatch's session would serve that session's
+            // key where the build it is compared with serves none.
+            .env_remove(onepipeline_ui::cli::SESSION_ENV)
             .env(
                 onepipeline_ui::store::GRAPH_RECORDS_ENV,
                 fixture_run::graph_records_for(root),

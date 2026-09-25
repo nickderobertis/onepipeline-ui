@@ -3430,15 +3430,17 @@ fn every_bucket_and_party_is_named_as_the_document_spells_it() {
 /// This crate's copy of the stack's shared filter grammar, held to the wire the
 /// grammar fixes.
 ///
-/// The grammar is `onemessagebus-agent`'s now — every producer in the stack
-/// re-exports that one `EventFilter` and `Matcher` — and this crate keeps a copy
-/// of it because a read API asks the grammar a per-request question of its own.
-/// So this is the drift gate that stands in for linking the declaration. It is a
-/// **type** gate, like the event vocabulary above: the copy is held to the bus's
-/// own serialization, reached through `oneagentgraph`'s re-export, rather than
-/// to a second reading of the wire alone. Which is why the sibling's resolution
-/// is the SDK's to decide: a tree that cannot reach that declaration has only
-/// the wire to compare against.
+/// The grammar's owner is `onepipeline` now — its
+/// `onepipeline::filter::{EventFilter, Matcher}`, the core's generic filter over
+/// the engine's own agent-stack vocabulary, published as `agent.event-filter@1`
+/// in its `schemas/events.json` — and each sibling producer declares the same
+/// grammar over a vocabulary of its own. This crate keeps a copy of it because a
+/// read API asks the grammar a per-request question of its own. So this is the
+/// drift gate that stands in for linking the declaration. It is a **type** gate,
+/// like the event vocabulary above: the copy is held to the engine's own
+/// serialization, reached through the exact release this crate links, rather
+/// than to a second reading of the wire alone — and, since the schema document
+/// ships with that release, to the `agent.event-filter@1` it publishes as well.
 ///
 /// One field is deliberately *not* shared: this grammar has no `round` matcher.
 /// Execution is continuous, the label is deprecated and stamped by nothing, and a
@@ -3475,17 +3477,17 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         "the shared grammar's matcher has drifted"
     );
 
-    // And the same document off the bus's own type, filled the same way: this
-    // is what makes the gate read that library's declaration rather than a
-    // second transcription of what it happens to emit. The bus keeps the
+    // And the same document off the engine's own type, filled the same way:
+    // this is what makes the gate read that library's declaration rather than a
+    // second transcription of what it happens to emit. The engine keeps the
     // dimension and the reserved labels behind `fields`, and flattens them onto
     // the wire beside `source` and `kind`.
     assert_eq!(
         mine,
-        serde_json::to_value(oneagentgraph::event::Matcher {
-            source: Some(oneagentgraph::event::Source::Agentgraph),
+        serde_json::to_value(onepipeline::filter::Matcher {
+            source: Some(onepipeline::event::Source::Agentgraph),
             kind: Some("turn-*".into()),
-            fields: oneagentgraph::event::MatchFields {
+            fields: onepipeline::vocabulary::MatchFields {
                 phase: Some(onepipeline::event::Phase::Review),
                 run_id: Some("run-1".into()),
                 node: Some("build".into()),
@@ -3494,14 +3496,26 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
                 persona: Some("engineer".into()),
             },
         })
-        .expect("the bus's matcher serializes"),
-        "this crate's matcher has drifted from the one the bus declares"
+        .expect("the engine's matcher serializes"),
+        "this crate's matcher has drifted from the one the engine declares"
     );
-    // And read back through the bus's own reader, the same document is the same
-    // matcher: the fields this copy names are exactly the ones the bus admits.
-    let theirs: oneagentgraph::event::Matcher =
-        serde_json::from_value(mine.clone()).expect("the bus reads this crate's matcher");
+    // And read back through the engine's own reader, the same document is the
+    // same matcher: the fields this copy names are exactly the ones it admits.
+    let theirs: onepipeline::filter::Matcher =
+        serde_json::from_value(mine.clone()).expect("the engine reads this crate's matcher");
     assert_eq!(serde_json::to_value(theirs).expect("serializes"), mine);
+
+    // And the schema that release publishes for the grammar,
+    // `agent.event-filter@1`, admits this crate's matcher: the gate reads the
+    // document a producer in another language reads the grammar from, too. (It
+    // leaves a matcher's unknown keys open, so the refusal of `round` below is
+    // held to the engine's reader rather than to that document.)
+    onepipeline::vocabulary::registry()
+        .check(
+            &onepipeline::vocabulary::EVENT_FILTER,
+            &serde_json::json!({"include": [mine], "exclude": []}),
+        )
+        .expect("the engine's published filter schema admits this crate's matcher");
 
     // A matcher that names nothing serializes to nothing, so a spec round-trips
     // as the file wrote it rather than gaining every key it left unasked — which
@@ -3511,8 +3525,8 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         serde_json::json!({})
     );
     assert_eq!(
-        serde_json::to_value(oneagentgraph::event::EventFilter::default())
-            .expect("the sibling's filter serializes"),
+        serde_json::to_value(onepipeline::filter::EventFilter::default())
+            .expect("the engine's filter serializes"),
         serde_json::json!({})
     );
 
@@ -3521,6 +3535,11 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
     assert!(
         serde_json::from_str::<EventFilter>(r#"{"include":[{"round":1}]}"#).is_err(),
         "a matcher over a label nothing stamps must not parse"
+    );
+    assert!(
+        serde_json::from_str::<onepipeline::filter::EventFilter>(r#"{"include":[{"round":1}]}"#)
+            .is_err(),
+        "the engine's reader admits a matcher over `round`"
     );
     // And so is a list this grammar does not have, for the same reason.
     assert!(serde_json::from_str::<EventFilter>(r#"{"only":[]}"#).is_err());

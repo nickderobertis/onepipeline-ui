@@ -6031,7 +6031,7 @@ fn an_inline_spec_is_read_in_the_grammar_the_stack_shares() {
         "{one_node:?}"
     );
 
-    // `member` has a typed slot of its own on the bus's envelope, which is where
+    // `member` has a typed slot of its own on the engine's envelope, which is where
     // every producer linked here stamps it: a matcher over it reaches the records
     // of one member and none of the run's own.
     let one_member = kinds_on(&timeline_under(
@@ -6081,7 +6081,7 @@ fn a_matcher_over_the_phase_reaches_the_records_a_producer_stamped_one_on() {
     ));
     assert!(released.is_empty(), "{released:?}");
     // And it is refused where every other field is, in the grammar's own terms: a
-    // phase the bus does not spell is not a matcher, and an empty one matches
+    // phase the engine does not spell is not a matcher, and an empty one matches
     // nothing on the stream.
     for spec in [
         r#"{"include":[{"phase":"gate"}]}"#,
@@ -12546,12 +12546,11 @@ fn write_node_scope_graph(dir: &Path) -> PathBuf {
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey needs
 // nothing a checkout may lack — the compiled binary every other journey in this module
 // drives, and a `/bin/sh` script it writes itself — which is what the tiers behind edges
-// of their own here need (`strace`, the base commit's server). It is the slowest journey
-// in this module at about 27 seconds, and that is the engine's own: the adopt route
-// dispatches in 0.1s and the member is composed at once, and what the time is spent on
-// is inside the turn the linked engine prepares before it spawns a harness. Measured
-// rather than estimated, and the failure half below — which settles in 0.2s — is what
-// says the cost is the successful turn rather than this fixture.
+// of their own here need (`strace`, the base commit's server). It dispatches a real turn
+// through a retained driver, and settles in about a second: measured, once the turn's
+// oneharness history is under the journey's own state directory. The 27 seconds this
+// once recorded, and the minutes a busy host made of it, were that turn queueing on the
+// history lock every harness turn on the host shares rather than the engine's own work.
 #[cfg(unix)]
 #[test]
 fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
@@ -12567,11 +12566,18 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
     // The directory a dispatch of a direct node runs in, named rather than left
     // to default: that default is the server's own working directory, which for
     // this suite is the checkout it was built in — so a journey that dispatches
-    // for real must say where, or the dispatch runs over this repository.
+    // for real must say where, or the dispatch runs over this repository. The
+    // state directory is named for the same reason: the turn records itself in
+    // oneharness's history under it, behind a lock every harness turn on the
+    // host otherwise shares, so a busy host would decide how long this waits.
+    let state = dir.join("state");
     let serving = Serving::start_in_as_with_env(
         workspace,
         fixture_run::SESSION,
-        &[("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string())],
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+        ],
     );
     let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
     assert_eq!(adopted.status, 200, "{}", adopted.body);
