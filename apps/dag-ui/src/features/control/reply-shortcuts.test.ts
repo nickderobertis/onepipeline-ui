@@ -46,7 +46,7 @@ describe("reply shortcuts", () => {
         sets: ["members.worker.agent.model=small"],
       }),
       "set-run-node-sets": composeEnvelope("set-run-node-sets", {
-        sets: ["members.worker.agent.model=run"],
+        runSets: ["members.worker.agent.model=run"],
       }),
       attest: composeEnvelope("attest", { reference: "signoff" }),
       complete: composeEnvelope("complete", { reason: "everything landed" }),
@@ -116,20 +116,30 @@ describe("reply shortcuts", () => {
         { id: "docs" },
         { op: "set-node-sets", id: "docs", sets: [] },
       ],
-      ["set-node-sets", { id: "docs", sets: [] }, undefined],
+      [
+        "set-node-sets",
+        { id: "docs", sets: [] },
+        { op: "set-node-sets", id: "docs", sets: [] },
+      ],
       ["set-run-node-sets", {}, { op: "set-run-node-sets", sets: [] }],
-      ["set-run-node-sets", { sets: [] }, undefined],
+      [
+        "set-run-node-sets",
+        { runSets: [] },
+        { op: "set-run-node-sets", sets: [] },
+      ],
     ] as const) {
       const composed = composeEnvelope(shortcut, fields);
       expect("bytes" in composed && JSON.parse(composed.bytes)).toEqual({
         version: REPLY_ENVELOPE_VERSION,
-        commands: [command ?? { op: shortcut, ...fields }],
+        commands: [command],
       });
     }
-    // A run-wide edit never carries a node id a stale form still holds.
+    // Neither edit carries the other's list, nor a node id the form still
+    // holds: the node list being edited is not the run-wide one.
     const run = composeEnvelope("set-run-node-sets", {
       id: "docs",
-      sets: ["members.worker.agent.model=run"],
+      sets: ["members.worker.agent.model=node"],
+      runSets: ["members.worker.agent.model=run"],
     });
     expect("envelope" in run && run.envelope.commands).toEqual([
       { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },

@@ -1484,10 +1484,8 @@ fn the_browser_clients_copy_of_the_reply_commands_matches_the_engines() {
     let node_list_fields = ["sets"];
     for field in node_list_fields {
         let written = json!({ "id": "n", "task": "t", field: ["b=2", "a=1"] });
-        let node: onepipeline::plan::Node =
-            serde_json::from_value(written.clone()).unwrap_or_else(|err| {
-                panic!("the engine's node no longer declares `{field}`: {err}")
-            });
+        let node: onepipeline::plan::Node = serde_json::from_value(written.clone())
+            .unwrap_or_else(|err| panic!("the engine's node no longer declares `{field}`: {err}"));
         assert_eq!(
             serde_json::to_value(&node).expect("serialize"),
             written,

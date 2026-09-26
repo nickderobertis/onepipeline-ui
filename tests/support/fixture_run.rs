@@ -5828,6 +5828,64 @@ pub const DISPATCH_NODE_ID: &str = "resolve";
 /// relative reference would put the resolution of the graph itself between the
 /// question and the answer.
 pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &Path) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "resolve the config chain" },
+        "name": "dispatch",
+        "concurrency": 1,
+        "tasks": [
+            { "id": DISPATCH_NODE_ID, "task": "Do the work the graph dispatches." },
+        ],
+    });
+    write_awaiting(root, run, dir, node_graph, &plan)
+}
+
+/// The node of [`write_awaiting_overrides`] a journey gives overrides of its own.
+pub const OVERRIDDEN_NODE_ID: &str = "overridden";
+/// The node of [`write_awaiting_overrides`] whose planned overrides a journey
+/// clears.
+pub const CLEARED_NODE_ID: &str = "cleared";
+
+/// A run nothing is driving whose two **agent** nodes have not dispatched, at
+/// plan schema 3 so a node may carry `sets`: [`OVERRIDDEN_NODE_ID`] declares
+/// none, and [`CLEARED_NODE_ID`] declares `cleared_sets`, which a journey
+/// replaces before any dispatch reads them. Launched as
+/// [`write_awaiting_dispatch`]'s run is, over the node-scope graph at
+/// `node_graph`.
+pub fn write_awaiting_overrides(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    cleared_sets: &[&str],
+) -> PathBuf {
+    let plan = json!({
+        "schema_version": 3,
+        "goal": { "text": "dispatch each node under the overrides it was edited to" },
+        "name": "overrides",
+        "concurrency": 1,
+        "tasks": [
+            // A persona each, because a node whose dispatch an override list
+            // reaches is validated as a whole dispatch, and a direct agent node
+            // without one is refused there — `engineer` is one oneagentgraph
+            // ships, so nothing here has to be written for it to resolve.
+            {
+                "id": OVERRIDDEN_NODE_ID,
+                "persona": "engineer",
+                "task": "Dispatch under the node's own override.",
+            },
+            {
+                "id": CLEARED_NODE_ID,
+                "persona": "engineer",
+                "task": "Dispatch under the run-wide override.",
+                "sets": cleared_sets,
+            },
+        ],
+    });
+    write_awaiting(root, run, dir, node_graph, &plan)
+}
+
+fn write_awaiting(root: &Path, run: &str, dir: &Path, node_graph: &Path, plan: &Value) -> PathBuf {
     let run_dir = root.join(run);
     fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
     fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
@@ -5852,16 +5910,7 @@ pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &
         })),
     )
     .expect("the launch record");
-    let plan = json!({
-        "schema_version": 2,
-        "goal": { "text": "resolve the config chain" },
-        "name": "dispatch",
-        "concurrency": 1,
-        "tasks": [
-            { "id": DISPATCH_NODE_ID, "task": "Do the work the graph dispatches." },
-        ],
-    });
-    fs::write(run_dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    fs::write(run_dir.join("plan.json"), pretty(plan)).expect("the plan");
     fs::write(
         run_dir.join("events.jsonl"),
         format!(

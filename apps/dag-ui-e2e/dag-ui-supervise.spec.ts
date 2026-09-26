@@ -317,10 +317,146 @@ test("adopts a run nothing is driving, then attests the human action its driver 
   // Applied by the call itself, because nothing is driving the run: the
   // engine's own fold now settles the action.
   await page.getByRole("tab", { name: "Reads" }).click();
+  // The human action is done; the two agent nodes behind it wait on a driver,
+  // which the next journey adopts the run again to give them.
   await expect(page.getByRole("region", { name: "Status" })).toContainText(
-    "1/1 done",
+    "1/3 done",
     { timeout: 30_000 },
   );
+});
+
+test("edits the adopted run's graph overrides from the composer, and its next dispatches run under them", async ({
+  page,
+}) => {
+  test.slow();
+  const run = runs().adoptable;
+  const { overridden_node, cleared_node, sets, answers } = fixture().overrides;
+  await page.goto(`/?run=${run}&view=channel`);
+  const composer = page.getByRole("region", { name: "Reply" });
+  const shortcut = composer.getByLabel("Shortcut");
+  const editor = composer.getByLabel("Envelope (sent as typed)");
+  const edit = (commands: readonly unknown[]) =>
+    JSON.stringify({ version: 3, commands }, null, 2);
+  // Composed, shown, then sent as the editor holds it, and answered by the engine.
+  const composeAndSend = async (expected: string, status: number) => {
+    await composer.getByRole("button", { name: "Compose envelope" }).click();
+    await expect(editor).toHaveValue(expected);
+    const answered = page.waitForResponse((response) =>
+      response.url().includes(`/runs/${run}/channel/reply`),
+    );
+    await composer.getByRole("button", { name: "Send reply" }).click();
+    const response = await answered;
+    expect(response.request().postData()).toBe(expected);
+    expect(response.status()).toBe(status);
+  };
+
+  // The cleared node's planned list, loaded from the graph and emptied: the
+  // edit still names the list, as `[]`, because an absent one clears nothing.
+  await shortcut.selectOption("set-node-sets");
+  await composer.getByLabel("Node id").fill(cleared_node);
+  const nodeList = composer.getByRole("group", {
+    name: "Node overrides, in order",
+  });
+  await expect(nodeList).toContainText(`Current list: ${sets.stale}`);
+  await nodeList.getByRole("button", { name: "Load current list" }).click();
+  await expect(
+    nodeList.getByRole("textbox", { name: "Override 1" }),
+  ).toHaveValue(sets.stale ?? "");
+  await nodeList.getByRole("button", { name: "Remove override 1" }).click();
+  await composeAndSend(
+    edit([{ op: "set-node-sets", id: cleared_node, sets: [] }]),
+    200,
+  );
+  await expect(receipt(page, "Reply")).toContainText('"state": "applied"');
+
+  // The other node's own list, typed by hand from the keyboard.
+  await composer.getByLabel("Node id").fill(overridden_node);
+  await nodeList.getByRole("button", { name: "Add override" }).click();
+  await nodeList
+    .getByRole("textbox", { name: "Override 1" })
+    .fill(sets.own ?? "");
+  await composeAndSend(
+    edit([{ op: "set-node-sets", id: overridden_node, sets: [sets.own] }]),
+    200,
+  );
+
+  // The run-wide list every node dispatch composes first.
+  await shortcut.selectOption("set-run-node-sets");
+  const runList = composer.getByRole("group", {
+    name: "Run-wide overrides, in order",
+  });
+  await expect(runList).toContainText("Current list: none");
+  await runList.getByRole("button", { name: "Add override" }).click();
+  await runList
+    .getByRole("textbox", { name: "Override 1" })
+    .fill(sets["run-wide"] ?? "");
+  await composeAndSend(
+    edit([{ op: "set-run-node-sets", sets: [sets["run-wide"]] }]),
+    200,
+  );
+
+  // Refused in the engine's words, and neither list moves: a node the graph
+  // does not hold.
+  await shortcut.selectOption("set-node-sets");
+  await composer.getByLabel("Node id").fill("ghost");
+  await nodeList
+    .getByRole("textbox", { name: "Override 1" })
+    .fill(sets.stale ?? "");
+  await composeAndSend(
+    edit([{ op: "set-node-sets", id: "ghost", sets: [sets.stale] }]),
+    422,
+  );
+  await expect(refusal(page, "Reply")).toContainText("no node 'ghost'");
+  const graph = (await served(page, `/api/v2/runs/${run}`, runDetailSchema))
+    .graph;
+  expect(graph?.run_node_sets).toEqual([sets["run-wide"]]);
+  const planned = new Map(
+    graph?.plan.tasks.map((task) => [task.id, task.sets]) ?? [],
+  );
+  expect(planned.get(overridden_node)).toEqual([sets.own]);
+  expect(planned.get(cleared_node)).toBeUndefined();
+
+  // What the node shows is the list its next dispatch composes after the
+  // run-wide one.
+  await page.goto(`/?run=${run}&node=${overridden_node}&tab=task`);
+  await expect(page.getByRole("list", { name: "Graph overrides" })).toHaveText(
+    sets.own ?? "",
+  );
+
+  // Adopted again: the driver this server retains is the engine it links, and
+  // it replays the journalled edits into the two dispatches it now makes. The
+  // ceiling is a bound on a failure, not a cost: measured on this fixture, the
+  // adopted driver releases the two nodes at once and dispatches them about a
+  // minute later, on a later pass of its loop.
+  test.setTimeout(300_000);
+  await page.goto(`/?run=${run}&view=channel`);
+  await page.getByRole("button", { name: "Adopt", exact: true }).click();
+  await expect(receipt(page, "Adopt")).toContainText('"pid": ');
+  await expect
+    .poll(
+      async () =>
+        (await served(page, `/api/v2/runs/${run}/agents`, runAgentsSchema))
+          .sessions.length,
+      { timeout: 180_000 },
+    )
+    .toBe(2);
+  // Each node's own dispatch, opened to its transcript: the node given a list
+  // of its own ran under it, over the run-wide entry before it; the cleared node
+  // ran under the run-wide list alone; nothing replaced reached either.
+  for (const [node, config] of [
+    [overridden_node, "own"],
+    [cleared_node, "run-wide"],
+  ] as const) {
+    await page.goto(`/?run=${run}&node=${node}&tab=agents`);
+    const agents = page.getByRole("region", { name: `Agents of ${node}` });
+    await agents.getByRole("button", { name: "Open transcript" }).click();
+    await expect(agents).toContainText(answers[config] ?? config, {
+      timeout: 30_000,
+    });
+    for (const replaced of ["planned", "stale"]) {
+      await expect(agents).not.toContainText(answers[replaced] ?? replaced);
+    }
+  }
 });
 
 test("refuses to stop a run another session owns, naming the owner, and forces it only behind a confirm that names them", async ({

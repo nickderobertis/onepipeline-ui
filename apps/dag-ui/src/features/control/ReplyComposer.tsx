@@ -37,7 +37,8 @@ const FIELD_LABELS: Readonly<Record<keyof ShortcutFields, string>> = {
   landing: "Landing (optional)",
   blocking: "Blocking",
   json: "Mapping (JSON)",
-  sets: "Overrides",
+  sets: "Node overrides",
+  runSets: "Run-wide overrides",
 };
 
 /**
@@ -141,24 +142,20 @@ export function ReplyComposer({
         {SHORTCUT_FIELDS[shortcut].map((field) => {
           const fieldId = `${id}-${field}`;
           const choices = CHOICES[field];
-          if (field === "sets") {
+          if (field === "sets" || field === "runSets") {
             const nodeId =
               typeof fields.id === "string" ? fields.id.trim() : "";
             return (
               <SetsEditor
                 current={
-                  shortcut === "set-run-node-sets"
+                  field === "runSets"
                     ? overrides?.run
                     : overrides?.nodes.get(nodeId)
                 }
                 key={field}
-                legend={
-                  shortcut === "set-run-node-sets"
-                    ? "Run-wide overrides, in order"
-                    : "Node overrides, in order"
-                }
+                legend={`${FIELD_LABELS[field]}, in order`}
                 onChange={(sets) => set(field, sets)}
-                sets={fields.sets ?? []}
+                sets={fields[field] ?? []}
               />
             );
           }

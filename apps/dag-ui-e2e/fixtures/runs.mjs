@@ -100,6 +100,29 @@ export const ADOPTABLE_RUN = "dag-ui-adoptable";
 /** The human action that run holds, which the driver settles as waiting. */
 export const ADOPTABLE_ACTION = "approve";
 /**
+ * The adoptable run's two agent nodes, both behind its human action, so the first
+ * adoption dispatches neither and the one after the attestation dispatches both —
+ * under whatever graph overrides the channel left them by then. The first is
+ * given a list of its own; the second plans a stale one that is cleared, so it
+ * composes the run-wide list alone.
+ */
+export const OVERRIDDEN_NODE = "overridden";
+export const CLEARED_NODE = "cleared";
+/**
+ * The oneharness configs a dispatch of the adoptable run can be composed with,
+ * each naming a harness stand-in of its own that answers in its own words — so
+ * which one a dispatch ran under is read back off its transcript. `planned` is
+ * the node-scope graph's own; the rest are only ever reached by an override.
+ */
+export const OVERRIDE_CONFIGS = ["planned", "stale", "run-wide", "own"];
+/** What the stand-in a config names answers, which its transcript records. */
+export const ranUnder = (config) => `ran under the ${config} config`;
+/** Where the adoptable run's graph, configs and stand-ins are written. */
+export const overridesDir = (workspace) => join(workspace, "overrides");
+/** The override entry that points the worker member at one of those configs. */
+export const configSet = (workspace, config) =>
+  `members.worker.oneharness_config=${join(overridesDir(workspace), `${config}.toml`)}`;
+/**
  * The session the served API acts as, and the one the supervising runs were
  * launched by. Distinct from the two sessions the rest of the corpus is launched
  * under so the runs the acting session owns — and so the unwatched report — are
@@ -2394,21 +2417,37 @@ function writeAdoptableRun(root, workspace) {
   const dir = runDir(root, ADOPTABLE_RUN);
   mkdirSync(join(dir, "channel"), { recursive: true });
   mkdirSync(join(dir, "dispatches"), { recursive: true });
+  const nodeGraph = writeOverrideConfigs(workspace);
+  // Schema 3, where a node's `sets` begins. Each agent node names a persona the
+  // node-scope graph's library ships, because a node an override list reaches is
+  // validated as the whole dispatch it would be, and a direct node needs one.
   const plan = {
-    schema_version: 2,
+    schema_version: 3,
     goal: { text: "Get the change approved" },
     name: "adoptable",
     concurrency: 1,
     tasks: [
       { id: ADOPTABLE_ACTION, kind: "human", task: "Approve the change." },
+      {
+        id: OVERRIDDEN_NODE,
+        persona: "engineer",
+        deps: [ADOPTABLE_ACTION],
+        task: "## What\nDispatch under the node's own override.",
+      },
+      {
+        id: CLEARED_NODE,
+        persona: "engineer",
+        deps: [ADOPTABLE_ACTION],
+        task: "## What\nDispatch under the run-wide override.",
+        sets: [configSet(workspace, "stale")],
+      },
     ],
   };
   writeJson(join(dir, "plan.json"), plan);
   const start = now() - 12 * 60 * 1000;
   // No observer graph: a record naming one is a graph the adopted driver would
-  // launch, and this fixture has none to launch. The node graph is named because
-  // the driver refuses a record naming none before it drives, and never read,
-  // because this graph dispatches nothing.
+  // launch, and this fixture has none to launch. The node graph is the one the
+  // agent nodes dispatch over once the human action is attested.
   const record = launch(
     ADOPTABLE_RUN,
     "claude-code",
@@ -2420,12 +2459,50 @@ function writeAdoptableRun(root, workspace) {
   writeJson(join(dir, "launch.json"), {
     ...record,
     dir: workspace,
-    node_graph: "graphs/node-scope.yaml",
+    node_graph: nodeGraph,
     host: thisHost(),
   });
   const journal = new Journal(dir, streamOf(ADOPTABLE_RUN), start);
   journal.emit("pipeline", "run-started", run, { plan });
   journal.write();
+}
+
+/**
+ * The adoptable run's node-scope graph — one single-sided `worker` member, whose
+ * turn is a library call of the binary that drives it — and one oneharness config
+ * per name in {@link OVERRIDE_CONFIGS}, each selecting `claude-code` at a stand-in
+ * that answers as that adapter expects and names its config in the answer.
+ *
+ * The harness program is the one thing standing in: the adopted driver, the
+ * dispatch, the graph run and the config loader are all the engine the served
+ * binary links.
+ */
+function writeOverrideConfigs(workspace) {
+  const dir = overridesDir(workspace);
+  mkdirSync(dir, { recursive: true });
+  for (const config of OVERRIDE_CONFIGS) {
+    const standin = join(dir, `harness-${config}`);
+    const answer = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: ranUnder(config),
+      session_id: `standin-${config}`,
+    });
+    writeFileSync(standin, `#!/bin/sh\nprintf '%s\\n' '${answer}'\n`, {
+      mode: 0o755,
+    });
+    writeFileSync(
+      join(dir, `${config}.toml`),
+      `harnesses = ["claude-code"]\n\n[harness.claude-code]\nbin = ${JSON.stringify(standin)}\n`,
+    );
+  }
+  const graph = join(dir, "node-scope.yaml");
+  writeFileSync(
+    graph,
+    `version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: ${JSON.stringify(join(dir, "planned.toml"))}\n`,
+  );
+  return graph;
 }
 
 /** One run with no launching session recorded, as every swept launch reads. */
@@ -2849,7 +2926,7 @@ export function buildRuns(root, workspace) {
 }
 
 /** Everything the fixture wrote, published beside the runs it serves. */
-export function facts() {
+export function facts(workspace) {
   return {
     runs: {
       live: LIVE_RUN,
@@ -2868,6 +2945,23 @@ export function facts() {
     /** The session the served API acts as, which owns the supervised runs. */
     supervisor_session: SUPERVISOR_SESSION,
     adoptable_action: ADOPTABLE_ACTION,
+    /**
+     * The adoptable run's graph overrides: its two agent nodes, the override entry
+     * for each config, and what a dispatch under each answers.
+     */
+    overrides: {
+      overridden_node: OVERRIDDEN_NODE,
+      cleared_node: CLEARED_NODE,
+      sets: Object.fromEntries(
+        OVERRIDE_CONFIGS.map((config) => [
+          config,
+          configSet(workspace, config),
+        ]),
+      ),
+      answers: Object.fromEntries(
+        OVERRIDE_CONFIGS.map((config) => [config, ranUnder(config)]),
+      ),
+    },
     projects: {
       observatory: OBSERVATORY_PROJECT,
       archive: ARCHIVE_PROJECT,

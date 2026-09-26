@@ -40,6 +40,7 @@ import {
   facts,
   graphRecordsFor,
   growTranscript,
+  overridesDir,
   recordActivity,
   removePageRuns,
   removeRun,
@@ -248,7 +249,7 @@ async function serve(workspace, port, ui, shutdown) {
   mkdirSync(onevcsHome, { recursive: true });
   writeFileSync(
     join(workspace, FIXTURE_FACTS_NAME),
-    `${JSON.stringify(shutdown === undefined ? facts() : shutdownFacts(), null, 2)}\n`,
+    `${JSON.stringify(shutdown === undefined ? facts(workspace) : shutdownFacts(), null, 2)}\n`,
   );
 
   const binary = serverBinary();
@@ -286,6 +287,13 @@ async function serve(workspace, port, ui, shutdown) {
         ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
         HOSTNAME: thisHost(),
         ONEVCS_HOME: onevcsHome,
+        // Where a dispatch the adopted driver starts runs, and where its harness
+        // turn records itself: named inside the workspace, because the defaults
+        // are this server's working directory — the app's checkout — and the
+        // operator's own oneharness history, behind a lock every turn on the
+        // host shares.
+        ONEPIPELINE_PROJECT_DIR: overridesDir(workspace),
+        XDG_STATE_HOME: join(workspace, "state"),
       },
     },
   );

@@ -41,7 +41,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(20), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(21), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -12480,9 +12480,17 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
 /// a double whether the engine resolves a config chain.
 #[cfg(unix)]
 fn write_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    write_named_harness_standin(dir, "fake-harness", log)
+}
+
+/// [`write_harness_standin`] under a name of the journey's choosing, so a
+/// journey telling several configs apart reads which one a dispatch ran by the
+/// program the record names.
+#[cfg(unix)]
+fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
-    let standin = dir.join("fake-harness");
+    let standin = dir.join(name);
     // The log path is written into the script rather than read from the
     // environment, because what this journey may not assume is anything about
     // the environment the engine composes for a dispatch — that composition is
@@ -12692,6 +12700,201 @@ fn a_dispatch_whose_config_names_a_parent_that_is_not_there_settles_the_node() {
     drop(driver);
     serving.stop_on(Stop::Terminate);
 }
+
+/// A oneharness config naming one harness stand-in, as its own program: which
+/// config a dispatch was composed with is read back off the program it ran.
+#[cfg(unix)]
+fn write_config_for(dir: &Path, name: &str, log: &Path) -> PathBuf {
+    let standin = write_named_harness_standin(dir, &format!("harness-{name}"), log);
+    let config = dir.join(format!("{name}.toml"));
+    fs::write(
+        &config,
+        format!(
+            "harnesses = [\"claude-code\"]\n\n[harness.claude-code]\nbin = {:?}\n",
+            standin.display().to_string()
+        ),
+    )
+    .expect("the oneharness config");
+    config
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names` above: the
+// compiled binary and `/bin/sh` stand-ins it writes itself, nothing a checkout may lack,
+// and two dispatches through a retained driver that settle in seconds once each turn's
+// oneharness history is under the journey's own state directory.
+#[cfg(unix)]
+#[test]
+fn graph_override_edits_relayed_by_the_reply_route_decide_the_adopted_runs_next_dispatches() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    // One config per list an edit can leave in force, each naming its own
+    // stand-in: the graph as written, a stale entry both edits must replace,
+    // the run-wide replacement, and the node's own.
+    let planned = write_config_for(&dir, "planned", &log);
+    let stale = write_config_for(&dir, "stale", &log);
+    let run_wide = write_config_for(&dir, "run-wide", &log);
+    let own = write_config_for(&dir, "own", &log);
+    let graph = dir.join("node-scope.yaml");
+    fs::write(
+        &graph,
+        format!(
+            "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    \
+             oneharness_config: {:?}\n",
+            planned.display().to_string()
+        ),
+    )
+    .expect("the node-scope graph");
+    let set = |config: &Path| format!("members.worker.oneharness_config={}", config.display());
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_overrides(&root, run, &dir, &graph, &[&set(&stale)]);
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+        ],
+    );
+    let reply_route = format!("/api/v2/runs/{run}/channel/reply");
+    let reply = |envelope: &str| http::post(serving.address, &reply_route, envelope);
+    let applied = |envelope: &str| {
+        let answered = reply(envelope);
+        assert_eq!(answered.status, 200, "{envelope}: {}", answered.body);
+        assert_eq!(
+            answered.json()["receipt"]["commands"],
+            json!("applied"),
+            "{envelope}: {}",
+            answered.body
+        );
+    };
+    let refused = |envelope: &str, words: &str| {
+        let answered = reply(envelope);
+        assert_eq!(answered.status, 422, "{envelope}: {}", answered.body);
+        let answered = answered.json();
+        assert_eq!(answered["error"]["code"], json!("refused"), "{answered}");
+        assert!(
+            answered["error"]["message"]
+                .as_str()
+                .is_some_and(|said| said.contains(words)),
+            "the refusal is the engine's, naming {words:?}: {answered}"
+        );
+    };
+    let graph_of =
+        || http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"].clone();
+    let task_sets = |graph: &Value, node: &str| {
+        graph["plan"]["tasks"]
+            .as_array()
+            .expect("the plan's tasks")
+            .iter()
+            .find(|task| task["id"] == json!(node))
+            .expect("the node")
+            .get("sets")
+            .cloned()
+    };
+
+    // Nothing is driving the run, so each reply is applied by the call itself —
+    // byte for byte as sent, with a space and a newline the engine reads past
+    // and this server never re-encodes. A run-wide list replaced twice, and each
+    // node's own list replaced: one given an entry, one cleared with `[]`.
+    applied(&format!(
+        "{{\"version\": 3, \"commands\": [{{\"op\": \"set-run-node-sets\", \"sets\": [{:?}]}}]}}\n",
+        set(&stale)
+    ));
+    applied(&format!(
+        "{{\"version\": 3, \"commands\": [{{\"op\": \"set-run-node-sets\", \"sets\": [{:?}]}}]}} ",
+        set(&run_wide)
+    ));
+    applied(&format!(
+        "{{\"version\": 3, \"commands\": [{{\"op\": \"set-node-sets\", \"id\": {:?}, \"sets\": [{:?}]}}]}}",
+        fixture_run::OVERRIDDEN_NODE_ID,
+        set(&own)
+    ));
+    applied(&format!(
+        "{{\"version\": 3, \"commands\": [{{\"op\": \"set-node-sets\", \"id\": {:?}, \"sets\": []}}]}}",
+        fixture_run::CLEARED_NODE_ID
+    ));
+    let edited = graph_of();
+    assert_eq!(edited["run_node_sets"], json!([set(&run_wide)]), "{edited}");
+    assert_eq!(
+        task_sets(&edited, fixture_run::OVERRIDDEN_NODE_ID),
+        Some(json!([set(&own)])),
+        "{edited}"
+    );
+    assert_eq!(
+        task_sets(&edited, fixture_run::CLEARED_NODE_ID),
+        None,
+        "a cleared list is served as none: {edited}"
+    );
+
+    // Refused, each in the engine's words: a node the graph does not hold, an
+    // entry the node-scope graph cannot apply, and a run-wide entry that is not
+    // an override at all. None of them moves either list.
+    refused(
+        &format!(
+            "{{\"version\": 3, \"commands\": [{{\"op\": \"set-node-sets\", \"id\": \"ghost\", \"sets\": [{:?}]}}]}}",
+            set(&stale)
+        ),
+        "no node 'ghost'",
+    );
+    refused(
+        &format!(
+            "{{\"version\": 3, \"commands\": [{{\"op\": \"set-node-sets\", \"id\": {:?}, \"sets\": [\"members.worker.nonsense=1\"]}}]}}",
+            fixture_run::OVERRIDDEN_NODE_ID
+        ),
+        fixture_run::OVERRIDDEN_NODE_ID,
+    );
+    refused(
+        r#"{"version": 3, "commands": [{"op": "set-run-node-sets", "sets": ["not an override"]}]}"#,
+        "set-run-node-sets",
+    );
+    assert_eq!(graph_of()["run_node_sets"], edited["run_node_sets"]);
+    assert_eq!(
+        graph_of()["plan"]["tasks"],
+        edited["plan"]["tasks"],
+        "a refused edit left the lists as they were"
+    );
+    assert!(!log.exists(), "nothing dispatched before the adoption");
+
+    // Adopted: the driver this server retains is the engine this binary links,
+    // and it replays the journalled edits on the dispatches that follow.
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    let ran = || fs::read_to_string(&log).unwrap_or_default();
+    eventually("both nodes dispatched", || ran().lines().count() >= 2);
+    let ran = ran();
+    let line_of = |task: &str| {
+        ran.lines()
+            .find(|line| line.contains(task))
+            .unwrap_or_else(|| panic!("no dispatch was given {task:?}: {ran}"))
+            .to_owned()
+    };
+    // The node's own list composes after the run-wide one, so its entry wins.
+    assert!(
+        line_of("Dispatch under the node's own override.").contains("harness-own"),
+        "{ran}"
+    );
+    // The cleared node composes the run-wide list alone.
+    assert!(
+        line_of("Dispatch under the run-wide override.").contains("harness-run-wide"),
+        "{ran}"
+    );
+    for superseded in ["harness-stale", "harness-planned"] {
+        assert!(
+            !ran.contains(superseded),
+            "a replaced list reached a dispatch: {ran}"
+        );
+    }
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 #[test]
 fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
