@@ -155,7 +155,7 @@ onemessagebus = "0.9.0"
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
-onepipeline = "=0.45.0"
+onepipeline = "=0.47.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
