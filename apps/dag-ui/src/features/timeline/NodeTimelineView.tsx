@@ -182,6 +182,25 @@ export function NodeTimelineView({
               <dt>Outcome</dt>
               <dd>{formatValue(node.result?.detail)}</dd>
             </div>
+            {/* The node's own overrides, in the order its next dispatch applies
+                them after the run-wide list; an edit replaces the whole list. */}
+            <div>
+              <dt>Graph overrides</dt>
+              <dd>
+                {(node.task.sets ?? []).length === 0 ? (
+                  "None"
+                ) : (
+                  <ol aria-label="Graph overrides" className="sets-served">
+                    {node.task.sets?.map((entry, index) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: an override's identity is its position in the ordered list.
+                      <li key={index}>
+                        <code>{entry}</code>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </dd>
+            </div>
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">

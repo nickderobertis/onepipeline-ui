@@ -13,7 +13,7 @@ export interface ReplyComposerState {
   readonly fields: ShortcutFields;
   readonly setField: (
     key: keyof ShortcutFields,
-    value: string | boolean,
+    value: string | boolean | readonly string[],
   ) => void;
   /** Why the last compose produced no envelope, in the grammar's own words. */
   readonly problem?: string;
@@ -47,7 +47,7 @@ export function useReplyComposer(
   const [envelope, setEnvelope] = useState("");
   const [correlation, setCorrelation] = useState("");
   const setField = useCallback(
-    (key: keyof ShortcutFields, value: string | boolean) =>
+    (key: keyof ShortcutFields, value: string | boolean | readonly string[]) =>
       setFields((previous) => ({ ...previous, [key]: value })),
     [],
   );

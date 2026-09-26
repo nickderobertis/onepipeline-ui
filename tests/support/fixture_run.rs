@@ -323,6 +323,11 @@ pub const HUMAN_RELEASE_ACTION: &str = "publish the npm wrapper from the tagged 
 pub const NODE_ID: &str = "contract-interface";
 /// The node that depends on it.
 pub const REVIEW_NODE_ID: &str = "review";
+/// The ordered graph overrides [`NODE_ID`]'s plan declares for its dispatches.
+pub const NODE_SETS: [&str; 2] = [
+    "members.worker.agent.model=large",
+    "members.worker.agent.oneharness_config=./worker.toml",
+];
 /// The lifecycle node of the live run, which runs steps on one branch.
 pub const SHIP_NODE_ID: &str = "ship";
 /// The live run's human action, which nothing but a person can finish.
@@ -696,7 +701,9 @@ pub fn write_in_project(root: &Path, run: &str, project: Option<&str>) -> PathBu
 /// The plan the run executed.
 fn plan() -> Value {
     json!({
-        "schema_version": 2,
+        // Schema 3, because that is where a node's `sets` begins: the engine
+        // refuses the field by name in any earlier plan.
+        "schema_version": 3,
         "goal": { "text": "serve the read contract" },
         "name": "contract",
         "concurrency": 4,
@@ -705,6 +712,7 @@ fn plan() -> Value {
                 "id": NODE_ID,
                 "persona": "worker",
                 "task": "## What\nLand the wire contract.",
+                "sets": NODE_SETS,
             },
             {
                 "id": REVIEW_NODE_ID,
@@ -5820,30 +5828,6 @@ pub const DISPATCH_NODE_ID: &str = "resolve";
 /// relative reference would put the resolution of the graph itself between the
 /// question and the answer.
 pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &Path) -> PathBuf {
-    let run_dir = root.join(run);
-    fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
-    fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
-    fs::write(
-        run_dir.join("launch.json"),
-        pretty(&json!({
-            "run_id": run,
-            "project": PLAN_PROJECT,
-            "dir": dir.display().to_string(),
-            "launcher": "claude-code",
-            "session": SESSION,
-            "node_graph": node_graph.display().to_string(),
-            // A driver recorded on this host under a pid nothing can be
-            // holding, exactly as [`write_awaiting_attestation`] records one, so
-            // the engine proves it gone and the run is one an adoption may take
-            // over.
-            "pid": 0x7FFF_FFF0_u32,
-            "host": onepipeline_ui::liveness::hostname(),
-            "started_at": START,
-            "heartbeat_interval": 1_800,
-            "adoptions": 0,
-        })),
-    )
-    .expect("the launch record");
     let plan = json!({
         "schema_version": 2,
         "goal": { "text": "resolve the config chain" },
@@ -5853,7 +5837,89 @@ pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &
             { "id": DISPATCH_NODE_ID, "task": "Do the work the graph dispatches." },
         ],
     });
-    fs::write(run_dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    write_awaiting(root, run, dir, node_graph, &plan, &[])
+}
+
+/// The node of [`write_awaiting_overrides`] a journey gives overrides of its own.
+pub const OVERRIDDEN_NODE_ID: &str = "overridden";
+/// The node of [`write_awaiting_overrides`] whose planned overrides a journey
+/// clears.
+pub const CLEARED_NODE_ID: &str = "cleared";
+
+/// A run nothing is driving whose two **agent** nodes have not dispatched, at
+/// plan schema 3 so a node may carry `sets`: [`OVERRIDDEN_NODE_ID`] declares
+/// none, and [`CLEARED_NODE_ID`] declares `cleared_sets`, which a journey
+/// replaces before any dispatch reads them. Launched as
+/// [`write_awaiting_dispatch`]'s run is, over the node-scope graph at
+/// `node_graph`, with `launch_sets` as the launch's run-wide `node_sets`.
+pub fn write_awaiting_overrides(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    cleared_sets: &[&str],
+    launch_sets: &[&str],
+) -> PathBuf {
+    let plan = json!({
+        "schema_version": 3,
+        "goal": { "text": "dispatch each node under the overrides it was edited to" },
+        "name": "overrides",
+        "concurrency": 1,
+        "tasks": [
+            // A persona each, because a node whose dispatch an override list
+            // reaches is validated as a whole dispatch, and a direct agent node
+            // without one is refused there — `engineer` is one oneagentgraph
+            // ships, so nothing here has to be written for it to resolve.
+            {
+                "id": OVERRIDDEN_NODE_ID,
+                "persona": "engineer",
+                "task": "Dispatch under the node's own override.",
+            },
+            {
+                "id": CLEARED_NODE_ID,
+                "persona": "engineer",
+                "task": "Dispatch under the run-wide override.",
+                "sets": cleared_sets,
+            },
+        ],
+    });
+    write_awaiting(root, run, dir, node_graph, &plan, launch_sets)
+}
+
+fn write_awaiting(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    plan: &Value,
+    launch_sets: &[&str],
+) -> PathBuf {
+    let run_dir = root.join(run);
+    fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
+    fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
+    let mut launch = json!({
+        "run_id": run,
+        "project": PLAN_PROJECT,
+        "dir": dir.display().to_string(),
+        "launcher": "claude-code",
+        "session": SESSION,
+        "node_graph": node_graph.display().to_string(),
+        // A driver recorded on this host under a pid nothing can be
+        // holding, exactly as [`write_awaiting_attestation`] records one, so
+        // the engine proves it gone and the run is one an adoption may take
+        // over.
+        "pid": 0x7FFF_FFF0_u32,
+        "host": onepipeline_ui::liveness::hostname(),
+        "started_at": START,
+        "heartbeat_interval": 1_800,
+        "adoptions": 0,
+    });
+    // Omitted when empty, as the engine writes an empty list.
+    if !launch_sets.is_empty() {
+        launch["node_sets"] = json!(launch_sets);
+    }
+    fs::write(run_dir.join("launch.json"), pretty(&launch)).expect("the launch record");
+    fs::write(run_dir.join("plan.json"), pretty(plan)).expect("the plan");
     fs::write(
         run_dir.join("events.jsonl"),
         format!(

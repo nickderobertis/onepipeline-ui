@@ -55,7 +55,7 @@ import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
 import { groupForKey, projectLabel } from "../lib/project-model";
-import { graphOf, nodeViews } from "../lib/run-model";
+import { currentOverrides, graphOf, nodeViews } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
 import {
   DETAIL_LEVELS,
@@ -425,6 +425,7 @@ export function App({
                       filter={filter}
                       invalidations={telemetry.invalidations}
                       observedAt={detail.observed_at}
+                      overrides={graph && currentOverrides(graph)}
                       runId={selectedRunId}
                     />
                   ) : selection.view === "watch" ? (

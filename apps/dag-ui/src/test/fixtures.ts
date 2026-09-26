@@ -63,7 +63,7 @@ export const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 20,
+  telemetry_schema_version: 21,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -93,7 +93,7 @@ export const LIVE_PROJECT_NAME = "observe-live-run";
  */
 export const projectList = {
   api_version: 2,
-  telemetry_schema_version: 20,
+  telemetry_schema_version: 21,
   observed_at: "2026-07-26T12:00:00Z",
   projects: [
     {
@@ -131,7 +131,7 @@ export const projectList = {
 /** The envelope every wrapped verb answers under. */
 const verbEnvelope = {
   api_version: 2,
-  telemetry_schema_version: 20,
+  telemetry_schema_version: 21,
   observed_at: "2026-07-26T12:00:00Z",
 };
 
@@ -386,6 +386,14 @@ export function receipt(runId: string = LIVE_RUN) {
   };
 }
 
+/** The graph overrides the live run's `queued` node declares, in order. */
+export const QUEUED_NODE_SETS = [
+  "members.worker.agent.model=large",
+  "members.worker.agent.oneharness_config=./worker.toml",
+];
+/** The run-wide overrides the live run's graph holds. */
+export const RUN_NODE_SETS = ["members.worker.agent.model=run"];
+
 export function runDetail(runId: string = LIVE_RUN) {
   const historical = runId === HISTORY_RUN;
   const tasks = historical
@@ -442,6 +450,8 @@ export function runDetail(runId: string = LIVE_RUN) {
           id: "queued",
           deps: ["approval"],
           task: "## What\nStart queued follow-up\n\n## Acceptance criteria\nFollow-up starts",
+          // The node's own graph overrides, in the order its dispatch applies them.
+          sets: QUEUED_NODE_SETS,
         },
         // Held behind the failed publish rather than behind a human action: the
         // scheduler's other derived gate, and the other word a card has to say.
@@ -495,7 +505,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 20,
+    telemetry_schema_version: 21,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -555,6 +565,7 @@ export function runDetail(runId: string = LIVE_RUN) {
     graph: {
       run_id: runId,
       plan: { tasks },
+      ...(historical ? {} : { run_node_sets: RUN_NODE_SETS }),
       node_states: states,
       node_status: status,
       node_gated_by: gatedBy,

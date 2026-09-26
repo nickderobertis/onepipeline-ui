@@ -1238,7 +1238,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 20);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 21);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1418,6 +1418,104 @@ fn the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines() 
             path.display()
         );
     }
+}
+
+/// The golden both halves of the reply-command drift gate read.
+const REPLY_COMMANDS: &str = "reply-commands.json";
+
+/// The browser's copy of the reply envelope's commands, held to the engine's own
+/// `Command` — one half of a gate whose other half is TypeScript.
+///
+/// The composer composes, and `packages/dag-model` parses, every op the engine's
+/// `channel::Command` declares, which a Rust enum cannot be read across the
+/// language boundary to say. So this reads each op's fields off the schema that
+/// type itself derives — the declaration, never the engine's prose — and pins
+/// them to `tests/fixtures/reply-commands.json`, which
+/// `packages/dag-model/e2e/model.e2e.test.ts` holds the model's own
+/// `replyCommandSchema` to, op for op and field for field. An op or a field the
+/// engine grows fails here until the golden moves with it
+/// (`UPDATE_CONTRACT_FIXTURES=1`), and fails there until the browser follows.
+///
+/// A node's list fields ride along on the same terms: the engine's `plan::Node`
+/// denies what it does not declare, so a field that round-trips through it is
+/// one it declares, and one it omits when empty is one it defaults.
+#[test]
+fn the_browser_clients_copy_of_the_reply_commands_matches_the_engines() {
+    let schema = schemars::schema_for!(onepipeline::channel::Command).to_value();
+    let variants = schema["oneOf"]
+        .as_array()
+        .expect("the engine's Command derives one schema per op");
+    let mut commands = serde_json::Map::new();
+    for variant in variants {
+        let op = variant["properties"]["op"]["const"]
+            .as_str()
+            .expect("every op is a constant tag");
+        assert_eq!(
+            variant["additionalProperties"],
+            json!(false),
+            "the engine's `{op}` is no longer closed, so a client could not know what it refuses"
+        );
+        let required: Vec<&str> = variant["required"]
+            .as_array()
+            .expect("required fields")
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|field| *field != "op")
+            .collect();
+        let mut optional: Vec<&str> = variant["properties"]
+            .as_object()
+            .expect("the op's fields")
+            .keys()
+            .map(String::as_str)
+            .filter(|field| *field != "op" && !required.contains(field))
+            .collect();
+        optional.sort_unstable();
+        let mut required = required;
+        required.sort_unstable();
+        commands.insert(
+            op.to_owned(),
+            json!({ "required": required, "optional": optional }),
+        );
+    }
+
+    // `sets` is a list the engine declares on a node, keeps in order, and omits
+    // when empty — what the browser's `planTaskSchema` and the composer's
+    // `add`, `retry` and `requeue` carry for it.
+    let node_list_fields = ["sets"];
+    for field in node_list_fields {
+        let written = json!({ "id": "n", "task": "t", field: ["b=2", "a=1"] });
+        let node: onepipeline::plan::Node = serde_json::from_value(written.clone())
+            .unwrap_or_else(|err| panic!("the engine's node no longer declares `{field}`: {err}"));
+        assert_eq!(
+            serde_json::to_value(&node).expect("serialize"),
+            written,
+            "the engine's node does not keep `{field}` as written, in order"
+        );
+        let emptied: onepipeline::plan::Node =
+            serde_json::from_value(json!({ "id": "n", "task": "t", field: [] }))
+                .expect("an empty list");
+        assert_eq!(
+            serde_json::to_value(&emptied).expect("serialize"),
+            json!({ "id": "n", "task": "t" }),
+            "the engine's node no longer omits an empty `{field}`"
+        );
+    }
+
+    let declared = canonical(&json!({
+        "reply_envelope_version": onepipeline::channel::REPLY_ENVELOPE_VERSION,
+        "commands": commands,
+        "node_list_fields": node_list_fields,
+    }));
+    let path = fixture_dir().join(REPLY_COMMANDS);
+    if std::env::var_os(UPDATE).is_some() {
+        fs::write(&path, &declared).unwrap_or_else(|err| panic!("write {}: {err}", path.display()));
+    }
+    assert_eq!(
+        read_fixture(REPLY_COMMANDS),
+        declared,
+        "the engine's reply commands moved; re-run with {UPDATE}=1 and bring \
+         `packages/dag-model`'s `replyCommandSchema` with them"
+    );
 }
 
 #[test]

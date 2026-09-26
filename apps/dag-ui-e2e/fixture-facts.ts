@@ -33,6 +33,17 @@ const fixtureSchema = z.object({
   supervisor_session: z.string().min(1),
   /** The one human action the adoptable run holds. */
   adoptable_action: z.string().min(1),
+  /**
+   * The adoptable run's graph overrides: its two agent nodes, the override
+   * entry pointing its worker at each config, and what a dispatch under each
+   * config answers.
+   */
+  overrides: z.object({
+    overridden_node: z.string().min(1),
+    cleared_node: z.string().min(1),
+    sets: z.record(z.string(), z.string().min(1)),
+    answers: z.record(z.string(), z.string().min(1)),
+  }),
   /** The qualified project ids the runs were launched against. */
   projects: z.object({
     observatory: z.string().min(1),

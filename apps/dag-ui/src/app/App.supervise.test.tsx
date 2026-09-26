@@ -17,6 +17,8 @@ import {
   LIVE_PROJECT,
   LIVE_PROJECT_NAME,
   LIVE_RUN,
+  QUEUED_NODE_SETS,
+  RUN_NODE_SETS,
   receipt,
   runAgents,
   runDetail,
@@ -285,6 +287,120 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       "refused: the reply is malformed: unknown field `nonsense`, expected one of `version`, `author`, `completion`, `message`, `reason`, `commands` at line 1 column 12",
     );
     expect(sent[1]).toBe('{"nonsense": 1}');
+  });
+
+  test("edits a node's overrides and the run-wide list as ordered lists, and clears one by sending `[]`", async () => {
+    const sent: string[] = [];
+    const { client } = telemetryHarness((url, init) => {
+      if (verbOf(url) === "channel/reply") {
+        sent.push(bodyOf(init));
+        return Response.json(receipt());
+      }
+      return defaultResponder(url);
+    });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("region", { name: "Reply" });
+    const compose = () =>
+      userEvent.click(
+        within(composer).getByRole("button", { name: "Compose envelope" }),
+      );
+    const editor = within(composer).getByLabelText("Envelope (sent as typed)");
+    const send = async () => {
+      await userEvent.click(
+        within(composer).getByRole("button", { name: "Send reply" }),
+      );
+      await within(composer).findByRole("alert", { name: "Reply receipt" });
+    };
+
+    // A node's list: nothing to load until the id names a node the graph holds,
+    // then the graph's own list, reordered and extended as a person would.
+    await userEvent.selectOptions(
+      within(composer).getByLabelText("Shortcut"),
+      "set-node-sets",
+    );
+    const nodeList = within(composer).getByRole("group", {
+      name: "Node overrides, in order",
+    });
+    expect(nodeList).toHaveTextContent("No overrides: sends an empty list.");
+    const load = within(nodeList).getByRole("button", {
+      name: "Load current list",
+    });
+    expect(load).toBeDisabled();
+    await userEvent.type(within(composer).getByLabelText("Node id"), "queued");
+    expect(nodeList).toHaveTextContent(
+      `Current list: ${QUEUED_NODE_SETS.join(" · ")}`,
+    );
+    await userEvent.click(load);
+    expect(within(nodeList).getByLabelText("Override 1")).toHaveValue(
+      QUEUED_NODE_SETS[0],
+    );
+    expect(
+      within(nodeList).getByRole("button", { name: "Move override 1 up" }),
+    ).toBeDisabled();
+    await userEvent.click(
+      within(nodeList).getByRole("button", { name: "Move override 2 up" }),
+    );
+    await userEvent.click(
+      within(nodeList).getByRole("button", { name: "Add override" }),
+    );
+    // A blank entry is refused by position before anything is sent.
+    await compose();
+    expect(
+      within(composer).getByRole("alert", { name: "Envelope not composed" }),
+    ).toHaveTextContent("sets.2: an override needs a PATH=VALUE");
+    await userEvent.type(
+      within(nodeList).getByLabelText("Override 3"),
+      "members.worker.agent.model=small",
+    );
+    await compose();
+    const nodeEdit = {
+      version: 3,
+      commands: [
+        {
+          op: "set-node-sets",
+          id: "queued",
+          sets: [
+            QUEUED_NODE_SETS[1],
+            QUEUED_NODE_SETS[0],
+            "members.worker.agent.model=small",
+          ],
+        },
+      ],
+    };
+    expect(editor).toHaveValue(JSON.stringify(nodeEdit, null, 2));
+    await send();
+
+    // The run-wide list, loaded and then emptied: the edit still names it, as
+    // `[]`, because an absent list would clear nothing.
+    await userEvent.selectOptions(
+      within(composer).getByLabelText("Shortcut"),
+      "set-run-node-sets",
+    );
+    const runList = within(composer).getByRole("group", {
+      name: "Run-wide overrides, in order",
+    });
+    expect(within(composer).queryByLabelText("Node id")).toBeNull();
+    await userEvent.click(
+      within(runList).getByRole("button", { name: "Load current list" }),
+    );
+    expect(within(runList).getByLabelText("Override 1")).toHaveValue(
+      RUN_NODE_SETS[0],
+    );
+    await userEvent.click(
+      within(runList).getByRole("button", { name: "Remove override 1" }),
+    );
+    expect(runList).toHaveTextContent("No overrides: sends an empty list.");
+    await compose();
+    const cleared = {
+      version: 3,
+      commands: [{ op: "set-run-node-sets", sets: [] }],
+    };
+    expect(editor).toHaveValue(JSON.stringify(cleared, null, 2));
+    await send();
+    expect(sent).toEqual([
+      JSON.stringify(nodeEdit, null, 2),
+      JSON.stringify(cleared, null, 2),
+    ]);
   });
 
   test("attests a ready human action the graph shows", async () => {

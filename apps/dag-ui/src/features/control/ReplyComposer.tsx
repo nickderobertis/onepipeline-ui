@@ -16,6 +16,7 @@ import {
   type ShortcutFields,
   VERDICT_SHORTCUTS,
 } from "./reply-shortcuts";
+import { SetsEditor } from "./SetsEditor";
 import { useReplyComposer } from "./useReplyComposer";
 
 /** What each field asks for, in the words the engine's own schema uses. */
@@ -36,7 +37,18 @@ const FIELD_LABELS: Readonly<Record<keyof ShortcutFields, string>> = {
   landing: "Landing (optional)",
   blocking: "Blocking",
   json: "Mapping (JSON)",
+  sets: "Node overrides",
+  runSets: "Run-wide overrides",
 };
+
+/**
+ * The graph overrides the served graph holds: the run-wide list and each node's
+ * own, so the list editor can offer the one its edit would replace.
+ */
+export interface CurrentOverrides {
+  readonly run: readonly string[];
+  readonly nodes: ReadonlyMap<string, readonly string[]>;
+}
 
 /**
  * The closed choices some fields take, read off the grammar's own enums so the
@@ -71,10 +83,13 @@ export function ReplyComposer({
   client,
   runId,
   onSent,
+  overrides,
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly onSent: () => void;
+  /** What the graph holds now, where the run has a graph to read it from. */
+  readonly overrides?: CurrentOverrides;
 }) {
   const id = useId();
   const {
@@ -127,6 +142,23 @@ export function ReplyComposer({
         {SHORTCUT_FIELDS[shortcut].map((field) => {
           const fieldId = `${id}-${field}`;
           const choices = CHOICES[field];
+          if (field === "sets" || field === "runSets") {
+            const nodeId =
+              typeof fields.id === "string" ? fields.id.trim() : "";
+            return (
+              <SetsEditor
+                current={
+                  field === "runSets"
+                    ? overrides?.run
+                    : overrides?.nodes.get(nodeId)
+                }
+                key={field}
+                legend={`${FIELD_LABELS[field]}, in order`}
+                onChange={(sets) => set(field, sets)}
+                sets={fields[field] ?? []}
+              />
+            );
+          }
           if (field === "persist" || field === "blocking") {
             return (
               <div className="composer-check" key={field}>

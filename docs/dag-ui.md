@@ -236,8 +236,14 @@ fourth, **Agents**, is the section after this one.
   `continue` — is the engine's legacy verdict half (`completion: true`,
   `completion: false` with a reason, or a `message` alone), and every op the
   engine's `Reply` schema declares (`add`, `drop`, `reparent`, `retry`, `cancel`,
-  `requeue`, `attest`, `complete`, `amend`, `note`, `finding`, `settle`) is a form
-  that renders to one command at the envelope version the engine reads edits at.
+  `requeue`, `set-node-sets`, `set-run-node-sets`, `attest`, `complete`, `amend`,
+  `note`, `finding`, `settle`) is a form that renders to one command at the
+  envelope version the engine reads edits at. The two graph-override edits take an
+  **ordered list** — a row per `PATH=VALUE`, each row movable up or down and
+  removable, plus **Load current list** for the list the served graph holds for
+  that node or run — and compose the whole replacement list, an empty one as
+  `"sets": []`, which is how a list is cleared. A node's own list is on its
+  **Task** tab under *Graph overrides*, in the order its next dispatch applies it.
   That grammar is `@onepipeline-ui/dag-model`'s `replyEnvelopeSchema`, held to the
   engine's own field set, and a form that cannot compose an envelope the grammar
   reads says which field rather than sending something the engine would refuse for
@@ -253,7 +259,10 @@ fourth, **Agents**, is the section after this one.
 `e2e/dag-ui-supervise.spec.ts` drives every one of these against the real API over
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
-every other journey reads is left as it was.
+every other journey reads is left as it was. The run nothing drives is adopted
+twice: once to settle its human action, and once — after the composer has edited
+its graph overrides — to dispatch its two agent nodes, whose transcripts say which
+oneharness config each ran under.
 
 ### Shutting down a run, all my runs, or the host
 
@@ -673,6 +682,7 @@ being photographed.
 | `11-project-list` | the projects the app opens on, the `(no project)` group among them |
 | `12-project-page` | a project's page: its runs, newest activity first |
 | `13-channel` | the channel: the queue, the composer and the surface form |
+| `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

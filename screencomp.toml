@@ -24,7 +24,7 @@ embed_limit = 10             # embed images inline when <= N shots differ (0 dis
 # The one dimension this capture varies over. Each value is a viewport name from
 # `apps/dag-ui-e2e/viewports.ts`, which is the matrix's single declaration — the
 # gallery then renders one card per screen that toggles through its five widths
-# instead of sixty-five unrelated cards. `apps/dag-ui/src/test/visual-docs.test.ts`
+# instead of one unrelated card per shot. `apps/dag-ui/src/test/visual-docs.test.ts`
 # reconciles this list with that declaration, so a width can reach neither list
 # without reaching the other. The first value is the gallery's default.
 #

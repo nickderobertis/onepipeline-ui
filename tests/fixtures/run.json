@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 20,
+  "telemetry_schema_version": 21,
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
@@ -146,7 +146,11 @@
           "id": "contract-interface",
           "kind": "agent",
           "persona": "worker",
-          "task": "## What\nLand the wire contract."
+          "task": "## What\nLand the wire contract.",
+          "sets": [
+            "members.worker.agent.model=large",
+            "members.worker.agent.oneharness_config=./worker.toml"
+          ]
         },
         {
           "id": "review",
@@ -158,7 +162,7 @@
           ]
         }
       ],
-      "schema_version": 2,
+      "schema_version": 3,
       "concurrency": 4,
       "name": "contract",
       "goal": {

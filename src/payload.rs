@@ -1620,6 +1620,11 @@ fn plan_task(node: &Node) -> Value {
     if let Some(max_turns) = node.max_turns.filter(|turns| *turns > 0) {
         task.insert("max_turns".into(), json!(max_turns));
     }
+    // The node's own ordered graph overrides, as the fold holds them after every
+    // accepted `set-node-sets`: a step has none, so none is served on one.
+    if !node.sets.is_empty() {
+        task.insert("sets".into(), json!(node.sets));
+    }
     if node.expects_no_diff {
         task.insert("expects_no_diff".into(), json!(true));
     }
@@ -1963,6 +1968,17 @@ fn graph_state(view: &RunView) -> Option<Value> {
     );
     out.insert("result".into(), run_result(result.as_ref()));
     out.insert("last_seq".into(), json!(last_seq(view)));
+    // The run-wide list the next node dispatch composes first: the latest
+    // accepted `set-run-node-sets`, which replaces the launch's list — an empty
+    // replacement included — and the launch's where no edit has.
+    let run_node_sets = view
+        .state
+        .run_node_sets
+        .as_ref()
+        .unwrap_or(&view.launch.node_sets);
+    if !run_node_sets.is_empty() {
+        out.insert("run_node_sets".into(), json!(run_node_sets));
+    }
     Some(Value::Object(out))
 }
 

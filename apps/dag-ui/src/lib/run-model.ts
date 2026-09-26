@@ -53,6 +53,21 @@ export function graphOf(detail: RunDetail): GraphState | undefined {
   return detail.graph ?? undefined;
 }
 
+/**
+ * The graph overrides a graph holds: the run-wide list every future node
+ * dispatch composes first, and each plan node's own. Absent on the wire is the
+ * empty list, which is what the engine reads it as.
+ */
+export function currentOverrides(graph: GraphState): {
+  readonly run: readonly string[];
+  readonly nodes: ReadonlyMap<string, readonly string[]>;
+} {
+  return {
+    run: graph.run_node_sets ?? [],
+    nodes: new Map(graph.plan.tasks.map((task) => [task.id, task.sets ?? []])),
+  };
+}
+
 export function nodeViews(detail: RunDetail): NodeView[] {
   const graph = graphOf(detail);
   if (!graph) return [];

@@ -141,7 +141,7 @@ async function settleMotion(page: Page): Promise<void> {
  * says how to find a capture in the directory. The index below splits the same two
  * halves back apart — the surface is the screen, the viewport is the toggle — which
  * is what makes the gallery one card per screen you toggle through its five widths
- * rather than sixty-five unrelated cards.
+ * rather than one unrelated card per shot.
  */
 const fileName = (surface: Surface, size: Viewport): string =>
   `${surface.name}-${size.name}.png`;
@@ -196,6 +196,9 @@ const SETTLE_POLL_MS = 250;
 async function settleReads(page: Page): Promise<void> {
   await page.waitForFunction(
     (needed: number) => {
+      // Two properties this function parks on the page's own `window` between
+      // polls; the DOM's `Window` type declares neither, and this code runs in
+      // the browser, where no declaration of this file's can reach it.
       const held = window as unknown as {
         __capturePrint?: string;
         __captureQuiet?: number;
@@ -437,6 +440,34 @@ const SURFACES: readonly Surface[] = [
         page.getByRole("region", { name: "Channel queue" }),
       ).toContainText("Replies");
       await expect(page.getByRole("region", { name: "Reply" })).toBeVisible();
+    },
+  },
+  {
+    name: "14-channel-graph-overrides",
+    title: "The composer editing a node's graph overrides as an ordered list",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().supervised}&view=channel`);
+      await settleReads(page);
+      const composer = page.getByRole("region", { name: "Reply" });
+      await composer.getByLabel("Shortcut").selectOption("set-node-sets");
+      await composer.getByLabel("Node id").fill("build");
+      const list = composer.getByRole("group", {
+        name: "Node overrides, in order",
+      });
+      // Two rows, so the reorder controls read in both states, and the longest
+      // entry a reader types: a config path the row has to wrap or truncate.
+      for (const entry of [
+        "members.worker.agent.oneharness_config=./configs/worker-large.toml",
+        "members.worker.agent.model=claude-opus",
+      ]) {
+        await list.getByRole("button", { name: "Add override" }).click();
+        await list.getByRole("textbox").last().fill(entry);
+      }
+      await composer.getByRole("button", { name: "Compose envelope" }).click();
+      await list.scrollIntoViewIfNeeded();
+      await expect(
+        list.getByRole("button", { name: "Move override 2 up" }),
+      ).toBeEnabled();
     },
   },
 ];

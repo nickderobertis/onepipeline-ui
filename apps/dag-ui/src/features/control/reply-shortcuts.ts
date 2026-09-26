@@ -58,6 +58,17 @@ export interface ShortcutFields {
   readonly blocking?: boolean;
   /** A node mapping or an amendment, as the JSON a person typed. */
   readonly json?: string;
+  /**
+   * A node's ordered replacement list of graph overrides, one `PATH=VALUE` entry
+   * each, in the order the engine applies them. Empty is a list too: it clears.
+   */
+  readonly sets?: readonly string[];
+  /**
+   * The run-wide replacement list, on the same terms. A field of its own rather
+   * than `sets`, so a node's list being edited is never carried into the edit of
+   * every node's, or back.
+   */
+  readonly runSets?: readonly string[];
 }
 
 /**
@@ -77,6 +88,8 @@ export const SHORTCUT_FIELDS: Readonly<
   retry: ["id", "json"],
   cancel: ["id", "reason"],
   requeue: ["id", "json"],
+  "set-node-sets": ["id", "sets"],
+  "set-run-node-sets": ["runSets"],
   attest: ["reference"],
   complete: ["reason"],
   amend: ["id", "text"],
@@ -186,6 +199,21 @@ function draftCommand(
       if (op === "add") return { command: { op, node: parsed } };
       if (op === "retry") return { command: { op, id, node: parsed } };
       return { command: { op, id, ...optional("amend", parsed) } };
+    }
+    case "set-node-sets":
+    case "set-run-node-sets": {
+      // The whole replacement list, in order and as typed: an entry is the
+      // engine's to read, so none is trimmed, reordered or dropped here — and a
+      // blank one is refused by position rather than sent to be refused there.
+      const sets = [
+        ...((op === "set-node-sets" ? fields.sets : fields.runSets) ?? []),
+      ];
+      const blank = sets.findIndex((entry) => entry.trim().length === 0);
+      if (blank >= 0)
+        return { problem: `sets.${blank}: an override needs a PATH=VALUE` };
+      return op === "set-node-sets"
+        ? { command: { op, id, sets } }
+        : { command: { op, sets } };
     }
     case "drop":
       return { command: { op, id, dependents: text("dependents") } };

@@ -155,7 +155,7 @@ onemessagebus = "0.9.0"
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
-onepipeline = "=0.45.0"
+onepipeline = "=0.47.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -189,6 +189,12 @@ libc = "0.2"
 # dependency above, which the crate now links in its own right.
 onevcs = "0.32.0"
 predicates = "3"
+# The drift gate on the browser's copy of the reply envelope's commands reads
+# each op's fields off the engine's own `Command` through the schema that type
+# derives, so the copy is held to the declaration rather than to a second
+# reading of the engine's prose. Held at the major `onepipeline` resolves, so
+# the tree links one version of it.
+schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
 # `tests/packaging.rs` and by the journeys that drive the probe over every
