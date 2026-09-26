@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.13.0...v0.14.0) - 2026-09-26
+
+### Added
+
+- *(deps)* [**breaking**] announce the break linking onepipeline 0.47.0 makes ([#115](https://github.com/nickderobertis/onepipeline-ui/pull/115))
+- *(deps)* relink the read API for live graph overrides ([#113](https://github.com/nickderobertis/onepipeline-ui/pull/113))
+
 ## [0.13.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.12.1...v0.13.0) - 2026-09-25
 
 ### Added
