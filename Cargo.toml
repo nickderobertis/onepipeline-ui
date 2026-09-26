@@ -143,7 +143,8 @@ onejudge = "0.14.0"
 # reconciles the edges the lockfile records.
 onemessagebus = "0.9.0"
 # This crate's own public surface is made of this library's types:
-# `error::ApiError::from_engine` takes an `onepipeline::Error`,
+# `error::ApiError::from_engine` and `from_engine_unscoped` take an
+# `onepipeline::Error`,
 # `filter::EventFilter::to_engine` returns an `onepipeline::filter::EventFilter`,
 # `payload::status` takes an `onepipeline::verbs::RunStatus`, and
 # `telemetry::of_run` takes an `onepipeline::views::RunView`. A consumer naming
