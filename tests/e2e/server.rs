@@ -25,6 +25,7 @@ use onepipeline_ui::telemetry;
 use crate::fixture_run;
 use crate::harness_history;
 use crate::http;
+use crate::scratch_repo;
 use crate::serving::Serving;
 #[cfg(unix)]
 use crate::serving::Stop;
@@ -12510,6 +12511,35 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
     standin
 }
 
+/// A harness stand-in that also does a dispatch's work: it commits one file in
+/// the directory it is run in, which for a lifecycle node is the worktree its
+/// session was cut into, so the node has something to publish.
+///
+/// Still the one process a journey stands in for — the commit is what a real
+/// harness's agent leaves behind, and everything that finds it there, publishes
+/// it and records where is the engine and `onevcs` doing their own work.
+#[cfg(unix)]
+fn write_committing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("committing-harness");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\n\
+             printf 'the dispatch wrote this\\n' > work.txt\n\
+             git add work.txt && git commit -q -m 'feat: the dispatch work' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            log.display().to_string()
+        ),
+    )
+    .expect("the committing harness stand-in");
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod the committing harness stand-in");
+    standin
+}
+
 /// A oneharness config chain: `child.toml` names no harness of its own and
 /// declares `parent.toml`, which names the one — and points it at the stand-in.
 ///
@@ -12630,6 +12660,139 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
     assert!(
         ran.contains("Do the work the graph dispatches."),
         "the harness was not given this node's task: {ran}"
+    );
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names` above, plus `git`,
+// which every checkout of this repository already has: the session is cut by the linked
+// `onevcs` over a scratch repository the journey seeds in its own workspace, and the
+// whole journey settles in seconds.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repo = scratch_repo::seed(&dir);
+    let log = dir.join("harness.log");
+    let standin = write_committing_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::DISPATCH_NODE_ID;
+    fixture_run::write_awaiting_session(
+        &root,
+        run,
+        &dir,
+        &graph,
+        &repo.alias,
+        scratch_repo::BASE_BRANCH,
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            (
+                scratch_repo::GIT_CONFIG_ENV,
+                &repo.gitconfig.display().to_string(),
+            ),
+            // `onevcs`'s shipped default rather than whatever this host prefixes
+            // its branches with: the prefix is that library's, and what this
+            // journey asks about is the name the engine proposed under it.
+            (onevcs::branches::PREFIX_ENV, ""),
+        ],
+    );
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    // The adopted driver opened the node's session, the stand-in committed onto
+    // it, and the lifecycle published it onto the scratch origin: every step the
+    // engine's and `onevcs`'s own, read back off the run's served detail.
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    eventually("the adopted run's node settled", || {
+        matches!(
+            detail()["graph"]["node_status"][node].as_str(),
+            Some("done" | "failed")
+        )
+    });
+    let detail = detail();
+    assert_eq!(
+        detail["graph"]["node_status"][node],
+        json!("done"),
+        "{}",
+        detail["graph"]
+    );
+    assert!(
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("committing-harness")),
+        "the node settled without the harness running"
+    );
+
+    // What the linked engine renders for this run's own plan and node, asked of
+    // the engine's own renderer over the template the launch retained: the plan
+    // names no task key, so the name carries the plan's name and the node's id.
+    let rendered = onepipeline::branchname::render(
+        onepipeline::branchname::DEFAULT_TEMPLATE,
+        &json!({
+            "task": { "id": "", "title": "", "delivers": [] },
+            "plan": { "name": fixture_run::SESSION_PLAN_NAME, "id": fixture_run::PLAN_PROJECT },
+            "node": { "id": node },
+            "run": run,
+        }),
+    )
+    .expect("the engine's default template renders over this plan");
+    assert!(
+        rendered.contains(fixture_run::SESSION_PLAN_NAME) && rendered.contains(node),
+        "the engine rendered a name carrying neither the plan nor the node: {rendered}"
+    );
+    // And not the name `onevcs` derives when it is handed none — `onevcs/<session
+    // token>`, which is the branch every engine before the template cut here.
+    assert!(!rendered.starts_with("onevcs/"), "{rendered}");
+
+    // The branch the served node detail names, both where the engine's fold
+    // records it and where the node's publication evidence reads it from.
+    assert_eq!(
+        detail["graph"]["node_results"][node]["branch"],
+        json!(rendered),
+        "{}",
+        detail["graph"]
+    );
+    assert_eq!(
+        detail["node_details"][node]["publication"]["branch"],
+        json!(rendered),
+        "{}",
+        detail["node_details"]
+    );
+
+    // And the branch the timeline route serves for the node's publication, which
+    // is the one the `session-opened` `onevcs` relayed names.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let publications: Vec<&Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == json!("publication") && span["node_id"] == json!(node))
+        .collect();
+    assert_eq!(publications.len(), 1, "{timeline}");
+    assert_eq!(publications[0]["label"], json!(rendered), "{timeline}");
+    assert!(
+        events_on(&timeline).iter().any(
+            |event| event["kind"] == json!("session-opened") && event["node_id"] == json!(node)
+        ),
+        "the timeline lists no session-opened for the node: {timeline}"
     );
     drop(driver);
     serving.stop_on(Stop::Terminate);
