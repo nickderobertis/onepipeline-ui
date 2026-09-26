@@ -25,6 +25,9 @@ use onepipeline_ui::telemetry;
 use crate::fixture_run;
 use crate::harness_history;
 use crate::http;
+// Its one caller is the `cfg(unix)` journey that lets an adopted dispatch cut a
+// real session, so it is gated with that journey, as `Stop` is below.
+#[cfg(unix)]
 use crate::scratch_repo;
 use crate::serving::Serving;
 #[cfg(unix)]
