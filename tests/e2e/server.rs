@@ -12535,7 +12535,9 @@ fn write_committing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
         ),
     )
     .expect("the committing harness stand-in");
-    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o755))
+    // Owner-only: the one process that runs it is the dispatch this journey's own
+    // server starts, as this user.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
         .expect("chmod the committing harness stand-in");
     standin
 }
@@ -12678,6 +12680,12 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
     let dir = workspace.path().to_path_buf();
     let repo = scratch_repo::seed(&dir);
     let log = dir.join("harness.log");
+    // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
+    // journey stands in for, on the terms `write_harness_standin` states: a real one
+    // bills a model call and answers differently on each run. Everything the branch
+    // under test passes through — the adopt route, the retained driver, the engine's
+    // executor and graph run, and the linked `onevcs` cutting the session over real
+    // git — is real, and the stand-in only commits the work a real agent would leave.
     let standin = write_committing_harness_standin(&dir, &log);
     write_extending_config(&dir, &standin);
     let graph = write_node_scope_graph(&dir);
