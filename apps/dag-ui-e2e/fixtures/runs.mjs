@@ -92,9 +92,10 @@ export const ELSEWHERE_RUN = "dag-ui-elsewhere";
 /**
  * A run the acting session owns whose driver is proved gone — recorded on **this**
  * host under a pid nothing can be holding — so the engine reads it as one nothing
- * is driving and an adoption may take it over. Its whole graph is one human
- * action, which is what lets the adopted driver settle it and let go without a
- * harness or a model.
+ * is driving and an adoption may take it over. Its graph is one human action
+ * with two agent nodes behind it: the first adoption settles the action as
+ * waiting and lets go with nothing dispatched, and the one after the attestation
+ * dispatches the agent nodes, each to a harness stand-in rather than a model.
  */
 export const ADOPTABLE_RUN = "dag-ui-adoptable";
 /** The human action that run holds, which the driver settles as waiting. */
@@ -2400,17 +2401,18 @@ function writeElsewhereRun(root) {
 }
 
 /**
- * A run nothing is driving, owned by the acting session, whose whole graph is one
- * human action: what the adopt journey takes over, and what the attest journey
- * then clears.
+ * A run nothing is driving, owned by the acting session, whose graph is one human
+ * action and the two agent nodes it gates: what the adopt journey takes over and
+ * the attest journey clears, and what the graph-override journey then edits and
+ * adopts again, so that its agent nodes dispatch.
  *
  * Its launch record is the one the engine itself writes for a run being driven,
  * and its driver is proved gone rather than unknown: recorded on this host, under
  * a pid above the kernel's maximum on every platform this runs on, so the
  * engine's own liveness reads `DRIVER DEAD` and an adoption is offered. The
  * adopted driver is this repository's own binary at the engine's driver verb; it
- * needs the run's working directory and a node graph the record names, which is
- * why both are written even though this graph dispatches nothing.
+ * needs the run's working directory and the node graph the record names, over
+ * which the second adoption dispatches the agent nodes.
  */
 function writeAdoptableRun(root, workspace) {
   const run = { run_id: ADOPTABLE_RUN };

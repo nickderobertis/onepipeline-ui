@@ -141,7 +141,7 @@ async function settleMotion(page: Page): Promise<void> {
  * says how to find a capture in the directory. The index below splits the same two
  * halves back apart — the surface is the screen, the viewport is the toggle — which
  * is what makes the gallery one card per screen you toggle through its five widths
- * rather than seventy unrelated cards.
+ * rather than one unrelated card per shot.
  */
 const fileName = (surface: Surface, size: Viewport): string =>
   `${surface.name}-${size.name}.png`;

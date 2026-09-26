@@ -63,14 +63,14 @@ a panel clipped at one width is invisible to an assertion nobody wrote — and t
 the pictures `README.md` carries, which is the only way somebody deciding whether to
 install this can see the product.
 
-Fourteen surfaces at five viewports, seventy shots. The surface list is
+Every surface at every viewport, one shot each. The surface list is
 `SURFACES`, the matrix is `viewports.ts`, and `docs/dag-ui.md` tabulates both with
 what each one shows; `apps/dag-ui/src/test/dag-ui-doc.test.ts` reconciles the tables
 with the declarations, so a surface or a width can reach neither list without
 reaching the other. Each surface is photographed only once its real reads have landed
 — never mid-skeleton — which is what makes a capture worth looking at.
 
-The README carries a handful of them rather than all seventy: the overall view as
+The README carries a handful of them rather than all of them: the overall view as
 the hero, the graph, a node's detail, a conversation, the project list and a project
 page, the channel, and one phone-width shot. A screen that would say less than the
 prose beside it is left to the gallery.
