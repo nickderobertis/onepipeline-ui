@@ -1593,14 +1593,19 @@ button.graph-row-name {
   list-style: none;
 }
 
+/* The entry takes the row and the three controls sit at its end; where the column
+   is too narrow for a readable entry beside them, the entry keeps a line of its own
+   and the controls wrap beneath it rather than squeezing it to a few characters. */
 .sets-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
 }
 
 .sets-entry {
+  flex: 1 1 14rem;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;

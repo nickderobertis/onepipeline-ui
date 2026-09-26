@@ -682,6 +682,7 @@ being photographed.
 | `11-project-list` | the projects the app opens on, the `(no project)` group among them |
 | `12-project-page` | a project's page: its runs, newest activity first |
 | `13-channel` | the channel: the queue, the composer and the surface form |
+| `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
