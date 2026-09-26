@@ -196,6 +196,9 @@ const SETTLE_POLL_MS = 250;
 async function settleReads(page: Page): Promise<void> {
   await page.waitForFunction(
     (needed: number) => {
+      // Two properties this function parks on the page's own `window` between
+      // polls; the DOM's `Window` type declares neither, and this code runs in
+      // the browser, where no declaration of this file's can reach it.
       const held = window as unknown as {
         __capturePrint?: string;
         __captureQuiet?: number;
