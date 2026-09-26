@@ -249,7 +249,7 @@ export const API_V2_FILTER_PROFILES = {
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 20;
+export const TELEMETRY_SCHEMA_VERSION = 21;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -715,6 +715,14 @@ export const stackBaseSchema = openObject({
   pr_base: z.string().min(1).optional(),
 });
 /**
+ * A node's ordered graph overrides, each a `PATH=VALUE` entry in oneagentgraph's
+ * dotted-path grammar. The engine composes them after the run-wide list, so the
+ * last entry for a path wins, and it is the engine that reads each entry: this is
+ * the list's shape, never a second reading of the grammar.
+ */
+export const nodeSetsSchema = z.array(z.string());
+
+/**
  * One top-level plan node. `task` is optional because one legal node shape has never
  * had it: a lifecycle node that delegates to `steps` carries its prose on each step
  * instead, and so carries no `persona` either. The refinement below holds every other
@@ -740,6 +748,12 @@ export const planTaskSchema = planStepSchema
     execution_checkout: z.string().min(1).optional(),
     stack_bases: z.array(stackBaseSchema).optional(),
     resume: planTaskResumeSchema.optional(),
+    /**
+     * The node's ordered graph overrides; absent is `[]`. A node, never a step:
+     * the engine declares no `sets` on a step. An explicit `[]` is kept as
+     * written, which is how an `add` or a `retry` says the node carries none.
+     */
+    sets: nodeSetsSchema.optional(),
   })
   .superRefine((task, context) => {
     if (task.steps === undefined && task.task === undefined) {
@@ -962,6 +976,12 @@ export const graphStateSchema = openObject({
   attestations: z.array(z.string()),
   result: graphPayloadSchema.nullable(),
   last_seq: counter,
+  /**
+   * The run-wide overrides every future node dispatch composes before a node's
+   * own `sets`: the latest accepted `set-run-node-sets`, or the launch's list.
+   * Absent is `[]` — a cleared list and one nobody set read the same.
+   */
+  run_node_sets: nodeSetsSchema.optional(),
 }).superRefine((graph, context) => {
   const taskIds = new Set(graph.plan.tasks.map((task) => task.id));
   const statusIds = new Set(Object.keys(graph.node_status));
@@ -1666,6 +1686,16 @@ export const dropDependentsSchema = z.enum(["detach", "drop"]);
 export const settleOutcomeSchema = z.enum(["done", "failed"]);
 
 /**
+ * The partial node a `requeue` merges onto a parked node before it is
+ * redispatched. Open, because any node field may be amended; typed where the
+ * field is one this client reads, so an amendment replacing the node's `sets` —
+ * `[]` included, which clears them — is held to the list's shape.
+ */
+export const requeueAmendSchema = openObject({
+  sets: nodeSetsSchema.optional(),
+});
+
+/**
  * One graph edit, discriminated on `op`, with exactly the required fields the
  * engine's `Command` declares. Every object is closed: the engine refuses a field
  * it does not declare by name, and a composer that let one through would be
@@ -1705,7 +1735,20 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
     .object({
       op: z.literal("requeue"),
       id: z.string().min(1),
-      amend: arbitraryRecord.optional(),
+      amend: requeueAmendSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("set-node-sets"),
+      id: z.string().min(1),
+      sets: nodeSetsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("set-run-node-sets"),
+      sets: nodeSetsSchema,
     })
     .strict(),
   z.object({ op: z.literal("attest"), ref: z.string().min(1) }).strict(),

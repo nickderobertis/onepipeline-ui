@@ -31,7 +31,7 @@ configure({ asyncUtilTimeout: 10_000 });
 
 const envelope = {
   api_version: 2,
-  telemetry_schema_version: 20,
+  telemetry_schema_version: 21,
   observed_at: "2026-07-26T12:00:00Z",
 };
 

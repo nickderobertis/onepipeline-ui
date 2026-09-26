@@ -1,0 +1,115 @@
+{
+  "reply_envelope_version": 3,
+  "commands": {
+    "set-node-sets": {
+      "required": [
+        "id",
+        "sets"
+      ],
+      "optional": []
+    },
+    "set-run-node-sets": {
+      "required": [
+        "sets"
+      ],
+      "optional": []
+    },
+    "add": {
+      "required": [
+        "node"
+      ],
+      "optional": []
+    },
+    "drop": {
+      "required": [
+        "dependents",
+        "id"
+      ],
+      "optional": []
+    },
+    "reparent": {
+      "required": [
+        "deps",
+        "id"
+      ],
+      "optional": []
+    },
+    "retry": {
+      "required": [
+        "id",
+        "node"
+      ],
+      "optional": []
+    },
+    "cancel": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "reason"
+      ]
+    },
+    "requeue": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "amend"
+      ]
+    },
+    "attest": {
+      "required": [
+        "ref"
+      ],
+      "optional": []
+    },
+    "complete": {
+      "required": [
+        "reason"
+      ],
+      "optional": []
+    },
+    "amend": {
+      "required": [
+        "id",
+        "text"
+      ],
+      "optional": []
+    },
+    "note": {
+      "required": [
+        "addressee",
+        "id",
+        "text"
+      ],
+      "optional": [
+        "criterion",
+        "deliver",
+        "persist"
+      ]
+    },
+    "finding": {
+      "required": [
+        "message"
+      ],
+      "optional": [
+        "blocking",
+        "id"
+      ]
+    },
+    "settle": {
+      "required": [
+        "evidence",
+        "id",
+        "outcome"
+      ],
+      "optional": [
+        "landing",
+        "release"
+      ]
+    }
+  },
+  "node_list_fields": [
+    "sets"
+  ]
+}

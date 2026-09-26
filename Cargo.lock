@@ -1314,6 +1314,7 @@ dependencies = [
  "onepipeline",
  "onevcs",
  "predicates",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",

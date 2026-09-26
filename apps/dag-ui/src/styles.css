@@ -1560,6 +1560,58 @@ button.graph-row-name {
   gap: 10px;
 }
 
+.sets-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.sets-editor legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sets-hint,
+.sets-empty,
+.sets-current {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.sets-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sets-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+  align-items: center;
+  gap: 2px;
+}
+
+.sets-entry {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sets-served {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
 .composer-problem {
   margin: 0;
   color: var(--destructive);

@@ -21,6 +21,7 @@ import {
   REPLY_OPS,
   renderedRootSchema,
   renderedRunSchema,
+  replyCommandSchema,
   replyEnvelopeSchema,
   replyReceiptSchema,
   runConversationsSchema,
@@ -944,6 +945,8 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "retry",
     "cancel",
     "requeue",
+    "set-node-sets",
+    "set-run-node-sets",
     "attest",
     "complete",
     "amend",
@@ -993,4 +996,127 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("the model's reply commands are the engine's, op for op and field for field", async () => {
+  // `tests/contract.rs` pins this golden to the fields the engine's own
+  // `channel::Command` declares; this half holds the browser's copy to it, so an
+  // op or a field on one side alone fails one of the two.
+  const engine = z
+    .object({
+      reply_envelope_version: z.number(),
+      commands: z.record(
+        z.string(),
+        z.object({
+          required: z.array(z.string()),
+          optional: z.array(z.string()),
+        }),
+      ),
+      node_list_fields: z.array(z.string()),
+    })
+    .parse(await served("reply-commands.json"));
+  expect(REPLY_ENVELOPE_VERSION).toBe(engine.reply_envelope_version);
+  expect([...REPLY_OPS].sort()).toEqual(Object.keys(engine.commands).sort());
+  for (const option of replyCommandSchema.options) {
+    const op = option.shape.op.value;
+    const fields = Object.entries(option.shape).filter(([key]) => key !== "op");
+    const required = fields
+      .filter(([, field]) => !field.safeParse(undefined).success)
+      .map(([key]) => key)
+      .sort();
+    const optional = fields
+      .filter(([, field]) => field.safeParse(undefined).success)
+      .map(([key]) => key)
+      .sort();
+    expect({ op, required, optional }).toEqual({ op, ...engine.commands[op] });
+  }
+  // A node's list fields are ones the plan task declares, a list and optional.
+  for (const field of engine.node_list_fields) {
+    const shape: Record<string, z.ZodType> = planTaskSchema.shape;
+    expect(shape[field]?.safeParse(undefined).success).toBe(true);
+    expect(shape[field]?.safeParse(["a=1"]).success).toBe(true);
+    expect(shape[field]?.safeParse("a=1").success).toBe(false);
+  }
+});
+
+test("a node's graph overrides are kept as written, in order, through every command that carries a node", () => {
+  const sets = [
+    "members.worker.agent.model=large",
+    "members.worker.agent.model=small",
+  ];
+  const node = {
+    id: "build",
+    persona: "engineer",
+    task: "## What\nbuild",
+    sets,
+  };
+  // `add` and `retry` carry a whole node, `sets` and an explicit `[]` alike.
+  const parsed = replyEnvelopeSchema.parse({
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      { op: "add", node },
+      { op: "retry", id: "build", node: { ...node, id: "build-2", sets: [] } },
+      { op: "requeue", id: "parked", amend: { sets: [] } },
+      { op: "requeue", id: "parked", amend: { sets, max_turns: 3 } },
+      { op: "set-node-sets", id: "build", sets },
+      { op: "set-node-sets", id: "build", sets: [] },
+      { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },
+      { op: "set-run-node-sets", sets: [] },
+    ],
+  });
+  expect(parsed.commands).toEqual([
+    { op: "add", node },
+    { op: "retry", id: "build", node: { ...node, id: "build-2", sets: [] } },
+    { op: "requeue", id: "parked", amend: { sets: [] } },
+    { op: "requeue", id: "parked", amend: { sets, max_turns: 3 } },
+    { op: "set-node-sets", id: "build", sets },
+    { op: "set-node-sets", id: "build", sets: [] },
+    { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },
+    { op: "set-run-node-sets", sets: [] },
+  ]);
+  // Each replacement names its whole list: an absent one is not a clear, and
+  // a node edit names its node.
+  for (const command of [
+    { op: "set-node-sets", id: "build" },
+    { op: "set-node-sets", sets: [] },
+    { op: "set-node-sets", id: "", sets: [] },
+    { op: "set-run-node-sets" },
+    { op: "set-run-node-sets", sets: "members.worker.agent.model=run" },
+    { op: "set-run-node-sets", sets: [], id: "build" },
+    { op: "requeue", id: "parked", amend: { sets: "a=1" } },
+    { op: "add", node: { ...node, sets: [1] } },
+  ]) {
+    expect(
+      replyEnvelopeSchema.safeParse({
+        version: REPLY_ENVELOPE_VERSION,
+        commands: [command],
+      }).success,
+      JSON.stringify(command),
+    ).toBe(false);
+  }
+});
+
+test("the graph serves a node's overrides and the run-wide list, and absent reads as none", async () => {
+  const golden = await served("run.json");
+  const graph = graphStateSchema.parse(golden.graph);
+  const node = graph.plan.tasks.find(
+    (task) => task.id === "contract-interface",
+  );
+  expect(node?.sets).toEqual([
+    "members.worker.agent.model=large",
+    "members.worker.agent.oneharness_config=./worker.toml",
+  ]);
+  expect(
+    graph.plan.tasks.find((task) => task.id === "review")?.sets,
+  ).toBeUndefined();
+  expect(graph.run_node_sets).toBeUndefined();
+  const edited = graphStateSchema.parse({
+    ...golden.graph,
+    run_node_sets: ["members.worker.agent.model=run"],
+  });
+  expect(edited.run_node_sets).toEqual(["members.worker.agent.model=run"]);
+  expect(
+    graphStateSchema.safeParse({ ...golden.graph, run_node_sets: "a=1" })
+      .success,
+  ).toBe(false);
 });

@@ -21,7 +21,7 @@ import { Outcome } from "../../lib/Outcome";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
-import { ReplyComposer } from "./ReplyComposer";
+import { type CurrentOverrides, ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
 import { useVerb, type Verb } from "./useVerb";
 
@@ -45,6 +45,7 @@ export function ChannelView({
   decisions,
   observedAt,
   invalidations,
+  overrides,
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
@@ -54,6 +55,8 @@ export function ChannelView({
   /** When the graph was read, so a surface's age is against the payload's clock. */
   readonly observedAt: string;
   readonly invalidations: number;
+  /** The graph overrides the run holds now, which the composer offers to load. */
+  readonly overrides?: CurrentOverrides;
 }) {
   const { queue, wrote } = useChannelQueue(client, runId, invalidations);
   const next = useVerb(
@@ -108,7 +111,12 @@ export function ChannelView({
           onWrote={wrote}
           runId={runId}
         />
-        <ReplyComposer client={client} onSent={wrote} runId={runId} />
+        <ReplyComposer
+          client={client}
+          onSent={wrote}
+          overrides={overrides}
+          runId={runId}
+        />
         <SurfaceForm client={client} onRaised={wrote} runId={runId} />
       </div>
     </ScrollArea>

@@ -323,6 +323,11 @@ pub const HUMAN_RELEASE_ACTION: &str = "publish the npm wrapper from the tagged 
 pub const NODE_ID: &str = "contract-interface";
 /// The node that depends on it.
 pub const REVIEW_NODE_ID: &str = "review";
+/// The ordered graph overrides [`NODE_ID`]'s plan declares for its dispatches.
+pub const NODE_SETS: [&str; 2] = [
+    "members.worker.agent.model=large",
+    "members.worker.agent.oneharness_config=./worker.toml",
+];
 /// The lifecycle node of the live run, which runs steps on one branch.
 pub const SHIP_NODE_ID: &str = "ship";
 /// The live run's human action, which nothing but a person can finish.
@@ -696,7 +701,9 @@ pub fn write_in_project(root: &Path, run: &str, project: Option<&str>) -> PathBu
 /// The plan the run executed.
 fn plan() -> Value {
     json!({
-        "schema_version": 2,
+        // Schema 3, because that is where a node's `sets` begins: the engine
+        // refuses the field by name in any earlier plan.
+        "schema_version": 3,
         "goal": { "text": "serve the read contract" },
         "name": "contract",
         "concurrency": 4,
@@ -705,6 +712,7 @@ fn plan() -> Value {
                 "id": NODE_ID,
                 "persona": "worker",
                 "task": "## What\nLand the wire contract.",
+                "sets": NODE_SETS,
             },
             {
                 "id": REVIEW_NODE_ID,

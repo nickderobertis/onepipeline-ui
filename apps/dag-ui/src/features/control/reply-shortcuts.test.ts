@@ -41,6 +41,13 @@ describe("reply shortcuts", () => {
         id: "docs",
         json: '{"max_turns":3}',
       }),
+      "set-node-sets": composeEnvelope("set-node-sets", {
+        id: "docs",
+        sets: ["members.worker.agent.model=small"],
+      }),
+      "set-run-node-sets": composeEnvelope("set-run-node-sets", {
+        sets: ["members.worker.agent.model=run"],
+      }),
       attest: composeEnvelope("attest", { reference: "signoff" }),
       complete: composeEnvelope("complete", { reason: "everything landed" }),
       amend: composeEnvelope("amend", { id: "docs", text: "the bar is p99" }),
@@ -91,6 +98,91 @@ describe("reply shortcuts", () => {
           !["approve", "reject", "continue"].includes(s),
       ).sort(),
     );
+  });
+
+  test("a graph-override edit sends its whole list in order, and an empty list as `[]`", () => {
+    const sets = [
+      "members.worker.agent.oneharness_config=./b.toml",
+      "members.worker.agent.model=a b, c=d",
+    ];
+    const node = composeEnvelope("set-node-sets", { id: "docs", sets });
+    expect("envelope" in node && node.envelope.commands).toEqual([
+      { op: "set-node-sets", id: "docs", sets },
+    ]);
+    // Cleared, a list is still named: absent would not replace anything.
+    for (const [shortcut, fields, command] of [
+      [
+        "set-node-sets",
+        { id: "docs" },
+        { op: "set-node-sets", id: "docs", sets: [] },
+      ],
+      ["set-node-sets", { id: "docs", sets: [] }, undefined],
+      ["set-run-node-sets", {}, { op: "set-run-node-sets", sets: [] }],
+      ["set-run-node-sets", { sets: [] }, undefined],
+    ] as const) {
+      const composed = composeEnvelope(shortcut, fields);
+      expect("bytes" in composed && JSON.parse(composed.bytes)).toEqual({
+        version: REPLY_ENVELOPE_VERSION,
+        commands: [command ?? { op: shortcut, ...fields }],
+      });
+    }
+    // A run-wide edit never carries a node id a stale form still holds.
+    const run = composeEnvelope("set-run-node-sets", {
+      id: "docs",
+      sets: ["members.worker.agent.model=run"],
+    });
+    expect("envelope" in run && run.envelope.commands).toEqual([
+      { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },
+    ]);
+    // `add`, `retry` and `requeue` carry the node's `sets` as typed, `[]` too.
+    for (const [shortcut, fields, command] of [
+      [
+        "add",
+        { json: '{"id":"docs","task":"Write it","sets":[]}' },
+        { op: "add", node: { id: "docs", task: "Write it", sets: [] } },
+      ],
+      [
+        "retry",
+        {
+          id: "docs",
+          json: `{"id":"docs-2","task":"Again","sets":${JSON.stringify(sets)}}`,
+        },
+        {
+          op: "retry",
+          id: "docs",
+          node: { id: "docs-2", task: "Again", sets },
+        },
+      ],
+      [
+        "requeue",
+        { id: "docs", json: '{"sets":[]}' },
+        { op: "requeue", id: "docs", amend: { sets: [] } },
+      ],
+    ] as const) {
+      const composed = composeEnvelope(shortcut, fields);
+      expect("envelope" in composed && composed.envelope.commands).toEqual([
+        command,
+      ]);
+    }
+  });
+
+  test("a graph-override edit that cannot be read says which entry or field", () => {
+    expect(
+      composeEnvelope("set-node-sets", {
+        id: "docs",
+        sets: ["members.worker.agent.model=a", "  "],
+      }),
+    ).toEqual({ problem: "sets.1: an override needs a PATH=VALUE" });
+    expect(
+      composeEnvelope("set-node-sets", {
+        sets: ["members.worker.agent.model=a"],
+      }),
+    ).toMatchObject({ problem: expect.stringMatching(/^commands\.0\.id: /) });
+    expect(
+      composeEnvelope("requeue", { id: "docs", json: '{"sets":"a=1"}' }),
+    ).toMatchObject({
+      problem: expect.stringMatching(/^commands\.0\.amend\.sets: /),
+    });
   });
 
   test("a form that cannot compose an envelope the engine would read says which field", () => {

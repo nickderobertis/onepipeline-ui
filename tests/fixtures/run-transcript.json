@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 20,
+  "telemetry_schema_version": 21,
   "observed_at": "2026-08-07T12:00:00Z",
   "run_id": "run-20260807-a1b2c3",
   "rendered": "run-20260807-a1b2c3  contract-interface\n  turn 1\n    tool_call Read  src/api.rs\n  turn 2\n    tool_call Bash  just gate\n  report worker /a-scratch/report.json\n    user\n      ## What\n      Land the wire contract.\n    assistant\n      Landed the route table; every route answers.\n      tool_call Read  {\"file_path\":\"src/api.rs\"}\n      tool_result   pub fn routes() -> Router { /* … */ }\n    user\n      Run the repository's gate once, end to end.\n    assistant\n      The gate ran green over the finished tree.\n      tool_call Bash  {\"command\":\"just gate\"}\n      tool_result   \n    user\n      One more: say what the contract now serves.\n    assistant\n      It serves the transcript the dispatch really had.\n      tool_call Read  {\"file_path\":\"docs/contract.md\"}\n      tool_result   docs/contract.md: schema 14\n",

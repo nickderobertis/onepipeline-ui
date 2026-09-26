@@ -135,7 +135,17 @@ pub const API_VERSION: u32 = 2;
 /// value; the version moves because a client that has never seen `session_key`
 /// cannot tell this session's runs from another's before it acts on them, and
 /// would name a colleague's run as its own in a confirm.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 20;
+///
+/// **Schema 21 is a run's graph overrides.** A plan task gains `sets`, the
+/// node's ordered `PATH=VALUE` list as the engine's fold holds it after every
+/// accepted `set-node-sets`, and the graph gains `run_node_sets`, the run-wide
+/// list every future node dispatch composes before a node's own — the latest
+/// accepted `set-run-node-sets`, or the launch's list where none was. Both are
+/// omitted when empty. Every field 20 served is served with the same meaning and
+/// the same value; the version moves because a client that has never seen the
+/// lists shows a node about to dispatch under another model or harness config
+/// as one dispatching under the graph as written.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
