@@ -1,6 +1,12 @@
 import { REPLY_ENVELOPE_VERSION } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
-import { composeEnvelope, SHORTCUT_FIELDS, SHORTCUTS } from "./reply-shortcuts";
+import {
+  composeEnvelope,
+  SHORTCUT_FIELDS,
+  SHORTCUTS,
+  type Shortcut,
+  type ShortcutFields,
+} from "./reply-shortcuts";
 
 describe("reply shortcuts", () => {
   test("a verdict is the legacy half and names no version", () => {
@@ -110,7 +116,7 @@ describe("reply shortcuts", () => {
       { op: "set-node-sets", id: "docs", sets },
     ]);
     // Cleared, a list is still named: absent would not replace anything.
-    for (const [shortcut, fields, command] of [
+    const cleared: readonly (readonly [Shortcut, ShortcutFields, unknown])[] = [
       [
         "set-node-sets",
         { id: "docs" },
@@ -127,7 +133,8 @@ describe("reply shortcuts", () => {
         { runSets: [] },
         { op: "set-run-node-sets", sets: [] },
       ],
-    ] as const) {
+    ];
+    for (const [shortcut, fields, command] of cleared) {
       const composed = composeEnvelope(shortcut, fields);
       expect("bytes" in composed && JSON.parse(composed.bytes)).toEqual({
         version: REPLY_ENVELOPE_VERSION,
@@ -145,7 +152,7 @@ describe("reply shortcuts", () => {
       { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },
     ]);
     // `add`, `retry` and `requeue` carry the node's `sets` as typed, `[]` too.
-    for (const [shortcut, fields, command] of [
+    const carried: readonly (readonly [Shortcut, ShortcutFields, unknown])[] = [
       [
         "add",
         { json: '{"id":"docs","task":"Write it","sets":[]}' },
@@ -168,7 +175,8 @@ describe("reply shortcuts", () => {
         { id: "docs", json: '{"sets":[]}' },
         { op: "requeue", id: "docs", amend: { sets: [] } },
       ],
-    ] as const) {
+    ];
+    for (const [shortcut, fields, command] of carried) {
       const composed = composeEnvelope(shortcut, fields);
       expect("envelope" in composed && composed.envelope.commands).toEqual([
         command,

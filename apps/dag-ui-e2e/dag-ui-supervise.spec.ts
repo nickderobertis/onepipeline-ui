@@ -443,10 +443,11 @@ test("edits the adopted run's graph overrides from the composer, and its next di
   // Each node's own dispatch, opened to its transcript: the node given a list
   // of its own ran under it, over the run-wide entry before it; the cleared node
   // ran under the run-wide list alone; nothing replaced reached either.
-  for (const [node, config] of [
-    [overridden_node, "own"],
-    [cleared_node, "run-wide"],
-  ] as const) {
+  const dispatched: readonly { node: string; config: string }[] = [
+    { node: overridden_node, config: "own" },
+    { node: cleared_node, config: "run-wide" },
+  ];
+  for (const { node, config } of dispatched) {
     await page.goto(`/?run=${run}&node=${node}&tab=agents`);
     const agents = page.getByRole("region", { name: `Agents of ${node}` });
     await agents.getByRole("button", { name: "Open transcript" }).click();

@@ -12748,7 +12748,16 @@ fn graph_override_edits_relayed_by_the_reply_route_decide_the_adopted_runs_next_
     .expect("the node-scope graph");
     let set = |config: &Path| format!("members.worker.oneharness_config={}", config.display());
     let run = fixture_run::RUN_ID;
-    fixture_run::write_awaiting_overrides(&root, run, &dir, &graph, &[&set(&stale)]);
+    // The launch's own run-wide list is the stale one: what every dispatch
+    // composes first until an edit replaces it.
+    fixture_run::write_awaiting_overrides(
+        &root,
+        run,
+        &dir,
+        &graph,
+        &[&set(&stale)],
+        &[&set(&stale)],
+    );
 
     let state = dir.join("state");
     let serving = Serving::start_in_as_with_env(
@@ -12785,6 +12794,13 @@ fn graph_override_edits_relayed_by_the_reply_route_decide_the_adopted_runs_next_
     };
     let graph_of =
         || http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"].clone();
+    // Before any edit the run-wide list served is the launch's, and the node's
+    // own list is the plan's.
+    assert_eq!(
+        graph_of()["run_node_sets"],
+        json!([set(&stale)]),
+        "the launch's list is the run-wide list until an edit replaces it"
+    );
     let task_sets = |graph: &Value, node: &str| {
         graph["plan"]["tasks"]
             .as_array()
