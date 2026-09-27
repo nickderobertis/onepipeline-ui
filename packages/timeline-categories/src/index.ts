@@ -159,6 +159,7 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // `branches` because a word is matched whole: the engine's records of the branches
     // a landed lineage superseded and of the finished ones a sweep retired are about
     // branches as surely as a discovered one is.
+    // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the producer owns the kinds and this package owns the category, which are different facts. `src/index.test.ts` says so where it declares the gate: the category "is not gated and cannot be — which of the eleven a kind reads under is a decision rather than a fact about the producer". These rules are where that decision is made, and `branches` is a word of the rule rather than a kind: it files both of the kinds `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` named when the engine pin moved to the release that declares them.
     ["repository", ["edit", "fetch", "push", "branch", "branches", "commit"]],
     // Both an agent's conversation and a workspace session: each is a unit of work
     // that was opened, ran, and closed, and the reader meets them the same way.

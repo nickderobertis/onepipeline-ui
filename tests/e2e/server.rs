@@ -12511,7 +12511,7 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     .expect("the refusing program");
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&refusing, fs::Permissions::from_mode(0o755))
+        fs::set_permissions(&refusing, fs::Permissions::from_mode(0o700))
             .expect("the refusing program is executable");
     }
     let path = std::env::join_paths(
