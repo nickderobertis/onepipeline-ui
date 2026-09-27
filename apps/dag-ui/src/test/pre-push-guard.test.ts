@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -78,6 +85,41 @@ describe("the pre-push guard on a host with no declared lane", () => {
     expect(stderr).toContain("unsupported arch riscv64");
     expect(status).toBe(1);
   });
+});
+
+describe("the pre-push guard over a screencomp.toml it cannot read lanes from", () => {
+  /** The committed hook, run from a checkout whose screencomp.toml says `config`. */
+  function pushWith(config: string) {
+    const checkout = mkdtempSync(join(hosts, "checkout-"));
+    mkdirSync(join(checkout, ".githooks"));
+    copyFileSync(
+      repoPath(".githooks/pre-push"),
+      join(checkout, ".githooks/pre-push"),
+    );
+    writeFileSync(join(checkout, "screencomp.toml"), config);
+    const run = spawnSync("/bin/bash", [".githooks/pre-push"], {
+      cwd: checkout,
+      env: { PATH: hostPath("aarch64") },
+      input: "",
+      encoding: "utf8",
+    });
+    return { status: run.status, stderr: run.stderr };
+  }
+
+  it.each([
+    ["declares no arches at all", "[capture]\n"],
+    ["declares them twice", 'arches = ["x86_64"]\narches = ["arm64"]\n'],
+    ["declares an empty list", "arches = []\n"],
+    ["declares something that is not a lane name", 'arches = ["x86 64/v2"]\n'],
+  ])(
+    "refuses a screencomp.toml that %s, rather than call the host undeclared",
+    (_, config) => {
+      const { status, stderr } = pushWith(`[capture]\n${config}`);
+      expect(stderr).toContain("which is not one list of lane");
+      expect(stderr).not.toContain("has no lane");
+      expect(status).toBe(1);
+    },
+  );
 });
 
 describe("the pre-push guard on a declared lane", () => {

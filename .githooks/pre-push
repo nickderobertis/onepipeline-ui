@@ -68,7 +68,22 @@ CURRENT="shots/current"                    # capture root, mirrors visual-docs.y
 # refusal would make `git push` depend on the hardware while the visual-docs
 # workflow's declared lanes gate the pull request either way. Adding a lane is a CI
 # job on every run, so it is a decision rather than something a push should force.
-LANES="$(sed -n 's/^arches *= *\[\(.*\)\].*/\1/p' screencomp.toml | tr -d '"[:blank:]' | tr ',' '\n')"
+#
+# Validated before it is used: a declaration that is missing, stated twice, or not a
+# list of lane names is this tree's own file being wrong rather than this host being
+# unusual, so it is refused outright. Read leniently it would arrive below as "no lane
+# matches" and send the pusher off to add a lane that is not what is wrong.
+DECLARED_ARCHES="$(grep -cE '^arches *=' screencomp.toml || true)"
+LANES="$(sed -n 's/^arches *= *\[\(.*\)\].*/\1/p' screencomp.toml \
+  | tr -d '"[:blank:]' | tr ',' '\n' | grep -v '^$' || true)"
+if [ "$DECLARED_ARCHES" != 1 ] || [ -z "$LANES" ] ||
+  printf '%s\n' "$LANES" | grep -qvE '^[A-Za-z0-9_]+$'; then
+  echo "pre-push: screencomp.toml states 'arches' on $DECLARED_ARCHES line(s), and the" >&2
+  echo "          lanes read [${LANES//$'\n'/, }] — which is not one list of lane" >&2
+  echo "          names. The guard classifies this host's lane against" >&2
+  echo "          shots/baseline/<lane>.json and cannot pick one out of that." >&2
+  exit 1
+fi
 if ! printf '%s\n' "$LANES" | grep -qxF "$ARCH"; then
   {
     echo "pre-push: this host's architecture ($ARCH) has no lane in [capture].arches"
