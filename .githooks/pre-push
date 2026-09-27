@@ -13,8 +13,9 @@
 # `git add` the baseline, commit, and push again. That is the entire workflow,
 # local-first by design: you own the baseline, so don't wait for CI to handle
 # drift. Don't pre-check your environment either — your CPU arch is auto-detected
-# just below (CI gates its own arch lane; local and CI never need to match) and
-# Docker is checked further down and fails loudly if missing. Just run the loop.
+# just below (CI gates its own arch lane; local and CI never need to match; a host
+# whose arch has no lane is told the guard did not evaluate it) and Docker is
+# checked further down and fails loudly if missing. Just run the loop.
 #
 # This directory carries the screencomp guard and nothing else. `just gate` — this
 # repository's complete pre-push bar — stays unhooked and is run deliberately, exactly
@@ -27,9 +28,25 @@
 # Bypass intentionally:   git push --no-verify
 set -euo pipefail
 
+# `SCREENCOMP_GUARD_REQUIRE` decides which way every ending that could NOT evaluate
+# the push answers — the undeclared-lane one and the missing-CLI one below — so it is
+# read first, before either can be reached, and held to a value it can have:
+# present-means-on would read `SCREENCOMP_GUARD_REQUIRE=0` as "require".
+case "${SCREENCOMP_GUARD_REQUIRE:-0}" in
+  0 | false | no) GUARD_REQUIRE=0 ;;
+  1 | true | yes) GUARD_REQUIRE=1 ;;
+  *)
+    echo "pre-push: SCREENCOMP_GUARD_REQUIRE is '${SCREENCOMP_GUARD_REQUIRE}', which is" >&2
+    echo "          neither 0/false/no nor 1/true/yes. Refusing rather than guessing" >&2
+    echo "          whether this push may go without the guard having evaluated it." >&2
+    exit 1
+    ;;
+esac
+
 # Detect this machine's arch so the same committed hook works for every developer.
-# It must be one of [capture].arches in screencomp.toml; if not, classify below
-# fails with an explanatory error telling you to add it.
+# A CPU with no spelling here is refused outright: that is a host the guard cannot
+# name a lane for, which is a different fact from a lane it knows and has no
+# baseline for (handled below).
 case "$(uname -m)" in
   arm64 | aarch64) ARCH="arm64" ;;
   x86_64 | amd64)  ARCH="x86_64" ;;
@@ -45,6 +62,26 @@ CURRENT="shots/current"                    # capture root, mirrors visual-docs.y
 # No-op under CI: the visual-docs workflow is the source of truth there.
 [ -n "${CI:-}" ] && exit 0
 
+# The lanes `[capture].arches` in screencomp.toml declares — the one place a lane is
+# named. A host whose arch is not among them has no committed baseline, so the guard
+# CANNOT evaluate the push: say so on every push rather than refuse it, because the
+# refusal would make `git push` depend on the hardware while the visual-docs
+# workflow's declared lanes gate the pull request either way. Adding a lane is a CI
+# job on every run, so it is a decision rather than something a push should force.
+LANES="$(sed -n 's/^arches *= *\[\(.*\)\].*/\1/p' screencomp.toml | tr -d '"[:blank:]' | tr ',' '\n')"
+if ! printf '%s\n' "$LANES" | grep -qxF "$ARCH"; then
+  {
+    echo "pre-push: this host's architecture ($ARCH) has no lane in [capture].arches"
+    echo "          of screencomp.toml, so there is no committed baseline to classify"
+    echo "          against and the visual guard did NOT evaluate this push."
+    echo "          Declared: [${LANES//$'\n'/, }]. The visual-docs workflow still"
+    echo "          gates it on the pull request."
+    echo "          Set SCREENCOMP_GUARD_REQUIRE=1 to fail here instead."
+  } >&2
+  [ "$GUARD_REQUIRE" = 1 ] && exit 1
+  exit 0
+fi
+
 # Without the CLI the guard CANNOT evaluate the push, so do NOT skip silently — a
 # strict gate you believe is protecting you but isn't is the worst outcome. Warn
 # loudly and skip; set SCREENCOMP_GUARD_REQUIRE=1 to fail here instead (safest
@@ -56,7 +93,7 @@ if ! command -v screencomp >/dev/null 2>&1; then
     echo "          then enable the hook: git config core.hooksPath .githooks"
     echo "          Set SCREENCOMP_GUARD_REQUIRE=1 to fail here instead."
   } >&2
-  [ -n "${SCREENCOMP_GUARD_REQUIRE:-}" ] && exit 1
+  [ "$GUARD_REQUIRE" = 1 ] && exit 1
   exit 0
 fi
 
