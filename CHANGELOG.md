@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.14.0...v0.15.0) - 2026-09-27
+
+### Added
+
+- *(deps)* [**breaking**] adopt the engine that names a node's branch from a template ([#119](https://github.com/nickderobertis/onepipeline-ui/pull/119))
+
 ## [0.14.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.13.0...v0.14.0) - 2026-09-26
 
 ### Added
