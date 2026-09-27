@@ -62,6 +62,8 @@ mod harness_history;
 mod http;
 #[path = "../support/release_declaration.rs"]
 mod release_declaration;
+#[path = "../support/scratch_repo.rs"]
+mod scratch_repo;
 #[path = "../support/serving.rs"]
 mod serving;
 #[path = "../support/sibling.rs"]

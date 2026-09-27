@@ -5886,6 +5886,54 @@ pub fn write_awaiting_overrides(
     write_awaiting(root, run, dir, node_graph, &plan, launch_sets)
 }
 
+/// The plan name of the run [`write_awaiting_session`] writes: `plan.name` to the
+/// branch-name template that run is launched with.
+pub const SESSION_PLAN_NAME: &str = "readable";
+
+/// A run nothing is driving whose one node is a **lifecycle** node: its task
+/// names `repo` and `base_branch`, so a driver that adopts the run opens a real
+/// `onevcs` session for it before dispatching it over `node_graph`.
+///
+/// Launched as the linked engine launches a run that names no branch-name
+/// template at any layer: its launch record retains the engine's own
+/// [`DEFAULT_TEMPLATE`](onepipeline::branchname::DEFAULT_TEMPLATE) under the
+/// engine's own [`KEY`](onepipeline::branchname::KEY), since a driver renders a
+/// run's branches with the template its launch retained and never resolves one
+/// of its own. Nothing here states what that template says.
+pub fn write_awaiting_session(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    repo: &str,
+    base_branch: &str,
+) -> PathBuf {
+    let plan = json!({
+        "schema_version": 3,
+        "goal": { "text": "cut a branch a person can read" },
+        "name": SESSION_PLAN_NAME,
+        "concurrency": 1,
+        "tasks": [
+            {
+                "id": DISPATCH_NODE_ID,
+                "repo": repo,
+                "base_branch": base_branch,
+                "persona": "engineer",
+                "title": "feat: resolve the config chain",
+                "task": "Do the work the graph dispatches.",
+            },
+        ],
+    });
+    let run_dir = write_awaiting(root, run, dir, node_graph, &plan, &[]);
+    let path = run_dir.join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    launch[onepipeline::branchname::KEY] = json!(onepipeline::branchname::DEFAULT_TEMPLATE);
+    fs::write(&path, pretty(&launch)).expect("the launch record");
+    run_dir
+}
+
 fn write_awaiting(
     root: &Path,
     run: &str,
