@@ -909,9 +909,10 @@ impl fmt::Display for Correlation {
 /// has to be before it is compared against any group.
 ///
 /// The grammar is quoted from `docs/contract.md`, which quotes it from the
-/// decision that fixed this route — onetaskgraph is no dependency of this
-/// crate, and the engine reaches it by subprocess — so the contract text is the
-/// one source, and `tests/contract.rs` holds this copy to it.
+/// decision that fixed this route. onetaskgraph is no direct dependency of this
+/// crate: it arrives only transitively, as the store the linked engine compiles
+/// in, so there is no declaration here to import. The contract text is the one
+/// source, and `tests/contract.rs` holds this copy to it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ProjectId(String);

@@ -1785,10 +1785,11 @@ fn every_engine_refusal_maps_to_the_code_and_status_the_contract_assigns() {
 /// The project id's source grammar is the contract's, and the code's copy is
 /// held to the text.
 ///
-/// onetaskgraph is no dependency of this crate — the engine reaches it by
-/// subprocess — so there is no declaration to import; what there is, is the
-/// grammar the contract quotes, and this reads the code's copy back against it
-/// and drives it at the edges the grammar draws.
+/// onetaskgraph is no direct dependency of this crate — it arrives only
+/// transitively, as the store the linked engine compiles in — so there is no
+/// declaration to import; what there is, is the grammar the contract quotes, and
+/// this reads the code's copy back against it and drives it at the edges the
+/// grammar draws.
 #[test]
 fn the_project_id_grammar_is_the_one_the_contract_quotes() {
     let contract = contract_text();
