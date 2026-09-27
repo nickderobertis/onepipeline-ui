@@ -78,6 +78,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // done — the run's driving ending, like a stop, and no node's work.
   "dispatch-stopped": "lifecycle",
   "host-shutdown": "lifecycle",
+  // What the engine did to branches rather than to a node: the earlier attempts a
+  // landed lineage superseded, and the finished branches a sweep retired.
+  "branches-superseded": "repository",
+  "branches-retired": "repository",
   // `agentgraph` — the members and turns under each node.
   "graph-started": "lifecycle",
   "graph-settled": "lifecycle",

@@ -5834,7 +5834,7 @@ pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &
         "name": "dispatch",
         "concurrency": 1,
         "tasks": [
-            { "id": DISPATCH_NODE_ID, "task": "Do the work the graph dispatches." },
+            { "id": DISPATCH_NODE_ID, "task": criteria_bearing("Do the work the graph dispatches.") },
         ],
     });
     write_awaiting(root, run, dir, node_graph, &plan, &[])
@@ -5873,12 +5873,12 @@ pub fn write_awaiting_overrides(
             {
                 "id": OVERRIDDEN_NODE_ID,
                 "persona": "engineer",
-                "task": "Dispatch under the node's own override.",
+                "task": criteria_bearing("Dispatch under the node's own override."),
             },
             {
                 "id": CLEARED_NODE_ID,
                 "persona": "engineer",
-                "task": "Dispatch under the run-wide override.",
+                "task": criteria_bearing("Dispatch under the run-wide override."),
                 "sets": cleared_sets,
             },
         ],
@@ -5920,7 +5920,7 @@ pub fn write_awaiting_session(
                 "base_branch": base_branch,
                 "persona": "engineer",
                 "title": "feat: resolve the config chain",
-                "task": "Do the work the graph dispatches.",
+                "task": criteria_bearing("Do the work the graph dispatches."),
             },
         ],
     });
@@ -5932,6 +5932,16 @@ pub fn write_awaiting_session(
     launch[onepipeline::branchname::KEY] = json!(onepipeline::branchname::DEFAULT_TEMPLATE);
     fs::write(&path, pretty(&launch)).expect("the launch record");
     run_dir
+}
+
+/// An agent node's task as the engine will adopt it: the prose, then the one
+/// `## Acceptance criteria` section listing a criterion.
+///
+/// The linked engine holds every node an adoption could still dispatch to that
+/// rule (C6b) and refuses the adoption otherwise, so a run whose agent node a
+/// journey adopts states its bar the way every plan the engine launches does.
+fn criteria_bearing(task: &str) -> String {
+    format!("{task}\n\n## Acceptance criteria\n\n- The work is done.\n")
 }
 
 fn write_awaiting(

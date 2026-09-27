@@ -156,7 +156,10 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
         "drafting",
       ],
     ],
-    ["repository", ["edit", "fetch", "push", "branch", "commit"]],
+    // `branches` because a word is matched whole: the engine's records of the branches
+    // a landed lineage superseded and of the finished ones a sweep retired are about
+    // branches as surely as a discovered one is.
+    ["repository", ["edit", "fetch", "push", "branch", "branches", "commit"]],
     // Both an agent's conversation and a workspace session: each is a unit of work
     // that was opened, ran, and closed, and the reader meets them the same way.
     ["session", ["turn", "member", "session", "heartbeat", "conversation"]],

@@ -707,7 +707,7 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
     let replied = enveloped(store.channel_reply(
         &run,
         None,
-        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
     ));
     pin("run-channel-surface.json", surfaced);
     pin("run-channel-next.json", claimed);
