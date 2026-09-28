@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.16.0...v0.16.1) - 2026-09-28
+
+### Fixed
+
+- *(release)* build the Linux wheels now that the engine brings vendored OpenSSL ([#127](https://github.com/nickderobertis/onepipeline-ui/pull/127))
+
 ## [0.16.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.15.0...v0.16.0) - 2026-09-28
 
 ### Added
