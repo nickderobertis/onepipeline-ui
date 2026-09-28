@@ -12672,7 +12672,6 @@ fn an_adoption_of_a_run_whose_undispatched_node_states_no_criteria_is_refused() 
             .any(|event| event["kind"] == json!("driver-adopted")),
         "a refused adoption was journalled: {events:?}"
     );
-    serving.stop_on(Stop::Terminate);
 }
 
 /// The harness stand-in a dispatch here runs: it records the argv it was given
