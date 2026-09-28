@@ -12909,7 +12909,9 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and answers differently on each run. What this journey is about — the released engine's `start` over a real `local-md` store, the adopt route, the retained driver and the executor that dispatches the rendered task — is all real, and the stand-in only records that the dispatch reached it.
     let standin = write_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
     let graph = write_node_scope_graph(&dir);
     let (run, template_root) = launch_rendered_over_local_md_store(&root, &dir, &graph);
