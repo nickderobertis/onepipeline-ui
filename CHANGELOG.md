@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.15.0...v0.16.0) - 2026-09-28
+
+### Added
+
+- *(deps)* [**breaking**] announce the move to onepipeline 0.51.0 as the break it is ([#124](https://github.com/nickderobertis/onepipeline-ui/pull/124))
+- *(deps)* link the engine that reads its plans through the linked onetaskgraph crates ([#123](https://github.com/nickderobertis/onepipeline-ui/pull/123))
+
 ## [0.15.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.14.0...v0.15.0) - 2026-09-27
 
 ### Added
