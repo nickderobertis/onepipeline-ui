@@ -426,6 +426,28 @@ fn the_pull_request_check_builds_the_release_linux_legs_through_the_recipe() {
         block.contains("if: needs.changes.outputs.crate == 'true'"),
         "ci.yml's wheel runs on every pull request that reaches the crate"
     );
+    // What the leg built is installed and smoke-tested, from the directory the
+    // recipe writes to by default — the call above passes no `out`.
+    let justfile = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
+    assert!(
+        justfile.contains("wheel-linux target out=\"dist\":"),
+        "`just wheel-linux` writes to dist/ by default"
+    );
+    let built = block.find("just wheel-linux").expect("the wheel is built");
+    let installed = block
+        .find("bin/pip\" install --no-index dist/*.whl")
+        .expect("ci.yml's wheel installs the wheel it built, and only that");
+    let smoked = block
+        .find("bash scripts/smoke-published.sh")
+        .expect("ci.yml's wheel smoke-tests the installed binary");
+    assert!(
+        built < installed && installed < smoked,
+        "ci.yml's wheel builds, then installs, then smoke-tests"
+    );
+    assert!(
+        block.contains("--expect-version \"$version\""),
+        "the smoke test holds the installed binary to this tree's version"
+    );
     let release = job_block("release.yml", "build-wheels");
     assert!(
         release.contains("run: just wheel-linux \"$TARGET\"")
