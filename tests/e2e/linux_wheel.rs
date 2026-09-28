@@ -684,3 +684,149 @@ fn a_build_directory_that_cannot_be_created_is_named() {
     );
     assert!(!dir.join("docker.log").exists(), "docker was not run");
 }
+
+/// ci.yml's `gate` job's verdict command, as the runner assembles it from the
+/// folded `run: >-` scalar: its lines joined by single spaces.
+fn gate_command() -> String {
+    let block = job_block("ci.yml", "gate");
+    let mut lines = block.lines().skip_while(|line| line.trim() != "run: >-");
+    lines
+        .next()
+        .expect("ci.yml's gate rules through a folded `run: >-` step");
+    lines
+        .map(str::trim)
+        .take_while(|line| !line.is_empty() && !line.starts_with('-'))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Runs ci.yml's own `gate` command, with the three job results the runner
+/// would hand it.
+fn gate(changes: &str, quality: &str, wheel: &str) -> Output {
+    let output = Command::new("bash")
+        .current_dir(repo_root())
+        .args(["-c", &gate_command()])
+        .env("CHANGES", changes)
+        .env("QUALITY", quality)
+        .env("WHEEL", wheel)
+        .output()
+        .expect("bash runs");
+    eprintln!(
+        "[gate {changes} {quality} {wheel}] exit {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+}
+
+/// The acceptance the review asked for: a Linux wheel that cannot build fails the
+/// `gate` context branch protection requires, without the quality sweep having to
+/// wait on it.
+#[test]
+fn the_required_gate_context_rules_on_both_wheel_legs_and_the_quality_sweep() {
+    let block = job_block("ci.yml", "gate");
+    assert!(
+        block.contains("needs: [changes, quality, wheel]"),
+        "ci.yml's gate waits on the changes, quality and wheel jobs:\n{block}"
+    );
+    assert!(
+        block.contains("if: always()"),
+        "ci.yml's gate runs when a job it needs failed, rather than being skipped — \
+         which protection reads as passing:\n{block}"
+    );
+    for result in [
+        "CHANGES: ${{ needs.changes.result }}",
+        "QUALITY: ${{ needs.quality.result }}",
+        "WHEEL: ${{ needs.wheel.result }}",
+    ] {
+        assert!(
+            block.contains(result),
+            "ci.yml's gate reads {result}:\n{block}"
+        );
+    }
+    let quality = job_block("ci.yml", "quality");
+    assert!(
+        quality.contains("run: just check") && !quality.contains("needs:"),
+        "the quality sweep runs `just check` and waits on nothing, so it runs beside the wheels"
+    );
+    assert!(
+        job_block("ci.yml", "install").contains("needs: [changes, quality]"),
+        "install still waits on the quality sweep it smoke-tests after"
+    );
+}
+
+#[test]
+fn a_wheel_that_did_not_build_fails_the_gate_and_is_named() {
+    for wheel in ["failure", "cancelled"] {
+        let output = gate("success", "success", wheel);
+        assert_eq!(output.status.code(), Some(1), "{wheel}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("gate: `wheel` reported {wheel}")),
+            "{stderr}"
+        );
+        assert!(
+            stderr.contains("ACTION: open the jobs named above"),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
+fn the_gate_passes_only_when_every_job_it_needs_passed() {
+    let passed = gate("success", "success", "success");
+    assert!(passed.status.success());
+    assert!(String::from_utf8_lossy(&passed.stdout).contains("gate: every required job passed"));
+    // A change that cannot reach the crate skips the wheels, and that is a pass.
+    assert!(gate("success", "success", "skipped").status.success());
+    // Anything else is not: a skipped sweep proves nothing, and a `changes` that
+    // failed is what would otherwise have let a skipped wheel through.
+    for (changes, quality, wheel, named) in [
+        (
+            "success",
+            "failure",
+            "success",
+            "`quality` reported failure",
+        ),
+        (
+            "success",
+            "skipped",
+            "success",
+            "`quality` reported skipped",
+        ),
+        (
+            "failure",
+            "success",
+            "skipped",
+            "`changes` reported failure",
+        ),
+    ] {
+        let output = gate(changes, quality, wheel);
+        assert_eq!(output.status.code(), Some(1), "{changes} {quality} {wheel}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(named), "{stderr}");
+    }
+}
+
+#[test]
+fn a_malformed_gate_verdict_invocation_is_refused_with_the_usage() {
+    for (args, says) in [
+        (&[][..], "no job results to rule on"),
+        (&["--may-skip"][..], "--may-skip needs a job name"),
+        (&["--bogus", "a=success"][..], "unknown option: --bogus"),
+        (&["quality"][..], "not JOB=RESULT: 'quality'"),
+        (&["quality="][..], "not JOB=RESULT: 'quality='"),
+    ] {
+        let output = Command::new("bash")
+            .current_dir(repo_root())
+            .arg("scripts/gate-verdict.sh")
+            .args(args)
+            .output()
+            .expect("the script runs");
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(says), "{args:?}: {stderr}");
+        assert!(stderr.contains("ACTION: run 'gate-verdict.sh"), "{stderr}");
+    }
+}

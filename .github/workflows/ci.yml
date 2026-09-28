@@ -49,8 +49,9 @@ jobs:
   # runs the whole graph, so nothing affected-detection or a stale cache could
   # miss survives past the merge.
   # Linux-only because coverage is measured here; macOS/Windows prove the
-  # artifact via the `cross` job below.
-  gate:
+  # artifact via the `cross` job below. Its verdict reaches branch protection
+  # through `gate` at the end of this file, not a context of its own.
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,7 +170,7 @@ jobs:
   # the registry fetch — so the path users take is exercised on every PR, not
   # only after a release.
   install:
-    needs: [changes, gate]
+    needs: [changes, quality]
     if: needs.changes.outputs.crate == 'true'
     strategy:
       fail-fast: false
@@ -243,6 +244,30 @@ jobs:
           PATH="$RUNNER_TEMP/wheel-venv/bin:$PATH" bash scripts/smoke-published.sh \
             --expect-version "$version" \
             --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
+
+  # The `gate` context branch protection requires: the quality gate and both
+  # Linux wheel legs, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
+  # wheels are in it — `wheel` was not a required context, so a wheel that could
+  # not build in the release's image left every required check green. Aggregated
+  # here rather than by making the quality gate wait on `wheel`, so the two still
+  # run side by side. `always()` because a job whose needs failed is otherwise
+  # skipped, and protection reads a skipped required check as passing. `wheel`
+  # may be skipped only on a change `changes` found cannot reach the crate, which
+  # is why `changes` has to have succeeded too.
+  gate:
+    needs: [changes, quality, wheel]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The quality gate and every Linux wheel leg passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          QUALITY: ${{ needs.quality.result }}
+          WHEEL: ${{ needs.wheel.result }}
+        run: >-
+          bash scripts/gate-verdict.sh --may-skip wheel
+          "changes=$CHANGES" "quality=$QUALITY" "wheel=$WHEEL"
 
   # Lint the PR title: under squash-merge it becomes the release-driving commit.
   pr-title:

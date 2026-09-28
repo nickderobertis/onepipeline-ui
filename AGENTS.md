@@ -110,7 +110,7 @@ seconds, so `onepipeline-ui:test-cost` exists to spare a checkout the
 a bare `just test` does not need the tracer. Linux-only and compiled away
 elsewhere, and where it does run it **fails** rather than skips when the tracer
 is missing — a cost bound nothing measured is a bound nobody has.
-`ci.yml`'s gate job installs it; a Linux checkout without it is told what to
+`ci.yml`'s quality job installs it; a Linux checkout without it is told what to
 install by the failure itself.
 
 **The tier that needs that CLI provisions it; `bootstrap` is not the only path to
@@ -157,7 +157,7 @@ binary here and renders inside a browser container pinned to this repository's o
 `@playwright/test`, because pixels are not portable and the gate compares content
 hashes. `README.md` leads with those pictures, so the images a reader sees are the
 ones the gate hashes. `.github/workflows/visual-docs.yml` is a workflow of its own and
-nothing in it is reachable from `check`, from `gate` or from `ci.yml`'s gate job: it
+nothing in it is reachable from `check`, from `gate` or from `ci.yml`'s quality job: it
 asserts nothing, it costs a container and a build, and informational tiers live
 outside the bar here. What *is* new is `.githooks/pre-push`, which `just bootstrap`
 activates through `scripts/enable-hooks.sh` — a committed guard nothing points
@@ -193,7 +193,10 @@ fans one uniformly-named target across all of them.
   whose subject is the PR title. Queue with `gh pr merge --auto --squash`. Admins
   may bypass in a break-glass.
 - **All gating checks are required**, including the `gate` job and the separate
-  `llmlint` job. `published-smoke` is *not* required and cannot be: branch
+  `llmlint` job. `gate` rules on `quality` (the deterministic sweep) and on both
+  Linux `wheel` legs through `scripts/gate-verdict.sh`, so a job that must block a
+  merge joins it there rather than as a context protection would also have to
+  list — v0.16.0's wheels failed with every required check green. `published-smoke` is *not* required and cannot be: branch
   protection lists contexts a pull request reports, and it runs on a completed
   run of `release.yml` or on a manual dispatch — neither of which is one. Nothing
   turns red for it, so its own `report` job files a failure as an issue and

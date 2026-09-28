@@ -774,7 +774,7 @@ by the stall server (`serve-fixture.mjs --refuse-port`): leaving it merely free 
 let a concurrent run's own API server take it.
 
 That capture is deliberately outside `just check`, outside `just gate` and outside
-ci.yml's gate job — `.github/workflows/visual-docs.yml` is a workflow of its own: its
+ci.yml's quality job — `.github/workflows/visual-docs.yml` is a workflow of its own: its
 product is images a reviewer reads for clipping, overlap and reflow, which no selector
 describes, and it costs a container and a build to make them. It is what found
 the tab list widening the working area past the viewport, the pinned timeline leaving
