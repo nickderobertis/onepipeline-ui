@@ -206,7 +206,6 @@ jobs:
   # anything compiled there — so it published no wheel. `just wheel-linux` is the
   # one definition release.yml's Linux `build-wheels` legs also run, on the same
   # native runners, and tests/e2e/linux_wheel.rs holds the two matrices equal.
-  # llmlint: ignore[external_service_suite_stays_out_of_the_affected_tier] this is not a suite exercising an external service: it is the release's own Linux build, and what it reaches over the network is its pinned image, toolchain and maturin, as `gate` reaches crates.io and npm. It sits in the pull-request tier on purpose — v0.16.0 published no wheel because the release was the first place anything compiled in this image, with every required check green — so moving it to a credential-gated or promoted tier would reinstate exactly that gap. It needs no credential.
   wheel:
     needs: changes
     if: needs.changes.outputs.crate == 'true'
@@ -230,10 +229,12 @@ jobs:
           tool: just
       - name: Build the browser view
         run: just build
+      # llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this is not a suite exercising an external service: it is the release's own Linux build, and what it reaches over the network is its pinned image, toolchain and maturin, as `gate` reaches crates.io and npm. It sits in the pull-request tier on purpose — v0.16.0 published no wheel because the release was the first place anything compiled in this image, with every required check green — so moving it to a credential-gated or promoted tier would reinstate exactly that gap. It needs no credential.
       - name: Build wheel (shared with release.yml's Linux build-wheels)
         env:
           TARGET: ${{ matrix.target }}
         run: just wheel-linux "$TARGET"
+      # llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]
       - name: Install the wheel and smoke-test its binary
         run: |
           version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
