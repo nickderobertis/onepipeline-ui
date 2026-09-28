@@ -270,8 +270,19 @@ fn write_store_item(path: &Path, front: &[(&str, Value)], body: &str) {
     fs::create_dir_all(path.parent().expect("a directory")).expect("a store directory");
     let mut document = String::from("---\n");
     for (key, value) in front {
-        // Compact JSON is YAML flow style, so each value keeps its type.
-        document.push_str(&format!("{key}: {value}\n"));
+        // Compact JSON is YAML flow style, so each value keeps its type. A
+        // mapping is written as a block, one entry to a line: the store sets a
+        // single metadata key on a block mapping in place, and refuses to on a
+        // mapping written on one line.
+        match value.as_object() {
+            Some(entries) => {
+                document.push_str(&format!("{key}:\n"));
+                for (entry, value) in entries {
+                    document.push_str(&format!("  {entry}: {value}\n"));
+                }
+            }
+            None => document.push_str(&format!("{key}: {value}\n")),
+        }
     }
     document.push_str(&format!("---\n\n{body}\n"));
     fs::write(path, document).expect("a store document");
@@ -317,7 +328,7 @@ pub fn configure_local_md_store(dir: &Path) -> PathBuf {
 /// projection: where the approval's item is, and what it said as read.
 ///
 /// Hand-written because the document is the engine's internal
-/// `LandedBaseline` (`writeback-landed.json`, schema 1 at 0.52.0) and the engine
+/// `LandedBaseline` (`writeback-landed.json`, schema 1 at 0.52.1) and the engine
 /// exposes nothing that produces it. A run without one reads as a run an older
 /// build started, whose adopted drivers write each node to an item of their own
 /// rather than to the task the plan was read from. The engine reads the file
