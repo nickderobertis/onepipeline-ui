@@ -7,7 +7,7 @@
 #
 # A workflow of its own, deliberately. Screenshots assert nothing and cost a container
 # and a Rust build, so nothing here is reachable from `just check`, from `just gate` —
-# this repository's complete pre-push bar — or from ci.yml's gate job, exactly as this
+# this repository's complete pre-push bar — or from ci.yml's quality job, exactly as this
 # repository keeps every other informational tier outside them.
 #
 # Which CPU arch(es) CI captures is read from [capture].arches in screencomp.toml, one

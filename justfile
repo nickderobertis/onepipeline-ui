@@ -193,6 +193,14 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
+# Shared by release.yml's Linux `build-wheels` legs and ci.yml's `wheel` legs, so
+# a pull request meets the prerequisites and maturin invocation a release does.
+# Needs Docker, and the browser view `just build` writes.
+# Build the onepipeline-api-cli wheel for one Linux target in the release's image.
+[positional-arguments]
+wheel-linux target out="dist":
+    @bash scripts/build-linux-wheel.sh --target "$1" --out "$2"
+
 # Every project's own test target: the crate's suite under its coverage floor, the
 # frontend's components, and the browser journeys, which are a project of their
 # own. `test-baseline` is the one tier outside this, because it is the one that

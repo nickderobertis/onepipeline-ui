@@ -49,8 +49,9 @@ jobs:
   # runs the whole graph, so nothing affected-detection or a stale cache could
   # miss survives past the merge.
   # Linux-only because coverage is measured here; macOS/Windows prove the
-  # artifact via the `cross` job below.
-  gate:
+  # artifact via the `cross` job below. Its verdict reaches branch protection
+  # through `gate` at the end of this file, not a context of its own.
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,7 +170,7 @@ jobs:
   # the registry fetch — so the path users take is exercised on every PR, not
   # only after a release.
   install:
-    needs: [changes, gate]
+    needs: [changes, quality]
     if: needs.changes.outputs.crate == 'true'
     strategy:
       fail-fast: false
@@ -198,6 +199,75 @@ jobs:
           bash scripts/smoke-published.sh \
             --expect-version "$version" \
             --label "cargo install onepipeline-ui on $RUNNER_OS/$RUNNER_ARCH"
+
+  # Build the Linux wheels the way the release does, then install and smoke-test
+  # the one built. v0.16.0 is why this exists: every required check passed on the
+  # change that linked onetaskgraph's HTTP stores, whose vendored OpenSSL could
+  # not configure in the manylinux image, and the release was the first place
+  # anything compiled there — so it published no wheel. `just wheel-linux` is the
+  # one definition release.yml's Linux `build-wheels` legs also run, on the same
+  # native runners, and tests/e2e/linux_wheel.rs holds the two matrices equal.
+  wheel:
+    needs: changes
+    if: needs.changes.outputs.crate == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    name: wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Build the browser view
+        run: just build
+      # llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this is not a suite exercising an external service: it is the release's own Linux build, and what it reaches over the network is its pinned image, toolchain and maturin, as `gate` reaches crates.io and npm. It sits in the pull-request tier on purpose — v0.16.0 published no wheel because the release was the first place anything compiled in this image, with every required check green — so moving it to a credential-gated or promoted tier would reinstate exactly that gap. It needs no credential.
+      - name: Build wheel (shared with release.yml's Linux build-wheels)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: just wheel-linux "$TARGET"
+      # llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]
+      - name: Install the wheel and smoke-test its binary
+        run: |
+          version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+          python3 -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install --no-index dist/*.whl
+          PATH="$RUNNER_TEMP/wheel-venv/bin:$PATH" bash scripts/smoke-published.sh \
+            --expect-version "$version" \
+            --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
+
+  # The `gate` context branch protection requires: the quality gate and both
+  # Linux wheel legs, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
+  # wheels are in it — `wheel` was not a required context, so a wheel that could
+  # not build in the release's image left every required check green. Aggregated
+  # here rather than by making the quality gate wait on `wheel`, so the two still
+  # run side by side. `always()` because a job whose needs failed is otherwise
+  # skipped, and protection reads a skipped required check as passing. `wheel`
+  # may be skipped only on a change `changes` found cannot reach the crate, which
+  # is why `changes` has to have succeeded too.
+  gate:
+    needs: [changes, quality, wheel]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The quality gate and every Linux wheel leg passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          QUALITY: ${{ needs.quality.result }}
+          WHEEL: ${{ needs.wheel.result }}
+        run: >-
+          bash scripts/gate-verdict.sh --may-skip wheel
+          "changes=$CHANGES" "quality=$QUALITY" "wheel=$WHEEL"
 
   # Lint the PR title: under squash-merge it becomes the release-driving commit.
   pr-title:
