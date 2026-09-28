@@ -12589,17 +12589,29 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
 
     // What the drivers wrote reached the project's own task document, through
     // the store the binary links: the author's document carried no status and
-    // no settlement, and the one the store holds now carries both.
+    // no settlement, and the one the store holds now carries both. The document
+    // is read back through that store rather than matched byte for byte, because
+    // a targeted update edits it in place and spells the keys it adds its own way.
     assert!(!before.contains("status:"), "{before}");
-    let after = fs::read_to_string(&task).expect("the task document");
-    assert!(after.contains("\nstatus: done\n"), "{after}");
-    assert!(after.contains("onepipeline.settlement:"), "{after}");
-    assert!(
-        after.contains(&format!(
-            "onepipeline.node: {}",
+    let after = stored_task(
+        &dir,
+        &format!(
+            "{}:{}/000-{}",
+            fixture_run::LOCAL_MD_SOURCE,
+            fixture_run::LOCAL_MD_PROJECT,
             fixture_run::APPROVAL_NODE_ID
-        )),
-        "{after}"
+        ),
+    );
+    let document = fs::read_to_string(&task).expect("the task document");
+    assert_eq!(after.status.name, "done", "{document}");
+    assert!(
+        after.metadata.contains_key("onepipeline.settlement"),
+        "{document}"
+    );
+    assert_eq!(
+        after.metadata.get("onepipeline.node"),
+        Some(&json!(fixture_run::APPROVAL_NODE_ID)),
+        "{document}"
     );
     // And every projection either driver attempted landed on that project.
     let records = fs::read_to_string(
@@ -12633,6 +12645,153 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A run adopted through `POST /api/v2/runs/{run}/adopt` writes back only what
+/// changed: every projection the retained drivers attempt is a member-scoped
+/// record at version 4 of `writeback-projections.jsonl`, naming the store calls
+/// it made, the approval's existing item is written through a targeted update
+/// rather than a copy of the project, and the drivers keep the run's landed
+/// baseline beside it.
+///
+/// The engine release before the targeted write-back already wrote member-scoped
+/// version 4 lines, but landed a change to an existing item by copying the
+/// project (`project-copy`), which is the assertion that release fails. The
+/// records are read as the engine wrote them; what each field means is the
+/// engine's to say, and nothing here does. The fixture seeds the baseline as
+/// `onepipeline start` does, with no word landed on the approval, so a baseline
+/// naming a landed status is one the drivers wrote.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
+// above: two drivers, each settling a one-node human graph in about two seconds over a
+// folder of Markdown the journey writes itself; the sixty seconds beside it is the ceiling
+// a failing wait reaches, which no passing run pays.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_writes_back_member_scoped_projections_and_keeps_its_landed_baseline() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let (project, _) = fixture_run::launch_from_local_md_store(&root, run, &dir);
+    let landed_file = root.join(run).join(onepipeline::cli::WRITEBACK_LANDED_FILE);
+    let seeded: Value =
+        serde_json::from_str(&fs::read_to_string(&landed_file).expect("the seeded baseline"))
+            .expect("the seeded baseline parses");
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let adopt = format!("/api/v2/runs/{run}/adopt");
+    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
+
+    // The first driver settles the human action as waiting and lets go.
+    let adopted = http::post(serving.address, &adopt, "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let first =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(first);
+    eventually("the first driver let go and was reaped", || {
+        !process_is_live(first)
+    });
+    drop(driver);
+    assert_eq!(
+        detail(serving.address)["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("waiting")
+    );
+
+    // Attested, then adopted again: the second driver completes the graph.
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let again = http::post(serving.address, &adopt, "");
+    assert_eq!(again.status, 200, "{}", again.body);
+    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let driver = RetainedDriver(second);
+    eventually("the second driver was reaped", || !process_is_live(second));
+    drop(driver);
+    assert_eq!(detail(serving.address)["run"]["state"], json!("settled"));
+
+    let records: Vec<Value> = fs::read_to_string(
+        root.join(run)
+            .join(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE),
+    )
+    .expect("the projection record")
+    .lines()
+    .map(|line| serde_json::from_str(line).expect("a projection record line"))
+    .collect();
+    assert!(!records.is_empty(), "no projection was attempted");
+    for record in &records {
+        // Version 4 is the one that added `calls`; a later one is this journey's to read anew.
+        assert_eq!(record["schema_version"], json!(4), "{record}");
+        assert_eq!(record["project"], json!(project), "{record}");
+        assert_eq!(record["scope"], json!("members"), "{record}");
+        assert!(
+            record.get("whole_because").is_none_or(Value::is_null),
+            "{record}"
+        );
+        assert_eq!(record["outcome"], json!("projected"), "{record}");
+        let calls = record["calls"]
+            .as_object()
+            .expect("every line names its calls");
+        // The approval's item already exists, so no attempt copies the project.
+        assert!(!calls.contains_key("project-copy"), "{record}");
+    }
+    // Landing the settlement is a targeted update of the approval's own item.
+    assert!(
+        records
+            .iter()
+            .any(|record| record["calls"]["task-update"].as_u64() > Some(0)
+                && record["updated_fields"]["status"].as_u64() > Some(0)),
+        "no attempt updated the approval's status in place: {records:?}"
+    );
+
+    let landed: Value =
+        serde_json::from_str(&fs::read_to_string(&landed_file).expect("the landed baseline"))
+            .expect("the landed baseline parses");
+    assert_eq!(
+        landed["schema_version"],
+        json!(onepipeline::cli::WRITEBACK_LANDED_SCHEMA_VERSION),
+        "{landed}"
+    );
+    assert_eq!(landed["project"], json!(project), "{landed}");
+    let item = &landed["items"][fixture_run::APPROVAL_NODE_ID];
+    assert_eq!(
+        item["destination"],
+        seeded["items"][fixture_run::APPROVAL_NODE_ID]["destination"],
+        "{landed}"
+    );
+    assert!(seeded["items"][fixture_run::APPROVAL_NODE_ID]["status"].is_null());
+    assert!(
+        !item["status"].is_null(),
+        "the drivers landed no status: {landed}"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The task `id` names, as the `local-md` store configured in `dir` reads it:
+/// the same linked store the retained driver writes through, so a journey
+/// holds what it wrote to what that store answers rather than to its bytes.
+#[cfg(unix)]
+fn stored_task(dir: &Path, id: &str) -> onetaskgraph_plugin_api::Task {
+    // An empty environment, so the host's own store configuration is not read.
+    let loaded = onetaskgraph_core::config::load(
+        dir,
+        &onetaskgraph_core::Environment::from_os_pairs(Vec::new()),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the store configuration loads");
+    let engine = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let id = onetaskgraph_core::GlobalId::try_from(id.to_owned()).expect("a task id");
+    tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(engine.task(&id))
+        .expect("the store reads the task")
+        .items
+        .pop()
+        .expect("the store holds the task")
+        .item
+}
 
 /// An adoption of a run whose undispatched agent node states no
 /// `## Acceptance criteria` section is refused through the route with the
