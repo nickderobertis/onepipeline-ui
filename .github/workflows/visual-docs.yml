@@ -90,13 +90,16 @@ jobs:
         # rustc drives a C linker for the final link and `ring`'s build script wants a
         # C compiler outright, and the Playwright image ships neither: without this the
         # cargo build below stops at "error: linker `cc` not found" before a single
-        # pixel is rendered. gcc and the C library's headers are the whole of it —
-        # build-essential would add make and dpkg-dev for nothing. This lane runs as
-        # root, which is what makes apt available here and is a property of a GitHub
-        # `container:` job rather than of the container in scripts/visual-capture.sh,
-        # where the toolchain is the host's and the container installs nothing.
+        # pixel is rendered. make is for `openssl-src`, which builds OpenSSL from
+        # source with it: the engine's linked onetaskgraph store plugins reach it
+        # through reqwest's native TLS. gcc, the C library's headers and make are the
+        # whole of it — build-essential would add dpkg-dev for nothing. This lane runs
+        # as root, which is what makes apt available here and is a property of a
+        # GitHub `container:` job rather than of the container in
+        # scripts/visual-capture.sh, where the toolchain is the host's and the
+        # container installs nothing.
         apt-get update -qq
-        apt-get install -y --no-install-recommends gcc libc6-dev
+        apt-get install -y --no-install-recommends gcc libc6-dev make
         npm ci
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
           | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
