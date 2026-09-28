@@ -67,6 +67,10 @@ include = [
   "/npm/onepipeline-ui/package.json",
   "/npm/onepipeline-ui/README.md",
   "/scripts/npm-build.mjs",
+  # The one build of every Linux wheel: its image, the prerequisites it installs
+  # there and the maturin invocation are what decide those wheels' bytes, and a
+  # change to it has to be able to cut the release that publishes them.
+  "/scripts/build-linux-wheel.sh",
 
   # The frontend bundle the `onepipeline-ui` npm package carries: its sources,
   # the workspace libraries Vite inlines into it, the config that decides what is
