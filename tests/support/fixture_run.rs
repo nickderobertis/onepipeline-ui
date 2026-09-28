@@ -235,6 +235,54 @@ pub const LOCAL_MD_PROJECT: &str = "approval-board";
 /// Answers the qualified project id and the path of the approval's task
 /// document, which is what a driver's write-back rewrites.
 pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String, PathBuf) {
+    let store = configure_local_md_store(dir);
+    let task = store
+        .join("tasks")
+        .join(LOCAL_MD_PROJECT)
+        .join(format!("000-{APPROVAL_NODE_ID}.md"));
+    write_store_item(
+        &task,
+        &[
+            ("title", json!("Approve the change")),
+            ("project", json!(LOCAL_MD_PROJECT)),
+            (
+                "metadata",
+                json!({ "onepipeline.id": APPROVAL_NODE_ID, "onepipeline.kind": "human" }),
+            ),
+        ],
+        "Approve the change.",
+    );
+
+    let project = format!("{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}");
+    seed_landed_baseline(root, run, &project);
+    let path = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    launch["project"] = json!(project);
+    fs::write(&path, pretty(&launch)).expect("the launch record");
+    (project, task)
+}
+
+/// Write a document into a `local-md` store the way an operator writes one by
+/// hand: YAML front matter and a body.
+fn write_store_item(path: &Path, front: &[(&str, Value)], body: &str) {
+    fs::create_dir_all(path.parent().expect("a directory")).expect("a store directory");
+    let mut document = String::from("---\n");
+    for (key, value) in front {
+        // Compact JSON is YAML flow style, so each value keeps its type.
+        document.push_str(&format!("{key}: {value}\n"));
+    }
+    document.push_str(&format!("---\n\n{body}\n"));
+    fs::write(path, document).expect("a store document");
+}
+
+/// Configure a `local-md` store under `dir` as the source
+/// [`LOCAL_MD_SOURCE`], through the `onetaskgraph.yaml` in `dir` — where the
+/// engine discovers a run's store — and write its project [`LOCAL_MD_PROJECT`]
+/// with the plan-level settings as the project's reserved `onepipeline.*`
+/// metadata and no tasks yet. Answers the store's root.
+pub fn configure_local_md_store(dir: &Path) -> PathBuf {
     let store = dir.join("plan-store");
     fs::write(
         dir.join("onetaskgraph.yaml"),
@@ -244,17 +292,7 @@ pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String
         ),
     )
     .expect("the store configuration");
-    let item = |path: &Path, front: &[(&str, Value)], body: &str| {
-        fs::create_dir_all(path.parent().expect("a directory")).expect("a store directory");
-        let mut document = String::from("---\n");
-        for (key, value) in front {
-            // Compact JSON is YAML flow style, so each value keeps its type.
-            document.push_str(&format!("{key}: {value}\n"));
-        }
-        document.push_str(&format!("---\n\n{body}\n"));
-        fs::write(path, document).expect("a store document");
-    };
-    item(
+    write_store_item(
         &store
             .join("projects")
             .join(format!("{LOCAL_MD_PROJECT}.md")),
@@ -271,31 +309,56 @@ pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String
         ],
         "",
     );
-    let task = store
-        .join("tasks")
-        .join(LOCAL_MD_PROJECT)
-        .join(format!("000-{APPROVAL_NODE_ID}.md"));
-    item(
-        &task,
-        &[
-            ("title", json!("Approve the change")),
-            ("project", json!(LOCAL_MD_PROJECT)),
-            (
-                "metadata",
-                json!({ "onepipeline.id": APPROVAL_NODE_ID, "onepipeline.kind": "human" }),
-            ),
-        ],
-        "Approve the change.",
-    );
+    store
+}
 
-    let project = format!("{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}");
-    let path = root.join(run).join("launch.json");
-    let mut launch: Value =
-        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
-            .expect("the launch record parses");
-    launch["project"] = json!(project);
-    fs::write(&path, pretty(&launch)).expect("the launch record");
-    (project, task)
+/// The landed write-back baseline `onepipeline start` seeds from its read of
+/// the project [`launch_from_local_md_store`] writes, before the run's first
+/// projection: where the approval's item is, and what it said as read.
+///
+/// Hand-written because the document is the engine's internal
+/// `LandedBaseline` (`writeback-landed.json`, schema 1 at 0.52.0) and the engine
+/// exposes nothing that produces it. A run without one reads as a run an older
+/// build started, whose adopted drivers write each node to an item of their own
+/// rather than to the task the plan was read from. The engine reads the file
+/// strictly and takes one it refuses as empty, so
+/// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
+/// is this copy's drift gate: it fails on any projection that created an item.
+fn seed_landed_baseline(root: &Path, run: &str, project: &str) {
+    use sha2::Digest;
+
+    let digest: String = sha2::Sha256::digest("Approve the change.".as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    fs::write(
+        root.join(run).join(onepipeline::cli::WRITEBACK_LANDED_FILE),
+        pretty(&json!({
+            "schema_version": onepipeline::cli::WRITEBACK_LANDED_SCHEMA_VERSION,
+            "project": project,
+            "project_metadata": {
+                "onepipeline.concurrency": 1,
+                "onepipeline.goal": { "text": "get the change approved" },
+                "onepipeline.schema_version": 2,
+            },
+            "items": {
+                APPROVAL_NODE_ID: {
+                    "destination": format!(
+                        "{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}/000-{APPROVAL_NODE_ID}"
+                    ),
+                    "title": "Approve the change",
+                    "content_sha256": digest,
+                    // Seeded from a read, so no word this engine landed.
+                    "status": null,
+                    // Engine-owned keys only, as the store answered them.
+                    "metadata": { "onepipeline.id": APPROVAL_NODE_ID, "onepipeline.kind": "human" },
+                    "delivers": [],
+                    "depends_on": [],
+                },
+            },
+        })),
+    )
+    .expect("the landed write-back baseline");
 }
 
 /// The graph run one session id names: `{stream}.{member}`, as that library

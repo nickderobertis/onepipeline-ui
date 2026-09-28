@@ -257,6 +257,49 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     }
   });
 
+  test("keeps every card on the graph readable when a live update settles a node", async () => {
+    // The re-read a live update raises serves the node settled, as the server
+    // folds it once the executor records the settlement: done on every surface,
+    // and no longer in flight, so no turn the run can address.
+    const served = runDetail(LIVE_RUN);
+    const done = {
+      ...served,
+      run: {
+        ...served.run,
+        nodes: served.run.nodes.map((node) =>
+          node.node === "dashboard" ? { ...node, status: "done" } : node,
+        ),
+      },
+      graph: {
+        ...served.graph,
+        node_states: { ...served.graph.node_states, dashboard: "done" },
+        node_status: { ...served.graph.node_status, dashboard: "done" },
+        node_control: {},
+      },
+    };
+    let settled = false;
+    const { client, sources } = telemetryHarness((url) =>
+      settled && isRunDetail(url) ? Response.json(done) : defaultResponder(url),
+    );
+    render(<App client={client} />);
+    // Asked for by role, which a card React Flow holds hidden does not answer to.
+    // This environment's resize observer never reports, so a card is readable
+    // here only if it is drawn at its size without waiting to be measured.
+    expect(
+      await screen.findByRole("article", { name: "dashboard: running" }),
+    ).toBeVisible();
+
+    settled = true;
+    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "2");
+    expect(
+      await screen.findByRole("article", { name: "dashboard: done" }),
+    ).toBeVisible();
+    // Every other card came through the same update drawn, not just the one that moved.
+    expect(
+      screen.getByRole("article", { name: "publish: failed" }),
+    ).toBeVisible();
+  });
+
   test("still counts a run whose statuses the server could not fold", async () => {
     // When a run's authoritative journal will not fold, the server counts its nodes
     // from the tolerant telemetry index instead, whose statuses are an open string.

@@ -71,7 +71,14 @@ export function DagGraph({
               ? {}
               : { reason: reasons.get(node.id) }),
           },
-          style: { width: node.width, height: node.height },
+          // The node's own dimensions rather than a style: React Flow hides a card
+          // it holds no size for, and every live update hands it new node objects
+          // whose measured size it drops until a resize observation re-measures
+          // them, so on a busy page the whole graph stayed hidden for longer than a
+          // reader waits after a node settled. The layout already knows each card's
+          // size, so the card is drawn at it from the first frame.
+          width: node.width,
+          height: node.height,
         }),
       ),
       edges: layout.edges.map(

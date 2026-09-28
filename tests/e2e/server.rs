@@ -12615,6 +12615,16 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     for record in &records {
         assert_eq!(record["project"], json!(project), "{record}");
         assert_eq!(record["outcome"], json!("projected"), "{record}");
+        // Every write landed on the item the plan was read from, which the engine
+        // finds through the landed baseline the fixture seeds as `start` does. A
+        // baseline it could not read — the fixture's copy of that document drifted
+        // from the engine's — is taken as empty, and the first projection creates
+        // an item of its own. An attempt that carried nothing states no actions.
+        assert_eq!(
+            record["actions"]["created"].as_u64().unwrap_or_default(),
+            0,
+            "{record}"
+        );
     }
     assert!(
         !ran.exists(),
@@ -12673,6 +12683,312 @@ fn an_adoption_of_a_run_whose_undispatched_node_states_no_criteria_is_refused() 
         "a refused adoption was journalled: {events:?}"
     );
 }
+
+/// The variable `onepipeline start` reads the node-scope graph a run's
+/// dispatches launch from. The engine declares it in a module it does not
+/// export, so it is named here, and the journey that sets it holds the launch
+/// record's `node_graph` to the graph it named: a renamed variable is a launch
+/// that recorded the default instead.
+#[cfg(unix)]
+const NODE_GRAPH_ENV: &str = "ONEPIPELINE_NODE_GRAPH";
+
+/// The template a host root supplies for the built-in task name: it declares
+/// one variable, extends the engine's own base, and states that variable before
+/// the criteria the base lists.
+#[cfg(unix)]
+fn host_task_template() -> String {
+    format!(
+        "---\nonetaskgraph_template: 1\nvariables:\n  what:\n    description: What the task \
+         does.\n    type: text\n---\n{{% extends \"{}\" %}}\n{{% block before_criteria %}}\n\
+         {{{{ what }}}}\n\n{{% endblock %}}\n",
+        onepipeline::templates::BASE
+    )
+}
+
+/// Create one task in the `local-md` store `dir` configures, through the store
+/// library's own create — the call `onetaskgraph task create` makes — filed under
+/// the fixture's project with `metadata`, blocked by `depends_on`.
+#[cfg(unix)]
+fn create_store_task(
+    dir: &Path,
+    title: &str,
+    body: onetaskgraph_core::Body,
+    metadata: &[(&str, Value)],
+    depends_on: &[&onetaskgraph_core::GlobalId],
+) -> onetaskgraph_core::GlobalId {
+    // An empty environment, so the host's own store configuration is not read:
+    // the one this journey writes is the only one there is.
+    let loaded = onetaskgraph_core::config::load(
+        dir,
+        &onetaskgraph_core::Environment::from_os_pairs(Vec::new()),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the store configuration loads");
+    let engine = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let request = onetaskgraph_core::TaskCreate {
+        source: onetaskgraph_plugin_api::SourceName::try_from(
+            fixture_run::LOCAL_MD_SOURCE.to_owned(),
+        )
+        .expect("a source name"),
+        project: onetaskgraph_plugin_api::NativeId::from(fixture_run::LOCAL_MD_PROJECT),
+        title: title.to_owned(),
+        body,
+        status: None,
+        labels: Vec::new(),
+        repositories: Vec::new(),
+        depends_on: depends_on.iter().map(|&id| id.clone()).collect(),
+        delivers: Vec::new(),
+        metadata: metadata
+            .iter()
+            .map(|(key, value)| {
+                (
+                    onetaskgraph_plugin_api::MetadataKey::try_from((*key).to_owned())
+                        .expect("a metadata key"),
+                    value.clone(),
+                )
+            })
+            .collect(),
+    };
+    tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(engine.create_task(&request))
+        .expect("the store creates the task")
+        .task
+        .id
+}
+
+/// Launch a run the way a host with its own task template does, over a
+/// `local-md` store in `dir`, with the released `onepipeline` this crate pins:
+/// the approval [`fixture_run::APPROVAL_NODE_ID`] gates the agent node
+/// [`fixture_run::DISPATCH_NODE_ID`], whose task is rendered from the host root's
+/// template — stated by `onepipeline template resolve`, rendered by the store —
+/// and `start` is handed that root, relative to `dir`, and the rendered-only
+/// check.
+///
+/// `start` holds the plan to both before it mints the run, records what it
+/// resolved in the launch record, and leaves a driver that settles the approval
+/// as waiting and lets go, which is what makes the run one an adoption takes
+/// over. Answers the run id and the host root as `start` resolves it: against
+/// its working directory as the OS reports it, symlinks resolved, which on macOS
+/// is `/private/var/...` for a temporary directory named `/var/...`.
+#[cfg(unix)]
+fn launch_rendered_over_local_md_store(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+) -> (String, PathBuf) {
+    fixture_run::configure_local_md_store(dir);
+    let template_root = dir.join("template-root");
+    fs::create_dir_all(&template_root).expect("the template root");
+    fs::write(
+        template_root.join(format!(
+            "{}{}",
+            onepipeline::templates::BUILT_IN,
+            onepipeline::templates::EXTENSION
+        )),
+        host_task_template(),
+    )
+    .expect("the host template");
+
+    let onepipeline = |arguments: &[&str]| {
+        let output = std::process::Command::new(sibling::binary())
+            .args(arguments)
+            .current_dir(dir)
+            .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+            .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+            .env(NODE_GRAPH_ENV, node_graph)
+            .env(
+                onepipeline_ui::store::GRAPH_RECORDS_ENV,
+                fixture_run::graph_records_for(root),
+            )
+            .env_remove(onepipeline::templates::ROOT_ENVIRONMENT)
+            .env_remove(onepipeline::templates::REQUIRE_RENDERED_ENVIRONMENT)
+            .output()
+            .expect("the provisioned onepipeline runs");
+        assert!(
+            output.status.success(),
+            "`onepipeline {}` refused: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+
+    let approval = create_store_task(
+        dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the change."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let loader = onepipeline(&[
+        "template",
+        "resolve",
+        onepipeline::templates::BUILT_IN,
+        "--json",
+        onepipeline::templates::ROOT_FLAG,
+        "template-root",
+    ]);
+    let input = onetaskgraph_core::TemplateInput::Loader(
+        onetaskgraph_core::LoaderDocument::from_json(&String::from_utf8_lossy(&loader))
+            .expect("the engine states a loader document"),
+    );
+    let answers = onetaskgraph_core::Answers::from_yaml(
+        "what: Do the work the graph dispatches.\nacceptance_criteria:\n  - The work is done.\n",
+    )
+    .expect("the answers");
+    let rendered = input
+        .load()
+        .expect("the host template loads")
+        .render(&answers)
+        .expect("the host template renders");
+    create_store_task(
+        dir,
+        "Resolve the config chain",
+        onetaskgraph_core::Body::rendered(&input, rendered).expect("a rendering"),
+        &[
+            ("onepipeline.id", json!(fixture_run::DISPATCH_NODE_ID)),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&approval],
+    );
+
+    let launched = onepipeline(&[
+        "start",
+        &format!(
+            "{}:{}",
+            fixture_run::LOCAL_MD_SOURCE,
+            fixture_run::LOCAL_MD_PROJECT
+        ),
+        "--detach",
+        onepipeline::templates::ROOT_FLAG,
+        "template-root",
+        onepipeline::templates::REQUIRE_RENDERED_FLAG,
+        "true",
+    ]);
+    let launched: Value = serde_json::from_slice(&launched).expect("start prints its launch");
+    let run = launched["run_id"].as_str().expect("a run id").to_owned();
+    let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    eventually("the launched driver let go of the run", || {
+        !process_is_live(pid)
+    });
+    let template_root = template_root
+        .canonicalize()
+        .expect("the template root resolves");
+    (run, template_root)
+}
+
+/// The launch record of `run` under `root`, as the engine last wrote it.
+#[cfg(unix)]
+fn launch_record(root: &Path, run: &str) -> Value {
+    serde_json::from_str(
+        &fs::read_to_string(root.join(run).join("launch.json")).expect("the launch record"),
+    )
+    .expect("the launch record parses")
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names` below, plus the
+// `onepipeline` CLI every comparison in this module already provisions: a real launch of
+// a two-node plan whose driver lets go at once, then one dispatch, settling in seconds.
+/// A run a host launched with its own template root and the rendered-only check
+/// on, over a `local-md` store, is adopted through the route once its approval is
+/// attested, and the driver the adoption retains dispatches the rendered node.
+///
+/// The launch is the released engine's own `start`: it resolved the root it was
+/// handed relative to the launch directory, held the plan to it and to being
+/// rendered, and recorded both. Adoption reloads no plan from the store and runs
+/// no rendered-only check, so what it owes those settings is to leave them as the
+/// launch recorded them.
+#[cfg(unix)]
+#[test]
+fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispatches_it() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and answers differently on each run. What this journey is about — the released engine's `start` over a real `local-md` store, the adopt route, the retained driver and the executor that dispatches the rendered task — is all real, and the stand-in only records that the dispatch reached it.
+    let standin = write_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let (run, template_root) = launch_rendered_over_local_md_store(&root, &dir, &graph);
+
+    let launched = launch_record(&root, &run);
+    assert_eq!(
+        launched[onepipeline::templates::ROOT_KEY],
+        json!(template_root.display().to_string()),
+        "the launch did not record the root it was handed, resolved: {launched}"
+    );
+    assert_eq!(
+        launched[onepipeline::templates::REQUIRE_RENDERED_KEY],
+        json!(true),
+        "{launched}"
+    );
+    assert_eq!(
+        launched["node_graph"],
+        json!(graph.display().to_string()),
+        "the launch did not read the graph {NODE_GRAPH_ENV} names: {launched}"
+    );
+
+    // Where the dispatch runs and where its turn records itself, named for the
+    // reasons `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names`
+    // gives.
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+        ],
+    );
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    let kinds = |address| {
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+            .iter()
+            .map(|event| event["kind"].clone())
+            .collect::<Vec<_>>()
+    };
+    eventually("the adopted driver dispatched the rendered node", || {
+        kinds(serving.address).contains(&json!("node-dispatched"))
+    });
+    assert!(
+        kinds(serving.address).contains(&json!("driver-adopted")),
+        "{:?}",
+        kinds(serving.address)
+    );
+    eventually("the dispatch ran the harness on the rendered task", || {
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("Do the work the graph dispatches."))
+    });
+
+    // The adoption rewrote the launch record — it counts itself there — and
+    // left the template settings the launch resolved exactly as they were.
+    let record = launch_record(&root, &run);
+    assert_eq!(record["adoptions"], json!(1), "{record}");
+    for key in [
+        onepipeline::templates::ROOT_KEY,
+        onepipeline::templates::REQUIRE_RENDERED_KEY,
+    ] {
+        assert_eq!(record[key], launched[key], "{key}: {record}");
+    }
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The harness stand-in a dispatch here runs: it records the argv it was given
 /// and answers as the adapter expects, so a journey can read back *that* it ran
