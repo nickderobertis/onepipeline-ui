@@ -110,9 +110,19 @@ fn container_double(dir: &Path, fail_at: Option<&str>) {
              [[ \"$call\" != '{fail_at}'* ]] || exit 1\n"
         )
     };
-    for tool in ["yum", "sha256sum", "chmod", "rustup", "python3.12", "chown"] {
+    for tool in ["yum", "chmod", "rustup", "python3.12", "chown"] {
         executable(&dir.join("container-bin").join(tool), record(tool));
     }
+    // The script pipes the pinned checksum into `sha256sum -c -` under
+    // pipefail, so a stand-in that exits without reading it can kill the `echo`
+    // with SIGPIPE and fail a step no test asked to fail. This one drains its
+    // stdin through the host's `cat` before anything else, even when it is the
+    // call that fails.
+    let cat = which("cat");
+    executable(
+        &dir.join("container-bin/sha256sum"),
+        record("sha256sum").replacen('\n', &format!("\n'{}' > /dev/null\n", cat.display()), 1),
+    );
     // What `curl -o` downloads is the installer the script then runs, so this
     // one also leaves a recording `rustup-init` where it was asked to write.
     let chmod = which("chmod");
