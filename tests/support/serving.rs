@@ -246,7 +246,13 @@ impl Serving {
             // workspace's own, empty, rather than the operator's — a journey
             // that shuts a fixture run down must never push, or list, a branch
             // of the host running it.
-            .env(ONEVCS_HOME_ENV, workspace.path().join(ONEVCS_HOME_DIR));
+            .env(ONEVCS_HOME_ENV, workspace.path().join(ONEVCS_HOME_DIR))
+            // Nor the operator's harnesses: a run's status carries the engine's
+            // provider block, which probes every harness it finds on `PATH` —
+            // the operator's own subscriptions, for up to a minute each, which
+            // ran past a journey's read timeout. A journey that names a `PATH`
+            // of its own replaces this one.
+            .env("PATH", path_without_harnesses());
         if let Some(session) = session {
             command.args(["--session", session]);
         }
@@ -516,4 +522,22 @@ impl Drop for ForeignServing {
         ask_to_stop(&mut self.child, Stop::Terminate);
         let _ = wait_or_kill(&mut self.child, STOP_DEADLINE);
     }
+}
+
+/// This process's `PATH` without every directory holding a harness binary
+/// oneharness's own registry names, so the engine's provider sweep — which finds
+/// each harness on `PATH` — finds none and probes nothing. Read off the
+/// registry rather than a list kept here, so a harness it adds is left off too.
+/// Configuration is left alone: a harness a config file names by its own path
+/// is still found, and would still be probed.
+fn path_without_harnesses() -> std::ffi::OsString {
+    let bins: Vec<&str> = oneharness_core::domain::harness::all()
+        .iter()
+        .map(|spec| spec.default_bin)
+        .collect();
+    std::env::join_paths(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .filter(|dir| !bins.iter().any(|bin| dir.join(bin).exists())),
+    )
+    .expect("a PATH")
 }
