@@ -212,6 +212,92 @@ pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf
     run_dir
 }
 
+/// The `onetaskgraph` source [`launch_from_local_md_store`] configures: named for
+/// this fixture rather than a common word like `plans`, so a host that configures a
+/// source of its own through `ONETASKGRAPH_SOURCES__*` cannot collide with it.
+pub const LOCAL_MD_SOURCE: &str = "approvals";
+/// The native id of the project [`launch_from_local_md_store`] writes. It is not
+/// the project's title.
+pub const LOCAL_MD_PROJECT: &str = "approval-board";
+
+/// Turn [`write_awaiting_attestation`]'s run into one launched from a real
+/// `local-md` onetaskgraph store: a folder of Markdown under `dir` holding the
+/// run's plan as a project whose one task is the approval, and the
+/// `onetaskgraph.yaml` in `dir` that configures that folder as a source, which is
+/// where the engine discovers a run's store (the launch record's directory). The
+/// launch record then names that project as the run's.
+///
+/// Every document is written the way an operator writes one by hand: YAML front
+/// matter and a body. The plan-level settings are the project's reserved
+/// `onepipeline.*` metadata, and the node is a task carrying its node id under
+/// `onepipeline.id`.
+///
+/// Answers the qualified project id and the path of the approval's task
+/// document, which is what a driver's write-back rewrites.
+pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String, PathBuf) {
+    let store = dir.join("plan-store");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        format!(
+            "sources:\n  {LOCAL_MD_SOURCE}:\n    plugin: local-md\n    config:\n      root: {:?}\n",
+            store.display().to_string()
+        ),
+    )
+    .expect("the store configuration");
+    let item = |path: &Path, front: &[(&str, Value)], body: &str| {
+        fs::create_dir_all(path.parent().expect("a directory")).expect("a store directory");
+        let mut document = String::from("---\n");
+        for (key, value) in front {
+            // Compact JSON is YAML flow style, so each value keeps its type.
+            document.push_str(&format!("{key}: {value}\n"));
+        }
+        document.push_str(&format!("---\n\n{body}\n"));
+        fs::write(path, document).expect("a store document");
+    };
+    item(
+        &store
+            .join("projects")
+            .join(format!("{LOCAL_MD_PROJECT}.md")),
+        &[
+            ("title", json!("Approval")),
+            (
+                "metadata",
+                json!({
+                    "onepipeline.schema_version": 2,
+                    "onepipeline.goal": { "text": "get the change approved" },
+                    "onepipeline.concurrency": 1,
+                }),
+            ),
+        ],
+        "",
+    );
+    let task = store
+        .join("tasks")
+        .join(LOCAL_MD_PROJECT)
+        .join(format!("000-{APPROVAL_NODE_ID}.md"));
+    item(
+        &task,
+        &[
+            ("title", json!("Approve the change")),
+            ("project", json!(LOCAL_MD_PROJECT)),
+            (
+                "metadata",
+                json!({ "onepipeline.id": APPROVAL_NODE_ID, "onepipeline.kind": "human" }),
+            ),
+        ],
+        "Approve the change.",
+    );
+
+    let project = format!("{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}");
+    let path = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    launch["project"] = json!(project);
+    fs::write(&path, pretty(&launch)).expect("the launch record");
+    (project, task)
+}
+
 /// The graph run one session id names: `{stream}.{member}`, as that library
 /// spells one, so the stream is everything before the last `.`.
 pub fn stream_of(session: &str) -> &str {
@@ -5834,6 +5920,27 @@ pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &
         "name": "dispatch",
         "concurrency": 1,
         "tasks": [
+            { "id": DISPATCH_NODE_ID, "task": criteria_bearing("Do the work the graph dispatches.") },
+        ],
+    });
+    write_awaiting(root, run, dir, node_graph, &plan, &[])
+}
+
+/// [`write_awaiting_dispatch`]'s run with its agent node's task stating **no**
+/// `## Acceptance criteria` section, which is the task a plan written before the
+/// engine held adoptions to C6b could carry.
+pub fn write_awaiting_dispatch_without_criteria(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "resolve the config chain" },
+        "name": "dispatch",
+        "concurrency": 1,
+        "tasks": [
             { "id": DISPATCH_NODE_ID, "task": "Do the work the graph dispatches." },
         ],
     });
@@ -5873,12 +5980,12 @@ pub fn write_awaiting_overrides(
             {
                 "id": OVERRIDDEN_NODE_ID,
                 "persona": "engineer",
-                "task": "Dispatch under the node's own override.",
+                "task": criteria_bearing("Dispatch under the node's own override."),
             },
             {
                 "id": CLEARED_NODE_ID,
                 "persona": "engineer",
-                "task": "Dispatch under the run-wide override.",
+                "task": criteria_bearing("Dispatch under the run-wide override."),
                 "sets": cleared_sets,
             },
         ],
@@ -5920,7 +6027,7 @@ pub fn write_awaiting_session(
                 "base_branch": base_branch,
                 "persona": "engineer",
                 "title": "feat: resolve the config chain",
-                "task": "Do the work the graph dispatches.",
+                "task": criteria_bearing("Do the work the graph dispatches."),
             },
         ],
     });
@@ -5932,6 +6039,16 @@ pub fn write_awaiting_session(
     launch[onepipeline::branchname::KEY] = json!(onepipeline::branchname::DEFAULT_TEMPLATE);
     fs::write(&path, pretty(&launch)).expect("the launch record");
     run_dir
+}
+
+/// An agent node's task as the engine will adopt it: the prose, then the one
+/// `## Acceptance criteria` section listing a criterion.
+///
+/// The linked engine holds every node an adoption could still dispatch to that
+/// rule (C6b) and refuses the adoption otherwise, so a run whose agent node a
+/// journey adopts states its bar the way every plan the engine launches does.
+fn criteria_bearing(task: &str) -> String {
+    format!("{task}\n\n## Acceptance criteria\n\n- The work is done.\n")
 }
 
 fn write_awaiting(

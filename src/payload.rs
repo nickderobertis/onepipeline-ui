@@ -1722,8 +1722,9 @@ fn kind_word(node: &Node) -> &'static str {
 /// the plan the run was launched with, so it carries no edit committed since.
 ///
 /// The file is deserialized here rather than through a loader of the SDK's:
-/// `onepipeline` now reads its plans out of the onetaskgraph store and no longer
-/// publishes one, but `RunPaths::plan()` still names the JSON document `start`
+/// `onepipeline` now reads its plans out of the onetaskgraph store, which it
+/// links in process and which reaches this crate only transitively through it,
+/// and it no longer publishes one, but `RunPaths::plan()` still names the JSON document `start`
 /// writes and `Plan` is still the published shape of it — so the deserialization
 /// is this crate's while the *schema* stays the SDK's, which is the same terms
 /// every other record here is read on.

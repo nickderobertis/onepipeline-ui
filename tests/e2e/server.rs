@@ -11515,7 +11515,7 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     let ungranted = http::post(
         serving.address,
         &reply,
-        r###"{"version": 2, "author": "sentinel", "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+        r###"{"version": 2, "author": "sentinel", "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
     );
     assert_eq!(ungranted.status, 422, "{}", ungranted.body);
     let ungranted = ungranted.json();
@@ -11552,7 +11552,7 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     let correlated = http::post(
         serving.address,
         &format!("{reply}?correlation=c-0123456789abcdef0123456789abcdef"),
-        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
     );
     assert_eq!(correlated.status, 422, "{}", correlated.body);
     let correlated = correlated.json();
@@ -11571,7 +11571,7 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     let applied = http::post(
         serving.address,
         &reply,
-        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more"}}]}"###,
+        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
     );
     assert_eq!(applied.status, 200, "{}", applied.body);
     let applied = applied.json();
@@ -12472,6 +12472,208 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// An adoption through the built binary drives a run whose plan lives in a
+/// `local-md` onetaskgraph store, on a host that offers **no** `onetaskgraph`
+/// executable. The engine this binary links compiles that store in, so the
+/// retained driver reads the project and projects the run onto it in process,
+/// with no program to look up.
+///
+/// Nothing on the server's `PATH` answers to `onetaskgraph`: every directory
+/// holding one is taken off it. `ONETASKGRAPH_BIN`, the variable that named the
+/// executable when the engine spawned one, names a program that records that it
+/// ran and then fails. A driver that still spawned the store would fail, or
+/// leave that record behind. The proof that the linked store did the work is
+/// read off the store itself: the project's task document carries the
+/// settlement the second driver reached, and every projection the run recorded
+/// landed.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server` above: two drivers,
+// each settling a one-node human graph, in about two seconds; the sixty seconds beside it
+// is the ceiling a failing wait reaches, which no passing run pays. It needs nothing a
+// checkout may lack: the compiled binary, and a folder of Markdown it writes itself.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let (project, task) = fixture_run::launch_from_local_md_store(&root, run, &dir);
+    let before = fs::read_to_string(&task).expect("the task document");
+
+    let ran = dir.join("onetaskgraph-was-run");
+    let refusing = dir.join("bin-that-fails").join("onetaskgraph");
+    fs::create_dir_all(refusing.parent().expect("a directory")).expect("a bin directory");
+    fs::write(
+        &refusing,
+        format!("#!/bin/sh\n: > '{}'\nexit 1\n", ran.display()),
+    )
+    .expect("the refusing program");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&refusing, fs::Permissions::from_mode(0o700))
+            .expect("the refusing program is executable");
+    }
+    let path = std::env::join_paths(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .filter(|dir| !dir.join("onetaskgraph").exists()),
+    )
+    .expect("a PATH");
+    let path = path.to_str().expect("a PATH in UTF-8").to_owned();
+
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("PATH", &path),
+            ("ONETASKGRAPH_BIN", &refusing.display().to_string()),
+        ],
+    );
+    let adopt = format!("/api/v2/runs/{run}/adopt");
+    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
+    let events = |address| {
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+    };
+    // The run the server lists is the one the store's project launched.
+    let listed = http::get(serving.address, "/api/v2/runs").json();
+    let row = listed["runs"]
+        .as_array()
+        .expect("the listed runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .cloned()
+        .expect("the run is listed");
+    assert_eq!(row["project"], json!(project), "{row}");
+
+    // The first driver settles the human action as waiting and lets go.
+    let adopted = http::post(serving.address, &adopt, "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually(
+        "the first driver settled the human action as waiting",
+        || {
+            detail(serving.address)["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID]
+                == json!("waiting")
+        },
+    );
+    eventually("the first driver let go and was reaped", || {
+        !process_is_live(pid)
+    });
+    drop(driver);
+
+    // Attested, then adopted again: the second driver completes the graph.
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let again = http::post(serving.address, &adopt, "");
+    assert_eq!(again.status, 200, "{}", again.body);
+    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let driver = RetainedDriver(second);
+    eventually("the second driver completed the graph", || {
+        detail(serving.address)["run"]["state"] == json!("settled")
+    });
+    eventually("the second driver was reaped", || !process_is_live(second));
+    drop(driver);
+    assert_eq!(
+        events(serving.address)
+            .iter()
+            .filter(|event| event["kind"] == json!("driver-adopted"))
+            .count(),
+        2
+    );
+
+    // What the drivers wrote reached the project's own task document, through
+    // the store the binary links: the author's document carried no status and
+    // no settlement, and the one the store holds now carries both.
+    assert!(!before.contains("status:"), "{before}");
+    let after = fs::read_to_string(&task).expect("the task document");
+    assert!(after.contains("\nstatus: done\n"), "{after}");
+    assert!(after.contains("onepipeline.settlement:"), "{after}");
+    assert!(
+        after.contains(&format!(
+            "onepipeline.node: {}",
+            fixture_run::APPROVAL_NODE_ID
+        )),
+        "{after}"
+    );
+    // And every projection either driver attempted landed on that project.
+    let records = fs::read_to_string(
+        root.join(run)
+            .join(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE),
+    )
+    .expect("the projection record");
+    let records: Vec<Value> = records
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a projection record line"))
+        .collect();
+    assert!(!records.is_empty(), "no projection was attempted");
+    for record in &records {
+        assert_eq!(record["project"], json!(project), "{record}");
+        assert_eq!(record["outcome"], json!("projected"), "{record}");
+    }
+    assert!(
+        !ran.exists(),
+        "a driver ran the program ONETASKGRAPH_BIN names"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// An adoption of a run whose undispatched agent node states no
+/// `## Acceptance criteria` section is refused through the route with the
+/// engine's own C6b refusal, and nothing is adopted.
+///
+/// The linked engine holds every node an adoption could still dispatch to that
+/// rule before it writes anything. So the route answers `422 refused` naming
+/// the node and the rule, the run's record gains no `driver-adopted`, and no
+/// driver was started.
+#[test]
+fn an_adoption_of_a_run_whose_undispatched_node_states_no_criteria_is_refused() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    // Never read: the refusal comes before anything is dispatched over it.
+    fixture_run::write_awaiting_dispatch_without_criteria(
+        &root,
+        run,
+        &dir,
+        &dir.join("node-scope.yaml"),
+    );
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+
+    let refused = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains(&format!(
+                "node '{}': no criteria section",
+                fixture_run::DISPATCH_NODE_ID
+            ))),
+        "{refused}"
+    );
+    let events = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["kind"] == json!("driver-adopted")),
+        "a refused adoption was journalled: {events:?}"
+    );
+}
+
 /// The harness stand-in a dispatch here runs: it records the argv it was given
 /// and answers as the adapter expects, so a journey can read back *that* it ran
 /// and *what as*.
@@ -13057,7 +13259,13 @@ fn graph_override_edits_relayed_by_the_reply_route_decide_the_adopted_runs_next_
         u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
     let driver = RetainedDriver(pid);
     let ran = || fs::read_to_string(&log).unwrap_or_default();
-    eventually("both nodes dispatched", || ran().lines().count() >= 2);
+    // Waited on by task rather than by line: a task carries its criteria section
+    // on lines of its own, so one dispatch's argv spans several lines of the log.
+    eventually("both nodes dispatched", || {
+        let ran = ran();
+        ran.contains("Dispatch under the node's own override.")
+            && ran.contains("Dispatch under the run-wide override.")
+    });
     let ran = ran();
     let line_of = |task: &str| {
         ran.lines()

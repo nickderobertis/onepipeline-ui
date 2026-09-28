@@ -2423,6 +2423,8 @@ function writeAdoptableRun(root, workspace) {
   // Schema 3, where a node's `sets` begins. Each agent node names a persona the
   // node-scope graph's library ships, because a node an override list reaches is
   // validated as the whole dispatch it would be, and a direct node needs one.
+  // Each states an `## Acceptance criteria` section too: the engine refuses to
+  // adopt a run with a node it could still dispatch that has none (C6b).
   const plan = {
     schema_version: 3,
     goal: { text: "Get the change approved" },
@@ -2434,13 +2436,13 @@ function writeAdoptableRun(root, workspace) {
         id: OVERRIDDEN_NODE,
         persona: "engineer",
         deps: [ADOPTABLE_ACTION],
-        task: "## What\nDispatch under the node's own override.",
+        task: "## What\nDispatch under the node's own override.\n\n## Acceptance criteria\n\n- The dispatch runs.\n",
       },
       {
         id: CLEARED_NODE,
         persona: "engineer",
         deps: [ADOPTABLE_ACTION],
-        task: "## What\nDispatch under the run-wide override.",
+        task: "## What\nDispatch under the run-wide override.\n\n## Acceptance criteria\n\n- The dispatch runs.\n",
         sets: [configSet(workspace, "stale")],
       },
     ],

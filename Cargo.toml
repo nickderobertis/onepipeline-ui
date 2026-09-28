@@ -4,7 +4,8 @@ version = "0.15.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below, and `clippy.toml` mirrors it so clippy suggests nothing newer.
+# below — 0.51.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
 license = "MIT"
@@ -156,7 +157,13 @@ onemessagebus = "0.9.0"
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
-onepipeline = "=0.48.0"
+#
+# 0.51.0 links the onetaskgraph store (`onetaskgraph-core` and its plugins)
+# where earlier releases spawned an `onetaskgraph` executable, so the driver an
+# adoption retains reads and projects a run's plan store in process. That family
+# arrives only through this line, pinned exactly by the engine, and this crate
+# names none of it.
+onepipeline = "=0.51.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -188,7 +195,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.33.0"
+onevcs = "0.34.1"
 predicates = "3"
 # The drift gate on the browser's copy of the reply envelope's commands reads
 # each op's fields off the engine's own `Command` through the schema that type
