@@ -36,7 +36,19 @@ mod cost;
 mod ensure_baseline;
 mod ensure_sibling;
 mod lint_llm_diff;
+// llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
+// image compiling the whole release binary, minutes per target, which ci.yml's
+// `wheel` legs run for real — then install and smoke-test — on every pull request
+// that reaches the crate. The module stands in for `docker` and the image's tools
+// at the PATH boundary only, and drives the real recipe and script.
+// llmlint: ignore-block[tests_mirror_real_usage] the same substitution read by
+// the other rule that names it: with the runtime stood in for, what the script
+// asked it to run is the only place the image and prerequisites can be read, and
+// every journey still drives `just wheel-linux` and asserts on its exit and
+// stderr. The module header states both reasons in full.
 mod linux_wheel;
+// llmlint: ignore-end[tests_mirror_real_usage]
+// llmlint: ignore-end[e2e_not_mocked]
 // llmlint: ignore-block[e2e_not_mocked] the real `llmlint` bills a model call
 // and answers differently on each roll, so a journey that drove it could not
 // tell a replayed verdict from a lucky reroll — which is the entire subject of
