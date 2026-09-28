@@ -1517,6 +1517,8 @@ dependencies = [
  "onejudge",
  "onemessagebus",
  "onepipeline",
+ "onetaskgraph-core",
+ "onetaskgraph-plugin-api",
  "onevcs",
  "predicates",
  "schemars",
