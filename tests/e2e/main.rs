@@ -46,6 +46,7 @@ mod lint_llm_diff;
 // asked it to run is the only place the image and prerequisites can be read, and
 // every journey still drives `just wheel-linux` and asserts on its exit and
 // stderr. The module header states both reasons in full.
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] nothing in this suite is expensive: it never starts Docker or compiles anything, and all of it runs in well under a second (17 journeys, 0.11s under nextest). The expensive half — the real build in the manylinux image — is already behind an edge of its own: `just wheel-linux`, run by ci.yml's `wheel` job and never by `test`.
 mod linux_wheel;
 // llmlint: ignore-end[tests_mirror_real_usage]
 // llmlint: ignore-end[e2e_not_mocked]
