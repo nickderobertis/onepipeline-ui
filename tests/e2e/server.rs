@@ -12768,7 +12768,9 @@ fn create_store_task(
 /// `start` holds the plan to both before it mints the run, records what it
 /// resolved in the launch record, and leaves a driver that settles the approval
 /// as waiting and lets go, which is what makes the run one an adoption takes
-/// over. Answers the run id and the host root.
+/// over. Answers the run id and the host root as `start` resolves it: against
+/// its working directory as the OS reports it, symlinks resolved, which on macOS
+/// is `/private/var/...` for a temporary directory named `/var/...`.
 #[cfg(unix)]
 fn launch_rendered_over_local_md_store(
     root: &Path,
@@ -12873,6 +12875,9 @@ fn launch_rendered_over_local_md_store(
     eventually("the launched driver let go of the run", || {
         !process_is_live(pid)
     });
+    let template_root = template_root
+        .canonicalize()
+        .expect("the template root resolves");
     (run, template_root)
 }
 
