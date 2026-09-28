@@ -12615,6 +12615,16 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     for record in &records {
         assert_eq!(record["project"], json!(project), "{record}");
         assert_eq!(record["outcome"], json!("projected"), "{record}");
+        // Every write landed on the item the plan was read from, which the engine
+        // finds through the landed baseline the fixture seeds as `start` does. A
+        // baseline it could not read — the fixture's copy of that document drifted
+        // from the engine's — is taken as empty, and the first projection creates
+        // an item of its own. An attempt that carried nothing states no actions.
+        assert_eq!(
+            record["actions"]["created"].as_u64().unwrap_or_default(),
+            0,
+            "{record}"
+        );
     }
     assert!(
         !ran.exists(),

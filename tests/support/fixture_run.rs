@@ -329,7 +329,10 @@ fn launch_node_from_local_md_store(
 /// `LandedBaseline` (`writeback-landed.json`, schema 1 at 0.52.0) and the engine
 /// exposes nothing that produces it. A run without one reads as a run an older
 /// build started, whose adopted drivers write each node to an item of their own
-/// rather than to the task the plan was read from.
+/// rather than to the task the plan was read from. The engine reads the file
+/// strictly and takes one it refuses as empty, so
+/// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
+/// is this copy's drift gate: it fails on any projection that created an item.
 fn seed_landed_baseline(
     root: &Path,
     run: &str,
