@@ -36,7 +36,7 @@ function hostPath(machine: string): string {
   const bin = mkdtempSync(join(hosts, `${machine}-`));
   const uname = join(bin, "uname");
   writeFileSync(uname, `#!/bin/sh\necho ${machine}\n`);
-  chmodSync(uname, 0o755);
+  chmodSync(uname, 0o700);
   return `${bin}:/usr/bin:/bin`;
 }
 
