@@ -616,6 +616,9 @@ const ARTIFACT_FILES: &[&str] = &[
     // The per-platform packages have no committed manifest: this is the only
     // source of the bytes theirs is written from.
     "scripts/npm-build.mjs",
+    // The Linux wheels are compiled by this, in the image and with the
+    // prerequisites and maturin invocation it names.
+    "scripts/build-linux-wheel.sh",
     // What Vite emits into the frontend bundle is decided by these, and what it
     // inlines is pinned by the lockfile.
     "apps/dag-ui/index.html",

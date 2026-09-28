@@ -199,6 +199,49 @@ jobs:
             --expect-version "$version" \
             --label "cargo install onepipeline-ui on $RUNNER_OS/$RUNNER_ARCH"
 
+  # Build the Linux wheels the way the release does, then install and smoke-test
+  # the one built. v0.16.0 is why this exists: every required check passed on the
+  # change that linked onetaskgraph's HTTP stores, whose vendored OpenSSL could
+  # not configure in the manylinux image, and the release was the first place
+  # anything compiled there — so it published no wheel. `just wheel-linux` is the
+  # one definition release.yml's Linux `build-wheels` legs also run, on the same
+  # native runners, and tests/e2e/linux_wheel.rs holds the two matrices equal.
+  wheel:
+    needs: changes
+    if: needs.changes.outputs.crate == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    name: wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Build the browser view
+        run: just build
+      - name: Build wheel (shared with release.yml's Linux build-wheels)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: just wheel-linux "$TARGET"
+      - name: Install the wheel and smoke-test its binary
+        run: |
+          version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+          python3 -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install --no-index dist/*.whl
+          PATH="$RUNNER_TEMP/wheel-venv/bin:$PATH" bash scripts/smoke-published.sh \
+            --expect-version "$version" \
+            --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
+
   # Lint the PR title: under squash-merge it becomes the release-driving commit.
   pr-title:
     if: github.event_name == 'pull_request'

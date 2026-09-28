@@ -306,9 +306,9 @@ jobs:
   # PyPI wheels: maturin's `bin` bindings wrap the prebuilt binary in
   # per-platform wheels (the ruff/uv pattern), so `pip install onepipeline-api-cli`
   # is a seconds-fast binary install anywhere PyPI is reachable — the quickest
-  # path on a CI image with no Rust toolchain. maturin-action compiles inside
-  # manylinux containers on Linux for broad glibc compatibility, which is why
-  # this is a separate matrix from `upload` rather than a step inside it.
+  # path on a CI image with no Rust toolchain. On Linux `just wheel-linux`
+  # compiles inside the manylinux image for broad glibc compatibility, which is
+  # why this is a separate matrix from `upload` rather than a step inside it.
   build-wheels:
     name: build-wheels (${{ matrix.target }})
     needs: test
@@ -343,7 +343,17 @@ jobs:
       # needs no node of its own.
       - name: Build the browser view
         run: just build
+      # Linux builds through the one definition ci.yml's `wheel` legs run on every
+      # pull request — the same image, the Perl modules OpenSSL's vendored build
+      # needs, and the same maturin invocation — so a Linux wheel that cannot
+      # build fails a pull request rather than a release, as v0.16.0's did.
+      - name: Build wheel (Linux, shared with ci.yml's wheel)
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: just wheel-linux "$TARGET"
       - name: Build wheel
+        if: runner.os != 'Linux'
         # The gate denies warnings on Linux only; these targets are compiled
         # nowhere else, so deny them here too rather than let a
         # platform-specific one ship unread.

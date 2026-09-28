@@ -20,7 +20,8 @@
 //! this repository asks, `report_workflow_failure` runs the reporter that is the
 //! only alarm on a published-smoke failure, `ensure_sibling` runs the recipe
 //! the gate provisions the sibling CLI with, plus the task graph Nx itself builds
-//! for `test`, and `ui` starts the binary with `--ui` and reads the browser view
+//! for `test`, `linux_wheel` runs the one Linux wheel build both workflows share
+//! up to the container it hands that build to, and `ui` starts the binary with `--ui` and reads the browser view
 //! it serves beside the API against the bundle it embedded.
 //!
 //! What is under test in every one of them is the real script, recipe or binary,
@@ -34,6 +35,14 @@ mod cli;
 mod cost;
 mod ensure_baseline;
 mod ensure_sibling;
+// llmlint: ignore-block[e2e_not_mocked] the real build is minutes of network-bound
+// compile inside a manylinux image, which ci.yml's `wheel` legs run for real — and
+// then install and smoke-test — on every pull request that reaches the crate. This
+// suite substitutes only `docker` and the image's own tools at the PATH boundary;
+// the recipe, the script and the in-container script it hands the image are the
+// real ones, and the module header records that substitution and its reason.
+mod linux_wheel;
+// llmlint: ignore-end[e2e_not_mocked]
 mod lint_llm_diff;
 // llmlint: ignore-block[e2e_not_mocked] the real `llmlint` bills a model call
 // and answers differently on each roll, so a journey that drove it could not
