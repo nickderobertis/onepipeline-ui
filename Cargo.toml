@@ -163,8 +163,9 @@ onemessagebus = "0.9.0"
 # adoption retains reads and projects a run's plan store in process. That family
 # arrives only through this line, pinned exactly by the engine, and this crate
 # names none of it.
-# Moving here from 0.48.0 is a break of this crate's surface like every other
-# move of this line, announced as one.
+# Its github-projects and linear plugins reach reqwest's native TLS, so a build
+# of this crate compiles OpenSSL from source through `openssl-src` and needs
+# `make` beside a C compiler — why visual-docs.yml's capture job installs it.
 onepipeline = "=0.51.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
