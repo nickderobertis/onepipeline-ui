@@ -25,6 +25,15 @@
 //! seam onto the SDK's own telemetry document — the fold it publishes and the
 //! one its summary carries — held to the producer's contract before a timing
 //! is served, and never folded a second time here.
+//!
+//! This crate's public surface follows `onepipeline`'s version, because parts
+//! of it are made of that crate's types: [`ApiError::from_engine`] takes an
+//! [`onepipeline::Error`], [`filter::EventFilter::to_engine`] returns an
+//! [`onepipeline::filter::EventFilter`], and [`telemetry::of_run`] reads an
+//! [`onepipeline::views::RunView`]. `Cargo.toml` pins the engine exactly, so a
+//! release that moves that pin across a `0.x` minor makes callers of those
+//! items recompile against the new engine. That is a breaking change of this
+//! crate, whatever its own signatures show.
 
 #![deny(missing_docs)]
 
