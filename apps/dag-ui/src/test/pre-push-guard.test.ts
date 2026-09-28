@@ -111,6 +111,10 @@ describe("the pre-push guard over a screencomp.toml it cannot read lanes from", 
     ["declares them twice", 'arches = ["x86_64"]\narches = ["arm64"]\n'],
     ["declares an empty list", "arches = []\n"],
     ["declares something that is not a lane name", 'arches = ["x86 64/v2"]\n'],
+    [
+      "declares arches only under another table",
+      '[other]\narches = ["arm64"]\n',
+    ],
   ])(
     "refuses a screencomp.toml that %s, rather than call the host undeclared",
     (_, config) => {
@@ -120,6 +124,17 @@ describe("the pre-push guard over a screencomp.toml it cannot read lanes from", 
       expect(status).toBe(1);
     },
   );
+
+  it("reads the lanes from [capture] alone, not an arches key under another table", () => {
+    const { status, stderr } = pushWith(
+      '[capture]\narches = ["x86_64"]\n\n[other] # not a lane list\narches = ["arm64"]\n',
+    );
+    expect(stderr).toContain(
+      "this host's architecture (arm64) has no lane in [capture].arches",
+    );
+    expect(stderr).toContain("Declared: [x86_64]");
+    expect(status).toBe(0);
+  });
 });
 
 describe("the pre-push guard on a declared lane", () => {

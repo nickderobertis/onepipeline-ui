@@ -72,9 +72,16 @@ CURRENT="shots/current"                    # capture root, mirrors visual-docs.y
 # Validated before it is used: a declaration that is missing, stated twice, or not a
 # list of lane names is this tree's own file being wrong rather than this host being
 # unusual, so it is refused outright. Read leniently it would arrive below as "no lane
-# matches" and send the pusher off to add a lane that is not what is wrong.
-DECLARED_ARCHES="$(grep -cE '^arches *=' screencomp.toml || true)"
-LANES="$(sed -n 's/^arches *= *\[\(.*\)\].*/\1/p' screencomp.toml \
+# matches" and send the pusher off to add a lane that is not what is wrong. Only the
+# `[capture]` table is read: an `arches` key under any other table is some other
+# setting, and taking it for the lane list would classify the host against it.
+CAPTURE_ARCHES="$(awk '
+  /^[[:blank:]]*\[/ { table = $0; sub(/#.*/, "", table); gsub(/[[:blank:]]/, "", table); next }
+  table == "[capture]" && /^[[:blank:]]*arches[[:blank:]]*=/ { print }
+' screencomp.toml)"
+DECLARED_ARCHES="$(printf '%s' "$CAPTURE_ARCHES" | grep -c . || true)"
+LANES="$(printf '%s\n' "$CAPTURE_ARCHES" \
+  | sed -n 's/^[[:blank:]]*arches[[:blank:]]*=[[:blank:]]*\[\(.*\)\].*/\1/p' \
   | tr -d '"[:blank:]' | tr ',' '\n' | grep -v '^$' || true)"
 if [ "$DECLARED_ARCHES" != 1 ] || [ -z "$LANES" ] ||
   printf '%s\n' "$LANES" | grep -qvE '^[A-Za-z0-9_]+$'; then
