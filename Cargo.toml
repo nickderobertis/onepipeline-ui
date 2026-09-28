@@ -4,7 +4,7 @@ version = "0.16.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.51.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.52.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -166,7 +166,13 @@ onemessagebus = "0.9.0"
 # Its github-projects and linear plugins reach reqwest's native TLS, so a build
 # of this crate compiles OpenSSL from source through `openssl-src` and needs
 # `make` beside a C compiler — why visual-docs.yml's capture job installs it.
-onepipeline = "=0.51.0"
+#
+# 0.52.0 adds host-owned task templates: `start` resolves a `template_root` and
+# `require_rendered` (launch-config schema 12), holds the plan to them, and
+# retains both in the launch record. Adoption reloads no plan from the store and
+# runs no rendered-only check, so a browser-adopted run keeps what its launch
+# recorded, and nothing here reads either setting.
+onepipeline = "=0.52.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the

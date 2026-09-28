@@ -235,6 +235,27 @@ pub const LOCAL_MD_PROJECT: &str = "approval-board";
 /// Answers the qualified project id and the path of the approval's task
 /// document, which is what a driver's write-back rewrites.
 pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String, PathBuf) {
+    launch_node_from_local_md_store(
+        root,
+        run,
+        dir,
+        APPROVAL_NODE_ID,
+        ("Approve the change", Some("human")),
+        "Approve the change.",
+    )
+}
+
+/// [`launch_from_local_md_store`] for a store whose project holds one node,
+/// `node`, titled and of the kind `title_and_kind` says (an agent node where it
+/// names no kind), whose task document's body is `body`.
+fn launch_node_from_local_md_store(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node: &str,
+    (title, kind): (&str, Option<&str>),
+    body: &str,
+) -> (String, PathBuf) {
     let store = dir.join("plan-store");
     fs::write(
         dir.join("onetaskgraph.yaml"),
@@ -274,21 +295,23 @@ pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String
     let task = store
         .join("tasks")
         .join(LOCAL_MD_PROJECT)
-        .join(format!("000-{APPROVAL_NODE_ID}.md"));
+        .join(format!("000-{node}.md"));
+    let mut metadata = json!({ "onepipeline.id": node });
+    if let Some(kind) = kind {
+        metadata["onepipeline.kind"] = json!(kind);
+    }
     item(
         &task,
         &[
-            ("title", json!("Approve the change")),
+            ("title", json!(title)),
             ("project", json!(LOCAL_MD_PROJECT)),
-            (
-                "metadata",
-                json!({ "onepipeline.id": APPROVAL_NODE_ID, "onepipeline.kind": "human" }),
-            ),
+            ("metadata", metadata),
         ],
-        "Approve the change.",
+        body,
     );
 
     let project = format!("{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}");
+    seed_landed_baseline(root, run, &project, node, (title, kind), body);
     let path = root.join(run).join("launch.json");
     let mut launch: Value =
         serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
@@ -296,6 +319,118 @@ pub fn launch_from_local_md_store(root: &Path, run: &str, dir: &Path) -> (String
     launch["project"] = json!(project);
     fs::write(&path, pretty(&launch)).expect("the launch record");
     (project, task)
+}
+
+/// The landed write-back baseline `onepipeline start` seeds from its read of
+/// the project [`launch_node_from_local_md_store`] writes, before the run's
+/// first projection: where each node's item is, and what it said as read.
+///
+/// Hand-written because the document is the engine's internal
+/// `LandedBaseline` (`writeback-landed.json`, schema 1 at 0.52.0) and the engine
+/// exposes nothing that produces it. A run without one reads as a run an older
+/// build started, whose adopted drivers write each node to an item of their own
+/// rather than to the task the plan was read from.
+fn seed_landed_baseline(
+    root: &Path,
+    run: &str,
+    project: &str,
+    node: &str,
+    (title, kind): (&str, Option<&str>),
+    body: &str,
+) {
+    use sha2::Digest;
+
+    // Engine-owned keys only, as the store answered them.
+    let mut metadata = json!({ "onepipeline.id": node });
+    if let Some(kind) = kind {
+        metadata["onepipeline.kind"] = json!(kind);
+    }
+    let digest: String = sha2::Sha256::digest(body.trim().as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    fs::write(
+        root.join(run).join(onepipeline::cli::WRITEBACK_LANDED_FILE),
+        pretty(&json!({
+            "schema_version": onepipeline::cli::WRITEBACK_LANDED_SCHEMA_VERSION,
+            "project": project,
+            "project_metadata": {
+                "onepipeline.concurrency": 1,
+                "onepipeline.goal": { "text": "get the change approved" },
+                "onepipeline.schema_version": 2,
+            },
+            "items": {
+                node: {
+                    "destination": format!("{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}/000-{node}"),
+                    "title": title,
+                    "content_sha256": digest,
+                    // Seeded from a read, so no word this engine landed.
+                    "status": null,
+                    "metadata": metadata,
+                    "delivers": [],
+                    "depends_on": [],
+                },
+            },
+        })),
+    )
+    .expect("the landed write-back baseline");
+}
+
+/// A host template root under `dir`, as a host that shapes its own tasks writes
+/// one: the built-in `plan-task` name overridden at the host layer by a template
+/// extending the engine's own base.
+fn write_template_root(dir: &Path) -> PathBuf {
+    let root = dir.join("template-root");
+    fs::create_dir_all(&root).expect("the template root");
+    fs::write(
+        root.join(format!(
+            "{}{}",
+            onepipeline::templates::BUILT_IN,
+            onepipeline::templates::EXTENSION
+        )),
+        format!(
+            "{{% extends \"{}\" %}}\n{{% block before_criteria %}}Shaped by this host.\n\n\
+             {{% endblock %}}\n",
+            onepipeline::templates::BASE
+        ),
+    )
+    .expect("the host template");
+    root
+}
+
+/// Turn a run [`write_awaiting_dispatch`] (or its criteria-less counterpart)
+/// wrote into one launched from a real `local-md` store with the host template
+/// root [`write_template_root`] writes and the rendered-only check on — the two
+/// settings the linked engine's `start` resolves out of its flags, environment
+/// and launch config and retains in the launch record, under the launch-config
+/// keys of schema [`onepipeline::templates::CONFIG_SCHEMA_VERSION`].
+///
+/// The store's task document carries `task`, the task the run's journalled plan
+/// holds for [`DISPATCH_NODE_ID`]. Answers the template root, absolute, as the
+/// launch record names it.
+pub fn launch_with_templates_from_local_md_store(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    task: &str,
+) -> PathBuf {
+    launch_node_from_local_md_store(
+        root,
+        run,
+        dir,
+        DISPATCH_NODE_ID,
+        ("Resolve the config chain", None),
+        task,
+    );
+    let template_root = write_template_root(dir);
+    let path = root.join(run).join("launch.json");
+    let mut launch: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))
+            .expect("the launch record parses");
+    launch[onepipeline::templates::ROOT_KEY] = json!(template_root.display().to_string());
+    launch[onepipeline::templates::REQUIRE_RENDERED_KEY] = json!(true);
+    fs::write(&path, pretty(&launch)).expect("the launch record");
+    template_root
 }
 
 /// The graph run one session id names: `{stream}.{member}`, as that library
@@ -6047,7 +6182,7 @@ pub fn write_awaiting_session(
 /// The linked engine holds every node an adoption could still dispatch to that
 /// rule (C6b) and refuses the adoption otherwise, so a run whose agent node a
 /// journey adopts states its bar the way every plan the engine launches does.
-fn criteria_bearing(task: &str) -> String {
+pub fn criteria_bearing(task: &str) -> String {
     format!("{task}\n\n## Acceptance criteria\n\n- The work is done.\n")
 }
 

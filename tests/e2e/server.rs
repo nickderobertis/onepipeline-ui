@@ -12674,6 +12674,149 @@ fn an_adoption_of_a_run_whose_undispatched_node_states_no_criteria_is_refused() 
     );
 }
 
+/// The template settings a run was launched with, read off its launch record
+/// under the engine's own keys: `(template_root, require_rendered)`.
+fn launched_template_settings(root: &Path, run: &str) -> (Value, Value) {
+    let launch: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(run).join("launch.json")).expect("the launch record"),
+    )
+    .expect("the launch record parses");
+    (
+        launch[onepipeline::templates::ROOT_KEY].clone(),
+        launch[onepipeline::templates::REQUIRE_RENDERED_KEY].clone(),
+    )
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names` below: the compiled
+// binary and a `/bin/sh` stand-in the journey writes itself, settling in about a second.
+/// A run launched over a `local-md` store with a host template root and the
+/// rendered-only check on is adopted through the route, and the driver it
+/// retains dispatches the run's ready agent node.
+///
+/// Adoption reloads no plan from the store, so it runs no rendered-only (C7)
+/// check: the run is held to what its launch resolved, and the launch record
+/// still names that root and that setting once the adoption has written itself
+/// into it.
+#[cfg(unix)]
+#[test]
+fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispatches_it() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    let standin = write_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_dispatch(&root, run, &dir, &graph);
+    let template_root = fixture_run::launch_with_templates_from_local_md_store(
+        &root,
+        run,
+        &dir,
+        &fixture_run::criteria_bearing("Do the work the graph dispatches."),
+    );
+    let launched = launched_template_settings(&root, run);
+    assert_eq!(
+        launched,
+        (json!(template_root.display().to_string()), json!(true))
+    );
+
+    // Where the dispatch runs and where its turn records itself, named for the
+    // reasons `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names`
+    // gives.
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+        ],
+    );
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    let kinds = |address| {
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+            .iter()
+            .map(|event| event["kind"].clone())
+            .collect::<Vec<_>>()
+    };
+    eventually("the adopted driver dispatched the ready node", || {
+        kinds(serving.address).contains(&json!("node-dispatched"))
+    });
+    assert!(
+        kinds(serving.address).contains(&json!("driver-adopted")),
+        "{:?}",
+        kinds(serving.address)
+    );
+    eventually("the dispatch ran the harness", || {
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("Do the work the graph dispatches."))
+    });
+
+    // The adoption rewrote the launch record — it counts itself there — and
+    // left the template settings the launch resolved exactly as they were.
+    let record: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(run).join("launch.json")).expect("the launch record"),
+    )
+    .expect("the launch record parses");
+    assert_eq!(record["adoptions"], json!(1), "{record}");
+    assert_eq!(launched_template_settings(&root, run), launched);
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The same launch, over a store whose agent node's task states no
+/// `## Acceptance criteria` section, is refused on adoption with the engine's
+/// C6b refusal naming the node: the template settings the launch carries do not
+/// excuse a journalled node from it, and the refused adoption writes nothing
+/// into the launch record.
+#[test]
+fn an_adoption_of_a_run_launched_with_templates_still_refuses_a_node_stating_no_criteria() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    // Never read: the refusal comes before anything is dispatched over it.
+    fixture_run::write_awaiting_dispatch_without_criteria(
+        &root,
+        run,
+        &dir,
+        &dir.join("node-scope.yaml"),
+    );
+    let template_root = fixture_run::launch_with_templates_from_local_md_store(
+        &root,
+        run,
+        &dir,
+        "Do the work the graph dispatches.",
+    );
+    let before = fs::read_to_string(root.join(run).join("launch.json")).expect("the record");
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+
+    let refused = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains(&format!(
+                "node '{}': no criteria section",
+                fixture_run::DISPATCH_NODE_ID
+            ))),
+        "{refused}"
+    );
+    let after = fs::read_to_string(root.join(run).join("launch.json")).expect("the record");
+    assert_eq!(after, before, "a refused adoption wrote the launch record");
+    assert_eq!(
+        launched_template_settings(&root, run),
+        (json!(template_root.display().to_string()), json!(true))
+    );
+}
+
 /// The harness stand-in a dispatch here runs: it records the argv it was given
 /// and answers as the adapter expects, so a journey can read back *that* it ran
 /// and *what as*.
