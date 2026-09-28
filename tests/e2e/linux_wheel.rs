@@ -8,6 +8,27 @@
 //! bash from the checkout with the environment the script gave it. The two
 //! workflows are read rather than restated, so the targets and the maturin they
 //! name cannot drift from what the script builds.
+//!
+//! llmlint: ignore-file[e2e_not_mocked] the real `docker run` of this script is a
+//! manylinux image compiling the whole release binary — four to nine minutes of
+//! network-bound build per target — which an offline, quick suite cannot drive.
+//! It is driven for real instead by ci.yml's `wheel` legs on every pull request
+//! that reaches the crate, which build both targets through this same recipe and
+//! then install and smoke-test the wheel. Here only `docker` and the image's own
+//! tools are stand-ins on PATH; the recipe, the script and the in-container
+//! script it hands the image are the real ones, run by bash with the environment
+//! the script gave the container. `docker_double` and `container_double` are the
+//! whole of that substitution, and every journey below rests on one of them.
+//!
+//! llmlint: ignore-file[tests_mirror_real_usage] what this script does is ask a
+//! container runtime to run a build: which image, on which platform, with which
+//! prerequisites and which maturin invocation. With the runtime stood in for,
+//! that request — recorded by the stand-ins — is the only place those facts can
+//! be read, and they are the facts v0.16.0 got wrong (no Perl modules for
+//! OpenSSL's `Configure`). Every journey still drives the user's command, `just
+//! wheel-linux`, and asserts on its exit code and its stderr; the recordings are
+//! read beside them, never instead. The observable outcome — a wheel that
+//! installs and runs — is asserted by ci.yml's `wheel` legs against the real image.
 
 #![cfg(target_os = "linux")]
 
