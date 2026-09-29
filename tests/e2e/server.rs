@@ -6495,7 +6495,12 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
     let serving = Serving::start(|root| {
         fixture_run::write_live(root, fixture_run::RUN_ID);
     });
-    let latest = |filter: &str| -> Option<Value> {
+    // `admitted` says which half of the assertion the caller is making. A frame
+    // that must come is waited for up to a deadline, because a loaded host —
+    // a Windows runner beside the rest of the suite — can take longer than any
+    // short silence to relay it; only the frame that must *not* come is judged
+    // by a short silence, where the silence is the answer.
+    let latest = |filter: &str, admitted: bool| -> Option<Value> {
         let mut stream = http::stream(
             serving.address,
             &format!(
@@ -6518,8 +6523,16 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
             }),
             json!({ "kind": "tool_use", "name": "Grep", "detail": "docs/contract.md" }),
         );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let mut activity = None;
-        while let Some(frame) = stream.frame_within(std::time::Duration::from_millis(750)) {
+        while let Some(frame) = if admitted {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            (!left.is_zero())
+                .then(|| stream.frame_within(left))
+                .flatten()
+        } else {
+            stream.frame_within(Duration::from_millis(750))
+        } {
             if frame.event == "activity.changed" {
                 activity = Some(frame.json());
                 break;
@@ -6528,7 +6541,8 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
         activity
     };
 
-    let told = latest("detailed").expect("the detailed reading is told what the turn is doing");
+    let told =
+        latest("detailed", true).expect("the detailed reading is told what the turn is doing");
     let summary = told["activity"]
         .as_array()
         .expect("the live activity")
@@ -6542,7 +6556,7 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
     // neither an `activity.changed` carrying an empty list, which would be this
     // server saying the node is doing nothing.
     assert!(
-        latest("planner").is_none(),
+        latest("planner", false).is_none(),
         "a decisions-level watcher was told about a tool call"
     );
 }
