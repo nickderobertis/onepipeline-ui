@@ -33,13 +33,10 @@
 //! [`onepipeline::views::RunView`]. `Cargo.toml` pins the engine exactly, so a
 //! release that moves that pin across a `0.x` minor makes callers of those
 //! items recompile against the new engine. That is a breaking change of this
-//! crate, whatever its own signatures show.
-//!
-//! The release that moved that pin from `onepipeline` 0.52.1 to 0.53.0 was
-//! such a break: from it on, a caller passing an [`onepipeline::Error`] to
-//! [`ApiError::from_engine`] had to build against 0.53.0 as well. That is a
-//! record of one past move, not a statement of the current pin, which
-//! `Cargo.toml` alone declares.
+//! crate, whatever its own signatures show: moving to `onepipeline` 0.53.0
+//! left [`ApiError::from_engine`] spelled exactly as before, and a caller
+//! still holding a 0.52 [`onepipeline::Error`] could no longer pass it, which
+//! is why no reading of this crate's API alone can see such a break.
 
 #![deny(missing_docs)]
 
