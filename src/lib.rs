@@ -35,10 +35,11 @@
 //! items recompile against the new engine. That is a breaking change of this
 //! crate, whatever its own signatures show.
 //!
-//! The move from `onepipeline` 0.52.1 to 0.53.0 is such a break: each of the
-//! items above now carries 0.53.0's types, so a caller passing an
-//! [`onepipeline::Error`] to [`ApiError::from_engine`] must build against
-//! 0.53.0 too.
+//! The release that moved that pin from `onepipeline` 0.52.1 to 0.53.0 was
+//! such a break: from it on, a caller passing an [`onepipeline::Error`] to
+//! [`ApiError::from_engine`] had to build against 0.53.0 as well. That is a
+//! record of one past move, not a statement of the current pin, which
+//! `Cargo.toml` alone declares.
 
 #![deny(missing_docs)]
 
