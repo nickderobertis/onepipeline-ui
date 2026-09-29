@@ -34,6 +34,11 @@
 //! release that moves that pin across a `0.x` minor makes callers of those
 //! items recompile against the new engine. That is a breaking change of this
 //! crate, whatever its own signatures show.
+//!
+//! The move from `onepipeline` 0.52.1 to 0.53.0 is such a break: each of the
+//! items above now carries 0.53.0's types, so a caller passing an
+//! [`onepipeline::Error`] to [`ApiError::from_engine`] must build against
+//! 0.53.0 too.
 
 #![deny(missing_docs)]
 
