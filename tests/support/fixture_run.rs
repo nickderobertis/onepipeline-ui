@@ -6000,6 +6000,32 @@ pub fn write_awaiting_dispatch(root: &Path, run: &str, dir: &Path, node_graph: &
     write_awaiting(root, run, dir, node_graph, &plan, &[])
 }
 
+/// [`write_awaiting_dispatch`]'s run with its agent node carrying a persona, as
+/// a node must for a manager's note to be judged against it: the engine refuses
+/// an envelope naming a direct agent node with none. `engineer` is one
+/// oneagentgraph ships, so nothing here has to be written for it to resolve.
+pub fn write_awaiting_dispatch_with_persona(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "resolve the config chain" },
+        "name": "dispatch",
+        "concurrency": 1,
+        "tasks": [
+            {
+                "id": DISPATCH_NODE_ID,
+                "persona": "engineer",
+                "task": criteria_bearing("Do the work the graph dispatches."),
+            },
+        ],
+    });
+    write_awaiting(root, run, dir, node_graph, &plan, &[])
+}
+
 /// [`write_awaiting_dispatch`]'s run with its agent node's task stating **no**
 /// `## Acceptance criteria` section, which is the task a plan written before the
 /// engine held adoptions to C6b could carry.

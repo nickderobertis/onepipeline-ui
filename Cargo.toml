@@ -4,7 +4,7 @@ version = "0.17.1"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.52.1 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.53.1 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -183,7 +183,18 @@ onemessagebus = "0.9.0"
 # run's driver is this line's copy of the engine, so it spends only on what
 # changed once this moves; this crate reads neither that file nor the
 # projection record.
-onepipeline = "=0.52.1"
+#
+# 0.53.0 delivers a manager's live note off the run's single writer: a note
+# waiting on a turn that takes it only as it ends no longer holds the run's
+# journal, so the turn's work and its member's heartbeat go on being recorded
+# and the run goes on reading as live. It also names, in a `checks-failed`
+# re-dispatch, the commit the node's branch is published at and requires new
+# commits on top of it. 0.53.1 links the onetaskgraph release that gives a copied
+# project's tasks destination-scoped ids. A browser-adopted run is driven by this
+# line's copy of the engine, so it carries all three once this moves;
+# `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`
+# holds the first through the adopt and reply routes.
+onepipeline = "=0.53.1"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
