@@ -184,6 +184,12 @@ onemessagebus = "0.9.0"
 # changed once this moves; this crate reads neither that file nor the
 # projection record.
 #
+# llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch and the destination-scoped
+# ids below are the engine's behaviour, composed by no code of this crate's — nothing here
+# builds a re-dispatch, publishes a branch or copies a project — and the engine's own suites
+# prove them. What this crate owes for the move is that a browser-adopted run is driven by
+# that engine, which the named journey proves end to end through the one behaviour a
+# scripted turn can hold open.
 # 0.53.0 delivers a manager's live note off the run's single writer: a note
 # waiting on a turn that takes it only as it ends no longer holds the run's
 # journal, so the turn's work and its member's heartbeat go on being recorded
@@ -195,6 +201,7 @@ onemessagebus = "0.9.0"
 # `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`
 # holds the first through the adopt and reply routes.
 onepipeline = "=0.53.1"
+# llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the

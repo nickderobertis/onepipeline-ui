@@ -12472,6 +12472,20 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+// llmlint: ignore-block[e2e_not_mocked] the one process stood in for from here to the end
+// of the journey below is the paid model turn: the `oneharness run` onejudge spawns per side
+// per turn, at the `ONEAGENTGRAPH_ONEHARNESS_BIN` seam `oneagentgraph` resolves it through.
+// A real one bills a provider and answers differently each time, so no turn could be held
+// open on cue; the server, the adopted driver, the member and the conversation above it are
+// all real, and every document the stand-in prints is serialized by the linked
+// `oneharness_core` that declares it — the same cut the engine's own note journeys make.
+// llmlint: ignore-block[tests_mirror_real_usage] the files the journey writes into
+// `harness-double` are the stand-in model turn's own pacing — when the paid turn would have
+// produced its next tool call and its end — which no product surface decides, because a
+// real model decides it. The one read below the API is the member's note spool, the only
+// place "offered to the conversation and not yet taken" exists: nothing the server serves
+// distinguishes a note waiting there from one still queued, and the assertion is about the
+// first. Everything the journey claims about the run is read off the served routes.
 /// The note a manager sends into the adopted run's live conversation.
 #[cfg(unix)]
 const HELD_TURN_NOTE: &str = "the reviewer asked for a smaller diff; stop editing src/old.rs";
@@ -12695,9 +12709,11 @@ esac
         ),
     )
     .expect("the double");
+    // Owner-only: the one process that runs it is the dispatch this journey's own
+    // server starts, as this user.
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o755))
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
             .expect("the double is executable");
     }
     program
@@ -12722,6 +12738,10 @@ fn write_two_party_node_scope_graph(dir: &Path) -> PathBuf {
     )
     .expect("the onejudge base config");
     let graph = dir.join("node-scope.yaml");
+    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
+    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
+    // no narrower one to choose, and without the field no turn ever opens. What it grants is
+    // handed to the stand-in `oneharness` above, which runs no tool at all.
     fs::write(
         &graph,
         "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
@@ -12986,6 +13006,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     drop(driver);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+// llmlint: ignore-end[tests_mirror_real_usage]
+// llmlint: ignore-end[e2e_not_mocked]
 
 /// An adoption through the built binary drives a run whose plan lives in a
 /// `local-md` onetaskgraph store, on a host that offers **no** `onetaskgraph`
