@@ -69,6 +69,11 @@ fn healthz_answers_without_reading_run_storage() {
         response.json(),
         json!({ "status": "ok", "onepipeline_version": onepipeline::VERSION })
     );
+    // And the release a host reads is the one the checked-in golden pins, so a
+    // pin move reaches the wire and the golden in one change or fails here.
+    let golden: Value = serde_json::from_str(include_str!("../fixtures/healthz.json"))
+        .expect("tests/fixtures/healthz.json parses");
+    assert_eq!(response.json(), golden);
 }
 
 #[test]
