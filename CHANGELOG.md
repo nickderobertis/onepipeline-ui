@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.17.1...v0.18.0) - 2026-09-29
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose copied tasks get destination-scoped ids ([#145](https://github.com/nickderobertis/onepipeline-ui/pull/145))
+- *(deps)* [**breaking**] announce that the public surface follows onepipeline 0.53 ([#151](https://github.com/nickderobertis/onepipeline-ui/pull/151))
+- *(deps)* link the engine release carrying status --no-providers and watch --log ([#143](https://github.com/nickderobertis/onepipeline-ui/pull/143))
+
 ## [0.17.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.17.0...v0.17.1) - 2026-09-28
 
 ### Added
