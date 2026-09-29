@@ -139,7 +139,7 @@ impl Serving {
     ) -> Self {
         let (workspace, runs) = fixture_run::workspace();
         build(&runs);
-        Self::spawn_from(binary, workspace, &[], false, None, None, arguments)
+        Self::spawn_from(binary, workspace, &[], &[], false, None, None, arguments)
     }
 
     /// The same, acting as `session` over a workspace the caller already built.
@@ -158,6 +158,29 @@ impl Serving {
         environment: &[(&str, &str)],
     ) -> Self {
         Self::spawn_as(workspace, environment, false, None, Some(session), &[])
+    }
+
+    /// The same, with every variable `removed` names taken out of the
+    /// environment first — for a journey whose server starts processes that read
+    /// variables this suite's own dispatch exported, and that must meet none of
+    /// them.
+    pub fn start_in_as_with_env_removing(
+        workspace: TempDir,
+        session: &str,
+        environment: &[(&str, &str)],
+        removed: &[String],
+    ) -> Self {
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        Self::spawn_from(
+            &binary,
+            workspace,
+            environment,
+            removed,
+            false,
+            None,
+            Some(session),
+            &[],
+        )
     }
 
     /// The same, reading the server's own log rather than letting it through to
@@ -208,6 +231,7 @@ impl Serving {
             &binary,
             workspace,
             environment,
+            &[],
             capture,
             home,
             session,
@@ -215,10 +239,15 @@ impl Serving {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "every way a journey shapes the one process it starts, passed on as given"
+    )]
     fn spawn_from(
         binary: &Path,
         workspace: TempDir,
         environment: &[(&str, &str)],
+        removed: &[String],
         capture: bool,
         home: Option<&Path>,
         session: Option<&str>,
@@ -272,6 +301,9 @@ impl Serving {
                 .env_remove(onepipeline_ui::store::GRAPH_RECORDS_ENV)
                 .env("HOME", home),
         };
+        for name in removed {
+            command.env_remove(name);
+        }
         let mut child = command
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())

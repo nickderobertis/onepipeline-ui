@@ -165,7 +165,17 @@ fn head(reader: &mut BufReader<TcpStream>) -> (u16, bool) {
 /// `fetch` sends and what every verb route reads — the reply route as the
 /// envelope's bytes, verbatim, and the rest as the shape each documents.
 pub fn post(address: SocketAddr, path: &str, body: &str) -> Response {
+    post_within(address, path, body, TIMEOUT)
+}
+
+/// [`post`], waiting up to `patience` for the answer rather than the usual
+/// ceiling — for a verb whose answer is owed only once something else has
+/// happened, such as a note a held turn has not taken yet.
+pub fn post_within(address: SocketAddr, path: &str, body: &str, patience: Duration) -> Response {
     let mut stream = connect(address);
+    stream
+        .set_read_timeout(Some(patience))
+        .expect("read timeout");
     let request = format!(
         "POST {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",

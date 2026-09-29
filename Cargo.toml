@@ -4,7 +4,7 @@ version = "0.17.1"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.53.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.53.1 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -184,11 +184,26 @@ onemessagebus = "0.9.0"
 # changed once this moves; this crate reads neither that file nor the
 # projection record.
 #
-# 0.53.0 adds `onepipeline status --no-providers` and `watch --log PATH`, CLI
-# shapes a host can allowlist, and links onetaskgraph 0.2.50. Nothing here
-# calls either verb's new option; the move keeps a browser-adopted run on the
-# engine its host pins.
-onepipeline = "=0.53.0"
+# llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch and the destination-scoped
+# ids below are the engine's behaviour, composed by no code of this crate's — nothing here
+# builds a re-dispatch, publishes a branch or copies a project — and the engine's own suites
+# prove them. What this crate owes for the move is that a browser-adopted run is driven by
+# that engine, which the named journey proves end to end through the one behaviour a
+# scripted turn can hold open.
+# 0.53.0 delivers a manager's live note off the run's single writer: a note
+# waiting on a turn that takes it only as it ends no longer holds the run's
+# journal, so the turn's work and its member's heartbeat go on being recorded
+# and the run goes on reading as live. It also names, in a `checks-failed`
+# re-dispatch, the commit the node's branch is published at and requires new
+# commits on top of it, and adds `onepipeline status --no-providers` and
+# `watch --log PATH`, CLI shapes a host can allowlist, which nothing here
+# calls. 0.53.1 links the onetaskgraph release that gives a copied
+# project's tasks destination-scoped ids. A browser-adopted run is driven by this
+# line's copy of the engine, so it carries each of these once this moves;
+# `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`
+# holds the first through the adopt and reply routes.
+onepipeline = "=0.53.1"
+# llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the

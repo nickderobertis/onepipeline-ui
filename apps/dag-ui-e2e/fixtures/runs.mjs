@@ -3213,17 +3213,30 @@ export function removeRun(root, runId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) {
     throw new Error(`'${runId}' is not a usable run id`);
   }
-  rmSync(join(root, runId), { recursive: true, force: true });
+  removeServedRun(join(root, runId));
 }
 
 /** Remove the synthetic pagination rows, leaving the named journeys intact. */
 export function removePageRuns(root) {
   for (let index = 0; index < PAGE_RUNS; index += 1) {
-    rmSync(join(root, `dag-ui-page-${String(index).padStart(2, "0")}`), {
-      recursive: true,
-      force: true,
-    });
+    removeServedRun(
+      join(root, `dag-ui-page-${String(index).padStart(2, "0")}`),
+    );
   }
+}
+
+/**
+ * Delete a run directory the server may be writing into at that moment.
+ *
+ * A read of a run writes its `checkpoint.json` and `summary.json` back beside
+ * the journal, and the page is still reading the runs a journey removes, so a
+ * file can land between the delete emptying the directory and removing it.
+ * That is `ENOTEMPTY`, which the retries answer; a run the delete never
+ * finished would otherwise fail the journey removing it rather than the one
+ * reading it.
+ */
+function removeServedRun(dir) {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
 /**
