@@ -12993,6 +12993,13 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     assert_eq!(answered.status, 200, "{}", answered.body);
     let receipt = answered.json();
     assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
+    // The driver records a presentation when it next reads the turn's stream
+    // after the delivery, not before the receipt is answered.
+    eventually("the note's presentation to be recorded", || {
+        journal()
+            .iter()
+            .any(|event| event["kind"] == json!("note-shown"))
+    });
     let recorded = journal();
     let delivered = recorded
         .iter()
