@@ -97,7 +97,7 @@ export function RunActions({
             </TooltipTrigger>
             <TooltipContent>
               {unwatched.reported.length === 0
-                ? "Every run this session owns is watched or closed."
+                ? "Every run this session owns is watched or settled."
                 : unwatched.reported
                     .map(
                       (run) =>
