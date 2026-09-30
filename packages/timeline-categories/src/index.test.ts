@@ -58,6 +58,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // A launch that went ahead past a live holder because the plan depends on the
   // holding node: the same contention its acknowledged sibling records, settled
   // by the dependency rather than by a word from the planner.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns the kind and this package owns the category it reads under; this corpus is where that decision is pinned, as the doc comment above `CORPUS` states. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` named exactly `concurrent-deferred` when the engine pin moved to 0.55.0, the release that declares it, and demands an entry here for it.
   "concurrent-deferred": "contention",
   "quiet-worker": "contention",
   "node-held": "contention",
