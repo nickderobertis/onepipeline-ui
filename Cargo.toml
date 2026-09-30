@@ -4,7 +4,7 @@ version = "0.18.1"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.53.3 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.54.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -185,8 +185,8 @@ onemessagebus = "0.9.0"
 # projection record.
 #
 # llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch, the destination-scoped
-# ids, the cut-short sweep, the discharged decisions, the native board search and the copy
-# links below are the engine's behaviour, composed by no code of this crate's — the reply
+# ids, the cut-short sweep, the discharged decisions, the native board search, the copy
+# links and the reused retirement verdicts below are the engine's behaviour, composed by no code of this crate's — the reply
 # route hands a retry or a drop to the engine as the envelope's bytes, and nothing here builds
 # a re-dispatch, publishes a branch, sweeps a pool, settles a decision, queries a board or
 # copies a project — and the engine's own suites prove them. What this crate owes for the
@@ -217,7 +217,25 @@ onemessagebus = "0.9.0"
 # This crate serves the journal, the decisions and the results those write
 # through the linked SDK as it finds them, and names neither a board query nor a
 # copy.
-onepipeline = "=0.53.3"
+#
+# 0.54.0 links the onevcs release whose idle retirement pass records each
+# branch's verdict and reuses it while that branch's inputs are unchanged, reads
+# the remote's refs in bulk rather than one query per branch, and asks no
+# existence or ancestry question twice. A browser-adopted run's driver is this
+# line's copy of the engine, so its idle sweep re-derives only the verdicts
+# whose branches moved once this moves. The `branches-retired` record reads as
+# it did, since it never said how a verdict was reached, and this crate serves
+# it as the journal holds it. It also adds a stop guard that holds a session's
+# owed runs to a wake budget, a hook surface nothing here calls, and with it a
+# closure rule that does reach this crate: a run a 0.54 driver drove is owed
+# until it is closed — stopped, given a verdict whose `completion` is true, or
+# acknowledged — rather than once its graph completes. A browser-adopted run is
+# driven by this line's copy of the engine, so `GET /api/v2/unwatched` goes on
+# reporting it after its graph settles until one of those closes it; the route
+# forwards the verb's answer unfiltered, and
+# `holds the watch as a stream, and the unwatched badge changes while it is held`
+# reads it beside a run an earlier journey adopted and completed.
+onepipeline = "=0.54.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -250,7 +268,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.34.1"
+onevcs = "0.35.0"
 predicates = "3"
 # The drift gate on the browser's copy of the reply envelope's commands reads
 # each op's fields off the engine's own `Command` through the schema that type

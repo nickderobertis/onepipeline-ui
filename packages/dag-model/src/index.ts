@@ -2088,9 +2088,10 @@ export const watchFrameDataSchema = z.discriminatedUnion("watch", [
 ]);
 
 /**
- * `GET /api/v2/unwatched`: one entry per run the acting session owns that is not
- * proven settled and that nothing is watching, and what could not be resolved in
- * the engine's words. An unattributed server owns no run and reports none.
+ * `GET /api/v2/unwatched`: one entry per run the acting session owns that the
+ * engine's `unwatched` verb reports as owed and not watched, by that verb's own
+ * rule, and what could not be resolved in the engine's words. An unattributed
+ * server owns no run and reports none.
  */
 export const unwatchedSchema = openObject({
   ...verbEnvelope,
