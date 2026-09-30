@@ -280,6 +280,12 @@ libc = "0.2"
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
 onevcs = "0.35.0"
+# The same library the crate links above, with the schema bundle it publishes
+# for its SDK consumers: the history record's schema is where `oneharness`
+# closes the two kinds an agent's own words are streamed under, so
+# `tests/contract.rs` holds `payload::graph::MESSAGE` and `REASONING` to it.
+# A test-only feature, so the shipped binary compiles none of it.
+oneharness-core = { version = "0.21.0", features = ["sdk-schema"] }
 predicates = "3"
 # The drift gate on the browser's copy of the reply envelope's commands reads
 # each op's fields off the engine's own `Command` through the schema that type

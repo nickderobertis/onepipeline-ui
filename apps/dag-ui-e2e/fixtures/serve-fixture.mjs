@@ -22,6 +22,7 @@
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
+ *                     | --record-words KIND --words-text TEXT
  *                     | --churn-live N --churn-interval MS
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
@@ -42,6 +43,7 @@ import {
   growTranscript,
   overridesDir,
   recordActivity,
+  recordWords,
   removePageRuns,
   removeRun,
   SUPERVISOR_SESSION,
@@ -322,6 +324,8 @@ function parseArgs(argv) {
     "--churn-interval",
     "--record-activity",
     "--activity-detail",
+    "--record-words",
+    "--words-text",
     "--refuse-port",
     "--live-dispatch-pid",
   ]);
@@ -355,7 +359,8 @@ const args = parseArgs(process.argv.slice(2));
 // asked for two changes and got one is reading a run that recorded something
 // they never asked for, which is the whole failure this script's guards exist to
 // prevent. `--activity-detail` is not counted: it is the other half of
-// `--record-activity`, and arriving alone is already its own refusal.
+// `--record-activity`, and arriving alone is already its own refusal — as is
+// `--words-text`, the other half of `--record-words`.
 const ACTIONS = [
   "stall",
   "settle-dashboard",
@@ -364,6 +369,7 @@ const ACTIONS = [
   "grow-worker-session",
   "churn-live",
   "record-activity",
+  "record-words",
 ];
 const asked = ACTIONS.filter((action) => args[action] !== undefined);
 if (args.ui && asked.length > 0) {
@@ -508,6 +514,21 @@ if (args.stall) {
       die(
         "--activity-detail needs --record-activity",
         "pass --record-activity the name of the tool the summary came from",
+      );
+    } else if (args["record-words"] !== undefined) {
+      // Both halves or neither, as a tool summary is: a word's kind and what was
+      // said, and the half that arrived alone is a mistyped command.
+      if (args["words-text"] === undefined) {
+        die(
+          "--record-words needs --words-text",
+          "pass --words-text what the agent said or reasoned",
+        );
+      }
+      recordWords(runsRoot, args["record-words"], args["words-text"]);
+    } else if (args["words-text"] !== undefined) {
+      die(
+        "--words-text needs --record-words",
+        "pass --record-words message or reasoning",
       );
     } else {
       let shutdown;

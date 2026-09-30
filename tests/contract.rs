@@ -2677,6 +2677,57 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
 }
 
+/// The two kinds an agent's own words are streamed under are the two
+/// `oneharness` closes for them.
+///
+/// A tool event's `kind` is an open string on every type that carries one, so no
+/// enum declares these; the history record's published schema does, as the one
+/// event branch whose `kind` is an enum of exactly the agent's text and its
+/// reasoning. Held to that branch, so a harness that renamed either word would
+/// fail here rather than reach a reader as a tool call with no name.
+#[test]
+fn the_kinds_an_agents_words_are_served_from_are_the_ones_oneharness_closes() {
+    use onepipeline_ui::payload::graph;
+
+    fn kind_enums(value: &Value, found: &mut Vec<Vec<String>>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(words) = map
+                    .get("properties")
+                    .and_then(|properties| properties.get("kind"))
+                    .and_then(|kind| kind.get("enum"))
+                    .and_then(Value::as_array)
+                {
+                    found.push(
+                        words
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                    );
+                }
+                map.values().for_each(|value| kind_enums(value, found));
+            }
+            Value::Array(items) => items.iter().for_each(|value| kind_enums(value, found)),
+            _ => {}
+        }
+    }
+
+    let schema = serde_json::to_value(oneharness_core::sdk_schema::bundle().history_record)
+        .expect("the schema serializes");
+    let mut found = Vec::new();
+    kind_enums(&schema, &mut found);
+    assert!(
+        found.contains(&vec![
+            graph::MESSAGE.to_owned(),
+            graph::REASONING.to_owned()
+        ]),
+        "no event branch of oneharness's history record closes its kind to [{}, {}]: {found:?}",
+        graph::MESSAGE,
+        graph::REASONING
+    );
+}
+
 /// The usage keys this crate reads off a `turn-completed`, against the type that
 /// really writes them.
 ///
