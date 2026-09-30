@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.18.0...v0.18.1) - 2026-09-30
+
+### Added
+
+- *(deps)* link the engine release whose store searches boards natively and follows copy links ([#155](https://github.com/nickderobertis/onepipeline-ui/pull/155))
+
 ## [0.18.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.17.1...v0.18.0) - 2026-09-29
 
 ### Added
