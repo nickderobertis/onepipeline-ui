@@ -55,6 +55,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "note-shown": "planning",
   "completion-requested": "lifecycle",
   "concurrent-acknowledged": "contention",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the producer owns the kind and this package owns the category it reads under; this corpus is where that decision is pinned, as the doc comment above `CORPUS` states. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` named this kind when the engine pin moved to onepipeline 0.55.0, which declares it, and demands an entry here for it.
+  "concurrent-deferred": "contention",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "quiet-worker": "contention",
   "node-held": "contention",
   "node-unheld": "contention",

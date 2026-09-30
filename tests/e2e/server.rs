@@ -7629,6 +7629,7 @@ fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> Str
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),
@@ -8031,6 +8032,7 @@ fn unclosed_judge_report() -> String {
         candidates: vec![candidate(ms)],
         history_file: None,
         judge: None,
+        posture: None,
     };
     let mut assessment = String::new();
     while assessment.len() <= VERBOSE_ASSESSMENT_BYTES {
@@ -8743,6 +8745,7 @@ fn unanswered_report(prompt: &str) -> String {
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),
@@ -8884,8 +8887,9 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
 /// and on no other.
 ///
 /// The report is read back through the artifact route first, so this journey
-/// cannot go on passing after the stored document has stopped being a schema-12
-/// report carrying two judges' decisions. The transcript is then read off the
+/// cannot go on passing after the stored document has stopped being a schema-14
+/// report — the schema the linked onejudge 0.17 writes — carrying two judges'
+/// decisions. The transcript is then read off the
 /// conversation route and off the detail beside it, which are one fold.
 #[test]
 fn each_judge_of_a_stacked_panel_is_served_on_the_turn_it_judged() {
@@ -8903,7 +8907,7 @@ fn each_judge_of_a_stacked_panel_is_served_on_the_turn_it_judged() {
     assert_eq!(stored["truncated"], json!(false), "{stored}");
     let report: Value = serde_json::from_str(stored["content"].as_str().expect("the bytes"))
         .expect("the stored report parses");
-    assert_eq!(report["schema_version"], json!(12), "{report}");
+    assert_eq!(report["schema_version"], json!(14), "{report}");
     let judged = report["judge_decisions"]
         .as_array()
         .expect("the report's judge decisions");
@@ -9264,6 +9268,7 @@ fn stacked_panel_report() -> String {
             }],
             history_file: None,
             judge: Some((*label).to_owned()),
+            posture: None,
         })
         .collect();
 
@@ -10196,6 +10201,274 @@ fn a_live_turn_answers_for_the_records_a_recorded_run_has_none_of() {
     assert_eq!(turns[0]["usage"]["costUsd"], json!(0.05));
 }
 
+/// An agent's own words, relayed from inside a turn under a tool event's kind,
+/// are that turn's text and reasoning — and never one of its tool calls.
+///
+/// `oneagentgraph` 0.5 publishes what the agent says and reasons as it works as
+/// `turn-activity` of kind `message` and `reasoning`, beside the calls it makes.
+/// Two sessions of one run are served side by side: one carrying all three kinds,
+/// and one whose history holds the same tool activity and nothing else. The
+/// second is the reading every run recorded before the words existed, so it holds
+/// the tool payload to what it was; the first has to serve exactly that tool
+/// payload too, with the words on the turn instead.
+#[test]
+fn an_agents_relayed_words_are_its_text_and_reasoning_and_never_its_tool_calls() {
+    const WORDS: &str = "node-scope-1786925518999-3163555.worker";
+    const TOOLS_ONLY: &str = "node-scope-1786925518999-3163556.worker";
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for (session, words) in [(WORDS, true), (TOOLS_ONLY, false)] {
+            let relay = |kind: &str, payload: Value| {
+                let labels = json!({
+                    "run_id": fixture_run::RUN_ID,
+                    "node": fixture_run::SHIP_NODE_ID,
+                    "member": "worker",
+                    "persona": "pr-author",
+                    "session": session,
+                });
+                fixture_run::append_relayed(&dir, "agentgraph", kind, labels, payload);
+            };
+            // What a worker's words look like on the wire: no name, an empty
+            // summary, no call identity, and the words as the output.
+            let said = |kind: &str, text: &str, index: u64| {
+                if words {
+                    relay(
+                        "turn-activity",
+                        json!({ "kind": kind, "name": Value::Null, "detail": "", "output": text, "index": index }),
+                    );
+                }
+            };
+            relay(
+                "turn-started",
+                json!({
+                    "turn": 1,
+                    "role": "assistant",
+                    "instruction": "Prove the change.",
+                    "started_at": "2026-08-07T12:04:00.000Z",
+                }),
+            );
+            said("reasoning", "The gate is the quickest proof.", 0);
+            said("message", "Running the gate first.", 1);
+            relay(
+                "turn-activity",
+                json!({
+                    "kind": "tool_call",
+                    "name": "bash",
+                    "detail": "{\"command\":\"just check\"}",
+                    "tool_call_id": "t1",
+                    "index": 2,
+                }),
+            );
+            relay(
+                "turn-activity",
+                json!({
+                    "kind": "tool_result",
+                    "name": Value::Null,
+                    "detail": "",
+                    "output": "check passed",
+                    "tool_call_id": "t1",
+                    "index": 3,
+                }),
+            );
+            // A second thought and a second remark after the call, and a remark
+            // that is the reply the turn closes with, which a harness streams as
+            // it writes it and returns as its answer too.
+            said("reasoning", "Nothing else needs running.", 4);
+            said("message", "The gate passed.", 5);
+            if words {
+                relay(
+                    "turn-message",
+                    json!({ "turn": 1, "role": "assistant", "text": "The gate passed." }),
+                );
+            }
+        }
+    });
+
+    let turns_of = |session: &str| {
+        http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{session}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json()["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript")
+            .clone()
+    };
+    let words = turns_of(WORDS);
+    let tools_only = turns_of(TOOLS_ONLY);
+    assert_eq!(words.len(), 1, "{words:?}");
+    assert_eq!(tools_only.len(), 1, "{tools_only:?}");
+
+    // Tool activity alone is served as it always was: the call, carrying the
+    // observation that answered it, and no text or reasoning on the turn.
+    let expected_tools = json!([{
+        "index": 2,
+        "kind": "tool_call",
+        "name": "bash",
+        "input": "{\"command\":\"just check\"}",
+        "output": "check passed",
+    }]);
+    assert_eq!(tools_only[0]["tools"], expected_tools);
+    assert_eq!(tools_only[0]["assistant"], json!(null));
+    assert_eq!(tools_only[0]["reasoning"], json!(null));
+
+    // Beside the words, the same tool payload and nothing more: not one of the
+    // four words is a tool event, named or unnamed.
+    assert_eq!(words[0]["tools"], expected_tools);
+    // What it said along the way, then the reply it closed with — once, because
+    // the reply is the last thing it said.
+    assert_eq!(
+        words[0]["assistant"],
+        json!("Running the gate first.\n\nThe gate passed.")
+    );
+    assert_eq!(
+        words[0]["reasoning"],
+        json!("The gate is the quickest proof.\n\nNothing else needs running.")
+    );
+}
+
+/// A settled member's stored report is read the same way: words its harness
+/// history recorded among a turn's tool events are the turn's text and
+/// reasoning, and its tool events are served as they were.
+#[test]
+fn a_reports_recorded_words_are_its_text_and_reasoning_and_never_its_tool_calls() {
+    use onejudge::{Message, Report, Role, ToolEvent, Transcript};
+
+    const STREAM: &str = "node-scope-1786925518999-3163557";
+    const SESSION: &str = "node-scope-1786925518999-3163557.worker";
+
+    let event = |kind: &str, index: usize, output: Option<&str>| ToolEvent {
+        kind: kind.into(),
+        name: None,
+        input: None,
+        output: output.map(str::to_owned),
+        index,
+        tool_call_id: None,
+    };
+    let call = ToolEvent {
+        name: Some("bash".into()),
+        input: Some(json!({ "command": "just check" })),
+        tool_call_id: Some("t1".into()),
+        ..event("tool_call", 1, None)
+    };
+    let observed = ToolEvent {
+        tool_call_id: Some("t1".into()),
+        ..event("tool_result", 2, Some("check passed"))
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user("Prove the change."),
+                Message {
+                    role: Role::Assistant,
+                    content: "The gate passed.".into(),
+                    events: vec![
+                        event("reasoning", 0, Some("The gate is the quickest proof.")),
+                        call.clone(),
+                        observed.clone(),
+                        event("message", 3, Some("Ran the gate.")),
+                    ],
+                },
+                Message::user("And the docs?"),
+                Message {
+                    role: Role::Assistant,
+                    content: "The docs build.".into(),
+                    events: vec![call, observed],
+                },
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: Some("the change is proven".into()),
+        settled_reason: None,
+        judge_decisions: Vec::new(),
+        usage: None,
+        telemetry: None,
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        // The session as the producer opened it while it ran; the report it
+        // stored on settling is then the whole of the reading.
+        fixture_run::append_relayed(
+            &dir,
+            "agentgraph",
+            "turn-started",
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "pr-author",
+                "session": SESSION,
+            }),
+            json!({
+                "turn": 1,
+                "role": "assistant",
+                "instruction": "Prove the change.",
+                "started_at": "2026-08-07T12:04:00.000Z",
+            }),
+        );
+        fixture_run::settle_member(
+            &dir,
+            &fixture_run::SettledMember {
+                stream: STREAM,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                at: "2026-08-07T12:05:00.000Z",
+                artifact: "report-node-scope-1786925518999-3163557",
+                report: &serde_json::to_string(&report).expect("a report serializes"),
+            },
+            fixture_run::Produced::Report,
+        );
+    });
+
+    let turns = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{SESSION}",
+            fixture_run::RUN_ID
+        ),
+    )
+    .json()["conversation"]["turns"]
+        .as_array()
+        .expect("the transcript")
+        .clone();
+    assert_eq!(turns.len(), 2, "{turns:?}");
+
+    // The second turn's history holds tool activity only, and is served as a
+    // report's tool events always were: each event as recorded, and no reasoning.
+    let expected_tools = json!([
+        { "index": 1, "kind": "tool_call", "name": "bash", "input": { "command": "just check" }, "output": null },
+        { "index": 2, "kind": "tool_result", "name": null, "input": null, "output": "check passed" },
+    ]);
+    assert_eq!(turns[1]["tools"], expected_tools);
+    assert_eq!(turns[1]["assistant"], json!("The docs build."));
+    assert_eq!(turns[1]["reasoning"], json!(null));
+
+    // The first holds the same tool events and two words beside them: the words
+    // are its text and its reasoning, and none of them is a tool event.
+    assert_eq!(turns[0]["tools"], expected_tools);
+    assert_eq!(
+        turns[0]["assistant"],
+        json!("Ran the gate.\n\nThe gate passed.")
+    );
+    assert_eq!(
+        turns[0]["reasoning"],
+        json!("The gate is the quickest proof.")
+    );
+}
+
 /// A turn the journal holds only half of is still the turn it was.
 ///
 /// Two halves, because the journal is a live stream and either record can be the
@@ -10452,6 +10725,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),

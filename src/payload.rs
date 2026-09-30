@@ -441,6 +441,15 @@ pub mod graph {
     /// one word the producer closes, and it closes it inline.
     // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] `oneagentgraph::event::TurnActivity::kind` is a `String` rather than an enum — deliberately, so a call's kind can be the harness's own word — so this single closed spelling is declared by no type a consumer can reach. `tests/support/fixture_run.rs` writes the record as that library emits it and the goldens pin what this crate makes of it, which is the whole of the gate available.
     pub const TOOL_RESULT: &str = "tool_result";
+    /// The agent's own text, published from inside a turn under a tool event's
+    /// kind: no name, no input, and the words as its [`OUTPUT`].
+    ///
+    /// Held by `tests/contract.rs` to the `oneharness-core` history-record schema
+    /// that declares it, beside [`REASONING`]: the two words that schema closes for
+    /// an agent's words rather than its actions.
+    pub const MESSAGE: &str = "message";
+    /// The agent's own reasoning, published the way [`MESSAGE`] is.
+    pub const REASONING: &str = "reasoning";
     /// What a tool returned, on the observation that carries it.
     pub const OUTPUT: &str = "output";
     /// Whether [`OUTPUT`] was cut to the producer's bound.
@@ -2895,6 +2904,7 @@ struct ReportedTurn {
     user: String,
     assistant: Option<String>,
     tools: Vec<Value>,
+    words: Words,
 }
 
 /// The settlement one session's member left, by the `{stream}.{member}` id that
@@ -3030,11 +3040,15 @@ fn reported_turns(report: &judge::Report) -> Vec<ReportedTurn> {
     let mut turns: Vec<ReportedTurn> = Vec::new();
     for message in &report.transcript.messages {
         match message.role {
-            judge::Role::User => turns.push(ReportedTurn {
-                user: message.content.clone(),
-                assistant: None,
-                tools: reported_tools(message),
-            }),
+            judge::Role::User => {
+                let mut words = Words::default();
+                turns.push(ReportedTurn {
+                    user: message.content.clone(),
+                    assistant: None,
+                    tools: reported_tools(message, &mut words),
+                    words,
+                });
+            }
             judge::Role::Assistant => {
                 // A reply with no prompt before it is still the agent's turn; it
                 // opens one rather than joining the turn before it, which was
@@ -3046,12 +3060,14 @@ fn reported_turns(report: &judge::Report) -> Vec<ReportedTurn> {
                             user: String::new(),
                             assistant: None,
                             tools: Vec::new(),
+                            words: Words::default(),
                         });
                         turns.last_mut().expect("the turn just pushed")
                     }
                 };
                 open.assistant = Some(message.content.clone());
-                open.tools.extend(reported_tools(message));
+                let tools = reported_tools(message, &mut open.words);
+                open.tools.extend(tools);
             }
             judge::Role::System => {}
         }
@@ -3164,6 +3180,79 @@ fn agent_session(report: &judge::Report, turn: u64) -> Option<&judge::SessionLin
         .find(|link| link.role == judge::TelemetryRole::Agent && link.turn_index == turn)
 }
 
+/// Whether a tool event's kind is one of the agent's own words rather than
+/// something it did: [`graph::MESSAGE`] or [`graph::REASONING`].
+fn is_words(kind: &str) -> bool {
+    kind == graph::MESSAGE || kind == graph::REASONING
+}
+
+/// What the agent said and reasoned inside one turn, each in the order the
+/// producer published it.
+///
+/// A harness streams these under a tool event's kind, so a reader who took every
+/// event as a tool would show the agent's narration as calls with no name. They
+/// are the turn's text instead: its `reasoning`, and its `assistant` alongside the
+/// reply the turn closed with. A turn that published neither is served exactly
+/// as it was before either word existed.
+#[derive(Default)]
+struct Words {
+    said: Vec<String>,
+    reasoned: Vec<String>,
+}
+
+impl Words {
+    /// The words among one turn's relayed `turn-activity` summaries.
+    fn of(summaries: &[&Envelope]) -> Self {
+        let mut words = Self::default();
+        for event in summaries {
+            let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
+            if let Some(kind) = field(graph::KIND) {
+                words.took(kind, field(graph::OUTPUT));
+            }
+        }
+        words
+    }
+
+    /// Keeps `text` if `kind` is one of the agent's words, and says whether it
+    /// was — so a caller walking tool events drops exactly what this kept. Words
+    /// with no text are still words, and are dropped rather than served as a call.
+    fn took(&mut self, kind: &str, text: Option<&str>) -> bool {
+        let into = match kind {
+            graph::MESSAGE => &mut self.said,
+            graph::REASONING => &mut self.reasoned,
+            _ => return false,
+        };
+        if let Some(text) = text.filter(|text| !text.is_empty()) {
+            into.push(text.to_owned());
+        }
+        true
+    }
+
+    /// The turn's `assistant`: what it said along the way, then the reply it
+    /// closed with — once, where the reply is the last thing it said, which is how
+    /// a harness streams a final answer it also returns. The reply alone where it
+    /// said nothing along the way.
+    fn assistant(&self, reply: Option<String>) -> Option<String> {
+        if self.said.is_empty() {
+            return reply;
+        }
+        let mut said = self.said.clone();
+        if let Some(reply) = reply.filter(|reply| !reply.is_empty() && said.last() != Some(reply)) {
+            said.push(reply);
+        }
+        Some(said.join("\n\n"))
+    }
+
+    /// The turn's `reasoning`, or `null` where it published none.
+    fn reasoning(&self) -> Value {
+        if self.reasoned.is_empty() {
+            Value::Null
+        } else {
+            json!(self.reasoned.join("\n\n"))
+        }
+    }
+}
+
 /// The tool calls one turn published, each carrying the observation that
 /// answered it.
 ///
@@ -3190,6 +3279,12 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
     let mut open: Vec<(usize, Option<String>, Option<u64>)> = Vec::new();
     for (position, event) in summaries.iter().enumerate() {
         let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
+        // The agent's own words are not a call and answer none: they are the
+        // turn's `assistant` and `reasoning`, read by [`Words::of`]. Skipped in
+        // place, so a call with no recorded index keeps the position it had.
+        if field(graph::KIND).is_some_and(is_words) {
+            continue;
+        }
         let recorded = event.payload.get(graph::INDEX).and_then(Value::as_u64);
         let identity = field(graph::TOOL_CALL_ID);
         // `tool_result` is the one word the producer closes: it declares the
@@ -3287,10 +3382,11 @@ fn truthy(event: &Envelope, field: &str) -> bool {
 /// is. `name` is `null` on a result for the same reason — that is what the
 /// producing library records, and a result renamed after its call would claim a
 /// pairing this crate did not read.
-fn reported_tools(message: &judge::Message) -> Vec<Value> {
+fn reported_tools(message: &judge::Message, words: &mut Words) -> Vec<Value> {
     message
         .events
         .iter()
+        .filter(|event| !words.took(&event.kind, event.output.as_deref()))
         .map(|event| {
             json!({
                 "index": event.index,
@@ -3778,16 +3874,20 @@ fn conversation_document(
             let bounds = numbered
                 .zip(reported)
                 .and_then(|(turn, report)| agent_session(report, turn));
+            let summaries = turn.map_or(&[][..], |turn| &turn.summaries[..]);
+            let live_words = Words::of(summaries);
             let mut served = json!({
                 "assistant": match recorded {
                     // Explicitly absent rather than empty: the report holds this
                     // turn and it recorded no reply.
-                    Some(turn) => json!(turn.assistant),
+                    Some(turn) => json!(turn.words.assistant(turn.assistant.clone())),
                     // A turn's reply is what its own party published for it, and
                     // only the agent's words are a transcript's reply — the
                     // supervisor's reach a reader as the next turn's prompt,
                     // which is what it was asked rather than what it said.
-                    None => json!(relayed.filter(|_| event.is_some_and(agent_turn)).and_then(LiveTurn::text)),
+                    None => json!(live_words.assistant(
+                        relayed.filter(|_| event.is_some_and(agent_turn)).and_then(LiveTurn::text),
+                    )),
                 },
                 "durationMs": match ran {
                     Some(candidate) => json!(candidate.duration_ms),
@@ -3813,7 +3913,10 @@ fn conversation_document(
                     Some(model) => json!(model),
                     None => json!(turn.and_then(|turn| turn.field("model"))),
                 },
-                "reasoning": Value::Null,
+                "reasoning": match recorded {
+                    Some(turn) => turn.words.reasoning(),
+                    None => live_words.reasoning(),
+                },
                 "startedAt": match bounds {
                     Some(link) => json!(link.started_at),
                     None => json!(relayed.and_then(LiveTurn::started_at)),
@@ -3841,7 +3944,7 @@ fn conversation_document(
                 },
                 "tools": match recorded {
                     Some(turn) => Value::Array(turn.tools.clone()),
-                    None => Value::Array(live_tools(turn.map_or(&[], |turn| &turn.summaries))),
+                    None => Value::Array(live_tools(summaries)),
                 },
                 "unknown": with_attribution(
                     relayed.map(LiveTurn::cut).unwrap_or_default(),
