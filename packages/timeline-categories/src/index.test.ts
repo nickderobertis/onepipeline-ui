@@ -55,6 +55,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "note-shown": "planning",
   "completion-requested": "lifecycle",
   "concurrent-acknowledged": "contention",
+  // A launch that went ahead past a live holder because the plan depends on the
+  // holding node: the same contention its acknowledged sibling records, settled
+  // by the dependency rather than by a word from the planner.
+  "concurrent-deferred": "contention",
   "quiet-worker": "contention",
   "node-held": "contention",
   "node-unheld": "contention",

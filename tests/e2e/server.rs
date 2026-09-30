@@ -7629,6 +7629,7 @@ fn classified_report(kind: oneharness_core::domain::signals::FailureKind) -> Str
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),
@@ -8031,6 +8032,7 @@ fn unclosed_judge_report() -> String {
         candidates: vec![candidate(ms)],
         history_file: None,
         judge: None,
+        posture: None,
     };
     let mut assessment = String::new();
     while assessment.len() <= VERBOSE_ASSESSMENT_BYTES {
@@ -8743,6 +8745,7 @@ fn unanswered_report(prompt: &str) -> String {
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),
@@ -9264,6 +9267,7 @@ fn stacked_panel_report() -> String {
             }],
             history_file: None,
             judge: Some((*label).to_owned()),
+            posture: None,
         })
         .collect();
 
@@ -10452,6 +10456,7 @@ fn a_report_held_turn_is_stamped_and_measured_by_what_the_report_holds() {
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),
@@ -11313,6 +11318,120 @@ fn listing_a_run_that_predates_the_channel_makes_it_no_channel() {
         !channel.exists(),
         "listing the run wrote a channel directory into it"
     );
+}
+
+/// The two records a launch writes when it goes ahead beside a live holder of a
+/// repository it targets: `concurrent-deferred` for the holders the plan depends
+/// on through `run:<id>#<node>`, and `concurrent-acknowledged` for an override,
+/// whose holders now name the identity, run, node and covering dependency where
+/// the engine knew them. Neither is read by any typed reader here, so what this
+/// crate owes is that each reaches a reader as the engine wrote it — the new
+/// kind admitted by the filter grammar's globs, and the optional holder keys
+/// neither dropped where they are present nor invented where they are not.
+#[test]
+fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let identity = "github.com/nickderobertis/onepipeline-ui";
+    let dir = serving.run_dir(run);
+    let deferred = json!({
+        "launching": run,
+        "holders": [{
+            "identity": identity,
+            "session": "a-holding-session",
+            "owner_pid": 4242,
+            "run": fixture_run::OTHER_RUN_ID,
+            "node": "contract-interface",
+            "dependency": format!("run:{}#contract-interface", fixture_run::OTHER_RUN_ID),
+            "dependents": [fixture_run::NODE_ID, fixture_run::REVIEW_NODE_ID],
+        }],
+    });
+    // One holder the dependency also covers, and one an older engine opened,
+    // which carries none of the keys a newer one attributes.
+    let acknowledged = json!({
+        "shared_identities": [identity],
+        "runs": {
+            "launching": run,
+            "holding_sessions": ["a-holding-session", "a-hand-opened-session"],
+        },
+        "holders": [
+            {
+                "session": "a-holding-session",
+                "owner_pid": 4242,
+                "identity": identity,
+                "run": fixture_run::OTHER_RUN_ID,
+                "node": "contract-interface",
+                "dependency": format!("run:{}#contract-interface", fixture_run::OTHER_RUN_ID),
+            },
+            { "session": "a-hand-opened-session", "owner_pid": 4343 },
+        ],
+    });
+    fixture_run::append(&dir, "concurrent-deferred", deferred.clone());
+    fixture_run::append(&dir, "concurrent-acknowledged", acknowledged.clone());
+
+    let concurrent = urlencode(r#"{"include":[{"kind":"concurrent-*"}]}"#);
+    let read = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next?filter={concurrent}"),
+        "",
+    );
+    assert_eq!(read.status, 200, "{}", read.body);
+    let read = read.json();
+    assert_enveloped(&read);
+    // A settled run with nothing raised: the read claims nothing.
+    assert_eq!(read["status"], json!("finished"), "{read}");
+    let served: Vec<(&str, &Value)> = read["events"]
+        .as_array()
+        .expect("the shaped events")
+        .iter()
+        .map(|event| {
+            (
+                event["kind"].as_str().unwrap_or_default(),
+                &event["payload"],
+            )
+        })
+        .collect();
+    assert_eq!(
+        served,
+        [
+            ("concurrent-deferred", &deferred),
+            ("concurrent-acknowledged", &acknowledged),
+        ],
+        "{read}"
+    );
+    let unattributed = &read["events"][1]["payload"]["holders"][1];
+    for key in ["identity", "run", "node", "dependency"] {
+        assert!(
+            unattributed.get(key).is_none(),
+            "an absent {key} was served as present: {unattributed}"
+        );
+    }
+
+    // And the one record that went ahead on the dependency alone is still its
+    // own kind to a reader excluding the override.
+    let deferred_only = urlencode(
+        r#"{"include":[{"kind":"concurrent-*"}],"exclude":[{"kind":"concurrent-acknowledged"}]}"#,
+    );
+    let narrowed = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next?filter={deferred_only}"),
+        "",
+    )
+    .json();
+    assert_eq!(narrowed["events"], json!([read["events"][0]]), "{narrowed}");
+
+    // A kind matcher with nothing in it names no kind, and is refused before the
+    // run is read rather than read as admitting both.
+    let empty = urlencode(r#"{"include":[{"kind":""}]}"#);
+    let refused = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next?filter={empty}"),
+        "",
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
 }
 
 #[test]

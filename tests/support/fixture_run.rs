@@ -3203,6 +3203,7 @@ pub fn drafter_report() -> String {
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),
@@ -5221,6 +5222,7 @@ pub fn worker_report() -> String {
         candidates,
         history_file: None,
         judge: None,
+        posture: None,
     };
 
     let report = Report {
@@ -5250,6 +5252,10 @@ pub fn worker_report() -> String {
                     kind: (*kind).to_owned(),
                     decision: *decision,
                     reason: (*reason).to_owned(),
+                    labels: Default::default(),
+                    run_id: None,
+                    posture: None,
+                    events: Vec::new(),
                 })
                 .collect(),
         }],
@@ -5399,6 +5405,7 @@ pub fn supervised_report() -> String {
             }],
             history_file: None,
             judge: None,
+            posture: None,
         })
         .collect();
 
@@ -5537,6 +5544,7 @@ pub fn reviewer_report() -> String {
         }],
         history_file: None,
         judge: None,
+        posture: None,
     };
     let observed = |turn: usize| SessionLink {
         session_id: format!("01a01f5{turn}-6168-72d1-b946-2251794e2fce"),
@@ -5620,6 +5628,7 @@ pub fn reviewer_report() -> String {
                     }],
                     history_file: None,
                     judge: None,
+                    posture: None,
                 },
                 judged(1, 500),
                 judged(2, 400),
@@ -5709,6 +5718,7 @@ pub fn lint_report() -> String {
                 }],
                 history_file: None,
                 judge: None,
+                posture: None,
             }],
         }),
         processes: Vec::new(),

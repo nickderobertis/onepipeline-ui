@@ -62,7 +62,8 @@
         "count": 0,
         "oldest_seconds": null,
         "kinds": []
-      }
+      },
+      "blocking": false
     }
   }
 ]
