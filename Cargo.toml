@@ -4,7 +4,7 @@ version = "0.18.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.53.1 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.53.3 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -184,11 +184,13 @@ onemessagebus = "0.9.0"
 # changed once this moves; this crate reads neither that file nor the
 # projection record.
 #
-# llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch and the destination-scoped
-# ids below are the engine's behaviour, composed by no code of this crate's — nothing here
-# builds a re-dispatch, publishes a branch or copies a project — and the engine's own suites
-# prove them. What this crate owes for the move is that a browser-adopted run is driven by
-# that engine, which the named journey proves end to end through the one behaviour a
+# llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch, the destination-scoped
+# ids, the cut-short sweep, the discharged decisions, the native board search and the copy
+# links below are the engine's behaviour, composed by no code of this crate's — the reply
+# route hands a retry or a drop to the engine as the envelope's bytes, and nothing here builds
+# a re-dispatch, publishes a branch, sweeps a pool, settles a decision, queries a board or
+# copies a project — and the engine's own suites prove them. What this crate owes for the
+# move is that a browser-adopted run is driven by that engine, which the named journey proves end to end through the one behaviour a
 # scripted turn can hold open.
 # 0.53.0 delivers a manager's live note off the run's single writer: a note
 # waiting on a turn that takes it only as it ends no longer holds the run's
@@ -202,7 +204,20 @@ onemessagebus = "0.9.0"
 # line's copy of the engine, so it carries each of these once this moves;
 # `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`
 # holds the first through the adopt and reply routes.
-onepipeline = "=0.53.1"
+#
+# 0.53.2 has a closing driver finish the identity its maintenance sweep is on
+# and stop before the next, journalling the pass as cut short, and answers a
+# blocking decision about a node a committed retry or drop removed rather than
+# leaving it pending. 0.53.3 links the onetaskgraph release whose store answers
+# text, metadata and origin queries with GitHub's own search rather than reading
+# the whole board for each, and whose copies record where an item was copied to
+# and follow that link on every later copy. A browser-adopted run's driver is
+# this line's copy of the engine, so its sweep stops, its stale decisions clear
+# and its board checks and copies spend only on what they ask once this moves.
+# This crate serves the journal, the decisions and the results those write
+# through the linked SDK as it finds them, and names neither a board query nor a
+# copy.
+onepipeline = "=0.53.3"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -247,8 +262,8 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
 # engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.2.50"
-onetaskgraph-plugin-api = "0.2.50"
+onetaskgraph-core = "0.2.52"
+onetaskgraph-plugin-api = "0.2.52"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
