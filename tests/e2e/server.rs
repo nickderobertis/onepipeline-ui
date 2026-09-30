@@ -8887,9 +8887,9 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
 /// and on no other.
 ///
 /// The report is read back through the artifact route first, so this journey
-/// cannot go on passing after the stored document has stopped being a report of
-/// schema 12 — the one that began recording each judge's decision — or later,
-/// carrying two judges' decisions. The transcript is then read off the
+/// cannot go on passing after the stored document has stopped being a schema-14
+/// report — the schema the linked onejudge 0.17 writes — carrying two judges'
+/// decisions. The transcript is then read off the
 /// conversation route and off the detail beside it, which are one fold.
 #[test]
 fn each_judge_of_a_stacked_panel_is_served_on_the_turn_it_judged() {
@@ -8907,12 +8907,7 @@ fn each_judge_of_a_stacked_panel_is_served_on_the_turn_it_judged() {
     assert_eq!(stored["truncated"], json!(false), "{stored}");
     let report: Value = serde_json::from_str(stored["content"].as_str().expect("the bytes"))
         .expect("the stored report parses");
-    assert!(
-        report["schema_version"]
-            .as_u64()
-            .is_some_and(|version| version >= 12),
-        "{report}"
-    );
+    assert_eq!(report["schema_version"], json!(14), "{report}");
     let judged = report["judge_decisions"]
         .as_array()
         .expect("the report's judge decisions");
