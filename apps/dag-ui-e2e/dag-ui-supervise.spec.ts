@@ -510,7 +510,11 @@ test("holds the watch as a stream, and the unwatched badge changes while it is h
 }) => {
   await page.goto(`/?run=${runs().supervised}&view=watch`);
   const badge = page.getByLabel(/^\d+ unwatched$/);
-  await expect(badge).toHaveText("1 unwatched · this run");
+  // The count is the session's, not the run's: a run an earlier journey adopted
+  // stays owed after its graph completes until it is closed, so the badge moves
+  // by this run alone, from whatever else the session owes.
+  await expect(badge).toHaveText(/^\d+ unwatched · this run$/);
+  const owed = Number.parseInt((await badge.textContent()) ?? "", 10);
   const panel = page.getByRole("region", { name: "Watch" });
   await expect(panel).toContainText("Not watching");
 
@@ -531,7 +535,7 @@ test("holds the watch as a stream, and the unwatched badge changes while it is h
   await expect(frames).toContainText("prepare");
   // While the stream is held the server is the run's registered watcher, and
   // the report the badge reads says so.
-  await expect(badge).toHaveText("0 unwatched");
+  await expect(badge).toHaveText(`${owed - 1} unwatched`);
   await expect(
     page.getByRole("button", { name: "Watching", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -539,7 +543,9 @@ test("holds the watch as a stream, and the unwatched badge changes while it is h
   await panel.getByRole("button", { name: "Stop watching" }).click();
   await expect(panel).toContainText("Not watching");
   // Released on close: the record goes with the stream.
-  await expect(badge).toHaveText("1 unwatched · this run", { timeout: 30_000 });
+  await expect(badge).toHaveText(`${owed} unwatched · this run`, {
+    timeout: 30_000,
+  });
 });
 
 test("reads status, results, goals, the transcript, telemetry and the host as the API renders them", async ({

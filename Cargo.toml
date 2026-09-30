@@ -223,10 +223,18 @@ onemessagebus = "0.9.0"
 # the remote's refs in bulk rather than one query per branch, and asks no
 # existence or ancestry question twice. A browser-adopted run's driver is this
 # line's copy of the engine, so its idle sweep re-derives only the verdicts
-# whose branches moved once this moves. It also adds a stop guard that holds a
-# session's owed runs to a wake budget, a hook surface nothing here calls. The
-# `branches-retired` record reads as it did, since it never said how a verdict
-# was reached, and this crate serves it as the journal holds it.
+# whose branches moved once this moves. The `branches-retired` record reads as
+# it did, since it never said how a verdict was reached, and this crate serves
+# it as the journal holds it. It also adds a stop guard that holds a session's
+# owed runs to a wake budget, a hook surface nothing here calls, and with it a
+# closure rule that does reach this crate: a run a 0.54 driver drove is owed
+# until it is closed — stopped, given a verdict whose `completion` is true, or
+# acknowledged — rather than once its graph completes. A browser-adopted run is
+# driven by this line's copy of the engine, so `GET /api/v2/unwatched` goes on
+# reporting it after its graph settles until one of those closes it; the route
+# forwards the verb's answer unfiltered, and
+# `holds the watch as a stream, and the unwatched badge changes while it is held`
+# reads it beside a run an earlier journey adopted and completed.
 onepipeline = "=0.54.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
