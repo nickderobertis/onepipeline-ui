@@ -236,7 +236,7 @@ test.afterEach(async () => {
   sleeper = undefined;
 });
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: the eight journeys below took 26.4 s together on this host (2.3 s to 5.8 s each, the longest waiting out a real three-second grace), the same per-journey cost as the rest of this project (133 journeys in 4.7 min). Each needs only what `dag-ui-e2e:test` already depends on — the built bundle and the API server — and what they exercise is the app's header, navigation and shutdown feature, so an edge narrower than `dag-ui` would drop them out of `nx affected` for exactly the changes they exist to catch.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: the nine journeys below took 28.5 s together on this host (1.9 s to 7.3 s each, the longest stopping two runs and waiting for each driver to read as dead), the same per-journey cost as the rest of this project (133 journeys in 4.7 min). Each needs only what `dag-ui-e2e:test` already depends on — the built bundle and the API server — and what they exercise is the app's header, navigation and shutdown feature, so an edge narrower than `dag-ui` would drop them out of `nx affected` for exactly the changes they exist to catch.
 test("shuts one run down: the dialog names it and its owner, cancel sends nothing, and the grace confirmed is the grace sent", async ({
   page,
 }) => {
@@ -393,6 +393,36 @@ test("shuts down all my runs: the dialog names exactly the runs this session own
   ]);
   expect((await shutDownRuns(server)).sort()).toEqual(
     [runs.idle, runs.mine].sort(),
+  );
+});
+
+test("stops every run this session owns, and the unwatched badge then says it owes nothing, in the engine's terms", async ({
+  page,
+}) => {
+  server = await startServer();
+  const { runs } = server.facts;
+  for (const run of [runs.mine, runs.idle]) {
+    await openRun(page, server, run);
+    await expect(page.getByLabel(/^\d+ unwatched$/)).toContainText(
+      "· this run",
+    );
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Stop run" })
+      .click();
+    await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible({
+      timeout: 60_000,
+    });
+  }
+  // A stopped run is closed, and nothing else is this session's. A settled run
+  // it has not closed would still be owed, so the words are "closed", not
+  // "settled".
+  const badge = page.getByLabel(/^\d+ unwatched$/);
+  await expect(badge).toHaveText("0 unwatched", { timeout: 30_000 });
+  await badge.hover();
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "Every run this session owns is watched or closed.",
   );
 });
 
