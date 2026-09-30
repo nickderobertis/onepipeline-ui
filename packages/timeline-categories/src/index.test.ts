@@ -55,6 +55,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "note-shown": "planning",
   "completion-requested": "lifecycle",
   "concurrent-acknowledged": "contention",
+  "concurrent-deferred": "contention",
   "quiet-worker": "contention",
   "node-held": "contention",
   "node-unheld": "contention",
