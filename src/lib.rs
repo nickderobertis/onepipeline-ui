@@ -36,7 +36,9 @@
 //! crate, whatever its own signatures show: moving to `onepipeline` 0.53.0
 //! left [`ApiError::from_engine`] spelled exactly as before, and a caller
 //! still holding a 0.52 [`onepipeline::Error`] could no longer pass it, which
-//! is why no reading of this crate's API alone can see such a break.
+//! is why no reading of this crate's API alone can see such a break. Moving
+//! from `onepipeline` 0.54.0 to 0.55.0 is the same break: a caller holding a
+//! 0.54 [`onepipeline::Error`] must recompile against 0.55 to pass it.
 
 #![deny(missing_docs)]
 
