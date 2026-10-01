@@ -26,6 +26,14 @@
 //! the whole point of changes like these, and a value that improved is a change
 //! a branch's own record states rather than one a comparison should refuse.
 //!
+//! **The timeline is the one exception, because its contract is the opposite.**
+//! `docs/contract.md` declares every timeline schema bump additive — new fields on
+//! the events it names, and every other span and event byte-for-byte what the
+//! schema before served — so a value that moved there without a bump saying so is
+//! exactly what a comparison should refuse.
+//! [`every_span_and_event_the_base_commits_timeline_served_is_served_unchanged`]
+//! compares those bytes, with the fields a newer schema declared set aside.
+//!
 //! **`/healthz` is no exception to that, and must not be made one.** It names the
 //! engine the binary links, so the two sides report the same release on a branch
 //! that did not move the SDK pin and different ones on a branch that did — which
@@ -50,11 +58,13 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use onepipeline_ui::contract::routes;
-use serde_json::Value;
+use onepipeline_ui::payload;
+use serde_json::{json, Value};
 
 use crate::fixture_run;
 use crate::http;
@@ -471,4 +481,187 @@ fn every_run_the_base_commit_listed_is_listed_now() {
             response.body
         );
     }
+}
+
+/// The fields a timeline schema added to an event, with the schema that added
+/// each.
+///
+/// `docs/contract.md` declares every timeline schema bump additive: a new
+/// schema serves new fields on the events it names, and every other span and
+/// event is byte-for-byte what the schema before it served. This list is that
+/// declaration read back, so a bump appends its own entry here and the journey
+/// below holds the rest of the timeline to the base commit's bytes. Stripped
+/// only when the base commit served a schema older than the one that added the
+/// field, so once a bump *is* the base nothing is stripped and the comparison is
+/// plain equality.
+const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[(11, "review")];
+
+/// The `onevcs` kinds whose events a review-phase schema serves anew.
+///
+/// A run that records any of them is one whose `publication` span closes where
+/// the run's watch of the change ended, so on such a run the comparison holds
+/// every other span and every event of another kind.
+const REVIEW_KINDS: [&str; 6] = [
+    payload::vcs::CHANGE_CHECK,
+    payload::vcs::CHANGE_DRAFTED,
+    payload::vcs::DRAFT_LIFTED,
+    payload::vcs::DRAFT_LIFTED_EARLY,
+    payload::vcs::DRAFT_KEPT_FOR_REVIEW,
+    payload::vcs::CHECKS_SETTLED,
+];
+
+/// `timeline` with every event field a schema newer than `base_schema` added
+/// removed, which is what the base commit's schema served of it.
+fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
+    let added: Vec<&str> = TIMELINE_EVENT_ADDITIONS
+        .iter()
+        .filter(|(schema, _)| *schema > base_schema)
+        .map(|(_, field)| *field)
+        .collect();
+    for span in timeline["spans"].as_array_mut().into_iter().flatten() {
+        for event in span["events"].as_array_mut().into_iter().flatten() {
+            if let Some(event) = event.as_object_mut() {
+                for field in &added {
+                    event.remove(*field);
+                }
+            }
+        }
+    }
+    timeline
+}
+
+/// One timeline as two servers answered it, with what is a property of the
+/// response rather than of the run — when it was read, and the schema it
+/// declares — set aside.
+fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value, u64) {
+    let before = http::get(older, path);
+    let after = http::get(newer, path);
+    assert_eq!(
+        before.status, 200,
+        "{path} at the base commit: {}",
+        before.body
+    );
+    assert_eq!(after.status, 200, "{path} now: {}", after.body);
+    let (mut before, mut after) = (before.json(), after.json());
+    let base_schema = before["timeline_schema_version"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("{path} at the base commit declares no schema: {before}"));
+    let schema = after["timeline_schema_version"].as_u64().expect("a schema");
+    assert!(
+        schema >= base_schema,
+        "{path} serves timeline schema {schema}, older than the base commit's {base_schema}"
+    );
+    assert!(
+        schema == base_schema
+            || TIMELINE_EVENT_ADDITIONS
+                .iter()
+                .any(|(added, _)| *added == schema),
+        "{path} serves timeline schema {schema} and `TIMELINE_EVENT_ADDITIONS` says \
+         nothing about what it added"
+    );
+    for body in [&mut before, &mut after] {
+        let body = body.as_object_mut().expect("a timeline");
+        body.remove("observed_at");
+        body.remove("timeline_schema_version");
+    }
+    (before, as_served_at(after, base_schema), base_schema)
+}
+
+#[test]
+fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
+    let base = base_commit();
+    let baseline = baseline_binary(&base);
+
+    let serving = Serving::start(|root| {
+        shared_store(root);
+        let review = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+        fixture_run::make_launch_record_legacy(&review);
+    });
+    let sibling = provisioned_sibling();
+    let older = ForeignServing::start(
+        &baseline,
+        &serving.runs_root(),
+        &[(sibling::BINARY_ENV, sibling.as_str())],
+    );
+
+    // A run that recorded none of the review kinds' settlements is served whole
+    // as the base commit served it, once the fields a newer schema added to an
+    // event are set aside — its `change-check`s included, which gain `review`
+    // and nothing else.
+    for run in [
+        fixture_run::RUN_ID,
+        fixture_run::LANES_RUN_ID,
+        "run-baseline-preserved",
+        "run-baseline-recorded",
+        "run-baseline-stopped",
+    ] {
+        let timeline = routes::RUN_TIMELINE.replace("{run}", run);
+        for path in [
+            format!("{timeline}?scope=run"),
+            format!("{timeline}?scope=node&node={}", fixture_run::NODE_ID),
+        ] {
+            let (before, after, base_schema) = timelines(older.address, serving.address, &path);
+            assert_eq!(
+                after, before,
+                "{path}: this build serves a span or event the base commit's schema \
+                 {base_schema} served differently"
+            );
+        }
+    }
+
+    // A run that recorded them is where the schema moved more than an event's
+    // fields, and only in the two places `docs/contract.md` says: its
+    // publication closes where the watch of its change ended, and a verification
+    // record a skipped check stored is served `ok: false`. Those spans are set
+    // aside — the skipped checks' after saying they passed nothing — and every
+    // other span, and every event of a kind other than the review records, is
+    // the base commit's.
+    let timeline = routes::RUN_TIMELINE.replace("{run}", fixture_run::REVIEW_DRAFT_RUN_ID);
+    let (before, after, base_schema) = timelines(
+        older.address,
+        serving.address,
+        &format!("{timeline}?scope=run"),
+    );
+    let skipped_check = |span: &Value| {
+        [
+            fixture_run::SKIPPED_CHECK_LOG,
+            fixture_run::LEGACY_SKIPPED_CHECK_LOG,
+        ]
+        .iter()
+        .any(|log| span["kind"] == "verification" && span["detail"]["artifact_id"] == *log)
+    };
+    let skipped: Vec<&Value> = after["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| skipped_check(span))
+        .collect();
+    assert_eq!(skipped.len(), 2, "the skipped checks' records: {after}");
+    for span in skipped {
+        assert_eq!(span["detail"]["ok"], json!(false), "{span}");
+    }
+    let held = |timeline: &Value| -> Vec<Value> {
+        let mut spans = timeline["spans"].as_array().expect("spans").clone();
+        spans.retain(|span| span["kind"] != "publication" && !skipped_check(span));
+        for span in &mut spans {
+            span["events"]
+                .as_array_mut()
+                .expect("events")
+                .retain(|event| !REVIEW_KINDS.iter().any(|kind| event["kind"] == *kind));
+        }
+        spans
+    };
+    let held_before = held(&before);
+    assert!(
+        held_before.len() > 1,
+        "the base commit served {} spans of the review run beside its publication, so \
+         this comparison is holding almost nothing: {before}",
+        held_before.len()
+    );
+    assert_eq!(
+        held(&after),
+        held_before,
+        "{timeline}: a span or event outside the review records is served differently \
+         than at the base commit's schema {base_schema}"
+    );
 }
