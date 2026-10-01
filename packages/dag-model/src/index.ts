@@ -1336,12 +1336,12 @@ export const timelineReviewSchema = openObject({
   state: z.string().min(1).optional(),
   kind: z.string().min(1).optional(),
   base: z.string().min(1).optional(),
-  awaited: z.array(z.string()).optional(),
+  awaited: z.array(z.string().min(1)).optional(),
   grace_seconds: z.number().nonnegative().optional(),
   warned: z.boolean().optional(),
   head: z.string().min(1).optional(),
   verdict: z.string().min(1).optional(),
-  skipped: z.array(z.string()).optional(),
+  skipped: z.array(z.string().min(1)).optional(),
 }).superRefine((review, context) => {
   // The server serves no `review` for a record that carried none of these, so an
   // empty one is a payload this client cannot render rather than one it renders

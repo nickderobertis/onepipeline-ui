@@ -4902,10 +4902,16 @@ fn review_facts(event: &Envelope) -> Option<Value> {
         }
     }
     // The checks a list names, kept even when empty: a settlement that skipped
-    // no required check says so with an empty list, and that is a reading.
+    // no required check says so with an empty list, and that is a reading. A list
+    // with any entry that is not a check's name is no reading at all, so it is
+    // served as absent rather than shortened into one that names fewer checks.
     for key in lists {
-        if let Some(names) = event.payload.get(*key).and_then(Value::as_array) {
-            let names: Vec<&str> = names.iter().filter_map(Value::as_str).collect();
+        let names: Option<Vec<&str>> = event
+            .payload
+            .get(*key)
+            .and_then(Value::as_array)
+            .and_then(|names| names.iter().map(|name| non_empty(name.as_str())).collect());
+        if let Some(names) = names {
             record.insert((*key).to_owned(), json!(names));
         }
     }

@@ -5913,11 +5913,13 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         drafted[0]["reference"],
         json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
     );
-    let states: Vec<(Value, Value)> = review_events(&timeline, "change-check")
+    // Each check with whether the change's merge waits on it, as recorded.
+    let states: Vec<(Value, Value, Value)> = review_events(&timeline, "change-check")
         .into_iter()
         .map(|event| {
             (
                 event["review"]["name"].clone(),
+                event["review"]["required"].clone(),
                 event["review"]["state"].clone(),
             )
         })
@@ -5925,10 +5927,10 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
     assert_eq!(
         states,
         vec![
-            (json!("gate"), json!("pending")),
-            (json!("integration"), json!("skipped")),
-            (json!("docs"), json!("skipped")),
-            (json!("gate"), json!("passed")),
+            (json!("gate"), json!(true), json!("pending")),
+            (json!("integration"), json!(true), json!("skipped")),
+            (json!("docs"), json!(false), json!("skipped")),
+            (json!("gate"), json!(true), json!("passed")),
         ],
         "{timeline}"
     );
@@ -6015,6 +6017,40 @@ fn an_early_lift_recording_a_negative_grace_is_served_no_grace() {
     assert_eq!(
         early[0]["review"],
         json!({ "base": "main", "awaited": ["ci"], "warned": true })
+    );
+}
+
+#[test]
+fn a_review_list_naming_something_other_than_a_check_is_served_as_absent() {
+    let serving = Serving::start(|root| {
+        let run = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+        // The early lift's list of what it waited for, rewritten to carry a blank
+        // name and a number beside the one check it named.
+        let recorded = files_naming(&run, "\"awaited\"");
+        assert_eq!(recorded.len(), 1, "the early lift's record: {recorded:?}");
+        let text = fs::read_to_string(&recorded[0]).expect("the record");
+        let rewritten = text
+            .replace("\"awaited\": [\"ci\"]", "\"awaited\": [\"ci\", \"\", 7]")
+            .replace("\"awaited\":[\"ci\"]", "\"awaited\":[\"ci\",\"\",7]");
+        assert_ne!(rewritten, text, "the list was rewritten");
+        fs::write(&recorded[0], rewritten).expect("the rewritten record");
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::REVIEW_DRAFT_RUN_ID,
+            fixture_run::LIFTED_NODE_ID
+        ),
+    )
+    .json();
+    let early = review_events(&timeline, "draft-lifted-early");
+    assert_eq!(early.len(), 1, "{timeline}");
+    // Not shortened to `["ci"]`, and not emptied into a lift that waited for
+    // nothing: a list this build cannot read is no reading at all.
+    assert_eq!(
+        early[0]["review"],
+        json!({ "base": "main", "grace_seconds": 2.5, "warned": true })
     );
 }
 
