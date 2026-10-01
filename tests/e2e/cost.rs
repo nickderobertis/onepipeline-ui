@@ -754,7 +754,7 @@ impl LongLivedStore {
                         .mode()
                         & 0o777;
                     assert_eq!(mode, 0, "{} was made openable", path.display());
-                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o400))
                         .expect("read the legacy index back");
                 }
                 let bytes = std::fs::read(path).unwrap_or_else(|error| {

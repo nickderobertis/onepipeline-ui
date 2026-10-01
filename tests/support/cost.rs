@@ -514,18 +514,13 @@ impl Watch {
     /// thread of it.
     pub fn this_process() -> Self {
         require_strace();
-        // Yama's default scope lets a process be traced only by its ancestors,
-        // and the tracer is this process's child. This opts this process in to
-        // being traced by it — and by nothing it did not already allow — for the
-        // rest of its life, which is one test under nextest.
-        // SAFETY: `prctl(PR_SET_PTRACER, ...)` takes integer arguments and
-        // touches no memory of this process; a kernel without Yama refuses it
-        // with `EINVAL`, and there it was not needed.
-        unsafe {
-            libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0);
-        }
         let traces = tempfile::tempdir().expect("temp dir");
-        let mut tracer = Command::new("strace")
+        // The tracer is started held at a `read` and only then becomes strace,
+        // under the pid it was spawned with — which is what lets this process
+        // name exactly that pid as the one allowed to trace it before strace
+        // tries to.
+        let mut tracer = Command::new("sh")
+            .args(["-c", r#"read -r go && exec strace "$@""#, "sh"])
             .arg("-f")
             // One file per thread, so no call is split across another thread's.
             .arg("-ff")
@@ -536,10 +531,26 @@ impl Watch {
             .arg("-o")
             .arg(traces.path().join("trace"))
             .args(["-p", &std::process::id().to_string()])
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("strace is installed");
+            .expect("a shell to start strace from");
+        // Yama's default scope lets a process be traced only by its ancestors,
+        // and the tracer is this process's child. This names that one child as
+        // the only other process allowed to trace it.
+        let tracer_pid = libc::c_ulong::from(tracer.id());
+        // SAFETY: `prctl(PR_SET_PTRACER, pid)` takes integer arguments and
+        // touches no memory of this process; a kernel without Yama refuses it
+        // with `EINVAL`, and there it was not needed.
+        unsafe {
+            libc::prctl(libc::PR_SET_PTRACER, tracer_pid, 0, 0, 0);
+        }
+        {
+            use std::io::Write;
+            let mut go = tracer.stdin.take().expect("the tracer's stdin");
+            writeln!(go, "go").expect("release the tracer");
+        }
         let mut lines = BufReader::new(tracer.stderr.take().expect("the tracer's stderr")).lines();
         let mut said = String::new();
         loop {
