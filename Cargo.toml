@@ -236,16 +236,16 @@ onemessagebus = "0.9.0"
 # `holds the watch as a stream, and the unwatched badge changes while it is held`
 # reads it beside a run an earlier journey adopted and completed.
 #
-# 0.55.0 lets a cross-DAG `run:<id>#<node>` dependency on a live repository
-# holder's node stand in for `--acknowledge-concurrent`, journalling that launch
-# as the new `concurrent-deferred` kind, and names the identity, run, node and
-# covering dependency on an acknowledged holder where it knows them. This crate
-# serves both as the journal holds them;
-# `a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it` holds
-# that through the channel route, and the timeline files the new kind under
-# contention. It links onejudge 0.17 and oneharness-core 0.21, which the lines
-# above move with it; the lock holds onejudge at 0.17.0 because 0.17.1 asks
-# for an oneharness-core this release does not resolve, and would link two.
+# 0.55.0 links oneagentgraph 0.5.4, onejudge 0.17.0 and oneharness-core 0.21.0,
+# whose streams carry what an agent *said* beside what it did: a turn's
+# `turn-activity` and its report's harness history now hold `message` and
+# `reasoning` entries under those kinds as well as tool calls and observations.
+# A conversation turn serves them as its `assistant` and `reasoning` rather
+# than as tool events (`src/payload.rs`, `Words`). It also journals
+# `concurrent-deferred` when a launch's cross-DAG dependency acknowledges the
+# holder it waits on, and its `watch` wakes on every planner surface and ends
+# with a `blocking` flag on its `returned` frame, which
+# `GET /api/v2/runs/{run}/watch` forwards as the SDK renders it.
 onepipeline = "=0.55.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
@@ -280,6 +280,12 @@ libc = "0.2"
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
 onevcs = "0.35.0"
+# The same library the crate links above, with the schema bundle it publishes
+# for its SDK consumers: the history record's schema is where `oneharness`
+# closes the two kinds an agent's own words are streamed under, so
+# `tests/contract.rs` holds `payload::graph::MESSAGE` and `REASONING` to it.
+# A test-only feature, so the shipped binary compiles none of it.
+oneharness-core = { version = "0.21.0", features = ["sdk-schema"] }
 predicates = "3"
 # The drift gate on the browser's copy of the reply envelope's commands reads
 # each op's fields off the engine's own `Command` through the schema that type

@@ -5252,7 +5252,7 @@ pub fn worker_report() -> String {
                     kind: (*kind).to_owned(),
                     decision: *decision,
                     reason: (*reason).to_owned(),
-                    labels: Default::default(),
+                    labels: BTreeMap::new(),
                     run_id: None,
                     posture: None,
                     events: Vec::new(),

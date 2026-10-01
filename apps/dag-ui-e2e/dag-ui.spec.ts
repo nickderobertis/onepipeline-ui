@@ -3818,6 +3818,71 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
 });
 
 /**
+ * What a worker says and reasons from inside a turn is shown as its words, and
+ * never as one of its tool calls.
+ *
+ * `oneagentgraph` relays an agent's own text and reasoning as `turn-activity`
+ * under the kinds `message` and `reasoning`, beside the tools it calls. Recorded
+ * into the dashboard worker's open transcript around a tool call: the turn reads
+ * the reasoning under its own disclosure, the text as the agent's message, and the
+ * tool call as a tool call — and the words appear nowhere among the calls.
+ */
+test("shows what a worker said and reasoned as its words, never as tool calls", async ({
+  page,
+}) => {
+  const reasoned = "The gate is the quickest proof the layout holds.";
+  const said = "Running the gate before calling the dashboard done.";
+  await openObservatory(page, `/?run=${runs().live}&view=graph`);
+  await page
+    .getByRole("button", { name: /dashboard: (running|done)/ })
+    .press("Enter");
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("button", { name: /^Open worker \(engineer-dashboard\)/ })
+    .click();
+  await expect(
+    itemDetail(page)
+      .getByRole("article", { name: /^Turn / })
+      .first(),
+  ).toBeVisible();
+
+  // In the order a harness streams them: a thought, the call it led to, and what
+  // the agent said about it.
+  changeServedRuns(["--record-words", "reasoning", "--words-text", reasoned]);
+  changeServedRuns([
+    "--record-activity",
+    "Bash",
+    "--activity-detail",
+    "just gate --dashboard",
+  ]);
+  changeServedRuns(["--record-words", "message", "--words-text", said]);
+
+  const turn = itemDetail(page)
+    .getByRole("article", { name: /^Turn / })
+    .filter({ hasText: said });
+  await expect(turn).toHaveCount(1);
+
+  // The reasoning is the turn's own, behind the disclosure a reader opens.
+  await turn.getByRole("button", { name: "Reasoning" }).click();
+  await expect(turn.getByText(reasoned)).toBeVisible();
+
+  // The call is shown as it always was, and the words are none of the calls.
+  const calls = turn.getByRole("region", { name: "Tool calls" });
+  await expect(
+    calls
+      .getByRole("button", { name: "Bash tool details" })
+      .filter({ hasText: "just gate --dashboard" }),
+  ).toHaveCount(1);
+  await expect(
+    calls
+      .getByRole("button", { name: /tool details$/ })
+      .filter({ hasNotText: "Bash" }),
+  ).toHaveCount(0);
+  await expect(calls).not.toContainText(said);
+  await expect(calls).not.toContainText(reasoned);
+});
+
+/**
  * The fixture command's own contract, which is the one thing standing between a
  * mistyped journey and a served run that records something no library could have
  * written.
@@ -3836,6 +3901,16 @@ test("refuses a change no recorded run could have held", () => {
     [
       ["--record-activity", "not a tool", "--activity-detail", "just gate"],
       "is not a tool name",
+    ],
+    [["--record-words", "message"], "needs --words-text"],
+    [["--words-text", "Running the gate."], "needs --record-words"],
+    [
+      ["--record-words", "tool_use", "--words-text", "Running the gate."],
+      "is not one of message, reasoning",
+    ],
+    [
+      ["--record-words", "message", "--words-text", ""],
+      "an agent's words are at least one character",
     ],
     [["--grow-worker-session", "many"], "is not a turn count"],
     [["--churn-live", "5"], "needs --churn-interval"],

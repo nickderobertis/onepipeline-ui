@@ -3138,6 +3138,51 @@ export function recordActivity(root, name, detail) {
   );
 }
 
+/** The two kinds `oneharness` streams an agent's own words under. */
+const WORD_KINDS = ["message", "reasoning"];
+
+/**
+ * Record something the dashboard's worker said or reasoned from inside the turn
+ * it is taking.
+ *
+ * `oneagentgraph` relays these as `turn-activity` under the word's own kind, in
+ * the shape its worker's words take on the wire: no tool name, an empty summary,
+ * no call identity, and the words as the output. The `index` is the record's
+ * position among the activity the session has published, which is what that
+ * library numbers within a turn.
+ */
+export function recordWords(root, kind, text) {
+  if (!WORD_KINDS.includes(kind)) {
+    throw new Error(`'${kind}' is not one of ${WORD_KINDS.join(", ")}`);
+  }
+  if (text.length === 0) {
+    throw new Error("an agent's words are at least one character");
+  }
+  const dir = join(root, LIVE_RUN);
+  const index = readFileSync(join(dir, "events.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter(
+      (event) =>
+        event.kind === "turn-activity" &&
+        event.labels.session === WORKER_SESSION,
+    ).length;
+  appendEvent(
+    dir,
+    "agentgraph",
+    "turn-activity",
+    {
+      run_id: LIVE_RUN,
+      node: "dashboard",
+      member: "worker",
+      persona: "worker",
+      session: WORKER_SESSION,
+    },
+    { kind, name: null, detail: "", output: text, index },
+  );
+}
+
 /**
  * Keep the live run recording, for as long as it is asked to.
  *
