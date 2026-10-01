@@ -185,10 +185,10 @@ onemessagebus = "0.9.0"
 # projection record.
 #
 # llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch, the destination-scoped
-# ids, the cut-short sweep, the discharged decisions, the native board search, the copy
-# links and the reused retirement verdicts below are the engine's behaviour, composed by no code of this crate's — the reply
+# ids, the cut-short sweep, the discharged decisions, the native and paged board searches, the copy
+# links and digests and the reused retirement verdicts below are the engine's behaviour, composed by no code of this crate's — the reply
 # route hands a retry or a drop to the engine as the envelope's bytes, and nothing here builds
-# a re-dispatch, publishes a branch, sweeps a pool, settles a decision, queries a board or
+# a re-dispatch, publishes a branch, sweeps a pool, settles a decision, queries or pages a board or
 # copies a project — and the engine's own suites prove them. What this crate owes for the
 # move is that a browser-adopted run is driven by that engine, which the named journey proves end to end through the one behaviour a
 # scripted turn can hold open.
@@ -280,6 +280,18 @@ onemessagebus = "0.9.0"
 # holds them. A browser-adopted run's driver is this line's copy of the engine,
 # so its publications follow that lifecycle once this moves.
 #
+# 0.57.1 changes only the engine's own tests. 0.57.2 links onetaskgraph 0.2.54,
+# whose `github-projects` store sends a board's text, metadata, project-name and
+# comment-activity searches in pages of twenty and sends a further page only
+# while the caller still needs rows, so a caller's limit bounds what is fetched
+# as well as what is returned; and 0.2.53, whose copy keeps a rendered
+# document's recorded body digest true of the rendering once it rewrites that
+# document's references. A browser-adopted run's driver is this line's copy of
+# the engine, so its board reads spend only on the pages their answer needs once
+# this moves. This crate names neither a board search nor a copy, and its
+# `onetaskgraph-*` requirements below move with this line so the lock links the
+# one copy of that family the engine pins.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -288,7 +300,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.57.0"
+onepipeline = "=0.57.2"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -339,8 +351,8 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
 # engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.2.52"
-onetaskgraph-plugin-api = "0.2.52"
+onetaskgraph-core = "0.2.54"
+onetaskgraph-plugin-api = "0.2.54"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
