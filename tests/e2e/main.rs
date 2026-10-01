@@ -85,3 +85,5 @@ mod serving;
 mod sibling;
 #[path = "../support/stub_bin.rs"]
 mod stub_bin;
+#[path = "../support/timeline_schema.rs"]
+mod timeline_schema;

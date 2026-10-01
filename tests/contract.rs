@@ -35,6 +35,8 @@ use serde_json::{json, Value};
 
 #[path = "support/fixture_run.rs"]
 mod fixture_run;
+#[path = "support/timeline_schema.rs"]
+mod timeline_schema;
 
 /// The fixture file each route's response body is pinned in.
 const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
@@ -1250,6 +1252,49 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     );
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
+}
+
+/// The paragraph of `docs/contract.md` that says what timeline schema `schema`
+/// changed.
+fn timeline_schema_paragraph(schema: u64) -> String {
+    let opening = format!("**Timeline schema {schema} ");
+    contract_text()
+        .lines()
+        .find(|line| line.starts_with(&opening))
+        .unwrap_or_else(|| panic!("docs/contract.md has no paragraph opening {opening}"))
+        .to_owned()
+}
+
+/// What the baseline journey strips as a newer schema's, and what the timeline
+/// reads as a review record, are what the contract's schema paragraphs name.
+#[test]
+fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract_names() {
+    for &(schema, field) in timeline_schema::TIMELINE_EVENT_ADDITIONS {
+        assert!(
+            schema <= u64::from(TIMELINE_SCHEMA_VERSION),
+            "an addition names timeline schema {schema}, newer than the one served"
+        );
+        assert!(
+            timeline_schema_paragraph(schema).contains(&format!("**`{field}`**")),
+            "docs/contract.md's timeline schema {schema} adds no `{field}`"
+        );
+    }
+    let review = timeline_schema_paragraph(11);
+    for (kind, strings, lists) in onepipeline_ui::payload::vcs::REVIEW_RECORDS {
+        assert!(
+            review.contains(&format!("(`{kind}`")),
+            "docs/contract.md's timeline schema 11 names no `{kind}` record"
+        );
+        for field in strings.iter().chain(lists) {
+            assert!(
+                review.contains(&format!("`{field}`")),
+                "docs/contract.md's timeline schema 11 says no `{kind}` carries `{field}`"
+            );
+        }
+    }
+    // The paragraph counts the records it gives `review` to.
+    assert_eq!(onepipeline_ui::payload::vcs::REVIEW_RECORDS.len(), 6);
+    assert!(review.contains("any of those six carries **`review`**"));
 }
 
 /// The queued span the timeline serves is the one `docs/contract.md` describes.

@@ -295,6 +295,20 @@ pub mod vcs {
     /// naming the required checks that concluded skipped. Served as recorded,
     /// so this crate keeps no copy of the verdict words.
     pub const CHECKS_SETTLED: &str = "checks-settled";
+    /// The kinds whose events carry `review`, each with the string fields and
+    /// the lists of check names that record's `review` reads.
+    ///
+    /// The one table of them: the timeline reads a record through it, and the
+    /// tests that hold the schema-11 paragraph of `docs/contract.md` and the
+    /// base commit's timeline to those kinds read it too.
+    pub const REVIEW_RECORDS: [(&str, &[&str], &[&str]); 6] = [
+        (CHANGE_CHECK, &["name"], &[]),
+        (CHANGE_DRAFTED, &["kind", "base"], &[]),
+        (DRAFT_LIFTED, &["base"], &[]),
+        (DRAFT_LIFTED_EARLY, &["base"], &["awaited"]),
+        (DRAFT_KEPT_FOR_REVIEW, &["base"], &[]),
+        (CHECKS_SETTLED, &["head", "verdict"], &["skipped"]),
+    ];
     /// `{url, sha}`.
     pub const CHANGE_MERGED: &str = "change-merged";
     /// `{identity, sha, base}` — the merge the host had queued completed.
@@ -4887,14 +4901,9 @@ fn review_facts(event: &Envelope) -> Option<Value> {
     if event.source != Source::Vcs {
         return None;
     }
-    let (strings, lists): (&[&str], &[&str]) = match event.kind.0.as_str() {
-        vcs::CHANGE_CHECK => (&["name"], &[]),
-        vcs::CHANGE_DRAFTED => (&["kind", "base"], &[]),
-        vcs::DRAFT_LIFTED | vcs::DRAFT_KEPT_FOR_REVIEW => (&["base"], &[]),
-        vcs::DRAFT_LIFTED_EARLY => (&["base"], &["awaited"]),
-        vcs::CHECKS_SETTLED => (&["head", "verdict"], &["skipped"]),
-        _ => return None,
-    };
+    let &(_, strings, lists) = vcs::REVIEW_RECORDS
+        .iter()
+        .find(|(kind, ..)| *kind == event.kind.0)?;
     let mut record = Map::new();
     for key in strings {
         if let Some(value) = non_empty(event.payload.get(*key).and_then(Value::as_str)) {

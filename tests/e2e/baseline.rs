@@ -70,6 +70,7 @@ use crate::fixture_run;
 use crate::http;
 use crate::serving::{ForeignServing, Serving};
 use crate::sibling;
+use crate::timeline_schema::TIMELINE_EVENT_ADDITIONS;
 
 /// The environment variable naming the provisioned baseline server.
 ///
@@ -483,35 +484,9 @@ fn every_run_the_base_commit_listed_is_listed_now() {
     }
 }
 
-/// The fields a timeline schema added to an event, with the schema that added
-/// each.
-///
-/// `docs/contract.md` declares every timeline schema bump additive: a new
-/// schema serves new fields on the events it names, and every other span and
-/// event is byte-for-byte what the schema before it served. This list is that
-/// declaration read back, so a bump appends its own entry here and the journey
-/// below holds the rest of the timeline to the base commit's bytes. Stripped
-/// only when the base commit served a schema older than the one that added the
-/// field, so once a bump *is* the base nothing is stripped and the comparison is
-/// plain equality.
-const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[(11, "review")];
-
-/// The `onevcs` kinds whose events carry the `review` a review-phase schema
-/// added.
-///
-/// The review run below records every one of them, so holding its timeline to
-/// the base commit's holds each of their events too, beside that field.
-const REVIEW_KINDS: [&str; 6] = [
-    payload::vcs::CHANGE_CHECK,
-    payload::vcs::CHANGE_DRAFTED,
-    payload::vcs::DRAFT_LIFTED,
-    payload::vcs::DRAFT_LIFTED_EARLY,
-    payload::vcs::DRAFT_KEPT_FOR_REVIEW,
-    payload::vcs::CHECKS_SETTLED,
-];
-
 /// `timeline` with every event field a schema newer than `base_schema` added
-/// removed, which is what the base commit's schema served of it.
+/// removed, which is what the base commit's schema served of it. Once a bump
+/// *is* the base nothing is stripped and the comparison is plain equality.
 fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
     let added: Vec<&str> = TIMELINE_EVENT_ADDITIONS
         .iter()
@@ -656,7 +631,8 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
             watched.push(span["node_id"].clone());
         }
     }
-    for kind in REVIEW_KINDS {
+    // Every kind whose events carry `review` — the payload's own table of them.
+    for (kind, ..) in payload::vcs::REVIEW_RECORDS {
         assert!(
             before["spans"]
                 .as_array()
