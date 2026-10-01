@@ -1495,9 +1495,9 @@ impl TryFrom<&str> for NamedStore {
 /// every symlink, `.` and `..` along the way already resolved.
 ///
 /// Canonical rather than lexical because of what stands between a pointer and a
-/// file: oneharness's own reader walks the store's layout, listing a project
-/// directory and matching a session file inside it, and either component can be
-/// a symlink planted by anything that can write into the store. A check on how a
+/// file: oneharness's own reader joins the project directory and the session
+/// file a pointer names onto the store, and either component can be a symlink
+/// planted by anything that can write into the store. A check on how a
 /// path is *spelled* says nothing about where opening it lands, so the proof is
 /// made against the resolved path on both sides or it is not a proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1506,16 +1506,22 @@ pub struct StoreRoot(PathBuf);
 impl StoreRoot {
     /// The store at `dir`, or `None` when this host holds no directory there.
     ///
-    /// Resolved and then *read*, so the type cannot be inhabited by a path that
-    /// is merely spelled well — a file, or a name nothing answers to, is not a
-    /// root anything may be confined to. A store that is not there is an
+    /// Resolved and then *looked up*, so the type cannot be inhabited by a path
+    /// that is merely spelled well — a file, or a name nothing answers to, is
+    /// not a root anything may be confined to. A store that is not there is an
     /// artifact with no readable bytes, which is the answer a pointer at a store
     /// this host does not hold has always had.
+    ///
+    /// Never opened: a session is reached by the project and file its pointer
+    /// names, and the store around it — a host's whole history — is not this
+    /// reader's to open, let alone list.
     #[must_use]
     pub fn read(dir: &Path) -> Option<Self> {
         let resolved = fs::canonicalize(dir).ok()?;
-        fs::read_dir(&resolved).ok()?;
-        Some(Self(resolved))
+        fs::metadata(&resolved)
+            .ok()?
+            .is_dir()
+            .then_some(Self(resolved))
     }
 
     /// Where `path` — a path the store's own reader produced from this root —

@@ -506,7 +506,9 @@ obvious alternative is worse:
   if what it names is a symlink, which the store's project layer and its session
   files both can be. So the resolved path is proved to sit under a
   `contract::StoreRoot` — the store canonicalized, which exists only once the
-  directory has been read, on `cli::RunsRoot`'s own terms — and only what
+  path has resolved to a directory, looked up and never opened: the store
+  around a session is a host's whole history, and a read of one session opens
+  that session's file and nothing else of it — and only what
   `Confined::Under` returns is opened. `Confined` is three-valued because a path
   that resolved *outside* and a path that resolved *nowhere* are different facts
   about the host: the first is said to the operator's log, naming the artifact

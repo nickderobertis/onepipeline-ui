@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+use oneharness_core::domain::history::HistoryShowEntry;
 use oneharness_core::io::history;
 use onepipeline::agents::{AgentScope, AgentSession, Agents, RUN_ID_LABEL};
 // Under the name of the library that writes them. Three vocabularies here are
@@ -4490,10 +4491,15 @@ fn session_record(
         }
         Confined::Missing => return None,
     };
+    // Only a finished run carries a `history_id`: an entry still in flight is
+    // keyed by its `run_id` and is not an artifact this route serves.
     let record = history::read_session_display(path.as_path())
         .ok()?
         .into_iter()
-        .find(|record| record["history_id"] == json!(id.as_str()))?;
+        .find(|entry| match entry {
+            HistoryShowEntry::Record(record) => record.history_id.to_string() == id.as_str(),
+            HistoryShowEntry::Incomplete(_) => false,
+        })?;
     serde_json::to_vec_pretty(&record).ok()
 }
 // llmlint: ignore-end[authorization_enforced_server_side]

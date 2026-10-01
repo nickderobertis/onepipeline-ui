@@ -4,7 +4,7 @@ version = "0.20.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.55.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.56.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -128,7 +128,7 @@ futures-core = "0.3"
 # library writes, and a requirement string cannot say "the same release" — so
 # `tests/packaging.rs` reconciles the two edges the lockfile records instead.
 # Why the store is linked at all, and read without a lock: `src/AGENTS.md`.
-oneharness-core = "0.21.0"
+oneharness-core = "0.24.0"
 # The run record `oneagentgraph` writes for every graph it runs, linked rather
 # than re-read by hand: a session's `agent_role` is served only where that
 # record's `declared_members` names the member the session was stamped with, so
@@ -136,10 +136,10 @@ oneharness-core = "0.21.0"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.5.4"
+oneagentgraph = "0.5.5"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.17.0"
+onejudge = "0.17.1"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
@@ -246,7 +246,17 @@ onemessagebus = "0.9.0"
 # holder it waits on, and its `watch` wakes on every planner surface and ends
 # with a `blocking` flag on its `returned` frame, which
 # `GET /api/v2/runs/{run}/watch` forwards as the SDK renders it.
-onepipeline = "=0.55.0"
+#
+# 0.56.0 links oneagentgraph 0.5.5, onejudge 0.17.1 and oneharness-core 0.24.0,
+# whose history is indexed in dated pointer segments under `.index.d/`:
+# recording a run appends to its day's segment and reads no index and walks no
+# store, so a run this line's engine drives costs the same however much history
+# the host holds. The session artifact route resolves a session by its own
+# project and file and nothing else; `serves a recorded session without
+# reading an index or walking the history store` holds both halves under a
+# trace. `read_session_display` now answers typed entries rather than JSON
+# values, and the route serves the finished run's entry as it serializes.
+onepipeline = "=0.56.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -285,7 +295,7 @@ onevcs = "0.35.0"
 # closes the two kinds an agent's own words are streamed under, so
 # `tests/contract.rs` holds `payload::graph::MESSAGE` and `REASONING` to it.
 # A test-only feature, so the shipped binary compiles none of it.
-oneharness-core = { version = "0.21.0", features = ["sdk-schema"] }
+oneharness-core = { version = "0.24.0", features = ["sdk-schema"] }
 predicates = "3"
 # The drift gate on the browser's copy of the reply envelope's commands reads
 # each op's fields off the engine's own `Command` through the schema that type

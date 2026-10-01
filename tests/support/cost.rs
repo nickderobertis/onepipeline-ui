@@ -465,3 +465,166 @@ fn descriptor(line: &str) -> Option<&str> {
     let rest = &line[opened..];
     Some(&rest[..rest.find('>')?])
 }
+
+/// One file or directory a traced process tree reached for: opened, or listed.
+///
+/// Recorded **whether or not the kernel granted it**, unlike [`Op`]. A cost
+/// counts what was paid, and a refused open paid nothing; this records what was
+/// *attempted*, because the question it answers is whether a process went
+/// looking somewhere at all — a reader that tries an unreadable index, catches
+/// the refusal and walks the store instead has already done the thing it must
+/// not do on the first attempt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Access {
+    /// The instant strace stamped the call with, on the realtime clock
+    /// [`std::time::SystemTime`] reads, so a journey can bracket a phase.
+    pub at: f64,
+    /// Whether the call opened the path or listed it.
+    pub kind: Reach,
+    /// The path, made absolute against the descriptor it was opened under.
+    pub path: PathBuf,
+}
+
+/// The two ways a process reaches into a directory tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// A file or directory was opened, or creating one was attempted.
+    Open,
+    /// A directory's entries were read: `getdents64` against a descriptor.
+    List,
+}
+
+/// Every open and listing **this test process and every process it starts**
+/// make, from the moment this returns until [`Watch::finish`].
+///
+/// Attached rather than launched, because the journeys that need it are about
+/// work done in this process as well as in a server it starts: a session
+/// recorded through the linked `HistoryWriter` runs here, and the claim under
+/// test is about what that recording touched. `-f` follows every thread and
+/// every child, so a server spawned while the watch is held is on the same
+/// record from its own `execve` on.
+pub struct Watch {
+    tracer: Child,
+    traces: TempDir,
+    said: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl Watch {
+    /// Attach to this process and wait until the tracer says it holds every
+    /// thread of it.
+    pub fn this_process() -> Self {
+        require_strace();
+        // Yama's default scope lets a process be traced only by its ancestors,
+        // and the tracer is this process's child. This opts this process in to
+        // being traced by it — and by nothing it did not already allow — for the
+        // rest of its life, which is one test under nextest.
+        // SAFETY: `prctl(PR_SET_PTRACER, ...)` takes integer arguments and
+        // touches no memory of this process; a kernel without Yama refuses it
+        // with `EINVAL`, and there it was not needed.
+        unsafe {
+            libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0);
+        }
+        let traces = tempfile::tempdir().expect("temp dir");
+        let mut tracer = Command::new("strace")
+            .arg("-f")
+            // One file per thread, so no call is split across another thread's.
+            .arg("-ff")
+            .arg("-y")
+            .arg("-ttt")
+            .args(["-s", "4096"])
+            .args(["-e", "trace=%file,getdents64"])
+            .arg("-o")
+            .arg(traces.path().join("trace"))
+            .args(["-p", &std::process::id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("strace is installed");
+        let mut lines = BufReader::new(tracer.stderr.take().expect("the tracer's stderr")).lines();
+        let mut said = String::new();
+        loop {
+            let line = lines
+                .next()
+                .and_then(Result::ok)
+                .unwrap_or_else(|| panic!("the tracer never attached to this process: {said}"));
+            said.push_str(&line);
+            said.push('\n');
+            if line.contains("attached") {
+                break;
+            }
+        }
+        // Drained for the rest of its life, so a tracer announcing each child it
+        // follows never blocks on a full pipe with this process stopped under it.
+        let said = std::sync::Arc::new(std::sync::Mutex::new(said));
+        let kept = std::sync::Arc::clone(&said);
+        std::thread::spawn(move || {
+            for line in lines.map_while(Result::ok) {
+                let mut kept = kept.lock().expect("the tracer's log");
+                kept.push_str(&line);
+                kept.push('\n');
+            }
+        });
+        Self {
+            tracer,
+            traces,
+            said,
+        }
+    }
+
+    /// Detach, and answer everything recorded, in the order it happened.
+    pub fn finish(mut self) -> Vec<Access> {
+        let pid = libc::pid_t::try_from(self.tracer.id()).expect("a pid");
+        // SAFETY: a plain signal to the tracer this watch started, by its pid.
+        // `SIGINT` is how strace is asked to detach and leave its tracees running.
+        unsafe {
+            libc::kill(pid, libc::SIGINT);
+        }
+        let status = wait_within(&mut self.tracer, STOP_DEADLINE);
+        assert!(
+            status.success() || status.code() == Some(130) || status.code().is_none(),
+            "the tracer did not detach cleanly ({status}): {}",
+            self.said.lock().expect("the tracer's log")
+        );
+        let mut accesses = Vec::new();
+        for entry in std::fs::read_dir(self.traces.path())
+            .expect("the trace directory")
+            .flatten()
+        {
+            let reading = BufReader::new(std::fs::File::open(entry.path()).expect("a trace file"));
+            accesses.extend(
+                reading
+                    .lines()
+                    .map_while(Result::ok)
+                    .filter_map(|line| access(&line)),
+            );
+        }
+        accesses.sort_by(|left, right| left.at.total_cmp(&right.at));
+        accesses
+    }
+}
+
+/// One traced line as the access it records, or `None` for a call that neither
+/// opens nor lists — a lookup, a `mkdir`, an `execve`.
+fn access(line: &str) -> Option<Access> {
+    let (stamp, call) = line.split_once(' ')?;
+    let at = stamp.parse::<f64>().ok()?;
+    let (name, arguments) = call.split_once('(')?;
+    let (kind, path) = match name {
+        "getdents64" | "getdents" => (Reach::List, PathBuf::from(descriptor(arguments)?)),
+        "open" | "creat" => (Reach::Open, PathBuf::from(quoted(arguments)?)),
+        "openat" | "openat2" => {
+            let (base, rest) = arguments.split_once(", ")?;
+            let named = Path::new(quoted(rest)?);
+            // Relative to the directory the first argument names, which `-y`
+            // renders as the path that descriptor is open on.
+            let path = if named.is_absolute() {
+                named.to_path_buf()
+            } else {
+                Path::new(descriptor(base)?).join(named)
+            };
+            (Reach::Open, path)
+        }
+        _ => return None,
+    };
+    Some(Access { at, kind, path })
+}

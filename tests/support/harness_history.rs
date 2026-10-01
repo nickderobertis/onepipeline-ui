@@ -48,6 +48,9 @@ pub struct Recorded {
     pub project: String,
     pub session: String,
     pub path: PathBuf,
+    /// The run a session still has in flight after its finished one, by the
+    /// id its closing record will carry, where one was begun.
+    pub in_flight: Option<String>,
 }
 
 impl Recorded {
@@ -102,7 +105,61 @@ pub fn record_under(
     text: &str,
     model: Model<'_>,
 ) -> Recorded {
-    record_session(dir, name, prompt, text, model, None)
+    record_session(
+        dir,
+        name,
+        prompt,
+        text,
+        &Shape {
+            model,
+            ..Shape::default()
+        },
+    )
+}
+
+/// [`record`], and then a second harness run of the same session that has
+/// published `said` as its one event and has not finished.
+///
+/// What a session file holds while a turn is running: the closing record of
+/// the run before, and the event lines of the one that has no closing record
+/// yet — which the core renders as an in-flight entry beside the record.
+pub fn record_beside_in_flight(
+    dir: &Path,
+    name: &str,
+    prompt: &str,
+    text: &str,
+    said: &str,
+) -> Recorded {
+    record_session(
+        dir,
+        name,
+        prompt,
+        text,
+        &Shape {
+            in_flight: Some(said),
+            ..Shape::default()
+        },
+    )
+}
+
+/// [`record`], for a harness that ran in `project` rather than in a directory
+/// beside the store.
+///
+/// oneharness slugs the directory a harness ran in into the store's project
+/// layer, so sessions recorded from different directories land in different
+/// project directories — and a store a journey means to leave untouched but for
+/// what was recorded is not given a working directory of its own to hold.
+pub fn record_from(dir: &Path, project: &Path, name: &str, prompt: &str, text: &str) -> Recorded {
+    record_session(
+        dir,
+        name,
+        prompt,
+        text,
+        &Shape {
+            project: Some(project),
+            ..Shape::default()
+        },
+    )
 }
 
 /// A session launched under a run the engine stamped: the labels the launch
@@ -133,20 +190,50 @@ pub fn record_pointed(
     prompt: &str,
     text: &str,
 ) -> Recorded {
-    record_session(dir, name, prompt, text, Model::Unreported, Some(pointed))
+    record_session(
+        dir,
+        name,
+        prompt,
+        text,
+        &Shape {
+            pointed: Some(pointed),
+            ..Shape::default()
+        },
+    )
 }
 
-fn record_session(
-    dir: &Path,
-    name: &str,
-    prompt: &str,
-    text: &str,
-    model: Model<'_>,
-    pointed: Option<&Pointed<'_>>,
-) -> Recorded {
+/// Everything about a recorded session beyond what it was asked and said, each
+/// left as an ordinary run has it unless an entry point above sets it.
+struct Shape<'a> {
+    /// The directory the harness ran in; beside the store when `None`.
+    project: Option<&'a Path>,
+    model: Model<'a>,
+    pointed: Option<&'a Pointed<'a>>,
+    /// What a second, unfinished run of the session has said so far.
+    in_flight: Option<&'a str>,
+}
+
+impl Default for Shape<'_> {
+    fn default() -> Self {
+        Self {
+            project: None,
+            model: Model::Unreported,
+            pointed: None,
+            in_flight: None,
+        }
+    }
+}
+
+fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shape<'_>) -> Recorded {
+    let Shape {
+        project,
+        model,
+        pointed,
+        in_flight,
+    } = *shape;
     // The directory the harness ran in. oneharness canonicalizes it and slugs
     // the result into the store's project layer, so it has to be a real one.
-    let project = dir.join("project");
+    let project = project.map_or_else(|| dir.join("project"), Path::to_path_buf);
     fs::create_dir_all(&project).expect("the project the harness ran in");
     let labels = match pointed {
         Some(pointed) => parse_labels(pointed.labels.split(',').map(str::trim))
@@ -171,6 +258,19 @@ fn record_session(
             &BTreeSet::new(),
         )
         .expect("append the run oneharness had");
+    let in_flight = in_flight.map(|said| {
+        let running = writer.begin_harness_run(&identity);
+        let event = serde_json::from_value(json!({
+            "kind": "message",
+            "output": said,
+            "index": 0,
+        }))
+        .expect("the event oneharness streams");
+        writer
+            .append_event(running, "claude-code:alternate", event)
+            .expect("append the event of the run in flight");
+        running.to_string()
+    });
     let path = writer.path().to_path_buf();
     Recorded {
         history_id: history_id.to_string(),
@@ -184,6 +284,7 @@ fn record_session(
             .expect("the session file's stem")
             .to_owned(),
         path,
+        in_flight,
     }
 }
 
