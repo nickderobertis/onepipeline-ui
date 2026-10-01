@@ -26,6 +26,7 @@
 //! one its summary carries — held to the producer's contract before a timing
 //! is served, and never folded a second time here.
 //!
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the versions below date one past move as the example of a break no API reading sees, which stays true once made, not a restatement of the current pin; the live contract, a moved requirement against an announced break, is gated by `scripts/semver-check.sh` and `tests/e2e/semver_check.rs`.
 //! This crate's public surface follows `onepipeline`'s version, because parts
 //! of it are made of that crate's types: [`ApiError::from_engine`] takes an
 //! [`onepipeline::Error`], [`filter::EventFilter::to_engine`] returns an
@@ -37,6 +38,7 @@
 //! to 0.56.0 left [`ApiError::from_engine`] spelled exactly as before, and a
 //! caller still holding a 0.55 [`onepipeline::Error`] could no longer pass it,
 //! which is why no reading of this crate's API alone can see such a break.
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 #![deny(missing_docs)]
 
