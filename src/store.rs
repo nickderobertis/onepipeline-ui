@@ -1014,7 +1014,13 @@ impl RunApi for RunStore {
     }
 
     fn unwatched(&self) -> Result<Envelope<Value>, ApiError> {
-        let unwatched = verbs::unwatched(&self.root, self.session())
+        // The verb as `onepipeline unwatched` asks it with no flag: under the
+        // wake budget `ONEPIPELINE_WAKE_BUDGET` sets in this process's own
+        // environment, else none. Read per request, as each CLI invocation reads
+        // it, and a value the engine refuses is this server's misconfiguration
+        // rather than the client's, so it is served as the engine's failure.
+        let unwatched = verbs::WakeBudget::from_environment()
+            .and_then(|budget| verbs::Unwatched::within(&self.root, self.session(), budget))
             .map_err(|error| ApiError::Engine(error.to_string()))?;
         let mut answered = json!({
             "reported": unwatched

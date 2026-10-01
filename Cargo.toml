@@ -279,6 +279,15 @@ onemessagebus = "0.9.0"
 # `a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request`
 # holds them. A browser-adopted run's driver is this line's copy of the engine,
 # so its publications follow that lifecycle once this moves.
+#
+# Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
+# `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
+# `verbs::WakeBudget::from_environment` reads from the server's own environment
+# rather than `verbs::unwatched`, which asks under none; the route and its
+# shape are unchanged, and
+# `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
+# `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
+# hold it to the CLI.
 onepipeline = "=0.57.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
