@@ -64,7 +64,7 @@ use std::process::Command;
 
 use onepipeline_ui::contract::routes;
 use onepipeline_ui::payload;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::fixture_run;
 use crate::http;
@@ -542,16 +542,70 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
     (before, as_served_at(after, base_schema), base_schema)
 }
 
+/// What `path` serves now that the base commit's schema served differently, as
+/// the failure to report — or nothing, when every span and event is the same.
+fn served_differently(older: SocketAddr, newer: SocketAddr, path: &str) -> Option<String> {
+    let (before, after, base_schema) = timelines(older, newer, path);
+    (after != before).then(|| {
+        format!(
+            "{path}: this build serves a span or event the base commit's schema \
+             {base_schema} served differently\n  base: {before}\n  this: {after}"
+        )
+    })
+}
+
+/// Every fixture run whose timeline is compared, with the nodes it is also
+/// asked for one at a time.
+const COMPARED_RUNS: &[(&str, &[&str])] = &[
+    (fixture_run::RUN_ID, &[fixture_run::NODE_ID]),
+    (fixture_run::LANES_RUN_ID, &[fixture_run::NODE_ID]),
+    ("run-baseline-preserved", &[fixture_run::NODE_ID]),
+    ("run-baseline-recorded", &[fixture_run::NODE_ID]),
+    ("run-baseline-stopped", &[fixture_run::NODE_ID]),
+    (
+        fixture_run::REVIEW_DRAFT_RUN_ID,
+        &[fixture_run::KEPT_NODE_ID, fixture_run::LIFTED_NODE_ID],
+    ),
+];
+
+/// Every timeline path asked of `run`: the whole run, then each of `nodes`.
+fn timeline_paths(run: &str, nodes: &[&str]) -> Vec<String> {
+    let timeline = routes::RUN_TIMELINE.replace("{run}", run);
+    std::iter::once(format!("{timeline}?scope=run"))
+        .chain(
+            nodes
+                .iter()
+                .map(|node| format!("{timeline}?scope=node&node={node}")),
+        )
+        .collect()
+}
+
+/// The shared store with the review-draft run beside it, every launch record in
+/// the shape the base commit's engine could read.
+fn compared_store(root: &Path) {
+    shared_store(root);
+    let review = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+    fixture_run::make_launch_record_legacy(&review);
+}
+
+/// Every span and event of every compared run, the review-draft run's included,
+/// is what the base commit served, once the fields a newer schema added to an
+/// event are set aside.
+///
+/// What a schema bump changed beyond an event's fields — schema 11 served a
+/// skipped check's verification record `ok: false` and closed an open
+/// publication where the run's watch of it ended — is a movement of one change,
+/// and is held where it is a property of this build rather than of the pair:
+/// `server::a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request`
+/// and `server::a_draft_lifted_before_its_checks_ran_is_served_with_what_it_waited_for`.
+/// Asserted here, it held only on the change that made it and failed on every
+/// change after, whose base already served it.
 #[test]
 fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
     let base = base_commit();
     let baseline = baseline_binary(&base);
 
-    let serving = Serving::start(|root| {
-        shared_store(root);
-        let review = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
-        fixture_run::make_launch_record_legacy(&review);
-    });
+    let serving = Serving::start(compared_store);
     let sibling = provisioned_sibling();
     let older = ForeignServing::start(
         &baseline,
@@ -559,79 +613,18 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
         &[(sibling::BINARY_ENV, sibling.as_str())],
     );
 
-    // A run that recorded none of the review kinds' settlements is served whole
-    // as the base commit served it, once the fields a newer schema added to an
-    // event are set aside — its `change-check`s included, which gain `review`
-    // and nothing else.
-    for run in [
-        fixture_run::RUN_ID,
-        fixture_run::LANES_RUN_ID,
-        "run-baseline-preserved",
-        "run-baseline-recorded",
-        "run-baseline-stopped",
-    ] {
-        let timeline = routes::RUN_TIMELINE.replace("{run}", run);
-        for path in [
-            format!("{timeline}?scope=run"),
-            format!("{timeline}?scope=node&node={}", fixture_run::NODE_ID),
-        ] {
-            let (before, after, base_schema) = timelines(older.address, serving.address, &path);
-            assert_eq!(
-                after, before,
-                "{path}: this build serves a span or event the base commit's schema \
-                 {base_schema} served differently"
-            );
+    for (run, nodes) in COMPARED_RUNS {
+        for path in timeline_paths(run, nodes) {
+            if let Some(difference) = served_differently(older.address, serving.address, &path) {
+                panic!("{difference}");
+            }
         }
     }
 
-    // A run that recorded them is where the schema moved more than an event's
-    // fields, and in exactly the two places `docs/contract.md` says: a
-    // verification record a skipped check stored is served `ok: false` (its
-    // span's status read from that `ok`, as every verification span's is), and a
-    // publication whose change was left open ends where the run's watch of it
-    // ended rather than where it opened. The base commit's timeline with those
-    // two changes made — and nothing else — is what this build serves, every
-    // other span and every event included.
+    // The comparison holds the review kinds only if the base commit served them:
+    // every kind whose events carry `review` — the payload's own table of them.
     let timeline = routes::RUN_TIMELINE.replace("{run}", fixture_run::REVIEW_DRAFT_RUN_ID);
-    let (before, after, base_schema) = timelines(
-        older.address,
-        serving.address,
-        &format!("{timeline}?scope=run"),
-    );
-    let mut expected = before.clone();
-    let mut skipped = 0;
-    let mut watched = Vec::new();
-    for span in expected["spans"].as_array_mut().expect("spans") {
-        let skipped_log = [
-            fixture_run::SKIPPED_CHECK_LOG,
-            fixture_run::LEGACY_SKIPPED_CHECK_LOG,
-        ]
-        .contains(&span["detail"]["artifact_id"].as_str().unwrap_or_default());
-        if span["kind"] == "verification" && skipped_log {
-            // The base commit read a skipped check as passed; that is the defect.
-            assert_eq!(span["detail"]["ok"], json!(true), "{span}");
-            span["detail"]["ok"] = json!(false);
-            span["status"] = json!("failed");
-            skipped += 1;
-        }
-        let watch_ended = match span["node_id"].as_str() {
-            Some(fixture_run::KEPT_NODE_ID) => "2026-08-07T12:00:11.000Z",
-            Some(fixture_run::LIFTED_NODE_ID) => "2026-08-07T12:00:11.500Z",
-            _ => continue,
-        };
-        if span["kind"] == "publication" {
-            assert_eq!(span["status"], "open", "{span}");
-            // The base commit closed it at the moment the change opened, so
-            // before the watch that the draft records report ended.
-            assert!(
-                span["ended_at"].as_str() < Some(watch_ended),
-                "the base commit's publication already ended at the watch's end: {span}"
-            );
-            span["ended_at"] = json!(watch_ended);
-            watched.push(span["node_id"].clone());
-        }
-    }
-    // Every kind whose events carry `review` — the payload's own table of them.
+    let before = http::get(older.address, &format!("{timeline}?scope=run")).json();
     for kind in payload::vcs::REVIEW_RECORDS.map(|record| record.kind) {
         assert!(
             before["spans"]
@@ -644,22 +637,84 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
              comparison holds none: {before}"
         );
     }
+}
+
+/// The comparison above, made between two servers of this build — one reading
+/// the store as written and one reading it with a record changed — refuses every
+/// span or event served differently, and passes the store served as it was.
+///
+/// Both sides declare one schema, which is what every base from schema 11 on
+/// serves the review-draft run as: so this is the comparison's verdict on a pair
+/// whose base already serves what this build does, without the base commit's
+/// binary.
+#[test]
+fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
+    let unchanged = Serving::start(compared_store);
+    let same = Serving::start(compared_store);
+    for (run, nodes) in COMPARED_RUNS {
+        for path in timeline_paths(run, nodes) {
+            assert_eq!(
+                served_differently(unchanged.address, same.address, &path),
+                None,
+                "the same store served twice"
+            );
+        }
+    }
+
+    // One event of the review-draft run: its settled checks' verdict.
+    let rewritten = |from: &str, to: &str| {
+        let (from, to) = (from.to_owned(), to.to_owned());
+        Serving::start(move |root| {
+            compared_store(root);
+            let journal = root
+                .join(fixture_run::REVIEW_DRAFT_RUN_ID)
+                .join("events.jsonl");
+            let text = fs::read_to_string(&journal).expect("the journal");
+            assert!(text.contains(&from), "{from} in the review-draft journal");
+            fs::write(&journal, text.replace(&from, &to)).expect("the rewritten journal");
+        })
+    };
+    let review_run = timeline_paths(fixture_run::REVIEW_DRAFT_RUN_ID, &[])[0].clone();
+    let verdict = rewritten("passed-with-skipped", "passed");
+    let refused = served_differently(unchanged.address, verdict.address, &review_run)
+        .expect("a review event served with another verdict is refused");
+    assert!(refused.contains("passed-with-skipped"), "{refused}");
+    // One span of it: the kept draft's publication, ending where the run's watch
+    // of it ended, which moves with the record that watch ended on.
+    let watch = rewritten("2026-08-07T12:00:11.000Z", "2026-08-07T12:00:11.250Z");
+    let refused = served_differently(unchanged.address, watch.address, &review_run)
+        .expect("a publication served ending elsewhere is refused");
+    assert!(refused.contains("2026-08-07T12:00:11.250Z"), "{refused}");
+
+    // Every other run with a journal, by the last record it holds.
+    let truncated = Serving::start(|root| {
+        compared_store(root);
+        for (run, _) in COMPARED_RUNS {
+            let journal = root.join(run).join("events.jsonl");
+            let text = fs::read_to_string(&journal).unwrap_or_default();
+            let mut lines: Vec<&str> = text.lines().collect();
+            if lines.pop().is_some() {
+                fs::write(&journal, lines.join("\n") + "\n").expect("the shortened journal");
+            }
+        }
+    });
+    let mut refused_runs = Vec::new();
+    for (run, nodes) in COMPARED_RUNS {
+        let refused = timeline_paths(run, nodes)
+            .iter()
+            .any(|path| served_differently(unchanged.address, truncated.address, path).is_some());
+        if refused {
+            refused_runs.push(*run);
+        }
+    }
     assert_eq!(
-        skipped, 2,
-        "the skipped checks' records at the base commit: {before}"
-    );
-    assert_eq!(
-        watched,
-        [
-            json!(fixture_run::KEPT_NODE_ID),
-            json!(fixture_run::LIFTED_NODE_ID)
-        ],
-        "the open publications at the base commit: {before}"
-    );
-    assert_eq!(
-        after, expected,
-        "{timeline}: this build serves the review run differently from the base \
-         commit's schema {base_schema} somewhere other than the skipped checks' \
-         verification records and the open publications' ends"
+        refused_runs,
+        COMPARED_RUNS
+            .iter()
+            .map(|(run, _)| *run)
+            .filter(|run| *run != "run-baseline-recorded")
+            .collect::<Vec<_>>(),
+        "every run whose journal lost a record is refused; the one with no \
+         journal has none to lose"
     );
 }

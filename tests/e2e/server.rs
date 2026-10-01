@@ -5970,6 +5970,23 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         span["reference"],
         json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
     );
+
+    // And the record each skipped check stored is a failed verification on the
+    // timeline too, rather than one that passed: its span's status is read from
+    // the same `ok` the detail serves.
+    for log in [
+        fixture_run::SKIPPED_CHECK_LOG,
+        fixture_run::LEGACY_SKIPPED_CHECK_LOG,
+    ] {
+        let span = timeline["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .find(|span| span["kind"] == "verification" && span["detail"]["artifact_id"] == log)
+            .unwrap_or_else(|| panic!("the verification {log} stored: {timeline}"));
+        assert_eq!(span["detail"]["ok"], json!(false), "{span}");
+        assert_eq!(span["status"], json!("failed"), "{span}");
+    }
 }
 
 /// Every file under `dir` whose text names `needle`, at any depth.
