@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
@@ -221,7 +222,7 @@ let cached: FixtureFacts | undefined;
  */
 export function fixtureIn(workspace: string): FixtureFacts {
   return fixtureSchema.parse(
-    JSON.parse(readFileSync(join(workspace, "fixture-facts.json"), "utf8")),
+    JSON.parse(readFileSync(join(workspace, FIXTURE_FACTS_NAME), "utf8")),
   );
 }
 

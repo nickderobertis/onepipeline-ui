@@ -41,6 +41,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
 import {
   buildRuns,
   buildShutdownRuns,
@@ -70,9 +71,6 @@ import { thisHost } from "./this-host.mjs";
 const WORKSPACE_PREFIX = "dag-ui-e2e-";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-
-/** Published beside the runs root so a spec names what this wrote, not a copy of it. */
-export const FIXTURE_FACTS_NAME = "fixture-facts.json";
 
 /**
  * Report a failure and stop, under the same exit-code contract the crate serves:
