@@ -668,3 +668,342 @@ fn a_subscriber_whose_filter_narrows_nothing_pays_nothing_to_narrow_it() {
         );
     }
 }
+
+/// A history store as a long-lived host holds one: the legacy whole-store
+/// indexes the core before the dated segments kept, and the sessions of every
+/// project that has run there since.
+///
+/// Both legacy indexes exist and cannot be opened, so a recorder or a reader
+/// that reconciled them on open could not answer at all; and the sessions are
+/// numerous enough, across enough projects, that one which walked the store to
+/// find what an index would have told it pays for it on the trace.
+struct LongLivedStore {
+    dir: tempfile::TempDir,
+    /// Every file the store held before anything was recorded, with its bytes.
+    held: Vec<(std::path::PathBuf, Vec<u8>)>,
+}
+
+/// How many sessions other projects left behind in the store.
+const OTHER_SESSIONS: usize = 1_200;
+
+/// How many project directories they are spread across.
+const OTHER_PROJECTS: usize = 6;
+
+/// The two legacy indexes, by the names the core before the dated segments
+/// wrote them under.
+const LEGACY_INDEXES: [&str; 2] = [".index.jsonl", ".event-index.jsonl"];
+
+impl LongLivedStore {
+    fn new() -> Self {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("the oneharness history store");
+        // A real session's bytes, recorded by the linked writer into a scratch
+        // store, so every file the store holds is one the reader could parse.
+        let scratch = tempfile::tempdir().expect("a scratch store");
+        let sample = crate::harness_history::record(
+            scratch.path(),
+            "an earlier worker",
+            "do the earlier task",
+            "the earlier task is done",
+        );
+        let bytes = std::fs::read(&sample.path).expect("the sample session");
+        let mut held = Vec::new();
+        let mut legacy = String::new();
+        for n in 0..OTHER_SESSIONS {
+            let project = format!("-home-dev-project-{}", n % OTHER_PROJECTS);
+            let session = format!("earlier-worker-20250101T000000Z-{n}");
+            let path = dir.path().join(&project).join(format!("{session}.jsonl"));
+            std::fs::create_dir_all(path.parent().expect("a project")).expect("a project dir");
+            std::fs::write(&path, &bytes).expect("an earlier session");
+            legacy.push_str(&format!(
+                "{{\"project\":\"{project}\",\"session\":\"{session}\"}}\n"
+            ));
+            held.push((path, bytes.clone()));
+        }
+        for name in LEGACY_INDEXES {
+            let path = dir.path().join(name);
+            std::fs::write(&path, &legacy).expect("a legacy index");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+                .expect("make the legacy index unopenable");
+            held.push((path, legacy.clone().into_bytes()));
+        }
+        Self { dir, held }
+    }
+
+    /// The store, as the writer spells it once it has resolved it.
+    fn path(&self) -> std::path::PathBuf {
+        std::fs::canonicalize(self.dir.path()).expect("the store")
+    }
+
+    /// Every file the store held before, as it holds it now — the legacy
+    /// indexes read back by restoring the permission they were refused under.
+    fn held_now(&self) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+        use std::os::unix::fs::PermissionsExt;
+
+        self.held
+            .iter()
+            .map(|(path, _)| {
+                let legacy = LEGACY_INDEXES
+                    .iter()
+                    .any(|name| path.file_name() == Some(std::ffi::OsStr::new(name)));
+                if legacy {
+                    let mode = std::fs::metadata(path)
+                        .expect("the legacy index is still there")
+                        .permissions()
+                        .mode()
+                        & 0o777;
+                    assert_eq!(mode, 0, "{} was made openable", path.display());
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o400))
+                        .expect("read the legacy index back");
+                }
+                let bytes = std::fs::read(path).unwrap_or_else(|error| {
+                    panic!("{} is no longer readable: {error}", path.display())
+                });
+                (path.clone(), bytes)
+            })
+            .collect()
+    }
+}
+
+/// The UTC date a UUIDv7 history id was minted on, as `YYYY-MM-DD` — the date
+/// whose dated segment its index entry lands in.
+fn minted_on(history_id: &str) -> String {
+    let millis = u64::from_str_radix(&history_id.replace('-', "")[..12], 16)
+        .expect("a UUIDv7 carries its instant in its first 48 bits");
+    let date = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
+        .expect("an instant")
+        .date();
+    format!(
+        "{:04}-{:02}-{:02}",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
+}
+
+/// The realtime clock the tracer stamps each call with.
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after the epoch")
+        .as_secs_f64()
+}
+
+/// A run is recorded, and its session served, without reading an index or
+/// walking the history store — on a store a long-lived host really holds.
+///
+/// Every run a dispatch records goes through the core this binary links, and
+/// the core it linked before re-read the whole legacy index and walked every
+/// session file on each one: a host with gigabytes of history queued every
+/// worker behind one lock. The linked core records into a dated segment
+/// instead, and the server resolves a session by the project and file its
+/// pointer names. Both halves are held here against the kernel's own record of
+/// every open and listing the test process and the server it starts make —
+/// granted or refused, because a reader that tries an index it cannot open and
+/// falls back to a walk has done the forbidden thing on its first attempt.
+#[test]
+fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_store() {
+    use crate::cost_support::{Reach, Watch};
+    use oneharness_core::domain::history::HistoryShowEntry;
+    use oneharness_core::io::history;
+
+    const STREAM: &str = "node-scope-1786925518098-3163646";
+    let store = LongLivedStore::new();
+    let root = store.path();
+    let lock = root.join(".index.lock");
+    assert!(!lock.exists(), "the store starts with no lock file");
+    let projects = tempfile::tempdir().expect("the directories the harnesses ran in");
+    let tasks = [
+        (
+            "contract worker",
+            "land the wire contract",
+            "the route table is landed",
+        ),
+        ("judge", "judge the contract", "the contract holds"),
+        ("observer", "watch the run", "the run settled"),
+    ];
+    for (n, _) in tasks.iter().enumerate() {
+        std::fs::create_dir_all(projects.path().join(format!("project-{n}")))
+            .expect("a project the harness ran in");
+    }
+
+    let watch = Watch::this_process();
+    let mut recorded = Vec::new();
+    let mut recording = Vec::new();
+    for (n, (name, prompt, text)) in tasks.iter().enumerate() {
+        recording.push(now());
+        recorded.push(crate::harness_history::record_from(
+            &root,
+            &projects.path().join(format!("project-{n}")),
+            name,
+            prompt,
+            text,
+        ));
+    }
+    let starting = now();
+    let serving = crate::serving::Serving::start(|runs| {
+        let dir = fixture_run::write(runs, fixture_run::RUN_ID);
+        for session in &recorded {
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: STREAM,
+                    node: fixture_run::NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&session.dir),
+                    history_project: &session.project,
+                    history_session: &session.session,
+                    history_id: &session.history_id,
+                    bytes: session.bytes(),
+                },
+            );
+        }
+    });
+    let mut serving_at = Vec::new();
+    let mut served = Vec::new();
+    for session in &recorded {
+        serving_at.push(now());
+        let response = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/{}",
+                fixture_run::RUN_ID,
+                session.history_id
+            ),
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        served.push(response.json());
+    }
+    let stopping = now();
+    drop(serving);
+    let accesses = watch.finish();
+
+    // Each session is served as the linked core renders its finished run.
+    for (session, body) in recorded.iter().zip(&served) {
+        assert_eq!(body["kind"], json!("oneharness_session"), "{body}");
+        let entry = history::read_session_display(&session.path)
+            .expect("the recorded session")
+            .into_iter()
+            .find(|entry| {
+                matches!(entry, HistoryShowEntry::Record(record)
+                    if record.history_id.to_string() == session.history_id)
+            })
+            .expect("the session holds its finished run");
+        assert_eq!(
+            body["content"].as_str(),
+            Some(
+                serde_json::to_string_pretty(&entry)
+                    .expect("a record")
+                    .as_str()
+            ),
+            "the session served is not the record the core renders for {}",
+            session.history_id
+        );
+    }
+
+    // Each run's entry, and the entry for the event it streamed, landed in the
+    // segments for the date it was minted on.
+    for session in &recorded {
+        for kind in ["runs", "events"] {
+            let segment = root
+                .join(".index.d")
+                .join(format!("{kind}-{}.ndjson", minted_on(&session.history_id)));
+            let entries = std::fs::read_to_string(&segment)
+                .unwrap_or_else(|error| panic!("{}: {error}", segment.display()));
+            assert!(
+                entries.contains(&session.history_id),
+                "{} holds no entry for {}: {entries}",
+                segment.display(),
+                session.history_id
+            );
+        }
+    }
+
+    // Nothing the store held before changed, and no lock was taken.
+    assert!(
+        !lock.exists(),
+        "recording or reading created {}",
+        lock.display()
+    );
+    for ((path, before), (_, after)) in store.held.iter().zip(store.held_now()) {
+        assert!(before == &after, "{} was changed", path.display());
+    }
+
+    // And the trace: in each phase, nothing under the store but what that
+    // phase's session is allowed to reach.
+    let segments = root.join(".index.d");
+    let phases: Vec<(f64, f64, Vec<std::path::PathBuf>, String)> = recorded
+        .iter()
+        .enumerate()
+        .map(|(n, session)| {
+            let until = recording.get(n + 1).copied().unwrap_or(starting);
+            let project = session.path.parent().expect("a project").to_path_buf();
+            let date = minted_on(&session.history_id);
+            (
+                recording[n],
+                until,
+                vec![
+                    session.path.clone(),
+                    project,
+                    segments.clone(),
+                    segments.join(format!("runs-{date}.ndjson")),
+                    segments.join(format!("events-{date}.ndjson")),
+                ],
+                format!("recording {}", session.history_id),
+            )
+        })
+        .chain(std::iter::once((
+            starting,
+            serving_at[0],
+            Vec::new(),
+            "starting the server".to_owned(),
+        )))
+        .chain(recorded.iter().enumerate().map(|(n, session)| {
+            let until = serving_at.get(n + 1).copied().unwrap_or(stopping);
+            let project = session.path.parent().expect("a project").to_path_buf();
+            (
+                serving_at[n],
+                until,
+                vec![session.path.clone(), project],
+                format!("serving {}", session.history_id),
+            )
+        }))
+        .collect();
+    let in_store: Vec<_> = accesses
+        .iter()
+        .filter(|access| access.path.starts_with(&root))
+        .collect();
+    let mut reached = 0;
+    for access in &in_store {
+        let phase = phases
+            .iter()
+            .find(|(from, until, _, _)| access.at >= *from && access.at < *until);
+        let Some((_, _, allowed, what)) = phase else {
+            panic!("{access:?} reached the store outside every phase this journey ran");
+        };
+        assert!(
+            allowed.iter().any(|path| path == &access.path),
+            "{what} {} {} — only {allowed:?} may be",
+            match access.kind {
+                Reach::Open => "opened",
+                Reach::List => "listed",
+            },
+            access.path.display()
+        );
+        reached += 1;
+    }
+    // A trace that saw nothing would pass every assertion above: the sessions
+    // were written and read, so each of their files was opened.
+    for session in &recorded {
+        assert!(
+            in_store
+                .iter()
+                .filter(|access| access.path == session.path && access.kind == Reach::Open)
+                .count()
+                >= 2,
+            "the trace never saw {} written and read, so it saw nothing: {reached} accesses",
+            session.path.display()
+        );
+    }
+}

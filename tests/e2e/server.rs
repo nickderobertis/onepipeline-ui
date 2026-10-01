@@ -2629,6 +2629,97 @@ fn a_session_record_carries_the_model_the_harness_reported_and_the_refusal_it_ga
     );
 }
 
+/// A session whose next turn is still running is served by its finished run,
+/// exactly as the linked core renders that run — and the turn in flight, which
+/// has no record yet, is not an artifact.
+///
+/// The core renders a session as typed entries: each finished run's record, and
+/// an in-flight entry for a run that has streamed events but not closed. Only
+/// a record carries a `history_id`, so an artifact id selects a finished run
+/// and nothing else, and the bytes served for it are that record as the core
+/// serializes it — which is what a reader of `oneharness history show` sees.
+#[test]
+fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_not_the_running_one() {
+    use oneharness_core::domain::history::HistoryShowEntry;
+
+    let store = tempfile::tempdir().expect("the oneharness history store");
+    let recorded = harness_history::record_beside_in_flight(
+        store.path(),
+        "a worker on its second turn",
+        "land the wire contract",
+        "the route table is landed",
+        "now landing the client",
+    );
+    let running = recorded.in_flight.clone().expect("a run in flight");
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        for history_id in [&recorded.history_id, &running] {
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: HARNESS_STREAM,
+                    node: fixture_run::NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&recorded.dir),
+                    history_project: &recorded.project,
+                    history_session: &recorded.session,
+                    history_id,
+                    bytes: recorded.bytes(),
+                },
+            );
+        }
+    });
+    let entries =
+        oneharness_core::io::history::read_session_display(&recorded.path).expect("the session");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| matches!(entry, HistoryShowEntry::Incomplete(_))),
+        "the session holds a run in flight beside its finished one: {entries:?}"
+    );
+    let finished = entries
+        .iter()
+        .find(|entry| matches!(entry, HistoryShowEntry::Record(_)))
+        .expect("the finished run");
+
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/artifacts/{}",
+            fixture_run::RUN_ID,
+            recorded.history_id
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let body = response.json();
+    assert_eq!(body["kind"], json!("oneharness_session"));
+    assert_eq!(
+        body["content"].as_str(),
+        Some(
+            serde_json::to_string_pretty(finished)
+                .expect("the record")
+                .as_str()
+        ),
+        "the finished run is served as the core renders it"
+    );
+
+    let response = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/artifacts/{running}", fixture_run::RUN_ID),
+    );
+    assert_eq!(
+        response.status, 404,
+        "a run with no record yet is not an artifact: {}",
+        response.body
+    );
+    assert_eq!(
+        response.json()["error"]["code"],
+        json!("artifact_not_found"),
+        "{}",
+        response.body
+    );
+}
+
 /// Reading one takes no lock and writes nothing under the store.
 ///
 /// `oneharness_core` offers a lookup that reconciles the store's index under an

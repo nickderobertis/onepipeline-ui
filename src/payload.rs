@@ -4491,6 +4491,8 @@ fn session_record(
         }
         Confined::Missing => return None,
     };
+    // Only a finished run carries a `history_id`: an entry still in flight is
+    // keyed by its `run_id` and is not an artifact this route serves.
     let record = history::read_session_display(path.as_path())
         .ok()?
         .into_iter()
