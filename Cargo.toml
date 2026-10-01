@@ -245,7 +245,14 @@ onemessagebus = "0.9.0"
 # `concurrent-deferred` when a launch's cross-DAG dependency acknowledges the
 # holder it waits on, and its `watch` wakes on every planner surface and ends
 # with a `blocking` flag on its `returned` frame, which
-# `GET /api/v2/runs/{run}/watch` forwards as the SDK renders it.
+# `GET /api/v2/runs/{run}/watch` forwards as the SDK renders it; its new
+# `run-changed` ending is a CLI exit status, and the route serves the frame. Its
+# `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so `GET /api/v2/unwatched` asks
+# `verbs::Unwatched::within` under the budget the server's own environment sets
+# rather than `verbs::unwatched`, which asks under none, and the route and
+# its shape are unchanged. `unwatched_asks_under_the_wake_budget_the_servers_environment_sets`
+# and `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
+# hold it to the CLI.
 onepipeline = "=0.55.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
