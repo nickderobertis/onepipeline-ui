@@ -15,7 +15,6 @@ import {
   linkSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -31,7 +30,7 @@ import {
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
-import { fixture, runs } from "./fixture-facts";
+import { fixture, fixtureIn, runs } from "./fixture-facts";
 import {
   graphNodeList,
   graphNodes,
@@ -4247,7 +4246,7 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
  * v0.22.0 release. So the fixture serves through a name of its own, and this
  * replaces the found one under a live server, as cargo does, and adopts.
  */
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: 6.3 s to 6.8 s on this host, most of it the driver claiming the run, beside adopt journeys of 1.1 to 1.2 min in the same project. What it holds is this project's own fixture server, `fixtures/serve-fixture.mjs`, which nothing outside `dag-ui-e2e` runs, and it needs exactly what `dag-ui-e2e:test` already depends on, so no narrower edge contains it.
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: 9.4 s on this host, most of it the fixture server copying its binary and the driver claiming the run, beside adopt journeys of 1.1 to 1.2 min in the same project. What it holds is this project's own fixture server, `fixtures/serve-fixture.mjs`, which nothing outside `dag-ui-e2e` runs, and it needs exactly what `dag-ui-e2e:test` already depends on, so no narrower edge contains it.
 test("adopts a run after the binary it was served from is relinked under it", async () => {
   test.slow();
   const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));
@@ -4284,11 +4283,7 @@ test("adopts a run after the binary it was served from is relinked under it", as
     rmSync(built);
     stageBinary(built);
 
-    const { runs: written } = z
-      .object({ runs: z.object({ adoptable: z.string().min(1) }) })
-      .parse(
-        JSON.parse(readFileSync(join(workspace, "fixture-facts.json"), "utf8")),
-      );
+    const { runs: written } = fixtureIn(workspace);
     const answered = await fetch(
       `${api}${API_V2_PATHS.adopt(written.adoptable)}`,
       { method: "POST" },
