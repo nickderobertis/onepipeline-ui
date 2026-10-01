@@ -11656,6 +11656,8 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     assert_enveloped(&read);
     // A settled run with nothing raised: the read claims nothing.
     assert_eq!(read["status"], json!("finished"), "{read}");
+    // `Value` equality is exact, so this fails on an attributed holder key the
+    // server dropped as on one it invented for the unattributed holder.
     let served: Vec<(&str, &Value)> = read["events"]
         .as_array()
         .expect("the shaped events")
@@ -11675,13 +11677,6 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
         ],
         "{read}"
     );
-    let unattributed = &read["events"][1]["payload"]["holders"][1];
-    for key in ["identity", "run", "node", "dependency"] {
-        assert!(
-            unattributed.get(key).is_none(),
-            "an absent {key} was served as present: {unattributed}"
-        );
-    }
 
     // And the one record that went ahead on the dependency alone is still its
     // own kind to a reader excluding the override.
