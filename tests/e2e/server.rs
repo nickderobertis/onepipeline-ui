@@ -5814,7 +5814,7 @@ fn a_publication_that_never_landed_is_served_as_what_it_kept() {
     );
 }
 
-/// The events one node's timeline lists, by kind, in the order it lists them.
+/// The events of one kind a node's timeline lists, across its spans, oldest first.
 fn review_events<'a>(timeline: &'a Value, kind: &str) -> Vec<&'a Value> {
     let mut found = Vec::new();
     let mut spans: Vec<&Value> = timeline["spans"]

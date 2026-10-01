@@ -271,13 +271,14 @@ pub mod vcs {
     /// `{url, host, id, base, author}`.
     pub const CHANGE_OPENED: &str = "change-opened";
     /// `{name, required, status, from_status, conclusion, state}`, with the
-    /// settled check's log as an artifact. `state` is one of [`CHECK_STATES`],
+    /// settled check's log as an artifact. `state` is a [`CheckState`],
     /// and a record written before that library classified its checks carries
     /// none — [`check_state`] is how this crate reads either.
     pub const CHANGE_CHECK: &str = "change-check";
     /// `{url, id, base, kind, …}` — a change request is being held as a draft.
-    /// `kind` is a caller's reason, or [`AWAITING_CHECKS`] for the draft every
-    /// remote publication opens while its required checks run.
+    /// `kind` is a caller's reason, or `awaiting-checks` for the draft every
+    /// remote publication opens while its required checks run — served as
+    /// recorded, so this crate keeps no copy of either.
     pub const CHANGE_DRAFTED: &str = "change-drafted";
     /// `{url, id, base}` — a draft was made ready for review.
     pub const DRAFT_LIFTED: &str = "draft-lifted";
@@ -290,8 +291,9 @@ pub mod vcs {
     /// team's. The record behind a node settled `done` as `change-review-draft`.
     pub const DRAFT_KEPT_FOR_REVIEW: &str = "draft-kept-for-review";
     /// `{url, id, head, verdict, skipped}` — every required check stopped
-    /// blocking: `verdict` is [`PASSED`], or [`PASSED_WITH_SKIPPED`] naming the
-    /// required checks that concluded skipped.
+    /// blocking: `verdict` is `passed`, or `passed-with-skipped` with `skipped`
+    /// naming the required checks that concluded skipped. Served as recorded,
+    /// so this crate keeps no copy of the verdict words.
     pub const CHECKS_SETTLED: &str = "checks-settled";
     /// `{url, sha}`.
     pub const CHANGE_MERGED: &str = "change-merged";
@@ -343,42 +345,61 @@ pub mod vcs {
     // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason as the command above: `onevcs` renders this word from a private `gate::Ruling` it re-exports nothing of, so the wire is the only declaration reachable and the goldens are the gate available.
     pub const GATE_PASSED: &str = "pass";
 
-    /// The `kind` a [`CHANGE_DRAFTED`] carries for the draft a publication opens
-    /// while its required checks run, which nobody asked for and so is no reason.
-    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] that library writes this word from a private constant in its `publish` module, and the one type that spells it, `status::AwaitingChecks`, sits in a module it does not export, so no declaration is reachable from a consumer. `tests/support/fixture_run.rs` writes the record as that library emits it and the e2e journey pins what this crate makes of it, which is the whole of the gate available.
-    pub const AWAITING_CHECKS: &str = "awaiting-checks";
-    /// The [`CHECKS_SETTLED`] verdict where every required check passed.
-    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] both verdict words are built inline in that library's private `publish` module, which re-exports no type for them, so the wire is the only declaration reachable; the fixture and the e2e journey are the gate available.
-    pub const PASSED: &str = "passed";
-    /// The [`CHECKS_SETTLED`] verdict where a required check concluded skipped:
-    /// nothing blocks the merge, and something required did not run.
-    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason as [`PASSED`] above.
-    pub const PASSED_WITH_SKIPPED: &str = "passed-with-skipped";
+    /// The five states `onevcs` classifies one check into, as its `CheckState`
+    /// declares them and in its order. `tests/contract.rs` holds this copy to
+    /// that type, so a state added or renamed there fails there.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum CheckState {
+        /// Concluded `success` or `neutral`.
+        Passed,
+        /// Concluded in a way that blocks a merge.
+        Failed,
+        /// Concluded `skipped`: it did not run, and is never read as passed.
+        Skipped,
+        /// Not settled yet.
+        Pending,
+        /// Concluded `cancelled` or `stale`: the host ended it with no verdict.
+        NoVerdict,
+    }
 
-    /// The five states `onevcs` classifies one check into, in the order its
-    /// `CheckState` declares them: passed, failed, skipped, pending, and ended by
-    /// the host with no verdict. `tests/contract.rs` holds this copy to that type,
-    /// so a state added or renamed there fails there.
-    pub const CHECK_STATES: [&str; 5] = [
-        CHECK_PASSED,
-        CHECK_FAILED,
-        CHECK_SKIPPED,
-        CHECK_PENDING,
-        CHECK_NO_VERDICT,
-    ];
-    /// Concluded `success` or `neutral`.
-    pub const CHECK_PASSED: &str = "passed";
-    /// Concluded in a way that blocks a merge.
-    pub const CHECK_FAILED: &str = "failed";
-    /// Concluded `skipped`: it did not run, and is never read as passed.
-    pub const CHECK_SKIPPED: &str = "skipped";
-    /// Not settled yet.
-    pub const CHECK_PENDING: &str = "pending";
-    /// Concluded `cancelled` or `stale`: the host ended it with no verdict.
-    pub const CHECK_NO_VERDICT: &str = "no-verdict";
+    impl CheckState {
+        /// Every state, in the order that library declares them.
+        pub const ALL: [Self; 5] = [
+            Self::Passed,
+            Self::Failed,
+            Self::Skipped,
+            Self::Pending,
+            Self::NoVerdict,
+        ];
 
-    /// The state one [`CHANGE_CHECK`] record's check was in, as one of
-    /// [`CHECK_STATES`].
+        /// The word that library writes the state as.
+        #[must_use]
+        pub const fn as_str(self) -> &'static str {
+            match self {
+                Self::Passed => "passed",
+                Self::Failed => "failed",
+                Self::Skipped => "skipped",
+                Self::Pending => "pending",
+                Self::NoVerdict => "no-verdict",
+            }
+        }
+
+        /// The state a written word names, or `None` for one this build does not know.
+        #[must_use]
+        pub fn from_wire(word: &str) -> Option<Self> {
+            Self::ALL.into_iter().find(|state| state.as_str() == word)
+        }
+
+        /// Whether a record in this state reports nothing against the work: a
+        /// check that passed vouches for it and one still running has said
+        /// nothing yet. A skipped check ran nothing, so it vouches for nothing.
+        #[must_use]
+        pub const fn vouches(self) -> bool {
+            matches!(self, Self::Passed | Self::Pending)
+        }
+    }
+
+    /// The state one [`CHANGE_CHECK`] record's check was in.
     ///
     /// The record's own `state` wherever it carries one this build knows — that
     /// library classified the check as it wrote it, and its reading is the one a
@@ -391,11 +412,11 @@ pub mod vcs {
     /// wrote it — the copy of green conclusions this replaced counted `skipped`
     /// among them, which called a change verified that nothing had verified.
     #[must_use]
-    pub fn check_state(payload: &serde_json::Map<String, serde_json::Value>) -> &'static str {
+    pub fn check_state(payload: &serde_json::Map<String, serde_json::Value>) -> CheckState {
         if let Some(declared) = payload
             .get("state")
             .and_then(serde_json::Value::as_str)
-            .and_then(|state| CHECK_STATES.into_iter().find(|known| *known == state))
+            .and_then(CheckState::from_wire)
         {
             return declared;
         }
@@ -404,7 +425,7 @@ pub mod vcs {
             .and_then(serde_json::Value::as_str)
             .is_some_and(|status| status.eq_ignore_ascii_case("completed"));
         if !settled {
-            return CHECK_PENDING;
+            return CheckState::Pending;
         }
         match payload
             .get("conclusion")
@@ -412,10 +433,10 @@ pub mod vcs {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("success" | "neutral") => CHECK_PASSED,
-            Some("skipped") => CHECK_SKIPPED,
-            Some("cancelled" | "stale") => CHECK_NO_VERDICT,
-            _ => CHECK_FAILED,
+            Some("success" | "neutral") => CheckState::Passed,
+            Some("skipped") => CheckState::Skipped,
+            Some("cancelled" | "stale") => CheckState::NoVerdict,
+            _ => CheckState::Failed,
         }
     }
 }
@@ -2387,19 +2408,12 @@ struct Evidence<'a> {
 ///
 /// Each producer has its own word for a verdict, and none of them is the
 /// pipeline's `status`: `onevcs` rules a gate `pass` or `fail`, says whether a
-/// push was `accepted`, and classifies a host check into one of
-/// [`vcs::CHECK_STATES`]. Reading a check's `completed` as a
+/// push was `accepted`, and classifies a host check into a [`vcs::CheckState`]. Reading a check's `completed` as a
 /// pipeline status is how every passing check came to look like a failure.
 fn verdict_of(event: &Envelope) -> bool {
     if event.source == Source::Vcs {
         return match event.kind.0.as_str() {
-            // A check still running has reported nothing against the work, and
-            // one that passed vouches for it. A skipped one ran nothing, so it
-            // verified nothing and is not served as having passed.
-            vcs::CHANGE_CHECK => matches!(
-                vcs::check_state(&event.payload),
-                vcs::CHECK_PASSED | vcs::CHECK_PENDING
-            ),
+            vcs::CHANGE_CHECK => vcs::check_state(&event.payload).vouches(),
             vcs::GATE_VERDICT => {
                 event.payload.get("verdict").and_then(Value::as_str) == Some(vcs::GATE_PASSED)
             }
@@ -4898,7 +4912,10 @@ fn review_facts(event: &Envelope) -> Option<Value> {
         if let Some(required) = event.payload.get("required").and_then(Value::as_bool) {
             record.insert("required".into(), json!(required));
         }
-        record.insert("state".into(), json!(vcs::check_state(&event.payload)));
+        record.insert(
+            "state".into(),
+            json!(vcs::check_state(&event.payload).as_str()),
+        );
     }
     if let Some(grace) = event.payload.get("grace_seconds").and_then(Value::as_f64) {
         record.insert("grace_seconds".into(), json!(grace));

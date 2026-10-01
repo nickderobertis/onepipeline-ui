@@ -2400,11 +2400,11 @@ fn the_check_states_this_crate_reads_are_the_ones_that_library_declares() {
     use onevcs::CheckState;
 
     let copy_of = |state: CheckState| match state {
-        CheckState::Passed => vcs::CHECK_PASSED,
-        CheckState::Failed => vcs::CHECK_FAILED,
-        CheckState::Skipped => vcs::CHECK_SKIPPED,
-        CheckState::Pending => vcs::CHECK_PENDING,
-        CheckState::NoVerdict => vcs::CHECK_NO_VERDICT,
+        CheckState::Passed => vcs::CheckState::Passed,
+        CheckState::Failed => vcs::CheckState::Failed,
+        CheckState::Skipped => vcs::CheckState::Skipped,
+        CheckState::Pending => vcs::CheckState::Pending,
+        CheckState::NoVerdict => vcs::CheckState::NoVerdict,
     };
     let declared = [
         CheckState::Passed,
@@ -2416,15 +2416,16 @@ fn the_check_states_this_crate_reads_are_the_ones_that_library_declares() {
     for state in declared {
         assert_eq!(
             serde_json::to_value(state).expect("a state serializes"),
-            json!(copy_of(state)),
+            json!(copy_of(state).as_str()),
             "{state:?}"
         );
     }
-    assert_eq!(vcs::CHECK_STATES, declared.map(copy_of));
+    assert_eq!(vcs::CheckState::ALL, declared.map(copy_of));
 
     // A record that carries the state that library classified is read as it.
     for state in declared {
-        let record = json!({ "status": "queued", "conclusion": null, "state": copy_of(state) });
+        let record =
+            json!({ "status": "queued", "conclusion": null, "state": copy_of(state).as_str() });
         assert_eq!(
             vcs::check_state(record.as_object().expect("an object")),
             copy_of(state)
