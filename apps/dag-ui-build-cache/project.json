@@ -1,0 +1,33 @@
+{
+  "name": "dag-ui-build-cache",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:app", "type:test"],
+  "targets": {
+    "lint": {
+      "command": "cargo clippy --locked --quiet --test build-cache -- -D warnings",
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/tests/build_cache.rs",
+        "{projectRoot}/project.json"
+      ]
+    },
+    "test": {
+      "command": "cargo nextest run --locked --test build-cache --status-level fail --final-status-level fail",
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/tests/build_cache.rs",
+        "{workspaceRoot}/apps/dag-ui/**/*",
+        "{workspaceRoot}/packages/dag-model/**/*",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/package-lock.json",
+        "{workspaceRoot}/tsconfig.base.json",
+        "{workspaceRoot}/scripts/nx.sh",
+        "{projectRoot}/project.json"
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

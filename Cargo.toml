@@ -262,7 +262,25 @@ onemessagebus = "0.9.0"
 # `history_id` it names — an in-flight run, which carries no such id, was never
 # one — and serialized as before. A browser-adopted run's driver is this line's
 # copy of the engine, so its templates resolve through those layers once this
-# moves. Its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
+# moves.
+#
+# 0.57.0 links the onevcs 0.36 release whose publication opens every remote
+# lifecycle change request as a draft and watches its required checks under
+# every policy — `change-open` included, so red checks there are now a
+# `checks-failed` retry rather than an open change. A green `change-open` change
+# whose approvals are required stays a draft for its own user's review, and the
+# node settles `done` with the outcome `change-review-draft` and its change
+# request URL, which `graph.node_results` and the node's publication serve as
+# they serve a `change-open` settlement. That release journals `change-drafted`
+# with `kind: "awaiting-checks"`, `checks-settled` (`passed`, or
+# `passed-with-skipped`), `draft-lifted-early` and `draft-kept-for-review`, and
+# classifies each `change-check` into a `state` in which a skipped check is never
+# a passed one; timeline schema 11 serves each as a `review`, and
+# `a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request`
+# holds them. A browser-adopted run's driver is this line's copy of the engine,
+# so its publications follow that lifecycle once this moves.
+#
+# Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
 # rather than `verbs::unwatched`, which asks under none; the route and its
@@ -270,7 +288,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.56.0"
+onepipeline = "=0.57.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -303,7 +321,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.35.0"
+onevcs = "0.36.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -336,6 +354,14 @@ toml = "1"
 [[test]]
 name = "e2e"
 path = "tests/e2e/main.rs"
+
+[[test]]
+name = "build-cache"
+path = "tests/build_cache.rs"
+# Only dag-ui-build-cache:test runs the repeated real frontend builds, and
+# dag-ui-build-cache:lint denies this target's diagnostics: `test = false` keeps
+# it out of `clippy --all-targets`.
+test = false
 
 # A CLI binary: optimize for a small, fast-starting artifact.
 [profile.release]

@@ -245,7 +245,23 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 /// `agent_role`. The `run` span the engine's own driving is drawn under keeps
 /// its kind and its label: it is the engine's lane, not a member's. The word
 /// is held to `oneagentgraph`'s member-name grammar and to nothing narrower.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 10;
+///
+/// **Schema 11 carries where a change request's review stood.** `onevcs` opens
+/// every remote change request as a draft while its required checks run, watches
+/// them, and then lifts the draft, lifts it early because the checks skip drafts,
+/// or keeps it a draft for its own user's review. An event produced by a
+/// `change-check`, `change-drafted`, `draft-lifted`, `draft-lifted-early`,
+/// `draft-kept-for-review` or `checks-settled` carries **`review`**, that record's
+/// own fields — `name`, `required` and `state` on a check, where `state` is the
+/// check's `onevcs` state and a skipped check is `skipped` and never `passed`;
+/// `kind` and `base` on a draft; `awaited`, `grace_seconds` and `warned` on an
+/// early lift; `head`, `verdict` and `skipped` on a settlement — each present
+/// exactly where the record carried it, on the discipline `release` keeps. And a
+/// `publication` whose change was left open closes where the run's watch of it
+/// ended — the last such settlement or lift — rather than at the moment it was
+/// opened. Additive as `surface` was in 9: every other event, and every span of a
+/// run that recorded none of those, is byte-for-byte what 10 served.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 11;
 
 /// The largest run-list page any request can ask for.
 ///

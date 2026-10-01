@@ -35,6 +35,8 @@ use serde_json::{json, Value};
 
 #[path = "support/fixture_run.rs"]
 mod fixture_run;
+#[path = "support/timeline_schema.rs"]
+mod timeline_schema;
 
 /// The fixture file each route's response body is pinned in.
 const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
@@ -1243,13 +1245,57 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 10);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 11);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
     );
     assert_eq!(API_VERSION, 2);
     assert!(routes::RUNS.starts_with("/api/v2/"));
+}
+
+/// The paragraph of `docs/contract.md` that says what timeline schema `schema`
+/// changed.
+fn timeline_schema_paragraph(schema: u64) -> String {
+    let opening = format!("**Timeline schema {schema} ");
+    contract_text()
+        .lines()
+        .find(|line| line.starts_with(&opening))
+        .unwrap_or_else(|| panic!("docs/contract.md has no paragraph opening {opening}"))
+        .to_owned()
+}
+
+/// What the baseline journey strips as a newer schema's, and what the timeline
+/// reads as a review record, are what the contract's schema paragraphs name.
+#[test]
+fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract_names() {
+    for &(schema, field) in timeline_schema::TIMELINE_EVENT_ADDITIONS {
+        assert!(
+            schema <= u64::from(TIMELINE_SCHEMA_VERSION),
+            "an addition names timeline schema {schema}, newer than the one served"
+        );
+        assert!(
+            timeline_schema_paragraph(schema).contains(&format!("**`{field}`**")),
+            "docs/contract.md's timeline schema {schema} adds no `{field}`"
+        );
+    }
+    let review = timeline_schema_paragraph(11);
+    for record in onepipeline_ui::payload::vcs::REVIEW_RECORDS {
+        let kind = record.kind;
+        assert!(
+            review.contains(&format!("(`{kind}`")),
+            "docs/contract.md's timeline schema 11 names no `{kind}` record"
+        );
+        for field in record.fields() {
+            assert!(
+                review.contains(&format!("`{field}`")),
+                "docs/contract.md's timeline schema 11 says no `{kind}` carries `{field}`"
+            );
+        }
+    }
+    // The paragraph counts the records it gives `review` to.
+    assert_eq!(onepipeline_ui::payload::vcs::REVIEW_RECORDS.len(), 6);
+    assert!(review.contains("any of those six carries **`review`**"));
 }
 
 /// The queued span the timeline serves is the one `docs/contract.md` describes.
@@ -2322,7 +2368,7 @@ fn the_read_trait_covers_every_route_and_is_implementable() {
 /// runs an operator opens, so it stands where the payload values below it do:
 /// the wire is the only declaration reachable, and the fixture is the gate.
 ///
-/// The three payload *values* in that module have no equivalent to offer: each
+/// The payload *values* in that module have no equivalent to offer: each
 /// is built inline in a private module that re-exports nothing, and each says so
 /// where it is declared.
 #[test]
@@ -2356,6 +2402,17 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
             vcs::RELEASE_ACKNOWLEDGED,
         ),
         (onevcs::EventKind::ReleaseObserved, vcs::RELEASE_OBSERVED),
+        // The review phase of the draft lifecycle: a change request opened as a
+        // draft while its checks run, the checks settling, and the draft lifted,
+        // lifted early, or kept for its own user's review.
+        (onevcs::EventKind::ChangeDrafted, vcs::CHANGE_DRAFTED),
+        (onevcs::EventKind::DraftLifted, vcs::DRAFT_LIFTED),
+        (onevcs::EventKind::DraftLiftedEarly, vcs::DRAFT_LIFTED_EARLY),
+        (
+            onevcs::EventKind::DraftKeptForReview,
+            vcs::DRAFT_KEPT_FOR_REVIEW,
+        ),
+        (onevcs::EventKind::ChecksSettled, vcs::CHECKS_SETTLED),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }
@@ -2372,6 +2429,86 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
             wire(onevcs::EventKind::SessionClosed)
         ]
     );
+}
+
+/// The check states this crate classifies a `change-check` into, against
+/// `onevcs::CheckState`, and its reading of a record written before that library
+/// carried a `state`, against `onevcs::Check::state` over the same fields.
+///
+/// The match below names every variant and no wildcard, so a state added to that
+/// type stops this test compiling, and one renamed there fails the comparison. The
+/// legacy reading is the one place this crate classifies a check itself, and it is
+/// held to the library's own classifier rather than to a list kept beside it — the
+/// list it replaced counted `skipped` as green, which the library never has since.
+#[test]
+fn the_check_states_this_crate_reads_are_the_ones_that_library_declares() {
+    use onepipeline_ui::payload::vcs;
+    use onevcs::CheckState;
+
+    let copy_of = |state: CheckState| match state {
+        CheckState::Passed => vcs::CheckState::Passed,
+        CheckState::Failed => vcs::CheckState::Failed,
+        CheckState::Skipped => vcs::CheckState::Skipped,
+        CheckState::Pending => vcs::CheckState::Pending,
+        CheckState::NoVerdict => vcs::CheckState::NoVerdict,
+    };
+    let declared = [
+        CheckState::Passed,
+        CheckState::Failed,
+        CheckState::Skipped,
+        CheckState::Pending,
+        CheckState::NoVerdict,
+    ];
+    for state in declared {
+        assert_eq!(
+            serde_json::to_value(state).expect("a state serializes"),
+            json!(copy_of(state).as_str()),
+            "{state:?}"
+        );
+    }
+    assert_eq!(vcs::CheckState::ALL, declared.map(copy_of));
+
+    // A record that carries the state that library classified is read as it.
+    for state in declared {
+        let record =
+            json!({ "status": "queued", "conclusion": null, "state": copy_of(state).as_str() });
+        assert_eq!(
+            vcs::check_state(record.as_object().expect("an object")),
+            copy_of(state)
+        );
+    }
+
+    // And one written before it carried any is read the way it classifies the
+    // same status and conclusion, a skipped check among them.
+    for (status, conclusion) in [
+        ("queued", None),
+        ("in_progress", None),
+        ("completed", None),
+        ("completed", Some("success")),
+        ("completed", Some("SUCCESS")),
+        ("completed", Some("neutral")),
+        ("completed", Some("skipped")),
+        ("COMPLETED", Some("Skipped")),
+        ("completed", Some("cancelled")),
+        ("completed", Some("stale")),
+        ("completed", Some("failure")),
+        ("completed", Some("timed_out")),
+        ("completed", Some("action_required")),
+    ] {
+        let fields = json!({
+            "name": "a-check",
+            "status": status,
+            "conclusion": conclusion,
+            "required": true,
+        });
+        let check: onevcs::Check =
+            serde_json::from_value(fields.clone()).expect("a check that library reads");
+        assert_eq!(
+            vcs::check_state(fields.as_object().expect("an object")),
+            copy_of(check.state()),
+            "{status} / {conclusion:?}"
+        );
+    }
 }
 
 /// The `oneagentgraph` vocabulary this crate reads, against that library's own

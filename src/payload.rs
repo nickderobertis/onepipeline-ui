@@ -270,9 +270,116 @@ pub mod vcs {
     pub const PUSH: &str = "push";
     /// `{url, host, id, base, author}`.
     pub const CHANGE_OPENED: &str = "change-opened";
-    /// `{name, required, status, from_status, conclusion}`, with the settled
-    /// check's log as an artifact.
+    /// `{name, required, status, from_status, conclusion, state}`, with the
+    /// settled check's log as an artifact. `state` is a [`CheckState`],
+    /// and a record written before that library classified its checks carries
+    /// none — [`check_state`] is how this crate reads either.
     pub const CHANGE_CHECK: &str = "change-check";
+    /// `{url, id, base, kind, …}` — a change request is being held as a draft.
+    /// `kind` is a caller's reason, or `awaiting-checks` for the draft every
+    /// remote publication opens while its required checks run — served as
+    /// recorded, so this crate keeps no copy of either.
+    pub const CHANGE_DRAFTED: &str = "change-drafted";
+    /// `{url, id, base}` — a draft was made ready for review.
+    pub const DRAFT_LIFTED: &str = "draft-lifted";
+    /// `{url, id, base, awaited, grace_seconds, warned}` — a draft lifted before
+    /// any of its required checks had run on it, because the repository's checks
+    /// skip drafts. Recorded beside the [`DRAFT_LIFTED`] every lift writes.
+    pub const DRAFT_LIFTED_EARLY: &str = "draft-lifted-early";
+    /// `{url, id, base}` — green checks left a `change-open` change whose
+    /// approvals are required a draft, for its own user's review rather than the
+    /// team's. The record behind a node settled `done` as `change-review-draft`.
+    pub const DRAFT_KEPT_FOR_REVIEW: &str = "draft-kept-for-review";
+    /// `{url, id, head, verdict, skipped}` — every required check stopped
+    /// blocking: `verdict` is `passed`, or `passed-with-skipped` with `skipped`
+    /// naming the required checks that concluded skipped. Served as recorded,
+    /// so this crate keeps no copy of the verdict words.
+    pub const CHECKS_SETTLED: &str = "checks-settled";
+    /// What one review-bearing record's `review` reads from its payload, field by
+    /// field and by the kind of value each field holds.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ReviewRecord {
+        /// The record's kind.
+        pub kind: &'static str,
+        /// Words, served when the record carried one that is not blank.
+        pub words: &'static [&'static str],
+        /// Lists of check names, served only when every entry names one.
+        pub lists: &'static [&'static str],
+        /// Booleans, served as recorded.
+        pub flags: &'static [&'static str],
+        /// Lengths of time in seconds, served when finite and not negative.
+        pub durations: &'static [&'static str],
+        /// Whether `state` is served, as [`check_state`] classifies the record —
+        /// always present, because a record written before `onevcs` carried one
+        /// is still classified from its `status` and `conclusion`.
+        pub state: bool,
+    }
+
+    impl ReviewRecord {
+        /// Every field name this record's `review` can carry.
+        pub fn fields(&self) -> impl Iterator<Item = &'static str> {
+            let state: &'static [&'static str] = if self.state { &["state"] } else { &[] };
+            self.words
+                .iter()
+                .chain(self.lists)
+                .chain(self.flags)
+                .chain(self.durations)
+                .chain(state)
+                .copied()
+        }
+    }
+
+    const fn review(kind: &'static str) -> ReviewRecord {
+        ReviewRecord {
+            kind,
+            words: &[],
+            lists: &[],
+            flags: &[],
+            durations: &[],
+            state: false,
+        }
+    }
+
+    /// The kinds whose events carry `review`, each with every field that
+    /// record's `review` reads.
+    ///
+    /// The one table of them: the timeline reads a record through it, and the
+    /// tests that hold the schema-11 paragraph of `docs/contract.md` and the
+    /// base commit's timeline to those kinds read it too.
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the field names are `onevcs`'s payloads, which onevcs 0.36.0 declares only as `json!` literals at its private emission sites and in prose on `EventKind` — no type, schema or packaged contract document carries them, and onepipeline 0.57.0's packaged docs/contract.md does not name them either — so nothing reachable offline can be reconciled against. The kinds themselves are held to `onevcs::EventKind` by tests/contract.rs, every field of this table to docs/contract.md's schema-11 paragraph by the same file, and the fields to the producer's emitted shape by the review fixture the e2e journeys serve.
+    pub const REVIEW_RECORDS: [ReviewRecord; 6] = [
+        ReviewRecord {
+            words: &["name"],
+            flags: &["required"],
+            state: true,
+            ..review(CHANGE_CHECK)
+        },
+        ReviewRecord {
+            words: &["kind", "base"],
+            ..review(CHANGE_DRAFTED)
+        },
+        ReviewRecord {
+            words: &["base"],
+            ..review(DRAFT_LIFTED)
+        },
+        ReviewRecord {
+            words: &["base"],
+            lists: &["awaited"],
+            flags: &["warned"],
+            durations: &["grace_seconds"],
+            ..review(DRAFT_LIFTED_EARLY)
+        },
+        ReviewRecord {
+            words: &["base"],
+            ..review(DRAFT_KEPT_FOR_REVIEW)
+        },
+        ReviewRecord {
+            words: &["head", "verdict"],
+            lists: &["skipped"],
+            ..review(CHECKS_SETTLED)
+        },
+    ];
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     /// `{url, sha}`.
     pub const CHANGE_MERGED: &str = "change-merged";
     /// `{identity, sha, base}` — the merge the host had queued completed.
@@ -323,9 +430,101 @@ pub mod vcs {
     // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason as the command above: `onevcs` renders this word from a private `gate::Ruling` it re-exports nothing of, so the wire is the only declaration reachable and the goldens are the gate available.
     pub const GATE_PASSED: &str = "pass";
 
-    /// The conclusions `onevcs` reads as not blocking a merge, in its own words.
-    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the same reason again: this is a match arm in that library's private `host` module rather than a type, so nothing declares it to a consumer and the goldens are the gate available.
-    pub const GREEN_CONCLUSIONS: [&str; 3] = ["success", "skipped", "neutral"];
+    /// The five states `onevcs` classifies one check into, as its `CheckState`
+    /// declares them and in its order. `tests/contract.rs` holds this copy to
+    /// that type, so a state added or renamed there fails there.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum CheckState {
+        /// Concluded `success` or `neutral`.
+        Passed,
+        /// Concluded in a way that blocks a merge.
+        Failed,
+        /// Concluded `skipped`: it did not run, and is never read as passed.
+        Skipped,
+        /// Not settled yet.
+        Pending,
+        /// Concluded `cancelled` or `stale`: the host ended it with no verdict.
+        NoVerdict,
+    }
+
+    impl CheckState {
+        /// Every state, in the order that library declares them.
+        pub const ALL: [Self; 5] = [
+            Self::Passed,
+            Self::Failed,
+            Self::Skipped,
+            Self::Pending,
+            Self::NoVerdict,
+        ];
+
+        /// The word that library writes the state as.
+        #[must_use]
+        pub const fn as_str(self) -> &'static str {
+            match self {
+                Self::Passed => "passed",
+                Self::Failed => "failed",
+                Self::Skipped => "skipped",
+                Self::Pending => "pending",
+                Self::NoVerdict => "no-verdict",
+            }
+        }
+
+        /// The state a written word names, or `None` for one this build does not know.
+        #[must_use]
+        pub fn from_wire(word: &str) -> Option<Self> {
+            Self::ALL.into_iter().find(|state| state.as_str() == word)
+        }
+
+        /// Whether a record in this state reports nothing against the work: a
+        /// check that passed reported for it and one still running has said
+        /// nothing yet. A skipped check ran nothing, so it is held against the
+        /// work rather than counted as a pass.
+        #[must_use]
+        pub const fn reports_nothing_against(self) -> bool {
+            matches!(self, Self::Passed | Self::Pending)
+        }
+    }
+
+    /// The state one [`CHANGE_CHECK`] record's check was in.
+    ///
+    /// The record's own `state` wherever it carries one this build knows — that
+    /// library classified the check as it wrote it, and its reading is the one a
+    /// reader is owed. A record written before that library carried `state` is
+    /// read from its raw `status` and `conclusion` on the terms `onevcs::Check::
+    /// state` reads them, which `tests/contract.rs` holds this reading to: a check
+    /// is pending until its status is `completed`, `success` and `neutral` pass,
+    /// `skipped` is skipped, `cancelled` and `stale` carry no verdict, and every
+    /// other conclusion fails. So a skipped check is never read as passed, whoever
+    /// wrote it — the copy of green conclusions this replaced counted `skipped`
+    /// among them, which called a change verified that nothing had verified.
+    #[must_use]
+    pub fn check_state(payload: &serde_json::Map<String, serde_json::Value>) -> CheckState {
+        if let Some(declared) = payload
+            .get("state")
+            .and_then(serde_json::Value::as_str)
+            .and_then(CheckState::from_wire)
+        {
+            return declared;
+        }
+        let settled = payload
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|status| status.eq_ignore_ascii_case("completed"));
+        if !settled {
+            return CheckState::Pending;
+        }
+        match payload
+            .get("conclusion")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("success" | "neutral") => CheckState::Passed,
+            Some("skipped") => CheckState::Skipped,
+            Some("cancelled" | "stale") => CheckState::NoVerdict,
+            _ => CheckState::Failed,
+        }
+    }
 }
 
 /// The kinds `oneagentgraph` relays, and the keys the usage it relays is written
@@ -2295,19 +2494,12 @@ struct Evidence<'a> {
 ///
 /// Each producer has its own word for a verdict, and none of them is the
 /// pipeline's `status`: `onevcs` rules a gate `pass` or `fail`, says whether a
-/// push was `accepted`, and gives a host check a `conclusion` it reads three
-/// values of as not blocking a merge. Reading a check's `completed` as a
+/// push was `accepted`, and classifies a host check into a [`vcs::CheckState`]. Reading a check's `completed` as a
 /// pipeline status is how every passing check came to look like a failure.
 fn verdict_of(event: &Envelope) -> bool {
     if event.source == Source::Vcs {
         return match event.kind.0.as_str() {
-            vcs::CHANGE_CHECK => event
-                .payload
-                .get("conclusion")
-                .and_then(Value::as_str)
-                .is_none_or(|conclusion| {
-                    vcs::GREEN_CONCLUSIONS.contains(&conclusion.to_ascii_lowercase().as_str())
-                }),
+            vcs::CHANGE_CHECK => vcs::check_state(&event.payload).reports_nothing_against(),
             vcs::GATE_VERDICT => {
                 event.payload.get("verdict").and_then(Value::as_str) == Some(vcs::GATE_PASSED)
             }
@@ -4759,6 +4951,76 @@ fn surface_facts(event: &Envelope) -> Option<Value> {
     (!record.is_empty()).then_some(Value::Object(record))
 }
 
+/// What one record of a change request's review phase said, when it is one of
+/// the six this crate reads.
+///
+/// `onevcs` opens every remote change request as a draft while its required
+/// checks run, watches them, and then lifts the draft, lifts it early because the
+/// checks skip drafts, or keeps it a draft for its own user's review. Each step
+/// is a record whose kind alone says which step it was and whose fields say the
+/// rest, so they are served here as the record carried them rather than left as a
+/// bare kind and a link: a reader cannot tell a draft kept for review from one
+/// still awaiting its checks, or a settlement that passed from one that passed
+/// with a required check skipped, from the kind word alone.
+///
+/// A [`vcs::CHANGE_CHECK`] is served the check's [`vcs::check_state`], which is
+/// how a skipped check reads as skipped rather than as the passing conclusion a
+/// host may group it with. Every other field is present exactly where the record
+/// carried it, on the discipline [`release_facts`] keeps, and a record that
+/// carried none of them serves no `review` at all.
+fn review_facts(event: &Envelope) -> Option<Value> {
+    if event.source != Source::Vcs {
+        return None;
+    }
+    let read = vcs::REVIEW_RECORDS
+        .iter()
+        .find(|record| record.kind == event.kind.0)?;
+    let mut record = Map::new();
+    for key in read.words {
+        if let Some(value) = non_empty(event.payload.get(*key).and_then(Value::as_str)) {
+            record.insert((*key).to_owned(), json!(value));
+        }
+    }
+    // The checks a list names, kept even when empty: a settlement that skipped
+    // no required check says so with an empty list, and that is a reading. A list
+    // with any entry that is not a check's name is no reading at all, so it is
+    // served as absent rather than shortened into one that names fewer checks.
+    for key in read.lists {
+        let names: Option<Vec<&str>> = event
+            .payload
+            .get(*key)
+            .and_then(Value::as_array)
+            .and_then(|names| names.iter().map(|name| non_empty(name.as_str())).collect());
+        if let Some(names) = names {
+            record.insert((*key).to_owned(), json!(names));
+        }
+    }
+    // A length of time, so a negative or non-finite one is no reading of how
+    // long anything waited and is served as none at all.
+    for key in read.durations {
+        if let Some(seconds) = event
+            .payload
+            .get(*key)
+            .and_then(Value::as_f64)
+            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        {
+            record.insert((*key).to_owned(), json!(seconds));
+        }
+    }
+    for key in read.flags {
+        if let Some(flag) = event.payload.get(*key).and_then(Value::as_bool) {
+            record.insert((*key).to_owned(), json!(flag));
+        }
+    }
+    if read.state {
+        record.insert(
+            "state".into(),
+            json!(vcs::check_state(&event.payload).as_str()),
+        );
+    }
+    (!record.is_empty()).then_some(Value::Object(record))
+}
+
 /// The release facts one record carried, when it is one of the six that carry any.
 ///
 /// The six are two producers' halves of one sequencing: `onepipeline` records a
@@ -4971,6 +5233,12 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     // asked, of whom, and whether anything waited on the answer.
     if let Some(surface) = surface_facts(event) {
         item.insert("surface".into(), surface);
+    }
+    // Where a change request's review stood, on the records that say so: a
+    // draft opened for its checks, kept for review or lifted, and the verdict
+    // its checks settled on.
+    if let Some(review) = review_facts(event) {
+        item.insert("review".into(), review);
     }
     // Where the event's own heavy content lives, never inlined: the transcript it
     // is a turn of, the change it published, or the first evidence it stored. A
@@ -5383,6 +5651,18 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
     let merged = last_relayed(&[vcs::CHANGE_MERGED, vcs::MERGE_COMPLETED]);
     let conflicted = last_relayed(&[vcs::SYNC_CONFLICT]);
     let change = last_relayed(&[vcs::CHANGE_MERGED, vcs::CHANGE_OPENED]);
+    // A change left open is watched until its checks settle and its draft is
+    // lifted or kept for review, so the run's part in it ends at the last of
+    // those rather than at the moment it was opened.
+    let left_open = last_relayed(&[
+        vcs::CHANGE_MERGED,
+        vcs::CHANGE_OPENED,
+        vcs::CHECKS_SETTLED,
+        vcs::DRAFT_LIFTED,
+        vcs::DRAFT_LIFTED_EARLY,
+        vcs::DRAFT_KEPT_FOR_REVIEW,
+    ])
+    .filter(|_| change.is_some());
     // What closed the publication, in the order those records mean: a merge ends
     // it, a conflict ends it without one, a change left open ends the run's part
     // in it, and the worktree going away ends it whatever became of the branch —
@@ -5390,7 +5670,7 @@ fn publication_span(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
     // closing it is an in-flight publication, not an error.
     let closed = merged
         .or(conflicted)
-        .or(change)
+        .or(left_open)
         .or_else(|| last_relayed(&[vcs::SESSION_CLOSED]));
     let branch = relayed(&[vcs::SESSION_OPENED])
         .unwrap_or(opened)

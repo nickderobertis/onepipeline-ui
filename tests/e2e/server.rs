@@ -669,7 +669,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(10));
+    assert_eq!(body["timeline_schema_version"], json!(11));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -5811,6 +5811,294 @@ fn a_publication_that_never_landed_is_served_as_what_it_kept() {
     assert!(
         span.get("reference").is_none(),
         "no change was ever opened: {span}"
+    );
+}
+
+/// The events of one kind a node's timeline lists, across its spans, oldest first.
+fn review_events<'a>(timeline: &'a Value, kind: &str) -> Vec<&'a Value> {
+    let mut found = Vec::new();
+    let mut spans: Vec<&Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .collect();
+    while let Some(span) = spans.pop() {
+        for event in span["events"].as_array().into_iter().flatten() {
+            if event["kind"] == json!(kind) {
+                found.push(event);
+            }
+        }
+    }
+    found.sort_by_key(|event| event["at"].as_str().unwrap_or_default().to_owned());
+    found
+}
+
+#[test]
+fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+    });
+    let run = format!("/api/v2/runs/{}", fixture_run::REVIEW_DRAFT_RUN_ID);
+    let body = http::get(serving.address, &run).json();
+
+    // Settled `done`, with the outcome that tells it from a draft somebody asked
+    // for and from a red one, and its change request in the same `pr` field a
+    // `change-open` settlement fills — here, beside the node that settled so.
+    let results = &body["graph"]["node_results"];
+    let kept = &results[fixture_run::KEPT_NODE_ID];
+    assert_eq!(kept["status"], json!("done"), "{kept}");
+    assert_eq!(kept["completed"], json!(true), "{kept}");
+    assert_eq!(kept["outcome"], json!("change-review-draft"), "{kept}");
+    assert_eq!(kept["pr"], json!(fixture_run::KEPT_CHANGE_URL), "{kept}");
+    let lifted = &results[fixture_run::LIFTED_NODE_ID];
+    assert_eq!(lifted["outcome"], json!("change-open"), "{lifted}");
+    assert_eq!(
+        lifted["pr"],
+        json!(fixture_run::LIFTED_CHANGE_URL),
+        "{lifted}"
+    );
+    let publication = &body["node_details"][fixture_run::KEPT_NODE_ID]["publication"];
+    assert_eq!(publication["pr_url"], json!(fixture_run::KEPT_CHANGE_URL));
+    assert_eq!(publication["merged"], json!(false));
+
+    // A skipped check is served skipped and its log is not a passing record,
+    // whether `onevcs` classified it or wrote only its conclusion.
+    let verification = &body["node_details"][fixture_run::KEPT_NODE_ID]["verification"];
+    let checks = verification["checks"].as_array().expect("the checks");
+    let state_of = |name: &str| {
+        checks
+            .iter()
+            .find(|check| check["name"] == json!(name))
+            .map(|check| check["state"].clone())
+            .unwrap_or_else(|| panic!("no {name} check: {verification}"))
+    };
+    assert_eq!(state_of("integration"), json!("skipped"));
+    assert_eq!(state_of("docs"), json!("skipped"));
+    assert_eq!(state_of("gate"), json!("success"));
+    let records = verification["records"].as_array().expect("records");
+    for log in [
+        fixture_run::SKIPPED_CHECK_LOG,
+        fixture_run::LEGACY_SKIPPED_CHECK_LOG,
+    ] {
+        let record = records
+            .iter()
+            .find(|record| record["artifact_id"] == json!(log))
+            .unwrap_or_else(|| panic!("the record {log} stored: {verification}"));
+        assert_eq!(
+            record["ok"],
+            json!(false),
+            "a skipped check verified nothing: {record}"
+        );
+    }
+
+    // Each step of the review is served as what its record said, rather than as
+    // a bare kind: the draft awaiting its checks, each check's own state, the
+    // verdict they settled on, and the draft kept for review.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "{run}/timeline?scope=node&node={}",
+            fixture_run::KEPT_NODE_ID
+        ),
+    )
+    .json();
+    assert_eq!(timeline["timeline_schema_version"], json!(11));
+    let drafted = review_events(&timeline, "change-drafted");
+    assert_eq!(drafted.len(), 1, "{timeline}");
+    assert_eq!(
+        drafted[0]["review"],
+        json!({ "kind": "awaiting-checks", "base": "main" })
+    );
+    assert_eq!(
+        drafted[0]["reference"],
+        json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
+    );
+    // Each check with whether the change's merge waits on it, as recorded.
+    let states: Vec<(Value, Value, Value)> = review_events(&timeline, "change-check")
+        .into_iter()
+        .map(|event| {
+            (
+                event["review"]["name"].clone(),
+                event["review"]["required"].clone(),
+                event["review"]["state"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            (json!("gate"), json!(true), json!("pending")),
+            (json!("integration"), json!(true), json!("skipped")),
+            (json!("docs"), json!(false), json!("skipped")),
+            (json!("gate"), json!(true), json!("passed")),
+        ],
+        "{timeline}"
+    );
+    let settled = review_events(&timeline, "checks-settled");
+    assert_eq!(settled.len(), 1, "{timeline}");
+    assert_eq!(
+        settled[0]["review"],
+        json!({
+            "head": "0123456789abcdef0123456789abcdef01234567",
+            "verdict": "passed-with-skipped",
+            "skipped": ["integration"],
+        })
+    );
+    let kept_for_review = review_events(&timeline, "draft-kept-for-review");
+    assert_eq!(kept_for_review.len(), 1, "{timeline}");
+    assert_eq!(kept_for_review[0]["review"], json!({ "base": "main" }));
+    assert_eq!(
+        kept_for_review[0]["reference"],
+        json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
+    );
+
+    // The publication ends where the run stopped watching it — the draft kept
+    // for review — not at the moment the change was opened, and it is open.
+    let span = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["kind"] == "publication")
+        .expect("the branch the node opened");
+    assert_eq!(span["status"], json!("open"), "{span}");
+    assert_eq!(
+        span["ended_at"],
+        json!("2026-08-07T12:00:11.000Z"),
+        "{span}"
+    );
+    assert_eq!(
+        span["reference"],
+        json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
+    );
+}
+
+/// Every file under `dir` whose text names `needle`, at any depth.
+fn files_naming(dir: &Path, needle: &str) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).expect("a directory").flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files_naming(&path, needle));
+        } else if fs::read_to_string(&path).is_ok_and(|text| text.contains(needle)) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+#[test]
+fn an_early_lift_recording_a_negative_grace_is_served_no_grace() {
+    let serving = Serving::start(|root| {
+        let run = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+        // The one record carrying a grace, rewritten as a store holding a
+        // corrupted or hand-edited one would hold it.
+        let recorded = files_naming(&run, "\"grace_seconds\"");
+        assert_eq!(recorded.len(), 1, "the early lift's record: {recorded:?}");
+        let text = fs::read_to_string(&recorded[0]).expect("the record");
+        let rewritten = text
+            .replace("\"grace_seconds\": 2.5", "\"grace_seconds\": -2.5")
+            .replace("\"grace_seconds\":2.5", "\"grace_seconds\":-2.5");
+        assert_ne!(rewritten, text, "the grace was rewritten");
+        fs::write(&recorded[0], rewritten).expect("the rewritten record");
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::REVIEW_DRAFT_RUN_ID,
+            fixture_run::LIFTED_NODE_ID
+        ),
+    )
+    .json();
+    let early = review_events(&timeline, "draft-lifted-early");
+    assert_eq!(early.len(), 1, "{timeline}");
+    // The rest of what the record said is still served; a length of time below
+    // zero is not, because it is no reading of how long the lift waited.
+    assert_eq!(
+        early[0]["review"],
+        json!({ "base": "main", "awaited": ["ci"], "warned": true })
+    );
+}
+
+#[test]
+fn a_review_list_naming_something_other_than_a_check_is_served_as_absent() {
+    let serving = Serving::start(|root| {
+        let run = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+        // The early lift's list of what it waited for, rewritten to carry a blank
+        // name and a number beside the one check it named.
+        let recorded = files_naming(&run, "\"awaited\"");
+        assert_eq!(recorded.len(), 1, "the early lift's record: {recorded:?}");
+        let text = fs::read_to_string(&recorded[0]).expect("the record");
+        let rewritten = text
+            .replace("\"awaited\": [\"ci\"]", "\"awaited\": [\"ci\", \"\", 7]")
+            .replace("\"awaited\":[\"ci\"]", "\"awaited\":[\"ci\",\"\",7]");
+        assert_ne!(rewritten, text, "the list was rewritten");
+        fs::write(&recorded[0], rewritten).expect("the rewritten record");
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::REVIEW_DRAFT_RUN_ID,
+            fixture_run::LIFTED_NODE_ID
+        ),
+    )
+    .json();
+    let early = review_events(&timeline, "draft-lifted-early");
+    assert_eq!(early.len(), 1, "{timeline}");
+    // Not shortened to `["ci"]`, and not emptied into a lift that waited for
+    // nothing: a list this build cannot read is no reading at all.
+    assert_eq!(
+        early[0]["review"],
+        json!({ "base": "main", "grace_seconds": 2.5, "warned": true })
+    );
+}
+
+#[test]
+fn a_draft_lifted_before_its_checks_ran_is_served_with_what_it_waited_for() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::REVIEW_DRAFT_RUN_ID,
+            fixture_run::LIFTED_NODE_ID
+        ),
+    )
+    .json();
+    let early = review_events(&timeline, "draft-lifted-early");
+    assert_eq!(early.len(), 1, "{timeline}");
+    assert_eq!(
+        early[0]["review"],
+        json!({ "base": "main", "awaited": ["ci"], "grace_seconds": 2.5, "warned": true })
+    );
+    let lift = review_events(&timeline, "draft-lifted");
+    assert_eq!(lift.len(), 1, "{timeline}");
+    assert_eq!(lift[0]["review"], json!({ "base": "main" }));
+    let settled = review_events(&timeline, "checks-settled");
+    assert_eq!(
+        settled[0]["review"],
+        json!({
+            "head": "89abcdef0123456789abcdef0123456789abcdef",
+            "verdict": "passed",
+            "skipped": [],
+        })
+    );
+    // Watched as a ready change after the lift, so the run's part in it ends
+    // where its checks settled.
+    let span = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["kind"] == "publication")
+        .expect("the branch the node opened");
+    assert_eq!(span["status"], json!("open"), "{span}");
+    assert_eq!(
+        span["ended_at"],
+        json!("2026-08-07T12:00:11.500Z"),
+        "{span}"
     );
 }
 

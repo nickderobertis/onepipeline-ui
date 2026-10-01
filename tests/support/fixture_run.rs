@@ -5107,6 +5107,324 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The run id of the review-draft fixture below.
+pub const REVIEW_DRAFT_RUN_ID: &str = "run-20260807-5d4c3b";
+/// That run's node whose green change was kept a draft for its user's review.
+pub const KEPT_NODE_ID: &str = "kept";
+/// That run's node whose draft was lifted before its checks ran on it.
+pub const LIFTED_NODE_ID: &str = "lifted";
+/// The change request the kept node's work opened.
+pub const KEPT_CHANGE_URL: &str = "https://example.invalid/changes/7";
+/// The change request the lifted node's work opened.
+pub const LIFTED_CHANGE_URL: &str = "https://example.invalid/changes/8";
+/// The log the kept node's skipped required check stored.
+pub const SKIPPED_CHECK_LOG: &str = "artifact-skipped-check";
+/// The log the kept node's legacy skipped check stored — one written by an
+/// `onevcs` that recorded no `state`.
+pub const LEGACY_SKIPPED_CHECK_LOG: &str = "artifact-legacy-skipped-check";
+
+/// The stream the review-draft run's node graphs relayed their members on.
+const REVIEW_DRAFT_MEMBER_STREAM: &str = "node-scope-1786925518252-4252";
+
+/// A run published under `onevcs`'s draft lifecycle, as `onepipeline` 0.57 and
+/// `onevcs` 0.36 write it.
+///
+/// `kept` publishes to a `change-open` identity whose approvals are required: its
+/// change opens as a draft awaiting its checks, its required checks settle
+/// `passed-with-skipped` — one skipped check carries the `state` that library now
+/// classifies, and one advisory check is written as a release before it did, by
+/// its `conclusion` alone — and the draft is kept for its user's review, so the
+/// node settles `done` as `change-review-draft`. `lifted` publishes to a
+/// repository whose checks skip drafts, so its draft is lifted early, beside the
+/// `draft-lifted` every lift writes, and settles `change-open`.
+pub fn write_review_draft(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "graph": "graphs/dag-scope.yaml",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4252,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "name": "review-draft",
+        "concurrency": 2,
+        "tasks": [
+            { "id": KEPT_NODE_ID, "persona": "worker", "task": "## What\nPublish it for review." },
+            { "id": LIFTED_NODE_ID, "persona": "worker", "task": "## What\nPublish it." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let kept = json!({ "run_id": run, "node": KEPT_NODE_ID });
+    let lifted = json!({ "run_id": run, "node": LIFTED_NODE_ID });
+    let mut journal = Journal::new("a-recording-host-4252");
+    let mut member = Journal::new(REVIEW_DRAFT_MEMBER_STREAM);
+    member.emit(
+        "2026-08-07T12:00:02.500Z",
+        "agentgraph",
+        "member-started",
+        json!({ "run_id": run, "node": KEPT_NODE_ID, "member": "worker", "persona": "worker" }),
+        json!({}),
+    );
+    journal.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        json!({ "plan": plan }),
+    );
+    // Both nodes ready, dispatched and given a worktree at the same moments,
+    // written stage by stage so the stream's own sequence follows its clock.
+    let nodes = [KEPT_NODE_ID, LIFTED_NODE_ID];
+    for node in nodes {
+        journal.emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "node-ready",
+            json!({ "run_id": run, "node": node }),
+            json!({}),
+        );
+    }
+    for node in nodes {
+        journal.emit(
+            "2026-08-07T12:00:02.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": node, "persona": "worker" }),
+            json!({ "persona": "worker" }),
+        );
+    }
+    for node in nodes {
+        journal.emit(
+            "2026-08-07T12:00:03.000Z",
+            "vcs",
+            "session-opened",
+            json!({ "run_id": run, "node": node }),
+            json!({
+                "token": format!("a-{node}-vcs-session-token"),
+                "identity": "github.com/nickderobertis/onepipeline-ui",
+                "branch": format!("feature/{node}"),
+                "base": "main",
+                "worktree": "/a/recorded/worktree",
+            }),
+        );
+    }
+    let opened = |url: &str, id: &str| {
+        json!({
+            "url": url,
+            "host": "github",
+            "id": id,
+            "base": "main",
+            "author": "a-recording-host",
+        })
+    };
+    let drafted = |url: &str, id: &str| json!({ "url": url, "id": id, "base": "main", "kind": "awaiting-checks" });
+    // The kept node: opened as a draft while its checks run, watched until they
+    // stop blocking, and kept a draft because green is not reviewed yet.
+    journal
+        .emit(
+            "2026-08-07T12:00:05.000Z",
+            "vcs",
+            "push",
+            kept.clone(),
+            json!({ "branch": "feature/kept", "remote": "origin", "accepted": true }),
+        )
+        .emit(
+            "2026-08-07T12:00:06.000Z",
+            "vcs",
+            "change-opened",
+            kept.clone(),
+            opened(KEPT_CHANGE_URL, "7"),
+        )
+        .emit(
+            "2026-08-07T12:00:06.500Z",
+            "vcs",
+            "change-drafted",
+            kept.clone(),
+            drafted(KEPT_CHANGE_URL, "7"),
+        )
+        .emit(
+            "2026-08-07T12:00:07.000Z",
+            "vcs",
+            "change-check",
+            kept.clone(),
+            json!({
+                "name": "gate",
+                "required": true,
+                "status": "queued",
+                "from_status": Value::Null,
+                "conclusion": Value::Null,
+                "state": "pending",
+            }),
+        )
+        // A required job the workflow gates on the change not being a draft: it
+        // concluded `skipped` without running, which `onevcs` classifies as such.
+        .kept(
+            "2026-08-07T12:00:08.000Z",
+            "vcs",
+            "change-check",
+            kept.clone(),
+            json!({
+                "name": "integration",
+                "required": true,
+                "status": "completed",
+                "from_status": "queued",
+                "conclusion": "skipped",
+                "state": "skipped",
+            }),
+            json!([{ "id": SKIPPED_CHECK_LOG, "kind": "log", "bytes": 0 }]),
+        )
+        // The same conclusion as a release before `state` wrote it.
+        .kept(
+            "2026-08-07T12:00:08.500Z",
+            "vcs",
+            "change-check",
+            kept.clone(),
+            json!({
+                "name": "docs",
+                "required": false,
+                "status": "completed",
+                "from_status": "queued",
+                "conclusion": "skipped",
+            }),
+            json!([{ "id": LEGACY_SKIPPED_CHECK_LOG, "kind": "log", "bytes": 0 }]),
+        )
+        .emit(
+            "2026-08-07T12:00:09.000Z",
+            "vcs",
+            "change-check",
+            kept.clone(),
+            json!({
+                "name": "gate",
+                "required": true,
+                "status": "completed",
+                "from_status": "queued",
+                "conclusion": "success",
+                "state": "passed",
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "vcs",
+            "checks-settled",
+            kept.clone(),
+            json!({
+                "url": KEPT_CHANGE_URL,
+                "id": "7",
+                "head": "0123456789abcdef0123456789abcdef01234567",
+                "verdict": "passed-with-skipped",
+                "skipped": ["integration"],
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:11.000Z",
+            "vcs",
+            "draft-kept-for-review",
+            kept.clone(),
+            json!({ "url": KEPT_CHANGE_URL, "id": "7", "base": "main" }),
+        )
+        .emit(
+            "2026-08-07T12:00:12.000Z",
+            "vcs",
+            "session-closed",
+            kept.clone(),
+            json!({}),
+        )
+        .emit(
+            "2026-08-07T12:00:13.000Z",
+            "pipeline",
+            "node-settled",
+            kept,
+            json!({
+                "status": "done",
+                "outcome": "change-review-draft",
+                "branch": "feature/kept",
+                "change_url": KEPT_CHANGE_URL,
+                "detail": "its checks are green and its change request is a draft for its user's review",
+            }),
+        );
+    // The lifted node: the repository's checks skip drafts, so the grace window
+    // elapsed with nothing run and the draft was lifted early, with the warning.
+    // Its publication relayed on a stream of its own, interleaved with the kept
+    // node's by the merge rather than by the order this writes them in.
+    let mut lifting = Journal::new("a-recording-host-4253");
+    lifting
+        .emit(
+            "2026-08-07T12:00:05.000Z",
+            "vcs",
+            "change-opened",
+            lifted.clone(),
+            opened(LIFTED_CHANGE_URL, "8"),
+        )
+        .emit(
+            "2026-08-07T12:00:05.500Z",
+            "vcs",
+            "change-drafted",
+            lifted.clone(),
+            drafted(LIFTED_CHANGE_URL, "8"),
+        )
+        .emit(
+            "2026-08-07T12:00:08.000Z",
+            "vcs",
+            "draft-lifted",
+            lifted.clone(),
+            json!({ "url": LIFTED_CHANGE_URL, "id": "8", "base": "main" }),
+        )
+        .emit(
+            "2026-08-07T12:00:08.000Z",
+            "vcs",
+            "draft-lifted-early",
+            lifted.clone(),
+            json!({
+                "url": LIFTED_CHANGE_URL,
+                "id": "8",
+                "base": "main",
+                "awaited": ["ci"],
+                "grace_seconds": 2.5,
+                "warned": true,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:11.500Z",
+            "vcs",
+            "checks-settled",
+            lifted.clone(),
+            json!({
+                "url": LIFTED_CHANGE_URL,
+                "id": "8",
+                "head": "89abcdef0123456789abcdef0123456789abcdef",
+                "verdict": "passed",
+                "skipped": [],
+            }),
+        );
+    journal.emit(
+        "2026-08-07T12:00:14.000Z",
+        "pipeline",
+        "node-settled",
+        lifted,
+        json!({
+            "status": "done",
+            "outcome": "change-open",
+            "branch": "feature/lifted",
+            "change_url": LIFTED_CHANGE_URL,
+        }),
+    );
+    fs::write(dir.join("events.jsonl"), merged([journal, lifting, member])).expect("the journal");
+    declare_graph(root, REVIEW_DRAFT_MEMBER_STREAM, &["worker"]);
+    dir
+}
+
 /// The stream the settled run's worker member ran on, and the one its session id
 /// is spelled from.
 ///

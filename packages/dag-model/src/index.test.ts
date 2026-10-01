@@ -1131,6 +1131,34 @@ describe("run timeline", () => {
     ).toBeUndefined();
   });
 
+  test("reads a review record's lists only when every entry names a check", () => {
+    const settled = {
+      id: "e15",
+      kind: "checks-settled",
+      at: "2026-08-07T12:00:10Z",
+      review: { verdict: "passed-with-skipped", skipped: ["integration"] },
+    };
+    expect(timelineEventSchema.parse(settled).review?.skipped).toEqual([
+      "integration",
+    ]);
+    // An empty list is a reading: the settlement skipped nothing.
+    expect(
+      timelineEventSchema.parse({
+        ...settled,
+        review: { verdict: "passed", skipped: [] },
+      }).review?.skipped,
+    ).toEqual([]);
+    // A blank entry names no check, so the server never serves one.
+    for (const review of [
+      { verdict: "passed-with-skipped", skipped: ["integration", ""] },
+      { base: "main", awaited: [""] },
+    ]) {
+      expect(
+        timelineEventSchema.safeParse({ ...settled, review }).success,
+      ).toBe(false);
+    }
+  });
+
   test("rejects an unsupported span kind, reference kind, or negative rollup", () => {
     expect(() =>
       timelineSpanSchema.parse({ ...span, kind: "guess" }),
