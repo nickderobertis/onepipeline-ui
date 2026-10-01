@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.19.0...v0.20.0) - 2026-10-01
+
+### Added
+
+- *(deps)* [**breaking**] announce that the public surface follows onepipeline 0.55 ([#163](https://github.com/nickderobertis/onepipeline-ui/pull/163))
+- *(deps)* adopt the onepipeline engine with layered oneharness config and message events ([#160](https://github.com/nickderobertis/onepipeline-ui/pull/160))
+
 ## [0.19.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.18.1...v0.19.0) - 2026-09-30
 
 ### Fixed
