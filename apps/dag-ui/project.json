@@ -16,6 +16,7 @@
     },
     "build": {
       "command": "cd apps/dag-ui && npx vite build --config vite.config.ts",
+      "inputs": ["default", "^default"],
       "outputs": ["{projectRoot}/dist"]
     },
     "build-api-server": {
