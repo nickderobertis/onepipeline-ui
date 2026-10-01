@@ -300,6 +300,10 @@ impl Serving {
             // that shuts a fixture run down must never push, or list, a branch
             // of the host running it.
             .env(ONEVCS_HOME_ENV, workspace.path().join(ONEVCS_HOME_DIR))
+            // Nor the operator's cache, where a server keeps the name it retains
+            // each adopted driver from — a link to, or a copy of, the image it
+            // runs: this workspace's own, removed with it.
+            .env("XDG_CACHE_HOME", workspace.path().join("cache"))
             // Nor the operator's harnesses: a run's status carries the engine's
             // provider block, which probes every harness it finds on `PATH` —
             // the operator's own subscriptions, for up to a minute each, which
