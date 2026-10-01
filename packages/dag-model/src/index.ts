@@ -272,6 +272,14 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * machine and a node held on a **person** draw as the same row with the same word
  * on it — and the reader with something to go and do cannot tell that they have it.
  *
+ * `11` is where an event began carrying where a change request's review stood.
+ * A server on `10` serves `change-drafted`, `draft-lifted`, `draft-lifted-early`,
+ * `draft-kept-for-review` and `checks-settled` as a kind, a stamp and a link, so a
+ * draft kept for its user's review reads as one still awaiting its checks, and a
+ * settlement that passed with a required check skipped reads as one that passed. A
+ * check's `review.state` is its `onevcs` state, in which `skipped` is never
+ * `passed`. A publication whose change was left open closes where its watch ended.
+ *
  * `9` is where an event began carrying what a surface said. A server on `8`
  * serves a `planner-surface-queued` and a `planner-surfaced` as a kind and a stamp
  * alone, so a reader sees that something was raised to somebody and not what was
@@ -309,7 +317,7 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 10;
+export const TIMELINE_SCHEMA_VERSION = 11;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1314,6 +1322,38 @@ export const timelineSurfaceSchema = openObject({
   }
 });
 /**
+ * Where a change request's review stood, on the six `onevcs` records that say so:
+ * a check's `name`, `required` and `state`; a draft's `kind` (`awaiting-checks` for
+ * the draft a publication opens while its checks run) and `base`; an early lift's
+ * `awaited`, `grace_seconds` and `warned`; and a settlement's `head`, `verdict`
+ * (`passed` or `passed-with-skipped`) and the `skipped` checks. Every word is open
+ * and served as recorded, because the vocabulary is `onevcs`'s and released on its
+ * own schedule; each field is present exactly where the record carried it.
+ */
+export const timelineReviewSchema = openObject({
+  name: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+  state: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  base: z.string().min(1).optional(),
+  awaited: z.array(z.string()).optional(),
+  grace_seconds: z.number().nonnegative().optional(),
+  warned: z.boolean().optional(),
+  head: z.string().min(1).optional(),
+  verdict: z.string().min(1).optional(),
+  skipped: z.array(z.string()).optional(),
+}).superRefine((review, context) => {
+  // The server serves no `review` for a record that carried none of these, so an
+  // empty one is a payload this client cannot render rather than one it renders
+  // as nothing.
+  if (Object.values(review).every((fact) => fact === undefined)) {
+    context.addIssue({
+      code: "custom",
+      message: "a review record carries at least one recorded fact",
+    });
+  }
+});
+/**
  * What one release record said about itself, under one shape for all six kinds.
  *
  * The six are two producers' halves of one sequencing — `onepipeline` records a node
@@ -1400,6 +1440,12 @@ export const timelineEventSchema = openObject({
    */
   // llmlint: ignore[boundary_inputs_validated] the pairing of `surface` with a `kind` is the same constraint this parser may not enforce as the `release` pairing above, and for the same reason: the surface kinds are `onepipeline`'s, released on its own schedule, so a conforming server relaying one of them under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `surface` itself carries is validated above, down to refusing one that carries nothing.
   surface: timelineSurfaceSchema.optional(),
+  /**
+   * Where a change request's review stood, on the six `onevcs` kinds that say so
+   * and on no other. Not *keyed* on those names, for the reason `surface` is not.
+   */
+  // llmlint: ignore[boundary_inputs_validated] the pairing of `review` with a `kind` is the same constraint this parser may not enforce as the `surface` pairing above, and for the same reason: the review kinds are `onevcs`'s, released on its own schedule, so a conforming server relaying one under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `review` itself carries is validated above, down to refusing one that carries nothing.
+  review: timelineReviewSchema.optional(),
   reference: timelineReferenceSchema.optional(),
 });
 /**

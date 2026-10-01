@@ -669,7 +669,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(10));
+    assert_eq!(body["timeline_schema_version"], json!(11));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -5811,6 +5811,210 @@ fn a_publication_that_never_landed_is_served_as_what_it_kept() {
     assert!(
         span.get("reference").is_none(),
         "no change was ever opened: {span}"
+    );
+}
+
+/// The events one node's timeline lists, by kind, in the order it lists them.
+fn review_events<'a>(timeline: &'a Value, kind: &str) -> Vec<&'a Value> {
+    let mut found = Vec::new();
+    let mut spans: Vec<&Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .collect();
+    while let Some(span) = spans.pop() {
+        for event in span["events"].as_array().into_iter().flatten() {
+            if event["kind"] == json!(kind) {
+                found.push(event);
+            }
+        }
+    }
+    found.sort_by_key(|event| event["at"].as_str().unwrap_or_default().to_owned());
+    found
+}
+
+#[test]
+fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+    });
+    let run = format!("/api/v2/runs/{}", fixture_run::REVIEW_DRAFT_RUN_ID);
+    let body = http::get(serving.address, &run).json();
+
+    // Settled `done`, with the outcome that tells it from a draft somebody asked
+    // for and from a red one, and its change request in the same `pr` field a
+    // `change-open` settlement fills — here, beside the node that settled so.
+    let results = &body["graph"]["node_results"];
+    let kept = &results[fixture_run::KEPT_NODE_ID];
+    assert_eq!(kept["status"], json!("done"), "{kept}");
+    assert_eq!(kept["completed"], json!(true), "{kept}");
+    assert_eq!(kept["outcome"], json!("change-review-draft"), "{kept}");
+    assert_eq!(kept["pr"], json!(fixture_run::KEPT_CHANGE_URL), "{kept}");
+    let lifted = &results[fixture_run::LIFTED_NODE_ID];
+    assert_eq!(lifted["outcome"], json!("change-open"), "{lifted}");
+    assert_eq!(
+        lifted["pr"],
+        json!(fixture_run::LIFTED_CHANGE_URL),
+        "{lifted}"
+    );
+    let publication = &body["node_details"][fixture_run::KEPT_NODE_ID]["publication"];
+    assert_eq!(publication["pr_url"], json!(fixture_run::KEPT_CHANGE_URL));
+    assert_eq!(publication["merged"], json!(false));
+
+    // A skipped check is served skipped and its log is not a passing record,
+    // whether `onevcs` classified it or wrote only its conclusion.
+    let verification = &body["node_details"][fixture_run::KEPT_NODE_ID]["verification"];
+    let checks = verification["checks"].as_array().expect("the checks");
+    let state_of = |name: &str| {
+        checks
+            .iter()
+            .find(|check| check["name"] == json!(name))
+            .map(|check| check["state"].clone())
+            .unwrap_or_else(|| panic!("no {name} check: {verification}"))
+    };
+    assert_eq!(state_of("integration"), json!("skipped"));
+    assert_eq!(state_of("docs"), json!("skipped"));
+    assert_eq!(state_of("gate"), json!("success"));
+    let records = verification["records"].as_array().expect("records");
+    for log in [
+        fixture_run::SKIPPED_CHECK_LOG,
+        fixture_run::LEGACY_SKIPPED_CHECK_LOG,
+    ] {
+        let record = records
+            .iter()
+            .find(|record| record["artifact_id"] == json!(log))
+            .unwrap_or_else(|| panic!("the record {log} stored: {verification}"));
+        assert_eq!(
+            record["ok"],
+            json!(false),
+            "a skipped check verified nothing: {record}"
+        );
+    }
+
+    // Each step of the review is served as what its record said, rather than as
+    // a bare kind: the draft awaiting its checks, each check's own state, the
+    // verdict they settled on, and the draft kept for review.
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "{run}/timeline?scope=node&node={}",
+            fixture_run::KEPT_NODE_ID
+        ),
+    )
+    .json();
+    assert_eq!(timeline["timeline_schema_version"], json!(11));
+    let drafted = review_events(&timeline, "change-drafted");
+    assert_eq!(drafted.len(), 1, "{timeline}");
+    assert_eq!(
+        drafted[0]["review"],
+        json!({ "kind": "awaiting-checks", "base": "main" })
+    );
+    assert_eq!(
+        drafted[0]["reference"],
+        json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
+    );
+    let states: Vec<(Value, Value)> = review_events(&timeline, "change-check")
+        .into_iter()
+        .map(|event| {
+            (
+                event["review"]["name"].clone(),
+                event["review"]["state"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            (json!("gate"), json!("pending")),
+            (json!("integration"), json!("skipped")),
+            (json!("docs"), json!("skipped")),
+            (json!("gate"), json!("passed")),
+        ],
+        "{timeline}"
+    );
+    let settled = review_events(&timeline, "checks-settled");
+    assert_eq!(settled.len(), 1, "{timeline}");
+    assert_eq!(
+        settled[0]["review"],
+        json!({
+            "head": "0123456789abcdef0123456789abcdef01234567",
+            "verdict": "passed-with-skipped",
+            "skipped": ["integration"],
+        })
+    );
+    let kept_for_review = review_events(&timeline, "draft-kept-for-review");
+    assert_eq!(kept_for_review.len(), 1, "{timeline}");
+    assert_eq!(kept_for_review[0]["review"], json!({ "base": "main" }));
+    assert_eq!(
+        kept_for_review[0]["reference"],
+        json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
+    );
+
+    // The publication ends where the run stopped watching it — the draft kept
+    // for review — not at the moment the change was opened, and it is open.
+    let span = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["kind"] == "publication")
+        .expect("the branch the node opened");
+    assert_eq!(span["status"], json!("open"), "{span}");
+    assert_eq!(
+        span["ended_at"],
+        json!("2026-08-07T12:00:11.000Z"),
+        "{span}"
+    );
+    assert_eq!(
+        span["reference"],
+        json!({ "kind": "pr", "value": fixture_run::KEPT_CHANGE_URL })
+    );
+}
+
+#[test]
+fn a_draft_lifted_before_its_checks_ran_is_served_with_what_it_waited_for() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::REVIEW_DRAFT_RUN_ID,
+            fixture_run::LIFTED_NODE_ID
+        ),
+    )
+    .json();
+    let early = review_events(&timeline, "draft-lifted-early");
+    assert_eq!(early.len(), 1, "{timeline}");
+    assert_eq!(
+        early[0]["review"],
+        json!({ "base": "main", "awaited": ["ci"], "grace_seconds": 2.5, "warned": true })
+    );
+    let lift = review_events(&timeline, "draft-lifted");
+    assert_eq!(lift.len(), 1, "{timeline}");
+    assert_eq!(lift[0]["review"], json!({ "base": "main" }));
+    let settled = review_events(&timeline, "checks-settled");
+    assert_eq!(
+        settled[0]["review"],
+        json!({
+            "head": "89abcdef0123456789abcdef0123456789abcdef",
+            "verdict": "passed",
+            "skipped": [],
+        })
+    );
+    // Watched as a ready change after the lift, so the run's part in it ends
+    // where its checks settled.
+    let span = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["kind"] == "publication")
+        .expect("the branch the node opened");
+    assert_eq!(span["status"], json!("open"), "{span}");
+    assert_eq!(
+        span["ended_at"],
+        json!("2026-08-07T12:00:11.500Z"),
+        "{span}"
     );
 }
 

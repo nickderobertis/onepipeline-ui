@@ -194,6 +194,33 @@ test("the checked-in v2 run-timeline contract parses, and v1's meaning is refuse
     landing_commit: "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334",
   });
 
+  // Where a change request's review stood: a required check that skipped is
+  // `skipped` rather than passed, the settlement says it passed with that check
+  // skipped, and the draft kept for its user's review says so by its kind.
+  expect(
+    events.find((event) => event.kind === "change-check")?.review?.state,
+  ).toBe("skipped");
+  expect(
+    events.find((event) => event.kind === "checks-settled")?.review,
+  ).toEqual({
+    head: "0123456789abcdef0123456789abcdef01234567",
+    verdict: "passed-with-skipped",
+    skipped: ["integration"],
+  });
+  expect(
+    events.find((event) => event.kind === "draft-kept-for-review")?.review,
+  ).toEqual({ base: "main" });
+  // A review that carries nothing is not one a server serves, so it is refused
+  // rather than drawn as a review that said nothing.
+  const emptied = structuredClone(golden);
+  const kept = emptied.spans
+    .flatMap(
+      (span: { events: { kind: string; review?: object }[] }) => span.events,
+    )
+    .find((event: { kind: string }) => event.kind === "draft-kept-for-review");
+  kept.review = {};
+  expect(() => parseRunTimeline(emptied)).toThrow();
+
   // A payload on the other meaning of that pair is refused rather than rendered as
   // though it agreed with this one.
   expect(() =>

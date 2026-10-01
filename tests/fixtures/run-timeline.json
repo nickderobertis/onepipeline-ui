@@ -2,7 +2,7 @@
   "api_version": 2,
   "telemetry_schema_version": 21,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 10,
+  "timeline_schema_version": 11,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -194,7 +194,12 @@
           "kind": "change-check",
           "at": "2026-08-07T12:00:12.000Z",
           "node_id": "contract-interface",
-          "status": "queued"
+          "status": "queued",
+          "review": {
+            "name": "gate",
+            "required": true,
+            "state": "pending"
+          }
         },
         {
           "id": "e23",
@@ -202,6 +207,11 @@
           "at": "2026-08-07T12:00:13.000Z",
           "node_id": "contract-interface",
           "status": "completed",
+          "review": {
+            "name": "published-smoke",
+            "required": false,
+            "state": "failed"
+          },
           "reference": {
             "kind": "gate_log",
             "value": "artifact-published-smoke"
@@ -213,6 +223,11 @@
           "at": "2026-08-07T12:00:14.000Z",
           "node_id": "contract-interface",
           "status": "completed",
+          "review": {
+            "name": "gate",
+            "required": true,
+            "state": "passed"
+          },
           "reference": {
             "kind": "gate_log",
             "value": "artifact-gate-check"
