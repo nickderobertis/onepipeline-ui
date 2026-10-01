@@ -9,10 +9,16 @@
  *
  * `serve-fixture.mjs` is the entry point; this module is only the corpus, so a journey
  * that changes what is being served (`settleDashboard`, `removeRun`, `growTranscript`)
- * appends to the same journals through the same writer the initial build used.
+ * appends to the same journals the initial build wrote, as an executor appends to them.
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { thisHost } from "./this-host.mjs";
 
@@ -768,7 +774,16 @@ class Journal {
   }
 }
 
-/** Append one event to a journal an already-running server is serving. */
+/**
+ * Append one event to a journal an already-running server is serving.
+ *
+ * Appended, never rewritten, because that is how the engine writes a journal and
+ * the server reads it on the change notification the write itself raises.
+ * Rewriting the file whole truncates it first, so a read woken by that truncation
+ * serves the run as having recorded nothing at all — a state no real run passes
+ * through — and the view, told the node has no timeline, puts away the detail it
+ * had open and reopens it at its beginning.
+ */
 function appendEvent(dir, source, kind, labels, payload = {}) {
   const path = join(dir, "events.jsonl");
   const existing = readFileSync(path, "utf8");
@@ -784,7 +799,7 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
     payload,
     artifacts: [],
   });
-  writeFileSync(path, `${existing}${line}\n`);
+  appendFileSync(path, `${line}\n`);
 }
 
 /**
