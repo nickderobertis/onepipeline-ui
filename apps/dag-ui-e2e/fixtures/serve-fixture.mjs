@@ -325,6 +325,10 @@ async function serve(workspace, port, ui, shutdown) {
         // host shares.
         ONEPIPELINE_PROJECT_DIR: overridesDir(workspace),
         XDG_STATE_HOME: join(workspace, "state"),
+        // Where the server keeps the name it retains each adopted driver from —
+        // its running image, linked or copied — rather than the operator's own
+        // cache, which nothing would ever clear of a copy this tier made.
+        XDG_CACHE_HOME: join(workspace, "cache"),
       },
     },
   );

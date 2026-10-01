@@ -147,8 +147,9 @@ pub struct RunStore {
     /// The launching session this store acts as on every write, or `None` for
     /// an unattributed server that owns no run.
     session: Option<SessionId>,
-    /// The program an adoption retains as the run's driver: this executable,
-    /// unless a reader that is not the binary named the binary.
+    /// The program an adoption retains as the run's driver: this executable —
+    /// the engine it is running, even once its file has been replaced, see
+    /// `running_image` — unless a reader that is not the binary named the binary.
     driver: Option<PathBuf>,
     /// The drivers this process has retained and not yet seen exit.
     reaper: Reaper,
@@ -233,11 +234,7 @@ impl RunStore {
     fn retain(&self, run: &RunId) -> Result<verbs::Retain, ApiError> {
         let program = match &self.driver {
             Some(program) => program.clone(),
-            None => std::env::current_exe().map_err(|error| {
-                ApiError::Engine(format!(
-                    "cannot find this executable to retain a driver: {error}"
-                ))
-            })?,
+            None => crate::running_image::driver_program()?,
         };
         Ok(verbs::Retain {
             program,

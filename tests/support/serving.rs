@@ -142,6 +142,27 @@ impl Serving {
         Self::spawn_from(binary, workspace, &[], &[], false, None, None, arguments)
     }
 
+    /// The same, served by `binary` acting as `session` over a workspace the
+    /// caller already built, in an environment changed by `environment` — an
+    /// installed server, whose file a journey can replace while it runs.
+    pub fn start_binary_in_as_with_env(
+        binary: &Path,
+        workspace: TempDir,
+        session: &str,
+        environment: &[(&str, &str)],
+    ) -> Self {
+        Self::spawn_from(
+            binary,
+            workspace,
+            environment,
+            &[],
+            false,
+            None,
+            Some(session),
+            &[],
+        )
+    }
+
     /// The same, acting as `session` over a workspace the caller already built.
     pub fn start_in_as(workspace: TempDir, session: &str) -> Self {
         Self::spawn_as(workspace, &[], false, None, Some(session), &[])
@@ -279,6 +300,10 @@ impl Serving {
             // that shuts a fixture run down must never push, or list, a branch
             // of the host running it.
             .env(ONEVCS_HOME_ENV, workspace.path().join(ONEVCS_HOME_DIR))
+            // Nor the operator's cache, where a server keeps the name it retains
+            // each adopted driver from — a link to, or a copy of, the image it
+            // runs: this workspace's own, removed with it.
+            .env("XDG_CACHE_HOME", workspace.path().join("cache"))
             // Nor the operator's harnesses: a run's status carries the engine's
             // provider block, which probes every harness it finds on `PATH` —
             // the operator's own subscriptions, for up to a minute each, which
@@ -342,6 +367,12 @@ impl Serving {
             log,
             stopped: false,
         }
+    }
+
+    /// The serving process's pid, for a journey that reads what the kernel
+    /// says about it.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     /// Everything the server has said on its log so far.
