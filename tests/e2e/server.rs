@@ -14786,6 +14786,143 @@ fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
 }
 
 #[test]
+fn an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed() {
+    // Two runs the acting session launched, each converged with a node done and
+    // a node failed and nothing watching either. One was driven under the
+    // engine's closure rule, which a settled graph does not satisfy; the other
+    // under the rule before it, which a settled graph does.
+    let owed = fixture_run::CONVERGED_FAILED_RUN_ID;
+    let settled = "run-20260807-7e6f50";
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write_converged_with_a_failure(root, owed, true);
+            fixture_run::write_converged_with_a_failure(root, settled, false);
+            fixture_run::summarize(root, owed);
+            fixture_run::summarize(root, settled);
+        },
+        fixture_run::LIVE_SESSION,
+    );
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{owed}")).json();
+    assert!(
+        detail
+            .to_string()
+            .contains(fixture_run::CONVERGED_FAILED_NODE_ID),
+        "{detail}"
+    );
+
+    // Owed, and reported: with the closure as its remedy, since a run that can
+    // no longer move needs closing rather than a watch. The CLI over the same
+    // store says the same, and neither reports the run the older rule closed.
+    let unwatched = http::get(serving.address, "/api/v2/unwatched").json();
+    assert_enveloped(&unwatched);
+    let reported = unwatched["reported"].as_array().expect("reported runs");
+    assert_eq!(reported.len(), 1, "{unwatched}");
+    assert_eq!(reported[0]["run"], json!(owed), "{unwatched}");
+    assert!(reported[0]["why_not_watched"]
+        .as_str()
+        .is_some_and(|why| !why.is_empty()));
+    assert_eq!(unwatched["unresolved"], json!([]), "{unwatched}");
+    let said = sibling::run(
+        &serving.runs_root(),
+        Some(fixture_run::LIVE_SESSION),
+        &["unwatched"],
+    );
+    let printed = String::from_utf8_lossy(&said.stdout);
+    assert!(
+        printed.contains(owed) && printed.contains("--acknowledge"),
+        "the CLI reports the owed run: {printed}{}",
+        String::from_utf8_lossy(&said.stderr)
+    );
+    assert!(!printed.contains(settled), "{printed}");
+
+    // Closed by the session's own acknowledgement: no longer reported.
+    let acknowledged = sibling::run(
+        &serving.runs_root(),
+        Some(fixture_run::LIVE_SESSION),
+        &[
+            "unwatched",
+            "--acknowledge",
+            owed,
+            "--reason",
+            "the failure is known",
+        ],
+    );
+    assert!(
+        acknowledged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&acknowledged.stderr)
+    );
+    let after = http::get(serving.address, "/api/v2/unwatched").json();
+    assert_eq!(after["reported"], json!([]), "{after}");
+}
+
+#[test]
+fn unwatched_asks_under_the_wake_budget_the_servers_environment_sets() {
+    // The live run, held by a watch with no timeout: watched, but not one that
+    // wakes the session within the budget this server's environment names.
+    let budget = [(onepipeline::cli::WAKE_BUDGET_ENV, "60")];
+    let serving = Serving::start_as_with_env(
+        |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::summarize(root, fixture_run::RUN_ID);
+        },
+        fixture_run::LIVE_SESSION,
+        &budget,
+    );
+    let run = fixture_run::RUN_ID;
+    let mut stream = http::stream(
+        serving.address,
+        &format!("/api/v2/runs/{run}/watch?timeout=none&tick=1&until=settled"),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    std::iter::from_fn(|| stream.next_frame())
+        .find(|frame| frame.event == "tick")
+        .expect("a heartbeat, so the watch is held");
+
+    let unwatched = http::get(serving.address, "/api/v2/unwatched").json();
+    assert_enveloped(&unwatched);
+    assert_eq!(unwatched["reported"][0]["run"], json!(run), "{unwatched}");
+    let why = unwatched["reported"][0]["why_not_watched"]
+        .as_str()
+        .expect("why it is not watched");
+    assert!(why.contains("wake budget of 60s"), "{why}");
+    // The CLI, asked under the same budget, reports it in the same words.
+    let said = sibling::run_with_env(
+        &serving.runs_root(),
+        Some(fixture_run::LIVE_SESSION),
+        &["unwatched"],
+        &budget,
+    );
+    assert!(
+        String::from_utf8_lossy(&said.stdout).contains(why),
+        "{}{}",
+        String::from_utf8_lossy(&said.stdout),
+        String::from_utf8_lossy(&said.stderr)
+    );
+    drop(stream);
+    drop(serving);
+
+    // A budget the engine refuses is the server's misconfiguration, served as
+    // the engine's failure in its own words rather than as nothing unwatched.
+    let misconfigured = Serving::start_as_with_env(
+        |root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+        },
+        fixture_run::LIVE_SESSION,
+        &[(onepipeline::cli::WAKE_BUDGET_ENV, "soon")],
+    );
+    let refused = http::get(misconfigured.address, "/api/v2/unwatched");
+    assert_eq!(refused.status, 500, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("engine_error"));
+    assert!(
+        refused.body.contains(onepipeline::cli::WAKE_BUDGET_ENV),
+        "{}",
+        refused.body
+    );
+}
+
+#[test]
 fn the_read_verbs_serve_what_the_cli_prints() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
