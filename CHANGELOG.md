@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.21.1...v0.22.0) - 2026-10-01
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose change requests open as drafts and settle green team drafts as done ([#183](https://github.com/nickderobertis/onepipeline-ui/pull/183))
+
 ## [0.21.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.21.0...v0.21.1) - 2026-10-01
 
 ### Fixed
