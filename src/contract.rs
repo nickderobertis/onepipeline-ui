@@ -1516,7 +1516,7 @@ impl StoreRoot {
     /// names, and the store around it — a host's whole history — is not this
     /// reader's to open, let alone list.
     #[must_use]
-    pub fn resolve(dir: &Path) -> Option<Self> {
+    pub fn read(dir: &Path) -> Option<Self> {
         let resolved = fs::canonicalize(dir).ok()?;
         fs::metadata(&resolved)
             .ok()?
