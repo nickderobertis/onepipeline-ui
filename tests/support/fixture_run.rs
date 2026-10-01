@@ -4478,6 +4478,115 @@ fn pretty(value: &Value) -> String {
     )
 }
 
+/// The run id of the converged-with-a-failure fixture below.
+pub const CONVERGED_FAILED_RUN_ID: &str = "run-20260807-6d5e4f";
+/// The node of that run that failed.
+pub const CONVERGED_FAILED_NODE_ID: &str = "migrate";
+
+/// A run [`LIVE_SESSION`] launched whose graph has converged with one node done
+/// and one failed, and which nothing has closed: no stop, no completion request,
+/// no acknowledgement, and no watch.
+///
+/// `owed` is whether its driver held it to the engine's closure rule — the
+/// `owed_until_closed` a driver of that rule's release stamps on `run-started`.
+/// Under that rule a settled graph alone does not close a run, because a failure
+/// hook's ending counts failed nodes as settled; without it, the run is decided
+/// as it always was, and a settled graph closes it.
+pub fn write_converged_with_a_failure(root: &Path, run: &str, owed: bool) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "codex",
+            "session": LIVE_SESSION,
+            "pid": 4251,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "name": "converged",
+        "concurrency": 2,
+        "tasks": [
+            { "id": NODE_ID, "persona": "worker", "task": "## What\nShip it." },
+            { "id": CONVERGED_FAILED_NODE_ID, "persona": "worker", "task": "## What\nMove it." },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let mut started = json!({ "plan": plan, "graph": null, "dir": "/a-recording-host/workspace",
+        "heartbeat_interval": 1_800 });
+    if owed {
+        started["owed_until_closed"] = json!(true);
+    }
+    let stream = "a-recording-host-4251";
+    let record = |seq: u64, ts: &str, kind: &str, labels: Value, payload: Value| {
+        json!({
+            "v": 1, "ts": ts, "stream": stream, "seq": seq, "source": "pipeline",
+            "kind": kind, "labels": labels, "payload": payload, "artifacts": [],
+        })
+    };
+    let at = |node: &str| json!({ "run_id": run, "node": node });
+    let lines = [
+        record(0, START, "run-started", json!({ "run_id": run }), started),
+        record(
+            1,
+            "2026-08-07T12:00:01.000Z",
+            "node-ready",
+            at(NODE_ID),
+            json!({}),
+        ),
+        record(
+            2,
+            "2026-08-07T12:00:01.000Z",
+            "node-ready",
+            at(CONVERGED_FAILED_NODE_ID),
+            json!({}),
+        ),
+        record(
+            3,
+            "2026-08-07T12:00:02.000Z",
+            "node-dispatched",
+            at(NODE_ID),
+            json!({}),
+        ),
+        record(
+            4,
+            "2026-08-07T12:00:02.000Z",
+            "node-dispatched",
+            at(CONVERGED_FAILED_NODE_ID),
+            json!({}),
+        ),
+        record(
+            5,
+            "2026-08-07T12:05:00.000Z",
+            "node-settled",
+            at(NODE_ID),
+            json!({ "status": "done", "outcome": "shipped" }),
+        ),
+        record(
+            6,
+            "2026-08-07T12:06:00.000Z",
+            "node-settled",
+            at(CONVERGED_FAILED_NODE_ID),
+            json!({ "status": "failed", "outcome": "gate-failed" }),
+        ),
+    ];
+    let journal: Vec<String> = lines.iter().map(ToString::to_string).collect();
+    fs::write(
+        dir.join("events.jsonl"),
+        format!("{}\n", journal.join("\n")),
+    )
+    .expect("the journal");
+    dir
+}
+
 /// The run id of the stopped-mid-flight fixture below.
 pub const STOPPED_RUN_ID: &str = "run-20260807-5c4b3a";
 

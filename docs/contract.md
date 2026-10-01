@@ -22,7 +22,7 @@ POST /api/v2/runs/{run}/adopt         verbs::adopt(Detached): this binary's driv
 POST /api/v2/runs/{run}/shutdown      {grace?: seconds, force?: false} — verbs::shutdown(Run) as the acting session
 POST /api/v2/shutdown                 {scope: "mine"|"host", grace?: seconds, force?: false} — verbs::shutdown(Mine|Host)
 GET /api/v2/runs/{run}/watch          # SSE over verbs::watch; ?until=&timeout=&tick=&filter=&cursor=
-GET /api/v2/unwatched                 # verbs::unwatched for the acting session
+GET /api/v2/unwatched                 # verbs::Unwatched::within for the acting session, under the server's ONEPIPELINE_WAKE_BUDGET
 GET /api/v2/host                      # verbs::host
 GET /api/v2/runs/{run}/status         # verbs::status(Some(run))
 GET /api/v2/runs/{run}/results        # verbs::results
@@ -35,7 +35,7 @@ GET /api/v2/runs/{run}/nodes/{node}/agents  # verbs::agents(Node): the sessions 
 GET /api/v2/projects/{project}/agents # verbs::project_agents: the union over the project's runs
 ```
 
-The first seven are the read surface the browser view was copied against, and the rest are **the post-launch CLI, wrapped**: every route after `/api/v2/events` is a thin call into `onepipeline::verbs` — the SDK surface that the `onepipeline` binary is itself argument parsing over — and this API never runs that binary, never re-implements a verb, and never opens a run's files by a path of its own where the SDK has a call. The server acts as **one launching session** (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`, else unattributed), and that is the whole of its identity: it is passed to `verbs::stop`, `verbs::shutdown`, `verbs::unwatched` and `verbs::runs`, and an adoption is recorded under it. It never rewrites an envelope: `POST .../channel/reply` forwards the request body to `verbs::reply` byte for byte, an omitted author is `planner` by the engine's own contract, and any other author the body names is judged by the run's launch configuration inside the SDK.
+The first seven are the read surface the browser view was copied against, and the rest are **the post-launch CLI, wrapped**: every route after `/api/v2/events` is a thin call into `onepipeline::verbs` — the SDK surface that the `onepipeline` binary is itself argument parsing over — and this API never runs that binary, never re-implements a verb, and never opens a run's files by a path of its own where the SDK has a call. The server acts as **one launching session** (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`, else unattributed), and that is the whole of its identity: it is passed to `verbs::stop`, `verbs::shutdown`, `verbs::Unwatched::within` and `verbs::runs`, and an adoption is recorded under it. It never rewrites an envelope: `POST .../channel/reply` forwards the request body to `verbs::reply` byte for byte, an omitted author is `planner` by the engine's own contract, and any other author the body names is judged by the run's launch configuration inside the SDK.
 
 #### The browser view, served beside the API
 
@@ -58,7 +58,7 @@ One row per verb the `onepipeline` binary has once a plan is running, the SDK ca
 | `adopt` | `verbs::adopt` | `POST /api/v2/runs/{run}/adopt` |
 | `shutdown` | `verbs::shutdown` | `POST /api/v2/runs/{run}/shutdown` for `shutdown RUN`; `POST /api/v2/shutdown` for `--mine` and `--host` |
 | `watch` | `verbs::watch` | `GET /api/v2/runs/{run}/watch` |
-| `unwatched` | `verbs::unwatched` | `GET /api/v2/unwatched` |
+| `unwatched` | `verbs::Unwatched::within`, under `verbs::WakeBudget::from_environment` | `GET /api/v2/unwatched` |
 | `runs` | `verbs::runs` | `GET /api/v2/projects`, `GET /api/v2/projects/{project}`, and the flat `GET /api/v2/runs` |
 | `status` | `verbs::status` | `GET /api/v2/runs/{run}/status`; given no run, `GET /api/v2/projects` |
 | `host` | `verbs::host` | `GET /api/v2/host` |
@@ -114,7 +114,7 @@ Both call the seam under **the server's one acting session**, the same principal
 
 **While a client holds the stream, the server is the run's registered watcher**: the record `verbs::watch` writes for the calling process, under the run's own root, which `GET /api/v2/unwatched` and `onepipeline unwatched` read a run as watched by. It is removed when the stream closes, on either side — a client that disconnects ends the wait, and the record with it — so a person with the run open in the browser is a watcher and one who navigated away is not. The heartbeat comments and the blocking-worker discipline the event stream keeps apply: the wait runs on a blocking worker and never on the runtime every other connection shares.
 
-`GET /api/v2/unwatched` is `verbs::unwatched` for the acting session: `{reported, unresolved, session_key?}`, one entry `{run, standing, why_not_watched}` per run the session owns that the engine's `unwatched` verb reports as owed and not watched — by that verb's own rule, which this route neither restates nor filters — and what could not be resolved as the engine words it. An unattributed server owns no run and reports none. **`session_key`** is the acting session under the key a run-list row names its launcher's session by — `launch.session_key` — so a client can tell which of the runs it lists this session owns before it acts on them, as the browser view's shutdown dialog does; it is absent for an unattributed server, and the raw session is never served.
+`GET /api/v2/unwatched` answers what the engine's `unwatched` verb answers as the CLI asks it with no flag, for the acting session: `verbs::Unwatched::within` under the wake budget `ONEPIPELINE_WAKE_BUDGET` names in the server process's own environment, and under none where it is unset. It serves `{reported, unresolved, session_key?}`, one entry `{run, standing, why_not_watched}` per run the session owns that the verb reports as owed and not woken within that budget, or as not watched where there is none, by that verb's own rule, which this route neither restates nor filters. What could not be resolved is served as the engine words it. A budget the engine refuses is the server's misconfiguration, served as `engine_error`. An unattributed server owns no run and reports none. **`session_key`** is the acting session under the key a run-list row names its launcher's session by — `launch.session_key` — so a client can tell which of the runs it lists this session owns before it acts on them, as the browser view's shutdown dialog does; it is absent for an unattributed server, and the raw session is never served.
 
 #### The read verbs
 

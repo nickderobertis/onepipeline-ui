@@ -294,7 +294,8 @@ pub mod routes {
     pub const SHUTDOWN: &str = "/api/v2/shutdown";
     /// A watch on the run as a server-sent event stream: `verbs::watch`.
     pub const RUN_WATCH: &str = "/api/v2/runs/{run}/watch";
-    /// Which of the acting session's runs nothing is watching: `verbs::unwatched`.
+    /// Which of the acting session's runs nothing is watching: `verbs::Unwatched::within`,
+    /// under the wake budget the server's environment sets.
     pub const UNWATCHED: &str = "/api/v2/unwatched";
     /// Every live dispatch on this host: `verbs::host`.
     pub const HOST: &str = "/api/v2/host";

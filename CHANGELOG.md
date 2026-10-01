@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.21.0...v0.21.1) - 2026-10-01
+
+### Fixed
+
+- *(deps)* link the engine release that holds a session's runs to a wake budget ([#175](https://github.com/nickderobertis/onepipeline-ui/pull/175))
+
 ## [0.21.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.20.0...v0.21.0) - 2026-10-01
 
 ### Added
