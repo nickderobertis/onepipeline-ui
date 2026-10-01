@@ -169,6 +169,7 @@ function privateBinary(binary, workspace) {
   } catch (caught) {
     // Only the cross-device refusal is answered with a copy: anything else would
     // fail the copy for the same reason and report it twice.
+    // llmlint: ignore[changed_behavior_has_e2e] which branch runs is the host's filesystem layout, not anything a journey can choose: the copy is what every tier run takes wherever the temporary directory is on another filesystem than the checkout — this host, where the fixture server serving every journey goes through it — and the link is what the relink journey in `dag-ui.spec.ts` takes, its target staged beside its workspace. Making the kernel refuse a link on demand would need a second filesystem the tier does not own.
     if (caught?.code !== "EXDEV") throw caught;
     copyFileSync(binary, staged);
   }
