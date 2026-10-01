@@ -301,6 +301,7 @@ pub mod vcs {
     /// The one table of them: the timeline reads a record through it, and the
     /// tests that hold the schema-11 paragraph of `docs/contract.md` and the
     /// base commit's timeline to those kinds read it too.
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the field names are `onevcs`'s payloads, which onevcs 0.36.0 declares only as `json!` literals at its private emission sites and in prose on `EventKind` — no type, schema or packaged contract document carries them, and onepipeline 0.57.0's packaged docs/contract.md does not name them either — so nothing reachable offline can be reconciled against. The kinds themselves are held to `onevcs::EventKind` by tests/contract.rs, this table to docs/contract.md's schema-11 paragraph by the same file, and the fields to the producer's emitted shape by the review fixture the e2e journeys serve.
     pub const REVIEW_RECORDS: [(&str, &[&str], &[&str]); 6] = [
         (CHANGE_CHECK, &["name"], &[]),
         (CHANGE_DRAFTED, &["kind", "base"], &[]),
@@ -309,6 +310,7 @@ pub mod vcs {
         (DRAFT_KEPT_FOR_REVIEW, &["base"], &[]),
         (CHECKS_SETTLED, &["head", "verdict"], &["skipped"]),
     ];
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     /// `{url, sha}`.
     pub const CHANGE_MERGED: &str = "change-merged";
     /// `{identity, sha, base}` — the merge the host had queued completed.
