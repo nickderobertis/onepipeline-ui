@@ -391,10 +391,11 @@ pub mod vcs {
         }
 
         /// Whether a record in this state reports nothing against the work: a
-        /// check that passed vouches for it and one still running has said
-        /// nothing yet. A skipped check ran nothing, so it vouches for nothing.
+        /// check that passed reported for it and one still running has said
+        /// nothing yet. A skipped check ran nothing, so it is held against the
+        /// work rather than counted as a pass.
         #[must_use]
-        pub const fn vouches(self) -> bool {
+        pub const fn reports_nothing_against(self) -> bool {
             matches!(self, Self::Passed | Self::Pending)
         }
     }
@@ -2413,7 +2414,7 @@ struct Evidence<'a> {
 fn verdict_of(event: &Envelope) -> bool {
     if event.source == Source::Vcs {
         return match event.kind.0.as_str() {
-            vcs::CHANGE_CHECK => vcs::check_state(&event.payload).vouches(),
+            vcs::CHANGE_CHECK => vcs::check_state(&event.payload).reports_nothing_against(),
             vcs::GATE_VERDICT => {
                 event.payload.get("verdict").and_then(Value::as_str) == Some(vcs::GATE_PASSED)
             }
@@ -4917,7 +4918,14 @@ fn review_facts(event: &Envelope) -> Option<Value> {
             json!(vcs::check_state(&event.payload).as_str()),
         );
     }
-    if let Some(grace) = event.payload.get("grace_seconds").and_then(Value::as_f64) {
+    // A grace is a length of time, so a negative or non-finite one is no reading
+    // of how long the lift waited and is served as no grace at all.
+    if let Some(grace) = event
+        .payload
+        .get("grace_seconds")
+        .and_then(Value::as_f64)
+        .filter(|grace| grace.is_finite() && *grace >= 0.0)
+    {
         record.insert("grace_seconds".into(), json!(grace));
     }
     if let Some(warned) = event.payload.get("warned").and_then(Value::as_bool) {

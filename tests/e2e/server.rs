@@ -5970,6 +5970,54 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
     );
 }
 
+/// Every file under `dir` whose text names `needle`, at any depth.
+fn files_naming(dir: &Path, needle: &str) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).expect("a directory").flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files_naming(&path, needle));
+        } else if fs::read_to_string(&path).is_ok_and(|text| text.contains(needle)) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+#[test]
+fn an_early_lift_recording_a_negative_grace_is_served_no_grace() {
+    let serving = Serving::start(|root| {
+        let run = fixture_run::write_review_draft(root, fixture_run::REVIEW_DRAFT_RUN_ID);
+        // The one record carrying a grace, rewritten as a store holding a
+        // corrupted or hand-edited one would hold it.
+        let recorded = files_naming(&run, "\"grace_seconds\"");
+        assert_eq!(recorded.len(), 1, "the early lift's record: {recorded:?}");
+        let text = fs::read_to_string(&recorded[0]).expect("the record");
+        let rewritten = text
+            .replace("\"grace_seconds\": 2.5", "\"grace_seconds\": -2.5")
+            .replace("\"grace_seconds\":2.5", "\"grace_seconds\":-2.5");
+        assert_ne!(rewritten, text, "the grace was rewritten");
+        fs::write(&recorded[0], rewritten).expect("the rewritten record");
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::REVIEW_DRAFT_RUN_ID,
+            fixture_run::LIFTED_NODE_ID
+        ),
+    )
+    .json();
+    let early = review_events(&timeline, "draft-lifted-early");
+    assert_eq!(early.len(), 1, "{timeline}");
+    // The rest of what the record said is still served; a length of time below
+    // zero is not, because it is no reading of how long the lift waited.
+    assert_eq!(
+        early[0]["review"],
+        json!({ "base": "main", "awaited": ["ci"], "warned": true })
+    );
+}
+
 #[test]
 fn a_draft_lifted_before_its_checks_ran_is_served_with_what_it_waited_for() {
     let serving = Serving::start(|root| {
