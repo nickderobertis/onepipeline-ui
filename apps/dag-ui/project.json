@@ -30,15 +30,6 @@
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts"
     },
-    "test-build-cache": {
-      "command": "just _dag-ui-test-build-cache",
-      "inputs": [
-        "default",
-        "^default",
-        "{workspaceRoot}/tests/build_cache.rs",
-        "{workspaceRoot}/justfile"
-      ]
-    },
     "typecheck": {
       "command": "npx tsc -p apps/dag-ui/tsconfig.json --noEmit"
     },

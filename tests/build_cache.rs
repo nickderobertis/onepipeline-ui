@@ -1,5 +1,6 @@
 //! The browser bundle cache against real Nx and Vite builds.
-//! Kept behind dag-ui:test-build-cache so ordinary crate tests need no builds.
+//! Kept behind dag-ui-build-cache:test-build-cache, a project that depends on
+//! nothing in the crate, so only a change to what these builds read runs them.
 
 #![cfg(unix)]
 

@@ -358,7 +358,9 @@ path = "tests/e2e/main.rs"
 [[test]]
 name = "build-cache"
 path = "tests/build_cache.rs"
-# Only dag-ui:test-build-cache runs the repeated real frontend builds.
+# Only dag-ui-build-cache:test-build-cache runs the repeated real frontend
+# builds, and denies this target's diagnostics itself: `test = false` keeps it
+# out of `clippy --all-targets`.
 test = false
 
 # A CLI binary: optimize for a small, fast-starting artifact.
