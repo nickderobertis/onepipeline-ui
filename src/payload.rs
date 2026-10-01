@@ -4468,7 +4468,7 @@ fn session_record(
         None => None,
     };
     let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
-    let store = StoreRoot::read(&dir)?;
+    let store = StoreRoot::resolve(&dir)?;
     let project = PathSegment::try_from(history_project).ok()?;
     let session = PathSegment::try_from(history_session).ok()?;
     let listed = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
