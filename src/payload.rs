@@ -4496,9 +4496,11 @@ fn session_record(
     let record = history::read_session_display(path.as_path())
         .ok()?
         .into_iter()
-        .find(|entry| match entry {
-            HistoryShowEntry::Record(record) => record.history_id.to_string() == id.as_str(),
-            HistoryShowEntry::Incomplete(_) => false,
+        .find_map(|entry| match entry {
+            HistoryShowEntry::Record(record) if record.history_id.to_string() == id.as_str() => {
+                Some(record)
+            }
+            _ => None,
         })?;
     serde_json::to_vec_pretty(&record).ok()
 }

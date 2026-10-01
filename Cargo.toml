@@ -247,15 +247,22 @@ onemessagebus = "0.9.0"
 # with a `blocking` flag on its `returned` frame, which
 # `GET /api/v2/runs/{run}/watch` forwards as the SDK renders it.
 #
-# 0.56.0 links oneagentgraph 0.5.5, onejudge 0.17.1 and oneharness-core 0.24.0,
-# whose history is indexed in dated pointer segments under `.index.d/`:
+# 0.56.0 lets a repository's template layer extend the host's and replace only
+# the blocks it names, recording the layers it resolved through as a `chain` on
+# `templates::ResolvedTemplate`; this crate serves no template route and reads
+# no template. It links oneagentgraph 0.5.5, onejudge 0.17.1 and oneharness-core
+# 0.24.0, whose history is indexed in dated pointer segments under `.index.d/`:
 # recording a run appends to its day's segment and reads no index and walks no
 # store, so a run this line's engine drives costs the same however much history
 # the host holds. The session artifact route resolves a session by its own
 # project and file and nothing else; `serves a recorded session without
 # reading an index or walking the history store` holds both halves under a
-# trace. `read_session_display` now answers typed entries rather than JSON
-# values, and the route serves the finished run's entry as it serializes.
+# trace. `read_session_display` returns typed entries rather than JSON values,
+# so a harness session artifact is picked out as the `Record` entry whose
+# `history_id` it names — an in-flight run, which carries no such id, was never
+# one — and serialized as before. A browser-adopted run's driver is this line's
+# copy of the engine, so its templates resolve through those layers once this
+# moves.
 onepipeline = "=0.56.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
