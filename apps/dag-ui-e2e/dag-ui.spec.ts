@@ -23,13 +23,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   API_V2_PATHS,
+  adoptedSchema,
   parseRunList,
   parseRunTimeline,
 } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
-import { fixture, runs } from "./fixture-facts";
+import { fixture, fixtureIn, runs } from "./fixture-facts";
 import {
   graphNodeList,
   graphNodes,
@@ -4233,6 +4234,80 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
     }
   });
 }
+
+/**
+ * And what an adoption retains once cargo has relinked the binary the fixture found.
+ *
+ * The adopt route spawns *this executable* by the path it was started from, and
+ * `just check` runs cargo test builds beside this tier that unlink that name in
+ * `target/debug` and link it to an artifact of their own. A server spawned from
+ * that name then reads its own path as deleted and refuses every adoption with
+ * `No such file or directory` — which is how both adopt journeys failed the
+ * v0.22.0 release. So the fixture serves through a name of its own, and this
+ * replaces the found one under a live server, as cargo does, and adopts.
+ */
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: 9.4 s on this host (6.3 s when the fixture linked its binary rather than copying it), beside adopt journeys of 1.1 to 1.2 min in the same project. What it holds is this project's own fixture server, `fixtures/serve-fixture.mjs`, which nothing outside `dag-ui-e2e` runs, and it needs exactly what `dag-ui-e2e:test` already depends on, so no narrower edge contains it.
+test("adopts a run after the binary it was served from is relinked under it", async () => {
+  test.slow();
+  const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));
+  const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-space-"));
+  const built = join(target, "debug", "onepipeline-api");
+  mkdirSync(join(target, "debug"), { recursive: true });
+  stageBinary(built);
+  const port = await freePort();
+  const api = `http://127.0.0.1:${port}`;
+  const served = spawn(
+    process.execPath,
+    [FIXTURE_COMMAND, "--workspace", workspace, "--port", String(port)],
+    {
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, CARGO_TARGET_DIR: target },
+    },
+  );
+  let adopted: string | undefined;
+  try {
+    await expect
+      .poll(
+        async () => {
+          try {
+            return (await fetch(`${api}/healthz`)).status;
+          } catch {
+            return 0;
+          }
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(200);
+    // What a cargo build beside this tier does to that name: unlinks it and
+    // links it again, leaving the running server's own path deleted.
+    rmSync(built);
+    stageBinary(built);
+
+    const { runs: written } = fixtureIn(workspace);
+    const answered = await fetch(
+      `${api}${API_V2_PATHS.adopt(written.adoptable)}`,
+      { method: "POST" },
+    );
+    const body: unknown = await answered.json();
+    expect(answered.status, JSON.stringify(body)).toBe(200);
+    adopted = written.adoptable;
+    const receipt = adoptedSchema.parse(body);
+    expect(receipt.run_id).toBe(written.adoptable);
+    expect(receipt.pid).toBeGreaterThan(0);
+  } finally {
+    // The driver it retained runs in a process group of its own, so it is
+    // stopped through the run rather than left behind the workspace it drives.
+    if (adopted !== undefined) {
+      const stopped = await fetch(`${api}${API_V2_PATHS.stop(adopted)}`, {
+        method: "POST",
+      });
+      expect(stopped.status, await stopped.text()).toBe(200);
+    }
+    served.kill("SIGTERM");
+    rmSync(target, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
 
 async function detailScroll(
   page: Page,

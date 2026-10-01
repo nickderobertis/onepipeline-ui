@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
@@ -215,14 +216,20 @@ export type FixtureFacts = z.infer<typeof fixtureSchema>;
 
 let cached: FixtureFacts | undefined;
 
+/**
+ * What a fixture server published about the runs it built in `workspace` — the
+ * tier's own, or one a journey started over a workspace of its own.
+ */
+export function fixtureIn(workspace: string): FixtureFacts {
+  return fixtureSchema.parse(
+    JSON.parse(readFileSync(join(workspace, FIXTURE_FACTS_NAME), "utf8")),
+  );
+}
+
 /** Everything the fixture published about the runs it is serving. */
 export function fixture(): FixtureFacts {
   if (cached === undefined) {
-    cached = fixtureSchema.parse(
-      JSON.parse(
-        readFileSync(join(FIXTURE_WORKSPACE, "fixture-facts.json"), "utf8"),
-      ),
-    );
+    cached = fixtureIn(FIXTURE_WORKSPACE);
   }
   return cached;
 }
