@@ -49,6 +49,7 @@ pub mod error;
 pub mod filter;
 pub mod liveness;
 pub mod payload;
+mod running_image;
 pub mod server;
 pub mod store;
 pub mod telemetry;

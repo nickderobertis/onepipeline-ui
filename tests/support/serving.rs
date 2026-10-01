@@ -142,6 +142,27 @@ impl Serving {
         Self::spawn_from(binary, workspace, &[], &[], false, None, None, arguments)
     }
 
+    /// The same, served by `binary` acting as `session` over a workspace the
+    /// caller already built, in an environment changed by `environment` — an
+    /// installed server, whose file a journey can replace while it runs.
+    pub fn start_binary_in_as_with_env(
+        binary: &Path,
+        workspace: TempDir,
+        session: &str,
+        environment: &[(&str, &str)],
+    ) -> Self {
+        Self::spawn_from(
+            binary,
+            workspace,
+            environment,
+            &[],
+            false,
+            None,
+            Some(session),
+            &[],
+        )
+    }
+
     /// The same, acting as `session` over a workspace the caller already built.
     pub fn start_in_as(workspace: TempDir, session: &str) -> Self {
         Self::spawn_as(workspace, &[], false, None, Some(session), &[])
@@ -342,6 +363,12 @@ impl Serving {
             log,
             stopped: false,
         }
+    }
+
+    /// The serving process's pid, for a journey that reads what the kernel
+    /// says about it.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     /// Everything the server has said on its log so far.

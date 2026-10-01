@@ -13279,6 +13279,226 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// A server installed at `installed` — a copy of the built binary, which is
+/// what a package manager puts on disk — with the kept copies of its image
+/// under `cache`, which a server whose file is replaced retains its drivers
+/// from.
+#[cfg(target_os = "linux")]
+fn installed_server(installed: &Path, cache: &Path, workspace: tempfile::TempDir) -> Serving {
+    fs::create_dir_all(installed.parent().expect("an install directory"))
+        .expect("the install directory");
+    fs::copy(assert_cmd::cargo::cargo_bin("onepipeline-api"), installed)
+        .expect("the binary is installed");
+    Serving::start_binary_in_as_with_env(
+        installed,
+        workspace,
+        fixture_run::SESSION,
+        &[(
+            "XDG_CACHE_HOME",
+            cache.to_str().expect("a UTF-8 cache path"),
+        )],
+    )
+}
+
+/// Install another build over `installed` while its server runs, the way a
+/// package upgrade or a rebuild does: written beside it, then renamed over it.
+///
+/// The build put there is one that only says it was run, into `ran`, and
+/// drives nothing — so a driver retained from the path rather than from the
+/// running engine is one this journey can see.
+#[cfg(target_os = "linux")]
+fn install_over(installed: &Path, ran: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let incoming = installed.with_extension("incoming");
+    fs::write(
+        &incoming,
+        format!("#!/bin/sh\necho \"$*\" >> '{}'\nexit 97\n", ran.display()),
+    )
+    .expect("the incoming build");
+    fs::set_permissions(&incoming, fs::Permissions::from_mode(0o755))
+        .expect("the incoming build is executable");
+    fs::rename(&incoming, installed).expect("the incoming build replaces the installed one");
+}
+
+/// The copies of a running image kept under `cache`, as the server keeps them.
+#[cfg(target_os = "linux")]
+fn kept_images(cache: &Path) -> Vec<PathBuf> {
+    let Ok(images) = fs::read_dir(cache.join("onepipeline-api").join("drivers")) else {
+        return Vec::new();
+    };
+    images
+        .map(|image| image.expect("a kept image").path().join("onepipeline-api"))
+        .collect()
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same two drivers as
+// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server` above, each settling
+// a one-node graph and exiting; what this adds is a copy of the built binary, made twice —
+// once as the install and once by the server as the kept image — which is the behaviour
+// under test rather than a cost beside it.
+/// The journey a server upgraded in place meets: its file is replaced while it
+/// runs, and an adoption through it still retains a driver — one running the
+/// engine this server links, not the build now on disk — which drives the run
+/// exactly as a driver retained from an untouched file does.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_runs() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
+    let run = fixture_run::RUN_ID;
+    let adopt = format!("/api/v2/runs/{run}/adopt");
+    let installed = dir.join("installed").join("onepipeline-api");
+    let cache = dir.join("cache");
+    let ran = dir.join("the-incoming-build-ran");
+    let serving = installed_server(&installed, &cache, workspace);
+    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
+    let events = |address| {
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
+    };
+
+    install_over(&installed, &ran);
+    // Linux now names the running server's executable for a file that is gone.
+    let named = fs::read_link(format!("/proc/{}/exe", serving.pid())).expect("its executable");
+    assert!(
+        named.to_string_lossy().ends_with(" (deleted)"),
+        "{}",
+        named.display()
+    );
+
+    // Adopted through the replaced server: a receipt carrying the driver's pid.
+    let adopted = http::post(serving.address, &adopt, "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let adopted = adopted.json();
+    assert_enveloped(&adopted);
+    assert_eq!(adopted["run_id"], json!(run));
+    let pid = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    // And that driver is the engine the server links: retained from the one copy
+    // of the running image the server kept, byte for byte the build it started
+    // from, while the build installed over it never ran.
+    let kept = kept_images(&cache);
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(
+        fs::read(&kept[0]).expect("the kept image")
+            == fs::read(assert_cmd::cargo::cargo_bin("onepipeline-api")).expect("the built binary"),
+        "the kept image is the build the server started from"
+    );
+
+    // It drives the run as a driver retained from an untouched file does: the
+    // adoption journalled, the human action settled as waiting, then let go.
+    eventually("the driver settled the human action as waiting", || {
+        events(serving.address).iter().any(|event| {
+            event["kind"] == json!("node-settled")
+                && event["node_id"] == json!(fixture_run::APPROVAL_NODE_ID)
+        })
+    });
+    assert!(
+        events(serving.address)
+            .iter()
+            .any(|event| event["kind"] == json!("driver-adopted")),
+        "the adoption is journalled"
+    );
+    let driven = detail(serving.address);
+    assert_eq!(
+        driven["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("waiting"),
+        "{driven}"
+    );
+    eventually("the server reaped the driver it retained", || {
+        !process_is_live(pid)
+    });
+    eventually("the run reads as one nothing is driving", || {
+        detail(serving.address)["run"]["state"] == json!("driver-dead")
+    });
+    drop(driver);
+
+    // Answered, and adopted again through the same replaced server: the second
+    // driver is retained from the same kept image and completes the graph.
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let again = http::post(serving.address, &adopt, "");
+    assert_eq!(again.status, 200, "{}", again.body);
+    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let driver = RetainedDriver(second);
+    eventually("the second driver completed the graph", || {
+        detail(serving.address)["run"]["state"] == json!("settled")
+    });
+    let settled = detail(serving.address);
+    assert_eq!(
+        settled["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("done"),
+        "{settled}"
+    );
+    eventually("the server reaped the second driver", || {
+        !process_is_live(second)
+    });
+    drop(driver);
+    assert_eq!(
+        kept_images(&cache),
+        kept,
+        "one kept image serves every adoption"
+    );
+    assert!(
+        !ran.exists(),
+        "the build installed over the server never ran"
+    );
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A replaced server that cannot keep a copy of the engine it runs refuses the
+/// adoption, naming why, rather than answering a receipt for a driver that
+/// never started — and the run is untouched, so the adoption can be made once
+/// the cause is gone.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_adoption_through_a_replaced_server_that_cannot_keep_its_engine_is_refused() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
+    let run = fixture_run::RUN_ID;
+    let installed = dir.join("installed").join("onepipeline-api");
+    // A cache that is a file: nothing can be kept under it.
+    let cache = dir.join("cache");
+    fs::write(&cache, "not a directory").expect("the blocking file");
+    let ran = dir.join("the-incoming-build-ran");
+    let serving = installed_server(&installed, &cache, workspace);
+    install_over(&installed, &ran);
+
+    let refused = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(refused.status, 500, "{}", refused.body);
+    let error = &refused.json()["error"];
+    assert_eq!(error["code"], json!("engine_error"), "{error}");
+    let message = error["message"].as_str().expect("a message");
+    assert!(
+        message.contains("has been replaced") && message.contains("could be kept"),
+        "{message}"
+    );
+    let events = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["kind"] == json!("driver-adopted")),
+        "nothing was adopted"
+    );
+    assert!(
+        !ran.exists(),
+        "the build installed over the server never ran"
+    );
+}
+
 // llmlint: ignore-block[e2e_not_mocked] the one process stood in for from here to the end
 // of the journey below is the paid model turn: the `oneharness run` onejudge spawns per side
 // per turn, at the `ONEAGENTGRAPH_ONEHARNESS_BIN` seam `oneagentgraph` resolves it through.
