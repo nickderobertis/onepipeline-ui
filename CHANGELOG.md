@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.20.0...v0.21.0) - 2026-10-01
+
+### Added
+
+- *(deps)* [**breaking**] announce that the public surface follows onepipeline 0.56 ([#173](https://github.com/nickderobertis/onepipeline-ui/pull/173))
+- *(deps)* link the engine whose template layers extend the layer below ([#170](https://github.com/nickderobertis/onepipeline-ui/pull/170))
+
+### Fixed
+
+- *(history)* serve a session without opening the history store around it ([#169](https://github.com/nickderobertis/onepipeline-ui/pull/169))
+
 ## [0.20.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.19.0...v0.20.0) - 2026-10-01
 
 ### Added
