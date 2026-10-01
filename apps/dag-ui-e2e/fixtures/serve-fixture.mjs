@@ -28,7 +28,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -138,6 +145,34 @@ function serverBinary() {
     );
   }
   return binary;
+}
+
+/**
+ * The server binary under a name in `workspace` that nothing but this tier writes.
+ *
+ * The adopt route retains *this executable* as the run's driver, and finds it by the
+ * path it was started from. `target/debug/onepipeline-api` is cargo's to rewrite, and
+ * every cargo task `just check` runs beside this tier does: a test build of the crate
+ * links that name to an artifact of its own, and a dev build links it back. The
+ * server keeps running the image it started from, but its path now names
+ * `onepipeline-api (deleted)`, so every adoption from then on is refused with
+ * `cannot retain a driver: No such file or directory`. A second name for the image
+ * outlives that relink, because cargo replaces the name rather than writing into the
+ * file — so a hard link, and a copy where the workspace is on another filesystem.
+ */
+function privateBinary(binary, workspace) {
+  const directory = join(workspace, "bin");
+  mkdirSync(directory, { recursive: true });
+  const staged = join(directory, basename(binary));
+  try {
+    linkSync(binary, staged);
+  } catch (caught) {
+    // Only the cross-device refusal is answered with a copy: anything else would
+    // fail the copy for the same reason and report it twice.
+    if (caught?.code !== "EXDEV") throw caught;
+    copyFileSync(binary, staged);
+  }
+  return staged;
 }
 
 /**
@@ -254,7 +289,7 @@ async function serve(workspace, port, ui, shutdown) {
     `${JSON.stringify(shutdown === undefined ? facts(workspace) : shutdownFacts(), null, 2)}\n`,
   );
 
-  const binary = serverBinary();
+  const binary = privateBinary(serverBinary(), workspace);
   const server = spawn(
     binary,
     [
