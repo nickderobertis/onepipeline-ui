@@ -5971,7 +5971,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
 }
 
 /// Every file under `dir` whose text names `needle`, at any depth.
-fn files_naming(dir: &Path, needle: &str) -> Vec<PathBuf> {
+fn files_naming(dir: &Path, needle: &str) -> Vec<std::path::PathBuf> {
     let mut found = Vec::new();
     for entry in fs::read_dir(dir).expect("a directory").flatten() {
         let path = entry.path();
