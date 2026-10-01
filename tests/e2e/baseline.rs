@@ -496,11 +496,11 @@ fn every_run_the_base_commit_listed_is_listed_now() {
 /// plain equality.
 const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[(11, "review")];
 
-/// The `onevcs` kinds whose events a review-phase schema serves anew.
+/// The `onevcs` kinds whose events carry the `review` a review-phase schema
+/// added.
 ///
-/// A run that records any of them is one whose `publication` span closes where
-/// the run's watch of the change ended, so on such a run the comparison holds
-/// every other span and every event of another kind.
+/// The review run below records every one of them, so holding its timeline to
+/// the base commit's holds each of their events too, beside that field.
 const REVIEW_KINDS: [&str; 6] = [
     payload::vcs::CHANGE_CHECK,
     payload::vcs::CHANGE_DRAFTED,
@@ -610,58 +610,80 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
     }
 
     // A run that recorded them is where the schema moved more than an event's
-    // fields, and only in the two places `docs/contract.md` says: its
-    // publication closes where the watch of its change ended, and a verification
-    // record a skipped check stored is served `ok: false`. Those spans are set
-    // aside — the skipped checks' after saying they passed nothing — and every
-    // other span, and every event of a kind other than the review records, is
-    // the base commit's.
+    // fields, and in exactly the two places `docs/contract.md` says: a
+    // verification record a skipped check stored is served `ok: false` (its
+    // span's status read from that `ok`, as every verification span's is), and a
+    // publication whose change was left open ends where the run's watch of it
+    // ended rather than where it opened. The base commit's timeline with those
+    // two changes made — and nothing else — is what this build serves, every
+    // other span and every event included.
     let timeline = routes::RUN_TIMELINE.replace("{run}", fixture_run::REVIEW_DRAFT_RUN_ID);
     let (before, after, base_schema) = timelines(
         older.address,
         serving.address,
         &format!("{timeline}?scope=run"),
     );
-    let skipped_check = |span: &Value| {
-        [
+    let mut expected = before.clone();
+    let mut skipped = 0;
+    let mut watched = Vec::new();
+    for span in expected["spans"].as_array_mut().expect("spans") {
+        let skipped_log = [
             fixture_run::SKIPPED_CHECK_LOG,
             fixture_run::LEGACY_SKIPPED_CHECK_LOG,
         ]
-        .iter()
-        .any(|log| span["kind"] == "verification" && span["detail"]["artifact_id"] == *log)
-    };
-    let skipped: Vec<&Value> = after["spans"]
-        .as_array()
-        .expect("spans")
-        .iter()
-        .filter(|span| skipped_check(span))
-        .collect();
-    assert_eq!(skipped.len(), 2, "the skipped checks' records: {after}");
-    for span in skipped {
-        assert_eq!(span["detail"]["ok"], json!(false), "{span}");
-    }
-    let held = |timeline: &Value| -> Vec<Value> {
-        let mut spans = timeline["spans"].as_array().expect("spans").clone();
-        spans.retain(|span| span["kind"] != "publication" && !skipped_check(span));
-        for span in &mut spans {
-            span["events"]
-                .as_array_mut()
-                .expect("events")
-                .retain(|event| !REVIEW_KINDS.iter().any(|kind| event["kind"] == *kind));
+        .contains(&span["detail"]["artifact_id"].as_str().unwrap_or_default());
+        if span["kind"] == "verification" && skipped_log {
+            // The base commit read a skipped check as passed; that is the defect.
+            assert_eq!(span["detail"]["ok"], json!(true), "{span}");
+            span["detail"]["ok"] = json!(false);
+            span["status"] = json!("failed");
+            skipped += 1;
         }
-        spans
-    };
-    let held_before = held(&before);
-    assert!(
-        held_before.len() > 1,
-        "the base commit served {} spans of the review run beside its publication, so \
-         this comparison is holding almost nothing: {before}",
-        held_before.len()
+        let watch_ended = match span["node_id"].as_str() {
+            Some(fixture_run::KEPT_NODE_ID) => "2026-08-07T12:00:11.000Z",
+            Some(fixture_run::LIFTED_NODE_ID) => "2026-08-07T12:00:11.500Z",
+            _ => continue,
+        };
+        if span["kind"] == "publication" {
+            assert_eq!(span["status"], "open", "{span}");
+            // The base commit closed it at the moment the change opened, so
+            // before the watch that the draft records report ended.
+            assert!(
+                span["ended_at"].as_str() < Some(watch_ended),
+                "the base commit's publication already ended at the watch's end: {span}"
+            );
+            span["ended_at"] = json!(watch_ended);
+            watched.push(span["node_id"].clone());
+        }
+    }
+    for kind in REVIEW_KINDS {
+        assert!(
+            before["spans"]
+                .as_array()
+                .expect("spans")
+                .iter()
+                .flat_map(|span| span["events"].as_array().into_iter().flatten())
+                .any(|event| event["kind"] == kind),
+            "the base commit served no `{kind}` event of the review run, so this \
+             comparison holds none: {before}"
+        );
+    }
+    assert_eq!(
+        skipped, 2,
+        "the skipped checks' records at the base commit: {before}"
     );
     assert_eq!(
-        held(&after),
-        held_before,
-        "{timeline}: a span or event outside the review records is served differently \
-         than at the base commit's schema {base_schema}"
+        watched,
+        [
+            json!(fixture_run::KEPT_NODE_ID),
+            json!(fixture_run::LIFTED_NODE_ID)
+        ],
+        "the open publications at the base commit: {before}"
+    );
+    assert_eq!(
+        after, expected,
+        "{timeline}: this build serves the review run differently from the base \
+         commit's schema {base_schema} somewhere other than the skipped checks' \
+         verification records and the open publications' ends"
     );
 }
