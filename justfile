@@ -259,7 +259,10 @@ _crate-test:
       || { echo "tests failed, or coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
 
 # Real Nx/Vite rebuilds, isolated from the crate's ordinary test tier.
+# `test = false` keeps this target out of `clippy --all-targets`, so `_crate-lint`
+# never compiles it: its diagnostics are denied here instead, before it runs.
 _dag-ui-test-build-cache:
+    @cargo clippy --locked --quiet --test build-cache -- -D warnings
     @cargo nextest run --locked --test build-cache --status-level fail --final-status-level fail
 
 # The baseline comparison, behind an edge of its own because it is the one tier
