@@ -4,7 +4,7 @@
   "projectType": "application",
   "tags": ["scope:app", "type:test"],
   "targets": {
-    "test-build-cache": {
+    "test": {
       "command": "cargo clippy --locked --quiet --test build-cache -- -D warnings && cargo nextest run --locked --test build-cache --status-level fail --final-status-level fail",
       "cache": true,
       "inputs": [

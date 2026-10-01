@@ -55,7 +55,6 @@
         "test-baseline",
         "test-cost",
         "test-isolation",
-        "test-build-cache",
         "doc"
       ]
     }
