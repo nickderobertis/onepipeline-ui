@@ -270,6 +270,9 @@ impl Serving {
             // planner's session, and a server that inherited it would own the
             // planner's runs. A journey that wants a session names one.
             .env_remove(onepipeline_ui::cli::SESSION_ENV)
+            // Nor the planner's wake budget, which `unwatched` asks under: a
+            // journey that wants one sets it.
+            .env_remove(onepipeline::cli::WAKE_BUDGET_ENV)
             // The `onevcs` state root a host shutdown's preserving push and its
             // enumeration of this host's unpublished branches read: this
             // workspace's own, empty, rather than the operator's — a journey

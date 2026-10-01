@@ -64,11 +64,25 @@ pub fn binary() -> String {
 /// where its binary reads them, so the CLI and the server are asked the same
 /// question about the same store.
 pub fn run(root: &Path, session: Option<&str>, arguments: &[&str]) -> Output {
+    run_with_env(root, session, arguments, &[])
+}
+
+/// The same, in an environment changed by `environment` — the one way a journey
+/// gives the CLI a wake budget, since the planner's own is removed like its
+/// session.
+pub fn run_with_env(
+    root: &Path,
+    session: Option<&str>,
+    arguments: &[&str],
+    environment: &[(&str, &str)],
+) -> Output {
     let mut command = Command::new(binary());
     command
         .args(arguments)
         .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
-        .env_remove(onepipeline_ui::cli::SESSION_ENV);
+        .env_remove(onepipeline_ui::cli::SESSION_ENV)
+        .env_remove(onepipeline::cli::WAKE_BUDGET_ENV)
+        .envs(environment.iter().copied());
     if let Some(session) = session {
         command.env(onepipeline_ui::cli::SESSION_ENV, session);
     }
