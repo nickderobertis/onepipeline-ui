@@ -902,19 +902,22 @@ fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_stor
         );
     }
 
-    // Each run's entry landed in the segment for the date it was minted on.
+    // Each run's entry, and the entry for the event it streamed, landed in the
+    // segments for the date it was minted on.
     for session in &recorded {
-        let segment = root
-            .join(".index.d")
-            .join(format!("runs-{}.ndjson", minted_on(&session.history_id)));
-        let entries = std::fs::read_to_string(&segment)
-            .unwrap_or_else(|error| panic!("{}: {error}", segment.display()));
-        assert!(
-            entries.contains(&session.history_id),
-            "{} holds no entry for {}: {entries}",
-            segment.display(),
-            session.history_id
-        );
+        for kind in ["runs", "events"] {
+            let segment = root
+                .join(".index.d")
+                .join(format!("{kind}-{}.ndjson", minted_on(&session.history_id)));
+            let entries = std::fs::read_to_string(&segment)
+                .unwrap_or_else(|error| panic!("{}: {error}", segment.display()));
+            assert!(
+                entries.contains(&session.history_id),
+                "{} holds no entry for {}: {entries}",
+                segment.display(),
+                session.history_id
+            );
+        }
     }
 
     // Nothing the store held before changed, and no lock was taken.
@@ -936,11 +939,17 @@ fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_stor
         .map(|(n, session)| {
             let until = recording.get(n + 1).copied().unwrap_or(starting);
             let project = session.path.parent().expect("a project").to_path_buf();
-            let segment = segments.join(format!("runs-{}.ndjson", minted_on(&session.history_id)));
+            let date = minted_on(&session.history_id);
             (
                 recording[n],
                 until,
-                vec![session.path.clone(), project, segments.clone(), segment],
+                vec![
+                    session.path.clone(),
+                    project,
+                    segments.clone(),
+                    segments.join(format!("runs-{date}.ndjson")),
+                    segments.join(format!("events-{date}.ndjson")),
+                ],
                 format!("recording {}", session.history_id),
             )
         })

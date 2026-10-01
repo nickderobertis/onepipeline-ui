@@ -143,12 +143,14 @@ pub fn record_beside_in_flight(
 }
 
 /// [`record`], for a harness that ran in `project` rather than in a directory
-/// beside the store.
+/// beside the store, and that streamed `text` as an event before it finished.
 ///
 /// oneharness slugs the directory a harness ran in into the store's project
 /// layer, so sessions recorded from different directories land in different
 /// project directories — and a store a journey means to leave untouched but for
-/// what was recorded is not given a working directory of its own to hold.
+/// what was recorded is not given a working directory of its own to hold. The
+/// event is what a live turn appends to the store's event segment, so a
+/// recording made this way writes both of its run's dated segments.
 pub fn record_from(dir: &Path, project: &Path, name: &str, prompt: &str, text: &str) -> Recorded {
     record_session(
         dir,
@@ -157,6 +159,7 @@ pub fn record_from(dir: &Path, project: &Path, name: &str, prompt: &str, text: &
         text,
         &Shape {
             project: Some(project),
+            streamed: true,
             ..Shape::default()
         },
     )
@@ -209,6 +212,8 @@ struct Shape<'a> {
     project: Option<&'a Path>,
     model: Model<'a>,
     pointed: Option<&'a Pointed<'a>>,
+    /// Whether the run streamed what it said as an event before it finished.
+    streamed: bool,
     /// What a second, unfinished run of the session has said so far.
     in_flight: Option<&'a str>,
 }
@@ -219,6 +224,7 @@ impl Default for Shape<'_> {
             project: None,
             model: Model::Unreported,
             pointed: None,
+            streamed: false,
             in_flight: None,
         }
     }
@@ -229,6 +235,7 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         project,
         model,
         pointed,
+        streamed,
         in_flight,
     } = *shape;
     // The directory the harness ran in. oneharness canonicalizes it and slugs
@@ -247,6 +254,11 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
     // begins one: this is what appends the pointer line.
     let identity: HarnessIdentity = "claude-code:alternate".parse().expect("an identity");
     let history_id = writer.begin_harness_run(&identity);
+    if streamed {
+        writer
+            .append_event(history_id, "claude-code:alternate", message(text))
+            .expect("append the event the run streamed");
+    }
     let result = result(prompt, text, model);
     writer
         .append_streamed(
@@ -260,14 +272,8 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         .expect("append the run oneharness had");
     let in_flight = in_flight.map(|said| {
         let running = writer.begin_harness_run(&identity);
-        let event = serde_json::from_value(json!({
-            "kind": "message",
-            "output": said,
-            "index": 0,
-        }))
-        .expect("the event oneharness streams");
         writer
-            .append_event(running, "claude-code:alternate", event)
+            .append_event(running, "claude-code:alternate", message(said))
             .expect("append the event of the run in flight");
         running.to_string()
     });
@@ -286,6 +292,16 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         path,
         in_flight,
     }
+}
+
+/// The first message event a harness streams, saying `said`.
+fn message(said: &str) -> oneharness_core::domain::events::ActionEvent {
+    serde_json::from_value(json!({
+        "kind": "message",
+        "output": said,
+        "index": 0,
+    }))
+    .expect("the event oneharness streams")
 }
 
 /// The last component of a path, as the store holds it.
