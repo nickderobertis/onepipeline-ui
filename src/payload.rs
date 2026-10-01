@@ -295,20 +295,89 @@ pub mod vcs {
     /// naming the required checks that concluded skipped. Served as recorded,
     /// so this crate keeps no copy of the verdict words.
     pub const CHECKS_SETTLED: &str = "checks-settled";
-    /// The kinds whose events carry `review`, each with the string fields and
-    /// the lists of check names that record's `review` reads.
+    /// What one review-bearing record's `review` reads from its payload, field by
+    /// field and by the kind of value each field holds.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ReviewRecord {
+        /// The record's kind.
+        pub kind: &'static str,
+        /// Words, served when the record carried one that is not blank.
+        pub words: &'static [&'static str],
+        /// Lists of check names, served only when every entry names one.
+        pub lists: &'static [&'static str],
+        /// Booleans, served as recorded.
+        pub flags: &'static [&'static str],
+        /// Lengths of time in seconds, served when finite and not negative.
+        pub durations: &'static [&'static str],
+        /// Whether `state` is served, as [`check_state`] classifies the record —
+        /// always present, because a record written before `onevcs` carried one
+        /// is still classified from its `status` and `conclusion`.
+        pub state: bool,
+    }
+
+    impl ReviewRecord {
+        /// Every field name this record's `review` can carry.
+        pub fn fields(&self) -> impl Iterator<Item = &'static str> {
+            let state: &'static [&'static str] = if self.state { &["state"] } else { &[] };
+            self.words
+                .iter()
+                .chain(self.lists)
+                .chain(self.flags)
+                .chain(self.durations)
+                .chain(state)
+                .copied()
+        }
+    }
+
+    const fn review(kind: &'static str) -> ReviewRecord {
+        ReviewRecord {
+            kind,
+            words: &[],
+            lists: &[],
+            flags: &[],
+            durations: &[],
+            state: false,
+        }
+    }
+
+    /// The kinds whose events carry `review`, each with every field that
+    /// record's `review` reads.
     ///
     /// The one table of them: the timeline reads a record through it, and the
     /// tests that hold the schema-11 paragraph of `docs/contract.md` and the
     /// base commit's timeline to those kinds read it too.
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the field names are `onevcs`'s payloads, which onevcs 0.36.0 declares only as `json!` literals at its private emission sites and in prose on `EventKind` — no type, schema or packaged contract document carries them, and onepipeline 0.57.0's packaged docs/contract.md does not name them either — so nothing reachable offline can be reconciled against. The kinds themselves are held to `onevcs::EventKind` by tests/contract.rs, this table to docs/contract.md's schema-11 paragraph by the same file, and the fields to the producer's emitted shape by the review fixture the e2e journeys serve.
-    pub const REVIEW_RECORDS: [(&str, &[&str], &[&str]); 6] = [
-        (CHANGE_CHECK, &["name"], &[]),
-        (CHANGE_DRAFTED, &["kind", "base"], &[]),
-        (DRAFT_LIFTED, &["base"], &[]),
-        (DRAFT_LIFTED_EARLY, &["base"], &["awaited"]),
-        (DRAFT_KEPT_FOR_REVIEW, &["base"], &[]),
-        (CHECKS_SETTLED, &["head", "verdict"], &["skipped"]),
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the field names are `onevcs`'s payloads, which onevcs 0.36.0 declares only as `json!` literals at its private emission sites and in prose on `EventKind` — no type, schema or packaged contract document carries them, and onepipeline 0.57.0's packaged docs/contract.md does not name them either — so nothing reachable offline can be reconciled against. The kinds themselves are held to `onevcs::EventKind` by tests/contract.rs, every field of this table to docs/contract.md's schema-11 paragraph by the same file, and the fields to the producer's emitted shape by the review fixture the e2e journeys serve.
+    pub const REVIEW_RECORDS: [ReviewRecord; 6] = [
+        ReviewRecord {
+            words: &["name"],
+            flags: &["required"],
+            state: true,
+            ..review(CHANGE_CHECK)
+        },
+        ReviewRecord {
+            words: &["kind", "base"],
+            ..review(CHANGE_DRAFTED)
+        },
+        ReviewRecord {
+            words: &["base"],
+            ..review(DRAFT_LIFTED)
+        },
+        ReviewRecord {
+            words: &["base"],
+            lists: &["awaited"],
+            flags: &["warned"],
+            durations: &["grace_seconds"],
+            ..review(DRAFT_LIFTED_EARLY)
+        },
+        ReviewRecord {
+            words: &["base"],
+            ..review(DRAFT_KEPT_FOR_REVIEW)
+        },
+        ReviewRecord {
+            words: &["head", "verdict"],
+            lists: &["skipped"],
+            ..review(CHECKS_SETTLED)
+        },
     ];
     // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     /// `{url, sha}`.
@@ -4903,11 +4972,11 @@ fn review_facts(event: &Envelope) -> Option<Value> {
     if event.source != Source::Vcs {
         return None;
     }
-    let &(_, strings, lists) = vcs::REVIEW_RECORDS
+    let read = vcs::REVIEW_RECORDS
         .iter()
-        .find(|(kind, ..)| *kind == event.kind.0)?;
+        .find(|record| record.kind == event.kind.0)?;
     let mut record = Map::new();
-    for key in strings {
+    for key in read.words {
         if let Some(value) = non_empty(event.payload.get(*key).and_then(Value::as_str)) {
             record.insert((*key).to_owned(), json!(value));
         }
@@ -4916,7 +4985,7 @@ fn review_facts(event: &Envelope) -> Option<Value> {
     // no required check says so with an empty list, and that is a reading. A list
     // with any entry that is not a check's name is no reading at all, so it is
     // served as absent rather than shortened into one that names fewer checks.
-    for key in lists {
+    for key in read.lists {
         let names: Option<Vec<&str>> = event
             .payload
             .get(*key)
@@ -4926,27 +4995,28 @@ fn review_facts(event: &Envelope) -> Option<Value> {
             record.insert((*key).to_owned(), json!(names));
         }
     }
-    if event.kind.0 == vcs::CHANGE_CHECK {
-        if let Some(required) = event.payload.get("required").and_then(Value::as_bool) {
-            record.insert("required".into(), json!(required));
+    // A length of time, so a negative or non-finite one is no reading of how
+    // long anything waited and is served as none at all.
+    for key in read.durations {
+        if let Some(seconds) = event
+            .payload
+            .get(*key)
+            .and_then(Value::as_f64)
+            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        {
+            record.insert((*key).to_owned(), json!(seconds));
         }
+    }
+    for key in read.flags {
+        if let Some(flag) = event.payload.get(*key).and_then(Value::as_bool) {
+            record.insert((*key).to_owned(), json!(flag));
+        }
+    }
+    if read.state {
         record.insert(
             "state".into(),
             json!(vcs::check_state(&event.payload).as_str()),
         );
-    }
-    // A grace is a length of time, so a negative or non-finite one is no reading
-    // of how long the lift waited and is served as no grace at all.
-    if let Some(grace) = event
-        .payload
-        .get("grace_seconds")
-        .and_then(Value::as_f64)
-        .filter(|grace| grace.is_finite() && *grace >= 0.0)
-    {
-        record.insert("grace_seconds".into(), json!(grace));
-    }
-    if let Some(warned) = event.payload.get("warned").and_then(Value::as_bool) {
-        record.insert("warned".into(), json!(warned));
     }
     (!record.is_empty()).then_some(Value::Object(record))
 }

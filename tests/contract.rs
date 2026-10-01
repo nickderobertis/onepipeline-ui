@@ -1280,12 +1280,13 @@ fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract
         );
     }
     let review = timeline_schema_paragraph(11);
-    for (kind, strings, lists) in onepipeline_ui::payload::vcs::REVIEW_RECORDS {
+    for record in onepipeline_ui::payload::vcs::REVIEW_RECORDS {
+        let kind = record.kind;
         assert!(
             review.contains(&format!("(`{kind}`")),
             "docs/contract.md's timeline schema 11 names no `{kind}` record"
         );
-        for field in strings.iter().chain(lists) {
+        for field in record.fields() {
             assert!(
                 review.contains(&format!("`{field}`")),
                 "docs/contract.md's timeline schema 11 says no `{kind}` carries `{field}`"

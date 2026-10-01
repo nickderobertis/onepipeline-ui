@@ -632,7 +632,7 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
         }
     }
     // Every kind whose events carry `review` — the payload's own table of them.
-    for (kind, ..) in payload::vcs::REVIEW_RECORDS {
+    for kind in payload::vcs::REVIEW_RECORDS.map(|record| record.kind) {
         assert!(
             before["spans"]
                 .as_array()
