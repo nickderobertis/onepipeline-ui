@@ -11605,6 +11605,10 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     let run = fixture_run::RUN_ID;
     let identity = "github.com/nickderobertis/onepipeline-ui";
     let dir = serving.run_dir(run);
+    // The kinds are the engine's own words, so a rename there fails here.
+    let deferred_kind = onepipeline::event::PipelineKind::ConcurrentDeferred.as_str();
+    let acknowledged_kind = onepipeline::event::PipelineKind::ConcurrentAcknowledged.as_str();
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the engine exports no type or schema for these payloads (its structs are `pub(crate)` and `schemas/events.json` omits them), and this crate serves a payload as an opaque `Value`, so the journey asserts byte-for-byte passthrough of whatever was journalled; these literals illustrate the documented shape and no assertion depends on matching it.
     let deferred = json!({
         "launching": run,
         "holders": [{
@@ -11637,8 +11641,9 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
             { "session": "a-hand-opened-session", "owner_pid": 4343 },
         ],
     });
-    fixture_run::append(&dir, "concurrent-deferred", deferred.clone());
-    fixture_run::append(&dir, "concurrent-acknowledged", acknowledged.clone());
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    fixture_run::append(&dir, deferred_kind, deferred.clone());
+    fixture_run::append(&dir, acknowledged_kind, acknowledged.clone());
 
     let concurrent = urlencode(r#"{"include":[{"kind":"concurrent-*"}]}"#);
     let read = http::post(
@@ -11665,8 +11670,8 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     assert_eq!(
         served,
         [
-            ("concurrent-deferred", &deferred),
-            ("concurrent-acknowledged", &acknowledged),
+            (deferred_kind, &deferred),
+            (acknowledged_kind, &acknowledged),
         ],
         "{read}"
     );
@@ -11681,7 +11686,11 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     // And the one record that went ahead on the dependency alone is still its
     // own kind to a reader excluding the override.
     let deferred_only = urlencode(
-        r#"{"include":[{"kind":"concurrent-*"}],"exclude":[{"kind":"concurrent-acknowledged"}]}"#,
+        &json!({
+            "include": [{ "kind": "concurrent-*" }],
+            "exclude": [{ "kind": acknowledged_kind }],
+        })
+        .to_string(),
     );
     let narrowed = http::post(
         serving.address,
