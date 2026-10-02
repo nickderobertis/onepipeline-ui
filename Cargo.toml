@@ -186,7 +186,7 @@ onemessagebus = "0.9.0"
 #
 # llmlint: ignore-block[changed_behavior_has_e2e] the re-dispatch, the destination-scoped
 # ids, the cut-short sweep, the discharged decisions, the native and paged board searches, the copy
-# links and digests and the reused retirement verdicts below are the engine's behaviour, composed by no code of this crate's — the reply
+# links and digests, the reused retirement verdicts and the sessions opened over a base conflict below are the engine's behaviour, composed by no code of this crate's — the reply
 # route hands a retry or a drop to the engine as the envelope's bytes, and nothing here builds
 # a re-dispatch, publishes a branch, sweeps a pool, settles a decision, queries or pages a board or
 # copies a project — and the engine's own suites prove them. What this crate owes for the
@@ -303,6 +303,16 @@ onemessagebus = "0.9.0"
 # This crate reads no conflict and serves the record as journalled;
 # `a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it`
 # holds that through the event, channel and timeline routes.
+#
+# 0.57.3 also makes a correlated verdict the ruling on the question it names,
+# whether the run is live or settled: `POST /api/v2/runs/{run}/channel/reply?correlation=C`
+# delivers it to that question's listener through the bus's binding on a
+# settled run too, answering the engine's `delivered` receipt, and never journals
+# it as the run's `completion-requested`, however its `completion` is spelled; a
+# correlation the run never raised is refused. The route's request and receipt
+# shapes are unchanged, and
+# `a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_completion`
+# holds it.
 #
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
