@@ -372,6 +372,209 @@ fn seed_landed_baseline(root: &Path, run: &str, project: &str) {
     .expect("the landed write-back baseline");
 }
 
+/// The second `local-md` source [`launch_across_two_local_md_sources`] configures,
+/// beside [`LOCAL_MD_SOURCE`]: where the plan's member project lives.
+pub const MEMBER_MD_SOURCE: &str = "signoffs";
+/// The native id of the member project [`launch_across_two_local_md_sources`]
+/// writes into [`MEMBER_MD_SOURCE`].
+pub const MEMBER_MD_PROJECT: &str = "signoff-board";
+/// The node of the member project's one task, which depends on
+/// [`APPROVAL_NODE_ID`] in the home project.
+pub const SIGNOFF_MEMBER_NODE_ID: &str = "signoff";
+
+/// Where a plan spanning two sources keeps each of its tasks: the qualified id of
+/// the home project the run was launched from, and each task's qualified item id
+/// and document.
+pub struct SpanningPlan {
+    pub project: String,
+    pub home_task: String,
+    pub home_document: PathBuf,
+    pub member_task: String,
+    pub member_document: PathBuf,
+}
+
+/// Turn [`write_awaiting_attestation`]'s run into one launched from a plan that
+/// spans two `local-md` sources: the home project [`LOCAL_MD_PROJECT`] in
+/// [`LOCAL_MD_SOURCE`], holding the approval, and the member project
+/// [`MEMBER_MD_PROJECT`] in [`MEMBER_MD_SOURCE`], holding a sign-off that waits
+/// on the approval across the two sources. The home names its member at
+/// `onetaskgraph.members` and the member its home at `onetaskgraph.member_of`,
+/// which is the link the store's routed copy writes.
+///
+/// The run's ledger is written as `onepipeline start` records a launch of the
+/// home: `plan.json` carries both nodes, each with the task record it was read
+/// from — the member's naming its own source, the home's none — and the landed
+/// baseline is seeded from that read, each item's destination in its task's own
+/// source. Both are hand-written for the reason [`seed_landed_baseline`] is.
+pub fn launch_across_two_local_md_sources(root: &Path, run: &str, dir: &Path) -> SpanningPlan {
+    let home_store = dir.join("plan-store");
+    let member_store = dir.join("member-store");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        format!(
+            "sources:\n  {LOCAL_MD_SOURCE}:\n    plugin: local-md\n    config:\n      root: {:?}\n  \
+             {MEMBER_MD_SOURCE}:\n    plugin: local-md\n    config:\n      root: {:?}\n",
+            home_store.display().to_string(),
+            member_store.display().to_string()
+        ),
+    )
+    .expect("the store configuration");
+    let project = format!("{LOCAL_MD_SOURCE}:{LOCAL_MD_PROJECT}");
+    let member = format!("{MEMBER_MD_SOURCE}:{MEMBER_MD_PROJECT}");
+    let goal = json!({ "text": "get the change approved and signed off" });
+    write_store_item(
+        &home_store
+            .join("projects")
+            .join(format!("{LOCAL_MD_PROJECT}.md")),
+        &[
+            ("title", json!("Approval")),
+            (
+                "metadata",
+                json!({
+                    "onepipeline.schema_version": 2,
+                    "onepipeline.goal": goal,
+                    "onepipeline.concurrency": 1,
+                    "onetaskgraph.members": [member],
+                }),
+            ),
+        ],
+        "",
+    );
+    write_store_item(
+        &member_store
+            .join("projects")
+            .join(format!("{MEMBER_MD_PROJECT}.md")),
+        &[
+            ("title", json!("Sign-off")),
+            ("metadata", json!({ "onetaskgraph.member_of": project })),
+        ],
+        "",
+    );
+
+    let home_native = format!("{LOCAL_MD_PROJECT}/000-{APPROVAL_NODE_ID}");
+    let member_native = format!("{MEMBER_MD_PROJECT}/001-{SIGNOFF_MEMBER_NODE_ID}");
+    let home_task = format!("{LOCAL_MD_SOURCE}:{home_native}");
+    let member_task = format!("{MEMBER_MD_SOURCE}:{member_native}");
+    let home_document = home_store.join("tasks").join(format!("{home_native}.md"));
+    let member_document = member_store
+        .join("tasks")
+        .join(format!("{member_native}.md"));
+    let (approve, sign) = ("Approve the change.", "Sign the change off.");
+    let human = |node: &str| json!({ "onepipeline.id": node, "onepipeline.kind": "human" });
+    write_store_item(
+        &home_document,
+        &[
+            ("title", json!("Approve the change")),
+            ("project", json!(LOCAL_MD_PROJECT)),
+            ("metadata", human(APPROVAL_NODE_ID)),
+        ],
+        approve,
+    );
+    write_store_item(
+        &member_document,
+        &[
+            ("title", json!("Sign the change off")),
+            ("project", json!(MEMBER_MD_PROJECT)),
+            ("depends_on", json!([{ "id": home_task }])),
+            ("metadata", human(SIGNOFF_MEMBER_NODE_ID)),
+        ],
+        sign,
+    );
+
+    let plan = json!({
+        "schema_version": 2,
+        "goal": goal,
+        "name": "approval",
+        "concurrency": 1,
+        "tasks": [
+            {
+                "id": APPROVAL_NODE_ID,
+                "kind": "human",
+                "task": approve,
+                "task_record": { "id": home_native, "title": "Approve the change" },
+            },
+            {
+                "id": SIGNOFF_MEMBER_NODE_ID,
+                "kind": "human",
+                "task": sign,
+                "deps": [APPROVAL_NODE_ID],
+                "task_record": {
+                    "id": member_native,
+                    "title": "Sign the change off",
+                    "source": MEMBER_MD_SOURCE,
+                },
+            },
+        ],
+    });
+    let run_dir = root.join(run);
+    fs::write(run_dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let journal = run_dir.join("events.jsonl");
+    let mut started: Value = serde_json::from_str(
+        fs::read_to_string(&journal)
+            .expect("the journal")
+            .trim_end(),
+    )
+    .expect("the run's start");
+    started["payload"]["plan"] = plan;
+    fs::write(&journal, format!("{started}\n")).expect("the journal");
+
+    let landed = |destination: &str, title: &str, body: &str, node: &str, deps: Value| {
+        use sha2::Digest;
+        let digest: String = sha2::Sha256::digest(body.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        json!({
+            "destination": destination,
+            "title": title,
+            "content_sha256": digest,
+            "status": null,
+            "metadata": human(node),
+            "delivers": [],
+            "depends_on": deps,
+        })
+    };
+    fs::write(
+        run_dir.join(onepipeline::cli::WRITEBACK_LANDED_FILE),
+        pretty(&json!({
+            "schema_version": onepipeline::cli::WRITEBACK_LANDED_SCHEMA_VERSION,
+            "project": project,
+            "project_metadata": {
+                "onepipeline.concurrency": 1,
+                "onepipeline.goal": goal,
+                "onepipeline.schema_version": 2,
+            },
+            "items": {
+                APPROVAL_NODE_ID: landed(
+                    &home_task, "Approve the change", approve, APPROVAL_NODE_ID, json!([]),
+                ),
+                SIGNOFF_MEMBER_NODE_ID: landed(
+                    &member_task,
+                    "Sign the change off",
+                    sign,
+                    SIGNOFF_MEMBER_NODE_ID,
+                    json!([APPROVAL_NODE_ID]),
+                ),
+            },
+        })),
+    )
+    .expect("the landed write-back baseline");
+
+    let launch = run_dir.join("launch.json");
+    let mut record: Value =
+        serde_json::from_str(&fs::read_to_string(&launch).expect("the launch record"))
+            .expect("the launch record parses");
+    record["project"] = json!(project);
+    fs::write(&launch, pretty(&record)).expect("the launch record");
+    SpanningPlan {
+        project,
+        home_task,
+        home_document,
+        member_task,
+        member_document,
+    }
+}
+
 /// The graph run one session id names: `{stream}.{member}`, as that library
 /// spells one, so the stream is everything before the last `.`.
 pub fn stream_of(session: &str) -> &str {

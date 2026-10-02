@@ -37,6 +37,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "run-started": "lifecycle",
   "run-stopped": "lifecycle",
   "driver-adopted": "lifecycle",
+  // A driver's account of how it let go of the run: the other end of the
+  // driving an adoption begins, and no node's work.
+  "driver-exited": "lifecycle",
   "node-ready": "lifecycle",
   "node-dispatched": "lifecycle",
   "node-settled": "lifecycle",
