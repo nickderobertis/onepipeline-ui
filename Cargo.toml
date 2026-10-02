@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.22.2"
+version = "0.22.3"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -292,21 +292,27 @@ onemessagebus = "0.9.0"
 # `onetaskgraph-*` requirements below move with this line so the lock links the
 # one copy of that family the engine pins.
 #
-# 0.57.3 makes a correlated verdict the ruling on the question it names, whether
-# the run is live or settled: `POST /api/v2/runs/{run}/channel/reply?correlation=C`
-# now delivers it to that question's listener through the bus's binding on a
+# 0.57.3 links onevcs 0.37, which opens a session continuing a branch whose
+# moved base conflicts with it by leaving the merge in progress for the session
+# to conclude, and says so in an optional `conflict` on `session-opened` — the
+# unmerged `paths`, the `base_commit` merged in and the `branch_tip` before it —
+# with no new kind. The engine dispatches the worker into that session with a
+# merge-resolution criterion and raises `session-conflict` only once its
+# publication budget is spent. A browser-adopted run's driver is this line's
+# copy of the engine, so its conflicts go back to the worker once this moves.
+# This crate reads no conflict and serves the record as journalled;
+# `a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it`
+# holds that through the event, channel and timeline routes.
+#
+# 0.57.3 also makes a correlated verdict the ruling on the question it names,
+# whether the run is live or settled: `POST /api/v2/runs/{run}/channel/reply?correlation=C`
+# delivers it to that question's listener through the bus's binding on a
 # settled run too, answering the engine's `delivered` receipt, and never journals
 # it as the run's `completion-requested`, however its `completion` is spelled; a
 # correlation the run never raised is refused. The route's request and receipt
 # shapes are unchanged, and
 # `a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_completion`
-# holds it. It also links onevcs 0.37, so a session continuing a branch whose
-# base moved to conflict with it opens with the merge in progress and is
-# dispatched to the worker to conclude rather than settling
-# `infrastructure-failure`; this crate reads no field that change adds. A
-# browser-adopted run's driver is this line's copy of the engine, so its replies
-# and sessions follow both once this moves, and the `onevcs` requirement below
-# moves with it.
+# holds it.
 #
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.22.2...v0.22.3) - 2026-10-02
+
+### Fixed
+
+- *(deps)* link the engine that hands a merge conflict to its worker ([#201](https://github.com/nickderobertis/onepipeline-ui/pull/201))
+
 ## [0.22.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.22.1...v0.22.2) - 2026-10-02
 
 ### Fixed
