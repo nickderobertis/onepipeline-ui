@@ -12417,6 +12417,138 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     );
 }
 
+/// A verdict naming a settled run's question is that question's ruling, and
+/// never the run asking to complete. A host raises its end-of-run question on
+/// the run's channel through the bus — non-blocking, because the run is not
+/// held on it — and listens for the answer under its correlation; a manager in
+/// the browser answers it with `{"completion": true, ...}` under that
+/// correlation. The engine this binary links delivers the ruling to the
+/// listener through the bus's binding and answers `delivered`, and writes no
+/// `completion-requested`: the run already closed, and a ruling on a question
+/// about it is not a request to close it again.
+#[test]
+fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_completion() {
+    use onemessagebus::{Answer, AskOptions, Config, Layouts, QueueName, TransportKinds};
+    use onepipeline::channel::layout::PlannerChannel;
+    use onepipeline::channel::{source, Surface};
+    use std::sync::Arc;
+
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let state = || {
+        http::get(serving.address, "/api/v2/runs?include_settled=true").json()["runs"][0]["state"]
+            .clone()
+    };
+    assert_eq!(state(), json!("settled"), "the fixture is a settled run");
+
+    // The question, raised through the bus over the run's own channel under the
+    // layout the engine keeps it in, with a listener waiting on its answer.
+    let channel = serving.runs_root().join(run).join("channel");
+    let bus = Config::local(&channel, Some("planner-channel"))
+        .with_transport_dir(&channel)
+        .resolve(
+            &Layouts::new().with(Arc::new(PlannerChannel)),
+            &TransportKinds::builtin(),
+        )
+        .expect("the run's channel bus");
+    let pending = bus
+        .ask::<Surface, Value>(
+            &QueueName::try_from("surfaces").expect("the surfaces queue"),
+            Surface {
+                id: 0,
+                kind: "planner-question".to_owned(),
+                message: "the run settled: is its work complete?".to_owned(),
+                source: source::PROPOSAL.to_owned(),
+                blocking: false,
+                queued_at: 1,
+                workstream: None,
+                abandoned: false,
+                asker: None,
+                correlation: None,
+            },
+            AskOptions {
+                blocking: false,
+                asker: None,
+                about: None,
+            },
+        )
+        .expect("the question is raised");
+    let correlation = pending.correlation().to_string();
+    let listener = std::thread::spawn(move || pending.wait(Duration::from_secs(60)));
+    let queue = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert!(
+        queue["surfaces"]
+            .as_array()
+            .expect("the channel's surfaces")
+            .iter()
+            .any(|surface| surface["correlation"] == json!(correlation)
+                && surface["blocking"] == json!(false)),
+        "the question is not on the run's channel: {queue}"
+    );
+
+    // A correlation the run never raised is refused, with nothing delivered.
+    let unraised = http::post(
+        serving.address,
+        &format!("{reply}?correlation=c-0123456789abcdef0123456789abcdef"),
+        r#"{"version":2,"completion":true,"reason":"the work is done"}"#,
+    );
+    assert_eq!(unraised.status, 422, "{}", unraised.body);
+    assert_eq!(unraised.json()["error"]["code"], json!("refused"));
+    assert!(
+        !listener.is_finished(),
+        "a refused reply reached the listener"
+    );
+
+    // The ruling, under the question's correlation.
+    let answered = http::post(
+        serving.address,
+        &format!("{reply}?correlation={correlation}"),
+        r#"{"version":2,"completion":true,"reason":"the work is done"}"#,
+    );
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let answered = answered.json();
+    assert_enveloped(&answered);
+    assert_eq!(answered["run_id"], json!(run));
+    assert_eq!(
+        answered["receipt"]["state"],
+        json!("delivered"),
+        "{answered}"
+    );
+    assert_eq!(
+        answered["receipt"]["verdict"],
+        json!("delivered"),
+        "{answered}"
+    );
+
+    let Answer::Reply(ruling) = listener.join().expect("the listener") else {
+        panic!("the listener was not handed the ruling");
+    };
+    assert_eq!(ruling["reply"]["completion"], json!(true), "{ruling}");
+    assert_eq!(
+        ruling["reply"]["reason"],
+        json!("the work is done"),
+        "{ruling}"
+    );
+
+    // And the run was not asked to complete: its journal holds no completion
+    // request, and it reads as settled as it did before.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    assert!(
+        !events_on(&timeline)
+            .iter()
+            .any(|event| event["kind"] == json!("completion-requested")),
+        "a ruling on the run's question was journalled as its completion request: {timeline}"
+    );
+    assert_eq!(state(), json!("settled"));
+}
+
 #[test]
 fn an_attestation_completes_a_ready_human_action() {
     let serving = Serving::start(|root| {
