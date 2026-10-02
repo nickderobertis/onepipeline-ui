@@ -12103,6 +12103,96 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
 }
 
+/// onevcs 0.37 opens a session continuing a branch whose base conflicts with
+/// it by leaving the merge in progress for the worker to conclude, and says so
+/// on the `session-opened` it journals: an optional `conflict` naming the
+/// unmerged paths, the base merged in and the branch's tip before it. No kind
+/// is new and nothing here reads the key, so what this crate owes is that a
+/// run carrying one is still read — its change noticed on the event route,
+/// the record listed on its node's timeline, its branch still the node's
+/// publication — and that the record reaches a reader with the key as written.
+#[test]
+fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let branch = "nick/184/a-continued-branch";
+    let mut stream = http::stream(
+        serving.address,
+        &format!("/api/v2/events?run_id={run}"),
+        None,
+    );
+    assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
+
+    // The object is onevcs's own type, serialized as that library writes it,
+    // so a field it renames fails here rather than in a copy of its spelling.
+    let conflict = onevcs::OpenConflict {
+        paths: vec!["Cargo.lock".into(), "src/payload.rs".into()],
+        base_commit: "1f0c3a9d2b7e4c5a6f8e9d0c1b2a3f4e5d6c7b8a".into(),
+        branch_tip: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d".into(),
+    };
+    let opened = json!({
+        "token": "a-vcs-session-token",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "branch": branch,
+        "base": "main",
+        "worktree": "/a/recorded/worktree",
+        "clone": "/a/recorded/clone",
+        "conflict": serde_json::to_value(&conflict).expect("serialize the conflict"),
+    });
+    let kind = serde_json::to_value(onevcs::EventKind::SessionOpened).expect("a kind serializes");
+    let kind = kind.as_str().expect("a kind serializes as its wire string");
+    fixture_run::append_relayed(
+        &serving.run_dir(run),
+        "vcs",
+        kind,
+        json!({ "run_id": run, "node": node }),
+        opened.clone(),
+    );
+
+    // The event route notices the run moved, rather than refusing the record.
+    let changed = stream.next_frame().expect("the stream stayed open");
+    assert_eq!(changed.event, "run.changed", "{}", changed.data);
+    assert_eq!(changed.json()["run_id"], json!(run));
+
+    // The record as journalled, the conflict included, to a reader asking for it.
+    let only = urlencode(&json!({ "include": [{ "kind": kind }] }).to_string());
+    let read = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/next?filter={only}"),
+        "",
+    );
+    assert_eq!(read.status, 200, "{}", read.body);
+    let read = read.json();
+    assert_enveloped(&read);
+    let served: Vec<&Value> = read["events"]
+        .as_array()
+        .expect("the shaped events")
+        .iter()
+        .filter(|event| event["payload"]["conflict"].is_object())
+        .map(|event| &event["payload"])
+        .collect();
+    assert_eq!(served, [&opened], "{read}");
+
+    // And the timeline lists it on the node, and the run still reads.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    assert!(
+        events_on(&timeline)
+            .iter()
+            .any(|event| event["kind"] == json!(kind) && event["node_id"] == json!(node)),
+        "the timeline lists no {kind} for the node: {timeline}"
+    );
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+}
+
 #[test]
 fn the_channel_is_raised_read_and_claimed_over_http() {
     let serving = Serving::start(|root| {
