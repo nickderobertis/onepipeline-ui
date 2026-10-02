@@ -292,6 +292,18 @@ onemessagebus = "0.9.0"
 # `onetaskgraph-*` requirements below move with this line so the lock links the
 # one copy of that family the engine pins.
 #
+# 0.57.3 links onevcs 0.37, which opens a session continuing a branch whose
+# moved base conflicts with it by leaving the merge in progress for the session
+# to conclude, and says so in an optional `conflict` on `session-opened` — the
+# unmerged `paths`, the `base_commit` merged in and the `branch_tip` before it —
+# with no new kind. The engine dispatches the worker into that session with a
+# merge-resolution criterion and raises `session-conflict` only once its
+# publication budget is spent. A browser-adopted run's driver is this line's
+# copy of the engine, so its conflicts go back to the worker once this moves.
+# This crate reads no conflict and serves the record as journalled;
+# `a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it`
+# holds that through the event, channel and timeline routes.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -300,7 +312,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.57.2"
+onepipeline = "=0.57.3"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -333,7 +345,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.36.0"
+onevcs = "0.37.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
