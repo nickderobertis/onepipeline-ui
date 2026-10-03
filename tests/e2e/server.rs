@@ -5300,10 +5300,12 @@ fn a_run_that_ended_is_served_as_ended_beside_its_driver_liveness() {
         assert_eq!(row(run)["state"], json!(state), "{listed}");
         let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
         assert_eq!(detail["run"]["state"], json!(state), "{detail}");
+        // A listing row is the run id, then its launcher, progress and word.
         assert!(
-            printed
-                .lines()
-                .any(|line| line.starts_with(&format!("{run}  {word}"))),
+            printed.lines().any(|line| {
+                let line = line.trim();
+                line.starts_with(run) && line.ends_with(word)
+            }),
             "`onepipeline runs` reads {run} as something other than {word}:\n{printed}"
         );
     }
@@ -12043,6 +12045,9 @@ fn listing_a_run_that_predates_the_channel_makes_it_no_channel() {
 fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
+        // A driver recorded on another host reads as live and quiet — `PARKED`,
+        // which is driven — so the settled run names one proved gone here.
+        fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, 0x7FFF_FFF0);
     });
     let run = fixture_run::RUN_ID;
     let identity = "github.com/nickderobertis/onepipeline-ui";
@@ -12243,6 +12248,9 @@ fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it(
 fn the_channel_is_raised_read_and_claimed_over_http() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
+        // A driver recorded on another host reads as live and quiet — `PARKED`,
+        // which is driven — so the settled run names one proved gone here.
+        fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, 0x7FFF_FFF0);
     });
     let run = fixture_run::RUN_ID;
 
@@ -13783,11 +13791,11 @@ fn an_adoption_through_a_replaced_server_that_cannot_keep_its_engine_is_refused(
 }
 
 /// A process this journey starts to stand as the run's parked driver: alive,
-/// silent, and recorded as the run's driver, so an adoption ends it before it
-/// starts its own. Ending it is what installs the upgrade: it renames `incoming`
-/// over `installed` and only then exits — so the build on disk changes after
-/// the server has named the program it will retain, and before the engine
-/// starts it, every time.
+/// silent, and recorded as the run's driver, so the engine reads the run as
+/// driven and refuses to adopt it while it lives. Ending it is what installs
+/// the upgrade: it renames `incoming` over `installed` and only then exits — so
+/// the build on disk changes while the server runs, and the driver an adoption
+/// then retains is the one place the incoming build could be started from.
 #[cfg(target_os = "linux")]
 struct ParkedDriver {
     pid: u32,
@@ -13860,17 +13868,16 @@ fn parked_on_this_host(root: &Path, run: &str, pid: u32) {
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] two drivers settling a
 // one-node graph, as in the journey above, and a copy of the built binary as the install.
-/// The upgrade lands *during* the adoption: after the server has named the
-/// program it retains, and before the engine starts it — the window in which a
-/// server that handed the engine its own path would start the newly installed
-/// build. The window is opened by the engine itself rather than by a clock: an
-/// adoption ends the run's parked driver and waits for it to be gone before it
-/// starts its own, and the parked driver here installs the upgrade as it goes.
-/// The adoption still answers its receipt, and the driver it retained runs the
-/// engine the server links and completes the run.
+/// A run a live driver holds, however quiet, is that driver's: the engine reads
+/// it as `PARKED` — driven — and an adoption is refused, naming the driver, and
+/// ends nothing, starts nothing and leaves the installed build alone. The
+/// upgrade lands when that driver goes, while the server runs, and the adoption
+/// made after it still answers its receipt with a driver retained from the
+/// engine the server links, which completes the run; the incoming build never
+/// runs.
 #[cfg(target_os = "linux")]
 #[test]
-fn an_upgrade_landing_during_an_adoption_never_starts_the_new_build() {
+fn an_upgrade_landing_after_a_refused_adoption_never_starts_the_new_build() {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
@@ -13920,33 +13927,37 @@ fn an_upgrade_landing_during_an_adoption_never_starts_the_new_build() {
     assert_eq!(attested.json()["receipt"]["state"], json!("applied"));
 
     // Then the run is held by a driver that went quiet, which installs the
-    // upgrade when the adoption ends it.
+    // upgrade when it is ended.
     let incoming = stage_incoming(&installed, &ran);
     let parked = ParkedDriver::start(&incoming, &installed);
     parked_on_this_host(&root, run, parked.pid);
-    // Parked is the engine's own verdict, and adoption asks it rather than the
-    // row — which reads a completed graph as settled whatever holds it: a
-    // recorded driver alive on this host, silent past the threshold. The last
-    // thing the run recorded is the attestation, so twice the threshold after
-    // it the verdict holds, and goes on holding: nothing else writes to the run.
+    // Parked is the engine's own verdict, and adoption asks it: a recorded
+    // driver alive on this host, silent past the threshold. The last thing the
+    // run recorded is the attestation, so twice the threshold after it the
+    // verdict holds, and goes on holding: nothing else writes to the run.
     std::thread::sleep(Duration::from_secs(2));
-    // Up to the adoption, the path still names the build the server runs.
-    assert!(fs::read(&installed).expect("the installed build") == built);
 
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let adopted = adopted.json();
-    assert_enveloped(&adopted);
-    assert_eq!(adopted["run_id"], json!(run));
-    let second = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let driver = RetainedDriver(second);
-
-    // The upgrade landed inside the adoption: the parked driver was ended, the
-    // path now holds the incoming build, and the server's own file is gone.
+    // An adoption of a run a live driver holds is refused, and ends nothing.
+    let refused = http::post(serving.address, &adopt, "");
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    let message = refused["error"]["message"].as_str().expect("a message");
     assert!(
-        !process_is_live(parked.pid),
-        "the adoption ended the parked driver"
+        message.contains(&format!("driver pid {}", parked.pid)) && message.contains("PARKED"),
+        "{message}"
     );
+    assert!(
+        process_is_live(parked.pid),
+        "the refused adoption left the parked driver running"
+    );
+    assert!(incoming.exists(), "nothing installed the upgrade");
+    assert!(fs::read(&installed).expect("the installed build") == built);
+    assert_eq!(adoptions(serving.address), 1);
+
+    // The driver goes, installing the upgrade as it does: the path now holds the
+    // incoming build, and the server's own file is gone.
+    drop(parked);
     assert!(!incoming.exists(), "the upgrade was installed");
     assert!(
         fs::read(&installed).expect("the installed build") != built,
@@ -13958,10 +13969,17 @@ fn an_upgrade_landing_during_an_adoption_never_starts_the_new_build() {
         "{}",
         named.display()
     );
-    drop(parked);
+
+    let adopted = http::post(serving.address, &adopt, "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let adopted = adopted.json();
+    assert_enveloped(&adopted);
+    assert_eq!(adopted["run_id"], json!(run));
+    let second = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(second);
 
     // And the driver started is the engine the server links, which completes
-    // the run; the build installed during the adoption never ran.
+    // the run; the build installed before the adoption never ran.
     eventually("the second adoption was journalled", || {
         adoptions(serving.address) == 2
     });
@@ -13980,7 +13998,7 @@ fn an_upgrade_landing_during_an_adoption_never_starts_the_new_build() {
     drop(driver);
     assert!(
         !ran.exists(),
-        "the build installed during the adoption never ran"
+        "the build installed before the adoption never ran"
     );
     let kept = kept_images(&dir.join("cache"));
     assert_eq!(kept.len(), 1, "{kept:?}");

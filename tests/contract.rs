@@ -362,22 +362,30 @@ fn shapes() -> Vec<RunShape> {
         // restatement of `SETTLED` over the driver's word would miss: a graph
         // that converged with a node `failed`, held to the closure rule and not,
         // and a run nothing drives whose one node is a human action nobody took.
+        // A run reads as ended only once nothing drives it, and a driver recorded
+        // on another host reads as live, so the failed graphs name one proved
+        // gone on this host.
         ("a run that ended with a failed node", |root| {
             fixture_run::write_converged_with_a_failure(
                 root,
                 fixture_run::CONVERGED_FAILED_RUN_ID,
                 false,
             );
+            driven_by(root, fixture_run::CONVERGED_FAILED_RUN_ID, 0x7FFF_FFF0);
             fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
         }),
-        ("a run owed its closure that ended with a failed node", |root| {
-            fixture_run::write_converged_with_a_failure(
-                root,
-                fixture_run::CONVERGED_FAILED_RUN_ID,
-                true,
-            );
-            fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
-        }),
+        (
+            "a run owed its closure that ended with a failed node",
+            |root| {
+                fixture_run::write_converged_with_a_failure(
+                    root,
+                    fixture_run::CONVERGED_FAILED_RUN_ID,
+                    true,
+                );
+                driven_by(root, fixture_run::CONVERGED_FAILED_RUN_ID, 0x7FFF_FFF0);
+                fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
+            },
+        ),
         ("an undriven run waiting on a human node", |root| {
             let launched_from = root.parent().expect("a workspace above the runs root");
             fixture_run::write_awaiting_attestation(root, fixture_run::RUN_ID, launched_from);
@@ -834,6 +842,10 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
     let (adopting_workspace, adopt_root) = fixture_run::workspace();
     fixture_run::write(&adopt_root, fixture_run::RUN_ID);
     fixture_run::adoptable_from(&adopt_root, fixture_run::RUN_ID, adopting_workspace.path());
+    // A driver recorded on another host cannot be probed, so it reads as live
+    // and quiet — `PARKED`, which is driven — and an adoption refuses it. The
+    // run is adopted from a driver proved gone on this host instead.
+    driven_by(&adopt_root, fixture_run::RUN_ID, 0x7FFF_FFF0);
     let adopting = store_over(&adopt_root).driving_with(&api_binary());
     std::env::set_var(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION);
     std::env::set_var(onepipeline_ui::store::RUNS_DIR_ENV, &adopt_root);
