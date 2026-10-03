@@ -322,7 +322,23 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.57.3"
+#
+# 0.59.0 reads how a run ended: the listing word is `SETTLED`, `ENDED failed`,
+# `ENDED unfinished` or `ENDED stopped` for a run that ended, and `PAUSED` for an
+# undriven run held on a decision, before the `DriverLiveness` word it used to
+# fall back to for every unfinished run — so a run that ended with a node not
+# `done` no longer reads `DRIVER DEAD` forever. It publishes that word over the
+# bounded summary as `views::standing_word_of`, which `src/liveness.rs` calls
+# rather than restating, and its `liveness` beside it is unchanged. 0.60.0 makes
+# `PARKED` a live, driven driver and journals `driver-exited`. A run's `state`
+# therefore also serves `ended-failed`, `ended-unfinished`, `ended-stopped` and
+# `paused`, with no route or field added;
+# `a_run_that_ended_is_served_as_ended_beside_its_driver_liveness` holds the
+# endings to the CLI, and `tests/contract.rs`'s
+# `a_row_read_from_the_summary_is_the_row_a_fold_produces` holds the row to the
+# fold over an ended, a stopped and a paused run. The `onetaskgraph-*`
+# requirements below move to the 0.2.57 the engine pins exactly.
+onepipeline = "=0.60.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -373,8 +389,8 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
 # engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.2.54"
-onetaskgraph-plugin-api = "0.2.54"
+onetaskgraph-core = "0.2.57"
+onetaskgraph-plugin-api = "0.2.57"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in

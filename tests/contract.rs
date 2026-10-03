@@ -358,6 +358,31 @@ fn shapes() -> Vec<RunShape> {
             fixture_run::write_lanes(root, fixture_run::RUN_ID);
             fixture_run::RUN_ID.to_owned()
         }),
+        // The endings and the pause the engine's listing word reads, which a
+        // restatement of `SETTLED` over the driver's word would miss: a graph
+        // that converged with a node `failed`, held to the closure rule and not,
+        // and a run nothing drives whose one node is a human action nobody took.
+        ("a run that ended with a failed node", |root| {
+            fixture_run::write_converged_with_a_failure(
+                root,
+                fixture_run::CONVERGED_FAILED_RUN_ID,
+                false,
+            );
+            fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
+        }),
+        ("a run owed its closure that ended with a failed node", |root| {
+            fixture_run::write_converged_with_a_failure(
+                root,
+                fixture_run::CONVERGED_FAILED_RUN_ID,
+                true,
+            );
+            fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
+        }),
+        ("an undriven run waiting on a human node", |root| {
+            let launched_from = root.parent().expect("a workspace above the runs root");
+            fixture_run::write_awaiting_attestation(root, fixture_run::RUN_ID, launched_from);
+            fixture_run::RUN_ID.to_owned()
+        }),
         // The two that reach the pid probe at all: a launch record naming any
         // other host resolves toward live without asking the process table.
         ("a run this very process is driving", |root| {
@@ -416,6 +441,7 @@ fn driven_by(root: &Path, run: &str, pid: u32) {
 /// `tests/e2e/server.rs`'s `a_rows_clock_and_the_details_are_one_reading`.
 #[test]
 fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
+    let mut read = std::collections::BTreeSet::new();
     for (shape, write) in shapes() {
         let (_workspace, root) = fixture_run::workspace();
         let run = write(&root);
@@ -427,10 +453,19 @@ fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
         let id = RunId::try_from(run.as_str()).expect("a usable run id");
         let clock = onepipeline_ui::telemetry::of_aggregate(&id, &summary.timing).ok();
         assert!(clock.is_some(), "{shape}: the summary carries no clock");
+        read.insert(onepipeline_ui::liveness::word(&summary));
         assert_eq!(
             onepipeline_ui::payload::run_row(&id, &summary, &paths, clock.as_ref()),
             onepipeline_ui::payload::run_summary(&view, clock.as_ref()),
             "{shape}: the bounded reading and the fold describe different runs"
+        );
+    }
+    // The words a restatement of the engine's would have missed, so a shape
+    // that stopped reaching one is a gate that stopped holding it.
+    for word in ["ENDED failed", "ENDED stopped", "PAUSED"] {
+        assert!(
+            read.contains(word),
+            "no shape read as {word}; the shapes read {read:?}"
         );
     }
 }

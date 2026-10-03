@@ -5264,6 +5264,52 @@ fn a_run_that_wrote_no_result_is_described_by_the_fold_behind_it() {
     );
 }
 
+/// **A run that ended reads as ended**, on the row and in the detail, and as
+/// the word `onepipeline runs` prints over the same store: one whose graph
+/// converged with a node `failed`, and one that was stopped mid-flight. What is
+/// driving it is a separate field and keeps its own word — a run whose driver on
+/// this host is gone is still `DRIVER DEAD` there, because how a run ended is not
+/// who is driving it.
+#[test]
+fn a_run_that_ended_is_served_as_ended_beside_its_driver_liveness() {
+    let failed = fixture_run::CONVERGED_FAILED_RUN_ID;
+    let stopped = fixture_run::STOPPED_RUN_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_converged_with_a_failure(root, failed, false);
+        // Above the kernel's own maximum on every platform this runs on, so it
+        // is a driver nothing can be holding.
+        fixture_run::driven_on_this_host(root, failed, 0x7FFF_FFF0);
+        fixture_run::write_stopped_mid_flight(root, stopped);
+    });
+    let listed = http::get(serving.address, "/api/v2/runs").json();
+    let row = |run: &str| {
+        listed["runs"]
+            .as_array()
+            .expect("runs")
+            .iter()
+            .find(|row| row["run_id"] == json!(run))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not listed: {listed}"))
+    };
+    let printed = String::from_utf8(sibling::run(&serving.runs_root(), None, &["runs"]).stdout)
+        .expect("the CLI prints text");
+    for (run, state, word) in [
+        (failed, "ended-failed", "ENDED failed"),
+        (stopped, "ended-stopped", "ENDED stopped"),
+    ] {
+        assert_eq!(row(run)["state"], json!(state), "{listed}");
+        let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+        assert_eq!(detail["run"]["state"], json!(state), "{detail}");
+        assert!(
+            printed
+                .lines()
+                .any(|line| line.starts_with(&format!("{run}  {word}"))),
+            "`onepipeline runs` reads {run} as something other than {word}:\n{printed}"
+        );
+    }
+    assert_eq!(row(failed)["liveness"], json!("DRIVER DEAD"), "{listed}");
+}
+
 #[test]
 fn a_node_that_stored_nothing_serves_no_verification_and_no_publication() {
     let serving = live_run();

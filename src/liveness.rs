@@ -26,34 +26,27 @@
 
 use onepipeline::views::{DriverLiveness, RunSummary};
 
-/// The word a settled run reads as, whatever is or is not driving it.
-///
-/// A run whose graph completed is settled rather than abandoned: its driver is
-/// gone because there was nothing left for it to do, and reporting it as
-/// undriven would send a planner to intervene in finished work.
-const SETTLED: &str = "SETTLED";
-
 /// The status word every node of a completed graph carries.
 ///
 /// The run's own word, as `node_counts` counts it. The SDK's `NodeStatus` is
 /// declared in a private module, so this is the same literal
-/// [`payload`](crate::payload) already reads a status by, held to the SDK's
-/// meaning by the drift gate this module's header names.
+/// [`payload`](crate::payload) already reads a status by. It decides only
+/// [`graph_complete`] — a row's phase and timing, and whether a run has
+/// anything left to watch — and never the row's word, which is the SDK's.
 const DONE: &str = "done";
 
-/// The word a run's summary reads as: how it is being driven, or that it is
-/// over.
+/// The word a run's summary reads as: how it is being driven, how it ended, or
+/// that it is paused on a decision.
 ///
-/// The sibling's `views::liveness_word` over a folded run, over the bounded
-/// document — see this module's header for the check that holds the two
-/// together.
+/// The SDK's own listing word, called rather than restated:
+/// [`views::standing_word_of`](onepipeline::views::standing_word_of) is the word
+/// `onepipeline runs` prints for this row — `SETTLED`, `ENDED failed`,
+/// `ENDED unfinished`, `ENDED stopped`, `PAUSED`, or else the
+/// [`DriverLiveness`] word — and `views::liveness_word` gives the same word over
+/// a fold. See this module's header for the check that holds the two together.
 #[must_use]
 pub fn word(summary: &RunSummary) -> &'static str {
-    if graph_complete(summary) {
-        SETTLED
-    } else {
-        driver(summary).as_str()
-    }
+    onepipeline::views::standing_word_of(summary)
 }
 
 /// Whether every node the run recorded has settled `done`.
