@@ -121,8 +121,9 @@ const NODE_TONE: Readonly<Record<DagNodeState, StateTone | undefined>> = {
  * A run's state is an open string in the read contract and each executor has its
  * own words — `onepipeline` prints `ACTIVE` and `SETTLED` from its own CLI, and a
  * server that says `running` and `complete` is equally conforming. Each pair reads
- * as one tone. A word no table holds — `driver-dead`, `undriven` — is shown untoned
- * rather than relabelled: it is a real state with no outcome in it.
+ * as one tone. A word no table holds — `driver-dead`, `undriven`, `paused`, or an
+ * ending such as `ended-failed` or `ended-stopped` — is shown untoned rather than
+ * relabelled: it is the engine's own reading, and a tone here would be a second one.
  */
 const TONE: Readonly<Record<string, StateTone | undefined>> = {
   ...NODE_TONE,

@@ -339,6 +339,16 @@ onemessagebus = "0.9.0"
 # `views::standing_word_of`, the bounded twin of the fold's `liveness_word`, so
 # the row and the fold still give one word for one run.
 #
+# 0.60.1 reads a live, quiet driver as `PARKED` — a run that is driven, never one
+# nothing drives — which `RUN_LIVENESS_NOTHING_DRIVING` in the browser already
+# excludes, and requires nothing else of this crate. With it, `state` serves
+# `ended-failed` for a graph that converged with a node `failed` while its
+# `liveness` stays the driver's `DRIVER DEAD`;
+# `a_run_that_ended_is_served_as_ended_beside_its_driver_liveness` holds the
+# endings to the CLI, and `tests/contract.rs`'s
+# `a_row_read_from_the_summary_is_the_row_a_fold_produces` holds the row to the
+# fold over a failed, a stopped and a paused run.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -347,7 +357,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.60.0"
+onepipeline = "=0.60.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets

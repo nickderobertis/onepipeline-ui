@@ -358,6 +358,39 @@ fn shapes() -> Vec<RunShape> {
             fixture_run::write_lanes(root, fixture_run::RUN_ID);
             fixture_run::RUN_ID.to_owned()
         }),
+        // The endings and the pause the engine's listing word reads, which a
+        // restatement of `SETTLED` over the driver's word would miss: a graph
+        // that converged with a node `failed`, held to the closure rule and not,
+        // and a run nothing drives whose one node is a human action nobody took.
+        // A run reads as ended only once nothing drives it, and a driver recorded
+        // on another host reads as live, so the failed graphs name one proved
+        // gone on this host.
+        ("a run that ended with a failed node", |root| {
+            fixture_run::write_converged_with_a_failure(
+                root,
+                fixture_run::CONVERGED_FAILED_RUN_ID,
+                false,
+            );
+            driven_by(root, fixture_run::CONVERGED_FAILED_RUN_ID, 0x7FFF_FFF0);
+            fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
+        }),
+        (
+            "a run owed its closure that ended with a failed node",
+            |root| {
+                fixture_run::write_converged_with_a_failure(
+                    root,
+                    fixture_run::CONVERGED_FAILED_RUN_ID,
+                    true,
+                );
+                driven_by(root, fixture_run::CONVERGED_FAILED_RUN_ID, 0x7FFF_FFF0);
+                fixture_run::CONVERGED_FAILED_RUN_ID.to_owned()
+            },
+        ),
+        ("an undriven run waiting on a human node", |root| {
+            let launched_from = root.parent().expect("a workspace above the runs root");
+            fixture_run::write_awaiting_attestation(root, fixture_run::RUN_ID, launched_from);
+            fixture_run::RUN_ID.to_owned()
+        }),
         // The two that reach the pid probe at all: a launch record naming any
         // other host resolves toward live without asking the process table.
         ("a run this very process is driving", |root| {
@@ -416,6 +449,7 @@ fn driven_by(root: &Path, run: &str, pid: u32) {
 /// `tests/e2e/server.rs`'s `a_rows_clock_and_the_details_are_one_reading`.
 #[test]
 fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
+    let mut read = std::collections::BTreeSet::new();
     for (shape, write) in shapes() {
         let (_workspace, root) = fixture_run::workspace();
         let run = write(&root);
@@ -427,10 +461,19 @@ fn a_row_read_from_the_summary_is_the_row_a_fold_produces() {
         let id = RunId::try_from(run.as_str()).expect("a usable run id");
         let clock = onepipeline_ui::telemetry::of_aggregate(&id, &summary.timing).ok();
         assert!(clock.is_some(), "{shape}: the summary carries no clock");
+        read.insert(onepipeline_ui::liveness::word(&summary));
         assert_eq!(
             onepipeline_ui::payload::run_row(&id, &summary, &paths, clock.as_ref()),
             onepipeline_ui::payload::run_summary(&view, clock.as_ref()),
             "{shape}: the bounded reading and the fold describe different runs"
+        );
+    }
+    // The words a restatement of the engine's would have missed, so a shape
+    // that stopped reaching one is a gate that stopped holding it.
+    for word in ["ENDED failed", "ENDED stopped", "PAUSED"] {
+        assert!(
+            read.contains(word),
+            "no shape read as {word}; the shapes read {read:?}"
         );
     }
 }
@@ -799,6 +842,10 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
     let (adopting_workspace, adopt_root) = fixture_run::workspace();
     fixture_run::write(&adopt_root, fixture_run::RUN_ID);
     fixture_run::adoptable_from(&adopt_root, fixture_run::RUN_ID, adopting_workspace.path());
+    // A driver recorded on another host cannot be probed, so it reads as live
+    // and quiet — `PARKED`, which is driven — and an adoption refuses it. The
+    // run is adopted from a driver proved gone on this host instead.
+    driven_by(&adopt_root, fixture_run::RUN_ID, 0x7FFF_FFF0);
     let adopting = store_over(&adopt_root).driving_with(&api_binary());
     std::env::set_var(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION);
     std::env::set_var(onepipeline_ui::store::RUNS_DIR_ENV, &adopt_root);

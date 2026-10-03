@@ -590,7 +590,10 @@ export const runLaunchSchema = openObject({
  * Open rather than a closed enum, on the terms `state` is: the vocabulary is the
  * engine's — `ACTIVE`, `DRIVER DEAD`, `PARKED`, `UNDRIVEN` today — and a word a
  * later engine adds has to reach a reader as itself rather than fail the whole
- * list. Served whether or not the run has settled; `state` folds the settled case.
+ * list. Served whether or not the run has settled or ended; `state` folds those
+ * in, as the engine's listing word lowercased with dashes for spaces — `settled`,
+ * `ended-failed`, `ended-unfinished`, `ended-stopped` and `paused` beside the
+ * four words here.
  */
 export const runLivenessSchema = z.string().min(1);
 
