@@ -314,6 +314,31 @@ onemessagebus = "0.9.0"
 # `a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_completion`
 # holds it.
 #
+# 0.60.0 runs one plan across its home project and the member projects the home
+# names at `onetaskgraph.members`, each naming its home at
+# `onetaskgraph.member_of`, and links onetaskgraph 0.2.57, which carries that
+# membership, repository routing that files a task into the member project of
+# the source its repository routes to, and the Linear plugin's `status_mapping`.
+# A browser-adopted run's driver is this line's copy of the engine, so once this
+# moves it reads a plan across its home and member projects in different
+# sources, holds a dependency between two of them as one edge of one graph, and
+# writes each settlement back where its task lives: the task record of a
+# member's task names its own `source`, and the landed baseline names each
+# item's destination in that source.
+# `an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives`
+# holds that through `POST /api/v2/runs/{run}/adopt`. This crate reads no
+# membership, and its `onetaskgraph-*` requirements below move with this line.
+#
+# Between 0.57.3 and 0.60.0 the engine journals `driver-exited`, a driver's
+# account of how it let go of a run, which the browser files under `lifecycle`
+# beside `driver-adopted`; reads an undriven run's ending off its run-end hook
+# verdict, so a run whose one human action is outstanding reads `PAUSED` where it
+# read `DRIVER DEAD` and a stopped one `ENDED stopped`, words `state` serves as
+# the engine spells them; and gives `drop` an optional `reason`, which the
+# browser's reply schema carries. A row's `state` is now read through
+# `views::standing_word_of`, the bounded twin of the fold's `liveness_word`, so
+# the row and the fold still give one word for one run.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -322,7 +347,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.57.3"
+onepipeline = "=0.60.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -373,8 +398,8 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
 # engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.2.54"
-onetaskgraph-plugin-api = "0.2.54"
+onetaskgraph-core = "0.2.57"
+onetaskgraph-plugin-api = "0.2.57"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
