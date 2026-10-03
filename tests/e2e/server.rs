@@ -14817,7 +14817,9 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The node ids of every task one project holds, read through the store the
-/// binary links under `dir`'s configuration, without its members.
+/// binary links under `dir`'s configuration, without its members. Its one caller
+/// is the `cfg(unix)` journey above, so it is compiled where that journey is.
+#[cfg(unix)]
 fn project_nodes(dir: &Path, project: &str) -> Vec<String> {
     let loaded = onetaskgraph_core::config::load(
         dir,
