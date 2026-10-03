@@ -150,6 +150,13 @@ impl ApiError {
     /// The three run-scoped rulings reach the last arm, which is right for a
     /// caller that named no run: a listing over the root meeting one is a
     /// failure underneath the verb, not a ruling on the request.
+    ///
+    /// It takes the engine's own [`onepipeline::Error`] just as
+    /// [`from_engine`](Self::from_engine) does, so this crate's public surface
+    /// follows the linked engine's here too: moving the exact `onepipeline`
+    /// requirement in `Cargo.toml` across an incompatible version leaves this
+    /// signature spelled as before while the type it takes changes identity,
+    /// which makes that move a breaking change of this crate.
     #[must_use]
     pub fn from_engine_unscoped(error: onepipeline::Error) -> Self {
         match error {
