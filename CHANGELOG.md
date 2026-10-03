@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.22.4...v0.23.0) - 2026-10-03
+
+### Fixed
+
+- *(deps)* [**breaking**] follow the linked engine's surface across its incompatible versions ([#211](https://github.com/nickderobertis/onepipeline-ui/pull/211))
+- *(deps)* link the engine that runs a plan across member projects ([#209](https://github.com/nickderobertis/onepipeline-ui/pull/209))
+
 ## [0.22.4](https://github.com/nickderobertis/onepipeline-ui/compare/v0.22.3...v0.22.4) - 2026-10-02
 
 ### Fixed
