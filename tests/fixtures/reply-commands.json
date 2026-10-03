@@ -25,7 +25,9 @@
         "dependents",
         "id"
       ],
-      "optional": []
+      "optional": [
+        "reason"
+      ]
     },
     "reparent": {
       "required": [

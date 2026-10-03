@@ -13492,10 +13492,12 @@ fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
     // the run reading as driven for as long as any server lives: it was the
     // server that retained it that would have had to reap it, and that server
     // is gone, so `init` did. What the run reads as is what the engine's own
-    // rule makes of a driver on this host that is not there.
+    // rule makes of a run on this host whose driver is not there.
     eventually("the driver let go of the run", || !process_is_live(pid));
-    eventually("the run reads as one nothing is driving", || {
-        detail(restarted.address)["run"]["state"] == json!("driver-dead")
+    // Nothing drives it, and its one human action is outstanding: the
+    // engine reads that as a run paused on its decision.
+    eventually("the run reads as paused, nothing driving it", || {
+        detail(restarted.address)["run"]["state"] == json!("paused")
     });
     drop(driver);
 
@@ -13683,8 +13685,10 @@ fn an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_ru
     eventually("the server reaped the driver it retained", || {
         !process_is_live(pid)
     });
-    eventually("the run reads as one nothing is driving", || {
-        detail(serving.address)["run"]["state"] == json!("driver-dead")
+    // Nothing drives it, and its one human action is outstanding: the
+    // engine reads that as a run paused on its decision.
+    eventually("the run reads as paused, nothing driving it", || {
+        detail(serving.address)["run"]["state"] == json!("paused")
     });
     drop(driver);
 
@@ -13901,8 +13905,10 @@ fn an_upgrade_landing_during_an_adoption_never_starts_the_new_build() {
     eventually("the first driver let go and was reaped", || {
         !process_is_live(first)
     });
-    eventually("the run reads as one nothing is driving", || {
-        detail(serving.address)["run"]["state"] == json!("driver-dead")
+    // Nothing drives it, and its one human action is outstanding: the
+    // engine reads that as a run paused on its decision.
+    eventually("the run reads as paused, nothing driving it", || {
+        detail(serving.address)["run"]["state"] == json!("paused")
     });
     drop(driver);
     let attested = http::post(
@@ -14702,6 +14708,204 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// An adoption through the built binary drives a plan that spans two `local-md`
+/// sources — a home project in one and the member project linked to it through
+/// `onetaskgraph.members` and `onetaskgraph.member_of` in the other — and writes
+/// each settlement back where its task lives.
+///
+/// The member's sign-off depends on the home's approval across the two sources,
+/// so three retained drivers settle the graph: one leaves the approval waiting,
+/// one completes it and leaves the sign-off waiting, and one completes that. Read
+/// back through the store the binary links, each task's item in its own source's
+/// project carries its settled status and settlement, neither project holds an
+/// item for the other's task, and every projection the drivers recorded landed
+/// with each item's destination in its task's own source.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
+// above: three drivers, each settling a human action, in a few seconds over two folders of
+// Markdown the journey writes itself; the sixty seconds beside each wait is the ceiling a
+// failing wait reaches, which no passing run pays.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let plan = fixture_run::launch_across_two_local_md_sources(&root, run, &dir);
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let adopt = format!("/api/v2/runs/{run}/adopt");
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let status = |node: &str| detail()["graph"]["node_status"][node].clone();
+    let drive = |until: &str, settled: &dyn Fn() -> bool| {
+        let adopted = http::post(serving.address, &adopt, "");
+        assert_eq!(adopted.status, 200, "{}", adopted.body);
+        let pid = u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid"))
+            .expect("a pid");
+        let driver = RetainedDriver(pid);
+        eventually(until, settled);
+        eventually("the driver let go and was reaped", || !process_is_live(pid));
+        drop(driver);
+    };
+    let attest = |node: &str| {
+        let attested = http::post(
+            serving.address,
+            &format!("/api/v2/runs/{run}/attest"),
+            &json!({ "reference": node }).to_string(),
+        );
+        assert_eq!(attested.status, 200, "{}", attested.body);
+    };
+    let (approve, signoff) = (
+        fixture_run::APPROVAL_NODE_ID,
+        fixture_run::SIGNOFF_MEMBER_NODE_ID,
+    );
+
+    drive("the first driver left the approval waiting", &|| {
+        status(approve) == json!("waiting")
+    });
+    // The sign-off in the member's source waits on the home's approval.
+    assert_ne!(status(signoff), json!("waiting"), "{}", detail());
+    attest(approve);
+    drive("the second driver left the sign-off waiting", &|| {
+        status(approve) == json!("done") && status(signoff) == json!("waiting")
+    });
+    attest(signoff);
+    drive("the third driver completed the graph", &|| {
+        detail()["run"]["state"] == json!("settled")
+    });
+    assert_eq!(status(signoff), json!("done"), "{}", detail());
+
+    // Each task's own item, in its own source's project, carries what its node
+    // settled as.
+    for (id, node, document) in [
+        (&plan.home_task, approve, &plan.home_document),
+        (&plan.member_task, signoff, &plan.member_document),
+    ] {
+        let stored = stored_task(&dir, id);
+        let document = fs::read_to_string(document).expect("the task document");
+        assert_eq!(stored.status.name, "done", "{id}: {document}");
+        assert!(
+            stored.metadata.contains_key("onepipeline.settlement"),
+            "{id}: {document}"
+        );
+        assert_eq!(
+            stored.metadata.get("onepipeline.node"),
+            Some(&json!(node)),
+            "{id}: {document}"
+        );
+    }
+    // Neither project holds an item for the other's task.
+    let home = format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    );
+    let member = format!(
+        "{}:{}",
+        fixture_run::MEMBER_MD_SOURCE,
+        fixture_run::MEMBER_MD_PROJECT
+    );
+    assert_eq!(project_nodes(&dir, &home), vec![approve.to_owned()]);
+    assert_eq!(project_nodes(&dir, &member), vec![signoff.to_owned()]);
+
+    // Every projection the drivers recorded landed and created no item, and the
+    // baseline they kept of what landed names each item's qualified destination
+    // in its own task's source.
+    let records = fs::read_to_string(
+        root.join(run)
+            .join(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE),
+    )
+    .expect("the projection record");
+    let records: Vec<Value> = records
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a projection record line"))
+        .collect();
+    assert!(!records.is_empty(), "no projection was attempted");
+    let mut projected = std::collections::BTreeSet::new();
+    for record in &records {
+        assert_eq!(record["project"], json!(plan.project), "{record}");
+        assert_eq!(record["outcome"], json!("projected"), "{record}");
+        assert_eq!(
+            record["actions"]["created"].as_u64().unwrap_or_default(),
+            0,
+            "{record}"
+        );
+        projected.extend(
+            record["items"]
+                .as_array()
+                .expect("the items an attempt carried")
+                .iter()
+                .map(|node| node.as_str().expect("a node id").to_owned()),
+        );
+    }
+    assert_eq!(
+        projected,
+        std::collections::BTreeSet::from([approve.to_owned(), signoff.to_owned()]),
+        "{records:?}"
+    );
+    let landed: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(run).join(onepipeline::cli::WRITEBACK_LANDED_FILE))
+            .expect("the landed baseline"),
+    )
+    .expect("the landed baseline parses");
+    for (node, task) in [(approve, &plan.home_task), (signoff, &plan.member_task)] {
+        assert_eq!(
+            landed["items"][node]["destination"],
+            json!(task),
+            "{landed}"
+        );
+        // Seeded with no word landed, so a word here is one the drivers wrote.
+        assert!(!landed["items"][node]["status"].is_null(), "{landed}");
+    }
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The node ids of every task one project holds, read through the store the
+/// binary links under `dir`'s configuration, without its members. Its one caller
+/// is the `cfg(unix)` journey above, so it is compiled where that journey is.
+#[cfg(unix)]
+fn project_nodes(dir: &Path, project: &str) -> Vec<String> {
+    let loaded = onetaskgraph_core::config::load(
+        dir,
+        &onetaskgraph_core::Environment::from_os_pairs(Vec::new()),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the store configuration loads");
+    let engine = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let project = onetaskgraph_core::GlobalId::try_from(project.to_owned()).expect("a project id");
+    let answer = tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(engine.tasks(&onetaskgraph_core::TaskRequest {
+            sources: Vec::new(),
+            filters: onetaskgraph_core::Filters::default(),
+            priorities: Vec::new(),
+            metadata: Vec::new(),
+            origin: None,
+            project: onetaskgraph_core::ProjectSelector::Qualified(project),
+            commented_since: None,
+            include_members: false,
+            paging: onetaskgraph_core::Paging {
+                limit: std::num::NonZeroU32::new(100).expect("not zero"),
+                token: None,
+            },
+        }))
+        .expect("the store reads the project");
+    assert!(answer.errors.is_empty(), "{:?}", answer.errors);
+    answer
+        .items
+        .iter()
+        .map(|task| {
+            task.item
+                .metadata
+                .get("onepipeline.id")
+                .and_then(Value::as_str)
+                .expect("a plan task names its node")
+                .to_owned()
+        })
+        .collect()
+}
 
 /// A run adopted through `POST /api/v2/runs/{run}/adopt` writes back only what
 /// changed: every projection the retained drivers attempt is a member-scoped
