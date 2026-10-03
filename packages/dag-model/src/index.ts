@@ -1754,6 +1754,7 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       op: z.literal("drop"),
       id: z.string().min(1),
       dependents: dropDependentsSchema,
+      reason: z.string().min(1).optional(),
     })
     .strict(),
   z

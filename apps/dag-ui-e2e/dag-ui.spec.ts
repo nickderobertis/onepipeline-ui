@@ -3661,11 +3661,12 @@ test("tells each outcome apart by the palette's semantic tones", async ({
     "color",
     await tokenColor(page, "--info"),
   );
-  // A run's state is an open string in the read contract, and the sibling run's
-  // driver is gone without a result having been recorded — a real state with no
+  // A run's state is an open string in the read contract, and the sibling run was
+  // stopped with work outstanding and its driver has exited — which the linked
+  // engine reads off the run-end hook as `ended-stopped`: a real state with no
   // outcome in it. The list says the word and paints its mark with no meaning in
   // it rather than borrowing one of the tones above.
-  await expect(runRow(runs().sibling)).toContainText("driver-dead");
+  await expect(runRow(runs().sibling)).toContainText("ended-stopped");
   await expect(runMark(runs().sibling)).toHaveCSS(
     "color",
     await tokenColor(page, "--muted-foreground"),
