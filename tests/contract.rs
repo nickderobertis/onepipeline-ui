@@ -3284,6 +3284,74 @@ fn the_browser_fixtures_copy_of_the_activity_bound_matches_the_producers() {
     );
 }
 
+/// The words a `release-adopted` says it delivered with are the engine's, read
+/// off the schema it publishes for that payload, and the browser labels each and
+/// its fixture writes one of them.
+///
+/// TypeScript cannot read that schema, so this is the gate on the browser's copy:
+/// a word the engine adds, renames or drops fails here until the mapper in
+/// `release.tsx` and the fixture in `runs.mjs` follow it.
+#[test]
+fn the_browsers_release_delivery_words_are_the_ones_the_engine_publishes() {
+    let registry = onepipeline::payload::registry();
+    let id = onepipeline::payload::schema_of(onepipeline::event::PipelineKind::ReleaseAdopted);
+    let schema = registry
+        .schema(&id)
+        .unwrap_or_else(|| panic!("the engine publishes no schema under {id}"));
+    let reference = schema["properties"]["delivery"]["$ref"]
+        .as_str()
+        .expect("`delivery` names its words by reference");
+    let pointer = reference
+        .strip_prefix('#')
+        .expect("a reference into the same document");
+    let words: Vec<&str> = schema
+        .pointer(pointer)
+        .and_then(|words| words["oneOf"].as_array())
+        .expect("the delivery words are a closed choice")
+        .iter()
+        .map(|word| word["const"].as_str().expect("each word is a constant"))
+        .collect();
+    assert!(!words.is_empty(), "{schema}");
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mapper = root.join("apps/dag-ui/src/features/timeline/release.tsx");
+    let mapper = fs::read_to_string(&mapper)
+        .unwrap_or_else(|err| panic!("read {}: {err}", mapper.display()));
+    for word in &words {
+        assert!(
+            mapper.contains(&format!("delivery === \"{word}\"")),
+            "release.tsx labels no `release-adopted` delivered with `{word}`, which the engine \
+             writes"
+        );
+    }
+
+    let fixture = root.join("apps/dag-ui-e2e/fixtures/runs.mjs");
+    let fixture = fs::read_to_string(&fixture)
+        .unwrap_or_else(|err| panic!("read {}: {err}", fixture.display()));
+    let adoptions: Vec<&str> = fixture
+        .split("\"release-adopted\",")
+        .skip(1)
+        .map(|after| {
+            after
+                .split_once("delivery: \"")
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(word, _)| word)
+                .expect("the fixture's adoption names its delivery")
+        })
+        .collect();
+    assert!(
+        !adoptions.is_empty(),
+        "runs.mjs writes no `release-adopted`"
+    );
+    for word in adoptions {
+        assert!(
+            words.contains(&word),
+            "runs.mjs writes a `release-adopted` delivered with `{word}`, which the engine \
+             never writes: {words:?}"
+        );
+    }
+}
+
 /// The browser files a journal record under every kind the two producers that
 /// publish a vocabulary declare.
 ///
