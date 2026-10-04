@@ -75,6 +75,8 @@ mod fixture_run;
 mod harness_history;
 #[path = "../support/http.rs"]
 mod http;
+#[path = "../support/journal_schema.rs"]
+mod journal_schema;
 #[path = "../support/release_declaration.rs"]
 mod release_declaration;
 #[path = "../support/scratch_repo.rs"]
