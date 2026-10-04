@@ -25,6 +25,7 @@ use onepipeline_ui::telemetry;
 use crate::fixture_run;
 use crate::harness_history;
 use crate::http;
+use crate::journal_schema;
 // Its one caller is the `cfg(unix)` journey that lets an adopted dispatch cut a
 // real session, so it is gated with that journey, as `Stop` is below.
 #[cfg(unix)]
@@ -925,7 +926,7 @@ fn a_release_record_a_producer_wrote_badly_is_served_as_the_nothing_it_said() {
     // delivery, which the record did name, still is.
     let adopted = of_kind("release-adopted");
     assert_eq!(adopted.len(), 1);
-    assert_eq!(adopted[0]["release"]["delivery"], json!("deferred"));
+    assert_eq!(adopted[0]["release"]["delivery"], json!("next"));
     assert!(
         adopted[0]["release"].get("versions").is_none(),
         "{:?}",
@@ -3958,7 +3959,12 @@ fn the_stream_opens_with_a_fresh_snapshot_and_invalidates_on_a_live_append() {
     fixture_run::append(
         &serving.run_dir(fixture_run::RUN_ID),
         "planner-surface-queued",
-        json!({ "kind": "decision", "message": "which way?", "blocking": true }),
+        json!({
+            "kind": "decision",
+            "message": "which way?",
+            "source": "planner",
+            "blocking": true,
+        }),
     );
 
     let changed = stream.next_frame().expect("the append is noticed");
@@ -4777,7 +4783,7 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
                 "node": fixture_run::ANNOUNCE_NODE_ID,
                 "persona": "check-in",
             }),
-            json!({ "persona": "check-in" }),
+            json!({ "attempt": 1, "persona": "check-in" }),
         );
     })[fixture_run::ANNOUNCE_NODE_ID]
         .clone();
@@ -4797,14 +4803,19 @@ fn node_control_says_each_of_its_answers_from_a_run_that_produces_it() {
             "pipeline",
             "edit-committed",
             json!({ "run_id": fixture_run::RUN_ID }),
-            json!({
-                "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
-                "operations": [{
-                    "kind": "context-added",
-                    "node": fixture_run::REDIRECTED_NODE_ID,
-                    "note": "x",
-                }],
-            }),
+            // An older engine's record, which named no author and listed no
+            // operation kinds — neither of which today's schema leaves out.
+            fixture_run::departing_by_design(
+                "edit-committed",
+                json!({
+                    "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
+                    "operations": [{
+                        "kind": "context-added",
+                        "node": fixture_run::REDIRECTED_NODE_ID,
+                        "note": "x",
+                    }],
+                }),
+            ),
         );
     });
     let legacy = http::get(
@@ -4854,15 +4865,18 @@ fn a_redirection_this_build_cannot_read_is_served_as_none_at_all() {
             "pipeline",
             "edit-committed",
             json!({ "run_id": fixture_run::RUN_ID }),
-            json!({
-                "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
-                "operations": [{
-                    "kind": "context-added",
-                    "node": fixture_run::REDIRECTED_NODE_ID,
-                    "note": "x",
-                    "delivery": "someday",
-                }],
-            }),
+            fixture_run::departing_by_design(
+                "edit-committed",
+                json!({
+                    "command": { "op": "context", "id": fixture_run::REDIRECTED_NODE_ID, "note": "x" },
+                    "operations": [{
+                        "kind": "context-added",
+                        "node": fixture_run::REDIRECTED_NODE_ID,
+                        "note": "x",
+                        "delivery": "someday",
+                    }],
+                }),
+            ),
         );
     });
 
@@ -7268,11 +7282,18 @@ fn a_surface_that_said_nothing_this_build_can_read_is_served_without_one() {
     // field filled in here would be this API saying something no record did.
     let serving = Serving::start(|root| {
         let dir = fixture_run::write(root, fixture_run::RUN_ID);
-        fixture_run::append(&dir, "planner-surface-queued", json!({}));
+        fixture_run::append(
+            &dir,
+            "planner-surface-queued",
+            fixture_run::departing_by_design("planner-surface-queued", json!({})),
+        );
         fixture_run::append(
             &dir,
             "planner-surfaced",
-            json!({ "blocking": true, "kind": "", "message": "   " }),
+            fixture_run::departing_by_design(
+                "planner-surfaced",
+                json!({ "blocking": true, "kind": "", "message": "   " }),
+            ),
         );
     });
     let surfaces: Vec<Value> = events_on(&timeline_under(&serving, None))
@@ -7306,6 +7327,7 @@ fn an_edit_by_an_author_the_launch_declared_is_served_with_that_authors_word() {
                 "author": SENTINEL,
                 "command": { "op": "amend", "id": fixture_run::UNCONTROLLED_NODE_ID, "text": "the benchmark's bar is the p99, not the mean" },
                 "operations": [{ "kind": "task-amended", "node": fixture_run::UNCONTROLLED_NODE_ID }],
+                "operation_kinds": ["task-amended"],
             }),
         );
         fixture_run::append(
@@ -11995,6 +12017,88 @@ fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
     assert_eq!(row["state"], json!("parked"), "{row}");
 }
 
+/// A run whose recorded driver is alive on this host and whose journal has been
+/// quiet past the engine's threshold is `PARKED`: driven, by a driver that has
+/// nothing to say — never a run nothing drives. Every reading the API serves
+/// says so, and an adoption of it is refused naming that driver, leaving the
+/// driver running and recording no adoption.
+#[cfg(unix)]
+#[test]
+fn a_quiet_run_a_live_driver_holds_is_served_parked_and_its_adoption_is_refused() {
+    /// The driver this journey started, ended with it however it ends.
+    struct LiveDriver(std::process::Child);
+    impl Drop for LiveDriver {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_launched(&root, run);
+    fixture_run::launched_by(&root, run, "claude-code", fixture_run::SESSION);
+    fixture_run::adoptable_from(&root, run, &dir);
+    let driver = LiveDriver(
+        std::process::Command::new("sleep")
+            .arg("600")
+            .spawn()
+            .expect("a live driver"),
+    );
+    let pid = driver.0.id();
+    fixture_run::driven_on_this_host(&root, run, pid);
+    // The engine's own threshold, at the one second it will take.
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[("ONEPIPELINE_PARKED_AFTER_SECONDS", "1")],
+    );
+    // Quiet is counted in whole seconds past the threshold, so a run written to
+    // this second is quiet two seconds on.
+    std::thread::sleep(Duration::from_millis(2_200));
+
+    let row = http::get(serving.address, "/api/v2/runs").json()["runs"][0].clone();
+    assert_eq!(row["run_id"], json!(run), "{row}");
+    assert_eq!(row["liveness"], json!("PARKED"), "{row}");
+    assert_eq!(row["state"], json!("parked"), "{row}");
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert_eq!(detail["run"]["state"], json!("parked"), "{detail}");
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(status["liveness"], json!("PARKED"), "{status}");
+    // Driven: not one of the two words for a run nothing drives, which are the
+    // runs an adoption may take over.
+    for nothing_driving in ["DRIVER DEAD", "UNDRIVEN"] {
+        assert_ne!(status["liveness"], json!(nothing_driving), "{status}");
+    }
+
+    let refused = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    let message = refused["error"]["message"].as_str().expect("a message");
+    assert!(
+        message.contains(&format!("driver pid {pid}")) && message.contains("PARKED"),
+        "{message}"
+    );
+    assert!(
+        process_is_live(pid),
+        "the refused adoption ended the driver"
+    );
+    let adoptions = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    )
+    .iter()
+    .filter(|event| event["kind"] == json!("driver-adopted"))
+    .count();
+    assert_eq!(adoptions, 0, "a refused adoption recorded one");
+    drop(driver);
+}
+
 #[test]
 fn listing_a_run_that_predates_the_channel_makes_it_no_channel() {
     // A run recorded before the channel existed has no channel directory, and
@@ -12055,7 +12159,8 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     // The kinds are the engine's own words, so a rename there fails here.
     let deferred_kind = onepipeline::event::PipelineKind::ConcurrentDeferred.as_str();
     let acknowledged_kind = onepipeline::event::PipelineKind::ConcurrentAcknowledged.as_str();
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the engine exports no type or schema for these payloads (its structs are `pub(crate)` and `schemas/events.json` omits them), and this crate serves a payload as an opaque `Value`, so the journey asserts byte-for-byte passthrough of whatever was journalled; these literals illustrate the documented shape and no assertion depends on matching it.
+    // Written by hand, so held below to the schema the engine publishes for
+    // each kind rather than taken on trust.
     let deferred = json!({
         "launching": run,
         "holders": [{
@@ -12088,9 +12193,9 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
             { "session": "a-hand-opened-session", "owner_pid": 4343 },
         ],
     });
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     fixture_run::append(&dir, deferred_kind, deferred.clone());
     fixture_run::append(&dir, acknowledged_kind, acknowledged.clone());
+    journal_schema::assert_conforms(&serving.runs_root());
 
     let concurrent = urlencode(r#"{"include":[{"kind":"concurrent-*"}]}"#);
     let read = http::post(
@@ -12152,6 +12257,67 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     );
     assert_eq!(refused.status, 422, "{}", refused.body);
     assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
+}
+
+/// A fixture is held to the schema the linked engine publishes for its kind, so
+/// one that wrote a shape the engine never journals fails rather than being
+/// served and asserted on as if it were real. Planted here twice over one
+/// served run: a holder missing a key the engine always writes, and a key of
+/// the wrong type — each named by its journal line, its kind and where in the
+/// payload the schema refused it.
+#[test]
+fn a_journal_record_departing_from_its_kinds_schema_is_refused() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, 0x7FFF_FFF0);
+    });
+    let dir = serving.run_dir(fixture_run::RUN_ID);
+    let journal = dir.join("events.jsonl");
+    let conforming = fs::read_to_string(&journal).expect("the journal");
+    assert_eq!(
+        journal_schema::departures(&serving.runs_root()),
+        Vec::<String>::new(),
+        "the settled fixture conforms as written"
+    );
+
+    let deferred = onepipeline::event::PipelineKind::ConcurrentDeferred.as_str();
+    fixture_run::append(
+        &dir,
+        deferred,
+        json!({
+            "launching": fixture_run::RUN_ID,
+            // `dependents` missing: the engine writes it on every holder.
+            "holders": [{
+                "identity": "github.com/nickderobertis/onepipeline-ui",
+                "session": "a-holding-session",
+                "owner_pid": 4242,
+                "run": fixture_run::OTHER_RUN_ID,
+                "node": "contract-interface",
+                "dependency": format!("run:{}#contract-interface", fixture_run::OTHER_RUN_ID),
+            }],
+        }),
+    );
+    let settled = onepipeline::event::PipelineKind::NodeSettled.as_str();
+    fixture_run::append(&dir, settled, json!({ "status": 7 }));
+    let planted = conforming.lines().count();
+
+    let found = journal_schema::departures(&serving.runs_root());
+    assert_eq!(found.len(), 2, "{found:#?}");
+    let first = format!("events.jsonl:{}: {deferred}: ", planted + 1);
+    assert!(found[0].contains(&first), "{found:#?}");
+    assert!(found[0].contains("dependents"), "{found:#?}");
+    let second = format!("events.jsonl:{}: {settled}: ", planted + 2);
+    assert!(found[1].contains(&second), "{found:#?}");
+    assert!(found[1].contains("/status"), "{found:#?}");
+
+    // And the journey holding them fails, rather than only listing them.
+    let refused =
+        std::panic::catch_unwind(|| journal_schema::assert_conforms(&serving.runs_root()));
+    assert!(refused.is_err(), "a departing record passed the check");
+
+    // Put back as the fixture wrote it, so this journey's own server leaves a
+    // root that conforms when it stops.
+    fs::write(&journal, conforming).expect("restore the journal");
 }
 
 /// onevcs 0.37 opens a session continuing a branch whose base conflicts with

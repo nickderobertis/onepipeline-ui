@@ -81,7 +81,7 @@
           "at": "2026-08-07T12:00:01.800Z",
           "node_id": "contract-interface",
           "release": {
-            "delivery": "deferred",
+            "delivery": "next",
             "versions": [
               {
                 "identity": "github.com/nickderobertis/onepipeline",

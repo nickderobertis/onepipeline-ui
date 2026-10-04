@@ -203,7 +203,7 @@ pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf
                 "source": "pipeline",
                 "kind": "run-started",
                 "labels": { "run_id": run },
-                "payload": { "plan": plan },
+                "payload": run_started_in(plan, dir),
                 "artifacts": [],
             })
         ),
@@ -780,6 +780,24 @@ pub const RECLAIMED_INSTRUCTION: &str = "Draft the release note.";
 /// The instant the fixture run started, as every payload renders it.
 const START: &str = "2026-08-07T12:00:00.000Z";
 
+/// The payload of a `run-started` the engine journals for `plan`: launched with
+/// no observer graph, checking in every half hour, and not held to the closure
+/// rule — which a journey about that rule writes for itself.
+pub fn run_started(plan: impl serde::Serialize) -> Value {
+    run_started_in(plan, Path::new("/a-recording-host/workspace"))
+}
+
+/// [`run_started`], launched from `dir` — the directory the launch record names,
+/// which the engine states again on the run's first record.
+pub fn run_started_in(plan: impl serde::Serialize, dir: &Path) -> Value {
+    json!({
+        "plan": plan,
+        "graph": null,
+        "dir": dir.display().to_string(),
+        "heartbeat_interval": 1_800,
+    })
+}
+
 /// A third run, whose lanes ran one after another and whose nodes were re-asked.
 ///
 /// The other two fixtures each dispatch a node once, under a persona that is
@@ -1184,7 +1202,7 @@ fn journal(run: &str) -> String {
             "pipeline",
             "run-started",
             json!({ "run_id": run }),
-            json!({ "plan": plan() }),
+            run_started(plan()),
         )
         // Every dependency of this node has settled, so it may dispatch now —
         // which under the continuous engine is the moment a node starts, and
@@ -1327,7 +1345,7 @@ fn journal(run: &str) -> String {
             at_node.clone(),
             json!({
                 "node": NODE_ID,
-                "delivery": "deferred",
+                "delivery": "next",
                 "versions": [
                     { "identity": DEP_IDENTITY, "target": "crate", "version": DEP_VERSION },
                     { "identity": DEP_IDENTITY, "target": "npm", "version": DEP_VERSION },
@@ -1339,7 +1357,7 @@ fn journal(run: &str) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": NODE_ID, "persona": "worker" }),
-            json!({ "persona": "worker" }),
+            json!({ "attempt": 1, "persona": "worker" }),
         )
         // Two turns, each opened by the producer's own 1-based number and each
         // followed by the summaries it published from inside itself. That order
@@ -1599,7 +1617,7 @@ fn journal(run: &str) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": REVIEW_NODE_ID, "persona": "judge" }),
-            json!({ "persona": "judge" }),
+            json!({ "attempt": 1, "persona": "judge" }),
         )
         // The other side of the pair: a member the graph runs as the judge
         // transport, which is what tells a judge chain's failure from an
@@ -1637,6 +1655,35 @@ fn journal(run: &str) -> String {
             json!({ "status": "done", "outcome": "approved" }),
         );
     journal.text()
+}
+
+/// The payloads a fixture writes departing from their kind's schema on purpose:
+/// a record a producer wrote badly, for a journey about what a reader is served
+/// of one. Recorded here, in the process writing them, so the check every
+/// served root is held to (`journal_schema`) passes these and no others — and
+/// fails one that no longer departs, so a payload cannot stay excused after it
+/// stops needing to be.
+static DEPARTING_BY_DESIGN: std::sync::Mutex<Vec<(String, Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Mark `payload` as departing from the schema of `kind` on purpose, and return
+/// it.
+pub fn departing_by_design(kind: &str, payload: Value) -> Value {
+    DEPARTING_BY_DESIGN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((kind.to_owned(), payload.clone()));
+    payload
+}
+
+/// Whether a fixture marked a `kind` record carrying `payload` with
+/// [`departing_by_design`].
+pub fn departs_by_design(kind: &str, payload: &Value) -> bool {
+    DEPARTING_BY_DESIGN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .any(|(marked, held)| marked == kind && held == payload)
 }
 
 /// Append one event to a run's journal, the way the running loop does.
@@ -2295,7 +2342,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "run-started",
         json!({ "run_id": run }),
-        json!({ "plan": plan }),
+        run_started(plan),
     );
 
     // The run's own observer, at no node: the observer graph's `monitor` member,
@@ -2335,7 +2382,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": RETRIED_NODE_ID, "persona": "engineer" }),
-        json!({ "persona": "engineer" }),
+        json!({ "attempt": 1, "persona": "engineer" }),
     );
     abandoned.started(&mut members, "2026-08-07T12:00:02.000Z");
     abandoned.turn(&mut members, "2026-08-07T12:00:03.000Z");
@@ -2344,7 +2391,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": RETRIED_NODE_ID, "persona": "engineer" }),
-        json!({ "persona": "engineer" }),
+        json!({ "attempt": 2, "persona": "engineer" }),
     );
     reasked.started(&mut members, "2026-08-07T12:01:01.000Z");
     reasked.turn(&mut members, "2026-08-07T12:01:02.000Z");
@@ -2382,7 +2429,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": DRAFTED_NODE_ID, "persona": "engineer" }),
-            json!({ "persona": "engineer" }),
+            json!({ "attempt": 1, "persona": "engineer" }),
         )
         // The worktree the dispatch was given, which is where the *work* begins
         // and not where publishing does.
@@ -2491,7 +2538,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": REFUSED_NODE_ID, "persona": "docs-writer" }),
-            json!({ "persona": "docs-writer" }),
+            json!({ "attempt": 1, "persona": "docs-writer" }),
         )
         .emit(
             "2026-08-07T12:03:01.000Z",
@@ -2555,7 +2602,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": WORKING_NODE_ID, "persona": "docs-writer" }),
-            json!({ "persona": "docs-writer" }),
+            json!({ "attempt": 1, "persona": "docs-writer" }),
         )
         .emit(
             "2026-08-07T12:04:01.000Z",
@@ -2699,7 +2746,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": DIED_NODE_ID, "persona": "engineer" }),
-            json!({ "persona": "engineer" }),
+            json!({ "attempt": 1, "persona": "engineer" }),
         )
         .emit(
             "2026-08-07T12:05:00.500Z",
@@ -2778,7 +2825,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": RECLAIMED_NODE_ID, "persona": "engineer" }),
-            json!({ "persona": "engineer" }),
+            json!({ "attempt": 1, "persona": "engineer" }),
         )
         .emit(
             "2026-08-07T12:06:01.000Z",
@@ -2837,7 +2884,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": UNNAMED_NODE_ID, "persona": "docs-writer" }),
-        json!({ "persona": "docs-writer" }),
+        json!({ "attempt": 1, "persona": "docs-writer" }),
     );
     unnamed.started(&mut members, "2026-08-07T12:07:01.000Z");
     unnamed.turn(&mut members, "2026-08-07T12:07:02.000Z");
@@ -2859,7 +2906,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": SILENT_NODE_ID, "persona": "check-in" }),
-            json!({ "persona": "check-in" }),
+            json!({ "attempt": 1, "persona": "check-in" }),
         )
         .emit(
             "2026-08-07T12:08:30.000Z",
@@ -2888,7 +2935,7 @@ fn lanes_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": SUPERVISED_NODE_ID, "persona": "engineer" }),
-        json!({ "persona": "engineer" }),
+        json!({ "attempt": 1, "persona": "engineer" }),
     );
     supervised.started(&mut members, "2026-08-07T12:10:01.000Z");
     for turn in 1..=SUPERVISED_RELAYED {
@@ -3436,7 +3483,7 @@ fn named_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "run-started",
         json!({ "run_id": run }),
-        json!({ "plan": plan }),
+        run_started(plan),
     );
 
     // The two watching sessions, `ticker` first: the order the run relayed them
@@ -3473,7 +3520,7 @@ fn named_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": DRAFTED_BY_NAME_NODE_ID, "persona": "poet" }),
-        json!({ "persona": "poet" }),
+        json!({ "attempt": 1, "persona": "poet" }),
     );
     drafted.started(&mut members, "2026-08-07T12:01:01.000Z");
     drafted.turn(&mut members, "2026-08-07T12:01:02.000Z");
@@ -3494,7 +3541,7 @@ fn named_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": TIMED_NODE_ID, "persona": "ticker" }),
-        json!({ "persona": "ticker" }),
+        json!({ "attempt": 1, "persona": "ticker" }),
     );
     memberless_turn(
         &mut members,
@@ -3530,7 +3577,7 @@ fn named_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": STRAYED_NODE_ID, "persona": "drafter" }),
-        json!({ "persona": "drafter" }),
+        json!({ "attempt": 1, "persona": "drafter" }),
     );
     strayed.started(&mut members, "2026-08-07T12:03:01.000Z");
     strayed.turn(&mut members, "2026-08-07T12:03:02.000Z");
@@ -3549,7 +3596,7 @@ fn named_journal(run: &str, plan: &Value) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": MUSED_NODE_ID, "persona": "poet" }),
-        json!({ "persona": "poet" }),
+        json!({ "attempt": 1, "persona": "poet" }),
     );
     memberless_turn(
         &mut members,
@@ -3782,7 +3829,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "run-started",
         json!({ "run_id": run }),
-        json!({ "plan": plan }),
+        run_started(plan),
     );
     // The run's own driving session, recorded at no node: what starts the run
     // rather than any of the work in it — the observer graph's `monitor` member,
@@ -3826,7 +3873,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": REPORTED_NODE_ID, "persona": "worker" }),
-        json!({ "persona": "worker" }),
+        json!({ "attempt": 1, "persona": "worker" }),
     );
     emit(
         "2026-08-07T12:00:07.000Z",
@@ -3877,7 +3924,12 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "planner-surface-queued",
         json!({ "run_id": run }),
-        json!({ "kind": "decision", "message": "retry or park?", "blocking": true }),
+        json!({
+            "kind": "decision",
+            "message": "retry or park?",
+            "source": "planner",
+            "blocking": true,
+        }),
     );
     emit(
         "2026-08-07T12:00:10.500Z",
@@ -3895,14 +3947,19 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "planner-surfaced",
         json!({ "run_id": run }),
-        json!({ "blocking": true }),
+        json!({
+            "kind": "decision",
+            "message": "retry or park?",
+            "source": "planner",
+            "blocking": true,
+        }),
     );
     emit(
         "2026-08-07T12:00:25.000Z",
         "pipeline",
         "planner-replied",
         json!({ "run_id": run }),
-        json!({}),
+        json!({ "author": "planner", "completion": null, "reason": null }),
     );
     // Answered, so the subtree it held is released and the loop resumes it —
     // inside the running loop, with no external driver action.
@@ -3929,6 +3986,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
             "author": "planner",
             "command": { "op": "retry", "id": REPORTED_NODE_ID },
             "operations": [{ "kind": "node-added", "node": REPORTED_NODE_ID }],
+            "operation_kinds": ["node-added"],
         }),
     );
     emit(
@@ -3973,7 +4031,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": SHIP_NODE_ID, "persona": "pr-author" }),
-        json!({ "persona": "pr-author" }),
+        json!({ "attempt": 1, "persona": "pr-author" }),
     );
     emit(
         "2026-08-07T12:00:28.000Z",
@@ -4226,7 +4284,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": REDIRECTED_NODE_ID, "persona": "worker" }),
-        json!({ "persona": "worker" }),
+        json!({ "attempt": 1, "persona": "worker" }),
     );
     emit(
         "2026-08-07T12:00:43.000Z",
@@ -4246,7 +4304,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": UNCONTROLLED_NODE_ID, "persona": "worker" }),
-        json!({ "persona": "worker" }),
+        json!({ "attempt": 1, "persona": "worker" }),
     );
     emit(
         "2026-08-07T12:00:45.000Z",
@@ -4281,18 +4339,23 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "edit-committed",
         json!({ "run_id": run }),
-        json!({
-            // `deliver` is absent because it was `auto`, which is what the
-            // sibling's own `Command` omits: an edit that says nothing about
-            // delivery is exactly the edit the live-edit table always described.
-            "command": { "op": "context", "id": REDIRECTED_NODE_ID, "note": LIVE_NOTE },
-            "operations": [{
-                "kind": "context-added",
-                "node": REDIRECTED_NODE_ID,
-                "note": LIVE_NOTE,
-                "delivery": "live",
-            }],
-        }),
+        // The reconciler that compiled a `context` command named no author and
+        // listed no operation kinds, neither of which today's schema leaves out.
+        departing_by_design(
+            "edit-committed",
+            json!({
+                // `deliver` is absent because it was `auto`, which is what the
+                // sibling's own `Command` omits: an edit that says nothing about
+                // delivery is exactly the edit the live-edit table always described.
+                "command": { "op": "context", "id": REDIRECTED_NODE_ID, "note": LIVE_NOTE },
+                "operations": [{
+                    "kind": "context-added",
+                    "node": REDIRECTED_NODE_ID,
+                    "note": LIVE_NOTE,
+                    "delivery": "live",
+                }],
+            }),
+        ),
     );
     // The same lever pulled at a node whose harness has none. The verb answers
     // with the fact rather than a failure, and the note rides the next dispatch.
@@ -4319,15 +4382,18 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "edit-committed",
         json!({ "run_id": run }),
-        json!({
-            "command": { "op": "context", "id": UNCONTROLLED_NODE_ID, "note": DEFERRED_NOTE },
-            "operations": [{
-                "kind": "context-added",
-                "node": UNCONTROLLED_NODE_ID,
-                "note": DEFERRED_NOTE,
-                "delivery": "deferred",
-            }],
-        }),
+        departing_by_design(
+            "edit-committed",
+            json!({
+                "command": { "op": "context", "id": UNCONTROLLED_NODE_ID, "note": DEFERRED_NOTE },
+                "operations": [{
+                    "kind": "context-added",
+                    "node": UNCONTROLLED_NODE_ID,
+                    "note": DEFERRED_NOTE,
+                    "delivery": "deferred",
+                }],
+            }),
+        ),
     );
     // The same lever as the engine that links here pulls it. `context` is gone
     // from the submitted vocabulary and `note` is the one manager-note op, and
@@ -4390,7 +4456,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
         "pipeline",
         "node-dispatched",
         json!({ "run_id": run, "node": REPORTED_NODE_ID, "persona": "worker" }),
-        json!({ "persona": "worker" }),
+        json!({ "attempt": 1, "persona": "worker" }),
     );
     emit(
         "2026-08-07T12:00:45.000Z",
@@ -4442,6 +4508,7 @@ fn live_journal(run: &str, plan: &Value, report_path: &Path) -> String {
                 "note": MONITOR_NOTE,
                 "delivery": "deferred",
             }],
+            "operation_kinds": ["context-added"],
         }),
     );
     format!("{}\n", lines.join("\n"))
@@ -4481,7 +4548,7 @@ pub fn write_launched(root: &Path, run: &str) -> PathBuf {
                 "source": "pipeline",
                 "kind": "run-started",
                 "labels": { "run_id": run },
-                "payload": {},
+                "payload": run_started(json!({})),
                 "artifacts": [],
             })
         ),
@@ -4570,7 +4637,7 @@ pub fn write_launch_shapes(root: &Path) -> Vec<(String, &'static str)> {
                         "source": "pipeline",
                         "kind": "run-started",
                         "labels": { "run_id": run },
-                        "payload": {},
+                        "payload": run_started(json!({})),
                         "artifacts": [],
                     })
                 ),
@@ -4757,14 +4824,14 @@ pub fn write_converged_with_a_failure(root: &Path, run: &str, owed: bool) -> Pat
             "2026-08-07T12:00:02.000Z",
             "node-dispatched",
             at(NODE_ID),
-            json!({}),
+            json!({ "attempt": 1 }),
         ),
         record(
             4,
             "2026-08-07T12:00:02.000Z",
             "node-dispatched",
             at(CONVERGED_FAILED_NODE_ID),
-            json!({}),
+            json!({ "attempt": 1 }),
         ),
         record(
             5,
@@ -4834,7 +4901,7 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
         json!({
             "v": 1, "ts": START, "stream": "a-recording-host-4250", "seq": 0,
             "source": "pipeline", "kind": "run-started",
-            "labels": { "run_id": run }, "payload": { "plan": plan }, "artifacts": [],
+            "labels": { "run_id": run }, "payload": run_started(plan), "artifacts": [],
         }),
         json!({
             "v": 1, "ts": "2026-08-07T12:00:01.000Z", "stream": "a-recording-host-4250",
@@ -4845,7 +4912,7 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
             "v": 1, "ts": "2026-08-07T12:00:02.000Z", "stream": "a-recording-host-4250",
             "seq": 2, "source": "pipeline", "kind": "node-dispatched",
             "labels": { "run_id": run, "node": NODE_ID, "persona": "worker" },
-            "payload": {}, "artifacts": [],
+            "payload": { "attempt": 1 }, "artifacts": [],
         }),
         // The node graph opening its member, on that graph's own stream: the first
         // record a dispatch relays, and what puts its declared members in reach.
@@ -4858,7 +4925,8 @@ pub fn write_stopped_mid_flight(root: &Path, run: &str) -> PathBuf {
         json!({
             "v": 1, "ts": "2026-08-07T12:00:03.000Z", "stream": "a-recording-host-4250",
             "seq": 3, "source": "pipeline", "kind": "run-stopped",
-            "labels": { "run_id": run }, "payload": {}, "artifacts": [],
+            "labels": { "run_id": run }, "payload": { "owner": SESSION, "forced": false },
+            "artifacts": [],
         }),
     ];
     let journal: Vec<String> = lines.iter().map(ToString::to_string).collect();
@@ -4955,7 +5023,7 @@ pub fn write_held(root: &Path, run: &str) -> PathBuf {
         "pipeline",
         "run-started",
         json!({ "run_id": run }),
-        json!({ "plan": plan }),
+        run_started(plan),
     );
     for (index, node) in HELD_AHEAD.iter().enumerate() {
         journal
@@ -4971,7 +5039,7 @@ pub fn write_held(root: &Path, run: &str) -> PathBuf {
                 "pipeline",
                 "node-dispatched",
                 json!({ "run_id": run, "node": node, "persona": "worker" }),
-                json!({}),
+                json!({ "attempt": 1 }),
             );
     }
     // Ready with the run already at its concurrency, so the loop says so — and
@@ -5030,7 +5098,7 @@ pub fn write_held(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "node-held",
             at(HELD_UNREADABLE_NODE_ID),
-            json!({}),
+            departing_by_design("node-held", json!({})),
         )
         .emit(
             "2026-08-07T12:00:10.000Z",
@@ -5092,7 +5160,7 @@ pub fn write_held(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": HELD_BEHIND_NODE_ID, "persona": "worker" }),
-            json!({}),
+            json!({ "attempt": 1 }),
         )
         .emit(
             "2026-08-07T12:00:40.000Z",
@@ -5240,7 +5308,7 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "run-started",
             json!({ "run_id": run }),
-            json!({ "plan": plan }),
+            run_started(plan),
         )
         .emit(
             "2026-08-07T12:00:01.000Z",
@@ -5254,7 +5322,7 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": NODE_ID, "persona": "worker" }),
-            json!({ "persona": "worker" }),
+            json!({ "attempt": 1, "persona": "worker" }),
         )
         .emit(
             "2026-08-07T12:00:03.000Z",
@@ -5385,7 +5453,7 @@ pub fn write_review_draft(root: &Path, run: &str) -> PathBuf {
         "pipeline",
         "run-started",
         json!({ "run_id": run }),
-        json!({ "plan": plan }),
+        run_started(plan),
     );
     // Both nodes ready, dispatched and given a worktree at the same moments,
     // written stage by stage so the stream's own sequence follows its clock.
@@ -5405,7 +5473,7 @@ pub fn write_review_draft(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "node-dispatched",
             json!({ "run_id": run, "node": node, "persona": "worker" }),
-            json!({ "persona": "worker" }),
+            json!({ "attempt": 1, "persona": "worker" }),
         );
     }
     for node in nodes {
@@ -6423,7 +6491,7 @@ pub fn write_malformed_releases(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "run-started",
             at_run.clone(),
-            json!({ "plan": plan }),
+            run_started(plan),
         )
         .emit(
             "2026-08-07T12:00:01.000Z",
@@ -6457,29 +6525,32 @@ pub fn write_malformed_releases(root: &Path, run: &str) -> PathBuf {
             "pipeline",
             "release-arrived",
             at_node.clone(),
-            json!({ "dep": "", "identity": "", "target": "  ", "version": "" }),
+            json!({ "node": NODE_ID, "dep": "", "identity": "", "target": "  ", "version": "" }),
         )
         .emit(
             "2026-08-07T12:00:04.000Z",
             "pipeline",
             "release-adopted",
             at_node.clone(),
-            json!({
-                "node": NODE_ID,
-                "delivery": "deferred",
-                "versions": [
-                    { "target": "crate", "version": DEP_VERSION },
-                    { "identity": DEP_IDENTITY, "version": DEP_VERSION },
-                    { "identity": DEP_IDENTITY, "target": "npm" },
-                ],
-            }),
+            departing_by_design(
+                "release-adopted",
+                json!({
+                    "node": NODE_ID,
+                    "delivery": "next",
+                    "versions": [
+                        { "target": "crate", "version": DEP_VERSION },
+                        { "identity": DEP_IDENTITY, "version": DEP_VERSION },
+                        { "identity": DEP_IDENTITY, "target": "npm" },
+                    ],
+                }),
+            ),
         )
         .emit(
             "2026-08-07T12:00:05.000Z",
             "pipeline",
             "node-dispatched",
             at_node.clone(),
-            json!({ "persona": "worker" }),
+            json!({ "attempt": 1, "persona": "worker" }),
         )
         .emit(
             "2026-08-07T12:00:05.500Z",
@@ -6837,7 +6908,7 @@ fn write_awaiting(
                 "source": "pipeline",
                 "kind": "run-started",
                 "labels": { "run_id": run },
-                "payload": { "plan": plan },
+                "payload": run_started_in(plan, dir),
                 "artifacts": [],
             })
         ),

@@ -708,7 +708,7 @@ pub mod pipeline {
     pub const RELEASE_ARRIVED: &str = "release-arrived";
     /// `{node, delivery, versions: [{identity, target, version}]}` — the versions
     /// that arrived were written into the node's own context, `live` into the turn
-    /// already running or `deferred` onto its next dispatch.
+    /// already running or `next` onto its next dispatch.
     pub const RELEASE_ADOPTED: &str = "release-adopted";
 }
 

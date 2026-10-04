@@ -78,8 +78,7 @@ function adoptionLabel(delivery?: string): string | undefined {
   if (delivery === undefined) return undefined;
   if (delivery === "live")
     return "Live — into the turn that was already running";
-  if (delivery === "deferred")
-    return "Deferred — onto the node's next dispatch";
+  if (delivery === "next") return "Deferred — onto the node's next dispatch";
   return delivery;
 }
 

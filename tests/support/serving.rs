@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 use crate::fixture_run;
+use crate::journal_schema;
 
 /// How long a process asked to stop may take before a journey calls it hung.
 ///
@@ -528,16 +529,22 @@ fn wait_or_kill(child: &mut Child, deadline: Duration) -> Option<ExitStatus> {
 
 impl Drop for Serving {
     fn drop(&mut self) {
-        if self.stopped {
-            return;
+        if !self.stopped {
+            // Asked to stop rather than killed, so a journey that ends without
+            // calling `stop_on` still leaves the process to finish what it was
+            // doing — and, under coverage, to write what it measured. Bounded
+            // all the same: a wedged server must not turn the whole suite into
+            // a hang, and a `Drop` cannot report the failure anyway.
+            ask_to_stop(&mut self.child, Stop::Terminate);
+            let _ = wait_or_kill(&mut self.child, STOP_DEADLINE);
         }
-        // Asked to stop rather than killed, so a journey that ends without
-        // calling `stop_on` still leaves the process to finish what it was doing
-        // — and, under coverage, to write what it measured. Bounded all the
-        // same: a wedged server must not turn the whole suite into a hang, and
-        // a `Drop` cannot report the failure anyway.
-        ask_to_stop(&mut self.child, Stop::Terminate);
-        let _ = wait_or_kill(&mut self.child, STOP_DEADLINE);
+        // Every pipeline record the journey served, whoever wrote it, held to
+        // the schema the linked engine publishes for its kind — once nothing is
+        // writing any more. Not while unwinding: the journey already failed,
+        // and a second panic would abort before it said why.
+        if !std::thread::panicking() {
+            journal_schema::assert_conforms(&self.runs_root());
+        }
     }
 }
 
