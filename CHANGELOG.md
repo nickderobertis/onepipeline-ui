@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.23.1...v0.23.2) - 2026-10-04
+
+### Fixed
+
+- *(deps)* link the engine that keeps a quiet driver driven ([#218](https://github.com/nickderobertis/onepipeline-ui/pull/218))
+
 ## [0.23.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.23.0...v0.23.1) - 2026-10-03
 
 ### Fixed
