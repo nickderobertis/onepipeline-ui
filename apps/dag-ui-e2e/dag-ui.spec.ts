@@ -1534,6 +1534,9 @@ test("shows the release that carried a node's work and the waits before it", asy
     .click();
   await expect(itemDetail(page)).toContainText("Versions adopted");
   await expect(itemDetail(page)).toContainText(facts.release.dep_version);
+  await expect(itemDetail(page)).toContainText(
+    "Deferred — onto the node's next dispatch",
+  );
 
   // And drawn as the categories they belong to, which is what a reader scanning
   // the plot is answering: the wait apart from the two releases beside it, each

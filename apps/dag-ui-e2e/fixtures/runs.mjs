@@ -1187,7 +1187,7 @@ function writeLiveRun(root) {
     { ...run, node: "foundation" },
     {
       node: "foundation",
-      delivery: "deferred",
+      delivery: "next",
       versions: [
         {
           identity: RELEASE_DEP_IDENTITY,
