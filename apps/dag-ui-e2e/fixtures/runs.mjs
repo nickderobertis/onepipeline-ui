@@ -3478,3 +3478,144 @@ export function shutdownFacts() {
     live_node: SHUTDOWN_LIVE_NODE,
   };
 }
+
+/** The one run of the preserve corpus below. */
+export const PRESERVE_RUN = "dag-ui-preserve";
+/** Its node whose plan stated `publish: "preserve"`. */
+export const PRESERVE_NODE = "keep";
+/** Its node published the default way, which landed. */
+export const PRESERVE_LANDED_NODE = "land";
+/** The branch the kept node's work is on. */
+export const PRESERVE_BRANCH = "feature/keep";
+/** The commit that branch stands at. */
+export const PRESERVE_HEAD = "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e";
+/** The commit the landed node's work merged as. */
+export const PRESERVE_LANDED_COMMIT =
+  "3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f";
+/** The version that commit went out in. */
+export const PRESERVE_LANDED_VERSION = "0.14.0";
+
+/**
+ * Write the preserve corpus under `root`: one settled run of two lifecycle nodes
+ * on one identity, as `onepipeline` 0.61 settles them. `land` publishes the
+ * default way and merges; `keep` states `publish: "preserve"`, so at closeout its
+ * branch is put on its origin and it settles `done` as `preserved`, naming the
+ * branch, the commit it stands at and what the push found to do — and no landing.
+ *
+ * A corpus of its own rather than a run in the main one, because every run there
+ * is counted by the run list, the project cards and the paging journeys, and
+ * photographed by the gallery: a run added there would move pictures this
+ * change has nothing to say about.
+ */
+export function buildPreservedRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const run = { run_id: PRESERVE_RUN };
+  const dir = runDir(root, PRESERVE_RUN);
+  const lifecycle = (id, extra) => ({
+    id,
+    persona: "worker",
+    repo: IDENTITY,
+    title: `${id[0].toUpperCase()}${id.slice(1)} the change`,
+    task: `## What\n${id[0].toUpperCase()}${id.slice(1)} the change.\n\n## Acceptance criteria\nThe change is handled`,
+    ...extra,
+  });
+  const plan = {
+    schema_version: 3,
+    goal: { text: "Keep one change and land the other" },
+    name: PRESERVE_RUN,
+    concurrency: 2,
+    tasks: [
+      lifecycle(PRESERVE_LANDED_NODE, {}),
+      lifecycle(PRESERVE_NODE, { publish: "preserve" }),
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  const start = now() - 5 * 60 * 1000;
+  writeJson(
+    join(dir, "launch.json"),
+    launch(PRESERVE_RUN, "claude-code", CLAUDE_SESSION, stamp(start), 4261),
+  );
+  const journal = new Journal(dir, streamOf(PRESERVE_RUN), start);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  journal.emit("pipeline", "run-started", run, { plan });
+  for (const node of [PRESERVE_LANDED_NODE, PRESERVE_NODE]) {
+    journal.advance(1).emit("pipeline", "node-ready", { ...run, node });
+    journal
+      .advance(1)
+      .emit(
+        "pipeline",
+        "node-dispatched",
+        { ...run, node, persona: "worker" },
+        { attempt: 1, persona: "worker" },
+      );
+    journal.advance(1).emit(
+      "vcs",
+      "session-opened",
+      { ...run, node },
+      {
+        token: `a-vcs-session-token-${node}`,
+        identity: IDENTITY,
+        branch: `feature/${node}`,
+        base: "main",
+        worktree: `/a/recorded/worktree/${node}`,
+      },
+    );
+  }
+  const landed = { ...run, node: PRESERVE_LANDED_NODE };
+  journal.advance(5).emit("vcs", "change-merged", landed, {
+    url: "https://example.invalid/changes/9",
+    sha: PRESERVE_LANDED_COMMIT,
+  });
+  journal.emit("vcs", "merge-completed", landed, {
+    identity: IDENTITY,
+    sha: PRESERVE_LANDED_COMMIT,
+    base: "main",
+  });
+  // The release that carried the landed work, joined to its node by the commit
+  // it merged as: the one thing a reader is shown for landed work that a kept
+  // branch, which merged as nothing, can never be.
+  journal.advance(1).emit("vcs", "release-observed", run, {
+    identity: IDENTITY,
+    target: FOUNDATION_RELEASE_TARGET,
+    style: "automated",
+    version: PRESERVE_LANDED_VERSION,
+    landing_commit: PRESERVE_LANDED_COMMIT,
+  });
+  journal.advance(1).emit("pipeline", "node-settled", landed, {
+    status: "done",
+    outcome: "merged",
+    branch: `feature/${PRESERVE_LANDED_NODE}`,
+    change_url: "https://example.invalid/changes/9",
+    landing: "landed",
+  });
+  // The settlement the engine's lifecycle writes for a kept branch, field for
+  // field: nothing was drafted or published, and no `landing` is recorded
+  // because nothing was asked to land.
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: PRESERVE_NODE },
+    {
+      status: "done",
+      outcome: "preserved",
+      branch: PRESERVE_BRANCH,
+      head: PRESERVE_HEAD,
+      remote: "pushed",
+      detail: `kept on ${PRESERVE_BRANCH} at ${PRESERVE_HEAD} (pushed): pushed to origin. Nothing was drafted or published, and the branch does not land`,
+    },
+  );
+  journal.write();
+}
+
+/** What the preserve corpus wrote, published beside it as `facts()` is beside the main one. */
+export function preservedFacts() {
+  return {
+    run: PRESERVE_RUN,
+    node: PRESERVE_NODE,
+    landed_node: PRESERVE_LANDED_NODE,
+    branch: PRESERVE_BRANCH,
+    head: PRESERVE_HEAD,
+    landed_commit: PRESERVE_LANDED_COMMIT,
+    landed_version: PRESERVE_LANDED_VERSION,
+  };
+}

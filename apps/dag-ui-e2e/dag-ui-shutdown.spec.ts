@@ -1,11 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { API_V2_PATHS } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { exited, startFixtureServer } from "./fixture-server";
 
 /**
  * Shutting a run, the session's runs, or the whole host down from the browser.
@@ -29,9 +26,6 @@ import { z } from "zod";
  * back is the server's own, forwarded; nothing here writes a response.
  */
 
-const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
-const LOOPBACK = "127.0.0.1";
-
 /** What the shutdown corpus published about itself. */
 const factsSchema = z.object({
   runs: z.object({
@@ -53,82 +47,17 @@ interface ShutdownServer {
   readonly stop: () => Promise<void>;
 }
 
-/** A port the kernel says is free now. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
-      probe.close(() =>
-        typeof address === "object" && address !== null
-          ? resolve(address.port)
-          : reject(new Error("the kernel named no port")),
-      );
-    });
-  });
-}
-
-/** Wait for `child` to exit, however it ends. */
-const exited = (child: ChildProcess): Promise<void> =>
-  child.exitCode !== null || child.signalCode !== null
-    ? Promise.resolve()
-    : new Promise((resolve) => child.once("exit", () => resolve()));
-
 /**
  * Start a read API over a fresh shutdown corpus, the view beside it, and wait
  * until it answers. `livePid` is a process this journey started, recorded as
  * the in-flight run's live dispatch.
  */
 async function startServer(livePid?: number): Promise<ShutdownServer> {
-  // `dag-ui-e2e-…` directly under the temp root: the one shape
-  // `serve-fixture.mjs` agrees to remove and rebuild.
-  const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-shutdown-"));
-  const port = await freePort();
-  const child = spawn(
-    process.execPath,
-    [
-      FIXTURE_COMMAND,
-      "--workspace",
-      workspace,
-      "--port",
-      String(port),
-      "--ui",
-      "--shutdown-corpus",
-      ...(livePid === undefined
-        ? []
-        : ["--live-dispatch-pid", String(livePid)]),
-    ],
-    { stdio: ["ignore", "inherit", "inherit"] },
-  );
-  const origin = `http://${LOOPBACK}:${port}`;
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    if (child.exitCode !== null)
-      throw new Error(`the shutdown fixture server exited ${child.exitCode}`);
-    const ready = await fetch(`${origin}/healthz`).then(
-      (response) => response.ok,
-      () => false,
-    );
-    if (ready) break;
-    if (Date.now() > deadline)
-      throw new Error(
-        `the shutdown fixture server never answered on ${origin}`,
-      );
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return {
-    origin,
-    workspace,
-    facts: factsSchema.parse(
-      JSON.parse(readFileSync(join(workspace, "fixture-facts.json"), "utf8")),
-    ),
-    stop: async () => {
-      child.kill("SIGTERM");
-      await exited(child);
-      rmSync(workspace, { recursive: true, force: true });
-    },
-  };
+  const server = await startFixtureServer("shutdown", [
+    "--shutdown-corpus",
+    ...(livePid === undefined ? [] : ["--live-dispatch-pid", String(livePid)]),
+  ]);
+  return { ...server, facts: factsSchema.parse(server.facts) };
 }
 
 /** One shutdown request the browser sent: where, and the body as it went. */

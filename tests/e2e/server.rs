@@ -5917,6 +5917,11 @@ fn a_node_its_plan_kept_is_served_done_with_its_branch_and_head_and_never_landed
         body["graph"]["node_results"][land]["outcome"],
         json!("merged")
     );
+    assert_eq!(
+        body["graph"]["node_results"][land]["release"]["version"],
+        json!(fixture_run::RELEASE_VERSION),
+        "{body}"
+    );
 
     // The node's own reading, in the engine's rendering: the branch, its head
     // and what the push found, under the done word, and none of the words the

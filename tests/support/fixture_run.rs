@@ -5497,6 +5497,21 @@ pub fn write_kept_by_plan(root: &Path, run: &str) -> PathBuf {
             land.clone(),
             json!({ "identity": identity, "sha": LANDED_SHA, "base": "main" }),
         )
+        // The release that carried the landed work, joined to its node by the
+        // commit it merged as — which a kept branch, merged as nothing, never is.
+        .emit(
+            "2026-08-07T12:00:11.500Z",
+            "vcs",
+            "release-observed",
+            json!({ "run_id": run }),
+            json!({
+                "identity": identity,
+                "target": "crate",
+                "style": "automated",
+                "version": RELEASE_VERSION,
+                "landing_commit": LANDED_SHA,
+            }),
+        )
         .emit(
             "2026-08-07T12:00:12.000Z",
             "pipeline",
