@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.23.2...v0.24.0) - 2026-10-05
+
+### Added
+
+- *(deps)* [**breaking**] announce that the public surface follows onepipeline 0.61 ([#225](https://github.com/nickderobertis/onepipeline-ui/pull/225))
+
+### Fixed
+
+- *(deps)* link the engine that preserves a node's branch and reports each change's cycle time ([#223](https://github.com/nickderobertis/onepipeline-ui/pull/223))
+
 ## [0.23.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.23.1...v0.23.2) - 2026-10-04
 
 ### Fixed
