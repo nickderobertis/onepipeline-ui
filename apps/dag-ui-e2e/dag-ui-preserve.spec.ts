@@ -34,12 +34,21 @@ test.afterEach(async () => {
   server = undefined;
 });
 
-/** One row of the open tab's facts, read under its own heading. */
-const fact = (page: Page, label: string): Locator =>
-  page
-    .locator(".facts > div")
-    .filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }) })
-    .locator("dd");
+/** Open one node of the run on the server's own origin, and its named tab. */
+async function openTab(
+  page: Page,
+  origin: string,
+  run: string,
+  node: string,
+  tab: string,
+): Promise<Locator> {
+  await page.goto(`${origin}/?run=${run}&node=${node}`);
+  const view = page.getByRole("region", { name: `Timeline for ${node}` });
+  // The node's state, as its header's badge says it.
+  await expect(view.getByText("done", { exact: true })).toBeVisible();
+  await view.getByRole("tab", { name: tab }).click();
+  return view.getByRole("tabpanel", { name: tab });
+}
 
 test("shows a node its plan kept as done, on its branch at its head, and never as landed", async ({
   page,
@@ -73,30 +82,41 @@ test("shows a node its plan kept as done, on its branch at its head, and never a
   );
 
   // What a reader sees: finished, and where the work is.
-  await page.goto(`${server.origin}/?run=${facts.run}&node=${facts.node}`);
-  await expect(page.locator(".node-view-state")).toHaveText("done");
-  await page.getByRole("tab", { name: "Task" }).click();
-  await expect(fact(page, "Outcome")).toContainText(
-    `kept on ${facts.branch} at ${facts.head}`,
+  const task = await openTab(
+    page,
+    server.origin,
+    facts.run,
+    facts.node,
+    "Task",
   );
+  await expect(task).toContainText(`kept on ${facts.branch} at ${facts.head}`);
   // And nothing a landed node is shown: no change request it merged through, and
   // no release.
-  await page.getByRole("tab", { name: "PR" }).click();
-  await expect(fact(page, "Publication")).toHaveText("Not recorded");
-  await expect(fact(page, "Publication").getByRole("link")).toHaveCount(0);
-  await expect(fact(page, "Release")).toHaveText("Not recorded");
+  const keptPr = await openTab(
+    page,
+    server.origin,
+    facts.run,
+    facts.node,
+    "PR",
+  );
+  await expect(keptPr).toHaveText(
+    /^\s*Publication\s*Not recorded\s*Release\s*Not recorded\s*$/,
+  );
+  await expect(keptPr.getByRole("link")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Pull request" })).toHaveCount(0);
 
   // The node beside it landed, and is shown so — the treatment the kept node
   // was not given: the change request it merged through, and the release its
   // commit went out in.
-  await page.goto(
-    `${server.origin}/?run=${facts.run}&node=${facts.landed_node}`,
+  const landed = await openTab(
+    page,
+    server.origin,
+    facts.run,
+    facts.landed_node,
+    "PR",
   );
-  await expect(page.locator(".node-view-state")).toHaveText("done");
-  await page.getByRole("tab", { name: "PR" }).click();
   await expect(
-    fact(page, "Publication").getByRole("link", { name: "Pull request" }),
+    landed.getByRole("link", { name: "Pull request" }),
   ).toBeVisible();
-  await expect(fact(page, "Release")).toContainText(facts.landed_version);
+  await expect(landed).toContainText(facts.landed_version);
 });
