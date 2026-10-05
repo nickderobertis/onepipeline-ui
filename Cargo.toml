@@ -370,6 +370,17 @@ onemessagebus = "0.9.0"
 # holds 0.60.1's `PARKED` through the read and adopt routes over a driver alive
 # on this host.
 #
+# 0.61.0 adds a lifecycle node's `publish: "preserve"`: at closeout its branch is
+# put on its identity's origin and it settles `done` as `preserved`, carrying
+# `branch`, `head` and `remote` and no `landing`. It also adds `telemetry RUN
+# --changes`, which this crate does not serve. Nothing here enumerates an
+# outcome, so the word is served as journalled, and a node's publication reads
+# `merged` only off a merge record or the `merged` outcome, so a kept branch is
+# never served as landed;
+# `a_node_its_plan_kept_is_served_done_with_its_branch_and_head_and_never_landed`
+# holds that through the run and results routes. It links onevcs 0.42, which the
+# dev-only `onevcs` requirement moves with.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -378,7 +389,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.60.4"
+onepipeline = "=0.61.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -411,7 +422,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.40.2"
+onevcs = "0.42.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so

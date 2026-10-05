@@ -14,11 +14,14 @@
  *
  * Usage:
  *   serve-fixture.mjs --workspace DIR --port N [--ui]
- *                     [--shutdown-corpus [--live-dispatch-pid PID]]
+ *                     [--shutdown-corpus [--live-dispatch-pid PID]
+ *                      | --preserved-corpus]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
- *                                                  with --shutdown-corpus
+ *                                                  with --shutdown-corpus, and the
+ *                                                  kept-branch journey's with
+ *                                                  --preserved-corpus
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -43,6 +46,7 @@ import { fileURLToPath } from "node:url";
 
 import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
 import {
+  buildPreservedRuns,
   buildRuns,
   buildShutdownRuns,
   churnLive,
@@ -50,6 +54,7 @@ import {
   graphRecordsFor,
   growTranscript,
   overridesDir,
+  preservedFacts,
   recordActivity,
   recordWords,
   removePageRuns,
@@ -263,13 +268,15 @@ function bound(server, port, purpose) {
  * one `onepipeline-api serve --ui`, with nothing in front of it. The API is the
  * same either way, which every other journey holds through the Vite preview
  * proxying to this same server.
+ *
+ * `corpus` is which runs: `build` writes them under the runs root, and `facts`
+ * is what they publish about themselves beside it.
  */
-async function serve(workspace, port, ui, shutdown) {
+async function serve(workspace, port, ui, corpus) {
   rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
-  if (shutdown === undefined) buildRuns(runsRoot, workspace);
-  else buildShutdownRuns(runsRoot, shutdown.livePid);
+  corpus.build(runsRoot);
   // The `onevcs` state this server reads and writes, empty and inside the
   // workspace. A shutdown pushes every branch a run names through `onevcs` and
   // lists every other unpublished branch it knows of; left to the default, that
@@ -280,7 +287,7 @@ async function serve(workspace, port, ui, shutdown) {
   mkdirSync(onevcsHome, { recursive: true });
   writeFileSync(
     join(workspace, FIXTURE_FACTS_NAME),
-    `${JSON.stringify(shutdown === undefined ? facts(workspace) : shutdownFacts(), null, 2)}\n`,
+    `${JSON.stringify(corpus.facts(), null, 2)}\n`,
   );
 
   const binary = privateBinary(serverBinary(), workspace);
@@ -347,6 +354,7 @@ function parseArgs(argv) {
     "--stall",
     "--ui",
     "--shutdown-corpus",
+    "--preserved-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -415,6 +423,18 @@ if (args["shutdown-corpus"] && asked.length > 0) {
   die(
     `--shutdown-corpus serves; it means nothing beside --${asked[0]}`,
     "pass --shutdown-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (args["preserved-corpus"] && asked.length > 0) {
+  die(
+    `--preserved-corpus serves; it means nothing beside --${asked[0]}`,
+    "pass --preserved-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (args["shutdown-corpus"] && args["preserved-corpus"]) {
+  die(
+    "--shutdown-corpus and --preserved-corpus are two corpora",
+    "pass one of them, or neither for the main corpus",
   );
 }
 if (args["live-dispatch-pid"] !== undefined && !args["shutdown-corpus"]) {
@@ -564,8 +584,13 @@ if (args.stall) {
         "pass --record-words message or reasoning",
       );
     } else {
-      let shutdown;
-      if (args["shutdown-corpus"]) {
+      let corpus = {
+        build: (runsRoot) => buildRuns(runsRoot, workspace),
+        facts: () => facts(workspace),
+      };
+      if (args["preserved-corpus"]) {
+        corpus = { build: buildPreservedRuns, facts: preservedFacts };
+      } else if (args["shutdown-corpus"]) {
         const pid = args["live-dispatch-pid"];
         const livePid = pid === undefined ? undefined : Number(pid);
         if (
@@ -577,9 +602,12 @@ if (args.stall) {
             "pass --live-dispatch-pid the pid of a process this caller started",
           );
         }
-        shutdown = { livePid };
+        corpus = {
+          build: (runsRoot) => buildShutdownRuns(runsRoot, livePid),
+          facts: shutdownFacts,
+        };
       }
-      process.exit(await serve(workspace, port, args.ui === true, shutdown));
+      process.exit(await serve(workspace, port, args.ui === true, corpus));
     }
   } catch (refused) {
     die(

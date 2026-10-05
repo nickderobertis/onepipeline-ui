@@ -5378,6 +5378,177 @@ pub fn write_preserved(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The run id of the kept-by-plan fixture below.
+pub const KEPT_BY_PLAN_RUN_ID: &str = "run-20260807-8f7e6d";
+/// That run's node whose plan stated `publish: "preserve"`.
+pub const PRESERVE_NODE_ID: &str = "keep";
+/// That run's node published the default way, and landed.
+pub const LAND_NODE_ID: &str = "land";
+/// The branch the preserve node's work was kept on.
+pub const KEPT_BRANCH: &str = "feature/keep";
+/// The commit that branch stands at, as the settlement names it.
+pub const KEPT_HEAD: &str = "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e";
+/// The commit the land node's work merged as.
+pub const LANDED_SHA: &str = "3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f";
+
+/// A run of two lifecycle nodes on one identity, as `onepipeline` 0.61 settles
+/// them: `land` publishes the default way and merges, and `keep` states
+/// `publish: "preserve"`, so at closeout its branch is put on its origin and it
+/// settles `done` as `preserved`, naming the branch, its head and what the push
+/// found to do — and never landing.
+///
+/// Not [`write_preserved`]: that run's publication *failed* and kept its commit.
+/// This one's plan asked for the branch to be kept, and keeping it is the whole of
+/// a successful settlement.
+pub fn write_kept_by_plan(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4253,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let identity = "github.com/nickderobertis/onepipeline-ui";
+    let plan = json!({
+        "schema_version": 3,
+        "name": "kept-by-plan",
+        "concurrency": 2,
+        "tasks": [
+            {
+                "id": LAND_NODE_ID,
+                "persona": "worker",
+                "repo": identity,
+                "title": "Land the change",
+                "task": "## What\nLand it.",
+            },
+            {
+                "id": PRESERVE_NODE_ID,
+                "persona": "worker",
+                "repo": identity,
+                "title": "Keep the change",
+                "publish": "preserve",
+                "task": "## What\nKeep it for the next worker.",
+            },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let land = json!({ "run_id": run, "node": LAND_NODE_ID });
+    let keep = json!({ "run_id": run, "node": PRESERVE_NODE_ID });
+    let mut journal = Journal::new("a-recording-host-4253");
+    journal.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        run_started(plan),
+    );
+    for (node, labels) in [(LAND_NODE_ID, &land), (PRESERVE_NODE_ID, &keep)] {
+        journal
+            .emit(
+                "2026-08-07T12:00:01.000Z",
+                "pipeline",
+                "node-ready",
+                labels.clone(),
+                json!({}),
+            )
+            .emit(
+                "2026-08-07T12:00:02.000Z",
+                "pipeline",
+                "node-dispatched",
+                json!({ "run_id": run, "node": node, "persona": "worker" }),
+                json!({ "attempt": 1, "persona": "worker" }),
+            )
+            .emit(
+                "2026-08-07T12:00:03.000Z",
+                "vcs",
+                "session-opened",
+                labels.clone(),
+                json!({
+                    "token": format!("a-vcs-session-token-{node}"),
+                    "identity": identity,
+                    "branch": format!("feature/{node}"),
+                    "base": "main",
+                    "worktree": format!("/a/recorded/worktree/{node}"),
+                }),
+            );
+    }
+    journal
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "vcs",
+            "change-merged",
+            land.clone(),
+            json!({ "url": "https://example.invalid/changes/9", "sha": LANDED_SHA }),
+        )
+        .emit(
+            "2026-08-07T12:00:11.000Z",
+            "vcs",
+            "merge-completed",
+            land.clone(),
+            json!({ "identity": identity, "sha": LANDED_SHA, "base": "main" }),
+        )
+        // The release that carried the landed work, joined to its node by the
+        // commit it merged as — which a kept branch, merged as nothing, never is.
+        .emit(
+            "2026-08-07T12:00:11.500Z",
+            "vcs",
+            "release-observed",
+            json!({ "run_id": run }),
+            json!({
+                "identity": identity,
+                "target": "crate",
+                "style": "automated",
+                "version": RELEASE_VERSION,
+                "landing_commit": LANDED_SHA,
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:12.000Z",
+            "pipeline",
+            "node-settled",
+            land,
+            json!({
+                "status": "done",
+                "outcome": "merged",
+                "branch": "feature/land",
+                "change_url": "https://example.invalid/changes/9",
+                "landing": "landed",
+            }),
+        )
+        // The settlement `onepipeline`'s lifecycle writes for a kept branch, field
+        // for field: no drafter ran, nothing was published, and no `landing` is
+        // recorded because nothing was asked to land.
+        .emit(
+            "2026-08-07T12:00:13.000Z",
+            "pipeline",
+            "node-settled",
+            keep,
+            json!({
+                "status": "done",
+                "outcome": "preserved",
+                "branch": KEPT_BRANCH,
+                "head": KEPT_HEAD,
+                "remote": "pushed",
+                "detail": format!(
+                    "kept on {KEPT_BRANCH} at {KEPT_HEAD} (pushed): pushed to origin. Nothing \
+                     was drafted or published, and the branch does not land"
+                ),
+            }),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    dir
+}
+
 /// The run id of the review-draft fixture below.
 pub const REVIEW_DRAFT_RUN_ID: &str = "run-20260807-5d4c3b";
 /// That run's node whose green change was kept a draft for its user's review.
