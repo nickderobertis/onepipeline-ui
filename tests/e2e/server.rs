@@ -5876,6 +5876,83 @@ fn a_publication_that_never_landed_is_served_as_what_it_kept() {
     );
 }
 
+#[test]
+fn a_node_its_plan_kept_is_served_done_with_its_branch_and_head_and_never_landed() {
+    let run = fixture_run::KEPT_BY_PLAN_RUN_ID;
+    let keep = fixture_run::PRESERVE_NODE_ID;
+    let land = fixture_run::LAND_NODE_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_kept_by_plan(root, run);
+    });
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+
+    // Done, under the engine's own word, with the branch beside it and the head
+    // named in the settlement's own sentence — `head` is not a field of a node's
+    // result on the wire, and the detail is where the settlement says it.
+    assert_eq!(body["graph"]["node_status"][keep], json!("done"), "{body}");
+    let kept = &body["graph"]["node_results"][keep];
+    assert_eq!(kept["status"], json!("done"), "{kept}");
+    assert_eq!(kept["completed"], json!(true), "{kept}");
+    assert_eq!(kept["outcome"], json!("preserved"), "{kept}");
+    assert_eq!(kept["branch"], json!(fixture_run::KEPT_BRANCH), "{kept}");
+    let detail = kept["detail"].as_str().expect("the settlement's sentence");
+    assert!(detail.contains(fixture_run::KEPT_HEAD), "{detail}");
+    assert!(detail.contains(fixture_run::KEPT_BRANCH), "{detail}");
+    // Nothing that reads as landed: no change request, no release, and a
+    // publication that names the branch and says it did not merge.
+    for absent in ["pr", "release", "landing"] {
+        assert!(kept.get(absent).is_none(), "{absent}: {kept}");
+    }
+    let publication = &body["node_details"][keep]["publication"];
+    assert_eq!(publication["merged"], json!(false), "{publication}");
+    assert_eq!(publication["branch"], json!(fixture_run::KEPT_BRANCH));
+    assert!(publication.get("commit").is_none(), "{publication}");
+
+    // The node beside it, on the same identity, really did land — so the
+    // difference above is the settlement's and not the fixture's.
+    let landed = &body["node_details"][land]["publication"];
+    assert_eq!(landed["merged"], json!(true), "{landed}");
+    assert_eq!(landed["commit"], json!(fixture_run::LANDED_SHA), "{landed}");
+    assert_eq!(
+        body["graph"]["node_results"][land]["outcome"],
+        json!("merged")
+    );
+
+    // The node's own reading, in the engine's rendering: the branch, its head
+    // and what the push found, under the done word, and none of the words the
+    // landed node beside it is read with. Held to those lines rather than to the
+    // CLI byte for byte, because the rest of a lifecycle node's line is the
+    // engine asking this host's own `onevcs` registry about its identity, and the
+    // server and the CLI here read two different ones.
+    let results = http::get(serving.address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let rendered = results.json()["rendered"]
+        .as_str()
+        .expect("a rendering")
+        .to_owned();
+    let line = |node: &str| -> String {
+        rendered
+            .lines()
+            .find(|line| line.trim_start().starts_with(&format!("{node} ")))
+            .unwrap_or_else(|| panic!("no line for {node}: {rendered}"))
+            .to_owned()
+    };
+    let kept_line = line(keep);
+    assert!(kept_line.contains("done (preserved)"), "{kept_line}");
+    assert!(
+        kept_line.contains(&format!(
+            "kept on {} at {} (pushed)",
+            fixture_run::KEPT_BRANCH,
+            fixture_run::KEPT_HEAD
+        )),
+        "{kept_line}"
+    );
+    assert!(line(land).contains("landed on its base"), "{rendered}");
+    assert!(!kept_line.contains("landed on its base"), "{kept_line}");
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(status["node_status"][keep], json!("done"), "{status}");
+}
+
 /// The events of one kind a node's timeline lists, across its spans, oldest first.
 fn review_events<'a>(timeline: &'a Value, kind: &str) -> Vec<&'a Value> {
     let mut found = Vec::new();
