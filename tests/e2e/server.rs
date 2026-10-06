@@ -13018,6 +13018,99 @@ fn an_attestation_completes_a_ready_human_action() {
     assert_eq!(again.json()["error"]["code"], json!("refused"));
 }
 
+/// A human approval already waiting for its attestation can still be put
+/// behind more work. The engine this binary links takes a `reparent` of a
+/// waiting, unattested `kind: human` node through the reply route and clears
+/// its recorded wait, so the approval re-derives from its new prerequisites:
+/// behind a node nothing has started, the run's status no longer offers it for
+/// attestation, and an attestation of it is refused.
+#[test]
+fn a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_attestation() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_waiting_approval(root, fixture_run::RUN_ID, root);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let status = || http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    let signoff = fixture_run::APPROVAL_NODE_ID;
+    let docs = fixture_run::UNSTARTED_NODE_ID;
+
+    let before = status();
+    assert_eq!(before["node_status"][signoff], json!("waiting"), "{before}");
+    assert_eq!(before["node_status"][docs], json!("ready"), "{before}");
+
+    // An attestation and a reparent of the same approval in one envelope is
+    // refused whole, and the approval is left waiting as it was.
+    let both = http::post(
+        serving.address,
+        &reply,
+        &json!({
+            "version": 2,
+            "commands": [
+                { "op": "attest", "ref": signoff },
+                { "op": "reparent", "id": signoff, "deps": [docs] },
+            ],
+        })
+        .to_string(),
+    );
+    assert_eq!(both.status, 422, "{}", both.body);
+    let both = both.json();
+    assert_eq!(both["error"]["code"], json!("refused"));
+    assert!(
+        both["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("already started")),
+        "{both}"
+    );
+    assert_eq!(status()["node_status"][signoff], json!("waiting"));
+
+    // The reparent alone, onto the node nothing has started: applied by the reply
+    // itself, because nothing is driving the run.
+    let reparented = http::post(
+        serving.address,
+        &reply,
+        &json!({
+            "version": 2,
+            "commands": [{ "op": "reparent", "id": signoff, "deps": [docs] }],
+        })
+        .to_string(),
+    );
+    assert_eq!(reparented.status, 200, "{}", reparented.body);
+    let reparented = reparented.json();
+    assert_enveloped(&reparented);
+    assert_eq!(
+        reparented["receipt"]["state"],
+        json!("applied"),
+        "{reparented}"
+    );
+
+    let after = status();
+    assert_eq!(
+        after["node_status"][signoff],
+        json!("pending"),
+        "the approval re-derives from its new prerequisite rather than waiting: {after}"
+    );
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let task = detail["graph"]["plan"]["tasks"]
+        .as_array()
+        .expect("the plan's tasks")
+        .iter()
+        .find(|task| task["id"] == json!(signoff))
+        .cloned()
+        .expect("the approval is still in the plan");
+    assert_eq!(task["deps"], json!([docs]), "{task}");
+
+    // So nothing is waiting on it to attest any more.
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": signoff }).to_string(),
+    );
+    assert_eq!(attested.status, 422, "{}", attested.body);
+    assert_eq!(attested.json()["error"]["code"], json!("refused"));
+    assert_eq!(status()["node_status"][signoff], json!("pending"));
+}
+
 #[test]
 fn a_stop_is_judged_by_the_acting_session() {
     let run = fixture_run::RUN_ID;

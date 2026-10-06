@@ -152,6 +152,66 @@ pub const APPROVAL_NODE_ID: &str = "approve";
 /// driver's life is short and observable, and a journey decides when each one
 /// begins.
 pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "get the change approved" },
+        "name": "approval",
+        "concurrency": 1,
+        "tasks": [
+            { "id": APPROVAL_NODE_ID, "kind": "human", "task": "Approve the change." },
+        ],
+    });
+    write_undriven(root, run, dir, &plan, &[])
+}
+
+/// The unstarted node of the run [`write_waiting_approval`] writes, which its
+/// approval does not yet come after.
+pub const UNSTARTED_NODE_ID: &str = "document";
+
+/// A run nothing is driving, launched from `dir` on this host, whose approval
+/// [`APPROVAL_NODE_ID`] a driver already recorded `waiting` for an attestation
+/// nobody has given, beside [`UNSTARTED_NODE_ID`], which nothing has started.
+///
+/// It is the run a planner reaches for `reparent` on: the approval is offered
+/// for attestation, and the work it should have waited for has not happened.
+pub fn write_waiting_approval(root: &Path, run: &str, dir: &Path) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "get the documented change approved" },
+        "name": "approval",
+        "concurrency": 1,
+        "tasks": [
+            {
+                "id": UNSTARTED_NODE_ID,
+                "persona": "engineer",
+                "task": "## What\nDocument the change.\n\n## Acceptance criteria\n\n- the change is documented",
+            },
+            { "id": APPROVAL_NODE_ID, "kind": "human", "task": "Approve the change." },
+        ],
+    });
+    let waiting = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:00:01.000Z",
+        "stream": "a-recording-host-4242",
+        "seq": 1,
+        "source": "pipeline",
+        "kind": "node-settled",
+        "labels": { "run_id": run, "node": APPROVAL_NODE_ID },
+        "payload": { "status": "waiting" },
+        "artifacts": [],
+    });
+    write_undriven(root, run, dir, &plan, &[waiting])
+}
+
+/// The launch record, plan and journal of a run nothing is driving: `plan`
+/// started, followed by `journalled`.
+fn write_undriven(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    plan: &Value,
+    journalled: &[Value],
+) -> PathBuf {
     let run_dir = root.join(run);
     fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
     fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");
@@ -181,34 +241,23 @@ pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf
         })),
     )
     .expect("the launch record");
-    let plan = json!({
-        "schema_version": 2,
-        "goal": { "text": "get the change approved" },
-        "name": "approval",
-        "concurrency": 1,
-        "tasks": [
-            { "id": APPROVAL_NODE_ID, "kind": "human", "task": "Approve the change." },
-        ],
+    fs::write(run_dir.join("plan.json"), pretty(plan)).expect("the plan");
+    let started = json!({
+        "v": 1,
+        "ts": START,
+        "stream": "a-recording-host-4242",
+        "seq": 0,
+        "source": "pipeline",
+        "kind": "run-started",
+        "labels": { "run_id": run },
+        "payload": run_started_in(plan, dir),
+        "artifacts": [],
     });
-    fs::write(run_dir.join("plan.json"), pretty(&plan)).expect("the plan");
-    fs::write(
-        run_dir.join("events.jsonl"),
-        format!(
-            "{}\n",
-            json!({
-                "v": 1,
-                "ts": START,
-                "stream": "a-recording-host-4242",
-                "seq": 0,
-                "source": "pipeline",
-                "kind": "run-started",
-                "labels": { "run_id": run },
-                "payload": run_started_in(plan, dir),
-                "artifacts": [],
-            })
-        ),
-    )
-    .expect("the journal");
+    let journal: String = std::iter::once(&started)
+        .chain(journalled)
+        .map(|event| format!("{event}\n"))
+        .collect();
+    fs::write(run_dir.join("events.jsonl"), journal).expect("the journal");
     run_dir
 }
 

@@ -381,6 +381,16 @@ onemessagebus = "0.9.0"
 # holds that through the run and results routes. It links onevcs 0.42, which the
 # dev-only `onevcs` requirement moves with.
 #
+# 0.61.1 links an engine that accepts a `reparent` of a waiting, unattested
+# `kind: human` approval and re-gates it behind its new prerequisites, clearing
+# its recorded wait; every other recorded node, and an `attest` followed by a
+# `reparent` of one approval in a single envelope, is still refused. A run
+# adopted from the browser is driven, and the replies posted to it applied, by
+# this copy of the engine, so this changes which edits such a run accepts and
+# no route or response;
+# `a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_attestation`
+# holds it through the reply, status and attest routes.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -389,7 +399,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.61.0"
+onepipeline = "=0.61.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
