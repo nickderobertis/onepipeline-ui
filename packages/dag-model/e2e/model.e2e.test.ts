@@ -332,7 +332,7 @@ test("only a steps-shaped task may omit its own prose", () => {
   expect(
     planTaskSchema.parse({
       id: "ivr-real-api",
-      repo: "petsinc/org-apps",
+      repo: "example-org/apps",
       steps: [{ id: "build", persona: "engineer", task: "Build it" }],
     }).task,
   ).toBeUndefined();

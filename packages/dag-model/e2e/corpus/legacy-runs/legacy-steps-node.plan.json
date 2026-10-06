@@ -4,7 +4,7 @@
   "tasks": [
     {
       "id": "ivr-real-api",
-      "repo": "petsinc/org-apps",
+      "repo": "example-org/apps",
       "repo_type": "team",
       "steps": [
         {
