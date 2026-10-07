@@ -140,6 +140,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      # The workspace's package manager, at package.json's `packageManager` pin,
+      # as in ci.yml: `just` reaches the workspace through scripts/workspace-install.sh.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -173,6 +178,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -335,6 +343,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -506,6 +517,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -571,6 +585,9 @@ jobs:
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       # The frontend bundle below is built through the repository's own command
       # surface, so this job needs the runner that fans it out.
       - uses: taiki-e/install-action@v2

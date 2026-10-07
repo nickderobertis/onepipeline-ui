@@ -627,7 +627,7 @@ const ARTIFACT_FILES: &[&str] = &[
     "apps/dag-ui/package.json",
     "tsconfig.base.json",
     "package.json",
-    "package-lock.json",
+    "bun.lock",
 ];
 
 /// The files `cargo package` would upload, which is exactly the set release-plz
@@ -1526,71 +1526,137 @@ fn the_published_smoke_is_triggered_by_the_workflow_that_actually_releases() {
     );
 }
 
-/// Every workspace sibling is depended on the way `npm ci` here accepts.
+/// Every workspace sibling is depended on through bun's `workspace:` protocol.
 ///
-/// npm's own `workspace:` protocol is the obvious spelling of "the sibling in
-/// this repository", and it is the one thing these manifests may not use: npm
-/// 11.17.0 refuses it outright — `npm install` and `npm ci` both exit
-/// `EUNSUPPORTEDPROTOCOL, Unsupported URL Type "workspace:"`, measured from a
-/// manifest and a lockfile regenerated together — and `npm ci` is what
-/// `scripts/workspace-install.sh` runs, in a fresh clone, ahead of every tier.
-/// npm also normalises the protocol out of `package-lock.json`, so a manifest
-/// carrying it and a lockfile that cannot are drift by construction.
+/// `workspace:*` is the spelling that can only mean "the sibling in this
+/// repository": `bun install` links it from the workspace or refuses, where a
+/// bare range such as `*` is a registry range that happens to be satisfied by a
+/// sibling of the same name — and one a registry package of that name would
+/// satisfy just as well. These manifests spelled their siblings `*` while npm
+/// installed the workspace, because npm 11 refuses the protocol with
+/// `EUNSUPPORTEDPROTOCOL`; bun reads it, so that reason went with npm.
 ///
-/// A `*` beside a `workspaces` entry already means the sibling and nothing else:
-/// the root manifest lists these directories, so npm links them rather than
-/// resolving a registry range. What this refuses is a spelling that would install
-/// nowhere, and it is a test rather than a comment because a comment would be
-/// read after the clone that failed.
+/// None of these manifests is published: the npm packages this repository ships
+/// are assembled from `npm/` by `scripts/npm-build.mjs` and name no sibling, so
+/// the protocol never reaches a registry consumer. That half is held below too.
 #[test]
-fn no_manifest_names_a_sibling_with_a_protocol_this_npm_refuses() {
+fn every_workspace_sibling_is_named_through_the_workspace_protocol() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifests = ["package.json", "apps/dag-ui/package.json"]
-        .into_iter()
-        .map(PathBuf::from)
-        .chain(
-            ["apps", "packages"]
-                .into_iter()
-                .flat_map(|directory| {
-                    fs::read_dir(root.join(directory))
-                        .unwrap_or_else(|error| panic!("read {directory}: {error}"))
-                        .filter_map(Result::ok)
-                        .map(move |entry| {
-                            Path::new(directory)
-                                .join(entry.file_name())
-                                .join("package.json")
-                        })
-                })
-                .filter(|manifest| root.join(manifest).is_file()),
-        )
+    let manifest_in = |directory: &str| {
+        fs::read_dir(root.join(directory))
+            .unwrap_or_else(|error| panic!("read {directory}: {error}"))
+            .filter_map(Result::ok)
+            .map(move |entry| {
+                Path::new(directory)
+                    .join(entry.file_name())
+                    .join("package.json")
+            })
+            .filter(|manifest| root.join(manifest).is_file())
+            .collect::<Vec<_>>()
+    };
+    let parse = |manifest: &Path| -> serde_json::Value {
+        let read = fs::read_to_string(root.join(manifest))
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()));
+        serde_json::from_str(&read)
+            .unwrap_or_else(|error| panic!("parse {}: {error}", manifest.display()))
+    };
+    let workspace = std::iter::once(PathBuf::from("package.json"))
+        .chain(manifest_in("apps"))
+        .chain(manifest_in("packages"))
+        .collect::<BTreeSet<_>>();
+    let siblings = workspace
+        .iter()
+        .filter_map(|manifest| parse(manifest)["name"].as_str().map(str::to_owned))
         .collect::<BTreeSet<_>>();
     assert!(
-        manifests.len() > 2,
+        siblings.len() > 2,
         "no workspace manifests were found, so this gate is watching nothing"
     );
 
-    for manifest in manifests {
-        let read = fs::read_to_string(root.join(&manifest))
-            .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()));
-        let parsed: serde_json::Value = serde_json::from_str(&read)
-            .unwrap_or_else(|error| panic!("parse {}: {error}", manifest.display()));
+    let mut named = 0;
+    for manifest in &workspace {
+        let parsed = parse(manifest);
         for field in ["dependencies", "devDependencies"] {
             let Some(declared) = parsed[field].as_object() else {
                 continue;
             };
             for (name, requirement) in declared {
-                assert!(
-                    !requirement
-                        .as_str()
-                        .is_some_and(|spelled| spelled.starts_with("workspace:")),
-                    "{} depends on {name} as {requirement}, and `npm ci` refuses the \
-                     `workspace:` protocol with EUNSUPPORTEDPROTOCOL — a clone this \
-                     repository provisions would install nothing",
+                if !siblings.contains(name) {
+                    continue;
+                }
+                named += 1;
+                assert_eq!(
+                    requirement.as_str(),
+                    Some("workspace:*"),
+                    "{} depends on the workspace sibling {name} as {requirement}, which a \
+                     registry package of that name would satisfy too; name it `workspace:*`",
                     manifest.display()
                 );
             }
         }
     }
+    assert!(
+        named > 0,
+        "no manifest names a sibling, so this gate is watching nothing"
+    );
+
+    for manifest in manifest_in("npm") {
+        let read = fs::read_to_string(root.join(&manifest))
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()));
+        assert!(
+            !read.contains("workspace:"),
+            "{} is published to npm and carries a `workspace:` specifier, which no npm \
+             consumer can resolve",
+            manifest.display()
+        );
+    }
+}
+
+/// Every workflow runs the Node major package.json's `engines` floor names.
+///
+/// `scripts/workspace-install.sh` refuses a node below `engines.node`, and the
+/// workflows pin `node-version` for every job that runs Node — two spellings of
+/// one floor. A workflow pinning a major the script would refuse fails in CI
+/// before anything it was meant to check, and one pinning a newer major proves
+/// nothing about the floor a contributor's machine is held to. Equal is the only
+/// agreement, so it is held here.
+#[test]
+fn every_workflow_runs_the_node_major_package_json_requires() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("package.json")).expect("parse package.json");
+    let floor = manifest["engines"]["node"]
+        .as_str()
+        .and_then(|spelled| spelled.strip_prefix(">="))
+        .expect("package.json names its Node floor as `>=<major>` in engines.node");
+    assert!(
+        floor.parse::<u32>().is_ok(),
+        "engines.node names `>={floor}`, which is not a major version"
+    );
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
+    let mut pinned = 0;
+    for entry in fs::read_dir(&root).expect("read .github/workflows") {
+        let path = entry.expect("a workflow").path();
+        let text = fs::read_to_string(&path).expect("read the workflow");
+        for (number, line) in text.lines().enumerate() {
+            let Some((_, value)) = line.split_once("node-version:") else {
+                continue;
+            };
+            pinned += 1;
+            assert_eq!(
+                value.trim().trim_matches('"'),
+                floor,
+                "{}:{} pins Node {}, and package.json's engines.node floor is {floor}",
+                path.display(),
+                number + 1,
+                value.trim()
+            );
+        }
+    }
+    assert!(
+        pinned > 0,
+        "no workflow pins node-version, so this gate is watching nothing"
+    );
 }
 
 // The build script, as a module: `embed` is the decision it makes over a

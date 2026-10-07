@@ -17,11 +17,11 @@ files:
     # re-compose, so they are generated output, not repo-authored code.
     - "oneharness.toml"
     - "scripts/setup-llmlint.sh"
-    # Lock files: resolved by `cargo`/`npm ci`, not written by hand. The pin that
+    # Lock files: resolved by `cargo`/`bun install`, not written by hand. The pin that
     # matters is the exact version in the manifest beside each one, and that
     # manifest is judged.
     - "Cargo.lock"
-    - "package-lock.json"
+    - "bun.lock"
     # The contract this repository exists to implement, quoted verbatim from the
     # task that commissioned it. `tests/contract.rs` reconciles the code against
     # it, so it is an input the repo is judged *against*, not repo-authored prose

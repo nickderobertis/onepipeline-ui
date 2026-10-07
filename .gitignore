@@ -7,7 +7,7 @@
 /node_modules
 /.nx
 # Per-workspace installs, Vite's dependency cache, and the browser tier's own
-# scratch. `npm ci` and the Playwright configs recreate every one of them.
+# scratch. `bun install` and the Playwright configs recreate every one of them.
 node_modules/
 .vite/
 .vite-temp/

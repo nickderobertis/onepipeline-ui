@@ -24,7 +24,9 @@
 //! only alarm on a published-smoke failure, `ensure_sibling` runs the recipe
 //! the gate provisions the sibling CLI with, plus the task graph Nx itself builds
 //! for `test`, `linux_wheel` runs the one Linux wheel build both workflows share
-//! up to the container it hands that build to, and `ui` starts the binary with `--ui` and reads the browser view
+//! up to the container it hands that build to, `workspace_install` runs the
+//! script every recipe installs the TypeScript workspace through over a fresh
+//! copy of this checkout, and `ui` starts the binary with `--ui` and reads the browser view
 //! it serves beside the API against the bundle it embedded.
 //!
 //! What is under test in every one of them is the real script, recipe or binary,
@@ -71,6 +73,7 @@ mod report_workflow_failure;
 mod semver_check;
 mod server;
 mod ui;
+mod workspace_install;
 
 #[path = "../support/cost.rs"]
 mod cost_support;

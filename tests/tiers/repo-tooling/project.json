@@ -21,6 +21,7 @@
       "executor": "nx:noop"
     }
   },
+  "//": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] `tests/e2e/workspace_install.rs` joins this tier measured rather than assumed: the whole module takes 2.9 s under nextest, every refusal journey under 0.15 s and the one real `bun install` (from the cache `just bootstrap` filled) 2.9 s, against 12.8 s for `nx_affected`, already keyed here. What it exercises \u2014 `scripts/workspace-install.sh`, `package.json`, `bun.lock` \u2014 are inputs of this tier already, so a narrower edge would be a sixth tier project keyed on three of its files. JSON holds no comment, so this key is the narrowest place the directive can stand.",
   "namedInputs": {
     "repoMachinery": [
       "apiServerSurface",
@@ -44,6 +45,7 @@
       "{workspaceRoot}/packages/*/project.json",
       "{workspaceRoot}/tests/tiers/*/project.json",
       "{workspaceRoot}/**/package.json",
+      "{workspaceRoot}/bun.lock",
       "{workspaceRoot}/**/tsconfig*.json",
       "{workspaceRoot}/tests/packaging.rs",
       "{workspaceRoot}/tests/e2e/main.rs",
@@ -60,6 +62,7 @@
       "{workspaceRoot}/tests/e2e/release_status.rs",
       "{workspaceRoot}/tests/e2e/report_workflow_failure.rs",
       "{workspaceRoot}/tests/e2e/semver_check.rs",
+      "{workspaceRoot}/tests/e2e/workspace_install.rs",
       "{workspaceRoot}/tests/support/fixture_run.rs",
       "{workspaceRoot}/tests/support/harness_history.rs",
       "{workspaceRoot}/tests/support/http.rs",
@@ -71,5 +74,6 @@
       "{workspaceRoot}/tests/support/timeline_schema.rs",
       "{workspaceRoot}/tests/support/workflow.rs"
     ]
-  }
+  },
+  "//end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
 }

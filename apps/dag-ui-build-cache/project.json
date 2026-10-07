@@ -20,7 +20,7 @@
         "{workspaceRoot}/apps/dag-ui/**/*",
         "{workspaceRoot}/packages/dag-model/**/*",
         "{workspaceRoot}/package.json",
-        "{workspaceRoot}/package-lock.json",
+        "{workspaceRoot}/bun.lock",
         "{workspaceRoot}/tsconfig.base.json",
         "{workspaceRoot}/scripts/nx.sh",
         "{projectRoot}/project.json"

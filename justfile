@@ -372,7 +372,7 @@ _crate-deps-check:
 # Upgrade dependencies, then re-run the full deterministic gate.
 upgrade:
     @cargo update --quiet
-    @npm update --silent --no-audit --no-fund
+    @bun update --silent
     @just check
 
 # Ensures `just`, verifies the rest, then runs setup-llmlint. Runs automatically

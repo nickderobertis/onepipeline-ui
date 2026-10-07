@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # GitHub's default three plus `ready_for_review`: a change request opened as
+    # a draft and lifted later must get a run on the lifted state, or the merge
+    # path waits on checks that never re-run after the lift.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Least privilege: most jobs only need to read the repo.
 permissions:
@@ -48,6 +52,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      # bun installs the workspace (scripts/workspace-install.sh, through every
+      # recipe) at the version package.json's `packageManager` pins — the one pin,
+      # read here and by that script alike. Node still runs what it installs.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: extractions/setup-just@v3
       - name: Which projects the diff reaches
         id: affected
@@ -77,6 +87,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -103,7 +116,7 @@ jobs:
       # A committed lockfile that `just bootstrap`/`just check` had to change is
       # a stale generated file; fail rather than let it drift.
       - name: Committed generated files are up to date
-        run: git diff --exit-code -- Cargo.lock package-lock.json
+        run: git diff --exit-code -- Cargo.lock bun.lock
 
   # The broader tier: one full sweep of every project's `check`, on the release
   # pull request alone. That pull request's head is the commit that ships, and no
@@ -127,6 +140,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -164,6 +180,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest
@@ -196,6 +215,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: extractions/setup-just@v3
       # `just msrv` reads the same `rust-version` field, so the recipe and the
       # job can never disagree about which floor was proven.
@@ -213,6 +235,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,cargo-deny,cargo-machete
@@ -279,13 +304,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just
       - name: Build the browser view
         run: just build
       # llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this is not a suite exercising an external service: it is the release's own Linux build, and what it reaches over the network is its pinned image, toolchain and maturin, as `gate` reaches crates.io and npm. It sits in the pull-request tier on purpose — v0.16.0 published no wheel because the release was the first place anything compiled in this image, with every required check green — so moving it to a credential-gated or promoted tier would reinstate exactly that gap. It needs no credential.
-      - name: Build wheel (shared with release.yml's Linux build-wheels)
+      - name: Build wheel (shared with the Linux build-wheels legs in release.yml)
         env:
           TARGET: ${{ matrix.target }}
         run: just wheel-linux "$TARGET"
@@ -350,6 +378,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       # oneharness.toml's primary harness. Without a harness binary on PATH,
       # llmlint has nothing to drive and the job would fail with no findings —
       # which reads like a clean run. Pinned rather than floating: an upstream

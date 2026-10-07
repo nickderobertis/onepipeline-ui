@@ -35,7 +35,8 @@ export NX_DAEMON="${NX_DAEMON-false}"
 # for housekeeping: this workspace's pinned Nx is the only one that may run.
 export NX_USE_LOCAL=true
 
-bash "$ROOT/scripts/workspace-install.sh" || exit 1
+# Its exit code is passed through: it names which of its refusals this was.
+bash "$ROOT/scripts/workspace-install.sh" || exit $?
 
 # The npm-written shim rather than a path inside the package: Nx has moved its
 # bin entry between releases, and the shim is the one name that cannot.
