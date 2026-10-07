@@ -17,10 +17,10 @@
 # Reads what Actions sets on every build: GITHUB_EVENT_NAME, and GITHUB_HEAD_REF
 # on a pull request. Prints one word on stdout.
 #
-# Fails closed: an event this workflow is not triggered by is answered `broader`,
-# since sweeping a build nobody planned for costs time and skipping it costs a
-# check. Exit 2 when GITHUB_EVENT_NAME is missing, which means this did not run
-# inside Actions at all.
+# Refuses, with exit 2, an event ci.yml is not triggered by — a trigger added
+# without deciding its tier here — and a run with no GITHUB_EVENT_NAME at all,
+# which did not happen inside Actions. Either fails the `changes` job and with it
+# `gate`, rather than letting a build nobody placed run a tier by default.
 set -euo pipefail
 
 # The prefix release-plz gives the branch of the release pull request it opens.
@@ -44,7 +44,8 @@ push)
   printf 'affected\n'
   ;;
 *)
-  echo "ci-tier: '$event' is not an event ci.yml is triggered by — answering broader" >&2
-  printf 'broader\n'
+  echo "ci-tier: '$event' is not an event ci.yml is triggered by, so no tier is decided for it" >&2
+  echo "ACTION: add '$event' to scripts/ci-tier.sh with the tier its builds owe (AGENTS.md, \"Commits, releases, and merging\")" >&2
+  exit 2
   ;;
 esac

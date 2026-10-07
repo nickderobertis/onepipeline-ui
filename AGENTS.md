@@ -99,27 +99,10 @@ test tier or a release: the `bundled-ui` feature makes a missing bundle a build
 error, every release job that compiles the binary turns it on after `just
 build`, and `tests/packaging.rs` reads each of those jobs for both halves.
 
-**The crate's suite is five Nx projects, one per tier, and the coverage floor is
-measured over their union.** `onepipeline-ui:test` is the unit tier; the e2e
-journeys, the repo-tooling suites, the baseline comparison and the cost journeys
-are `onepipeline-ui-e2e`, `-repo-tooling`, `-baseline` and `-cost`, each reached
-by a change only through its own inputs, so a script edit no longer re-runs the
-journeys. `onepipeline-ui-coverage:coverage` merges the instrumented tiers'
-profiles and holds them to 95%. `tests/AGENTS.md` holds the rules.
-
-**One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
-edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the
-bounds on what a read may do to a runs root — the defect that made one open
-subscriber cost a core — and it counts operations from the kernel's own record
-of the running server rather than from a clock, because a CPU figure taken on a
-host that also runs every dispatch is a property of the host. It runs in
-seconds, so `onepipeline-ui-cost:test-cost` exists to spare a checkout the
-*dependency*: `check` runs it, so the pre-push bar still holds those bounds, and
-a bare `just test` does not need the tracer. Linux-only and compiled away
-elsewhere, and where it does run it **fails** rather than skips when the tracer
-is missing — a cost bound nothing measured is a bound nobody has.
-`ci.yml`'s `quality` and `sweep` jobs install it; a Linux checkout without it is
-told what to install by the failure itself.
+**`just check` needs one tool no lockfile can pin: `strace`, on Linux.** The
+cost journeys count what the server asks the kernel for, and fail rather than
+skip without it; a bare `just test` does not need it. `ci.yml`'s `quality` and
+`sweep` jobs install it.
 
 **The tier that needs that CLI provisions it; `bootstrap` is not the only path to
 it.** Everything else a tier needs lands in a user-wide cache that outlives any

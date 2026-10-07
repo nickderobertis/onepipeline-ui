@@ -50,7 +50,10 @@ property of the finished tree.
 They run behind `onepipeline-ui-cost:test-cost` rather than under `test`, and the
 edge is about the tracer rather than the clock — seconds, not minutes. `check`
 runs it, so the pre-push bar still holds the bounds; a bare `just test` is spared
-a dependency nothing else here has.
+a dependency nothing else here has. Where they do run, a missing tracer
+**fails** the tier rather than skipping it — a cost bound nothing measured is a
+bound nobody has — and the failure says what to install; `ci.yml`'s `quality`
+and `sweep` jobs install it.
 
 `tests/support/cost.rs` is how they are counted: the real binary, over a real
 runs root, on a real socket, with `strace` watching what it asks the kernel for.

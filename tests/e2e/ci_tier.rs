@@ -95,13 +95,21 @@ fn an_ordinary_pull_request_and_a_push_owe_the_affected_tier() {
 }
 
 #[test]
-fn an_event_nobody_planned_for_is_swept_rather_than_skipped() {
+fn an_event_nobody_placed_is_refused_rather_than_given_a_tier() {
     let output = tier(&[("GITHUB_EVENT_NAME", "workflow_dispatch")]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "broader");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a build of an event ci.yml is not triggered by was given a tier:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     assert!(
-        stderr(&output).contains("workflow_dispatch"),
-        "the fallback did not say which event it did not know:\n{}",
+        output.stdout.is_empty(),
+        "the refusal still answered a tier on stdout, which the workflow would read"
+    );
+    assert!(
+        stderr(&output).contains("workflow_dispatch") && stderr(&output).contains("ACTION:"),
+        "the refusal does not say which event it does not know and what to do:\n{}",
         stderr(&output)
     );
 }
