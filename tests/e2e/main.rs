@@ -73,15 +73,7 @@ mod report_workflow_failure;
 mod semver_check;
 mod server;
 mod ui;
-// llmlint: ignore-block[e2e_not_mocked] two of these journeys put a `bun` on PATH that
-// answers `--version` with an older release or with no version at all: no installed bun
-// can be made older without fetching a release over the network, which the offline gate
-// may not, and no real bun answers garbage. The stand-in substitutes only the program on
-// PATH, the script under test is the real one, and both journeys assert the stand-in was
-// never asked to install. Every other journey in the module drives the real bun.
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: the seven journeys take 2.4 s together under nextest, and six of them under 0.07 s each; the one real install from bun's cache takes 2.4 s, against 12.8 s for `nx_affected` beside it in the same tier. What they exercise is `scripts/workspace-install.sh`, `package.json` and `bun.lock`, all already inputs of the repository-machinery tier, so a narrower edge would be a sixth tier project keyed on three of its files.
 mod workspace_install;
-// llmlint: ignore-end[e2e_not_mocked]
 
 #[path = "../support/cost.rs"]
 mod cost_support;

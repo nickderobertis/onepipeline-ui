@@ -6,10 +6,9 @@
 //! gets is decided here: bun installing exactly what `bun.lock` pins, or a
 //! refusal that names the fix. These journeys run the real script with the real
 //! bun this checkout was bootstrapped with, then run a real Nx target over what
-//! it installed. The one substitution is a program on PATH that answers
-//! `--version` with an older release or with no version at all, for the two
-//! journeys about exactly that answer: no installed bun can be made older, and
-//! both assert the stand-in was never asked to install.
+//! it installed. Nothing is stood in for: a bun below the floor is the real bun
+//! under a pin moved past it, and a `bun` that is not bun is a real program
+//! linked under that name.
 //!
 //! Unix only for the reason `nx_affected` is: the script is bash, and the
 //! journeys that take a runtime away build their search path out of symlinks.
@@ -22,8 +21,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use tempfile::TempDir;
-
-use crate::stub_bin;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -326,58 +323,81 @@ fn a_manifest_without_the_bun_pin_is_refused() {
     assert!(!checkout.installed(), "a refused install left an Nx shim");
 }
 
-/// Run the script with a `bun` first on PATH that answers `--version` with
-/// `answer` and records anything else it is asked to do.
-fn with_a_bun_answering(answer: &str) -> (Checkout, Output, Option<String>) {
-    let checkout = Checkout::new();
-    let scratch = TempDir::new().expect("temp dir");
-    let asked = scratch.path().join("asked");
-    let path = stub_bin::install(
-        &scratch.path().join("bin"),
-        "bun",
-        &format!(
-            "#!/usr/bin/env bash\n\
-             if [ \"$1\" = --version ]; then echo '{answer}'; exit 0; fi\n\
-             echo \"$@\" >> '{}'\n\
-             exit 0\n",
-            asked.display()
-        ),
-    );
-    let output = checkout.install(&path);
-    let asked = fs::read_to_string(&asked).ok();
-    (checkout, output, asked)
-}
-
-/// A bun older than the pin is refused before it is asked to install anything.
+/// A bun older than the pin is refused before it installs anything — the state
+/// a clone is in after pulling a pin its bun has not caught up with. The pin is
+/// moved past the real bun rather than the bun moved behind it, which no
+/// offline journey can do.
 #[test]
 fn a_bun_older_than_the_pin_is_refused_before_it_installs() {
-    let (checkout, refused, asked) = with_a_bun_answering("1.0.0");
+    let checkout = Checkout::new();
+    let installed = text(
+        &Command::new("bun")
+            .arg("--version")
+            .output()
+            .expect("bun is on PATH")
+            .stdout,
+    )
+    .trim()
+    .to_owned();
+    let manifest = checkout.root().join("package.json");
+    let read = fs::read_to_string(&manifest).expect("read package.json");
+    let pinned = format!("\"packageManager\": \"bun@{}\"", pinned_bun());
+    assert!(
+        read.contains(&pinned),
+        "package.json spells its pin otherwise"
+    );
+    fs::write(
+        &manifest,
+        read.replace(&pinned, "\"packageManager\": \"bun@999.0.0\""),
+    )
+    .expect("write package.json");
+    let lock = fs::read(checkout.root().join("bun.lock")).expect("the committed bun.lock");
+
+    let refused = checkout.install(&this_path());
     let stderr = text(&refused.stderr);
     assert_eq!(refused.status.code(), Some(1), "{stderr}");
-    let pinned = pinned_bun();
     assert!(
-        stderr.contains(&format!("bun 1.0.0 is older than bun {pinned}")),
+        stderr.contains(&format!("bun {installed} is older than bun 999.0.0")),
         "{stderr}"
     );
     assert!(
         stderr.contains("ACTION: run 'bun upgrade'"),
         "the refusal does not name the fix:\n{stderr}"
     );
-    assert_eq!(asked, None, "a bun below the floor was asked to install");
-    assert!(!checkout.installed(), "a refused install left an Nx shim");
+    assert!(
+        !checkout.root().join("node_modules").exists(),
+        "a bun below the floor installed anyway"
+    );
+    assert_eq!(
+        fs::read(checkout.root().join("bun.lock")).expect("bun.lock after the refusal"),
+        lock,
+        "a bun below the floor rewrote bun.lock"
+    );
 }
 
-/// A `bun` whose answer is not a version is refused as such, rather than
-/// reaching the comparison as a shell arithmetic error.
+/// A `bun` on PATH that is some other program — an alias or a link left
+/// pointing at the wrong thing — is refused as answering no version, rather
+/// than reaching the comparison as a shell arithmetic error. Node is that other
+/// program here: it answers `--version` with `v` and its own release.
 #[test]
 fn a_bun_that_answers_no_version_is_refused_before_it_installs() {
-    let (checkout, refused, asked) = with_a_bun_answering("bun: command misconfigured");
+    let checkout = Checkout::new();
+    let scratch = TempDir::new().expect("temp dir");
+    let path = only(
+        scratch.path(),
+        &[
+            ("dirname", on_path("dirname")),
+            ("sed", on_path("sed")),
+            ("node", node()),
+            ("bun", node()),
+        ],
+    );
+
+    let refused = checkout.install(&path);
     let stderr = text(&refused.stderr);
     assert_eq!(refused.status.code(), Some(1), "{stderr}");
     assert!(
-        stderr.contains(
-            "answered --version with 'bun: command misconfigured', which is not a version"
-        ),
+        stderr.contains("answered --version with 'v") && stderr.contains("which is not a version"),
         "{stderr}"
     );
     assert!(
@@ -388,8 +408,10 @@ fn a_bun_that_answers_no_version_is_refused_before_it_installs() {
         !stderr.contains("integer expression"),
         "the answer reached the arithmetic:\n{stderr}"
     );
-    assert_eq!(asked, None, "a bun with no version was asked to install");
-    assert!(!checkout.installed(), "a refused install left an Nx shim");
+    assert!(
+        !checkout.root().join("node_modules").exists(),
+        "a bun with no version installed anyway"
+    );
 }
 
 /// The one pin of the workspace's package manager, as package.json names it.

@@ -33,6 +33,7 @@ final-status-level = "fail"
 # and CI scripts, the llmlint tier and the provisioning recipes.
 # `onepipeline-ui-repo-tooling:test`.
 [profile.repo-tooling]
+# llmlint: ignore[expensive_tests_stay_behind_their_own_edge] `workspace_install` joins this tier measured rather than assumed: its seven journeys take 2.4 s together under nextest, six of them under 0.07 s each and the one real `bun install` (from the cache `just bootstrap` filled) 2.4 s, against 12.8 s for `nx_affected` already here. What it exercises — `scripts/workspace-install.sh`, `package.json`, `bun.lock` — are inputs of this tier already, so a narrower edge would be a sixth tier project keyed on three of its files.
 default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/))"
 status-level = "fail"
 final-status-level = "fail"
