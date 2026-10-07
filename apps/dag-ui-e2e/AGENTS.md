@@ -27,9 +27,9 @@ can ask for without paying for the rest; `check` pays for all of it.
 
 ## Reaching the app
 
-Sibling dependencies here are `"*"`, as every one in this workspace is: the
-`workspace:*` protocol does not install under the npm this repository provisions
-with. `tests/packaging.rs` fails the build on it and carries the measurement.
+Sibling dependencies here are `workspace:*`, as every one in this workspace is:
+the spelling only the sibling can satisfy, never a registry package of the same
+name. `tests/packaging.rs` fails the build on any other.
 
 Not at all, and that is the point: what a journey needs of the app's vocabulary
 comes from `@onepipeline-ui/timeline-categories`, the shared package both this
