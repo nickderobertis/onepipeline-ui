@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # GitHub's default three plus `ready_for_review`: a change request opened as
+    # a draft and lifted later must get a run on the lifted state, or the merge
+    # path waits on checks that never re-run after the lift.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Least privilege: most jobs only need to read the repo.
 permissions:
