@@ -404,6 +404,19 @@ onemessagebus = "0.9.0"
 # hold both through the adopt and run routes over a bare origin. It links
 # onetaskgraph 0.3.2, which the dev-only `onetaskgraph-*` requirements move with.
 #
+# 0.63.0 links an engine whose write-back worker keeps one onetaskgraph store
+# for its lifetime, ending each attempt through that store's plugin-agnostic
+# command boundary and rebuilding it when its configuration changes, a call is
+# cancelled, or a source could not be built, and whose embedded store takes
+# onetaskgraph 0.3.2's one `status_mapping` grammar scoped by item kind across
+# `github-projects` and `linear`: a category maps to one name or to a name per
+# kind, so a Linear project is written its own project status. A status a source
+# names nothing for, for that kind, is refused rather than guessed, so a store a
+# browser-adopted run writes back to that wrote a status before — a `linear`
+# source with no mapping — now refuses it. This crate configures no store and
+# changes no route or response. It still links onetaskgraph 0.3.2, which the
+# dev-only `onetaskgraph-*` requirements now name exactly.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -412,7 +425,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.62.0"
+onepipeline = "=0.63.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -461,10 +474,11 @@ predicates = "3"
 # The store a host renders its tasks into, linked for the journey that launches
 # a run from a real rendering: `onetaskgraph task create --template-loader` is a
 # call into `Engine::create_task`, so a journey makes that call rather than
-# provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
-# engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.3.2"
-onetaskgraph-plugin-api = "0.3.2"
+# provisioning a second CLI. Exact, and the release the engine pins this family
+# to, because the family is lock-step and a caret would admit a release the
+# engine cannot share: the lock then resolves the one copy it links.
+onetaskgraph-core = "=0.3.2"
+onetaskgraph-plugin-api = "=0.3.2"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
