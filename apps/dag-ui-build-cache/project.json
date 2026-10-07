@@ -2,7 +2,7 @@
   "name": "dag-ui-build-cache",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "tags": ["scope:app", "type:test"],
+  "tags": ["scope:app", "type:test", "lang:rust"],
   "targets": {
     "lint": {
       "command": "cargo clippy --locked --quiet --test build-cache -- -D warnings",

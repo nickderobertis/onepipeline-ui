@@ -17,7 +17,10 @@
 //! the release workflow's own last job over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
 //! surface, `release_probe` runs the probe a consumer waiting on a release of
-//! this repository asks, `report_workflow_failure` runs the reporter that is the
+//! this repository asks, `nx_affected` asks the affected tier's own selection
+//! what a committed change would run, `ci_tier` runs the step that tells a CI
+//! build which tier of the gate it owes beside the workflow wiring that obeys
+//! it, `report_workflow_failure` runs the reporter that is the
 //! only alarm on a published-smoke failure, `ensure_sibling` runs the recipe
 //! the gate provisions the sibling CLI with, plus the task graph Nx itself builds
 //! for `test`, `linux_wheel` runs the one Linux wheel build both workflows share
@@ -31,6 +34,7 @@
 //! directive that permits it and the reason it is the narrowest cut available.
 
 mod baseline;
+mod ci_tier;
 mod cli;
 mod cost;
 mod ensure_baseline;
@@ -59,6 +63,7 @@ mod linux_wheel;
 // its reason at the constant that makes it.
 mod llmlint_cache;
 // llmlint: ignore-end[e2e_not_mocked]
+mod nx_affected;
 mod packaging;
 mod release_probe;
 mod release_status;
@@ -89,3 +94,5 @@ mod sibling;
 mod stub_bin;
 #[path = "../support/timeline_schema.rs"]
 mod timeline_schema;
+#[path = "../support/workflow.rs"]
+mod workflow;

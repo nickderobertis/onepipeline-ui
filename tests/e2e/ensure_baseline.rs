@@ -32,14 +32,23 @@ use crate::stub_bin;
 /// The suites that serve a run store through the base commit's binary, and so
 /// cannot run before it is provisioned.
 ///
-/// One target rather than the whole crate's `test`, because compiling another
-/// commit of this repository is what the comparison costs and nothing else in the
-/// suite owes it: `onepipeline-ui:test` runs everything but the comparison and
-/// provisions nothing for it, and this target runs the comparison alone. What that
-/// split can break is the comparison running *nowhere*, which is why
-/// [`the_gate_runs_the_comparison_beside_the_rest_of_the_suite`] and
-/// [`the_test_recipes_partition_the_suite`] are here beside it.
-const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui:test-baseline"];
+/// A project of its own rather than part of the crate's tests, because compiling
+/// another commit of this repository is what the comparison costs and nothing else
+/// in the suite owes it: the other tiers provision nothing for it, and this target
+/// runs the comparison alone. What that split can break is the comparison running
+/// *nowhere*, which is why [`the_gate_runs_the_comparison_beside_the_rest_of_the_suite`]
+/// and [`the_tier_profiles_partition_the_suite`] are here beside it.
+const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test-baseline"];
+
+/// The crate's test tiers: the Nx project and target each runs as, and the
+/// nextest profile in `.config/nextest.toml` that selects its tests.
+const TIERS: [(&str, &str, &str); 5] = [
+    ("onepipeline-ui", "test", "unit"),
+    ("onepipeline-ui-e2e", "test", "e2e"),
+    ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
+    ("onepipeline-ui-baseline", "test-baseline", "baseline"),
+    ("onepipeline-ui-cost", "test-cost", "cost"),
+];
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
 
@@ -511,19 +520,27 @@ fn every_suite_that_serves_the_baseline_depends_on_the_provisioning() {
     // The binary is clone-local and a publication clone is disposable, so a suite
     // that reached the comparison without this target would fail on a fresh clone
     // — which is exactly the tree the gate is asked to rule in.
-    let project: Value = serde_json::from_str(
-        &fs::read_to_string(repo_root().join("project.json")).expect("the project definition"),
-    )
-    .expect("the project definition parses");
+    let (provider, provision) = PROVISIONING.split_once(':').expect("a project:target");
     for suite in SUITES_THAT_SERVE_THE_BASELINE {
-        let target = suite.rsplit(':').next().expect("a target name");
+        let (name, target) = suite.split_once(':').expect("a project:target");
+        let project = project_definition(name);
         let depends = project["targets"][target]["dependsOn"]
             .as_array()
             .unwrap_or_else(|| panic!("{suite} declares no dependencies"));
+        // Either spelling Nx reads: a target of the suite's own project by name,
+        // or another project's named in full.
+        let provisions = |edge: &Value| match edge {
+            Value::String(own) => name == provider && own == provision,
+            Value::Object(_) => {
+                edge["target"] == provision
+                    && edge["projects"]
+                        .as_array()
+                        .is_some_and(|projects| projects.iter().any(|p| p == provider))
+            }
+            _ => false,
+        };
         assert!(
-            depends
-                .iter()
-                .any(|edge| edge == &Value::String("ensure-baseline".into())),
+            depends.iter().any(provisions),
             "{suite} serves a run store through the base commit's binary and does not \
              depend on {PROVISIONING}, so it fails on a clone nobody bootstrapped"
         );
@@ -546,7 +563,12 @@ fn the_gate_runs_the_comparison_beside_the_rest_of_the_suite() {
     let depends = workspace["targetDefaults"]["check"]["dependsOn"]
         .as_array()
         .expect("the check aggregate declares dependencies");
-    for tier in ["test", "test-baseline"] {
+    // Every tier's own target, and the floor measured over the instrumented ones.
+    let owed = TIERS
+        .iter()
+        .map(|(_, target, _)| *target)
+        .chain(["coverage"]);
+    for tier in owed {
         assert!(
             depends
                 .iter()
@@ -568,10 +590,7 @@ fn the_gate_runs_the_comparison_beside_the_rest_of_the_suite() {
 /// second reading of it.
 #[test]
 fn the_comparison_is_keyed_by_the_commit_it_compares_against() {
-    let project: Value = serde_json::from_str(
-        &fs::read_to_string(repo_root().join("project.json")).expect("the project definition"),
-    )
-    .expect("the project definition parses");
+    let project = project_definition("onepipeline-ui-baseline");
     let resolution = project["targets"]["test-baseline"]["inputs"]
         .as_array()
         .expect("the comparison declares its inputs")
@@ -705,92 +724,344 @@ fn jobs_in(workflow: &str) -> Vec<(String, String)> {
     jobs
 }
 
-/// Every module the comparison reads is one of the files it is keyed on.
+/// Every module a tier's journeys read is one of the files that tier is keyed on.
 ///
-/// Its inputs are the modules that decide what it compares rather than the whole
-/// suite, so a contract test or an unrelated journey no longer invalidates a
-/// verdict it cannot change. What that costs is a list: a helper the comparison
-/// starts reading and nobody adds here is one whose edits replay a stale verdict,
-/// silently and in the direction of passing. So the list is read back off the
-/// journeys themselves.
+/// A tier's inputs are the modules that decide what it runs rather than the whole
+/// suite — which is also what decides whether a change selects it at all, since a
+/// tier is a project of its own and Nx reaches it through those inputs alone. What
+/// that costs is a list: a helper a tier starts reading and nobody adds to it is
+/// one whose edits neither select the tier nor invalidate its cache, silently and
+/// in the direction of passing. So the list is read back off the journeys
+/// themselves: the modules the tier's nextest profile selects, the file that
+/// declares them, and every module those reach for in turn.
 #[test]
-fn the_comparison_is_keyed_by_every_module_it_reads() {
-    let project: Value = serde_json::from_str(
-        &fs::read_to_string(repo_root().join("project.json")).expect("the project definition"),
-    )
-    .expect("the project definition parses");
-    let keyed: Vec<String> = project["targets"]["test-baseline"]["inputs"]
-        .as_array()
-        .expect("the comparison declares its inputs")
-        .iter()
-        .filter_map(|input| input.as_str().map(str::to_owned))
-        .collect();
-
-    let journeys = repo_root().join("tests/e2e/baseline.rs");
-    let read = fs::read_to_string(&journeys).expect("the comparison's own source");
-    let modules = read
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("use crate::"))
-        .filter_map(|rest| rest.split([':', ';', '{', ' ']).next())
-        .filter(|module| !module.is_empty());
-    // The journeys and the file that declares them as a module, then everything
-    // they reach for: all of it has to be keyed, or an edit to it replays.
-    for module in ["baseline", "main"].into_iter().chain(modules) {
-        assert!(
-            keyed
-                .iter()
-                .any(|input| input.ends_with(&format!("/{module}.rs"))),
-            "`onepipeline-ui:test-baseline` is not keyed on `{module}`, which the \
-             comparison reads, so an edit to it would replay the verdict before it"
+fn every_tier_is_keyed_by_every_module_its_journeys_read() {
+    let declared = e2e_modules();
+    let profiles = tier_profiles();
+    for (name, target, profile) in TIERS {
+        // The crate's own tier is the root project, keyed on everything it owns,
+        // which is every file under `tests/` no tier project claims.
+        if name == "onepipeline-ui" {
+            continue;
+        }
+        let keyed = target_inputs(name, target);
+        let selection = &profiles[profile];
+        let selected = selection.modules.iter().cloned().chain(
+            // The `e2e` profile is the complement of the others, so its modules
+            // are every journey module the others leave.
+            (profile == "e2e")
+                .then(|| {
+                    declared
+                        .keys()
+                        .filter(|module| declared[*module].starts_with("tests/e2e/"))
+                        .filter(|module| !selection.excluded.contains(*module))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+                .flatten(),
         );
+        let mut pending: Vec<String> = selected.collect();
+        let mut files = vec!["tests/e2e/main.rs".to_owned()];
+        if selection
+            .binaries
+            .iter()
+            .any(|binary| binary == "packaging")
+        {
+            files.push("tests/packaging.rs".to_owned());
+            files.extend(path_modules("tests/packaging.rs"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(module) = pending.pop() {
+            if !seen.insert(module.clone()) {
+                continue;
+            }
+            let file = declared.get(&module).unwrap_or_else(|| {
+                panic!("`{profile}` selects `{module}`, which main.rs does not declare")
+            });
+            files.push(file.clone());
+            let text = fs::read_to_string(repo_root().join(file))
+                .unwrap_or_else(|error| panic!("{file}: {error}"));
+            pending.extend(
+                text.split("crate::")
+                    .skip(1)
+                    .filter_map(|rest| {
+                        rest.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                            .next()
+                    })
+                    .filter(|used| declared.contains_key(*used))
+                    .map(str::to_owned),
+            );
+        }
+        for file in files {
+            assert!(
+                keyed.iter().any(|input| input == &file),
+                "`{name}:{target}` is not keyed on `{file}`, which its journeys read, so an \
+                 edit to it neither selects the tier nor re-runs it"
+            );
+        }
     }
 }
 
-/// Every test runs under exactly one of the recipes the splits leave.
+/// Every test runs under exactly one tier.
 ///
-/// Two tiers sit behind edges of their own because each carries something the
-/// rest of the suite does not: the baseline comparison needs another commit of
-/// this repository compiled, and the cost journeys need a syscall tracer on the
-/// machine. The filters are the halves of one partition — `_crate-test` is `not`
-/// what the other two are — and they are written in three places, so nothing but
-/// this holds them to each other. Either side drifting alone is silent: widen the
-/// exclusion and tests stop running under the coverage floor, narrow an inclusion
-/// and a whole tier is declared for and runs nowhere.
+/// The suite is five Nx projects, each running its own nextest profile, and the
+/// five filters are the halves of one partition: `unit` is every binary but the
+/// two the other tiers draw on, and inside `e2e` the `e2e` profile is `not` what
+/// the other three select. They are written as module lists in two places, so
+/// nothing but this holds them to each other — and either side drifting alone is
+/// silent: widen an exclusion and tests stop running under the coverage floor,
+/// narrow an inclusion and a whole tier is declared for and runs nowhere. The
+/// tier projects are held to the profiles too, since a target naming the wrong
+/// profile runs another tier's tests twice and its own never.
 // llmlint: ignore-block[tests_mirror_real_usage] there is no command surface to drive here:
-// the property is that three *declarations* in one file partition one name space, and the
-// only way to observe it through the recipes would be to run all three tiers and see which
+// the property is that five *declarations* in one file partition one name space, and the
+// only way to observe it through the recipes would be to run all five tiers and see which
 // tests executed — which means compiling the base commit's server and provisioning a syscall
-// tracer to learn something about two strings. Asking `cargo nextest` what each filter
-// selects would be the real interface, and is refused for a different reason: a nested cargo
-// inside a running suite contends for the target-directory lock, which is a hang rather than
-// a verdict. Every other test in this module drives the real recipe.
+// tracer to learn something about five strings. Asking `cargo nextest list` what each
+// profile selects is the real interface, and is refused here for a different reason: a nested
+// cargo inside a running suite contends for the target-directory lock, which is a hang rather
+// than a verdict. Every other test in this module drives the real recipe.
 #[test]
-fn the_test_recipes_partition_the_suite() {
-    let recipes = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
-    let split: [(&str, &str); 2] = [
-        ("test(/^baseline::/)", "onepipeline-ui:test-baseline"),
-        ("test(/^cost::/)", "onepipeline-ui:test-cost"),
-    ];
-    let excluded: Vec<String> = split
+fn the_tier_profiles_partition_the_suite() {
+    let declared = e2e_modules();
+    let journeys: std::collections::BTreeSet<&String> = declared
         .iter()
-        .map(|(selection, _)| format!("not {selection}"))
+        .filter(|(_, file)| file.starts_with("tests/e2e/"))
+        .map(|(module, _)| module)
         .collect();
-    let covered = format!("-E '{}'", excluded.join(" and "));
-    assert!(
-        recipes.contains(&covered),
-        "`_crate-test` does not exclude the split-out tiers with `{covered}`, so the floor \
-         is measured over a suite that needs what those tiers need"
+    let profiles = tier_profiles();
+
+    // Inside the `e2e` binary: the three selections are disjoint, and the `e2e`
+    // profile excludes exactly their union.
+    let mut drawn = std::collections::BTreeSet::new();
+    for profile in ["repo-tooling", "baseline", "cost"] {
+        for module in &profiles[profile].modules {
+            assert!(
+                journeys.contains(module),
+                "the `{profile}` profile selects `{module}`, which is no module of the e2e binary"
+            );
+            assert!(
+                drawn.insert(module.clone()),
+                "`{module}` is selected by two tiers, so it runs twice"
+            );
+        }
+    }
+    assert_eq!(
+        profiles["e2e"].excluded, drawn,
+        "the `e2e` profile does not exclude exactly what the other tiers select, so a \
+         module runs in two tiers or in none"
     );
-    for (selection, target) in split {
-        let selects = format!("-E '{selection}'");
+
+    // Across binaries: `unit` is every binary but the ones the others draw on.
+    let others: std::collections::BTreeSet<String> = ["e2e", "repo-tooling", "baseline", "cost"]
+        .iter()
+        .flat_map(|profile| profiles[*profile].binaries.iter().cloned())
+        .collect();
+    assert_eq!(
+        profiles["unit"].excluded_binaries, others,
+        "the `unit` profile does not exclude exactly the binaries the other tiers run"
+    );
+
+    // Each tier's project runs its own profile, through the recipe that names it.
+    for (name, target, profile) in TIERS {
+        let command = project_definition(name)["targets"][target]["command"]
+            .as_str()
+            .unwrap_or_else(|| panic!("`{name}:{target}` has no command"))
+            .to_owned();
         assert!(
-            recipes.contains(&selects),
-            "no recipe selects that tier with `{selects}`, so `{target}` is declared for \
-             and runs nowhere"
+            [
+                format!("just _tier-test-covered {profile}"),
+                format!("just _tier-test {profile}")
+            ]
+            .contains(&command),
+            "`{name}:{target}` runs `{command}`, not the `{profile}` profile"
+        );
+    }
+    let recipes = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
+    for recipe in ["_tier-test-covered profile:", "_tier-test profile:"] {
+        let body = recipes
+            .split_once(&format!("\n{recipe}\n"))
+            .map(|(_, rest)| rest.split("\n\n").next().unwrap_or(""))
+            .unwrap_or_else(|| panic!("the justfile has no `{recipe}` recipe"));
+        assert!(
+            body.contains("NEXTEST_PROFILE=\"$1\""),
+            "`{recipe}` does not select its tests by the profile it is handed:\n{body}"
         );
     }
 }
 // llmlint: ignore-end[tests_mirror_real_usage]
+
+/// What one nextest profile selects, read off its `default-filter`.
+#[derive(Default)]
+struct Selection {
+    /// Binaries the filter selects (`binary(=…)` outside a `not`).
+    binaries: Vec<String>,
+    /// Binaries it excludes (`not binary(=…)`).
+    excluded_binaries: std::collections::BTreeSet<String>,
+    /// Modules of the e2e binary it selects (`test(/^(…)::/)`).
+    modules: Vec<String>,
+    /// Modules it excludes (`not test(/^(…)::/)`).
+    excluded: std::collections::BTreeSet<String>,
+}
+
+/// Every profile in `.config/nextest.toml`, by name.
+///
+/// The filters are a fixed shape — conjunctions and one disjunction of
+/// `binary(=NAME)` and `test(/^(A|B)::/)`, each optionally negated — so they are
+/// read by that shape rather than by a filterset parser, and a filter outside it
+/// fails here rather than being half-read.
+fn tier_profiles() -> std::collections::BTreeMap<String, Selection> {
+    let config: toml::Table = fs::read_to_string(repo_root().join(".config/nextest.toml"))
+        .expect("the nextest configuration reads")
+        .parse()
+        .expect("the nextest configuration parses");
+    let profiles = config["profile"].as_table().expect("nextest profiles");
+    TIERS
+        .iter()
+        .map(|(_, _, profile)| {
+            let filter = profiles
+                .get(*profile)
+                .and_then(|table| table.get("default-filter"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or_else(|| panic!("no `{profile}` profile with a default-filter"));
+            let mut selection = Selection::default();
+            for (offset, _) in filter.match_indices("binary(=") {
+                let name = filter[offset + "binary(=".len()..]
+                    .split(')')
+                    .next()
+                    .expect("a binary name")
+                    .to_owned();
+                if filter[..offset].ends_with("not ") {
+                    selection.excluded_binaries.insert(name);
+                } else {
+                    selection.binaries.push(name);
+                }
+            }
+            for (offset, _) in filter.match_indices("test(/^") {
+                let rest = &filter[offset + "test(/^".len()..];
+                let alternation = rest
+                    .split("::/)")
+                    .next()
+                    .expect("a module selection")
+                    .trim_start_matches('(')
+                    .trim_end_matches(')');
+                assert!(
+                    alternation
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '_' || c == '|'),
+                    "the `{profile}` filter selects modules by a pattern this test cannot \
+                     read: {filter}"
+                );
+                let modules = alternation.split('|').map(str::to_owned);
+                if filter[..offset].ends_with("not ") {
+                    selection.excluded.extend(modules);
+                } else {
+                    selection.modules.extend(modules);
+                }
+            }
+            ((*profile).to_owned(), selection)
+        })
+        .collect()
+}
+
+/// Every module the e2e binary declares, with the file it is read from.
+fn e2e_modules() -> std::collections::BTreeMap<String, String> {
+    let main = fs::read_to_string(repo_root().join("tests/e2e/main.rs")).expect("main.rs reads");
+    let mut modules = std::collections::BTreeMap::new();
+    let mut path: Option<String> = None;
+    for line in main.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("#[path = \"") {
+            path = rest.split('"').next().map(str::to_owned);
+        } else if let Some(name) = line
+            .strip_prefix("mod ")
+            .and_then(|rest| rest.strip_suffix(';'))
+        {
+            let file = match path.take() {
+                Some(relative) => format!("tests/{}", relative.trim_start_matches("../")),
+                None => format!("tests/e2e/{name}.rs"),
+            };
+            modules.insert(name.to_owned(), file);
+        }
+    }
+    modules
+}
+
+/// The files a test binary's root pulls in through `#[path]`.
+///
+/// Joined with `/` rather than through a `PathBuf`: the result is compared with
+/// the repository-relative inputs Nx declares, which a Windows separator never
+/// matches.
+fn path_modules(root: &str) -> Vec<String> {
+    let text = fs::read_to_string(repo_root().join(root)).expect("the binary's root reads");
+    let directory: Vec<&str> = root.split('/').collect();
+    let directory = &directory[..directory.len() - 1];
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("#[path = \""))
+        .filter_map(|rest| rest.split('"').next())
+        .map(|relative| {
+            let mut joined = directory.to_vec();
+            for part in relative.split('/') {
+                match part {
+                    ".." => {
+                        joined.pop();
+                    }
+                    part => joined.push(part),
+                }
+            }
+            joined.join("/")
+        })
+        .collect()
+}
+
+/// A project's definition, found by name among the `project.json` files Nx reads.
+fn project_definition(name: &str) -> Value {
+    let mut candidates = vec![repo_root().join("project.json")];
+    for directory in ["apps", "packages", "tests/tiers"] {
+        if let Ok(entries) = fs::read_dir(repo_root().join(directory)) {
+            candidates
+                .extend(entries.map(|entry| entry.expect("an entry").path().join("project.json")));
+        }
+    }
+    candidates
+        .into_iter()
+        .filter(|path| path.is_file())
+        .map(|path| {
+            serde_json::from_str::<Value>(&fs::read_to_string(&path).expect("a project definition"))
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+        })
+        .find(|project| project["name"] == name)
+        .unwrap_or_else(|| panic!("no project is named `{name}`"))
+}
+
+/// The files a target is keyed on, with named inputs — the project's own and the
+/// workspace's — expanded, as paths relative to the workspace root.
+fn target_inputs(project: &str, target: &str) -> Vec<String> {
+    let definition = project_definition(project);
+    let workspace: Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("nx.json")).expect("the workspace definition"),
+    )
+    .expect("the workspace definition parses");
+    let mut pending: Vec<Value> = definition["targets"][target]["inputs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("`{project}:{target}` declares no inputs"))
+        .clone();
+    let mut files = Vec::new();
+    while let Some(input) = pending.pop() {
+        let Some(input) = input.as_str() else {
+            continue;
+        };
+        if let Some(path) = input.strip_prefix("{workspaceRoot}/") {
+            files.push(path.to_owned());
+        } else if let Some(named) = definition["namedInputs"][input]
+            .as_array()
+            .or_else(|| workspace["namedInputs"][input].as_array())
+        {
+            pending.extend(named.iter().cloned());
+        }
+    }
+    files
+}
 
 /// The recipe writes where the suite reads, and neither restates the other's path.
 #[test]

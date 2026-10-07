@@ -29,7 +29,7 @@ fn bundle_on_disk() -> PathBuf {
 /// bytes against.
 ///
 /// The journeys over the embedded view need the tree to have built it before
-/// the binary was compiled — `onepipeline-ui:test` depends on `dag-ui:build`
+/// the binary was compiled — `onepipeline-ui-e2e:test` depends on `dag-ui:build`
 /// for exactly this — and say so rather than passing over a binary that
 /// embedded nothing.
 fn built_bundle() -> PathBuf {

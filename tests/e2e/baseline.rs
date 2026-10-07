@@ -48,10 +48,10 @@
 //! dependency graph is the expensive half of this, and it lives behind the
 //! `onepipeline-ui:ensure-baseline` Nx target — the same arrangement the sibling
 //! CLI has, and for the same reason: a change to a workflow, a script or a
-//! document must not make the root project's tests build a second server. These
-//! journeys are the only ones that edge is declared for: `onepipeline-ui:test`
-//! excludes them and `onepipeline-ui:test-baseline` is where they run, so nothing
-//! but the comparison pays for the comparison. `check` runs both. What
+//! document must not make the crate's tests build a second server. These
+//! journeys are the only ones that edge is declared for: they are a project of
+//! their own, `onepipeline-ui-baseline`, and no other tier's profile selects them,
+//! so nothing but the comparison pays for the comparison. `check` runs every tier. What
 //! reaches here is a provisioned binary and the commit it was stamped with, and a
 //! stamp naming anything but this branch's base fails the journey rather than
 //! comparing this build against something that is not what it replaced.

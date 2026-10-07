@@ -23,6 +23,9 @@
     },
     "format-check": {
       "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/timeline-categories"
+    },
+    "check": {
+      "executor": "nx:noop"
     }
   }
 }

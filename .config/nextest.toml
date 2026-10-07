@@ -1,0 +1,50 @@
+# The crate's test tiers, one nextest profile each.
+#
+# Every tier is an Nx project of its own (`project.json`, `tests/tiers/*/project.json`),
+# so a change pays for the tiers it can reach rather than the whole suite. They share
+# the test binaries — `e2e` is still one binary, `contract` and `packaging` one each —
+# and differ only in which of those binaries' tests they select, which is declared
+# here once and named by profile from every recipe that runs a tier.
+#
+# The five filters partition the default collection: `unit` is every binary but the
+# two the other tiers draw on, and inside `e2e` the `e2e` profile is the complement
+# of the other three. So a test added anywhere runs under exactly one tier, and one
+# added to a new module of the `e2e` binary lands in `e2e` rather than nowhere.
+# `tests/e2e/ensure_baseline.rs` holds the module lists below to each other, and to
+# the recipes that run them.
+#
+# `default` is untouched: a bare `cargo nextest run` still runs everything.
+
+# The crate's own fast tier: the library's and binary's unit tests and
+# `tests/contract.rs`. `onepipeline-ui:test`.
+[profile.unit]
+default-filter = "not binary(=e2e) and not binary(=packaging)"
+status-level = "fail"
+final-status-level = "fail"
+
+# The journeys a user drives — the binary as a subprocess, the server on a real
+# port, the browser view it serves. `onepipeline-ui-e2e:test`.
+[profile.e2e]
+default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check)::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# The repository's own machinery: the published packages' contents, the release
+# and CI scripts, the llmlint tier and the provisioning recipes.
+# `onepipeline-ui-repo-tooling:test`.
+[profile.repo-tooling]
+default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check)::/))"
+status-level = "fail"
+final-status-level = "fail"
+
+# The base commit's server against this one. `onepipeline-ui-baseline:test-baseline`.
+[profile.baseline]
+default-filter = "binary(=e2e) and test(/^baseline::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# The bounds on what a read costs, counted with `strace`. `onepipeline-ui-cost:test-cost`.
+[profile.cost]
+default-filter = "binary(=e2e) and test(/^cost::/)"
+status-level = "fail"
+final-status-level = "fail"

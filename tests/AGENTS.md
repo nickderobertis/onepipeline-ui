@@ -47,10 +47,13 @@ time, because a CPU measurement on a host that also runs every dispatch is a
 property of the host and reproduces nowhere, while the work a read does is a
 property of the finished tree.
 
-They run behind `onepipeline-ui:test-cost` rather than under `test`, and the
+They run behind `onepipeline-ui-cost:test-cost` rather than under `test`, and the
 edge is about the tracer rather than the clock — seconds, not minutes. `check`
 runs it, so the pre-push bar still holds the bounds; a bare `just test` is spared
-a dependency nothing else here has.
+a dependency nothing else here has. Where they do run, a missing tracer
+**fails** the tier rather than skipping it — a cost bound nothing measured is a
+bound nobody has — and the failure says what to install; `ci.yml`'s `quality`
+and `sweep` jobs install it.
 
 `tests/support/cost.rs` is how they are counted: the real binary, over a real
 runs root, on a real socket, with `strace` watching what it asks the kernel for.
@@ -68,6 +71,47 @@ are what the journeys assert.
 
 A new CLI verb, flag, or route is not done until its journey lands in
 `tests/e2e/`: the happy path **and** at least one failure the user can cause.
+
+## The tiers are projects
+
+The suite runs as five Nx projects, so a change pays for the tiers it can reach
+rather than for all of them. Each selects its tests through the nextest profile
+of the same name in `.config/nextest.toml`; the projects under `tests/tiers/`
+hold nothing but their `project.json`, and these rules are theirs.
+
+| Project | Target | Profile | Runs |
+| --- | --- | --- | --- |
+| `onepipeline-ui` | `test` | `unit` | the library's and binary's unit tests, `tests/contract.rs` |
+| `onepipeline-ui-e2e` | `test` | `e2e` | `cli`, `server`, `ui` |
+| `onepipeline-ui-repo-tooling` | `test` | `repo-tooling` | `tests/packaging.rs` and the e2e modules that drive scripts, workflows and recipes |
+| `onepipeline-ui-baseline` | `test-baseline` | `baseline` | `baseline` |
+| `onepipeline-ui-cost` | `test-cost` | `cost` | `cost` |
+
+- **A new module of the e2e binary lands in `e2e`** unless its name joins
+  another profile's list — the `e2e` filter is the complement of the other
+  three, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
+  `tests/e2e/ensure_baseline.rs` holds the profiles to one partition and every
+  tier project to the profile it names.
+- **A tier is reached only through its inputs.** No tier has a project-graph
+  edge to the crate — the root project is affected by every change, so an edge
+  to it would select every tier every time. Each instead names the files its
+  tests read, and a module a tier starts reading has to join that list:
+  `tests/e2e/ensure_baseline.rs` fails until it does. A file a journey only
+  needs to *exist* is left out — `ui::` packages the crate, which lists the
+  wrapper scripts, but their contents cannot change what it asserts.
+- **The coverage floor is one report over three tiers.** The instrumented
+  tiers (`unit`, `e2e`, `repo-tooling`) leave profiles named for themselves
+  under `target/llvm-cov-target` — declared as their Nx `outputs`, so a tier
+  replayed from the cache restores what the report merges — and
+  `onepipeline-ui-coverage:coverage` merges them and holds the union to 95%,
+  the same lines one run over the same tests measured. It lives on a project
+  of its own because the root project is always affected: there it would run
+  every instrumented tier on every change. Its inputs are the crate's sources
+  and the suite's own files, so a change that cannot move coverage does not
+  re-measure it.
+- **`test-quick`** is a tier without instrumentation, for the cross-platform
+  legs; the baseline and cost tiers have none, for the reasons the justfile's
+  `test-quick` recipe gives.
 
 ## Which tier a test belongs to
 

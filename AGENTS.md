@@ -61,9 +61,9 @@ and because nothing else recovers *why* the tooling is what it is.
   app later), Bash, and YAML/JSON/TOML config.
 - **Composed:** `base` + `ci` + `shapes/{cli,web-app,react}` +
   `languages/{rust,typescript}` + `intersections/rust-cli` + `releasing` +
-  `monorepo`, plus the `llmlint` judge tier. Nx owns the project graph, affected
-  selection, and caching; the language-native tools remain the source of each
-  check.
+  `project-graph` (the skill's former `monorepo`), plus the `llmlint` judge tier.
+  Nx owns the project graph, affected selection, and caching; the language-native
+  tools remain the source of each check.
 - **Excluded:** asdf/direnv — `rust-toolchain.toml` and the lockfiles already
   pin reproducibly. A second Nx project for the npm launcher — it is a committed
   shim with no build step, driven end to end by `tests/e2e/packaging.rs`; the
@@ -89,29 +89,20 @@ together.
 **The binary embeds the browser view, so the crate's test tiers build the
 frontend first.** `build.rs` compiles whatever `apps/dag-ui/dist` holds into
 `onepipeline-api` for `serve --ui`, and the `ui::` journeys read that view back
-off a port against the bundle on disk — so `onepipeline-ui:test`,
-`test-baseline`, `test-cost` and `dag-ui:build-api-server` all depend on
-`dag-ui:build` through Nx, `check-cross` reaches the same build through
-`_ensure-bundle`, and `tests/e2e/ensure_sibling.rs` holds that graph. A binary
+off a port against the bundle on disk — so every tier of the crate's suite and
+`dag-ui:build-api-server` depend on `dag-ui:build` through Nx, `check-cross`
+reaches the same build through the tiers' `test-quick` targets, and
+`tests/e2e/ensure_sibling.rs` holds that graph. A binary
 compiled before the bundle exists carries nothing and refuses `--ui`, which is
 the right answer for a `cargo install` from crates.io and the wrong one for a
 test tier or a release: the `bundled-ui` feature makes a missing bundle a build
 error, every release job that compiles the binary turns it on after `just
 build`, and `tests/packaging.rs` reads each of those jobs for both halves.
 
-**One tier needs a tool no lockfile can pin: `strace`, and it sits behind an
-edge for that reason rather than for its clock.** `tests/e2e/cost.rs` holds the
-bounds on what a read may do to a runs root — the defect that made one open
-subscriber cost a core — and it counts operations from the kernel's own record
-of the running server rather than from a clock, because a CPU figure taken on a
-host that also runs every dispatch is a property of the host. It runs in
-seconds, so `onepipeline-ui:test-cost` exists to spare a checkout the
-*dependency*: `check` runs it, so the pre-push bar still holds those bounds, and
-a bare `just test` does not need the tracer. Linux-only and compiled away
-elsewhere, and where it does run it **fails** rather than skips when the tracer
-is missing — a cost bound nothing measured is a bound nobody has.
-`ci.yml`'s quality job installs it; a Linux checkout without it is told what to
-install by the failure itself.
+**`just check` needs one tool no lockfile can pin: `strace`, on Linux.** The
+cost journeys count what the server asks the kernel for, and fail rather than
+skip without it; a bare `just test` does not need it. `ci.yml`'s `quality` and
+`sweep` jobs install it.
 
 **The tier that needs that CLI provisions it; `bootstrap` is not the only path to
 it.** Everything else a tier needs lands in a user-wide cache that outlives any
@@ -193,9 +184,9 @@ fans one uniformly-named target across all of them.
   whose subject is the PR title. Queue with `gh pr merge --auto --squash`. Admins
   may bypass in a break-glass.
 - **All gating checks are required**, including the `gate` job and the separate
-  `llmlint` job. `gate` rules on `quality` (the deterministic sweep) and on both
-  Linux `wheel` legs through `scripts/gate-verdict.sh`, so a job that must block a
-  merge joins it there rather than as a context protection would also have to
+  `llmlint` job. `gate` rules on `quality` (the deterministic affected tier) and
+  on both Linux `wheel` legs through `scripts/gate-verdict.sh`, so a job that must
+  block a merge joins it there rather than as a context protection would also have to
   list — v0.16.0's wheels failed with every required check green. `published-smoke` is *not* required and cannot be: branch
   protection lists contexts a pull request reports, and it runs on a completed
   run of `release.yml` or on a manual dispatch — neither of which is one. Nothing
@@ -208,6 +199,16 @@ fans one uniformly-named target across all of them.
   fires `release.yml`. Pre-1.0: `feat` → minor, `fix`/`perf`/`refactor`/`build`
   → patch, `!`/`BREAKING` → minor; `chore`/`docs`/`ci`/`test`/`style` do not
   release.
+- **Releases batch, so the full sweep runs on the release pull request.**
+  release-plz keeps one release PR open and every merge to `main` adds to it, so
+  the commit that ships is that PR's head, which no merge job swept. A push to
+  `main` therefore runs the affected tier, against the commit before the push
+  (`github.event.before` as `ONEPIPELINE_UI_NX_BASE_SHA`), and `ci.yml`'s `sweep`
+  job runs `just check` over every project on the release PR alone —
+  `scripts/ci-tier.sh` tells the two apart. `sweep` stays out of `gate`, which
+  rules on what every PR owes. `release.yml`'s `test` job sweeps once more, and
+  stays: a Release can be made by hand naming any commit, which no sweep may have
+  covered, and that job is the last gate before artifacts are built from it.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

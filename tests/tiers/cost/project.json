@@ -1,0 +1,31 @@
+{
+  "name": "onepipeline-ui-cost",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:api", "type:test", "lang:rust"],
+  "targets": {
+    "test-cost": {
+      "command": "just _tier-test cost",
+      "dependsOn": [
+        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" },
+        { "projects": ["dag-ui"], "target": "build" }
+      ],
+      "inputs": [
+        "apiServerSurface",
+        "testTiers",
+        "sharedGlobals",
+        "{workspaceRoot}/tests/e2e/main.rs",
+        "{workspaceRoot}/tests/e2e/cost.rs",
+        "{workspaceRoot}/tests/support/cost.rs",
+        "{workspaceRoot}/tests/support/fixture_run.rs",
+        "{workspaceRoot}/tests/support/harness_history.rs",
+        "{workspaceRoot}/tests/support/http.rs",
+        "{workspaceRoot}/tests/support/journal_schema.rs",
+        "{workspaceRoot}/tests/support/serving.rs"
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}
