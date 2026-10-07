@@ -988,14 +988,19 @@ fn e2e_modules() -> std::collections::BTreeMap<String, String> {
 }
 
 /// The files a test binary's root pulls in through `#[path]`.
+///
+/// Joined with `/` rather than through a `PathBuf`: the result is compared with
+/// the repository-relative inputs Nx declares, which a Windows separator never
+/// matches.
 fn path_modules(root: &str) -> Vec<String> {
     let text = fs::read_to_string(repo_root().join(root)).expect("the binary's root reads");
-    let directory = std::path::Path::new(root).parent().expect("a directory");
+    let directory: Vec<&str> = root.split('/').collect();
+    let directory = &directory[..directory.len() - 1];
     text.lines()
         .filter_map(|line| line.trim().strip_prefix("#[path = \""))
         .filter_map(|rest| rest.split('"').next())
         .map(|relative| {
-            let mut joined = directory.to_path_buf();
+            let mut joined = directory.to_vec();
             for part in relative.split('/') {
                 match part {
                     ".." => {
@@ -1004,7 +1009,7 @@ fn path_modules(root: &str) -> Vec<String> {
                     part => joined.push(part),
                 }
             }
-            joined.to_string_lossy().into_owned()
+            joined.join("/")
         })
         .collect()
 }
