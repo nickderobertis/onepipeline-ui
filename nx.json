@@ -18,10 +18,28 @@
     "wholeWorkspace": ["{workspaceRoot}/**/*"],
     "apiServerSurface": [
       "{workspaceRoot}/src/**/*.rs",
+      "{workspaceRoot}/build.rs",
       "{workspaceRoot}/Cargo.toml",
       "{workspaceRoot}/Cargo.lock"
     ],
-    "servedGoldens": ["{workspaceRoot}/tests/fixtures/*.json"]
+    "servedGoldens": [
+      "{workspaceRoot}/tests/fixtures/*.json",
+      { "runtime": "git hash-object tests/fixtures/project.json" }
+    ],
+    "embeddedView": [
+      "{workspaceRoot}/apps/dag-ui/index.html",
+      "{workspaceRoot}/apps/dag-ui/src/**/*",
+      "{workspaceRoot}/apps/dag-ui/package.json",
+      "{workspaceRoot}/apps/dag-ui/tsconfig.json",
+      "{workspaceRoot}/apps/dag-ui/vite.config.ts",
+      "{workspaceRoot}/packages/*/src/**/*",
+      "{workspaceRoot}/packages/*/package.json",
+      "{workspaceRoot}/packages/*/tsconfig.json"
+    ],
+    "testTiers": [
+      "{workspaceRoot}/.config/nextest.toml",
+      "{workspaceRoot}/justfile"
+    ]
   },
   "targetDefaults": {
     "bootstrap": { "cache": false },
@@ -31,10 +49,14 @@
     "typecheck": { "cache": true, "inputs": ["default"] },
     "build": { "cache": true, "inputs": ["default"] },
     "test": { "cache": true, "inputs": ["default"] },
+    "test-quick": { "cache": true, "inputs": ["default"] },
     "test-baseline": { "cache": true, "inputs": ["default"] },
     "test-cost": { "cache": true, "inputs": ["default"] },
     "test-isolation": { "cache": true, "inputs": ["default"] },
     "doc": { "cache": true, "inputs": ["default"] },
+    "coverage": { "cache": false },
+    "msrv": { "cache": false },
+    "deps-check": { "cache": false },
     "lint-llm-diff": {
       "cache": true,
       "inputs": [
@@ -55,7 +77,8 @@
         "test-baseline",
         "test-cost",
         "test-isolation",
-        "doc"
+        "doc",
+        "coverage"
       ]
     }
   }

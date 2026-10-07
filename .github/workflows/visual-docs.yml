@@ -105,6 +105,15 @@ jobs:
           | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
         export PATH="$HOME/.cargo/bin:$PATH"
         # rust-toolchain.toml pins the channel, so this installs that one and no other.
+        #
+        # Nx directly rather than through a `just` recipe, which is how every other
+        # CI step here reaches the graph: this container has no `just`, and this
+        # string is all of the job this repository writes — the steps around it are
+        # screencomp's reusable workflow's, so there is no step to install `just`
+        # with, only this script, where it would be a second toolchain compiled or
+        # downloaded per lane to run one Nx target. Same target, same graph: the
+        # target's `dependsOn` builds the bundle first, as `scripts/visual-capture.sh`
+        # relies on for the local capture.
         npx nx run dag-ui:build-api-server
         # $SHOTS_OUT arrives relative to the checkout; the config resolves it against
         # the repository root, which is where this runs from.

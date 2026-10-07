@@ -30,22 +30,24 @@ use onepipeline_ui::contract::Release;
 
 use crate::stub_bin;
 
-/// The tasks that start the read API, and so cannot run before the sibling is
-/// provisioned: the crate's own suite, the baseline comparison, which starts two
-/// servers rather than one, and the browser tier, whose Playwright journeys drive
-/// a real server over a fixture runs root.
+/// The tasks that start the read API beside the sibling, and so cannot run
+/// before the sibling is provisioned: the crate's e2e journeys — instrumented,
+/// and as the cross-platform legs run them — the baseline comparison, which
+/// starts two servers rather than one, and the browser tier, whose Playwright
+/// journeys drive a real server over a fixture runs root.
 ///
-/// Three targets and not one, because each of them is a tier a reader can ask for
-/// by name — that is what having an edge of their own means — and a tier reached
-/// on its own is exactly the one whose provisioning nothing else has done.
-const SUITES_THAT_START_THE_READ_API: [&str; 3] = [
-    "onepipeline-ui:test",
-    "onepipeline-ui:test-baseline",
+/// Several targets and not one, because each of them is a tier a reader can ask
+/// for by name — that is what having an edge of their own means — and a tier
+/// reached on its own is exactly the one whose provisioning nothing else has done.
+const SUITES_THAT_START_THE_READ_API: [&str; 4] = [
+    "onepipeline-ui-e2e:test",
+    "onepipeline-ui-e2e:test-quick",
+    "onepipeline-ui-baseline:test-baseline",
     "dag-ui-e2e:test",
 ];
 
 /// The targets those tasks are reached through, which is what Nx is asked for.
-const TIERS: &str = "test,test-baseline";
+const TIERS: &str = "test,test-quick,test-baseline";
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 
@@ -57,22 +59,27 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// one that refuses `--ui`, and the tier fails in a clean clone naming a
 /// missing bundle rather than proving anything.
 ///
-/// The cost tier is here for a reason of its own: its journeys never ask for
-/// the view, but they compile the same binary into the same target directory
-/// as the tiers that do, and `check` runs them beside each other. A tier that
-/// compiled a bundle-less binary there would leave the next one to rebuild it,
-/// which is minutes of the gate spent producing a binary that was already
-/// correct the run before.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 4] = [
+/// Every tier of the crate's suite is here, because each compiles the same test
+/// binaries: the ones whose journeys never ask for the view compile the same
+/// binary into the same target directory as the tiers that do, and `check` runs
+/// them beside each other. A tier that compiled a bundle-less binary there would
+/// leave the next one to rebuild it, which is minutes of the gate spent producing
+/// a binary that was already correct the run before. `test-quick` is each tier as
+/// the cross-platform legs run it, where nothing else builds the view first.
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 9] = [
     "onepipeline-ui:test",
-    "onepipeline-ui:test-baseline",
-    "onepipeline-ui:test-cost",
+    "onepipeline-ui:test-quick",
+    "onepipeline-ui-e2e:test",
+    "onepipeline-ui-e2e:test-quick",
+    "onepipeline-ui-repo-tooling:test",
+    "onepipeline-ui-repo-tooling:test-quick",
+    "onepipeline-ui-baseline:test-baseline",
+    "onepipeline-ui-cost:test-cost",
     "dag-ui:build-api-server",
 ];
 
-/// The targets those tasks are reached through — the sibling's two and the
-/// cost tier, which has an edge to the view build and none to the sibling.
-const COMPILING_TIERS: &str = "test,test-baseline,test-cost";
+/// The targets those tasks are reached through.
+const COMPILING_TIERS: &str = "test,test-quick,test-baseline,test-cost";
 
 /// What builds the view the binary embeds.
 const VIEW_BUILD: &str = "dag-ui:build";
@@ -393,21 +400,21 @@ fn every_suite_that_compiles_the_read_api_builds_the_view_first() {
     }
 }
 
-/// The one tier the graph above cannot answer for: `check-cross`, which drives
-/// cargo itself.
+/// `check-cross` reaches cargo only through the graph above.
 ///
-/// The cross-platform legs run that recipe rather than `onepipeline-ui:test`,
-/// so no Nx edge puts the view build in front of their compile — the recipe
-/// has to, and `_ensure-bundle` is how. Order is the whole of it: a view built
-/// after the compile is a view the compile did not see, and the leg would pass
-/// having proved the `ui::` journeys against a binary carrying nothing.
+/// The cross-platform legs run that recipe rather than the Linux tiers, and the
+/// suite it runs is the same binary those tiers compile — so it needs the view
+/// built first and the sibling provisioned just as they do. It gets both by
+/// running `test-quick` through Nx, whose edges the two tests above hold; a step
+/// of its own that drove cargo directly would have no such edge, and the leg
+/// would pass having proved the `ui::` journeys against a binary carrying nothing.
 ///
 /// Asked of `just` rather than of the justfile's text, because what a recipe
 /// runs and in what order is `just`'s own resolution of its dependencies and
 /// not something a reading of the file can settle. `--dry-run` prints those
 /// lines, to stderr, and runs none of them.
 #[test]
-fn check_cross_builds_the_view_before_it_compiles_the_read_api() {
+fn check_cross_reaches_the_suite_only_through_the_graph() {
     let output = Command::new("just")
         .args(["--dry-run", "check-cross"])
         .current_dir(repo_root())
@@ -422,21 +429,14 @@ fn check_cross_builds_the_view_before_it_compiles_the_read_api() {
     // `--dry-run` prints the recipe to stderr and leaves stdout to the recipe,
     // which runs nothing here.
     let planned = stderr(&output);
-    let built = planned
-        .find(&format!("run {VIEW_BUILD}"))
-        .unwrap_or_else(|| {
-            panic!(
-                "check-cross never builds the browser view, so the cross-platform legs compile a \
-             binary that embeds nothing:\n{planned}"
-            )
-        });
-    let compiled = planned.find("cargo nextest run").unwrap_or_else(|| {
-        panic!("check-cross no longer compiles the read API's suite:\n{planned}")
-    });
     assert!(
-        built < compiled,
-        "check-cross builds the browser view after compiling the suite that reads it back, so \
-         the binary under test embeds nothing:\n{planned}"
+        planned.contains("run-many -t test-quick"),
+        "check-cross no longer runs the suite's `test-quick` targets:\n{planned}"
+    );
+    assert!(
+        !planned.contains("cargo "),
+        "check-cross drives cargo outside the graph, where no edge builds the view or \
+         provisions the sibling first:\n{planned}"
     );
 }
 

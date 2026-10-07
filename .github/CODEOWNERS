@@ -10,6 +10,13 @@
 # The Rust crate — the published artifact and the versioned wire contract.
 /src/                    @nickderobertis
 /tests/                  @nickderobertis
+# The crate's test tiers, one Nx project each: the projects hold nothing but their
+# definitions, and tests/AGENTS.md holds their rules.
+/tests/tiers/e2e/        @nickderobertis
+/tests/tiers/repo-tooling/ @nickderobertis
+/tests/tiers/baseline/   @nickderobertis
+/tests/tiers/cost/       @nickderobertis
+/tests/tiers/coverage/   @nickderobertis
 /docs/contract.md        @nickderobertis
 /Cargo.toml              @nickderobertis
 

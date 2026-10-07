@@ -8,8 +8,8 @@
 # This is a monorepo: the repo-wide verbs (bootstrap, check, lint, test, format,
 # fmt-check, upgrade) delegate to Nx, which fans the uniformly-named target out
 # across every project. They never loop over projects by hand. What a target
-# *does* stays with its project — the `_crate-*` recipes below are the Rust
-# crate's own tools, named by project.json.
+# *does* stays with its project — the `_crate-*` and `_tier-*` recipes below are
+# the Rust crate's own tools and its test tiers', named by each `project.json`.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
@@ -136,19 +136,12 @@ check-affected:
 # what it cannot: coverage is instrumented on Linux alone (see `test-quick`),
 # and the frontend's typecheck, build and docs are the same artifact on every
 # OS. Naming that subset once is what keeps CI from re-listing tiers inline and
-# drifting away from this file.
+# drifting away from this file. Every part of it is an Nx target, so the
+# sibling CLI and the browser view the suite's binary embeds arrive through the
+# same `dependsOn` edges the Linux tiers declare rather than a second list here.
 # The gate's platform-sensitive tiers, without the Linux-only coverage floor.
-check-cross: fmt-check lint _ensure-sibling _ensure-bundle test-quick
+check-cross: fmt-check lint test-quick
     @echo "check-cross: ok"
-
-# The built browser view, which the crate's own build embeds in the binary and
-# the `ui::` journeys read back off the port. Behind an Nx target so a bundle
-# already built is a cache hit rather than a second Vite run; the crate's test
-# targets declare it a dependency, and `check-cross` reaches it here because
-# that recipe drives cargo directly.
-# Build the browser view the binary embeds, if it is not built already.
-_ensure-bundle:
-    @bash scripts/nx.sh run dag-ui:build
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
@@ -158,11 +151,13 @@ gate base="origin/main": check
     @just lint-llm-diff {{base}}
     @echo "gate: ok"
 
-# `true` when this branch's diff can reach the Rust crate project, so CI can skip
-# the cross-platform and install matrices on a change that cannot. Fails closed.
-# Whether the Rust crate is affected by this branch.
+# `true` when this branch's diff can reach any Rust project — the crate or one
+# of its test tiers, every one tagged `lang:rust` — so CI can skip the
+# cross-platform and install matrices on a change that cannot. A test-only change
+# is one that can: those matrices run the suites it touched. Fails closed.
+# Whether any Rust project is affected by this branch.
 affected-crate:
-    @bash scripts/nx-affected.sh --affects onepipeline-ui
+    @bash scripts/nx-affected.sh --affects tag:lang:rust
 
 # Escape hatch for Nx itself, e.g. `just nx show projects` or `just nx graph`.
 # Run an arbitrary Nx command against this workspace.
@@ -201,23 +196,25 @@ build:
 wheel-linux target out="dist":
     @bash scripts/build-linux-wheel.sh --target "$1" --out "$2"
 
-# Every project's own test target: the crate's suite under its coverage floor, the
-# frontend's components, and the browser journeys, which are a project of their
-# own. `test-baseline` is the one tier outside this, because it is the one that
-# needs another commit of this repository compiled first.
+# Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
+# the frontend's components, and the browser journeys — and the coverage floor
+# measured over the crate's tiers together. `test-baseline` and `test-cost` are
+# the two tiers outside this, each for what it needs that nothing else does.
+# Every project's tests, and the crate's coverage floor over its tiers.
 test:
-    @bash scripts/nx.sh run-many -t test
+    @bash scripts/nx.sh run-many -t test coverage
 
-# Only the crate declares this target, so this fans out to one project. It is a
-# recipe of its own rather than a step inside `test` because provisioning the base
+# Only `onepipeline-ui-baseline` declares this target, so this fans out to one
+# project. It is a recipe of its own rather than a step inside `test` because provisioning the base
 # commit's server is what it costs, and a reader iterating on the crate's own tests
 # should not pay it — `check` and `gate` run both.
 # The baseline comparison, which needs the base commit's server provisioned.
 test-baseline:
     @bash scripts/nx.sh run-many -t test-baseline
 
-# A recipe of its own for the reason `_crate-test-cost` gives: these need a
-# syscall tracer on the machine, and nothing else here does.
+# Only `onepipeline-ui-cost` declares this target. A recipe of its own because
+# these need a syscall tracer on the machine, and nothing else here does
+# (`tests/AGENTS.md`).
 # The bounds on what a read costs, which need `strace` installed.
 test-cost:
     @bash scripts/nx.sh run-many -t test-cost
@@ -238,57 +235,50 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
+# The crate's suite runs as five Nx projects, one per tier, each selecting its
+# tests through the nextest profile of the same name in `.config/nextest.toml`,
+# which is where the five filters are written and partition the suite. Three
+# tiers are instrumented and run here; the baseline comparison and the cost
+# journeys run through `_tier-test` below, for what each needs that the rest do
+# not — another commit of this repository compiled, and a syscall tracer.
+#
+# Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
+# named for the tier, and reports nothing: `_crate-coverage` merges every tier's
+# into one report and holds that to the floor. The name is what lets them share
+# one instrumented build and still be told apart — `cargo llvm-cov` would
+# otherwise name every tier's files alike, and Nx restores a tier replayed from
+# its cache by exactly that glob (the `outputs` its `project.json` declares). A
+# tier's own earlier profiles are cleared first, because a report merges every
+# file it finds and a stale run's would count lines this run never reached.
+# `--no-report` is also what stops `cargo llvm-cov` from cleaning the directory,
+# which would delete the other tiers' profiles mid-sweep.
+# One instrumented tier of the crate's suite, profiles kept for `coverage`.
+[positional-arguments]
+_tier-test-covered profile:
+    @rm -f target/llvm-cov-target/"$1"-*.profraw
+    @LLVM_PROFILE_FILE_NAME="$1-%p-%m.profraw" NEXTEST_PROFILE="$1" cargo llvm-cov nextest --locked --no-report \
+      || { echo "the $1 tier failed — the failing tests are listed above" >&2; exit 1; }
+
 # 95% line coverage is the gate; lower it only with a documented reason in
-# AGENTS.md.
-#
-# Two tiers are excluded and each has a recipe of its own below: the baseline
-# comparison, which cannot run until another commit of this repository has been
-# compiled, and the cost journeys, which need a syscall tracer on the machine.
-# The three filters partition the suite — this one is `not` what the other two
-# are — so every test runs under exactly one of them and the floor is still
-# measured over everything this target executes.
-# `tests/e2e/ensure_baseline.rs` holds all three recipes to that partition,
-# because a filter that drifted here would leave a tier running nowhere rather
-# than failing.
-# The crate's test suite (contract + e2e) with coverage enforced, less the two
-# tiers that carry a cost of their own.
-_crate-test:
-    @cargo llvm-cov nextest --locked --fail-under-lines 95 \
-      -E 'not test(/^baseline::/) and not test(/^cost::/)' \
-      --status-level fail --final-status-level fail \
-      || { echo "tests failed, or coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
+# AGENTS.md. Measured over the union of the three instrumented tiers, which is the
+# suite less the baseline and cost tiers — the same lines the floor was measured
+# over when one target ran all three. `onepipeline-ui-coverage:coverage` depends
+# on each tier's `test`, so a tier with nothing new to say replays its profiles
+# from the cache rather than leaving a hole in the report.
+# Merge every instrumented tier's profiles and hold them to the coverage floor.
+_crate-coverage:
+    @cargo llvm-cov report --locked --fail-under-lines 95 \
+      || { echo "coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
 
-# The baseline comparison, behind an edge of its own because it is the one tier
-# here that cannot run until another commit of this repository has been compiled.
-# `onepipeline-ui:test-baseline` is what declares that dependency; `check` runs
-# this target beside `test`, so the gate's verdict still covers it and only a
-# `test` run on its own is spared the provisioning.
-#
-# No coverage instrumentation: these journeys ask what two *binaries* serve rather
-# than which lines of this one ran, and the floor above is measured over the
-# partition that excludes them.
-# The base commit's server against this one — the comparison `test` leaves out.
-# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on.
-_crate-test-baseline:
-    @cargo nextest run --locked -E 'test(/^baseline::/)' --status-level fail --final-status-level fail
-# llmlint: ignore-end[diagnostics_error_or_absent]
-
-# The cost journeys, behind an edge of their own because they need something the
-# machine has to have rather than something the lockfile can pin: `strace`, which
-# is how they count what the server asks the kernel for. They are seconds rather
-# than minutes, so the edge is about that dependency and not about the clock — a
-# checkout without the tracer still runs every other tier.
-#
-# `check` runs this beside `test`, so the pre-push bar still holds the bounds; a
-# `test` run on its own is spared the dependency. Linux only, and the filter is a
-# no-op elsewhere because the suite is compiled away there.
-#
-# No coverage instrumentation: these journeys count syscalls rather than lines,
-# and the floor above is measured over the partition that excludes them.
-# The bounds on what a read costs — what `test` leaves out, and needs `strace`.
-# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own, on the terms `_crate-test-baseline` above states.
-_crate-test-cost:
-    @cargo nextest run --locked -E 'test(/^cost::/)' --status-level fail --final-status-level fail
+# A tier without instrumentation: the baseline comparison and the cost journeys,
+# which ask what two binaries serve and what a read asks the kernel for rather
+# than which lines ran, and `test-quick` on the platforms coverage is not measured
+# on.
+# One tier of the crate's suite, uninstrumented.
+# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on. The cross-platform legs this recipe serves run `_crate-lint` beside it, so the deny reaches these tests on every platform the gate rules on.
+[positional-arguments]
+_tier-test profile:
+    @NEXTEST_PROFILE="$1" cargo nextest run --locked
 # llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Build the docs with warnings denied (kept in the gate so doc links don't rot).
@@ -296,31 +286,28 @@ _crate-doc:
     @RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked --quiet
 
 # Coverage instrumentation is measured on Linux only, so the cross-platform CI
-# legs run the same suite through this instead of `test`.
+# legs run the same tiers through this instead of `test`: every Rust project's
+# `test-quick` target, which is its tier without the instrumentation.
 #
-# The cost journeys are excluded for the reason `_crate-test-cost` gives — they
-# need a tracer the machine has to have — and the exclusion is a no-op on the two
-# platforms this recipe exists for, because that suite is compiled away there.
-#
-# The baseline comparison is excluded on the same terms coverage is. It asks
-# whether *this crate* still serves what the commit it forked from served, which
-# is a property of the payload rather than of the platform — and paying for a
-# whole second server on each of the two cross legs would triple what the gate
-# spends to learn one thing. The Linux `test-baseline` tier runs it, behind the
-# `onepipeline-ui:ensure-baseline` target that provisions what it serves through.
-# `ensure_baseline::` is *not* excluded: those journeys stub the build and are as
-# platform-sensitive as any other recipe here.
-# Full test suite without coverage instrumentation.
-# llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on. The cross-platform legs this recipe is for run `_crate-lint` beside it, so the deny reaches these tests on every platform the gate rules on.
+# The cost journeys have no such target — they need a tracer the machine has to
+# have, and the suite is compiled away on the two platforms this recipe exists
+# for. Nor does the baseline comparison, which is excluded on the same terms
+# coverage is: it asks whether *this crate* still serves what the commit it forked
+# from served, a property of the payload rather than of the platform, and paying
+# for a whole second server on each of the two cross legs would triple what the
+# gate spends to learn one thing. The Linux `test-baseline` tier runs it, behind
+# the `onepipeline-ui:ensure-baseline` target that provisions what it serves
+# through. `ensure_baseline::` *is* here, in the repo-tooling tier: those journeys
+# stub the build and are as platform-sensitive as any other recipe here.
+# Every Rust tier without coverage instrumentation.
 test-quick:
-    @cargo nextest run --locked -E 'not test(/^baseline::/) and not test(/^cost::/)' --status-level fail
-# llmlint: ignore-end[diagnostics_error_or_absent]
+    @bash scripts/nx.sh run-many -t test-quick
 
 # Drives the compiled binary and the committed npm launcher — never a stub. The
-# whole e2e binary, which is `test` and `test-baseline` together: that split is
-# about what the gate provisions for which tier, and reaching for the journeys
-# themselves should not have to know it.
-# The end-to-end journeys in isolation (all of them, unlike `test`).
+# whole e2e binary, which four tiers share between them (`.config/nextest.toml`):
+# that split is about what each change pays for and what the gate provisions for
+# which tier, and reaching for the journeys themselves should not have to know it.
+# The whole `e2e` test binary in one run, every tier's share of it together.
 test-e2e: _ensure-baseline
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 
@@ -339,8 +326,14 @@ dag-ui-screens *ARGS:
 
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.
+# The `onepipeline-ui:msrv` target, which no `check` depends on: the floor needs a
+# second toolchain installed, so CI's `msrv` job is where it is proven.
 # Build under the declared MSRV.
 msrv:
+    @bash scripts/nx.sh run onepipeline-ui:msrv
+
+# The crate's MSRV build (the `onepipeline-ui:msrv` target).
+_crate-msrv:
     @RUSTFLAGS="-D warnings" cargo +{{msrv-version}} check --locked --all-targets --quiet \
       || { echo "the {{msrv-version}} floor no longer builds — install that toolchain, or raise rust-version in Cargo.toml (and clippy.toml)" >&2; exit 1; }
 
@@ -359,9 +352,14 @@ semver-check baseline ref:
     @bash scripts/semver-check.sh "$1" "$2"
 # llmlint: ignore-end[diagnostics_error_or_absent]
 
-# Separate from `check`: `cargo deny` needs a network-fetched advisory DB.
+# Separate from `check`: `cargo deny` needs a network-fetched advisory DB, so the
+# `onepipeline-ui:deps-check` target is one no `check` depends on.
 # Advisory + license audit and unused-dependency check.
 deps-check:
+    @bash scripts/nx.sh run onepipeline-ui:deps-check
+
+# The crate's supply-chain audit (the `onepipeline-ui:deps-check` target).
+_crate-deps-check:
     @command -v cargo-deny >/dev/null || { echo "cargo-deny not installed: cargo install cargo-deny --locked" >&2; exit 1; }
     @command -v cargo-machete >/dev/null || { echo "cargo-machete not installed: cargo install cargo-machete --locked" >&2; exit 1; }
     @cargo deny --log-level error check

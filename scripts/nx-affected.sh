@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# Affected-only selection, keyed off an explicitly derived merge base.
+# Affected-only selection, keyed off an explicitly derived base.
 #
 # Two modes:
-#   scripts/nx-affected.sh -t check        run a target over the affected projects
-#   scripts/nx-affected.sh --affects NAME  print `true`/`false` for one project
+#   scripts/nx-affected.sh -t check           run a target over the affected projects
+#   scripts/nx-affected.sh --affects PATTERN  print `true`/`false`: is any project the
+#                                             Nx pattern names affected (a project
+#                                             name, or e.g. `tag:lang:rust`)
 #
-# Both **fail closed**: when the merge base cannot be derived — a shallow clone,
-# a missing base branch, a detached build — this runs everything and says so on
-# stderr rather than reporting a scoped pass as a full one. Affected selection is
-# a speed optimisation, and a speed optimisation that can silently skip a check
-# is a correctness hole.
+# The base is one of two things, in this order:
+#   ONEPIPELINE_UI_NX_BASE_SHA   a commit, used as given — what a push build passes,
+#                                the commit the branch stood at before the push
+#   the merge base with a branch ONEPIPELINE_UI_NX_BASE_REF, else GITHUB_BASE_REF
+#                                on a pull request, else `main` outside CI
+#
+# Both modes **fail closed**: when no base can be derived — a shallow clone, a
+# missing base branch, a push build handed no commit, a commit that does not
+# resolve — this runs everything and says so on stderr rather than reporting a
+# scoped pass as a full one. Affected selection is a speed optimisation, and a
+# speed optimisation that can silently skip a check is a correctness hole.
 #
 # llmlint: ignore-file[tool_output_is_signal] the fallback notices say "this ran
 # everything, not the affected set" — unrecoverable once green, since both sweeps
@@ -31,7 +39,8 @@ cd "$ROOT" || {
 #
 # In CI its absence is meaningful rather than missing: a push build is *on* the
 # base branch, so scoping against it would find nothing changed and skip every
-# check. There is no base there, and no base means run everything.
+# check. A push build names its base with ONEPIPELINE_UI_NX_BASE_SHA instead, and
+# reaches this only without one — no base, which means run everything.
 base_branch() {
   local ref="${ONEPIPELINE_UI_NX_BASE_REF:-${GITHUB_BASE_REF:-}}"
   if [ -z "$ref" ]; then
@@ -49,8 +58,34 @@ base_branch() {
   printf '%s' "$ref"
 }
 
-# The merge base this branch forked from, or nothing when it cannot be derived.
+# The commit a push build names, when it names one: the commit to diff from, and
+# one that has to exist here. A value that is set and does not resolve is refused
+# rather than passed over to the branch below it — whoever set it meant this
+# commit and no other — and the refusal names the variable, because the full
+# sweep it falls back to looks like any other green run once it passes.
+#
+# A shape check comes first for the reason `base_branch` gives: the value reaches
+# git as an argument, and a commit is what a commit may look like. GitHub's
+# all-zero `before` — a push that created the branch — has that shape and names
+# no commit, so it is refused by the resolution like any other unknown one.
+base_commit() {
+  local sha="$ONEPIPELINE_UI_NX_BASE_SHA"
+  if ! printf '%s' "$sha" | grep -Eq '^[0-9a-fA-F]{7,64}$'; then
+    echo "nx-affected: ONEPIPELINE_UI_NX_BASE_SHA='$sha' is not a commit id" >&2
+    return 1
+  fi
+  if ! git rev-parse --quiet --verify "$sha^{commit}" 2>/dev/null; then
+    echo "nx-affected: ONEPIPELINE_UI_NX_BASE_SHA=$sha does not resolve to a commit in this checkout" >&2
+    return 1
+  fi
+}
+
+# The base to diff from, or nothing when it cannot be derived.
 resolve_base() {
+  if [ -n "${ONEPIPELINE_UI_NX_BASE_SHA:-}" ]; then
+    base_commit
+    return
+  fi
   local branch
   branch="$(base_branch)" || return 1
   # A PR runner's checkout has the base branch only as a remote-tracking ref if
@@ -65,25 +100,29 @@ resolve_base() {
 
 case "${1:-}" in
 --affects)
-  project="${2:-}"
-  [ -n "$project" ] || {
-    echo "nx-affected: --affects needs a project name" >&2
+  pattern="${2:-}"
+  [ -n "$pattern" ] || {
+    echo "nx-affected: --affects needs a project name or an Nx project pattern" >&2
     exit 2
   }
   if ! base="$(resolve_base)"; then
-    echo "nx-affected: no merge base — treating '$project' as affected" >&2
+    echo "nx-affected: no base — treating '$pattern' as affected" >&2
     printf 'true\n'
     exit 0
   fi
-  if ! projects="$(bash scripts/nx.sh show projects --affected --base="$base" --head=HEAD --json)"; then
-    echo "nx-affected: Nx could not list the affected projects — treating '$project' as affected" >&2
+  # Nx resolves the pattern itself — an exact name, a glob, or `tag:` — so a
+  # project whose name is a substring of another's cannot answer for it, and a
+  # pattern naming nothing is an empty answer rather than a match.
+  if ! projects="$(bash scripts/nx.sh show projects --affected --base="$base" --head=HEAD \
+    --projects "$pattern" --json)"; then
+    echo "nx-affected: Nx could not list the affected projects — treating '$pattern' as affected" >&2
     printf 'true\n'
     exit 0
   fi
-  # Matched as a parsed JSON array element rather than by grepping the text: a
-  # project whose name is a substring of another's would otherwise answer for it.
+  # Read as a parsed JSON array rather than by grepping the text, which is the one
+  # shape Nx promises on stdout.
   if printf '%s' "$projects" |
-    node -e 'const fs=require("node:fs");process.exit(JSON.parse(fs.readFileSync(0,"utf8")).includes(process.argv[1])?0:1)' "$project"; then
+    node -e 'const fs=require("node:fs");process.exit(JSON.parse(fs.readFileSync(0,"utf8")).length>0?0:1)'; then
     printf 'true\n'
   else
     printf 'false\n'
@@ -95,7 +134,7 @@ case "${1:-}" in
     exit 2
   }
   if ! base="$(resolve_base)"; then
-    echo "nx-affected: no merge base — running every project instead of the affected ones" >&2
+    echo "nx-affected: no base — running every project instead of the affected ones" >&2
     exec bash scripts/nx.sh run-many "$@"
   fi
   exec bash scripts/nx.sh affected --base="$base" --head=HEAD "$@"

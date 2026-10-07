@@ -1,0 +1,24 @@
+{
+  "name": "onepipeline-ui-coverage",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:api", "type:test", "lang:rust"],
+  "targets": {
+    "coverage": {
+      "command": "just _crate-coverage",
+      "dependsOn": [
+        { "projects": ["onepipeline-ui"], "target": "test" },
+        { "projects": ["onepipeline-ui-e2e"], "target": "test" },
+        { "projects": ["onepipeline-ui-repo-tooling"], "target": "test" }
+      ],
+      "inputs": [
+        "apiServerSurface",
+        "testTiers",
+        "{workspaceRoot}/tests/**/*.rs"
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

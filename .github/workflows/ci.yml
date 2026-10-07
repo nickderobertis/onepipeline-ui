@@ -9,26 +9,35 @@ on:
 permissions:
   contents: read
 
+# A pull request's superseded run is cancelled; a push to `main` never is. Each
+# push is gated against the commit before it (`ONEPIPELINE_UI_NX_BASE_SHA` below),
+# so a cancelled push run would leave the commits it covered gated by nothing.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
+  # The base a push build's affected selection diffs from: the commit `main` stood
+  # at before this push. Empty on a pull request, which is scoped against its merge
+  # base instead. `scripts/nx-affected.sh` refuses a value that does not resolve —
+  # a force-push's vanished commit, or the all-zero one — and runs everything.
+  ONEPIPELINE_UI_NX_BASE_SHA: ${{ github.event_name == 'push' && github.event.before || '' }}
 
 jobs:
-  # Which projects this pull request's diff can reach, derived once so every
-  # Rust-artifact job below can skip on a change that cannot reach the crate
-  # instead of paying the full matrix. On a push to main it answers `true`.
+  # Which projects this build's diff can reach, derived once so every
+  # Rust-artifact job below can skip on a change that cannot reach a Rust project
+  # instead of paying the full matrix — and which tier of the gate the build owes.
   #
-  # `just affected-crate` fails closed: with no derivable merge base — a shallow
-  # clone, a missing base branch — it says the crate is affected and the matrices
-  # run. Affected selection is a speed optimisation, and one that can silently
-  # skip a check is a correctness hole.
+  # `just affected-crate` fails closed: with no derivable base — a shallow clone,
+  # a missing base branch, a push whose `before` does not resolve — it says a Rust
+  # project is affected and the matrices run. Affected selection is a speed
+  # optimisation, and one that can silently skip a check is a correctness hole.
   changes:
     runs-on: ubuntu-latest
     outputs:
       crate: ${{ steps.affected.outputs.crate }}
+      tier: ${{ steps.tier.outputs.tier }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,12 +51,18 @@ jobs:
       - name: Which projects the diff reaches
         id: affected
         run: echo "crate=$(just affected-crate)" >> "$GITHUB_OUTPUT"
+      # `broader` on the release pull request alone, which is what `sweep` below
+      # runs on. `scripts/ci-tier.sh` holds why.
+      - name: Which tier of the gate this build owes
+        id: tier
+        run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
 
-  # The full gate on a clean checkout: bootstrap from scratch, then the quality
-  # gate (format, clippy, tests incl. e2e with the coverage threshold, docs) over
-  # every project. A pull request runs it over the affected projects only; main
-  # runs the whole graph, so nothing affected-detection or a stale cache could
-  # miss survives past the merge.
+  # The affected tier on a clean checkout: bootstrap from scratch, then the
+  # quality gate (format, clippy, the crate's test tiers with the coverage floor,
+  # docs) over the projects this build's diff can reach — a pull request's against
+  # its merge base, a push to main's against the commit before the push. Releases
+  # are batched through release-plz's release pull request, so the full sweep
+  # over every project runs there (`sweep` below) rather than after every merge.
   # Linux-only because coverage is measured here; macOS/Windows prove the
   # artifact via the `cross` job below. Its verdict reaches branch protection
   # through `gate` at the end of this file, not a context of its own.
@@ -83,15 +98,44 @@ jobs:
       # the compiled read API, so a change under `src/` selects that tier just as
       # one under `apps/dag-ui` does.
       - name: Quality gate (affected projects)
-        if: github.event_name == 'pull_request'
         run: just check-affected
-      - name: Quality gate (every project)
-        if: github.event_name != 'pull_request'
-        run: just check
       # A committed lockfile that `just bootstrap`/`just check` had to change is
       # a stale generated file; fail rather than let it drift.
       - name: Committed generated files are up to date
         run: git diff --exit-code -- Cargo.lock package-lock.json
+
+  # The broader tier: one full sweep of every project's `check`, on the release
+  # pull request alone. That pull request's head is the commit that ships, and no
+  # merge job swept it — every merge to `main` runs the affected tier above — so
+  # this is the one point each released tree meets the whole graph, catching what
+  # affected selection could miss. It is deliberately not an input to `gate`:
+  # `gate` rules on what every pull request owes, and this runs on one kind of
+  # pull request only. Whether branch protection lists it is the repository
+  # settings' call, not this file's. Publication does not wait on it either way —
+  # release.yml's `test` job re-sweeps whatever commit a Release names before any
+  # artifact is built, for the reason its own comment gives.
+  sweep:
+    needs: changes
+    if: needs.changes.outputs.tier == 'broader'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,nextest,cargo-llvm-cov
+      # The cost journeys count with it, as in `quality` above.
+      - name: Install the syscall tracer the cost journeys count with
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Quality gate (every project)
+        run: just check
 
   # Prove the artifact builds and its tests pass on macOS and Windows (without
   # the coverage threshold, which is enforced on Linux).
@@ -146,6 +190,11 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
       - uses: Swatinem/rust-cache@v2
+      # `just msrv` runs the `onepipeline-ui:msrv` Nx target, and Nx is a Node
+      # program the recipe installs from the committed lockfile.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - uses: extractions/setup-just@v3
       # `just msrv` reads the same `rust-version` field, so the recipe and the
       # job can never disagree about which floor was proven.
@@ -159,6 +208,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # `just deps-check` runs the `onepipeline-ui:deps-check` Nx target.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: just,cargo-deny,cargo-machete

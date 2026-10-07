@@ -1,0 +1,75 @@
+{
+  "name": "onepipeline-ui-repo-tooling",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:api", "type:test", "lang:rust"],
+  "targets": {
+    "test": {
+      "command": "just _tier-test-covered repo-tooling",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "inputs": ["repoMachinery"],
+      "outputs": [
+        "{workspaceRoot}/target/llvm-cov-target/repo-tooling-*.profraw"
+      ]
+    },
+    "test-quick": {
+      "command": "just _tier-test repo-tooling",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "inputs": ["repoMachinery"]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  },
+  "namedInputs": {
+    "repoMachinery": [
+      "apiServerSurface",
+      "embeddedView",
+      "testTiers",
+      "sharedGlobals",
+      "{workspaceRoot}/scripts/**/*",
+      "{workspaceRoot}/.github/**/*",
+      "{workspaceRoot}/npm/**/*",
+      "{workspaceRoot}/pyproject.toml",
+      "{workspaceRoot}/release-plz.toml",
+      "{workspaceRoot}/release-targets.toml",
+      "{workspaceRoot}/gh-secrets.json",
+      "{workspaceRoot}/README.md",
+      "{workspaceRoot}/LICENSE",
+      "{workspaceRoot}/docs/contract.md",
+      "{workspaceRoot}/.gitignore",
+      "{workspaceRoot}/**/.nxignore",
+      "{workspaceRoot}/project.json",
+      "{workspaceRoot}/apps/*/project.json",
+      "{workspaceRoot}/packages/*/project.json",
+      "{workspaceRoot}/tests/tiers/*/project.json",
+      "{workspaceRoot}/**/package.json",
+      "{workspaceRoot}/**/tsconfig*.json",
+      "{workspaceRoot}/tests/packaging.rs",
+      "{workspaceRoot}/tests/e2e/main.rs",
+      "{workspaceRoot}/tests/e2e/baseline.rs",
+      "{workspaceRoot}/tests/e2e/ci_tier.rs",
+      "{workspaceRoot}/tests/e2e/ensure_baseline.rs",
+      "{workspaceRoot}/tests/e2e/ensure_sibling.rs",
+      "{workspaceRoot}/tests/e2e/lint_llm_diff.rs",
+      "{workspaceRoot}/tests/e2e/linux_wheel.rs",
+      "{workspaceRoot}/tests/e2e/llmlint_cache.rs",
+      "{workspaceRoot}/tests/e2e/nx_affected.rs",
+      "{workspaceRoot}/tests/e2e/packaging.rs",
+      "{workspaceRoot}/tests/e2e/release_probe.rs",
+      "{workspaceRoot}/tests/e2e/release_status.rs",
+      "{workspaceRoot}/tests/e2e/report_workflow_failure.rs",
+      "{workspaceRoot}/tests/e2e/semver_check.rs",
+      "{workspaceRoot}/tests/support/fixture_run.rs",
+      "{workspaceRoot}/tests/support/harness_history.rs",
+      "{workspaceRoot}/tests/support/http.rs",
+      "{workspaceRoot}/tests/support/journal_schema.rs",
+      "{workspaceRoot}/tests/support/release_declaration.rs",
+      "{workspaceRoot}/tests/support/serving.rs",
+      "{workspaceRoot}/tests/support/sibling.rs",
+      "{workspaceRoot}/tests/support/stub_bin.rs",
+      "{workspaceRoot}/tests/support/timeline_schema.rs",
+      "{workspaceRoot}/tests/support/workflow.rs"
+    ]
+  }
+}

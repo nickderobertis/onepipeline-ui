@@ -29,48 +29,36 @@
       "command": "just _crate-lint"
     },
     "test": {
-      "command": "just _crate-test",
-      "dependsOn": ["ensure-sibling", { "projects": ["dag-ui"], "target": "build" }]
-    },
-    "test-cost": {
-      "command": "just _crate-test-cost",
-      "dependsOn": ["ensure-sibling", { "projects": ["dag-ui"], "target": "build" }],
+      "command": "just _tier-test-covered unit",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "inputs": [
-        "apiServerSurface",
-        "{projectRoot}/tests/e2e/main.rs",
-        "{projectRoot}/tests/e2e/cost.rs",
-        "{projectRoot}/tests/support/cost.rs",
-        "{projectRoot}/tests/support/fixture_run.rs",
-        "{projectRoot}/tests/support/harness_history.rs",
-        "{projectRoot}/tests/support/http.rs",
-        "{projectRoot}/tests/support/serving.rs",
-        "{projectRoot}/justfile",
-        "sharedGlobals"
-      ]
-    },
-    "test-baseline": {
-      "command": "just _crate-test-baseline",
-      "dependsOn": [
-        "ensure-sibling",
-        "ensure-baseline",
-        { "projects": ["dag-ui"], "target": "build" }
+        "default",
+        "servedGoldens",
+        "{workspaceRoot}/apps/dag-ui/src/**/*",
+        "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
+        "{workspaceRoot}/packages/*/src/**/*"
       ],
+      "outputs": ["{workspaceRoot}/target/llvm-cov-target/unit-*.profraw"]
+    },
+    "test-quick": {
+      "command": "just _tier-test unit",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "inputs": [
-        "apiServerSurface",
-        "{projectRoot}/tests/e2e/main.rs",
-        "{projectRoot}/tests/e2e/baseline.rs",
-        "{projectRoot}/tests/support/fixture_run.rs",
-        "{projectRoot}/tests/support/http.rs",
-        "{projectRoot}/tests/support/serving.rs",
-        "{projectRoot}/tests/support/sibling.rs",
-        "{projectRoot}/tests/support/timeline_schema.rs",
-        "{projectRoot}/justfile",
-        "sharedGlobals",
-        { "runtime": "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main" }
+        "default",
+        "servedGoldens",
+        "{workspaceRoot}/apps/dag-ui/src/**/*",
+        "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
+        "{workspaceRoot}/packages/*/src/**/*"
       ]
     },
     "doc": {
       "command": "just _crate-doc"
+    },
+    "msrv": {
+      "command": "just _crate-msrv"
+    },
+    "deps-check": {
+      "command": "just _crate-deps-check"
     },
     "lint-llm-diff": {
       "command": "bash scripts/llmlint-judge.sh",

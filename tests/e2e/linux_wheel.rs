@@ -37,6 +37,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use crate::workflow::job_block;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -216,27 +218,6 @@ fn out_arg(dir: &Path) -> String {
         .expect("the scratch directory is inside the checkout")
         .display()
         .to_string()
-}
-
-/// One job's block of a workflow: from `  <job>:` to the next job key at the
-/// same indentation.
-fn job_block(workflow: &str, job: &str) -> String {
-    let text = fs::read_to_string(repo_root().join(".github/workflows").join(workflow))
-        .unwrap_or_else(|error| panic!("{workflow} is readable: {error}"));
-    let header = format!("  {job}:");
-    let mut lines = text.lines().skip_while(|line| *line != header);
-    let first = lines
-        .next()
-        .unwrap_or_else(|| panic!("{workflow} has a `{job}` job"));
-    let body = lines.take_while(|line| {
-        let inner = line.strip_prefix("  ").unwrap_or("");
-        !(line.starts_with("  ") && !inner.starts_with([' ', '#']) && inner.ends_with(':'))
-    });
-    std::iter::once(first)
-        .chain(body)
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n"
 }
 
 /// Each `- target:` in a job's matrix, with the `os:` beside it.

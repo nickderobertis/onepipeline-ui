@@ -1,0 +1,15 @@
+# `project.json` here is a fixture — the body the read API serves for one
+# project — and Nx's built-in project discovery claims every `project.json` it
+# can see, which made this one an empty project named "contract" that owned
+# this directory and ran nothing.
+#
+# Ignored *here* rather than in the root `.nxignore` on purpose. Nx reads the
+# root file for change detection as well as for discovery, so a root entry would
+# make an edit to this fixture affect nothing at all. Nx's change detection reads
+# only the root file; its file walker honours this one too, so this hides the
+# file from discovery and from the walker's hashes while a change to it still
+# reaches every project whose inputs name it. The hash the walker no longer
+# takes is taken by the `servedGoldens` named input's runtime entry in
+# `nx.json`, so a cached reader still re-runs when this fixture moves.
+# `tests/e2e/nx_affected.rs` holds both halves.
+project.json
