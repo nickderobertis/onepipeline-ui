@@ -69,7 +69,8 @@ and because nothing else recovers *why* the tooling is what it is.
   installs it with `--frozen-lockfile` and refuses a bun older than
   `package.json`'s `packageManager`, the one pin, which every CI job's
   `oven-sh/setup-bun` reads too. Node still runs what bun installs (Nx, Vite,
-  Vitest, Playwright; the targets' `npx` only runs those installed binaries).
+  Vitest, Playwright; the targets' `npx` only runs those installed binaries),
+  and the same script holds it to `engines.node`.
   npm stays where the registry is the subject rather than this workspace:
   `npm pack`/`npm publish` of what `scripts/npm-build.mjs` assembles, the
   `verify-npm` and `published-smoke.yml` installs that prove what an npm user

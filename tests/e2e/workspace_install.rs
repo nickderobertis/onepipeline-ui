@@ -414,6 +414,111 @@ fn a_bun_that_answers_no_version_is_refused_before_it_installs() {
     );
 }
 
+/// Rewrite the copy's package.json with `edit` applied to its text.
+fn edit_manifest(checkout: &Checkout, edit: impl FnOnce(String) -> String) {
+    let manifest = checkout.root().join("package.json");
+    let read = fs::read_to_string(&manifest).expect("read package.json");
+    let edited = edit(read.clone());
+    assert_ne!(edited, read, "the edit changed nothing in package.json");
+    fs::write(&manifest, edited).expect("write package.json");
+}
+
+/// A node older than package.json's `engines` floor is refused before bun
+/// installs anything. The floor is moved past the real node rather than the
+/// node moved behind it, which no offline journey can do.
+#[test]
+fn a_node_older_than_the_floor_is_refused_before_it_installs() {
+    let checkout = Checkout::new();
+    let installed = text(
+        &Command::new("node")
+            .arg("--version")
+            .output()
+            .expect("node is on PATH")
+            .stdout,
+    )
+    .trim()
+    .to_owned();
+    edit_manifest(&checkout, |read| {
+        read.replace("\"node\": \">=24\"", "\"node\": \">=999\"")
+    });
+
+    let refused = checkout.install(&this_path());
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains(&format!("node {installed} is older than Node.js 999")),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("ACTION: install Node.js 999+"),
+        "the refusal does not name the fix:\n{stderr}"
+    );
+    assert!(
+        !checkout.root().join("node_modules").exists(),
+        "a node below the floor installed anyway"
+    );
+}
+
+/// A package.json that names no Node floor is refused rather than accepting
+/// whatever node is on PATH.
+#[test]
+fn a_manifest_without_the_node_floor_is_refused() {
+    let checkout = Checkout::new();
+    edit_manifest(&checkout, |read| {
+        read.replace("  \"engines\": {\n    \"node\": \">=24\"\n  },\n", "")
+    });
+
+    let refused = checkout.install(&this_path());
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("package.json names no Node.js floor"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("ACTION: restore \"engines\""),
+        "the refusal does not name the fix:\n{stderr}"
+    );
+    assert!(
+        !checkout.root().join("node_modules").exists(),
+        "an install with no Node floor went ahead"
+    );
+}
+
+/// A `node` on PATH that is some other program is refused as answering no
+/// version. Bun is that other program here: it answers `--version` without
+/// node's leading `v`.
+#[test]
+fn a_node_that_answers_no_version_is_refused_before_it_installs() {
+    let checkout = Checkout::new();
+    let scratch = TempDir::new().expect("temp dir");
+    let path = only(
+        scratch.path(),
+        &[
+            ("dirname", on_path("dirname")),
+            ("sed", on_path("sed")),
+            ("node", bun()),
+            ("bun", bun()),
+        ],
+    );
+
+    let refused = checkout.install(&path);
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("the node on PATH") && stderr.contains("which is not a version"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("ACTION: install Node.js 24+"),
+        "the refusal does not name the fix:\n{stderr}"
+    );
+    assert!(
+        !checkout.root().join("node_modules").exists(),
+        "a node with no version installed anyway"
+    );
+}
+
 /// The one pin of the workspace's package manager, as package.json names it.
 fn pinned_bun() -> String {
     let manifest: serde_json::Value = serde_json::from_str(

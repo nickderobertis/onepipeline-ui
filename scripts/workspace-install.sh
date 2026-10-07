@@ -10,10 +10,6 @@
 # to stderr: a caller such as `nx show projects --json` reads stdout for an answer.
 set -euo pipefail
 
-# Bun installs the workspace and Node runs it: Nx, Vite, Vitest and Playwright are
-# Node programs, and `.github/workflows/` pins the same Node major to every job.
-NODE_FLOOR=24
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || {
   echo "workspace-install: cannot enter the repository root $ROOT" >&2
@@ -27,8 +23,30 @@ if [ -e node_modules/.bin/nx ] || [ -e node_modules/.bin/nx.cmd ]; then
   exit 0
 fi
 
+# Bun installs the workspace and Node runs it: Nx, Vite, Vitest and Playwright are
+# Node programs. package.json's `engines.node` names the oldest major they run on,
+# and `.github/workflows/` pins that same major to every job.
+NODE_FLOOR="$(sed -n 's/^ *"node": *">=\([0-9]\{1,\}\)".*/\1/p' package.json)"
+if [ -z "$NODE_FLOOR" ]; then
+  echo "workspace-install: package.json names no Node.js floor in \"engines\"" >&2
+  echo "ACTION: restore \"engines\": { \"node\": \">=<major>\" } in package.json; it is the floor this install holds node to" >&2
+  exit 1
+fi
+
 if ! command -v node >/dev/null 2>&1; then
   echo "workspace-install: node not found; the workspace's tools run on Node.js" >&2
+  echo "ACTION: install Node.js $NODE_FLOOR+ (https://nodejs.org/) and re-run 'just bootstrap'" >&2
+  exit 1
+fi
+
+node_version="$(node --version 2>/dev/null || true)"
+if ! [[ "$node_version" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+  echo "workspace-install: the node on PATH ($(command -v node)) answered --version with '$node_version', which is not a version" >&2
+  echo "ACTION: install Node.js $NODE_FLOOR+ (https://nodejs.org/), put it first on PATH and re-run 'just bootstrap'" >&2
+  exit 1
+fi
+if [ "${BASH_REMATCH[1]}" -lt "$NODE_FLOOR" ]; then
+  echo "workspace-install: node $node_version is older than Node.js $NODE_FLOOR, which package.json's \"engines\" requires" >&2
   echo "ACTION: install Node.js $NODE_FLOOR+ (https://nodejs.org/) and re-run 'just bootstrap'" >&2
   exit 1
 fi
