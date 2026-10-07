@@ -16332,6 +16332,11 @@ fn a_kept_node_naming_its_own_base_beside_a_kept_dependency_is_refused_and_keeps
         &repo,
         &["for-each-ref", "--format=%(refname)", "refs/heads"],
     );
+    assert!(
+        heads.status.success(),
+        "the origin's branches cannot be listed: {}",
+        String::from_utf8_lossy(&heads.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&heads.stdout).trim(),
         format!("refs/heads/{}", scratch_repo::BASE_BRANCH)
