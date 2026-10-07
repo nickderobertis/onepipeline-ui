@@ -422,7 +422,9 @@ fn a_bun_that_answers_no_version_is_refused_before_it_installs() {
     );
 }
 
-/// Rewrite the copy's package.json with `edit` applied to its text.
+/// Refuses an edit that matched nothing: a journey whose pattern stopped
+/// matching package.json would otherwise run against the committed manifest
+/// and pass for a reason that has nothing to do with the refusal it names.
 fn edit_manifest(checkout: &Checkout, edit: impl FnOnce(String) -> String) {
     let manifest = checkout.root().join("package.json");
     let read = fs::read_to_string(&manifest).expect("read package.json");
