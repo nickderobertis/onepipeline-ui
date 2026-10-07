@@ -101,21 +101,20 @@ jobs:
         apt-get update -qq
         apt-get install -y --no-install-recommends gcc libc6-dev make
         # The workspace installs with bun, which this image does not carry: npm only
-        # fetches bun itself, at the version package.json's `packageManager` pins,
-        # and the workspace then installs through the same script every recipe uses.
+        # fetches bun itself, at the version package.json's `packageManager` pins.
+        # `scripts/nx.sh` below installs the workspace with it, as for every recipe.
         bun_version="$(node -p '(/^bun@(\d+\.\d+\.\d+)$/.exec(require("./package.json").packageManager ?? "") ?? [])[1] ?? ""')"
         if [ -z "$bun_version" ]; then
           echo "package.json pins no bun@<major>.<minor>.<patch> in \"packageManager\"; restore the pin scripts/workspace-install.sh reads" >&2
           exit 1
         fi
         npm install -g --no-audit --no-fund "bun@$bun_version"
-        bash scripts/workspace-install.sh
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
           | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
         export PATH="$HOME/.cargo/bin:$PATH"
         # rust-toolchain.toml pins the channel, so this installs that one and no other.
         # llmlint: ignore[work_goes_through_command_surface] this container has no `just` and this string is all of the job this repository writes — the steps around it are screencomp's reusable workflow's, so there is no step to install `just` with, and doing it here would compile or download a second toolchain per lane to run one Nx target. It runs the same target a recipe would, whose `dependsOn` builds the bundle first, as `scripts/visual-capture.sh` relies on for the local capture.
-        npx nx run dag-ui:build-api-server
+        bash scripts/nx.sh run dag-ui:build-api-server
         # $SHOTS_OUT arrives relative to the checkout; the config resolves it against
         # the repository root, which is where this runs from.
         npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts
