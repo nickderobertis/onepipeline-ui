@@ -391,6 +391,18 @@ onemessagebus = "0.9.0"
 # `a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_attestation`
 # holds it through the reply, status and attest routes.
 #
+# 0.62.0 registers project templates and checks a stored project's rendering,
+# lets a preserved lifecycle node build on a preserved dependency, and links
+# onetaskgraph 0.3.2, whose 0.3.0 scopes a source's `status_mapping` by item kind
+# and refuses a status it does not map. Nothing here reads a `status_mapping` or
+# a template: the plan stores this crate's journeys configure are `local-md`
+# sources, which declare no `status_mapping`. A browser-adopted run's driver is
+# this line's copy of the engine, so it carries each of these once this moves,
+# and the dev-only `onetaskgraph-*` requirements move with it;
+# `an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispatches_it`
+# and `an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives`
+# hold an adopted run's plan store through that engine.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -399,7 +411,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.61.1"
+onepipeline = "=0.62.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -450,8 +462,8 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
 # engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.2.58"
-onetaskgraph-plugin-api = "0.2.58"
+onetaskgraph-core = "0.3.2"
+onetaskgraph-plugin-api = "0.3.2"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
