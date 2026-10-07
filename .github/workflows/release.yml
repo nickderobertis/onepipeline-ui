@@ -584,10 +584,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+          registry-url: "https://registry.npmjs.org"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          registry-url: "https://registry.npmjs.org"
       # The frontend bundle below is built through the repository's own command
       # surface, so this job needs the runner that fans it out.
       - uses: taiki-e/install-action@v2

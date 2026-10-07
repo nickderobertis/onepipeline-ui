@@ -6,13 +6,14 @@
 //! gets is decided here: bun installing exactly what `bun.lock` pins, or a
 //! refusal that names the fix. These journeys run the real script with the real
 //! bun this checkout was bootstrapped with, then run a real Nx target over what
-//! it installed. The one substitution is the bun-below-the-floor journey's, which
-//! puts a program on PATH that reports an older version: no installed bun can be
-//! made older, and that journey asserts the stand-in was never asked to install.
+//! it installed. The one substitution is a program on PATH that answers
+//! `--version` with an older release or with no version at all, for the two
+//! journeys about exactly that answer: no installed bun can be made older, and
+//! both assert the stand-in was never asked to install.
 //!
 //! Unix only for the reason `nx_affected` is: the script is bash, and the
-//! bun-absent journey builds its search path out of symlinks. The macOS leg runs
-//! it.
+//! journeys that take a runtime away build their search path out of symlinks.
+//! The macOS leg runs it.
 #![cfg(unix)]
 
 use std::fs;
@@ -192,36 +193,60 @@ fn a_manifest_the_lockfile_does_not_carry_is_refused_without_rewriting_it() {
     assert!(!checkout.installed(), "a refused install left an Nx shim");
 }
 
+/// A directory holding only the named programs, as a search path: what a host
+/// with exactly those installed would offer the script. `bash` is always among
+/// them, since the journeys start the script through it.
+fn only(scratch: &Path, programs: &[(&str, PathBuf)]) -> std::ffi::OsString {
+    let dir = scratch.join("only");
+    fs::create_dir_all(&dir).expect("create the search-path directory");
+    for (name, program) in std::iter::once(&("bash", on_path("bash"))).chain(programs) {
+        symlink(program, dir.join(name)).unwrap_or_else(|error| panic!("link {name}: {error}"));
+    }
+    dir.into_os_string()
+}
+
+/// A program's real file, through this process's search path. Resolved rather
+/// than linked as found, because a version manager's shim on PATH finds its
+/// program through the PATH a journey has taken away.
+fn on_path(name: &str) -> PathBuf {
+    let found = Command::new("bash")
+        .args(["-c", &format!("command -v {name}")])
+        .output()
+        .expect("bash is on PATH");
+    assert!(found.status.success(), "{name} is not on PATH");
+    fs::canonicalize(text(&found.stdout).trim()).expect("resolve the program")
+}
+
+/// The file a runtime is running from, as that runtime reports it.
+fn runtime(name: &str, script: &str) -> PathBuf {
+    let ran = Command::new(name)
+        .args(["-e", script])
+        .output()
+        .unwrap_or_else(|error| panic!("{name} is on PATH: {error}"));
+    PathBuf::from(text(&ran.stdout).trim())
+}
+
+fn node() -> PathBuf {
+    runtime("node", "console.log(process.execPath)")
+}
+
+fn bun() -> PathBuf {
+    runtime("bun", "console.log(process.execPath)")
+}
+
 /// With no bun on the search path the script refuses, naming the version to
 /// install and how.
 #[test]
 fn no_bun_on_path_is_refused_naming_the_pinned_version() {
     let checkout = Checkout::new();
     let scratch = TempDir::new().expect("temp dir");
-    // Every search-path entry that holds a bun is dropped. Node can share a
-    // directory with bun — a bun installed through npm lands beside node — so it
-    // is put back on its own, through a directory holding nothing else.
-    let without_bun: Vec<PathBuf> = std::env::split_paths(&this_path())
-        .filter(|entry| !entry.join("bun").exists())
-        .collect();
-    let node = Command::new("node")
-        .args(["-p", "process.execPath"])
-        .output()
-        .expect("node is on PATH");
-    let node_only = scratch.path().join("node-only");
-    fs::create_dir(&node_only).expect("create the node directory");
-    symlink(text(&node.stdout).trim(), node_only.join("node")).expect("link node");
-    let path =
-        std::env::join_paths(std::iter::once(node_only).chain(without_bun)).expect("join PATH");
-    let probe = Command::new("bash")
-        .args(["-c", "command -v bun || true"])
-        .env("PATH", &path)
-        .output()
-        .expect("bash is on PATH");
-    assert!(
-        text(&probe.stdout).trim().is_empty(),
-        "bun is still reachable at {}",
-        text(&probe.stdout)
+    let path = only(
+        scratch.path(),
+        &[
+            ("dirname", on_path("dirname")),
+            ("sed", on_path("sed")),
+            ("node", node()),
+        ],
     );
 
     let refused = checkout.install(&path);
@@ -237,9 +262,73 @@ fn no_bun_on_path_is_refused_naming_the_pinned_version() {
     assert!(!checkout.installed(), "a refused install left an Nx shim");
 }
 
-/// A bun older than the pin is refused before it is asked to install anything.
+/// With bun but no node the script refuses before installing anything: what
+/// bun installs here is Node programs, so a workspace with no Node to run them
+/// is not an install worth making.
 #[test]
-fn a_bun_older_than_the_pin_is_refused_before_it_installs() {
+fn no_node_on_path_is_refused_naming_the_runtime() {
+    let checkout = Checkout::new();
+    let scratch = TempDir::new().expect("temp dir");
+    let path = only(
+        scratch.path(),
+        &[
+            ("dirname", on_path("dirname")),
+            ("sed", on_path("sed")),
+            ("bun", bun()),
+        ],
+    );
+
+    let refused = checkout.install(&path);
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("node not found"), "{stderr}");
+    assert!(
+        stderr.contains("ACTION: install Node.js 24+"),
+        "the refusal does not name the fix:\n{stderr}"
+    );
+    assert!(
+        !checkout.root().join("node_modules").exists(),
+        "a refused install wrote node_modules"
+    );
+}
+
+/// A package.json that no longer pins bun is refused: the pin is the floor, and
+/// an install with no floor is one CI and a laptop can disagree about.
+#[test]
+fn a_manifest_without_the_bun_pin_is_refused() {
+    let checkout = Checkout::new();
+    let manifest = checkout.root().join("package.json");
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest).expect("read package.json"))
+            .expect("parse package.json");
+    parsed
+        .as_object_mut()
+        .expect("package.json is an object")
+        .remove("packageManager")
+        .expect("package.json pins its package manager");
+    fs::write(
+        &manifest,
+        serde_json::to_string_pretty(&parsed).expect("serialise"),
+    )
+    .expect("write package.json");
+
+    let refused = checkout.install(&this_path());
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("package.json pins no bun version"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("ACTION: restore \"packageManager\""),
+        "the refusal does not name the fix:\n{stderr}"
+    );
+    assert!(!checkout.installed(), "a refused install left an Nx shim");
+}
+
+/// Run the script with a `bun` first on PATH that answers `--version` with
+/// `answer` and records anything else it is asked to do.
+fn with_a_bun_answering(answer: &str) -> (Checkout, Output, Option<String>) {
     let checkout = Checkout::new();
     let scratch = TempDir::new().expect("temp dir");
     let asked = scratch.path().join("asked");
@@ -248,14 +337,21 @@ fn a_bun_older_than_the_pin_is_refused_before_it_installs() {
         "bun",
         &format!(
             "#!/usr/bin/env bash\n\
-             if [ \"$1\" = --version ]; then echo 1.0.0; exit 0; fi\n\
+             if [ \"$1\" = --version ]; then echo '{answer}'; exit 0; fi\n\
              echo \"$@\" >> '{}'\n\
              exit 0\n",
             asked.display()
         ),
     );
+    let output = checkout.install(&path);
+    let asked = fs::read_to_string(&asked).ok();
+    (checkout, output, asked)
+}
 
-    let refused = checkout.install(&path);
+/// A bun older than the pin is refused before it is asked to install anything.
+#[test]
+fn a_bun_older_than_the_pin_is_refused_before_it_installs() {
+    let (checkout, refused, asked) = with_a_bun_answering("1.0.0");
     let stderr = text(&refused.stderr);
     assert_eq!(refused.status.code(), Some(1), "{stderr}");
     let pinned = pinned_bun();
@@ -267,11 +363,32 @@ fn a_bun_older_than_the_pin_is_refused_before_it_installs() {
         stderr.contains("ACTION: run 'bun upgrade'"),
         "the refusal does not name the fix:\n{stderr}"
     );
+    assert_eq!(asked, None, "a bun below the floor was asked to install");
+    assert!(!checkout.installed(), "a refused install left an Nx shim");
+}
+
+/// A `bun` whose answer is not a version is refused as such, rather than
+/// reaching the comparison as a shell arithmetic error.
+#[test]
+fn a_bun_that_answers_no_version_is_refused_before_it_installs() {
+    let (checkout, refused, asked) = with_a_bun_answering("bun: command misconfigured");
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
     assert!(
-        !asked.exists(),
-        "a bun below the floor was asked to install: {}",
-        fs::read_to_string(&asked).unwrap_or_default()
+        stderr.contains(
+            "answered --version with 'bun: command misconfigured', which is not a version"
+        ),
+        "{stderr}"
     );
+    assert!(
+        stderr.contains(&format!("ACTION: install bun {}", pinned_bun())),
+        "the refusal does not name the fix:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("integer expression"),
+        "the answer reached the arithmetic:\n{stderr}"
+    );
+    assert_eq!(asked, None, "a bun with no version was asked to install");
     assert!(!checkout.installed(), "a refused install left an Nx shim");
 }
 

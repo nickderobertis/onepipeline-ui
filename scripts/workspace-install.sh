@@ -38,10 +38,10 @@ fi
 # job, so a green CI run and a green local `just check` are the same install. An
 # older bun may not read the lockfile a newer one wrote, and would say so as a
 # lockfile error rather than as a version.
-BUN_FLOOR="$(sed -n 's/^ *"packageManager": *"bun@\([0-9][0-9.]*\)".*/\1/p' package.json)"
+BUN_FLOOR="$(sed -n 's/^ *"packageManager": *"bun@\([0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}\)".*/\1/p' package.json)"
 if [ -z "$BUN_FLOOR" ]; then
   echo "workspace-install: package.json pins no bun version in \"packageManager\"" >&2
-  echo "ACTION: restore \"packageManager\": \"bun@<version>\" in package.json; it is the one pin of the workspace's package manager" >&2
+  echo "ACTION: restore \"packageManager\": \"bun@<major>.<minor>.<patch>\" in package.json; it is the one pin of the workspace's package manager" >&2
   exit 1
 fi
 
@@ -51,8 +51,15 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 1
 fi
 
-# Field by field rather than `sort -V`, which not every platform's sort has.
-bun_version="$(bun --version)"
+# Field by field rather than `sort -V`, which not every platform's sort has, and
+# only once the answer is a version: anything else on a `bun` would reach the
+# arithmetic below as a shell error rather than as this refusal.
+bun_version="$(bun --version 2>/dev/null || true)"
+if ! [[ "$bun_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+  echo "workspace-install: the bun on PATH ($(command -v bun)) answered --version with '$bun_version', which is not a version" >&2
+  echo "ACTION: install bun $BUN_FLOOR (curl -fsSL https://bun.sh/install | bash -s bun-v$BUN_FLOOR), put it first on PATH and re-run 'just bootstrap'" >&2
+  exit 1
+fi
 older=0
 IFS=. read -r have_major have_minor have_patch <<<"${bun_version%%[-+]*}"
 IFS=. read -r want_major want_minor want_patch <<<"$BUN_FLOOR"
