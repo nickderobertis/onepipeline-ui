@@ -30,6 +30,8 @@ const SCRATCH_DIR: &str = "scratch-repo";
 pub struct ScratchRepo {
     /// The name the plan's task addresses it by: the registered checkout's alias.
     pub alias: String,
+    /// The bare origin the checkout publishes to, which a kept branch is put on.
+    pub origin: PathBuf,
     /// The git config every git call against it reads instead of this host's, and
     /// which a server driving a session in it is handed too: a host config that
     /// signs commits or installs hooks would otherwise decide what the engine's
@@ -121,6 +123,7 @@ pub fn seed(workspace: &Path) -> ScratchRepo {
     });
     ScratchRepo {
         alias: registration.alias,
+        origin,
         gitconfig,
     }
 }

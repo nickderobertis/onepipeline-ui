@@ -391,6 +391,19 @@ onemessagebus = "0.9.0"
 # `a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_attestation`
 # holds it through the reply, status and attest routes.
 #
+# 0.62.0 links an engine whose kept (`publish: "preserve"`) nodes may depend on
+# kept nodes and start from the branch their dependency kept: a kept node's
+# session opens on the branch its same-repository kept base dependency settled,
+# so a harness one spike builds is the start of every spike that depends on it,
+# and a plan giving such a node a second answer — its own `base_branch`, or kept
+# dependencies on separate stacking chains — is refused. A run adopted from the
+# browser is driven by this copy of the engine, so this changes which plans
+# such a run accepts and where it cuts their sessions, and no route or
+# response; `a_kept_node_that_depends_on_a_kept_node_starts_from_the_branch_it_kept`
+# and `a_kept_node_naming_its_own_base_beside_a_kept_dependency_is_refused_and_keeps_nothing`
+# hold both through the adopt and run routes over a bare origin. It links
+# onetaskgraph 0.3.2, which the dev-only `onetaskgraph-*` requirements move with.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -399,7 +412,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.61.1"
+onepipeline = "=0.62.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -450,8 +463,8 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Unpinned for the reason `oneagentgraph` is: the
 # engine pins this family exactly, and the lock resolves the one copy it links.
-onetaskgraph-core = "0.2.58"
-onetaskgraph-plugin-api = "0.2.58"
+onetaskgraph-core = "0.3.2"
+onetaskgraph-plugin-api = "0.3.2"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
