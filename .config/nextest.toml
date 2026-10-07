@@ -25,7 +25,7 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check)::/)"
+default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -33,7 +33,7 @@ final-status-level = "fail"
 # and CI scripts, the llmlint tier and the provisioning recipes.
 # `onepipeline-ui-repo-tooling:test`.
 [profile.repo-tooling]
-default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check)::/))"
+default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/))"
 status-level = "fail"
 final-status-level = "fail"
 

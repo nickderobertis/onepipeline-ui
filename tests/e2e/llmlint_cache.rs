@@ -53,7 +53,7 @@ const WORKSPACE_FILES: &[&str] = &[
     "nx.json",
     "project.json",
     "package.json",
-    "package-lock.json",
+    "bun.lock",
     // Without this, `.nx/cache` would be a tracked part of the workspace Nx
     // hashes, so every run would change the tree and nothing would ever replay.
     ".gitignore",
@@ -164,7 +164,7 @@ impl Fixture {
             fs::copy(repo_root().join(name), workspace.join(name))
                 .unwrap_or_else(|error| panic!("copy {name} into the scratch workspace: {error}"));
         }
-        // The orchestrator itself, borrowed rather than installed: `npm ci` here
+        // The orchestrator itself, borrowed rather than installed: `bun install` here
         // would cost minutes per test, and Nx is a tool this tier runs, not a
         // thing it decides. `scripts/workspace-install.sh` sees the shim and
         // no-ops, exactly as it does in a bootstrapped clone.

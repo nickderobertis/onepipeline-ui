@@ -7,6 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@onepipeline-ui/dag-model": "*"
+    "@onepipeline-ui/dag-model": "workspace:*"
   }
 }

@@ -100,7 +100,12 @@ jobs:
         # container installs nothing.
         apt-get update -qq
         apt-get install -y --no-install-recommends gcc libc6-dev make
-        npm ci
+        # The workspace installs with bun, which this image does not carry: npm only
+        # fetches bun itself, at the version package.json's `packageManager` pins,
+        # and the workspace then installs through the same script every recipe uses.
+        npm install -g --no-audit --no-fund \
+          "bun@$(node -p 'require("./package.json").packageManager.replace(/^bun@/, "")')"
+        bash scripts/workspace-install.sh
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
           | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
         export PATH="$HOME/.cargo/bin:$PATH"

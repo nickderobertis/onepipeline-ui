@@ -6,7 +6,7 @@
     "sharedGlobals": [
       "{workspaceRoot}/nx.json",
       "{workspaceRoot}/package.json",
-      "{workspaceRoot}/package-lock.json",
+      "{workspaceRoot}/bun.lock",
       "{workspaceRoot}/rust-toolchain.toml",
       "{workspaceRoot}/rustfmt.toml",
       "{workspaceRoot}/clippy.toml",

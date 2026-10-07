@@ -57,13 +57,25 @@ and because nothing else recovers *why* the tooling is what it is.
 
 - **Shape:** `cli`, composed additionally with `react` (which pulls in
   `web-app`) — the frontend lands in this repo, against this API.
-- **Languages:** Rust (crate), TypeScript/JavaScript (npm launcher today, the
-  app later), Bash, and YAML/JSON/TOML config.
+- **Languages:** Rust (crate), TypeScript/JavaScript (the npm launcher and the
+  frontend workspace), Bash, and YAML/JSON/TOML config.
 - **Composed:** `base` + `ci` + `shapes/{cli,web-app,react}` +
   `languages/{rust,typescript}` + `intersections/rust-cli` + `releasing` +
   `project-graph` (the skill's former `monorepo`), plus the `llmlint` judge tier.
   Nx owns the project graph, affected selection, and caching; the language-native
   tools remain the source of each check.
+- **Package manager:** bun, the skill's default — nothing here rules it out.
+  One `bun.lock` pins `apps/*` and `packages/*`; `scripts/workspace-install.sh`
+  installs it with `--frozen-lockfile` and refuses a bun older than
+  `package.json`'s `packageManager`, the one pin, which every CI job's
+  `oven-sh/setup-bun` reads too. Node still runs what bun installs (Nx, Vite,
+  Vitest, Playwright; the targets' `npx` only runs those installed binaries).
+  npm stays where the registry is the subject rather than this workspace:
+  `npm pack`/`npm publish` of what `scripts/npm-build.mjs` assembles, the
+  `verify-npm` and `published-smoke.yml` installs that prove what an npm user
+  gets, and global installs of harness CLIs and of bun itself in the
+  visual-docs container. Siblings are named `workspace:*`; none of those
+  manifests is published.
 - **Excluded:** asdf/direnv — `rust-toolchain.toml` and the lockfiles already
   pin reproducibly. A second Nx project for the npm launcher — it is a committed
   shim with no build step, driven end to end by `tests/e2e/packaging.rs`; the

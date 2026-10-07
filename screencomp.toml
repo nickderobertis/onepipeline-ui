@@ -60,7 +60,7 @@ paths = [
   "apps/dag-ui-e2e/viewports.ts",
   "scripts/visual-capture.sh",
   "screencomp.toml",
-  "package-lock.json",
+  "bun.lock",
   "**/*.{css,scss,html}",
 ]
 gallery = "shots/review"

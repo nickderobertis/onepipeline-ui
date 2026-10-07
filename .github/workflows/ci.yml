@@ -48,6 +48,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      # bun installs the workspace (scripts/workspace-install.sh, through every
+      # recipe) at the version package.json's `packageManager` pins — the one pin,
+      # read here and by that script alike. Node still runs what it installs.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: extractions/setup-just@v3
       - name: Which projects the diff reaches
         id: affected
@@ -77,6 +83,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -103,7 +112,7 @@ jobs:
       # A committed lockfile that `just bootstrap`/`just check` had to change is
       # a stale generated file; fail rather than let it drift.
       - name: Committed generated files are up to date
-        run: git diff --exit-code -- Cargo.lock package-lock.json
+        run: git diff --exit-code -- Cargo.lock bun.lock
 
   # The broader tier: one full sweep of every project's `check`, on the release
   # pull request alone. That pull request's head is the commit that ships, and no
@@ -127,6 +136,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov
@@ -164,6 +176,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest
@@ -196,6 +211,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: extractions/setup-just@v3
       # `just msrv` reads the same `rust-version` field, so the recipe and the
       # job can never disagree about which floor was proven.
@@ -213,6 +231,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just,cargo-deny,cargo-machete
@@ -279,6 +300,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -350,6 +374,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       # oneharness.toml's primary harness. Without a harness binary on PATH,
       # llmlint has nothing to drive and the job would fail with no findings —
       # which reads like a clean run. Pinned rather than floating: an upstream

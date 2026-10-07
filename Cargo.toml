@@ -85,7 +85,7 @@ include = [
   "/packages/*/tsconfig.json",
   "/tsconfig.base.json",
   "/package.json",
-  "/package-lock.json",
+  "/bun.lock",
 ]
 
 # The command an operator types. Deliberately not the crate name: the crate and
