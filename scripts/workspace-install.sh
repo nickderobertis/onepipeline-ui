@@ -8,7 +8,17 @@
 #
 # Quiet and idempotent when the install is already present. Installer chatter goes
 # to stderr: a caller such as `nx show projects --json` reads stdout for an answer.
+#
+# Exit codes, one per thing to fix (the sysexits numbers, as the binary's 70 is):
+#   0   the workspace is installed, now or already
+#   1   the install itself failed, with bun's own diagnostic above the refusal, or
+#       the checkout could not be entered
+#   69  a runtime (node, bun) is missing, answers no version, or is below its floor
+#   78  package.json names no floor for one of them, so there is nothing to hold it to
 set -euo pipefail
+
+EX_UNAVAILABLE=69
+EX_CONFIG=78
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || {
@@ -30,25 +40,25 @@ NODE_FLOOR="$(sed -n 's/^ *"node": *">=\([0-9]\{1,\}\)".*/\1/p' package.json)"
 if [ -z "$NODE_FLOOR" ]; then
   echo "workspace-install: package.json names no Node.js floor in \"engines\"" >&2
   echo "ACTION: restore \"engines\": { \"node\": \">=<major>\" } in package.json; it is the floor this install holds node to" >&2
-  exit 1
+  exit $EX_CONFIG
 fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "workspace-install: node not found; the workspace's tools run on Node.js" >&2
   echo "ACTION: install Node.js $NODE_FLOOR+ (https://nodejs.org/) and re-run 'just bootstrap'" >&2
-  exit 1
+  exit $EX_UNAVAILABLE
 fi
 
 node_version="$(node --version 2>/dev/null || true)"
 if ! [[ "$node_version" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
   echo "workspace-install: the node on PATH ($(command -v node)) answered --version with '$node_version', which is not a version" >&2
   echo "ACTION: install Node.js $NODE_FLOOR+ (https://nodejs.org/), put it first on PATH and re-run 'just bootstrap'" >&2
-  exit 1
+  exit $EX_UNAVAILABLE
 fi
 if [ "${BASH_REMATCH[1]}" -lt "$NODE_FLOOR" ]; then
   echo "workspace-install: node $node_version is older than Node.js $NODE_FLOOR, which package.json's \"engines\" requires" >&2
   echo "ACTION: install Node.js $NODE_FLOOR+ (https://nodejs.org/) and re-run 'just bootstrap'" >&2
-  exit 1
+  exit $EX_UNAVAILABLE
 fi
 
 # The bun that wrote bun.lock is the floor, and package.json's `packageManager` is
@@ -60,13 +70,13 @@ BUN_FLOOR="$(sed -n 's/^ *"packageManager": *"bun@\([0-9]\{1,\}\.[0-9]\{1,\}\.[0
 if [ -z "$BUN_FLOOR" ]; then
   echo "workspace-install: package.json pins no bun version in \"packageManager\"" >&2
   echo "ACTION: restore \"packageManager\": \"bun@<major>.<minor>.<patch>\" in package.json; it is the one pin of the workspace's package manager" >&2
-  exit 1
+  exit $EX_CONFIG
 fi
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "workspace-install: bun not found; cannot install the workspace's pinned dependencies from bun.lock" >&2
   echo "ACTION: install bun $BUN_FLOOR (curl -fsSL https://bun.sh/install | bash -s bun-v$BUN_FLOOR) and re-run 'just bootstrap'" >&2
-  exit 1
+  exit $EX_UNAVAILABLE
 fi
 
 # Field by field rather than `sort -V`, which not every platform's sort has, and
@@ -76,7 +86,7 @@ bun_version="$(bun --version 2>/dev/null || true)"
 if ! [[ "$bun_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
   echo "workspace-install: the bun on PATH ($(command -v bun)) answered --version with '$bun_version', which is not a version" >&2
   echo "ACTION: install bun $BUN_FLOOR (curl -fsSL https://bun.sh/install | bash -s bun-v$BUN_FLOOR), put it first on PATH and re-run 'just bootstrap'" >&2
-  exit 1
+  exit $EX_UNAVAILABLE
 fi
 older=0
 IFS=. read -r have_major have_minor have_patch <<<"${bun_version%%[-+]*}"
@@ -92,7 +102,7 @@ done
 if [ "$older" -eq 1 ]; then
   echo "workspace-install: bun $bun_version is older than bun $BUN_FLOOR, which package.json pins and bun.lock was written with" >&2
   echo "ACTION: run 'bun upgrade' (or install bun $BUN_FLOOR: curl -fsSL https://bun.sh/install | bash -s bun-v$BUN_FLOOR) and re-run 'just bootstrap'" >&2
-  exit 1
+  exit $EX_UNAVAILABLE
 fi
 
 # `--frozen-lockfile` is what makes the lockfile the pin: a manifest the lockfile

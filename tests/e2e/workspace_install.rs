@@ -22,6 +22,14 @@ use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
+/// The script's refusal when a runtime is missing, answers no version, or is
+/// below its floor — the sysexits `EX_UNAVAILABLE`, as its header documents.
+const EX_UNAVAILABLE: i32 = 69;
+
+/// The script's refusal when package.json names no floor to hold a runtime to —
+/// the sysexits `EX_CONFIG`.
+const EX_CONFIG: i32 = 78;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -248,7 +256,7 @@ fn no_bun_on_path_is_refused_naming_the_pinned_version() {
 
     let refused = checkout.install(&path);
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_UNAVAILABLE), "{stderr}");
     assert!(stderr.contains("bun not found"), "{stderr}");
     let pinned = pinned_bun();
     assert!(
@@ -277,7 +285,7 @@ fn no_node_on_path_is_refused_naming_the_runtime() {
 
     let refused = checkout.install(&path);
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_UNAVAILABLE), "{stderr}");
     assert!(stderr.contains("node not found"), "{stderr}");
     assert!(
         stderr.contains("ACTION: install Node.js 24+"),
@@ -311,7 +319,7 @@ fn a_manifest_without_the_bun_pin_is_refused() {
 
     let refused = checkout.install(&this_path());
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_CONFIG), "{stderr}");
     assert!(
         stderr.contains("package.json pins no bun version"),
         "{stderr}"
@@ -355,7 +363,7 @@ fn a_bun_older_than_the_pin_is_refused_before_it_installs() {
 
     let refused = checkout.install(&this_path());
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_UNAVAILABLE), "{stderr}");
     assert!(
         stderr.contains(&format!("bun {installed} is older than bun 999.0.0")),
         "{stderr}"
@@ -395,7 +403,7 @@ fn a_bun_that_answers_no_version_is_refused_before_it_installs() {
 
     let refused = checkout.install(&path);
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_UNAVAILABLE), "{stderr}");
     assert!(
         stderr.contains("answered --version with 'v") && stderr.contains("which is not a version"),
         "{stderr}"
@@ -444,7 +452,7 @@ fn a_node_older_than_the_floor_is_refused_before_it_installs() {
 
     let refused = checkout.install(&this_path());
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_UNAVAILABLE), "{stderr}");
     assert!(
         stderr.contains(&format!("node {installed} is older than Node.js 999")),
         "{stderr}"
@@ -470,7 +478,7 @@ fn a_manifest_without_the_node_floor_is_refused() {
 
     let refused = checkout.install(&this_path());
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_CONFIG), "{stderr}");
     assert!(
         stderr.contains("package.json names no Node.js floor"),
         "{stderr}"
@@ -504,7 +512,7 @@ fn a_node_that_answers_no_version_is_refused_before_it_installs() {
 
     let refused = checkout.install(&path);
     let stderr = text(&refused.stderr);
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert_eq!(refused.status.code(), Some(EX_UNAVAILABLE), "{stderr}");
     assert!(
         stderr.contains("the node on PATH") && stderr.contains("which is not a version"),
         "{stderr}"

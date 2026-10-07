@@ -1612,6 +1612,53 @@ fn every_workspace_sibling_is_named_through_the_workspace_protocol() {
     }
 }
 
+/// Every workflow runs the Node major package.json's `engines` floor names.
+///
+/// `scripts/workspace-install.sh` refuses a node below `engines.node`, and the
+/// workflows pin `node-version` for every job that runs Node — two spellings of
+/// one floor. A workflow pinning a major the script would refuse fails in CI
+/// before anything it was meant to check, and one pinning a newer major proves
+/// nothing about the floor a contributor's machine is held to. Equal is the only
+/// agreement, so it is held here.
+#[test]
+fn every_workflow_runs_the_node_major_package_json_requires() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("package.json")).expect("parse package.json");
+    let floor = manifest["engines"]["node"]
+        .as_str()
+        .and_then(|spelled| spelled.strip_prefix(">="))
+        .expect("package.json names its Node floor as `>=<major>` in engines.node");
+    assert!(
+        floor.parse::<u32>().is_ok(),
+        "engines.node names `>={floor}`, which is not a major version"
+    );
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
+    let mut pinned = 0;
+    for entry in fs::read_dir(&root).expect("read .github/workflows") {
+        let path = entry.expect("a workflow").path();
+        let text = fs::read_to_string(&path).expect("read the workflow");
+        for (number, line) in text.lines().enumerate() {
+            let Some((_, value)) = line.split_once("node-version:") else {
+                continue;
+            };
+            pinned += 1;
+            assert_eq!(
+                value.trim().trim_matches('"'),
+                floor,
+                "{}:{} pins Node {}, and package.json's engines.node floor is {floor}",
+                path.display(),
+                number + 1,
+                value.trim()
+            );
+        }
+    }
+    assert!(
+        pinned > 0,
+        "no workflow pins node-version, so this gate is watching nothing"
+    );
+}
+
 // The build script, as a module: `embed` is the decision it makes over a
 // directory, and the two `env` reads in its `main` are the whole of what cargo
 // adds. Driven here over real directories rather than through a `cargo build`,
