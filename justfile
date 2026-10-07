@@ -16,8 +16,8 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 # llmlint: ignore-file[tool_output_is_signal] recipes that hand straight to cargo,
 # clippy, rustdoc, or cargo-deny inherit those tools' diagnostics, which already
 # name the exact problem and its fix; a wrapper message would bury them. Recipes
-# whose failure needs project-level context (_crate-bootstrap, _crate-test, msrv,
-# _crate-fmt-check) add one explicitly.
+# whose failure needs project-level context (_crate-bootstrap, _tier-test-covered,
+# _crate-coverage, _crate-msrv, _crate-fmt-check) add one explicitly.
 
 # The MSRV has one source of truth — Cargo.toml's `rust-version` — so `just msrv`
 # cannot promise a floor the manifest no longer declares. CI reads the same field.
