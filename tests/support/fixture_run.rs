@@ -7062,7 +7062,95 @@ pub fn write_awaiting_session(
             },
         ],
     });
-    let run_dir = write_awaiting(root, run, dir, node_graph, &plan, &[]);
+    write_awaiting_under_default_template(root, run, dir, node_graph, &plan)
+}
+
+/// The kept node of [`write_awaiting_stacked_preserve`] that every other one
+/// depends on: the harness a spike is measured with.
+pub const STACK_BASE_NODE_ID: &str = "harness";
+/// The kept node of [`write_awaiting_stacked_preserve`] that depends on
+/// [`STACK_BASE_NODE_ID`], and so starts from the branch that node kept.
+pub const STACKED_NODE_ID: &str = "spike";
+
+/// A run nothing is driving whose two **lifecycle** nodes both keep their
+/// branches (`publish: "preserve"`) in one repository, the second depending on
+/// the first: [`STACK_BASE_NODE_ID`] is cut from `base_branch`, and
+/// [`STACKED_NODE_ID`] names no `base_branch` of its own, because its session
+/// starts from the branch its same-repository kept dependency settled, where
+/// an engine before 0.62 cut it from the repository's base. Launched as
+/// [`write_awaiting_session`]'s run is.
+pub fn write_awaiting_stacked_preserve(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    repo: &str,
+    base_branch: &str,
+) -> PathBuf {
+    let plan = stacked_preserve_plan(repo, base_branch, None);
+    write_awaiting_under_default_template(root, run, dir, node_graph, &plan)
+}
+
+/// [`write_awaiting_stacked_preserve`]'s run with [`STACKED_NODE_ID`] also
+/// naming `base_branch` — two answers to where its session starts, which the
+/// engine refuses rather than choosing one.
+pub fn write_awaiting_stacked_preserve_with_its_own_base(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    repo: &str,
+    base_branch: &str,
+) -> PathBuf {
+    let plan = stacked_preserve_plan(repo, base_branch, Some(base_branch));
+    write_awaiting_under_default_template(root, run, dir, node_graph, &plan)
+}
+
+/// The plan of [`write_awaiting_stacked_preserve`], with `stacked_base` as
+/// [`STACKED_NODE_ID`]'s own `base_branch` where it names one.
+fn stacked_preserve_plan(repo: &str, base_branch: &str, stacked_base: Option<&str>) -> Value {
+    let mut stacked = json!({
+        "id": STACKED_NODE_ID,
+        "repo": repo,
+        "deps": [STACK_BASE_NODE_ID],
+        "publish": "preserve",
+        "persona": "engineer",
+        "title": "feat: a spike on the harness",
+        "task": criteria_bearing("Measure the spike with the harness."),
+    });
+    if let Some(base) = stacked_base {
+        stacked["base_branch"] = json!(base);
+    }
+    json!({
+        "schema_version": 3,
+        "goal": { "text": "build the harness once and measure on top of it" },
+        "name": "stacked",
+        "concurrency": 1,
+        "tasks": [
+            {
+                "id": STACK_BASE_NODE_ID,
+                "repo": repo,
+                "base_branch": base_branch,
+                "publish": "preserve",
+                "persona": "engineer",
+                "title": "feat: the measurement harness",
+                "task": criteria_bearing("Build the harness every spike measures with."),
+            },
+            stacked,
+        ],
+    })
+}
+
+/// [`write_awaiting`] with the launch record retaining the engine's own default
+/// branch-name template, as a launch that names none at any layer does.
+fn write_awaiting_under_default_template(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    plan: &Value,
+) -> PathBuf {
+    let run_dir = write_awaiting(root, run, dir, node_graph, plan, &[]);
     let path = run_dir.join("launch.json");
     let mut launch: Value =
         serde_json::from_str(&fs::read_to_string(&path).expect("the launch record"))

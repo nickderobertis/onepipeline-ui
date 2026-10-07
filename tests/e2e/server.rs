@@ -15813,7 +15813,9 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
 
 /// A harness stand-in that also does a dispatch's work: it commits one file in
 /// the directory it is run in, which for a lifecycle node is the worktree its
-/// session was cut into, so the node has something to publish.
+/// session was cut into, so the node has something to publish. The file is
+/// named for the dispatch's process, so a session cut from a branch an earlier
+/// dispatch committed to still has work of its own to commit.
 ///
 /// Still the one process a journey stands in for — the commit is what a real
 /// harness's agent leaves behind, and everything that finds it there, publishes
@@ -15827,8 +15829,8 @@ fn write_committing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
         &standin,
         format!(
             "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\n\
-             printf 'the dispatch wrote this\\n' > work.txt\n\
-             git add work.txt && git commit -q -m 'feat: the dispatch work' >&2 || exit 1\n\
+             printf 'the dispatch wrote this\\n' > work-$$.txt\n\
+             git add work-$$.txt && git commit -q -m 'feat: the dispatch work' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
              \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
             log.display().to_string()
@@ -16101,6 +16103,243 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
             |event| event["kind"] == json!("session-opened") && event["node_id"] == json!(node)
         ),
         "the timeline lists no session-opened for the node: {timeline}"
+    );
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The plan writer a stacked-preserve journey adopts a run of.
+#[cfg(unix)]
+type WriteStacked = fn(&Path, &str, &Path, &Path, &str, &str) -> PathBuf;
+
+/// Seed a scratch repository, write the stacked-preserve run `write` writes
+/// against it, adopt that run through the server's own adopt route, and wait for
+/// both its kept nodes to settle.
+///
+/// What comes back is the serving server, the repository, the run's served
+/// detail once both settled, and the driver the adoption retained.
+#[cfg(unix)]
+fn adopt_stacked_preserve(
+    write: WriteStacked,
+) -> (Serving, scratch_repo::ScratchRepo, Value, RetainedDriver) {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repo = scratch_repo::seed(&dir);
+    let log = dir.join("harness.log");
+    // llmlint: ignore[e2e_not_mocked] the harness program is the one process these
+    // journeys stand in for, on the terms `write_harness_standin` states. The adopt
+    // route, the retained driver, the engine's placement and closeout, and the linked
+    // `onevcs` cutting and keeping each session over real git are all real; the
+    // stand-in only commits the work a real agent would leave.
+    let standin = write_committing_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    write(
+        &root,
+        run,
+        &dir,
+        &graph,
+        &repo.alias,
+        scratch_repo::BASE_BRANCH,
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            (
+                scratch_repo::GIT_CONFIG_ENV,
+                &repo.gitconfig.display().to_string(),
+            ),
+            (onevcs::branches::PREFIX_ENV, ""),
+        ],
+    );
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    eventually("both kept nodes settled", || {
+        let graph = &detail()["graph"];
+        [
+            fixture_run::STACK_BASE_NODE_ID,
+            fixture_run::STACKED_NODE_ID,
+        ]
+        .iter()
+        .all(|node| {
+            matches!(
+                graph["node_status"][node].as_str(),
+                Some("done" | "failed" | "skipped")
+            )
+        })
+    });
+    let detail = detail();
+    (serving, repo, detail, driver)
+}
+
+/// Run git against `repo`'s bare origin under its own config.
+#[cfg(unix)]
+fn on_origin(repo: &scratch_repo::ScratchRepo, args: &[&str]) -> std::process::Output {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(&repo.origin)
+        .env(scratch_repo::GIT_CONFIG_ENV, &repo.gitconfig)
+        .output()
+        .expect("git runs")
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders` above: the
+// compiled binary, `/bin/sh` stand-ins it writes itself and `git`, with each session cut
+// and kept by the linked `onevcs` over a scratch repository in the journey's own
+// workspace, settling in seconds.
+#[cfg(unix)]
+#[test]
+fn a_kept_node_that_depends_on_a_kept_node_starts_from_the_branch_it_kept() {
+    let run = fixture_run::RUN_ID;
+    let harness = fixture_run::STACK_BASE_NODE_ID;
+    let spike = fixture_run::STACKED_NODE_ID;
+    // The server's own engine places the spike on the branch the harness kept
+    // rather than refusing the plan or cutting it from the repository's base.
+    let (serving, repo, detail, driver) =
+        adopt_stacked_preserve(fixture_run::write_awaiting_stacked_preserve);
+    for node in [harness, spike] {
+        let result = &detail["graph"]["node_results"][node];
+        assert_eq!(
+            result["status"],
+            json!("done"),
+            "{node}: {}",
+            detail["graph"]
+        );
+        assert_eq!(result["outcome"], json!("preserved"), "{node}: {result}");
+    }
+    let branch_of = |node: &str| -> String {
+        detail["graph"]["node_results"][node]["branch"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{node} names no kept branch: {}", detail["graph"]))
+            .to_owned()
+    };
+    let (harness_branch, spike_branch) = (branch_of(harness), branch_of(spike));
+    assert_ne!(harness_branch, spike_branch);
+
+    // Each kept branch is on the bare origin, and the spike's descends from the
+    // head the harness settled at: its session was cut from that kept branch, not
+    // from the repository's base as 0.61.1 cut it, and it added work of its own.
+    let origin = |args: &[&str]| on_origin(&repo, args);
+    let head_of = |branch: &str| -> String {
+        let read = origin(&["rev-parse", "--verify", &format!("refs/heads/{branch}")]);
+        assert!(
+            read.status.success(),
+            "{branch} is not on the origin: {}",
+            String::from_utf8_lossy(&read.stderr)
+        );
+        String::from_utf8_lossy(&read.stdout).trim().to_owned()
+    };
+    let (harness_head, spike_head) = (head_of(&harness_branch), head_of(&spike_branch));
+    let harness_detail = detail["graph"]["node_results"][harness]["detail"]
+        .as_str()
+        .expect("the harness's settlement sentence");
+    assert!(
+        harness_detail.contains(&harness_head),
+        "the harness settled at a head other than its kept branch's: {harness_detail}"
+    );
+    assert_ne!(
+        spike_head, harness_head,
+        "the spike kept no work of its own"
+    );
+    assert!(
+        origin(&["merge-base", "--is-ancestor", &harness_head, &spike_head])
+            .status
+            .success(),
+        "the spike's kept branch {spike_branch} at {spike_head} does not descend from the \
+         harness's settled head {harness_head}"
+    );
+    let base_head = head_of(scratch_repo::BASE_BRANCH);
+    assert_ne!(
+        base_head, harness_head,
+        "the harness kept no work of its own"
+    );
+
+    // And the spike settled after the harness did: its session opened only once
+    // the harness's kept branch was there to start from.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let events = events_on(&timeline);
+    let at = |kind: &str, node: &str| -> String {
+        events
+            .iter()
+            .find(|event| event["kind"] == json!(kind) && event["node_id"] == json!(node))
+            .and_then(|event| event["at"].as_str())
+            .unwrap_or_else(|| panic!("no {kind} for {node}: {timeline}"))
+            .to_owned()
+    };
+    assert!(
+        at("node-settled", harness) <= at("session-opened", spike),
+        "the spike's session opened before the harness settled: {timeline}"
+    );
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the terms of the
+// journey above, over the same setup.
+#[cfg(unix)]
+#[test]
+fn a_kept_node_naming_its_own_base_beside_a_kept_dependency_is_refused_and_keeps_nothing() {
+    let harness = fixture_run::STACK_BASE_NODE_ID;
+    let spike = fixture_run::STACKED_NODE_ID;
+    // The recovery half: a planner who also wrote `base_branch` on the spike gave
+    // two answers to where its session starts. The engine resolves placement over
+    // the whole plan, so it refuses at the first dispatch with that reason: the
+    // harness fails before any session is cut, the spike is skipped behind it,
+    // and the run stays readable over the API.
+    let (serving, repo, detail, driver) =
+        adopt_stacked_preserve(fixture_run::write_awaiting_stacked_preserve_with_its_own_base);
+    let graph = &detail["graph"];
+    let results = &graph["node_results"];
+    assert_eq!(graph["node_status"][harness], json!("failed"), "{graph}");
+    assert_eq!(
+        results[harness]["outcome"],
+        json!("infrastructure-failure"),
+        "{results}"
+    );
+    let refusal = results[harness]["detail"].as_str().expect("the refusal");
+    assert!(
+        refusal.contains(&format!("node '{spike}' states base_branch"))
+            && refusal.contains("two answers to where its session starts"),
+        "{refusal}"
+    );
+    assert_eq!(graph["node_status"][spike], json!("skipped"), "{graph}");
+    for node in [harness, spike] {
+        assert!(
+            results[node].get("branch").is_none(),
+            "{node} names a branch: {results}"
+        );
+    }
+    // Nothing was kept: the origin holds the base it was seeded with and no more.
+    let heads = on_origin(
+        &repo,
+        &["for-each-ref", "--format=%(refname)", "refs/heads"],
+    );
+    assert!(
+        heads.status.success(),
+        "the origin's branches cannot be listed: {}",
+        String::from_utf8_lossy(&heads.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&heads.stdout).trim(),
+        format!("refs/heads/{}", scratch_repo::BASE_BRANCH)
     );
     drop(driver);
     serving.stop_on(Stop::Terminate);
