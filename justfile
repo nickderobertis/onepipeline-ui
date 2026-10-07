@@ -151,11 +151,13 @@ gate base="origin/main": check
     @just lint-llm-diff {{base}}
     @echo "gate: ok"
 
-# `true` when this branch's diff can reach any Rust project — the crate or one
-# of its test tiers, every one tagged `lang:rust` — so CI can skip the
-# cross-platform and install matrices on a change that cannot. A test-only change
-# is one that can: those matrices run the suites it touched. Fails closed.
-# Whether any Rust project is affected by this branch.
+# `true` when this branch's diff can reach the crate, so CI can skip the
+# cross-platform and install matrices on a change that cannot. The crate is the
+# one Cargo package, and it is several Nx projects — its sources and unit tier,
+# and each test tier, which are its `[[test]]` targets — each tagged `lang:rust`,
+# so a change reaching any of them reaches the crate. A test-only change is one
+# that does: those matrices compile and run the suites it touched. Fails closed.
+# Whether the crate — any of its `lang:rust` projects — is affected by this branch.
 affected-crate:
     @bash scripts/nx-affected.sh --affects tag:lang:rust
 

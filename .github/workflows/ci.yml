@@ -26,8 +26,9 @@ env:
 
 jobs:
   # Which projects this build's diff can reach, derived once so every
-  # Rust-artifact job below can skip on a change that cannot reach a Rust project
-  # instead of paying the full matrix — and which tier of the gate the build owes.
+  # Rust-artifact job below can skip on a change that cannot reach the crate —
+  # any of the `lang:rust` projects the one Cargo package is split into — instead
+  # of paying the full matrix, and which tier of the gate the build owes.
   #
   # `just affected-crate` fails closed: with no derivable base — a shallow clone,
   # a missing base branch, a push whose `before` does not resolve — it says a Rust
