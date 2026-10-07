@@ -15511,6 +15511,7 @@ fn create_store_task(
         .expect("a source name"),
         project: onetaskgraph_plugin_api::NativeId::from(fixture_run::LOCAL_MD_PROJECT),
         title: title.to_owned(),
+        assets: Vec::new(),
         body,
         status: None,
         labels: Vec::new(),
