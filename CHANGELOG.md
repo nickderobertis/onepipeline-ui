@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.1...v0.26.2) - 2026-10-08
+
+### Fixed
+
+- *(deps)* link the engine and plan store that carry a reference's fragment through a copy ([#249](https://github.com/nickderobertis/onepipeline-ui/pull/249))
+
 ## [0.26.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.25.0...v0.26.0) - 2026-10-07
 
 ### Added
