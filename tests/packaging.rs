@@ -724,6 +724,24 @@ fn every_file_a_published_artifact_ships_is_a_packaged_file() {
     );
 }
 
+/// Release-plz watches packaged files, so changes to the library build targets
+/// must be able to cut the release whose browser view they build.
+#[test]
+fn workspace_library_build_targets_can_trigger_a_release() {
+    let packaged = packaged_files();
+    let targets: Vec<_> = files_under("packages")
+        .into_iter()
+        .filter(|path| path.ends_with("/project.json"))
+        .collect();
+    assert!(!targets.is_empty(), "no workspace library targets found");
+    for target in targets {
+        assert!(
+            packaged.contains(&target),
+            "{target} cannot trigger a release"
+        );
+    }
+}
+
 /// The pictures `README.md` embeds, by their path from the repository root.
 ///
 /// Read out of the document rather than listed here: the set is whichever images the
