@@ -520,12 +520,18 @@ fn the_sdk_requirement_is_the_exact_version_the_lockfile_carries() {
 /// of their vocabularies to their own declarations: a suite linking a different
 /// release than the engine does would gate this crate's reading against a
 /// vocabulary no record on disk was ever written by, and pass. Dev-dependencies
-/// are therefore held to exactly the same rule as dependencies — for two of these
-/// three, the dev edge is the only one there is.
+/// are therefore held to exactly the same rule as dependencies, including
+/// siblings whose dev edge is the only one there is.
 #[test]
 fn every_sibling_is_the_release_the_pinned_engine_resolves() {
     let lock = read("Cargo.lock");
-    for sibling in ["oneagentgraph", "onejudge", "onevcs"] {
+    for sibling in [
+        "oneagentgraph",
+        "onejudge",
+        "onevcs",
+        "onetaskgraph-core",
+        "onetaskgraph-plugin-api",
+    ] {
         let ours = locked_dependency(&lock, "onepipeline-ui", sibling);
         let theirs = locked_dependency(&lock, "onepipeline", sibling);
         assert_eq!(
