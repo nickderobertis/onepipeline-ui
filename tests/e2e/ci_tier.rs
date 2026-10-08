@@ -191,8 +191,8 @@ fn the_sweep_runs_on_what_the_script_answers_and_feeds_no_verdict() {
     // scripts/gate-verdict.sh over the jobs it needs. The sweep is in neither.
     let gate = job_block("ci.yml", "gate");
     assert!(
-        gate.contains("needs: [changes, quality, wheel]"),
-        "the gate rules on other jobs than it did:\n{gate}"
+        gate.contains("needs: [changes, quality, wheel, browser-windows]"),
+        "the gate must require changes, quality, Linux wheels and the Windows browser build:\n{gate}"
     );
     assert!(
         !gate.contains("sweep"),

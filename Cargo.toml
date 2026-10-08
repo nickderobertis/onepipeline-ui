@@ -83,6 +83,8 @@ include = [
   "/packages/*/src/**",
   "/packages/*/package.json",
   "/packages/*/tsconfig.json",
+  # Nx targets decide how the release builds those workspace libraries.
+  "/packages/*/project.json",
   "/tsconfig.base.json",
   "/package.json",
   "/bun.lock",

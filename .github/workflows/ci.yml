@@ -191,6 +191,28 @@ jobs:
       - name: Quality gate (platform-sensitive tiers)
         run: just check-cross
 
+  # Run the release's browser build on Windows on every pull request. This
+  # catches workspace compiler resolution failures before any artifact ships.
+  browser-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Build the browser view (shared with release.yml)
+        # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] This only builds the release artifact, which the rule explicitly exempts; Linux quality cannot prove Windows compiler resolution after bun installs the workspace.
+        run: just build
+
   # The declared MSRV is a promise to consumers, so prove it rather than
   # document it: a floor that only lives in Cargo.toml drifts the first time a
   # dependency raises its own.
@@ -328,7 +350,7 @@ jobs:
             --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
 
   # The `gate` context branch protection requires: the quality gate and both
-  # Linux wheel legs, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
+  # Linux wheel legs plus the Windows browser build, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
   # wheels are in it — `wheel` was not a required context, so a wheel that could
   # not build in the release's image left every required check green. Aggregated
   # here rather than by making the quality gate wait on `wheel`, so the two still
@@ -337,19 +359,21 @@ jobs:
   # may be skipped only on a change `changes` found cannot reach the crate, which
   # is why `changes` has to have succeeded too.
   gate:
-    needs: [changes, quality, wheel]
+    needs: [changes, quality, wheel, browser-windows]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: The quality gate and every Linux wheel leg passed
+      - name: The quality gate, Linux wheels and Windows browser build passed
         env:
           CHANGES: ${{ needs.changes.result }}
           QUALITY: ${{ needs.quality.result }}
           WHEEL: ${{ needs.wheel.result }}
+          BROWSER_WINDOWS: ${{ needs.browser-windows.result }}
         run: >-
           bash scripts/gate-verdict.sh --may-skip wheel
           "changes=$CHANGES" "quality=$QUALITY" "wheel=$WHEEL"
+          "browser-windows=$BROWSER_WINDOWS"
 
   # Lint the PR title: under squash-merge it becomes the release-driving commit.
   pr-title:

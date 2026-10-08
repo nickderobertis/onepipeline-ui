@@ -713,7 +713,7 @@ fn gate_command() -> String {
         .join(" ")
 }
 
-/// Runs ci.yml's own `gate` command, with the three job results the runner
+/// Runs ci.yml's own `gate` command, with the job results the runner
 /// would hand it.
 fn gate(changes: &str, quality: &str, wheel: &str) -> Output {
     let output = Command::new("bash")
@@ -722,6 +722,7 @@ fn gate(changes: &str, quality: &str, wheel: &str) -> Output {
         .env("CHANGES", changes)
         .env("QUALITY", quality)
         .env("WHEEL", wheel)
+        .env("BROWSER_WINDOWS", "success")
         .output()
         .expect("bash runs");
     eprintln!(
@@ -737,11 +738,11 @@ fn gate(changes: &str, quality: &str, wheel: &str) -> Output {
 /// `gate` context branch protection requires, without the quality sweep having to
 /// wait on it.
 #[test]
-fn the_required_gate_context_rules_on_both_wheel_legs_and_the_quality_sweep() {
+fn the_required_gate_context_rules_on_quality_wheels_and_the_windows_browser_build() {
     let block = job_block("ci.yml", "gate");
     assert!(
-        block.contains("needs: [changes, quality, wheel]"),
-        "ci.yml's gate waits on the changes, quality and wheel jobs:\n{block}"
+        block.contains("needs: [changes, quality, wheel, browser-windows]"),
+        "ci.yml's gate waits on changes, quality, wheels and the Windows browser build:\n{block}"
     );
     assert!(
         block.contains("if: always()"),
@@ -752,6 +753,7 @@ fn the_required_gate_context_rules_on_both_wheel_legs_and_the_quality_sweep() {
         "CHANGES: ${{ needs.changes.result }}",
         "QUALITY: ${{ needs.quality.result }}",
         "WHEEL: ${{ needs.wheel.result }}",
+        "BROWSER_WINDOWS: ${{ needs.browser-windows.result }}",
     ] {
         assert!(
             block.contains(result),
@@ -841,5 +843,30 @@ fn a_malformed_gate_verdict_invocation_is_refused_with_the_usage() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(says), "{args:?}: {stderr}");
         assert!(stderr.contains("ACTION: run 'gate-verdict.sh"), "{stderr}");
+    }
+}
+
+#[test]
+fn windows_browser_build_is_required_and_failure_blocks_the_gate() {
+    let block = job_block("ci.yml", "browser-windows");
+    assert!(block.contains("runs-on: windows-latest"));
+    assert!(block.contains("run: just build"));
+    assert!(block.contains("bun-version-file: package.json"));
+    assert!(!block.contains("if:"), "the browser build must always run");
+    for result in ["success", "failure", "cancelled", "skipped"] {
+        let output = Command::new("bash")
+            .current_dir(repo_root())
+            .args(["-c", &gate_command()])
+            .env("CHANGES", "success")
+            .env("QUALITY", "success")
+            .env("WHEEL", "success")
+            .env("BROWSER_WINDOWS", result)
+            .output()
+            .expect("bash runs the required gate command");
+        assert_eq!(output.status.success(), result == "success");
+        if result != "success" {
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .contains(&format!("`browser-windows` reported {result}")));
+        }
     }
 }

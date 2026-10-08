@@ -6,7 +6,7 @@
   "tags": ["scope:shared", "type:model"],
   "targets": {
     "build": {
-      "command": "npx tsc -p packages/dag-model/tsconfig.json --emitDeclarationOnly",
+      "command": "node node_modules/typescript/bin/tsc -p packages/dag-model/tsconfig.json --emitDeclarationOnly",
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
@@ -17,7 +17,7 @@
       "inputs": ["default", "servedGoldens"]
     },
     "typecheck": {
-      "command": "npx tsc -p packages/dag-model/tsconfig.json --noEmit"
+      "command": "node node_modules/typescript/bin/tsc -p packages/dag-model/tsconfig.json --noEmit"
     },
     "format": {
       "command": "npx biome check --write --linter-enabled=false packages/dag-model"

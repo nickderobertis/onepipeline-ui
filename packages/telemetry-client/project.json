@@ -7,7 +7,7 @@
   "implicitDependencies": ["dag-model"],
   "targets": {
     "build": {
-      "command": "npx tsc -p packages/telemetry-client/tsconfig.json --emitDeclarationOnly",
+      "command": "node node_modules/typescript/bin/tsc -p packages/telemetry-client/tsconfig.json --emitDeclarationOnly",
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
@@ -17,7 +17,7 @@
       "command": "npx vitest run --root packages/telemetry-client"
     },
     "typecheck": {
-      "command": "npx tsc -p packages/telemetry-client/tsconfig.json --noEmit"
+      "command": "node node_modules/typescript/bin/tsc -p packages/telemetry-client/tsconfig.json --noEmit"
     },
     "format": {
       "command": "npx biome check --write --linter-enabled=false packages/telemetry-client"
