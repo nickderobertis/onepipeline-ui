@@ -210,6 +210,7 @@ jobs:
         with:
           tool: just
       - name: Build the browser view (shared with release.yml)
+        # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] This only builds the release artifact, which the rule explicitly exempts; Linux quality cannot prove Windows compiler resolution after bun installs the workspace.
         run: just build
 
   # The declared MSRV is a promise to consumers, so prove it rather than
