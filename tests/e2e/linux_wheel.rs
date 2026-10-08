@@ -738,11 +738,11 @@ fn gate(changes: &str, quality: &str, wheel: &str) -> Output {
 /// `gate` context branch protection requires, without the quality sweep having to
 /// wait on it.
 #[test]
-fn the_required_gate_context_rules_on_both_wheel_legs_and_the_quality_sweep() {
+fn the_required_gate_context_rules_on_quality_wheels_and_the_windows_browser_build() {
     let block = job_block("ci.yml", "gate");
     assert!(
         block.contains("needs: [changes, quality, wheel, browser-windows]"),
-        "ci.yml's gate waits on the changes, quality and wheel jobs:\n{block}"
+        "ci.yml's gate waits on changes, quality, wheels and the Windows browser build:\n{block}"
     );
     assert!(
         block.contains("if: always()"),
