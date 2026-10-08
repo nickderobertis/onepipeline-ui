@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.4](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.3...v0.26.4) - 2026-10-08
+
+### Added
+
+- *(deps)* link the engine whose plan store carries image assets ([#260](https://github.com/nickderobertis/onepipeline-ui/pull/260))
+
 ## [0.26.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.2...v0.26.3) - 2026-10-08
 
 ### Fixed
