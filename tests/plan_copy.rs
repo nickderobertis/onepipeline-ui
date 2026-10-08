@@ -23,14 +23,6 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
         "---\ntitle: Task\nproject: plan\n---\n## Budgets\nDetails\n",
     )
     .expect("the task");
-    fs::write(
-        source.join("documents/design.md"),
-        format!(
-            "---\ntitle: Design\nproject: plan\n---\n[Budget]({}#budgets)\n",
-            task.display()
-        ),
-    )
-    .expect("the project document");
     fs::write(dir.path().join("onetaskgraph.yaml"), format!(
         "sources:\n  authoring:\n    plugin: local-md\n    config:\n      root: {:?}\n  board:\n    plugin: local-md\n    config:\n      root: {:?}\n", source, destination,
     )).expect("the store configuration");
@@ -41,6 +33,24 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
     )
     .expect("the configuration loads");
     let engine = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let source_task = engine
+        .task(
+            &"authoring:plan/task"
+                .parse::<GlobalId>()
+                .expect("a task id"),
+        )
+        .await
+        .expect("read the authoring task");
+    let Some(onetaskgraph_plugin_api::Location::Path(source_location)) =
+        &source_task.items[0].item.location
+    else {
+        panic!("a local Markdown task has a file location");
+    };
+    fs::write(
+        source.join("documents/design.md"),
+        format!("---\ntitle: Design\nproject: plan\n---\n[Budget]({source_location}#budgets)\n"),
+    )
+    .expect("the project document");
     let request = |id: &str, scope| CopyRequest {
         items: CopyItems::new(vec![id.parse::<GlobalId>().expect("a qualified id")])
             .expect("one item"),
@@ -92,7 +102,7 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
         panic!("a local Markdown task has a file location");
     };
     assert!(content.contains(&format!("{location}#budgets")));
-    assert!(!content.contains(&task.display().to_string()));
+    assert!(!content.contains(source_location));
     assert!(
         engine
             .copy(&request("authoring:missing", CopyScope::Documents))
