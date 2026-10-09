@@ -14870,6 +14870,51 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "{}",
         recorded[delivered]
     );
+    // The engine names the command envelope an edit came in on the record it
+    // committed — the reply the receipt answered with — and the watch route
+    // serves that record as the engine's own machine record, so the field
+    // reaches a reader as the engine journalled it. The timeline's projection of
+    // the same edit is the contract's `{author, redirection}` and is unchanged.
+    let mut watched = http::stream(
+        address,
+        &format!("/api/v2/runs/{run}/watch?timeout=0&until=settled"),
+        None,
+    );
+    assert_eq!(watched.status, 200);
+    let committed: Vec<Value> = std::iter::from_fn(|| watched.next_frame())
+        .filter(|frame| frame.event == "event")
+        .map(|frame| frame.json()["event"].clone())
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .collect();
+    assert_eq!(committed.len(), 1, "{committed:?}");
+    assert!(
+        committed[0]["payload"]["envelope"].is_u64(),
+        "{}",
+        committed[0]
+    );
+    assert_eq!(
+        committed[0]["payload"]["envelope"], receipt["receipt"]["reply"],
+        "the edit names the envelope the reply was answered as: {receipt} / {}",
+        committed[0]
+    );
+    assert!(
+        recorded[delivered].get("envelope").is_none(),
+        "{}",
+        recorded[delivered]
+    );
+    // And the envelope the driver claimed is answered rather than left claimed:
+    // the channel holds no unclaimed command and one outcome, for that reply.
+    let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(channel["commands"], json!([]), "{channel}");
+    assert_eq!(
+        channel["outcomes"],
+        json!([{
+            "id": receipt["receipt"]["reply"],
+            "applied": true,
+            "results": [{ "index": 0, "op": "note", "outcome": "applied" }],
+        }]),
+        "{channel}"
+    );
     let shown = recorded
         .iter()
         .position(|event| event["kind"] == json!("note-shown"))
