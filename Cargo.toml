@@ -430,6 +430,18 @@ onemessagebus = "0.9.0"
 # serves no asset and changes no route or response; the dev-only
 # `onetaskgraph-*` requirements move with this line.
 #
+# 0.63.6 links onevcs 0.43 and onetaskgraph 0.3.10. 0.63.5 lets a cancel
+# preempt a live note its node has not answered, and 0.63.6 replays the
+# commands a dead driver claimed, so an adoption leaves no claimed envelope
+# without an outcome. Each `edit-committed` and `command-accepted` now names
+# the `envelope` it came in. A browser-adopted run's driver is this line's copy
+# of the engine, so it carries both fixes once this moves. The timeline still
+# serves an edit as `{author, redirection}`, and the watch route serves the
+# engine's record with its `envelope`;
+# `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`
+# holds both. The dev-only `onevcs` and `onetaskgraph-*` requirements move
+# with this line.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -438,7 +450,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.63.2"
+onepipeline = "=0.63.6"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -471,7 +483,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.42.0"
+onevcs = "0.43.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -490,8 +502,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.3.9"
-onetaskgraph-plugin-api = "=0.3.9"
+onetaskgraph-core = "=0.3.10"
+onetaskgraph-plugin-api = "=0.3.10"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
