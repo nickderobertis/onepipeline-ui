@@ -442,6 +442,12 @@ onemessagebus = "0.9.0"
 # holds both. The dev-only `onevcs` and `onetaskgraph-*` requirements move
 # with this line.
 #
+# 0.63.7 links onetaskgraph 0.3.11, whose store gains `onetaskgraph project
+# graph`, the verb that prints a plan's dependency graph. Nothing here calls it:
+# the move is so the `onepipeline-api` a host pins links the same engine as its
+# `onepipeline` pin. This crate changes no route or response; the dev-only
+# `onetaskgraph-*` requirements move with this line.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -450,7 +456,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.63.6"
+onepipeline = "=0.63.7"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -502,8 +508,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.3.10"
-onetaskgraph-plugin-api = "=0.3.10"
+onetaskgraph-core = "=0.3.11"
+onetaskgraph-plugin-api = "=0.3.11"
 schemars = "1"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
