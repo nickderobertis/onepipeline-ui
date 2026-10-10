@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.6](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.5...v0.26.6) - 2026-10-10
+
+### Added
+
+- *(deps)* link the engine whose plan store prints a project's dependency graph ([#270](https://github.com/nickderobertis/onepipeline-ui/pull/270))
+
 ## [0.26.5](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.4...v0.26.5) - 2026-10-09
 
 ### Added
