@@ -15636,6 +15636,179 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// A flow the provisioned CLI holds live under a runs root: `onepipeline flow
+/// run --name NAME --session SESSION`, over a program that waits for a file this
+/// journey writes. Ended by writing that file — never by a signal — and waited
+/// on, so the flow is over when this is dropped.
+#[cfg(unix)]
+struct LiveFlow {
+    holder: std::process::Child,
+    release: PathBuf,
+}
+
+#[cfg(unix)]
+impl LiveFlow {
+    fn start(root: &Path, name: &str, session: &str) -> Self {
+        let release = root.join(format!("release-flow-{name}"));
+        let holder = std::process::Command::new(sibling::binary())
+            .args(["flow", "run", "--name", name, "--session", session, "--"])
+            .args(["sh", "-c", "while [ ! -e \"$0\" ]; do sleep 0.1; done"])
+            .arg(&release)
+            .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+            .env_remove(onepipeline_ui::cli::SESSION_ENV)
+            .env_remove(onepipeline::cli::FLOW_ENV)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap_or_else(|err| panic!("cannot start `{}`: {err}", sibling::binary()));
+        // The engine keeps every flow in one directory of the runs root, beside
+        // the runs, and registers this one by writing its record there.
+        let record = root.join(".flows").join(name).join("flow.json");
+        eventually("the flow registered under the runs root", || {
+            record.is_file()
+        });
+        Self { holder, release }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for LiveFlow {
+    fn drop(&mut self) {
+        let _ = fs::write(&self.release, "");
+        let _ = self.holder.wait();
+    }
+}
+
+/// A run launched outside any flow is read, watched and adopted through the
+/// built binary as it was before the engine it links knew about flows — while a
+/// live flow of the same session sits in the same runs root.
+///
+/// The engine's own CLI registers that flow, so the root holds exactly what a
+/// host running a planning flow leaves there. The run list names the run and
+/// not the flow's directory; the run reads as one; and `unwatched` still owes
+/// the run a watch of its own, because a live flow covers only the runs
+/// launched in it. The route serves the flow's own row beside the run's,
+/// unfiltered, as the engine's verb words it — the same rows the CLI prints.
+/// Held, the server's watch of the run clears the run's row and leaves the
+/// flow's, which nothing here watches.
+///
+/// The adoption half adopts a run of no flow beside a live flow of its owner:
+/// the driver settles its human action as waiting, the launch record it rewrote
+/// as it claimed the run still names no flow, and the flow lists no member.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`: one driver over a
+// one-node human graph and two flows over a shell loop, in a few seconds; the sixty seconds
+// beside each wait is the ceiling a failing wait reaches. It needs the compiled binary and
+// the provisioned CLI every comparison in this module already drives.
+#[cfg(unix)]
+#[test]
+fn a_run_launched_outside_any_flow_is_read_watched_and_adopted_beside_a_live_flow() {
+    let run = fixture_run::RUN_ID;
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write_live(root, run);
+            fixture_run::summarize(root, run);
+        },
+        fixture_run::LIVE_SESSION,
+    );
+    let flow = LiveFlow::start(&serving.runs_root(), "plan", fixture_run::LIVE_SESSION);
+
+    let listed = http::get(serving.address, "/api/v2/runs").json();
+    let ids: Vec<&Value> = listed["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .map(|row| &row["run_id"])
+        .collect();
+    assert_eq!(ids, vec![&json!(run)], "{listed}");
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+
+    let rows = |address| -> Vec<Value> {
+        let unwatched = http::get(address, "/api/v2/unwatched").json();
+        assert_enveloped(&unwatched);
+        assert_eq!(unwatched["unresolved"], json!([]), "{unwatched}");
+        unwatched["reported"].as_array().expect("reported").clone()
+    };
+    let row_of =
+        |rows: &[Value], name: &str| rows.iter().find(|row| row["run"] == json!(name)).cloned();
+    let printed = || {
+        let said = sibling::run(
+            &serving.runs_root(),
+            Some(fixture_run::LIVE_SESSION),
+            &["unwatched"],
+        );
+        String::from_utf8_lossy(&said.stdout).into_owned()
+    };
+
+    // Owed a watch of its own, with the live flow beside it.
+    let before = rows(serving.address);
+    assert_eq!(before.len(), 2, "{before:?}");
+    let owed = row_of(&before, run).expect("the run of no flow is still owed a watch");
+    assert!(owed["why_not_watched"]
+        .as_str()
+        .is_some_and(|why| !why.is_empty()));
+    let flow_row = row_of(&before, "flow plan").expect("the live flow's own row");
+    assert_eq!(flow_row["standing"], json!("LIVE"), "{flow_row}");
+    let said = printed();
+    assert!(said.contains(run) && said.contains("flow plan"), "{said}");
+
+    // Held by the server's watch: the run is watched, the flow still is not.
+    let mut stream = http::stream(
+        serving.address,
+        &format!("/api/v2/runs/{run}/watch?timeout=none&tick=1&until=settled"),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    std::iter::from_fn(|| stream.next_frame())
+        .find(|frame| frame.event == "tick")
+        .expect("a heartbeat, so the watch is held");
+    let during = rows(serving.address);
+    assert_eq!(during, vec![flow_row.clone()], "{during:?}");
+    let said = printed();
+    assert!(!said.contains(run) && said.contains("flow plan"), "{said}");
+    drop(stream);
+    drop(flow);
+    drop(serving);
+
+    // Adopted beside a live flow of the run's owner, the run stays of no flow.
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let flow = LiveFlow::start(&root, "plan", fixture_run::SESSION);
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually("the driver settled the human action as waiting", || {
+        http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"]["node_status"]
+            [fixture_run::APPROVAL_NODE_ID]
+            == json!("waiting")
+    });
+    eventually("the driver let go and was reaped", || !process_is_live(pid));
+    drop(driver);
+    let launch: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(run).join("launch.json")).expect("the launch record"),
+    )
+    .expect("a launch record");
+    assert_eq!(
+        launch["pid"],
+        json!(pid),
+        "the driver claimed the run: {launch}"
+    );
+    assert!(launch.get("flow").is_none(), "{launch}");
+    let members = root.join(".flows").join("plan").join("members");
+    let joined: Vec<_> = fs::read_dir(&members)
+        .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+        .unwrap_or_default();
+    assert!(joined.is_empty(), "{joined:?}");
+    drop(flow);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// An adoption through the built binary drives a plan that spans two `local-md`
 /// sources — a home project in one and the member project linked to it through
 /// `onetaskgraph.members` and `onetaskgraph.member_of` in the other — and writes
