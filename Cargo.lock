@@ -1446,9 +1446,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51c7d67144438ab949eaea7d0d3b951ca215a8dd3dad6c09b83a25522700cd73"
+checksum = "e15fa00cb8fd2b44f059cfe7752a2bea138b47b710075547914f46c4fec4471a"
 dependencies = [
  "clap",
  "libc",
@@ -1468,9 +1468,9 @@ dependencies = [
 
 [[package]]
 name = "oneharness-core"
-version = "0.24.1"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25dfd6dffaaa07f6f0eb8d1a009304c6393f26f3d2a12593931c1c44fb4e3654"
+checksum = "61ccf1b2d49f5b0d4cb7eec8766a16c395e7923444f51426273be9d0ca76a645"
 dependencies = [
  "fs2",
  "jsonschema 0.33.0",
@@ -1489,9 +1489,9 @@ dependencies = [
 
 [[package]]
 name = "onejudge"
-version = "0.17.1"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff9526876e376295aca2085af53759bf32c8a9330bfa22203265d9c2a39bdf1"
+checksum = "866c10bcfcf8624e6feacedf352f349fa276b13ed83be0d767306e7ef602ddd0"
 dependencies = [
  "clap",
  "oneharness-core",
@@ -1526,9 +1526,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.63.7"
+version = "0.64.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae0ac5c519565a8e70c9659499d6b83e5639042c401e79a858efc8f6aa9450b"
+checksum = "e04a8fe7f6c12cfad7239d55778cec09346ce40f2d56f06943bd74d21e0360e9"
 dependencies = [
  "clap",
  "libc",
@@ -1572,6 +1572,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_norway",
  "sha2",
  "tempfile",
  "thiserror 2.0.21",

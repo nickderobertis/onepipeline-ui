@@ -9436,7 +9436,7 @@ fn a_summary_relayed_before_any_turn_joins_the_first_turn_relayed() {
 ///
 /// The report is read back through the artifact route first, so this journey
 /// cannot go on passing after the stored document has stopped being a schema-14
-/// report — the schema the linked onejudge 0.17 writes — carrying two judges'
+/// report — the schema the linked onejudge 0.19 writes — carrying two judges'
 /// decisions. The transcript is then read off the
 /// conversation route and off the detail beside it, which are one fold.
 #[test]
@@ -14933,6 +14933,400 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "{settled}"
     );
     eventually("the driver was reaped", || !process_is_live(pid));
+    drop(driver);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+// llmlint: ignore-end[tests_mirror_real_usage]
+// llmlint: ignore-end[e2e_not_mocked]
+
+// llmlint: ignore-block[e2e_not_mocked] the one process stood in for here is the paid model
+// turn, at the same `ONEAGENTGRAPH_ONEHARNESS_BIN` seam and on the same terms as
+// `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`: the
+// server, the adopted driver, `oneagentgraph`'s member, onejudge's panel and every document
+// the stand-in prints are real, and the stand-in only answers each `oneharness run` with a
+// report the linked `oneharness_core` serialized.
+// llmlint: ignore-block[tests_mirror_real_usage] two reads below the API, each of something
+// no route serves: the prompt onejudge handed each judge — what the judge model would have
+// read, which only the process standing in for it ever sees — and the provider block
+// `oneagentgraph` composed for the member, at the path its own `member-started` record names.
+// Everything the journey claims about the run itself is read off the served routes.
+/// A judge-side setting, passed to onejudge as written by an adopted member's
+/// graph. onejudge accepts it on a panel's `split` provider, and it is not a key
+/// `oneagentgraph` composes, so it reaches the provider block untouched.
+#[cfg(unix)]
+const PANEL_JUDGE_SETTINGS: &str = "{allow_writable_judges: false}";
+
+/// Install the `oneharness` a panel-judged member's turns spawn, standing in for
+/// the paid model turn and nothing above it, and answer with its path.
+///
+/// The agent side (the one onejudge asks for `--events`) runs one tool call and
+/// ends its turn. Every other run is a judge's: its prompt is kept at
+/// `judge-<pid>.prompt` — a panel's judges run at once, so a count of the files
+/// already there would hand two of them one name — and it calls the work done
+/// and the criterion met.
+#[cfg(unix)]
+fn install_panel_harness(fakes: &Path) -> PathBuf {
+    use oneharness_core::domain::report::RunStreamEnvelope;
+    fs::create_dir_all(fakes).expect("the double's directory");
+    let step = harness_step(0, "cargo test");
+    let mut agent = String::new();
+    for event in &step {
+        agent.push_str(
+            &serde_json::to_string(&RunStreamEnvelope::Event {
+                event: event.clone(),
+            })
+            .expect("an event line"),
+        );
+        agent.push('\n');
+    }
+    agent.push_str(
+        &serde_json::to_string(&RunStreamEnvelope::Result {
+            report: harness_report("Built the change.", Some(step.to_vec())),
+        })
+        .expect("the result line"),
+    );
+    agent.push('\n');
+    fs::write(fakes.join("agent.ndjson"), agent).expect("the agent's turn");
+    for (name, said) in [
+        (
+            "supervisor.json",
+            json!({ "completion": true, "reason": "the turn did what the task asked" }),
+        ),
+        (
+            "verdict.json",
+            json!({ "value": true, "reason": "the turn did what the task asked" }),
+        ),
+    ] {
+        fs::write(
+            fakes.join(name),
+            serde_json::to_string(&harness_report(&said.to_string(), None))
+                .expect("the judge's report"),
+        )
+        .expect("the judge's answer");
+    }
+    let program = fakes.join("oneharness");
+    fs::write(
+        &program,
+        format!(
+            r#"#!/bin/sh
+fakes='{fakes}'
+prompt=$(cat)
+case " $* " in
+*" --events "*) cat "$fakes/agent.ndjson" ;;
+*)
+  printf '%s' "$prompt" > "$fakes/judge-$$.prompt"
+  case "$prompt" in
+  *'{SUPERVISOR_OPENING}'*) cat "$fakes/supervisor.json" ;;
+  *) cat "$fakes/verdict.json" ;;
+  esac
+  ;;
+esac
+"#,
+            fakes = fakes.display()
+        ),
+    )
+    .expect("the double");
+    // Owner-only: the one process that runs it is the dispatch this journey's own
+    // server starts, as this user.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
+            .expect("the double is executable");
+    }
+    program
+}
+
+/// The node-scope graph of a member judged by a **panel** of two harness judges,
+/// both over `oneharness.judge.toml`, which sets `read-only` — the posture a
+/// planner's judge runs under — with `judge_settings` beside them. Version 10 is
+/// the first schema `oneagentgraph` accepts that field at.
+#[cfg(unix)]
+fn write_panel_node_scope_graph(dir: &Path, judge_settings: &str) -> PathBuf {
+    let chain = "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n";
+    fs::write(dir.join("oneharness.toml"), chain).expect("the agent's harness config");
+    fs::write(
+        dir.join("oneharness.judge.toml"),
+        format!("mode = \"read-only\"\n{chain}"),
+    )
+    .expect("the judges' harness config");
+    fs::write(
+        dir.join("onejudge.base.yaml"),
+        "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
+         done_when: the original task is complete\n  max_turns: 12\n",
+    )
+    .expect("the onejudge base config");
+    let graph = dir.join("node-scope.yaml");
+    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
+    // member and `bypass` the one approval mode oneagentgraph's contract names; it is the
+    // agent side's, handed to the stand-in `oneharness` above, which runs no tool at all. The
+    // judges' own posture is their config's `read-only`, which is what this graph is about.
+    fs::write(
+        &graph,
+        format!(
+            "version: 10\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
+             base_config: ./onejudge.base.yaml\n    agent:\n      \
+             oneharness_config: ./oneharness.toml\n    judge:\n      \
+             - oneharness_config: ./oneharness.judge.toml\n        label: reviewer\n      \
+             - oneharness_config: ./oneharness.judge.toml\n        label: checker\n    \
+             judge_settings: {judge_settings}\n    mode: bypass\n"
+        ),
+    )
+    .expect("the node-scope graph");
+    graph
+}
+
+/// Whether a node's served status is one of the two a one-node dispatch ends
+/// at: `done`, or `failed` when its member never ran.
+#[cfg(unix)]
+fn node_has_settled(status: &Value) -> bool {
+    status == &json!("done") || status == &json!("failed")
+}
+
+/// Serve `workspace` with the panel double installed at the seam a dispatch's
+/// turns spawn `oneharness` through, and adopt its run through the adopt route.
+#[cfg(unix)]
+fn adopt_with_panel_harness(
+    workspace: tempfile::TempDir,
+    dir: &Path,
+    harness: &Path,
+) -> (Serving, RetainedDriver) {
+    let scratch = dir.join("scratch");
+    fs::create_dir_all(&scratch).expect("a scratch directory");
+    // What this suite's own dispatch exported for *its* harness, graph and run.
+    let inherited: Vec<String> = std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| {
+            ["ONEPIPELINE_", "ONEAGENTGRAPH_", "ONEHARNESS_"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        })
+        .collect();
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            (
+                "ONEAGENTGRAPH_ONEHARNESS_BIN",
+                &harness.display().to_string(),
+            ),
+            (
+                "ONEAGENTGRAPH_STATE_DIR",
+                &dir.join("oneagentgraph-state").display().to_string(),
+            ),
+            (
+                "ONEPIPELINE_NODE_SCRATCH_DIR",
+                &scratch.display().to_string(),
+            ),
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            (
+                "XDG_STATE_HOME",
+                &dir.join("xdg-state").display().to_string(),
+            ),
+        ],
+        &inherited,
+    );
+    let adopted = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{}/adopt", fixture_run::RUN_ID),
+        "",
+    );
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    (serving, RetainedDriver(pid))
+}
+
+/// A run adopted through the adopt route is driven by this binary's copy of the
+/// engine, so a member judged by a panel judges as the CLI-driven engine does:
+/// each read-only harness judge is handed onejudge's one evidence contract — no
+/// read-only or permission instruction, and no ban on its shell — and the
+/// member's `judge_settings` reach the provider block onejudge is handed.
+///
+/// Nothing is stood in for but the paid model turn: the server, the adopted
+/// driver, `oneagentgraph`'s member and onejudge's panel are all real, and the
+/// `oneharness` each side spawns is [`install_panel_harness`]'s. An engine
+/// linking onejudge 0.17 hands a read-only judge an evidence contract telling it
+/// never to use a shell command, and one linking oneagentgraph 0.5.5 refuses
+/// the version 10 graph before the member starts.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live`: one
+// driver settling a one-node graph through a one-turn scripted conversation in a few
+// seconds; the ceiling beside it is what a failing wait reaches, which no passing run pays.
+// It needs nothing a checkout may lack: the compiled binary and a shell script it writes.
+#[cfg(unix)]
+#[test]
+fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_settings() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::DISPATCH_NODE_ID;
+    let graph = write_panel_node_scope_graph(&dir, PANEL_JUDGE_SETTINGS);
+    fixture_run::write_awaiting_dispatch_with_persona(&root, run, &dir, &graph);
+    let fakes = dir.join("harness-double");
+    let harness = install_panel_harness(&fakes);
+    let (serving, driver) = adopt_with_panel_harness(workspace, &dir, &harness);
+    let address = serving.address;
+    let detail = move || http::get(address, &format!("/api/v2/runs/{run}")).json();
+
+    // Waited on the node rather than the run, so an engine that refuses the
+    // graph fails here naming its refusal rather than on a run left owed.
+    eventually("the adopted node to settle", || {
+        node_has_settled(&detail()["graph"]["node_status"][node])
+    });
+    let settled = detail();
+    assert_eq!(
+        settled["graph"]["node_status"][node],
+        json!("done"),
+        "{settled}"
+    );
+    eventually("the adopted run to settle", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    let settled = detail();
+    eventually("the driver was reaped", || !process_is_live(driver.0));
+    drop(driver);
+
+    // Both judges of the panel decided the one turn, each under the read-only
+    // posture its config names — onejudge's own record of the mode it ran them
+    // under, served on the turn they judged.
+    let conversation = settled["conversations"]
+        .as_array()
+        .expect("conversations")
+        .iter()
+        .find(|document| document["attribution"]["agentRole"] == json!("worker"))
+        .expect("the worker's conversation")
+        .clone();
+    let turns = conversation["conversation"]["turns"]
+        .as_array()
+        .expect("turns");
+    assert_eq!(turns.len(), 1, "{conversation}");
+    let judges = turns[0]["judges"]
+        .as_array()
+        .expect("the panel's decisions");
+    assert_eq!(
+        judges
+            .iter()
+            .map(|judge| (
+                judge["judge"].as_str().unwrap_or_default(),
+                judge["decision"].as_str().unwrap_or_default(),
+                judge["posture"]["mode"].as_str().unwrap_or_default(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("reviewer", "done", "read-only"),
+            ("checker", "done", "read-only")
+        ],
+        "{conversation}"
+    );
+
+    // Every prompt a judge was handed carries the one evidence contract, and
+    // nothing telling a read-only judge what it may not do: that is its
+    // harness mode's to enforce, not the prompt's to state.
+    let prompts: Vec<String> = fs::read_dir(&fakes)
+        .expect("the double's directory")
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".prompt"))
+        .map(|entry| fs::read_to_string(entry.path()).expect("a judge's prompt"))
+        .collect();
+    assert!(
+        prompts
+            .iter()
+            .filter(|prompt| prompt.contains(SUPERVISOR_OPENING))
+            .count()
+            >= 2,
+        "each judge of the panel was asked to decide the turn: {prompts:?}"
+    );
+    let contract = format!("{}\n", onejudge::EVIDENCE_PROMPT_MARKER);
+    for prompt in &prompts {
+        assert!(prompt.contains(&contract), "{prompt}");
+        for instruction in [
+            "read-only",
+            "never a shell command",
+            "no change is permitted",
+            "permission mode",
+            "MODE:",
+        ] {
+            assert!(
+                !prompt.contains(instruction),
+                "a judge was told `{instruction}`: {prompt}"
+            );
+        }
+    }
+
+    // The member's `judge_settings` reach the provider block `oneagentgraph`
+    // composed for onejudge, beside the judges it composed itself. That block is
+    // written beside each judge's config, which the posture above names.
+    let member = Path::new(
+        judges[0]["posture"]["source"]
+            .as_str()
+            .expect("the reviewer's config"),
+    )
+    .parent()
+    .expect("the member's directory")
+    .to_path_buf();
+    let handed: Value = serde_norway::from_str(
+        &fs::read_to_string(member.join(oneagentgraph::invoke::ONEJUDGE_CONFIG_FILE))
+            .expect("the config the member handed onejudge"),
+    )
+    .expect("the config is YAML");
+    let provider = &handed["provider"];
+    assert_eq!(provider["kind"], json!("split"), "{handed}");
+    assert_eq!(provider["allow_writable_judges"], json!(false), "{handed}");
+    assert_eq!(
+        provider["judges"].as_array().map(Vec::len),
+        Some(2),
+        "{handed}"
+    );
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The refusal half of the same pass-through: a `judge_settings` key
+/// `oneagentgraph` composes itself is refused by name before the member takes a
+/// turn, so the adopted node fails with `oneagentgraph`'s own refusal as its
+/// detail, having spent no model turn on either side.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the journey above's
+// terms: one driver failing a one-node graph before its member's first turn.
+#[cfg(unix)]
+#[test]
+fn an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_turn() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::DISPATCH_NODE_ID;
+    let graph = write_panel_node_scope_graph(&dir, "{kind: oneharness}");
+    fixture_run::write_awaiting_dispatch_with_persona(&root, run, &dir, &graph);
+    let fakes = dir.join("harness-double");
+    let harness = install_panel_harness(&fakes);
+    let (serving, driver) = adopt_with_panel_harness(workspace, &dir, &harness);
+    let address = serving.address;
+    let detail = move || http::get(address, &format!("/api/v2/runs/{run}")).json();
+
+    eventually("the adopted node to settle", || {
+        node_has_settled(&detail()["graph"]["node_status"][node])
+    });
+    let settled = detail();
+    assert_eq!(
+        settled["graph"]["node_status"][node],
+        json!("failed"),
+        "{settled}"
+    );
+    let detail_said = settled["graph"]["node_results"][node]["detail"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        detail_said.contains("`judge_settings` names `kind`"),
+        "{settled}"
+    );
+    assert_eq!(settled["conversations"], json!([]), "{settled}");
+    assert!(
+        !fs::read_dir(&fakes)
+            .expect("the double's directory")
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".prompt")),
+        "a judge was asked to decide a member that never started"
+    );
+    // The failed node leaves the run owed a decision, so its driver stays; this
+    // journey started it and stops it.
     drop(driver);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]

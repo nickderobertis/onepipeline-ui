@@ -138,10 +138,10 @@ oneharness-core = "0.24.0"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.5.5"
+oneagentgraph = "0.5.6"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.17.1"
+onejudge = "0.19.0"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
@@ -448,6 +448,19 @@ onemessagebus = "0.9.0"
 # `onepipeline` pin. This crate changes no route or response; the dev-only
 # `onetaskgraph-*` requirements move with this line.
 #
+# 0.64.0 links onejudge 0.19 and oneagentgraph 0.5.6. onejudge gives every
+# judge one evidence contract whatever its mode, so a read-only harness judge
+# is no longer told never to use its shell; oneagentgraph's schema 10 passes a
+# `kind: onejudge` member's `judge_settings` and each judge's `settings` through
+# to onejudge untouched. A browser-adopted run's driver is this line's copy of
+# the engine, so it judges and accepts graphs as the CLI-driven engine does
+# once this moves, and the `onejudge`, `oneagentgraph` and `oneharness-core`
+# requirements above move with it to the versions its own lock resolves.
+# `an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_settings`
+# holds both through `drive-run --adopt`. This crate changes no route or
+# response; the dev-only `onetaskgraph-*` requirements stay at 0.3.11, which
+# this release still pins.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -456,7 +469,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.63.7"
+onepipeline = "=0.64.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -511,6 +524,11 @@ predicates = "3"
 onetaskgraph-core = "=0.3.11"
 onetaskgraph-plugin-api = "=0.3.11"
 schemars = "1"
+# The parser `oneagentgraph` writes a member's onejudge config with, so the
+# adoption journey over a panel-judged member reads the provider block it was
+# handed as the document it is. Held at the major that library requires, so the
+# lock resolves the one copy it already links.
+serde_norway = "0.9"
 tempfile = "3"
 # The parser `release-targets.toml` is read with, both by the schema check in
 # `tests/packaging.rs` and by the journeys that drive the probe over every
