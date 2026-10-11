@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.6...v0.27.0) - 2026-10-11
+
+### Added
+
+- *(deps)* [**breaking**] announce that the public surface follows onepipeline 0.64 ([#279](https://github.com/nickderobertis/onepipeline-ui/pull/279))
+- *(deps)* link the engine carrying judge settings ([#277](https://github.com/nickderobertis/onepipeline-ui/pull/277))
+
 ## [0.26.6](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.5...v0.26.6) - 2026-10-10
 
 ### Added
