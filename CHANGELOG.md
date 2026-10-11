@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.27.0...v0.28.0) - 2026-10-11
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose plan store projects metadata onto board fields ([#282](https://github.com/nickderobertis/onepipeline-ui/pull/282))
+
 ## [0.27.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.26.6...v0.27.0) - 2026-10-11
 
 ### Added
