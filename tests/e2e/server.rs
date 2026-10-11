@@ -15278,6 +15278,7 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
         "{handed}"
     );
 }
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The refusal half of the same pass-through: a `judge_settings` key
 /// `oneagentgraph` composes itself is refused by name before the member takes a
@@ -15328,6 +15329,9 @@ fn an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_t
     // journey started it and stops it.
     drop(driver);
 }
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+// llmlint: ignore-end[tests_mirror_real_usage]
+// llmlint: ignore-end[e2e_not_mocked]
 
 /// An adoption through the built binary drives a run whose plan lives in a
 /// `local-md` onetaskgraph store, on a host that offers **no** `onetaskgraph`
