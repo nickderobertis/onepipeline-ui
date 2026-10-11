@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.28.0...v0.29.0) - 2026-10-11
+
+### Added
+
+- *(deps)* [**breaking**] announce that the surface follows onepipeline 0.66's types ([#291](https://github.com/nickderobertis/onepipeline-ui/pull/291))
+- *(deps)* link the engine that holds a session for a live launch flow ([#289](https://github.com/nickderobertis/onepipeline-ui/pull/289))
+
 ## [0.28.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.27.0...v0.28.0) - 2026-10-11
 
 ### Added
