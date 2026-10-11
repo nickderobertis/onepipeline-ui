@@ -19,9 +19,9 @@ on:
   pull_request:
     # `closed` lets screencomp delete this PR's gh-pages preview once it closes,
     # so stale /pr-<n>/ galleries do not accumulate on the branch.
-    # `ready_for_review` gives a draft lifted later a run on the lifted state, so
-    # the required `report` context is not left waiting on the draft's run.
-    types: [opened, synchronize, reopened, ready_for_review, closed]
+    # No `ready_for_review`: the draft's run already reports the required
+    # `report` context on its head commit, and lifting it changes no commit.
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
   workflow_dispatch:

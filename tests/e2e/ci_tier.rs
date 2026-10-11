@@ -261,10 +261,10 @@ fn the_suppressions_comment_is_its_own_workflow_and_gates_nothing() {
 }
 
 #[test]
-fn a_draft_lifted_later_gets_a_run_of_every_required_check() {
-    // GitHub's default `pull_request` types omit `ready_for_review`, so a change
-    // request opened as a draft and lifted later gets no run on the lifted state,
-    // and a merge path that waits for one waits on checks that never re-run.
+fn lifting_a_draft_does_not_rerun_the_required_checks() {
+    // A draft's runs report on its head commit, and lifting it changes no
+    // commit, so those runs are the ones the merge path reads. Triggering on
+    // `ready_for_review` would only run every required check a second time.
     for file in ["ci.yml", "visual-docs.yml"] {
         let workflow = fs::read_to_string(repo_root().join(".github/workflows").join(file))
             .expect("workflow reads");
@@ -275,11 +275,15 @@ fn a_draft_lifted_later_gets_a_run_of_every_required_check() {
             .take_while(|line| line.starts_with("    "))
             .find_map(|line| line.trim().strip_prefix("types: "))
             .unwrap_or_else(|| panic!("{file} names no pull_request types"));
-        for kind in ["opened", "synchronize", "reopened", "ready_for_review"] {
+        for kind in ["opened", "synchronize", "reopened"] {
             assert!(
                 types.contains(kind),
                 "{file} no longer runs on a pull request's `{kind}` (types: {types})"
             );
         }
+        assert!(
+            !types.contains("ready_for_review"),
+            "{file} re-runs when a draft is lifted, repeating its draft's runs (types: {types})"
+        );
     }
 }
