@@ -461,6 +461,22 @@ onemessagebus = "0.9.0"
 # response; the dev-only `onetaskgraph-*` requirements stay at 0.3.11, which
 # this release still pins.
 #
+# 0.65.0 links onetaskgraph 0.4.0, a new minor of the store. Its
+# `github-projects` source takes `metadata_fields`, each entry projecting one
+# caller metadata value onto a board text field so a board can filter on it,
+# and its store checks that block against the plugin's schema when it reads the
+# configuration — so a host whose `followups` source names
+# `metadata_fields: [{field: Host, key: orchestrator.follow-up, path: [host]}]`
+# is read by this line's copy of the engine where the earlier store refused the
+# whole file as naming an unknown field. It also carries 0.3.12's item
+# classification: a task created through the store declares who may read it,
+# and a private one is written only to a destination verified private. A
+# browser-adopted run's driver reads the host's store configuration through
+# this copy, so it accepts that source once this moves;
+# `an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metadata_fields`
+# holds it through the adopt route. This crate changes no route or response;
+# the dev-only `onetaskgraph-*` requirements move with this line.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -469,7 +485,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.64.0"
+onepipeline = "=0.65.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -521,8 +537,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.3.11"
-onetaskgraph-plugin-api = "=0.3.11"
+onetaskgraph-core = "=0.4.0"
+onetaskgraph-plugin-api = "=0.4.0"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was

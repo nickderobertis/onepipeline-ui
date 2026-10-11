@@ -15507,6 +15507,135 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// An adoption through the built binary reads a plan-store configuration whose
+/// `github-projects` source projects a metadata value onto a board text field —
+/// the `followups` source a host configures with
+/// `metadata_fields: [{field: Host, key: orchestrator.follow-up, path: [host]}]`
+/// — and drives its run as it would without one.
+///
+/// The store checks every source's `config` block against its plugin's schema
+/// when it loads the file, so a store that predates `metadata_fields` refuses
+/// the whole configuration as naming an unknown field, and every write-back the
+/// driver attempts is refused with it. The driver settling the run's human
+/// action as waiting, and every projection it attempted landing on the
+/// `local-md` project beside that source, are the proof that this binary's
+/// store accepted it. The board's endpoint is a closed
+/// loopback port, so nothing here reaches GitHub, and nothing here asks it to:
+/// the plan lives in the `local-md` source.
+///
+/// A misspelled entry is still refused: the test then rewrites that entry's
+/// `path` as `paths`, and a second adoption's write-back is refused as a
+/// configuration setting naming exactly that entry.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
+// above: two retained drivers over a one-node human graph, in a few seconds; the
+// sixty seconds beside it is the ceiling a failing wait reaches. It needs nothing a
+// checkout may lack: the compiled binary, and files it writes itself.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metadata_fields() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let (project, _task) = fixture_run::launch_from_local_md_store(&root, run, &dir);
+    let configuration = dir.join("onetaskgraph.yaml");
+    let local_md = fs::read_to_string(&configuration).expect("the store configuration");
+    let followups = |path_key: &str| {
+        format!(
+            "{local_md}  followups:\n    plugin: github-projects\n    config:\n      \
+             owner: example-org\n      project_number: 7\n      \
+             endpoint: http://127.0.0.1:9/graphql\n      token_env: FOLLOWUPS_BOARD_TOKEN\n      \
+             metadata_fields:\n        - field: Host\n          key: orchestrator.follow-up\n          \
+             {path_key}: [host]\n"
+        )
+    };
+    fs::write(&configuration, followups("path")).expect("the store configuration");
+
+    // A source this suite's own host configures through `ONETASKGRAPH_SOURCES__*`
+    // would be merged into the file the driver reads, so it meets none of them.
+    let inherited: Vec<String> = std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("ONETASKGRAPH_"))
+        .collect();
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[("FOLLOWUPS_BOARD_TOKEN", "not-a-real-token")],
+        &inherited,
+    );
+    let adopt = format!("/api/v2/runs/{run}/adopt");
+    let node_status = |address| {
+        http::get(address, &format!("/api/v2/runs/{run}")).json()["graph"]["node_status"]
+            [fixture_run::APPROVAL_NODE_ID]
+            .clone()
+    };
+    let projections = || -> Vec<Value> {
+        fs::read_to_string(
+            root.join(run)
+                .join(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE),
+        )
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a projection record line"))
+        .collect()
+    };
+
+    let adopted = http::post(serving.address, &adopt, "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually("the driver settled the human action as waiting", || {
+        node_status(serving.address) == json!("waiting")
+    });
+    eventually("the driver let go and was reaped", || !process_is_live(pid));
+    drop(driver);
+    let records = projections();
+    assert!(!records.is_empty(), "no projection was attempted");
+    for record in &records {
+        assert_eq!(record["project"], json!(project), "{record}");
+        assert_eq!(record["outcome"], json!("projected"), "{record}");
+    }
+    assert!(
+        records.iter().any(|record| record["actions"]["updated"]
+            .as_u64()
+            .is_some_and(|updated| updated > 0)),
+        "no projection wrote the settlement through the store: {records:?}"
+    );
+    let projected = records.len();
+
+    // The same entry misspelled is an unknown field: the store refuses the
+    // file, and the next driver's write-back is refused naming that entry —
+    // the refusal a store predating `metadata_fields` gives the correct one.
+    fs::write(&configuration, followups("paths")).expect("the store configuration");
+    let refused = http::post(serving.address, &adopt, "");
+    assert_eq!(refused.status, 200, "{}", refused.body);
+    let pid =
+        u32::try_from(refused.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually("the second driver let go and was reaped", || {
+        !process_is_live(pid)
+    });
+    drop(driver);
+    let refusals: Vec<Value> = projections()[projected..]
+        .iter()
+        .filter(|record| record["outcome"] != json!("projected"))
+        .cloned()
+        .collect();
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    let refusal = &refusals[0];
+    assert_eq!(refusal["class"], json!("refused"), "{refusal}");
+    assert_eq!(refusal["kind"], json!("config-setting"), "{refusal}");
+    let reason = refusal["reason"].as_str().expect("a refusal's reason");
+    assert!(
+        reason.contains("sources.followups.config.metadata_fields.0.paths"),
+        "{reason}"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// An adoption through the built binary drives a plan that spans two `local-md`
 /// sources — a home project in one and the member project linked to it through
 /// `onetaskgraph.members` and `onetaskgraph.member_of` in the other — and writes
@@ -15967,6 +16096,9 @@ fn create_store_task(
                 )
             })
             .collect(),
+        // Who may read it: a public task, as every task was before the store
+        // classified them.
+        classification: onetaskgraph_plugin_api::Classification::Public,
     };
     tokio::runtime::Runtime::new()
         .expect("a runtime")
