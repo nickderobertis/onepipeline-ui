@@ -15075,6 +15075,13 @@ fn write_panel_node_scope_graph(dir: &Path, judge_settings: &str) -> PathBuf {
     graph
 }
 
+/// Whether a node's served status is one of the two a one-node dispatch ends
+/// at: `done`, or `failed` when its member never ran.
+#[cfg(unix)]
+fn node_has_settled(status: &Value) -> bool {
+    status == &json!("done") || status == &json!("failed")
+}
+
 /// Serve `workspace` with the panel double installed at the seam a dispatch's
 /// turns spawn `oneharness` through, and adopt its run through the adopt route.
 #[cfg(unix)]
@@ -15161,8 +15168,10 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
     let address = serving.address;
     let detail = move || http::get(address, &format!("/api/v2/runs/{run}")).json();
 
-    eventually("the adopted run to settle", || {
-        detail()["run"]["state"] == json!("settled")
+    // Waited on the node rather than the run, so an engine that refuses the
+    // graph fails here naming its refusal rather than on a run left owed.
+    eventually("the adopted node to settle", || {
+        node_has_settled(&detail()["graph"]["node_status"][node])
     });
     let settled = detail();
     assert_eq!(
@@ -15170,6 +15179,10 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
         json!("done"),
         "{settled}"
     );
+    eventually("the adopted run to settle", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    let settled = detail();
     eventually("the driver was reaped", || !process_is_live(driver.0));
     drop(driver);
 
@@ -15288,8 +15301,7 @@ fn an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_t
     let detail = move || http::get(address, &format!("/api/v2/runs/{run}")).json();
 
     eventually("the adopted node to settle", || {
-        let status = &detail()["graph"]["node_status"][node];
-        status != &json!("running") && status != &json!("pending") && status != &json!("ready")
+        node_has_settled(&detail()["graph"]["node_status"][node])
     });
     let settled = detail();
     assert_eq!(
