@@ -477,6 +477,21 @@ onemessagebus = "0.9.0"
 # holds it through the adopt route. This crate changes no route or response;
 # the dev-only `onetaskgraph-*` requirements move with this line.
 #
+# 0.66.0 adds flows: `onepipeline flow run` holds a launched program that is
+# not itself a run under the runs root's `.flows` directory, a run `start`ed
+# inside one records it as the launch record's `flow`, and `unwatched` counts a
+# qualifying watch of a live flow as watching the runs launched in it — and
+# reports a live flow nothing watches as a row of its own, `flow <id>`, which
+# `GET /api/v2/unwatched` serves beside the run rows, unfiltered, as it serves
+# every row of that verb. A browser-adopted run's driver is this line's copy of
+# the engine, so a host can hold its view and its engine to the release that
+# knows flows once this moves. Run discovery passes over `.flows`, and a run of
+# no flow is read, watched and adopted as before;
+# `a_run_launched_outside_any_flow_is_read_watched_and_adopted_beside_a_live_flow`
+# holds that through the run, watch, unwatched and adopt routes beside a flow
+# the provisioned CLI registers. This crate adds no route and changes no
+# response shape.
+#
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -485,7 +500,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.65.0"
+onepipeline = "=0.66.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
