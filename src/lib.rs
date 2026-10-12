@@ -34,10 +34,10 @@
 //! [`onepipeline::views::RunView`]. `Cargo.toml` pins the engine exactly, so a
 //! release that moves that pin across a `0.x` minor makes callers of those
 //! items recompile against the new engine. That is a breaking change of this
-//! crate, whatever its own signatures show: moving from `onepipeline` 0.66.0
-//! to 0.68.0, which made this surface follow `onepipeline` 0.68.0's types,
+//! crate, whatever its own signatures show: moving from `onepipeline` 0.68.1
+//! to 0.69.0, which made this surface follow `onepipeline` 0.69.0's types,
 //! left [`ApiError::from_engine`] spelled exactly as before, and a caller
-//! still holding a 0.66 [`onepipeline::Error`] could no longer pass it,
+//! still holding a 0.68 [`onepipeline::Error`] could no longer pass it,
 //! which is why no reading of this crate's API alone can see such a break.
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
