@@ -7141,6 +7141,71 @@ fn stacked_preserve_plan(repo: &str, base_branch: &str, stacked_base: Option<&st
     })
 }
 
+/// The private node of [`write_awaiting_export`]: a kept lifecycle node in the
+/// private repository, the producer of the plan's one export edge.
+pub const EXPORT_PRODUCER_NODE_ID: &str = "harvest";
+/// The public node of [`write_awaiting_export`], which builds on the producer's
+/// work through the export edge alone.
+pub const EXPORT_CONSUMER_NODE_ID: &str = "examples";
+/// The plan name of [`write_awaiting_export`].
+pub const EXPORT_PLAN_NAME: &str = "quarry";
+/// The directory of the private repository the producer's export carries.
+pub const EXPORT_SOURCE_DIRECTORY: &str = "examples/generic";
+/// Where in the public repository the export puts it.
+pub const EXPORT_TARGET_DIRECTORY: &str = "examples";
+
+/// A run nothing is driving over a **mixed** plan, the shape the engine's
+/// contract documents for its publication boundary, under names of its own that
+/// no word of the engine's boundary guidance shares, so a journey can tell a
+/// private name leaking from the guidance quoting itself: the private
+/// [`EXPORT_PRODUCER_NODE_ID`] in `private_repo` keeps its branch
+/// (`publish: "preserve"`), and the public [`EXPORT_CONSUMER_NODE_ID`] in
+/// `public_repo` depends on it through the plan's one export edge — the one way
+/// private work may reach a public node. Launched as [`write_awaiting_session`]'s
+/// run is.
+pub fn write_awaiting_export(
+    root: &Path,
+    run: &str,
+    dir: &Path,
+    node_graph: &Path,
+    private_repo: &str,
+    public_repo: &str,
+) -> PathBuf {
+    let plan = json!({
+        "schema_version": 3,
+        "goal": { "text": "publish a generic example of private work" },
+        "name": EXPORT_PLAN_NAME,
+        "concurrency": 1,
+        "tasks": [
+            {
+                "id": EXPORT_PRODUCER_NODE_ID,
+                "repo": private_repo,
+                "publish": "preserve",
+                "persona": "engineer",
+                "title": "feat: generalize the example",
+                "task": criteria_bearing("Write a generic example of the work."),
+            },
+            {
+                "id": EXPORT_CONSUMER_NODE_ID,
+                "repo": public_repo,
+                "deps": [EXPORT_PRODUCER_NODE_ID],
+                "persona": "engineer",
+                "title": "feat: add examples",
+                "task": criteria_bearing("Build the public examples on the exported one."),
+            },
+        ],
+        "export_edges": [
+            {
+                "from": EXPORT_PRODUCER_NODE_ID,
+                "to": EXPORT_CONSUMER_NODE_ID,
+                "source_directory": EXPORT_SOURCE_DIRECTORY,
+                "target_directory": EXPORT_TARGET_DIRECTORY,
+            },
+        ],
+    });
+    write_awaiting_under_default_template(root, run, dir, node_graph, &plan)
+}
+
 /// [`write_awaiting`] with the launch record retaining the engine's own default
 /// branch-name template, as a launch that names none at any layer does.
 fn write_awaiting_under_default_template(

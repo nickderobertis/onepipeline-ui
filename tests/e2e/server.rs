@@ -16854,6 +16854,284 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// A harness stand-in for a dispatch on either side of the publication boundary:
+/// it records the argv it was given in a file of its own under `records`, and
+/// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
+/// worktree it is run in — the one directory an export producer may change — in
+/// words that name nothing private.
+///
+/// Still the one process a journey stands in for, on
+/// [`write_committing_harness_standin`]'s terms: the commit is what a real agent
+/// leaves behind, and keeping it, exporting it and publishing what builds on it
+/// is the engine and `onevcs` doing their own work.
+#[cfg(unix)]
+fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(records).expect("the dispatch records directory");
+    let standin = dir.join("exporting-harness");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" > {:?}/argv-$$.txt\n\
+             mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
+             git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            records.display().to_string(),
+            dir = fixture_run::EXPORT_SOURCE_DIRECTORY,
+        ),
+    )
+    .expect("the exporting harness stand-in");
+    // Owner-only, as `write_committing_harness_standin`'s is.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the exporting harness stand-in");
+    standin
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders` above: the
+// compiled binary, `/bin/sh` stand-ins it writes itself and `git`, with each session cut,
+// kept and exported by the linked `onevcs` over two scratch repositories in the journey's
+// own workspace, settling in seconds.
+/// The publication boundary of the engine this binary links, driven through
+/// this server's routes over a plan spanning a private and a public repository
+/// of one synthetic owner.
+///
+/// A live edit relayed by the reply route that gives the public repository an
+/// ordinary dependency on the private node is refused in the engine's own
+/// neutral words, naming no node, and leaves the graph as it was. The adoption
+/// that follows dispatches both nodes through the driver this server retains:
+/// the private producer keeps its branch, the engine exports the one directory
+/// its export edge names into the public repository, and the public consumer
+/// starts from that export — told only the neutral context the engine's contract
+/// documents for its side, with nothing of the private side in it.
+#[cfg(unix)]
+#[test]
+fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_only_the_export() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let records = dir.join("dispatches");
+    // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
+    // journey stands in for, on the terms `write_harness_standin` states. The reply
+    // and adopt routes, the retained driver, the engine's boundary, and the linked
+    // `onevcs` keeping, exporting and publishing over real git are all real; the
+    // stand-in only commits the work a real agent would leave.
+    let standin = write_exporting_harness_standin(&dir, &records);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    let producer = fixture_run::EXPORT_PRODUCER_NODE_ID;
+    let consumer = fixture_run::EXPORT_CONSUMER_NODE_ID;
+    fixture_run::write_awaiting_export(
+        &root,
+        run,
+        &dir,
+        &graph,
+        &repos.private.alias,
+        &repos.public.alias,
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            (
+                scratch_repo::GIT_CONFIG_ENV,
+                &repos.private.gitconfig.display().to_string(),
+            ),
+            (onevcs::branches::PREFIX_ENV, ""),
+            (
+                scratch_repo::GH_ENV,
+                &repos.refusing_gh.display().to_string(),
+            ),
+        ],
+    );
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let node_ids = |detail: &Value| -> Vec<String> {
+        detail["graph"]["plan"]["tasks"]
+            .as_array()
+            .expect("the plan's tasks")
+            .iter()
+            .filter_map(|task| task["id"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let planned = node_ids(&detail());
+    assert_eq!(planned, [producer, consumer]);
+
+    // An ordinary dependency of a public node on the private one, relayed as a live
+    // edit: refused by the engine before anything is applied, in words naming no node
+    // — the ids it concerns may be private — and carrying the one way across.
+    let ordinary = json!({"version": 3, "commands": [{"op": "add", "node": {
+        "id": "outer",
+        "repo": repos.public.alias,
+        "persona": "engineer",
+        "title": "feat: ship outer",
+        "task": "Ship outer.\n\n## Acceptance criteria\n\n- outer is published.\n",
+        "deps": [producer],
+    }}]});
+    let refused = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/reply"),
+        &ordinary.to_string(),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    let said = refused["error"]["message"]
+        .as_str()
+        .expect("the refusal's words");
+    assert!(said.contains("ordinary dependency"), "{said}");
+    assert!(
+        said.contains("generalize -> preserve -> export -> consume"),
+        "the refusal carries no guidance: {said}"
+    );
+    for named in ["outer", producer, consumer, scratch_repo::PRIVATE_ALIAS] {
+        assert!(!said.contains(named), "the refusal names {named:?}: {said}");
+    }
+    assert_eq!(
+        node_ids(&detail()),
+        planned,
+        "a refused edit changed the graph"
+    );
+
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually("both nodes of the mixed run settled", || {
+        let graph = &detail()["graph"];
+        [producer, consumer].iter().all(|node| {
+            matches!(
+                graph["node_status"][node].as_str(),
+                Some("done" | "failed" | "skipped")
+            )
+        })
+    });
+    let detail = detail();
+    let results = &detail["graph"]["node_results"];
+    assert_eq!(
+        results[producer]["outcome"],
+        json!("preserved"),
+        "{results}"
+    );
+    assert_eq!(results[consumer]["status"], json!("done"), "{results}");
+    let kept = results[producer]["branch"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the producer kept no branch: {results}"));
+    let landed_on = results[consumer]["branch"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the consumer names no branch: {results}"));
+    // Both branches are the engine's neutral ones: neither names the plan or a node.
+    assert!(kept.starts_with("export/"), "{kept}");
+    assert!(landed_on.starts_with("public/"), "{landed_on}");
+    for name in [fixture_run::EXPORT_PLAN_NAME, producer, consumer] {
+        for branch in [kept, landed_on] {
+            assert!(!branch.contains(name), "{branch} names {name:?}");
+        }
+    }
+
+    // What reached the public origin is the exported directory under the consumer's
+    // target, and none of the private repository's own history.
+    let on = |repo: &scratch_repo::ScratchRepo, args: &[&str]| -> String {
+        let ran = on_origin(repo, args);
+        assert!(
+            ran.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        String::from_utf8_lossy(&ran.stdout).trim().to_owned()
+    };
+    let private_head = on(
+        &repos.private,
+        &["rev-parse", "--verify", &format!("refs/heads/{kept}")],
+    );
+    let public_tree = on(
+        &repos.public,
+        &["ls-tree", "-r", "--name-only", scratch_repo::BASE_BRANCH],
+    );
+    let exported_to = format!("{}/sample-", fixture_run::EXPORT_TARGET_DIRECTORY);
+    assert!(
+        public_tree
+            .lines()
+            .any(|path| path.starts_with(&exported_to)),
+        "the export is not on the public base: {public_tree}"
+    );
+    assert!(
+        !on_origin(
+            &repos.public,
+            &["cat-file", "-e", &format!("{private_head}^{{commit}}")]
+        )
+        .status
+        .success(),
+        "the producer's commit reached the public repository"
+    );
+    let public_history = on(&repos.public, &["log", "--all", "--format=%B%an%ae"]);
+    for private_name in [
+        scratch_repo::PRIVATE_ALIAS,
+        producer,
+        fixture_run::EXPORT_PLAN_NAME,
+        kept,
+    ] {
+        assert!(
+            !public_history.contains(private_name),
+            "the public history names {private_name:?}:\n{public_history}"
+        );
+    }
+
+    // What each side was told: the consumer's dispatch carries exactly the context the
+    // engine's contract documents for an export's consumer, and nothing of the private
+    // side; the producer is told it is the private side of a mixed plan.
+    let dispatched: Vec<String> = fs::read_dir(&records)
+        .expect("the dispatch records")
+        .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
+        .collect();
+    assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
+    let told = |task: &str| -> &String {
+        dispatched
+            .iter()
+            .find(|argv| argv.contains(task))
+            .unwrap_or_else(|| panic!("no dispatch was given {task:?}: {dispatched:#?}"))
+    };
+    let producer_told = told("Write a generic example of the work.");
+    assert!(
+        producer_told.contains(r#""mixed":true,"clearance":"private""#),
+        "{producer_told}"
+    );
+    let consumer_told = told("Build the public examples on the exported one.");
+    let documented = json!({"boundary": {
+        "mixed": true,
+        "clearance": "public",
+        "target_directory": fixture_run::EXPORT_TARGET_DIRECTORY,
+    }})
+    .to_string();
+    assert!(
+        consumer_told.contains(&documented),
+        "{documented}\n{consumer_told}"
+    );
+    for private_name in [
+        scratch_repo::PRIVATE_ALIAS,
+        producer,
+        fixture_run::EXPORT_PLAN_NAME,
+        fixture_run::EXPORT_SOURCE_DIRECTORY,
+        kept,
+        &private_head,
+    ] {
+        assert!(
+            !consumer_told.contains(private_name),
+            "the public dispatch names {private_name:?}:\n{consumer_told}"
+        );
+    }
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// The plan writer a stacked-preserve journey adopts a run of.
 #[cfg(unix)]
 type WriteStacked = fn(&Path, &str, &Path, &Path, &str, &str) -> PathBuf;
