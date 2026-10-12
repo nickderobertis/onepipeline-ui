@@ -9,7 +9,9 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is an unmaintained notice, not a vulnerability, with no safe upgrade available; it reaches this crate only through serde_yaml_ng, which onejudge and onevcs depend on (and onepipeline through them). Remove this entry once onejudge and onevcs move off serde_yaml_ng's unsafe-libyaml." },
+]
 
 [licenses]
 # Permissive licenses compatible with this MIT-licensed binary. Adding a
