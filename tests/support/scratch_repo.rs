@@ -21,7 +21,11 @@ use crate::serving::{ONEVCS_HOME_DIR, ONEVCS_HOME_ENV};
 pub const GIT_CONFIG_ENV: &str = "GIT_CONFIG_GLOBAL";
 
 /// The variable `onevcs` reads the program it runs in place of `gh` from. That
-/// library declares it in a module it does not export, so it is named here.
+/// library declares it in a module it does not export, so it is named here, and
+/// the journey that seeds [`BoundaryRepos`] holds it to the library: `onevcs`
+/// asks the host about a hosted identity's change request even when it publishes
+/// `local-direct`, so that journey fails unless [`BoundaryRepos::gh_calls`]
+/// records the ask — a renamed variable is the real `gh` asked instead.
 pub const GH_ENV: &str = "ONEVCS_GH";
 
 /// The branch the seeded repository publishes onto.
@@ -74,10 +78,12 @@ pub struct BoundaryRepos {
     pub private: ScratchRepo,
     /// `github.com/owner/library`, public.
     pub public: ScratchRepo,
-    /// The program `onevcs` runs in place of `gh`, which refuses everything: what
-    /// either side is is the rules file's statement, so nothing here asks GitHub
-    /// and a server driving sessions in them is handed this too.
+    /// The program `onevcs` runs in place of `gh` under [`GH_ENV`], which records
+    /// its argv to [`gh_calls`](Self::gh_calls) and refuses: nothing here may ask
+    /// GitHub anything, and a server driving sessions in these is handed it too.
     pub refusing_gh: PathBuf,
+    /// Where [`refusing_gh`](Self::refusing_gh) records each call, one per line.
+    pub gh_calls: PathBuf,
 }
 
 /// The private repository's alias, and the name its synthetic identity carries.
@@ -91,9 +97,10 @@ pub const PUBLIC_ALIAS: &str = "library";
 ///
 /// The visibility of each is the operator's statement — a version-4 rules file's
 /// `visibility:`, written before either is registered — because the host's own
-/// answer is a GitHub read no journey may make; [`BoundaryRepos::refusing_gh`]
-/// holds that for anything that would ask anyway. Each identity names its host
-/// and nothing else: the clone a session cuts takes its remote from the
+/// answer is a GitHub read no journey may make, and `onevcs` records a declared
+/// visibility without asking the host. What it does ask a hosted identity's host
+/// — whether a change request is open for a branch it publishes — goes to
+/// [`BoundaryRepos::refusing_gh`]. Each identity names its host and nothing else: the clone a session cuts takes its remote from the
 /// checkout, which points at the bare origin on this disk, so every fetch and
 /// push stays here.
 #[cfg(unix)]
@@ -102,12 +109,18 @@ pub fn seed_boundary(workspace: &Path) -> BoundaryRepos {
 
     let gitconfig = scratch_gitconfig(workspace);
     let refusing_gh = workspace.join(SCRATCH_DIR).join("refusing-gh");
+    let gh_calls = workspace.join(SCRATCH_DIR).join("gh-calls.log");
     std::fs::write(
         &refusing_gh,
-        "#!/bin/sh\necho 'no forge is asked anything here' >&2\nexit 1\n",
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {:?}\n\
+             echo 'no forge is asked anything here' >&2\nexit 1\n",
+            gh_calls.display().to_string()
+        ),
     )
     .expect("the refusing gh stand-in");
-    std::fs::set_permissions(&refusing_gh, std::fs::Permissions::from_mode(0o700))
+    // Owner read and execute: run as this user, and never written again.
+    std::fs::set_permissions(&refusing_gh, std::fs::Permissions::from_mode(0o500))
         .expect("chmod the refusing gh stand-in");
     std::fs::write(
         home_of(workspace).join("rules.yml"),
@@ -138,6 +151,7 @@ pub fn seed_boundary(workspace: &Path) -> BoundaryRepos {
         private,
         public,
         refusing_gh,
+        gh_calls,
     }
 }
 

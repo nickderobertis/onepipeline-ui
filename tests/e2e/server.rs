@@ -16883,8 +16883,9 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
         ),
     )
     .expect("the exporting harness stand-in");
-    // Owner-only, as `write_committing_harness_standin`'s is.
-    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+    // Owner read and execute: the one process that runs it is a dispatch this
+    // journey's own server starts, as this user, and nothing writes it again.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o500))
         .expect("chmod the exporting harness stand-in");
     standin
 }
@@ -17127,6 +17128,15 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
             "the public dispatch names {private_name:?}:\n{consumer_told}"
         );
     }
+    // Whatever `onevcs` asked the public identity's host went to the stand-in this
+    // journey named, which is what holds `scratch_repo::GH_ENV` to the library: under a
+    // renamed variable the real `gh` would have been asked, and this record be empty.
+    let asked = fs::read_to_string(&repos.gh_calls).unwrap_or_default();
+    assert!(
+        asked.contains(&format!("owner/{}", scratch_repo::PUBLIC_ALIAS)),
+        "onevcs asked no host through {}: {asked:?}",
+        scratch_repo::GH_ENV
+    );
     drop(driver);
     serving.stop_on(Stop::Terminate);
 }
