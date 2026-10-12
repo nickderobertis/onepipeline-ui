@@ -504,7 +504,19 @@ onemessagebus = "0.9.0"
 # `an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_only_the_export`
 # holds it through the reply and adopt routes. 0.67.0, which this passes
 # through, stacks a landing node on its unlanded same-repository parents. This
-# crate adds no route and changes no response shape.#
+# crate adds no route and changes no response shape.
+#
+# 0.68.1 links onevcs 0.48, which the dev-only `onevcs` requirement moves with.
+# A `change-auto` or `change-direct` publication that times out with auto-merge
+# armed is read again within its budget and settles `done` on its landing,
+# recording the armed change and how many reads it took, rather than sending
+# its worker back onto work already heading for merge; red checks, exhausted
+# reads and an unarmed timeout retry as before. A browser-adopted run's driver
+# is this line's copy of the engine, so it settles such a publication the way
+# every other dispatch on the host does once this moves. This crate adds no
+# route and changes no response shape;
+# `a_run_launched_outside_any_flow_is_read_watched_and_adopted_beside_a_live_flow`
+# holds the read, watch and adopt routes over this engine.
 # Since 0.56.0 its `unwatched` reads `ONEPIPELINE_WAKE_BUDGET`, so
 # `GET /api/v2/unwatched` asks `verbs::Unwatched::within` under the budget
 # `verbs::WakeBudget::from_environment` reads from the server's own environment
@@ -513,7 +525,7 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.68.0"
+onepipeline = "=0.68.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -546,7 +558,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.46.0"
+onevcs = "0.48.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
