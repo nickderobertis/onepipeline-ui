@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.29.0...v0.30.0) - 2026-10-12
+
+### Added
+
+- [**breaking**] follow onepipeline 0.68's public surface in the API crate ([#296](https://github.com/nickderobertis/onepipeline-ui/pull/296))
+- adopt boundary engine in the API binary ([#294](https://github.com/nickderobertis/onepipeline-ui/pull/294))
+
 ## [0.29.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.28.0...v0.29.0) - 2026-10-11
 
 ### Added
