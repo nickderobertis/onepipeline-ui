@@ -17977,6 +17977,68 @@ fn unwatched_asks_under_the_wake_budget_the_servers_environment_sets() {
     );
 }
 
+/// The host keeps a live worker visible while proving a stopped pre-registry
+/// dispatch gone; a stop that declined to signal cannot establish that proof.
+#[cfg(target_os = "linux")]
+#[test]
+fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
+    let worker = Orphan::start();
+    let mut ended_driver = std::process::Command::new("true")
+        .spawn()
+        .expect("the old driver starts");
+    let ended_pid = ended_driver.id();
+    assert!(ended_driver.wait().expect("the old driver ends").success());
+    let set_teardown = |dir: &Path, teardown: &str| {
+        let journal = dir.join("events.jsonl");
+        let text = fs::read_to_string(&journal).expect("the stopped run's journal");
+        let mut records: Vec<Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a journal record"))
+            .collect();
+        let stopped = records.last_mut().expect("the final stop");
+        assert_eq!(stopped["kind"], json!("run-stopped"));
+        stopped["payload"]["teardown"] = json!(teardown);
+        let lines: Vec<String> = records.iter().map(ToString::to_string).collect();
+        fs::write(journal, format!("{}\n", lines.join("\n"))).expect("record the teardown");
+    };
+    let serving = Serving::start(|root| {
+        fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
+        fixture_run::dispatching_on_this_host(
+            root,
+            fixture_run::RUN_ID,
+            fixture_run::NODE_ID,
+            worker.0,
+            &worker.started(),
+        );
+        let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
+        fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
+        set_teardown(&ended, "signalled");
+        assert!(!ended.join("dispatches").exists());
+    });
+    let response = http::get(serving.address, "/api/v2/host");
+    assert_eq!(response.status, 200, "{}", response.body);
+    let host = response.json();
+    assert_enveloped(&host);
+    let text = host["rendered"].as_str().expect("the host rendering");
+    assert!(text.contains(fixture_run::RUN_ID), "{text}");
+    assert!(text.contains(fixture_run::NODE_ID), "{text}");
+    assert!(text.contains("proven gone"), "{text}");
+    assert!(text.contains("workers signalled"), "{text}");
+    assert!(!text.contains("UNPROVEN"), "{text}");
+
+    // A teardown that could not signal its workers leaves them unproven.
+    set_teardown(
+        &serving.runs_root().join(fixture_run::STOPPED_RUN_ID),
+        "identity-declined",
+    );
+    let response = http::get(serving.address, "/api/v2/host");
+    assert_eq!(response.status, 200, "{}", response.body);
+    let host = response.json();
+    let text = host["rendered"].as_str().expect("the host rendering");
+    assert!(text.contains("UNPROVEN"), "{text}");
+    assert!(text.contains(fixture_run::STOPPED_RUN_ID), "{text}");
+}
+
 #[test]
 fn the_read_verbs_serve_what_the_cli_prints() {
     let serving = Serving::start(|root| {

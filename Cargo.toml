@@ -525,7 +525,11 @@ onemessagebus = "0.9.0"
 # `unwatched_asks_under_the_wake_budget_the_servers_environment_sets` and
 # `an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed`
 # hold it to the CLI.
-onepipeline = "=0.68.1"
+# 0.69.0 reads the host without opening whole runs and proves a stopped
+# pre-registry dispatch gone when its last stop signalled workers and no
+# adoption followed. `host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone`
+# holds that rendering and a teardown refusal over HTTP.
+onepipeline = "=0.69.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
