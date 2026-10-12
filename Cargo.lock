@@ -1529,9 +1529,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.68.1"
+version = "0.69.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15839260a97f2bcf88aee218a73a5105423580d9d5e110067a7489460708dff0"
+checksum = "6e69a674f3079a3ff20caa6ed1c7cddf838cc97dd7d7d488f8f5500a28cee020"
 dependencies = [
  "async-trait",
  "clap",
@@ -1543,7 +1543,7 @@ dependencies = [
  "onemessagebus",
  "onetaskgraph-core",
  "onetaskgraph-plugin-api",
- "onevcs",
+ "onevcs 0.48.0",
  "schemars",
  "serde",
  "serde_json",
@@ -1571,7 +1571,7 @@ dependencies = [
  "onepipeline",
  "onetaskgraph-core",
  "onetaskgraph-plugin-api",
- "onevcs",
+ "onevcs 0.49.0",
  "predicates",
  "schemars",
  "serde",
@@ -1700,6 +1700,38 @@ name = "onevcs"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc49c31391354485e179506b43da91b70cab2e4f57c58b888b99f7bd767500f8"
+dependencies = [
+ "aho-corasick",
+ "clap",
+ "dunce",
+ "filetime",
+ "fs4",
+ "git2",
+ "icu_normalizer",
+ "icu_properties",
+ "libc",
+ "libz-sys",
+ "minijinja",
+ "onemessagebus",
+ "schemars",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "toml",
+ "url",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "onevcs"
+version = "0.49.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bd51ff3c0cee29e5724a5fdbd7269858aee4ebf01e749f415b06dbd6ca98f28"
 dependencies = [
  "aho-corasick",
  "clap",
