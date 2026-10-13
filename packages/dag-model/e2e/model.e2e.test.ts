@@ -980,6 +980,8 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "note",
     "finding",
     "settle",
+    "rework",
+    "retitle",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,
@@ -1146,4 +1148,55 @@ test("the graph serves a node's overrides and the run-wide list, and absent read
     graphStateSchema.safeParse({ ...golden.graph, run_node_sets: "a=1" })
       .success,
   ).toBe(false);
+});
+
+test("rework and retitle envelopes round-trip and refuse incomplete commands", () => {
+  const commands = [
+    {
+      op: "rework",
+      id: "docs",
+      reason: "review",
+      instruction: "Address review",
+    },
+    {
+      op: "rework",
+      id: "docs",
+      reason: "review",
+      instruction: "Address review",
+      comments: [{ id: "42", url: "https://example.com/review/42" }],
+      title: "fix: address review",
+      replacement: "docs-review",
+    },
+    {
+      op: "retitle",
+      id: "docs",
+      reason: "review",
+      title: "fix: address review",
+    },
+  ];
+  const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
+  expect(
+    replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
+  ).toEqual(envelope);
+  for (const command of commands) {
+    for (const field of [
+      "id",
+      "reason",
+      command.op === "rework" ? "instruction" : "title",
+    ]) {
+      const incomplete = Object.fromEntries(
+        Object.entries(command).filter(([key]) => key !== field),
+      );
+      expect(
+        replyEnvelopeSchema.safeParse({ ...envelope, commands: [incomplete] })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      replyEnvelopeSchema.safeParse({
+        ...envelope,
+        commands: [{ ...command, unknown: true }],
+      }).success,
+    ).toBe(false);
+  }
 });

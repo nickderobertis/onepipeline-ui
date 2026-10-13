@@ -24,14 +24,17 @@ export const VERDICT_SHORTCUTS = {
 } as const;
 export type VerdictShortcut = keyof typeof VERDICT_SHORTCUTS;
 
-/** Every shortcut the composer offers: the verdicts, then every op the engine declares. */
-export type Shortcut = VerdictShortcut | ReplyOp;
+/** The composer keeps its existing shortcuts when the engine adds reply commands. */
+type ComposedOp = Exclude<ReplyOp, "rework" | "retitle">;
+export type Shortcut = VerdictShortcut | ComposedOp;
 
 export const SHORTCUTS: readonly Shortcut[] = [
   "approve",
   "reject",
   "continue",
-  ...REPLY_OPS,
+  ...REPLY_OPS.filter(
+    (op): op is ComposedOp => op !== "rework" && op !== "retitle",
+  ),
 ];
 
 export function isShortcut(value: string): value is Shortcut {
@@ -174,7 +177,7 @@ function draftEnvelope(
 }
 
 function draftCommand(
-  op: ReplyOp,
+  op: ComposedOp,
   fields: ShortcutFields,
   text: (key: keyof ShortcutFields) => string | undefined,
 ): { command: unknown } | { problem: string } {
