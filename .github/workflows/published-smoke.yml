@@ -10,7 +10,7 @@ name: Published smoke
 # nothing in this repository installs from a registry between releases.
 #
 # So this runs the identical `scripts/smoke-published.sh` those jobs run, against
-# `latest` rather than a tag, on Linux, both macOS architectures, and Windows,
+# `latest` rather than a tag, on Linux and Windows,
 # every time `release.yml` finishes. A release is the only thing that changes what
 # `latest` resolves to, so that is precisely when the answer can have just become
 # wrong — a publish that half-completed, a dist-tag pointed at a build whose
@@ -72,6 +72,11 @@ on:
   # The manual entry point — after a registry incident, or to confirm a fix
   # without waiting for the next release.
   workflow_dispatch:
+    inputs:
+      macos_diagnostic:
+        description: Explicit Mac registry diagnostic, outside automatic release routing
+        type: boolean
+        default: false
 
 # Nothing by default. Each job asks for `contents: read` because it checks out
 # the smoke script.
@@ -82,6 +87,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  macos-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.macos_diagnostic
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Diagnose the native PyPI install
+        if: vars.PYPI_PUBLISH == 'true'
+        run: |
+          pip install --no-cache-dir onepipeline-api-cli
+          version="$(pip show onepipeline-api-cli | awk '/^Version:/ {print $2}')"
+          [ -n "$version" ] || { echo "::error::pip reported no version for onepipeline-api-cli"; echo "ACTION: inspect pip show output and retry the diagnostic after confirming installed package metadata"; exit 1; }
+          bash scripts/smoke-published.sh --expect-version "$version" --label "manual Mac PyPI diagnostic"
+      - name: Diagnose the native npm install
+        if: vars.NPM_PUBLISH == 'true'
+        run: |
+          npm install -g --prefer-online onepipeline-api-cli
+          version="$(npm view onepipeline-api-cli version)"
+          [ -n "$version" ] || { echo "::error::npm reported no version for onepipeline-api-cli"; echo "ACTION: confirm the registry serves package version metadata and retry the diagnostic"; exit 1; }
+          bash scripts/smoke-published.sh --expect-version "$version" --label "manual Mac npm diagnostic"
+
   pypi:
     name: pypi (${{ matrix.os }})
     if: ${{ vars.PYPI_PUBLISH == 'true' }}
@@ -90,7 +123,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -120,7 +153,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -286,7 +319,7 @@ jobs:
   # all skipped, which is what a repository publishing nowhere looks like.
   report:
     name: report a failure
-    needs: [pypi, npm, probe]
+    needs: [pypi, npm, probe, macos-diagnostic]
     if: >-
       failure() && github.repository == 'nickderobertis/onepipeline-ui'
     runs-on: ubuntu-latest
@@ -306,7 +339,7 @@ jobs:
           TITLE: Published smoke is failing
           BODY: >-
             The published smoke failed. It installs what PyPI and npm serve as
-            `latest` on Linux, both macOS architectures and Windows, and asks
+            `latest` on Linux and Windows, and asks
             every declared release target what its registry is serving; open the
             run to see which legs failed. This runs after a release completes,
             so the first thing to rule out is the release that just finished

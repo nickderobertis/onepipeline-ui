@@ -11,7 +11,6 @@
 //     optionalDependencies:            one per Rust target in release.yml's matrix
 //       onepipeline-api-cli-linux-x64
 //       onepipeline-api-cli-linux-arm64
-//       onepipeline-api-cli-darwin-x64
 //       onepipeline-api-cli-darwin-arm64
 //       onepipeline-api-cli-win32-x64  each carries the matching prebuilt binary
 //
@@ -40,6 +39,7 @@
 //
 // Every mode prints the created package directory on stdout.
 
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -62,7 +62,6 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TARGETS = {
   "x86_64-unknown-linux-gnu": { platform: "linux", arch: "x64", exe: false },
   "aarch64-unknown-linux-gnu": { platform: "linux", arch: "arm64", exe: false },
-  "x86_64-apple-darwin": { platform: "darwin", arch: "x64", exe: false },
   "aarch64-apple-darwin": { platform: "darwin", arch: "arm64", exe: false },
   "x86_64-pc-windows-msvc": { platform: "win32", arch: "x64", exe: true },
 };
@@ -190,6 +189,17 @@ function buildPlatform(args) {
     );
   }
 
+  if (args["expect-sha256"] !== undefined) {
+    const expected = args["expect-sha256"];
+    const actual = createHash("sha256").update(readFileSync(srcBin)).digest("hex");
+    if (!/^[a-f0-9]{64}$/.test(expected) || actual !== expected) {
+      die(
+        "platform: binary does not match the verified wheel SHA256",
+        "pass the SHA256 of the final wheel binary; do not rebuild it for npm"
+      );
+    }
+  }
+
   attempt(
     `cannot assemble ${pkgName} under ${outRoot}`,
     "check that --out names a writable directory with room for the binary",
@@ -312,7 +322,7 @@ function buildUi(args) {
 
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "platform") {
-  buildPlatform(parseArgs(rest, ["target", "binary", "version", "out"]));
+  buildPlatform(parseArgs(rest, ["target", "binary", "version", "out", "expect-sha256"]));
 } else if (mode === "launcher") {
   buildLauncher(parseArgs(rest, ["version", "out"]));
 } else if (mode === "ui") {

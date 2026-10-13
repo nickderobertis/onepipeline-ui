@@ -33,6 +33,8 @@ const TAG: &str = "v0.3.1";
 const REPORTED_JOBS: &[&str] = &[
     "test",
     "upload",
+    "darwin",
+    "upload-darwin",
     "verify-assets",
     "publish-crate",
     "build-wheels",
@@ -686,4 +688,19 @@ fn the_stand_in_is_what_the_script_calls() {
         calls.contains(&format!("release view {TAG}")),
         "the script read some other release: {calls}"
     );
+}
+
+/// Darwin verification happens before publication, and neither a failed proof
+/// nor a failed Linux asset upload may leave a Release claiming it shipped.
+#[test]
+fn failed_or_cancelled_darwin_work_demotes_the_release() {
+    for job in ["darwin", "upload-darwin"] {
+        for result in ["failure", "cancelled", "skipped"] {
+            let fixture = Fixture::fresh();
+            let output = fixture.run(&[(job, result)], &ALL_ON);
+            assert!(!output.status.success(), "{}", stdout(&output));
+            let body = fixture.edited_body().expect("release demoted");
+            assert!(body.contains(&format!("{job} ({result})")), "{body}");
+        }
+    }
 }

@@ -15,10 +15,16 @@ name: Release
 #
 #   * test          — the complete deterministic gate, so untested artifacts
 #                     never publish.
-#   * upload        — build each target on a native runner and attach the archive
-#                     + sha256 checksum to the Release.
+#   * darwin        — one Apple Silicon runner builds the arm64 Darwin wheel
+#                     once (Intel macOS is no longer released), derives
+#                     archive/npm carriers from its final binary, and
+#                     installs/runs all three forms before publication.
+#   * upload-darwin — Linux attaches the verified Darwin archives, checksums
+#                     and CycloneDX SBOM to the Release.
+#   * upload        — build Linux/Windows targets on native runners and attach
+#                     their archives + sha256 checksums to the Release.
 #
-#   Every job that compiles the binary — upload, build-wheels, build-npm —
+#   Every job that compiles the binary — darwin, upload, build-wheels, build-npm —
 #   builds the browser view first (`just build`) and compiles with the
 #   `bundled-ui` feature, so the binary embeds the view of this same release
 #   and refuses to build without it (see build.rs). tests/packaging.rs holds
@@ -35,8 +41,8 @@ name: Release
 #                     is switched off.
 #   * publish-pypi  — upload those wheels to onepipeline-api-cli with the
 #                     PYPI_TOKEN secret, gated on the PYPI_PUBLISH repo variable.
-#   * verify-pypi   — on Linux, both macOS architectures, and Windows,
-#                     pip-install the exact version just published and run
+#   * verify-pypi   — on Linux and Windows, pip-install the exact published version
+#                     (Darwin installs are staged in darwin) and run
 #                     scripts/smoke-published.sh over it.
 #   * build-npm     — wrap the same prebuilt binary in per-platform npm packages
 #                     (onepipeline-api-cli-<platform>-<arch>) via
@@ -152,6 +158,84 @@ jobs:
       # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] the sweep the release pull request runs is not this path's. A Release created by hand in the GitHub UI is supported — this workflow's header says so — and it can name any commit, including one no push to `main` ever swept, while every job below publishes artifacts built from whatever it names. This is the only gate that commit meets.
       - run: just check
 
+  # One Apple Silicon runner, before any Darwin distribution is published.
+  # Intel macOS is no longer released. maturin compiles aarch64 once, natively;
+  # archive/npm use its final wheel bytes.
+  darwin:
+    needs: test
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: "-D warnings"
+      DARWIN_TARGETS: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-cyclonedx@0.5.7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the wheel producer
+        run: python3 -m pip install maturin==1.14.1 packaging==25.0
+      - name: Build the browser view
+        run: just build
+      - name: Build the Apple Silicon distributions from one binary
+        run: bash scripts/release-darwin.sh darwin-dist
+      - name: Generate CycloneDX SBOM
+        run: |
+          cargo cyclonedx --format json --all --features bundled-ui --target all
+          cp bom.json "darwin-dist/assets/onepipeline-api-${GITHUB_REF_NAME}.cdx.json"
+      - name: Install and run native archive, wheel and npm before publication
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: node scripts/verify-staged-release.mjs darwin-dist aarch64-apple-darwin "${RELEASE_VERSION#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-assets
+          path: darwin-dist/assets
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-darwin
+          path: darwin-dist/wheels
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-darwin
+          path: darwin-dist/npm-artifacts
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-reuse
+          path: darwin-dist/*/reuse.json
+          if-no-files-found: error
+
+  upload-darwin:
+    needs: darwin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-assets
+          path: assets
+      - name: Attach verified Darwin archives, checksums and SBOM
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release upload "$RELEASE_TAG" assets/*
+
   upload:
     name: upload (${{ matrix.target }})
     needs: test
@@ -166,10 +250,6 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -219,7 +299,8 @@ jobs:
   # and hands the extracted binary to the same smoke script every other verify
   # leg uses.
   #
-  # Three legs: the release ships a `.zip` for Windows, whose extraction under a
+  # Linux legs here; Darwin's server-and-view proof runs before publication in
+  # `darwin`. The release ships a `.zip` for Windows, whose extraction under a
   # POSIX shell needs `unzip` the Windows image does not carry — the Windows
   # install path documented in the README is `cargo install`, which ci.yml
   # exercises on windows-latest.
@@ -236,8 +317,6 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-          - target: aarch64-apple-darwin
-            os: macos-latest
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -331,10 +410,6 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -388,7 +463,7 @@ jobs:
   # Keeping the wheels' build unconditioned above means a packaging break still
   # reddens the release while publishing is off.
   publish-pypi:
-    needs: build-wheels
+    needs: [build-wheels, darwin]
     if: ${{ vars.PYPI_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -416,20 +491,11 @@ jobs:
           # red-fail because these wheels are already on PyPI.
           skip-existing: true
 
-  # Post-publish gate: prove the just-published version is pip-installable on
-  # every OS a user installs it on. PyPI propagation is not instant, so the
-  # install itself retries through scripts/retry-install.sh until the index a
-  # user resolves from serves the version, then the real wheel it put on PATH
-  # goes to scripts/smoke-published.sh — the same script ci.yml runs against the
-  # build under test, so what a release asserts cannot drift from what ships.
-  #
-  # Four legs for five targets: `pip install` resolves a *different wheel* per
-  # platform AND architecture, so the matrix is keyed on the pair, not the OS.
-  # `macos-latest` is arm64 — `macos-15-intel` is the leg that installs the
-  # `x86_64-apple-darwin` wheel. The one target with no leg is
-  # `aarch64-unknown-linux-gnu`: setup-python's arm64 Linux support is not
-  # something a release is the place to discover. It is still built by the
-  # matrices above and attached to the Release, where `verify-assets` runs it.
+  # Post-publication Linux/Windows registry installs complement Darwin's staged
+  # installs in the single Mac job. Propagation retries still exercise the exact
+  # version a registry serves through the existing smoke command. The arm64 Linux
+  # wheel remains built by the manylinux lane and its native binary is exercised
+  # by verify-assets, as before.
   verify-pypi:
     name: verify-pypi (${{ matrix.os }})
     needs: publish-pypi
@@ -439,7 +505,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -501,10 +567,6 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -559,7 +621,7 @@ jobs:
   # without it rather than risk that; adding it later is a one-flag change plus
   # `id-token: write` on this job.
   publish-npm:
-    needs: build-npm
+    needs: [build-npm, darwin]
     permissions:
       contents: read
     if: ${{ vars.NPM_PUBLISH == 'true' }}
@@ -644,7 +706,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -698,6 +760,8 @@ jobs:
       - guard
       - test
       - upload
+      - darwin
+      - upload-darwin
       - verify-assets
       - publish-crate
       - build-wheels
@@ -723,6 +787,8 @@ jobs:
           JOB_RESULTS: >-
             test=${{ needs.test.result }}
             upload=${{ needs.upload.result }}
+            darwin=${{ needs.darwin.result }}
+            upload-darwin=${{ needs.upload-darwin.result }}
             verify-assets=${{ needs.verify-assets.result }}
             publish-crate=${{ needs.publish-crate.result }}
             build-wheels=${{ needs.build-wheels.result }}

@@ -54,3 +54,6 @@
 /justfile                @nickderobertis
 /release-plz.toml        @nickderobertis
 /release-targets.toml    @nickderobertis
+
+# Workflow scheduling, its private tooling and telemetry budgets.
+/.github/project.json @nickderobertis

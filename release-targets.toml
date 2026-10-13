@@ -55,7 +55,6 @@ manifest = "npm/onepipeline-api-cli/package.json"
 covers = [
   "npm:onepipeline-api-cli-linux-x64",
   "npm:onepipeline-api-cli-linux-arm64",
-  "npm:onepipeline-api-cli-darwin-x64",
   "npm:onepipeline-api-cli-darwin-arm64",
   "npm:onepipeline-api-cli-win32-x64",
 ]

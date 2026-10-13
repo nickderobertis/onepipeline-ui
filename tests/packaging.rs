@@ -258,7 +258,6 @@ fn every_release_target_has_a_platform_package_on_both_sides() {
             "aarch64-unknown-linux-gnu",
             "onepipeline-api-cli-linux-arm64",
         ),
-        ("x86_64-apple-darwin", "onepipeline-api-cli-darwin-x64"),
         ("aarch64-apple-darwin", "onepipeline-api-cli-darwin-arm64"),
         ("x86_64-pc-windows-msvc", "onepipeline-api-cli-win32-x64"),
     ] {
@@ -865,6 +864,52 @@ fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
     assert!(stderr.contains("ACTION:"), "{stderr}");
 }
 
+/// Run the committed launcher as if node reported `platform`/`arch`. Only the
+/// host node describes is doubled — no Intel Mac runs here — and the launcher,
+/// its package resolution and its exit are the real ones.
+fn launcher_on(platform: &str, arch: &str) -> std::process::Output {
+    let scratch = tempfile::tempdir().expect("temp dir");
+    let preload = scratch.path().join("host.cjs");
+    fs::write(
+        &preload,
+        format!(
+            "Object.defineProperty(process, 'platform', {{ value: '{platform}' }});\n\
+             Object.defineProperty(process, 'arch', {{ value: '{arch}' }});\n"
+        ),
+    )
+    .expect("write preload");
+    std::process::Command::new("node")
+        .arg("--require")
+        .arg(&preload)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("npm/{WRAPPER}/bin/{COMMAND}.js")))
+        .arg("--version")
+        .output()
+        .expect("node is on PATH")
+}
+
+#[test]
+fn the_launcher_refuses_intel_macos_rather_than_looking_for_a_package_no_release_ships() {
+    let intel = launcher_on("darwin", "x64");
+    assert_eq!(intel.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&intel.stderr);
+    assert!(
+        stderr.contains("Intel macOS is no longer supported"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("is not installed"), "{stderr}");
+    assert!(stderr.contains("pip install"), "{stderr}");
+
+    // The same doubled host on Apple Silicon reaches package resolution, which
+    // is what proves the refusal above came from the platform and not the preload.
+    let silicon = launcher_on("darwin", "arm64");
+    assert_eq!(silicon.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&silicon.stderr);
+    assert!(
+        stderr.contains("onepipeline-api-cli-darwin-arm64 is not installed"),
+        "{stderr}"
+    );
+}
+
 // A repository that declares no release target releases nothing as far as the
 // mechanism sequencing work across repositories is concerned: a dependency
 // landing here would earn a consumer no hold at all, silently. So
@@ -1032,7 +1077,7 @@ fn published_names() -> BTreeSet<String> {
                 );
                 for mode in modes {
                     if mode == "platform" {
-                        let targets = names_after(
+                        let mut targets = names_after(
                             &workflow_job(&workflow, "build-npm"),
                             "- target: ",
                             |character| !character.is_whitespace(),
@@ -1042,6 +1087,12 @@ fn published_names() -> BTreeSet<String> {
                             "the build-npm job builds no target, so no platform package \
                              is published for the launcher to resolve"
                         );
+                        let darwin = workflow_job(&workflow, "darwin");
+                        assert!(
+                            darwin.contains("aarch64-apple-darwin"),
+                            "Darwin job omits aarch64-apple-darwin"
+                        );
+                        targets.insert("aarch64-apple-darwin".to_owned());
                         for target in targets {
                             published
                                 .insert(format!("npm:{}", npm_platform_package(&build, &target)));
@@ -1791,6 +1842,7 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
         ("taiki-e/upload-rust-binary-action", "features: {feature}"),
         ("PyO3/maturin-action", "--features {feature}"),
         ("cargo build", "--features {feature}"),
+        ("scripts/release-darwin.sh", "scripts/release-darwin.sh"),
     ];
     let mut compiling = Vec::new();
     for job in workflow_jobs(&workflow) {
@@ -1803,6 +1855,9 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
         else {
             continue;
         };
+        if *marker == "scripts/release-darwin.sh" {
+            assert!(read("scripts/release-darwin.sh").contains(&format!("--features {feature}")));
+        }
         compiling.push(job.clone());
         let built = block.find("just build").unwrap_or_else(|| {
             panic!(
@@ -1826,7 +1881,7 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
     compiling.sort();
     assert_eq!(
         compiling,
-        ["build-npm", "build-wheels", "upload"],
+        ["build-npm", "build-wheels", "darwin", "upload"],
         "the set of release jobs that compile the binary has changed; every prebuilt \
          distribution has to embed the view"
     );
@@ -1902,4 +1957,117 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
     assert!(refusal.contains("bundled-ui"), "{refusal}");
     assert!(refusal.contains("just build"), "{refusal}");
     assert!(refusal.contains("ACTION:"), "{refusal}");
+}
+
+/// Linux can rehearse the real producer and installers without pretending to
+/// execute Darwin bytes. The release job drives these same staging commands
+/// with maturin's native/cross-built Darwin wheels.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
+    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let scratch = tempfile::tempdir_in(root).expect("release staging directory");
+    let output = std::process::Command::new("bash")
+        .arg("scripts/release-native-dry-run.sh")
+        .arg(scratch.path())
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run production packaging dry run");
+    assert!(
+        output.status.success(),
+        "production dry run failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("embedded view passed"));
+    let record_path = fs::read_dir(scratch.path())
+        .expect("staging entries")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("reuse.json"))
+        .find(|path| path.is_file())
+        .expect("native reuse record");
+    let record: serde_json::Value =
+        serde_json::from_slice(&fs::read(record_path).expect("record bytes")).expect("reuse JSON");
+    let target = record["target"].as_str().expect("record target");
+    let manifest_path = fs::read_dir(scratch.path().join("npm"))
+        .expect("platform packages")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("package.json"))
+        .find(|path| path.is_file())
+        .expect("native platform manifest");
+    let original = fs::read(&manifest_path).expect("manifest bytes");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&original).expect("platform metadata");
+    manifest["version"] = serde_json::json!("9.9.9");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&manifest).expect("encode metadata"),
+    )
+    .expect("write mismatched metadata");
+    let verify = |provider: Option<&Path>| {
+        let mut command = std::process::Command::new("node");
+        command
+            .arg("scripts/verify-staged-release.mjs")
+            .arg(scratch.path())
+            .arg(target)
+            .arg(env!("CARGO_PKG_VERSION"))
+            .current_dir(env!("CARGO_MANIFEST_DIR"));
+        if let Some(provider) = provider {
+            let mut paths = vec![provider.to_path_buf()];
+            paths.extend(std::env::split_paths(
+                &std::env::var_os("PATH").expect("PATH"),
+            ));
+            command.env("PATH", std::env::join_paths(paths).expect("provider PATH"));
+        }
+        command.output().expect("verify actual staged products")
+    };
+    let mismatch = verify(None);
+    assert!(!mismatch.status.success());
+    let message = String::from_utf8_lossy(&mismatch.stderr);
+    assert!(
+        message.contains("invalid staged npm platform metadata"),
+        "{message}"
+    );
+    assert!(message.contains("ACTION:"), "{message}");
+    fs::write(&manifest_path, original).expect("restore platform manifest");
+    let provider = scratch.path().join("npm-provider");
+    fs::create_dir(&provider).expect("provider directory");
+    let npm = provider.join("npm");
+    fs::write(&npm, "#!/usr/bin/env bash\nprintf '[]\n'\n").expect("malformed pack provider");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(npm, fs::Permissions::from_mode(0o755)).expect("provider executable");
+    }
+    let malformed = verify(Some(&provider));
+    assert!(!malformed.status.success());
+    let message = String::from_utf8_lossy(&malformed.stderr);
+    assert!(
+        message.contains("npm pack returned invalid launcher metadata"),
+        "{message}"
+    );
+    assert!(message.contains("ACTION:"), "{message}");
+}
+
+#[test]
+fn npm_packaging_refuses_bytes_other_than_the_verified_wheel_binary() {
+    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let scratch = tempfile::tempdir_in(root).expect("package scratch");
+    let binary = scratch.path().join("onepipeline-api");
+    fs::write(&binary, b"unexpected binary bytes").expect("write changed binary");
+    let output = npm_build(&[
+        "platform",
+        "--target",
+        "aarch64-apple-darwin",
+        "--binary",
+        binary.to_str().expect("binary path"),
+        "--expect-sha256",
+        &"0".repeat(64),
+        "--out",
+        scratch.path().to_str().expect("scratch path"),
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("verified wheel SHA256"));
 }

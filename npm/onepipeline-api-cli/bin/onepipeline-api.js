@@ -24,7 +24,6 @@ const { spawn } = require("node:child_process");
 const PACKAGES = {
   "linux-x64": "onepipeline-api-cli-linux-x64",
   "linux-arm64": "onepipeline-api-cli-linux-arm64",
-  "darwin-x64": "onepipeline-api-cli-darwin-x64",
   "darwin-arm64": "onepipeline-api-cli-darwin-arm64",
   "win32-x64": "onepipeline-api-cli-win32-x64",
 };
@@ -40,8 +39,21 @@ function fail(message) {
   process.exit(1);
 }
 
+// Intel macOS was released up to the version before Darwin builds moved to one
+// Apple Silicon job; no later release carries a darwin-x64 package, so say that
+// rather than sending the user looking for an optional dependency that never
+// existed.
+const DISCONTINUED = {
+  "darwin-x64":
+    "Intel macOS is no longer supported: prebuilt binaries ship for Apple " +
+    "Silicon (darwin-arm64) only.",
+};
+
 function binaryPath() {
   const key = `${process.platform}-${process.arch}`;
+  if (DISCONTINUED[key]) {
+    fail(`${DISCONTINUED[key]} ${OTHER_INSTALLS}`);
+  }
   const pkg = PACKAGES[key];
   // llmlint: ignore-block[changed_behavior_has_e2e] reaching this branch means running
   // where no prebuilt package exists, and a test can only get there by lying to node
