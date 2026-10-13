@@ -105,12 +105,14 @@ jobs:
         run: |
           pip install --no-cache-dir onepipeline-api-cli
           version="$(pip show onepipeline-api-cli | awk '/^Version:/ {print $2}')"
+          [ -n "$version" ] || { echo "::error::pip reported no version for onepipeline-api-cli"; echo "ACTION: inspect pip show output and retry the diagnostic after confirming installed package metadata"; exit 1; }
           bash scripts/smoke-published.sh --expect-version "$version" --label "manual Mac PyPI diagnostic"
       - name: Diagnose the native npm install
         if: vars.NPM_PUBLISH == 'true'
         run: |
           npm install -g --prefer-online onepipeline-api-cli
           version="$(npm view onepipeline-api-cli version)"
+          [ -n "$version" ] || { echo "::error::npm reported no version for onepipeline-api-cli"; echo "ACTION: confirm the registry serves package version metadata and retry the diagnostic"; exit 1; }
           bash scripts/smoke-published.sh --expect-version "$version" --label "manual Mac npm diagnostic"
 
   pypi:

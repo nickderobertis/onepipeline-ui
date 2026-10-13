@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  cpSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { digest, resolveScenario } from "../workflow-graph.mjs";
 
@@ -145,6 +151,65 @@ test("telemetry boundary rejects malformed measurements and nested rows from a c
       assert.match(rejected.stderr, /invalid telemetry/);
       assert.match(rejected.stderr, /ACTION:/);
     }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the production budget gate accepts recorded workflow rows and rejects a duplicate Mac job and missing telemetry", () => {
+  const scratch = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR, "budget-gate-"),
+  );
+  try {
+    cpSync(".github", join(scratch, ".github"), {
+      recursive: true,
+      filter: (source) =>
+        !source.includes("/.telemetry") && !source.includes("/node_modules"),
+    });
+    cpSync("screencomp.toml", join(scratch, "screencomp.toml"));
+    symlinkSync(resolve("node_modules"), join(scratch, "node_modules"), "dir");
+    writeFileSync(join(scratch, ".gitignore"), "node_modules\n");
+    execFileSync("git", ["init", "-q"], { cwd: scratch });
+    execFileSync("git", ["add", "."], { cwd: scratch });
+    const generator = `
+      import {mkdirSync,writeFileSync} from "node:fs";
+      import {digest,resolveScenario} from "./.github/workflow-graph.mjs";
+      const scenario={id:"ordinary",class:"pr-synchronize",event:"pull_request",action:"synchronize",diff:"source",fork:false,releaseBranch:false,cratePublish:"true",vars:{PYPI_PUBLISH:"true",NPM_PUBLISH:"true"},policy:{isReleaseOnly:false,macosRequired:true,reason:"ordinary PR"}};
+      const rows=resolveScenario(scenario,scenario.policy);
+      const runs=[...new Set(rows.map(r=>r.workflow))].map(workflow=>({scenario:scenario.id,workflow,rows:rows.filter(r=>r.workflow===workflow),macJobs:rows.filter(r=>r.workflow===workflow&&r.macos&&r.requested).length}));
+      const macRuns=runs.filter(r=>r.macJobs>0).map(r=>({event:scenario.class,workflow:r.workflow,jobs:r.rows.filter(r=>r.macos&&r.requested)}));
+      mkdirSync(".github/.telemetry",{recursive:true});
+      writeFileSync(".github/.telemetry/macos-policy.json",JSON.stringify({schemaVersion:1,sourceDigest:digest(),scenarios:[{...scenario,rows}],runs,macRuns,lifecycles:[{diff:"source",fork:false,pypi:"true",npm:"true",cratePublish:"true",phases:[scenario.id],macRuns}],jobsPerRun:Math.max(...runs.map(r=>r.macJobs)),runsPerChange:macRuns.length}));
+    `;
+    const generate = () =>
+      execFileSync("node", ["--input-type=module", "-e", generator], {
+        cwd: scratch,
+      });
+    const check = () =>
+      spawnSync("node", [".github/check-budgets.mjs"], {
+        cwd: scratch,
+        encoding: "utf8",
+      });
+    generate();
+    const accepted = check();
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+    assert.match(accepted.stdout, /onepipeline-ui-macos-jobs-per-run: within/);
+    assert.match(
+      accepted.stdout,
+      /onepipeline-ui-macos-runs-per-change: within/,
+    );
+    const mutate = `import {readFileSync,writeFileSync} from "node:fs"; import {parse,stringify} from "yaml"; const file=".github/workflows/ci.yml";const workflow=parse(readFileSync(file,"utf8"));workflow.jobs["duplicate-macos"]=structuredClone(workflow.jobs.macos);writeFileSync(file,stringify(workflow));`;
+    execFileSync("node", ["--input-type=module", "-e", mutate], {
+      cwd: scratch,
+    });
+    generate();
+    const over = check();
+    assert.equal(over.status, 1, over.stdout + over.stderr);
+    assert.match(over.stdout, /onepipeline-ui-macos-jobs-per-run: over/);
+    rmSync(join(scratch, ".github/.telemetry/macos-policy.json"));
+    const missing = check();
+    assert.equal(missing.status, 1, missing.stdout + missing.stderr);
+    assert.match(missing.stdout + missing.stderr, /ENOENT|telemetry/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
