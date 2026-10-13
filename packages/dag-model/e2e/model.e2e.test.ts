@@ -1046,6 +1046,17 @@ test("review replies preserve rework comments and retitles and refuse malformed 
     },
   ];
   const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
+  for (const comment of [
+    { id: "", url: "https://example.com/review/1" },
+    { id: "review-1", url: "not a URL" },
+  ]) {
+    expect(
+      replyEnvelopeSchema.safeParse({
+        ...envelope,
+        commands: [{ ...commands[0], comments: [comment] }],
+      }).success,
+    ).toBe(false);
+  }
   expect(replyEnvelopeSchema.parse(envelope)).toEqual(envelope);
   expect(
     replyEnvelopeSchema.safeParse({
