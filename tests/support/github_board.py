@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import TCPServer
 
 def directory(value):
     path = pathlib.Path(value)
@@ -188,7 +189,16 @@ class Handler(BaseHTTPRequestHandler):
 
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
-server = HTTPServer(("127.0.0.1", 0), Handler)
+class LoopbackServer(HTTPServer):
+    def server_bind(self):
+        # HTTPServer resolves getfqdn even for a numeric loopback address. macOS
+        # can block there before publishing the endpoint. This board needs only
+        # the bound address, so binding must not depend on the host's DNS.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
+server = LoopbackServer(("127.0.0.1", 0), Handler)
 save()
 (root / "endpoint").write_text(f"http://127.0.0.1:{server.server_port}")
 server.serve_forever()

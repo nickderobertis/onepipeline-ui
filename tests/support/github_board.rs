@@ -16,6 +16,12 @@ pub struct GitHubBoard {
 
 impl GitHubBoard {
     pub fn start(workspace: &Path) -> Self {
+        let mut command = Command::new("python3");
+        command.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"));
+        Self::start_with(workspace, command)
+    }
+
+    fn start_with(workspace: &Path, mut command: Command) -> Self {
         let dir = workspace.join("github-board");
         std::fs::create_dir_all(&dir).expect("board directory");
         let mut random = [0_u8; 32];
@@ -24,8 +30,7 @@ impl GitHubBoard {
             .read_exact(&mut random)
             .expect("fresh board credential");
         let token: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-        let child = Command::new("python3")
-            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"))
+        let child = command
             .arg(&dir)
             .env("CACHE_BOARD_TOKEN", &token)
             .spawn()
@@ -111,4 +116,31 @@ fn the_board_refuses_missing_and_empty_credentials_before_writing() {
             .next()
             .is_none());
     }
+}
+
+#[test]
+fn the_numeric_loopback_board_serves_even_when_hostname_lookup_is_unavailable() {
+    let dir = tempfile::tempdir().expect("board workspace");
+    let mut command = Command::new("python3");
+    // Inject a DNS failure at the OS-facing seam; the board and HTTP socket stay real.
+    command
+        .args(["-c", "import runpy, socket, sys; socket.getfqdn = lambda *_: (_ for _ in ()).throw(RuntimeError('hostname lookup unavailable')); script = sys.argv.pop(1); runpy.run_path(script, run_name='__main__')"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"));
+    let board = GitHubBoard::start_with(dir.path(), command);
+    let address = board
+        .url
+        .strip_prefix("http://")
+        .expect("HTTP URL")
+        .parse()
+        .expect("numeric loopback");
+    let response = crate::http::post(
+        address,
+        "/graphql",
+        r#"{"query":"query { viewer { login } }","variables":{}}"#,
+    );
+    assert_eq!(response.status, 401);
+    assert_eq!(
+        response.json()["errors"][0]["message"],
+        "invalid board token"
+    );
 }
