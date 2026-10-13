@@ -42,6 +42,11 @@ export function isShortcut(value: string): value is Shortcut {
 export interface ShortcutFields {
   readonly message?: string;
   readonly reason?: string;
+  readonly instruction?: string;
+  readonly title?: string;
+  readonly replacement?: string;
+  /** Review comment references as a JSON array of id/url objects. */
+  readonly comments?: string;
   readonly id?: string;
   readonly text?: string;
   readonly addressee?: string;
@@ -86,6 +91,8 @@ export const SHORTCUT_FIELDS: Readonly<
   drop: ["id", "dependents"],
   reparent: ["id", "deps"],
   retry: ["id", "json"],
+  rework: ["id", "reason", "instruction", "comments", "title", "replacement"],
+  retitle: ["id", "title", "reason"],
   cancel: ["id", "reason"],
   requeue: ["id", "json"],
   "set-node-sets": ["id", "sets"],
@@ -227,6 +234,34 @@ function draftCommand(
             .map((line) => line.trim())
             .filter((line) => line.length > 0),
         },
+      };
+    case "rework": {
+      let comments: unknown;
+      const references = text("comments");
+      if (references !== undefined) {
+        try {
+          comments = JSON.parse(references);
+        } catch (caught) {
+          return {
+            problem: `comments: ${caught instanceof Error ? caught.message : "not JSON"}`,
+          };
+        }
+      }
+      return {
+        command: {
+          op,
+          id,
+          reason: text("reason"),
+          instruction: text("instruction"),
+          ...optional("comments", comments),
+          ...optional("title", text("title")),
+          ...optional("replacement", text("replacement")),
+        },
+      };
+    }
+    case "retitle":
+      return {
+        command: { op, id, title: text("title"), reason: text("reason") },
       };
     case "cancel":
       return { command: { op, id, ...optional("reason", text("reason")) } };

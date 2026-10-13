@@ -1,5 +1,6 @@
 //! A loopback GitHub board, at the remote plugin's real HTTP boundary.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
@@ -10,15 +11,23 @@ pub struct GitHubBoard {
     child: Child,
     dir: PathBuf,
     pub url: String,
+    pub token: String,
 }
 
 impl GitHubBoard {
     pub fn start(workspace: &Path) -> Self {
         let dir = workspace.join("github-board");
         std::fs::create_dir_all(&dir).expect("board directory");
+        let mut random = [0_u8; 32];
+        std::fs::File::open("/dev/urandom")
+            .expect("system randomness")
+            .read_exact(&mut random)
+            .expect("fresh board credential");
+        let token: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let child = Command::new("python3")
             .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"))
             .arg(&dir)
+            .env("CACHE_BOARD_TOKEN", &token)
             .spawn()
             .expect("the loopback board starts");
         // Own the child before waiting, so even a startup failure reaps it.
@@ -26,6 +35,7 @@ impl GitHubBoard {
             child,
             dir,
             url: String::new(),
+            token,
         };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while !board.dir.join("endpoint").is_file() {
@@ -76,5 +86,29 @@ fn the_board_refuses_missing_and_relative_roots_before_writing() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[test]
+fn the_board_refuses_missing_and_empty_credentials_before_writing() {
+    for token in [None, Some(""), Some("   ")] {
+        let dir = tempfile::tempdir().expect("board directory");
+        let mut command = Command::new("python3");
+        command
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"))
+            .arg(dir.path())
+            .env_remove("CACHE_BOARD_TOKEN");
+        if let Some(token) = token {
+            command.env("CACHE_BOARD_TOKEN", token);
+        }
+        let output = command
+            .output()
+            .expect("run the board without a credential");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("CACHE_BOARD_TOKEN"));
+        assert!(std::fs::read_dir(dir.path())
+            .expect("board directory")
+            .next()
+            .is_none());
     }
 }

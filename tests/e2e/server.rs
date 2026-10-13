@@ -18246,7 +18246,7 @@ fn remote_plan_cache_adoption(enabled: bool) {
         .current_dir(&dir)
         .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
         .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
-        .env("CACHE_BOARD_TOKEN", "loopback-token")
+        .env("CACHE_BOARD_TOKEN", &board.token)
         .output()
         .expect("launch the remote approval plan");
     assert!(
@@ -18262,7 +18262,7 @@ fn remote_plan_cache_adoption(enabled: bool) {
         &dir,
         &onetaskgraph_core::Environment::from_os_pairs(vec![(
             "CACHE_BOARD_TOKEN".into(),
-            "loopback-token".into(),
+            board.token.clone().into(),
         )]),
         &onetaskgraph_core::config::Layer::default(),
     )
@@ -18296,7 +18296,7 @@ fn remote_plan_cache_adoption(enabled: bool) {
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
-        &[("CACHE_BOARD_TOKEN", "loopback-token")],
+        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
         &inherited,
     );
     let detail_path = format!("/api/v2/runs/{run}");

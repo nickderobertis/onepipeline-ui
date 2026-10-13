@@ -6,6 +6,7 @@ Adapted from onepipeline 0.70.0's tests/e2e/github_loopback.py.
 """
 import argparse
 import json
+import os
 import pathlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -19,6 +20,9 @@ def directory(value):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("root", type=directory)
 root = parser.parse_args().root
+token = os.environ.get("CACHE_BOARD_TOKEN", "")
+if not token.strip():
+    parser.error("CACHE_BOARD_TOKEN must contain a nonempty board credential")
 # llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] This task requires a
 # loopback board stand-in at the real remote plugin's HTTP boundary. These are fixture
 # responses for the released plugin, not an API definition shipped to consumers; the
@@ -108,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_POST(self):
-        if self.headers.get("Authorization") != "Bearer loopback-token":
+        if self.headers.get("Authorization") != f"Bearer {token}":
             self.reply({"errors": [{"message": "invalid board token"}]}, 401)
             return
         try:

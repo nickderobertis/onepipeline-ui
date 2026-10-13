@@ -23,6 +23,10 @@ import { useReplyComposer } from "./useReplyComposer";
 const FIELD_LABELS: Readonly<Record<keyof ShortcutFields, string>> = {
   message: "Message",
   reason: "Reason",
+  instruction: "Instruction",
+  title: "Title",
+  replacement: "Replacement node id (optional)",
+  comments: "Review comments (JSON, optional)",
   id: "Node id",
   text: "Text",
   addressee: "Addressee",

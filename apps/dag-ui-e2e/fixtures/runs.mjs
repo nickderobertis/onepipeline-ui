@@ -2313,7 +2313,7 @@ function writeSiblingRun(root) {
  * settled, so a verdict-only reply is queued rather than refused; nothing on its
  * channel yet, so what the queue shows is what the journeys put there.
  */
-function writeSupervisedRun(root) {
+function writeSupervisedRun(root, review = false) {
   const run = { run_id: SUPERVISED_RUN };
   const dir = runDir(root, SUPERVISED_RUN);
   // The registry a stop reads to establish what the run is running: a run
@@ -2326,6 +2326,17 @@ function writeSupervisedRun(root) {
     name: "supervised",
     concurrency: 1,
     tasks: [
+      ...(review ? ["review-draft", "review-draft-optional"] : []).map(
+        (id) => ({
+          id,
+          persona: "worker",
+          repo: "example/repo",
+          branch: `feature/${id}`,
+          base_branch: "main",
+          title: "Review draft",
+          task: "## What\nPrepare a review draft.\n\n## Acceptance criteria\nThe draft is ready for review",
+        }),
+      ),
       {
         id: "prepare",
         persona: "worker",
@@ -2377,6 +2388,21 @@ function writeSupervisedRun(root) {
     node: "build",
     persona: "worker",
   });
+  for (const node of review ? ["review-draft", "review-draft-optional"] : []) {
+    const settlement = journal.advance(1);
+    settlement.emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node },
+      {
+        status: "done",
+        outcome: "draft",
+        branch: `feature/${node}`,
+        change_url: "https://github.com/example/repo/pull/1",
+        landing: "draft",
+      },
+    );
+  }
   journal.write();
 }
 
@@ -2920,9 +2946,9 @@ function writeNamedRun(root) {
 }
 
 /** Write every run this fixture serves, oldest first. */
-export function buildRuns(root, workspace) {
+export function buildRuns(root, workspace, review = false) {
   mkdirSync(root, { recursive: true });
-  writeSupervisedRun(root);
+  writeSupervisedRun(root, review);
   writeElsewhereRun(root);
   writeAdoptableRun(root, workspace);
   writeEventlessRun(root);
