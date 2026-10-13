@@ -284,7 +284,8 @@ pub mod vcs {
     pub const DRAFT_LIFTED: &str = "draft-lifted";
     /// `{url, id, base, awaited, grace_seconds, warned}` — a draft lifted before
     /// any of its required checks had run on it, because the repository's checks
-    /// skip drafts. Recorded beside the [`DRAFT_LIFTED`] every lift writes.
+    /// skip drafts and nothing is in progress on the pushed head. Recorded beside
+    /// the [`DRAFT_LIFTED`] every lift writes.
     pub const DRAFT_LIFTED_EARLY: &str = "draft-lifted-early";
     /// `{url, id, base}` — green checks left a `change-open` change whose
     /// approvals are required a draft, for its own user's review rather than the
@@ -4956,8 +4957,9 @@ fn surface_facts(event: &Envelope) -> Option<Value> {
 ///
 /// `onevcs` opens every remote change request as a draft while its required
 /// checks run, watches them, and then lifts the draft, lifts it early because the
-/// checks skip drafts, or keeps it a draft for its own user's review. Each step
-/// is a record whose kind alone says which step it was and whose fields say the
+/// checks skip drafts and nothing is in progress on the pushed head, or keeps it
+/// a draft for its own user's review. Each step is a record whose kind alone says
+/// which step it was and whose fields say the
 /// rest, so they are served here as the record carried them rather than left as a
 /// bare kind and a link: a reader cannot tell a draft kept for review from one
 /// still awaiting its checks, or a settlement that passed from one that passed
