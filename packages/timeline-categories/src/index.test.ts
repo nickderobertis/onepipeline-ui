@@ -48,6 +48,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-ready": "lifecycle",
   "node-dispatched": "lifecycle",
   "node-settled": "lifecycle",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds, while this package owns their display categories. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` failed naming all four after the 0.70.0 relink; these entries reconcile the category corpus with that declaration, without moving producer logic into the browser.
+  "node-restack-started": "lifecycle",
+  "node-restacked": "lifecycle",
+  "change-retitled": "publication",
+  "title-unverified": "activity",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A dispatch that ended before any work began, for the host's reason rather
   // than the node's, hands the node back to the queue: the run doing it again
   // rather than a step of the node's life.

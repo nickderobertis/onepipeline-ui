@@ -197,7 +197,16 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   // An edit by shortcut: a blocking finding, which the engine raises as a
   // surface holding the node it names — and claims into the pending slot.
   const composer = page.getByRole("region", { name: "Reply" });
-  await composer.getByLabel("Shortcut").selectOption("finding");
+  // Relinking the engine updates the wire grammar, while the composer retains
+  // its existing controls. These commands remain available through typed JSON.
+  const shortcut = composer.getByLabel("Shortcut");
+  await expect(
+    shortcut.getByRole("option", { name: "rework", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    shortcut.getByRole("option", { name: "retitle", exact: true }),
+  ).toHaveCount(0);
+  await shortcut.selectOption("finding");
   await composer.getByLabel("Message").fill("stop and read this first");
   await composer.getByLabel("Blocking").check();
   await composer.getByLabel("Node id").fill("build");

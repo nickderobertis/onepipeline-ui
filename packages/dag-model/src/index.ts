@@ -1842,6 +1842,7 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
         .optional(),
     })
     .strict(),
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these command declarations; this browser package validates the reply wire format it consumes. `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` reads the linked engine schema into the golden, and the consumer journey compares this union with that golden op for op and field for field. These are reconciled wire schemas, not implementations of rework or retitle.
   z
     .object({
       op: z.literal("rework"),
@@ -1849,12 +1850,10 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       reason: z.string().min(1),
       instruction: z.string().min(1),
       comments: z
-        .array(
-          z.object({ id: z.string().min(1), url: z.string().url() }).strict(),
-        )
+        .array(z.object({ id: z.string(), url: z.string() }).strict())
         .optional(),
-      title: z.string().min(1).optional(),
-      replacement: z.string().min(1).optional(),
+      title: z.string().optional(),
+      replacement: z.string().optional(),
     })
     .strict(),
   z
@@ -1865,9 +1864,10 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       reason: z.string().min(1),
     })
     .strict(),
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 ]);
 
-/** The ops the envelope may carry, in the order the composer offers them. */
+/** The ops the envelope may carry, in schema order. */
 export const REPLY_OPS = replyCommandSchema.options.map(
   (option) => option.shape.op.value,
 );

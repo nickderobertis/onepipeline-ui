@@ -529,11 +529,12 @@ onemessagebus = "0.9.0"
 # pre-registry dispatch gone when its last stop signalled workers and no
 # adoption followed. `host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone`
 # holds that rendering and a teardown refusal over HTTP.
-# 0.70.0 links onetaskgraph 0.6.0, whose plan store carries comments and
+# 0.70.0 carries the native unpublished verdict and links onevcs 0.48.1.
+# 0.70.1 links onevcs 0.49.0 and onetaskgraph 0.6.0, whose plan store carries comments and
 # caches remote reads. Browser-adopted drivers load that same cache configuration;
 # the dev-only store requirements move with the engine. This changes the engine
 # types carried by ApiError::from_engine and the other engine-typed public items.
-onepipeline = "=0.70.0"
+onepipeline = "=0.70.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -566,7 +567,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.48.0"
+onevcs = "=0.49.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
