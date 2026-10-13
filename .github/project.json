@@ -4,6 +4,7 @@
   "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "namedInputs": {
     "workflowPolicy": [
+      "sharedGlobals",
       "{projectRoot}/**/*",
       "{workspaceRoot}/screencomp.toml",
       "{workspaceRoot}/release-plz.toml",
@@ -16,7 +17,7 @@
   },
   "targets": {
     "bootstrap": {
-      "command": "bun install --cwd .github --frozen-lockfile"
+      "command": "bash scripts/workspace-install.sh"
     },
     "test": {
       "command": "node --test .github/tests/*.test.mjs",

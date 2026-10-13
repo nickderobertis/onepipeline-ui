@@ -146,3 +146,41 @@ with tarfile.open(root/'npm-artifacts'/('onepipeline-api-cli-darwin-'+arch+'-1.0
     rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("production packaging commands reject unsupported targets and malformed versions with next actions", () => {
+  for (const [args, message] of [
+    [[".", "unrecognized-target", "1.0.0"], /unsupported staged target/],
+    [[".", "aarch64-apple-darwin", "bad-version"], /invalid release version/],
+    [
+      ["package.json", "aarch64-apple-darwin", "1.0.0"],
+      /ROOT is not a directory/,
+    ],
+  ]) {
+    const result = spawnSync(
+      "node",
+      ["scripts/verify-staged-release.mjs", ...args],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, message);
+    assert.match(result.stderr, /ACTION:/);
+  }
+  const unknown = spawnSync(
+    "python3",
+    [
+      "scripts/release-package.py",
+      "--target",
+      "unknown",
+      "--wheel",
+      "missing.whl",
+      "--out",
+      ".",
+      "--tag",
+      "v1.0.0",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(unknown.status, 0);
+  assert.match(unknown.stderr, /invalid choice/);
+  assert.match(unknown.stderr, /ACTION:/);
+});
