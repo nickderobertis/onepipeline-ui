@@ -30,6 +30,7 @@ test("real git histories classify semantic releases and fail closed", () => {
       "dependency",
       "source",
       "lock-dependency",
+      "lock-same-name-registry",
       "json-content",
     ])
       assert.equal(

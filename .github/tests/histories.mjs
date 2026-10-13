@@ -22,7 +22,7 @@ export function history() {
   );
   writeFileSync(
     join(root, "Cargo.lock"),
-    'version = 4\n[[package]]\nname = "onepipeline-ui"\nversion = "1.0.0"\n[[package]]\nname = "engine"\nversion = "1.0.0"\n',
+    'version = 4\n[[package]]\nname = "onepipeline-ui"\nversion = "1.0.0"\n[[package]]\nname = "onepipeline-ui"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n[[package]]\nname = "engine"\nversion = "1.0.0"\n',
   );
   writeFileSync(join(root, "CHANGELOG.md"), "# Changes\n");
   mkdirSync(join(root, "npm/onepipeline-api-cli"), { recursive: true });
@@ -44,6 +44,7 @@ export function history() {
     "source",
     "lock-version",
     "lock-dependency",
+    "lock-same-name-registry",
     "json-version",
     "json-content",
   ]) {
@@ -62,7 +63,12 @@ export function history() {
     else if (kind === "lock-version" || kind === "lock-dependency") {
       writeFileSync(
         join(root, "Cargo.lock"),
-        `version = 4\n[[package]]\nname = "onepipeline-ui"\nversion = "${kind === "lock-version" ? "1.1.0" : "1.0.0"}"\n[[package]]\nname = "engine"\nversion = "${kind === "lock-dependency" ? "1.1.0" : "1.0.0"}"\n`,
+        `version = 4\n[[package]]\nname = "onepipeline-ui"\nversion = "${kind === "lock-version" ? "1.1.0" : "1.0.0"}"\n[[package]]\nname = "onepipeline-ui"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n[[package]]\nname = "engine"\nversion = "${kind === "lock-dependency" ? "1.1.0" : "1.0.0"}"\n`,
+      );
+    } else if (kind === "lock-same-name-registry") {
+      writeFileSync(
+        join(root, "Cargo.lock"),
+        'version = 4\n[[package]]\nname = "onepipeline-ui"\nversion = "1.0.0"\n[[package]]\nname = "onepipeline-ui"\nversion = "1.1.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n[[package]]\nname = "engine"\nversion = "1.0.0"\n',
       );
     } else if (kind.startsWith("json-")) {
       writeFileSync(
