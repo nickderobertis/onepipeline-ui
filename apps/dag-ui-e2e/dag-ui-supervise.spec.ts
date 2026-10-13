@@ -332,7 +332,7 @@ test("composes review replies, applies rework and reports retitle delivery refus
     await expect(composer).toContainText("comments:");
     await composer
       .getByLabel("Review comments (JSON, optional)")
-      .fill('[{"id":"review-1","url":"not a URL"}]');
+      .fill('[{"id":"review-1"}]');
     await composer.getByRole("button", { name: "Compose envelope" }).click();
     await expect(
       composer.getByRole("alert", { name: "Envelope not composed" }),
