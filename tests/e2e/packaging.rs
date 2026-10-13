@@ -24,13 +24,12 @@ use crate::http;
 use crate::serving::{self, Stop, STOP_DEADLINE};
 
 /// The Rust target triple for the host, as `.github/workflows/release.yml`
-/// spells it. The release matrix builds exactly these five, so a host outside
+/// spells it. The release matrix builds exactly these four, so a host outside
 /// them is a platform this repo does not ship — a failure to see, not to skip.
 fn host_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
         ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
-        ("macos", "x86_64") => "x86_64-apple-darwin",
         ("macos", "aarch64") => "aarch64-apple-darwin",
         ("windows", "x86_64") => "x86_64-pc-windows-msvc",
         (os, arch) => panic!(

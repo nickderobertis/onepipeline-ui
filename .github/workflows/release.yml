@@ -15,9 +15,10 @@ name: Release
 #
 #   * test          — the complete deterministic gate, so untested artifacts
 #                     never publish.
-#   * darwin        — one Apple Silicon runner builds both Darwin wheels once,
-#                     derives archive/npm carriers from their final binaries,
-#                     and installs/runs all three forms before publication.
+#   * darwin        — one Apple Silicon runner builds the arm64 Darwin wheel
+#                     once (Intel macOS is no longer released), derives
+#                     archive/npm carriers from its final binary, and
+#                     installs/runs all three forms before publication.
 #   * upload-darwin — Linux attaches the verified Darwin archives, checksums
 #                     and CycloneDX SBOM to the Release.
 #   * upload        — build Linux/Windows targets on native runners and attach
@@ -158,7 +159,8 @@ jobs:
       - run: just check
 
   # One Apple Silicon runner, before any Darwin distribution is published.
-  # maturin compiles once per target; archive/npm use its final wheel bytes.
+  # Intel macOS is no longer released. maturin compiles aarch64 once, natively;
+  # archive/npm use its final wheel bytes.
   darwin:
     needs: test
     runs-on: macos-latest
@@ -166,7 +168,7 @@ jobs:
       contents: read
     env:
       RUSTFLAGS: "-D warnings"
-      DARWIN_TARGETS: x86_64-apple-darwin aarch64-apple-darwin
+      DARWIN_TARGETS: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
@@ -186,34 +188,12 @@ jobs:
         run: python3 -m pip install maturin==1.14.1 packaging==25.0
       - name: Build the browser view
         run: just build
-      - name: Build both Darwin distributions from one binary each
+      - name: Build the Apple Silicon distributions from one binary
         run: bash scripts/release-darwin.sh darwin-dist
       - name: Generate CycloneDX SBOM
         run: |
           cargo cyclonedx --format json --all --features bundled-ui --target all
           cp bom.json "darwin-dist/assets/onepipeline-api-${GITHUB_REF_NAME}.cdx.json"
-      - name: Enable Rosetta for the Intel install proofs
-        run: sudo softwareupdate --install-rosetta --agree-to-license
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          architecture: x64
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          architecture: x64
-      - name: Install and run Intel archive, wheel and npm before publication
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: node scripts/verify-staged-release.mjs darwin-dist x86_64-apple-darwin "${RELEASE_VERSION#v}"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          architecture: arm64
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          architecture: arm64
       - name: Install and run native archive, wheel and npm before publication
         env:
           RELEASE_VERSION: ${{ github.ref_name }}

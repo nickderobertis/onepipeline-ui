@@ -16,7 +16,6 @@ import zipfile
 TARGET_ARCHES = {
     "x86_64-unknown-linux-gnu": "x86_64",
     "aarch64-unknown-linux-gnu": "aarch64",
-    "x86_64-apple-darwin": "x86_64",
     "aarch64-apple-darwin": "arm64",
     "x86_64-pc-windows-msvc": "amd64",
 }
@@ -53,7 +52,7 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
             raise StagingError(f"wheel must contain one CLI binary: {binaries}", "rebuild the bin-binding wheel with maturin for this target")
         binary = archive.read(binaries[0])
         if target.endswith("apple-darwin"):
-            expected_cpu = 0x01000007 if target.startswith("x86_64") else 0x0100000C
+            expected_cpu = 0x0100000C  # arm64: Apple Silicon is the one Darwin release
             if binary[:4] != b"\xcf\xfa\xed\xfe" or struct.unpack("<I", binary[4:8])[0] != expected_cpu:
                 raise StagingError("wheel binary does not have the declared Darwin architecture", "rebuild the wheel with maturin --target set to this Darwin target")
         elif "linux" in target:

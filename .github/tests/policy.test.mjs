@@ -54,6 +54,60 @@ test("real git histories classify semantic releases and fail closed", () => {
     h.close();
   }
 });
+test("release-prefix forgeries and unrecognised events route to macOS; known non-PR events stay Mac-free", () => {
+  const h = history();
+  try {
+    for (const [name, event, head, extraEnv] of [
+      [
+        "fork-headed release branch",
+        prEvent("release-plz-9", true),
+        "version-only",
+      ],
+      [
+        "release branch with a non-version change",
+        prEvent("release-plz-9"),
+        "source",
+      ],
+      [
+        "same-named registry dependency version change",
+        prEvent("release-plz-9"),
+        "lock-same-name-registry",
+      ],
+      [
+        "unrecognised event name",
+        prEvent("release-plz-9"),
+        "version-only",
+        { GITHUB_EVENT_NAME: "merge_group" },
+      ],
+    ]) {
+      const verdict = h.classify(event, h.heads[head], extraEnv);
+      assert.equal(verdict.macosRequired, true, name);
+      assert.equal(verdict.isReleaseOnly, false, name);
+    }
+    assert.match(
+      h.classify(prEvent("release-plz-9"), h.heads["version-only"], {
+        GITHUB_EVENT_NAME: "merge_group",
+      }).reason,
+      /unrecognised event: merge_group/,
+    );
+    for (const name of [
+      "push",
+      "release",
+      "workflow_run",
+      "repository_dispatch",
+      "schedule",
+      "workflow_dispatch",
+    ]) {
+      const verdict = h.classify({ event_name: name }, h.heads.source, {
+        GITHUB_EVENT_NAME: name,
+      });
+      assert.equal(verdict.macosRequired, false, name);
+      assert.equal(verdict.reason, `non-PR event: ${name}`);
+    }
+  } finally {
+    h.close();
+  }
+});
 test("real carrier command accepts only successful work or authorized omissions", () => {
   const command = resolve(".github/macos-verdict.mjs");
   for (const CHANGES of ["success", "failure", "cancelled", "skipped", ""])

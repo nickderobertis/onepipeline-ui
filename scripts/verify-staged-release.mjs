@@ -31,7 +31,6 @@ async function main() {
       "pass ROOT TARGET VERSION from the release workflow; ROOT must contain staged artifacts",
     );
   const allowed = [
-    "x86_64-apple-darwin",
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",

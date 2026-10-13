@@ -258,7 +258,6 @@ fn every_release_target_has_a_platform_package_on_both_sides() {
             "aarch64-unknown-linux-gnu",
             "onepipeline-api-cli-linux-arm64",
         ),
-        ("x86_64-apple-darwin", "onepipeline-api-cli-darwin-x64"),
         ("aarch64-apple-darwin", "onepipeline-api-cli-darwin-arm64"),
         ("x86_64-pc-windows-msvc", "onepipeline-api-cli-win32-x64"),
     ] {
@@ -865,6 +864,52 @@ fn npm_build_refuses_a_target_it_has_no_platform_package_for() {
     assert!(stderr.contains("ACTION:"), "{stderr}");
 }
 
+/// Run the committed launcher as if node reported `platform`/`arch`. Only the
+/// host node describes is doubled — no Intel Mac runs here — and the launcher,
+/// its package resolution and its exit are the real ones.
+fn launcher_on(platform: &str, arch: &str) -> std::process::Output {
+    let scratch = tempfile::tempdir().expect("temp dir");
+    let preload = scratch.path().join("host.cjs");
+    fs::write(
+        &preload,
+        format!(
+            "Object.defineProperty(process, 'platform', {{ value: '{platform}' }});\n\
+             Object.defineProperty(process, 'arch', {{ value: '{arch}' }});\n"
+        ),
+    )
+    .expect("write preload");
+    std::process::Command::new("node")
+        .arg("--require")
+        .arg(&preload)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("npm/{WRAPPER}/bin/{COMMAND}.js")))
+        .arg("--version")
+        .output()
+        .expect("node is on PATH")
+}
+
+#[test]
+fn the_launcher_refuses_intel_macos_rather_than_looking_for_a_package_no_release_ships() {
+    let intel = launcher_on("darwin", "x64");
+    assert_eq!(intel.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&intel.stderr);
+    assert!(
+        stderr.contains("Intel macOS is no longer supported"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("is not installed"), "{stderr}");
+    assert!(stderr.contains("pip install"), "{stderr}");
+
+    // The same doubled host on Apple Silicon reaches package resolution, which
+    // is what proves the refusal above came from the platform and not the preload.
+    let silicon = launcher_on("darwin", "arm64");
+    assert_eq!(silicon.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&silicon.stderr);
+    assert!(
+        stderr.contains("onepipeline-api-cli-darwin-arm64 is not installed"),
+        "{stderr}"
+    );
+}
+
 // A repository that declares no release target releases nothing as far as the
 // mechanism sequencing work across repositories is concerned: a dependency
 // landing here would earn a consumer no hold at all, silently. So
@@ -1043,10 +1088,11 @@ fn published_names() -> BTreeSet<String> {
                              is published for the launcher to resolve"
                         );
                         let darwin = workflow_job(&workflow, "darwin");
-                        for target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
-                            assert!(darwin.contains(target), "Darwin job omits {target}");
-                            targets.insert(target.to_owned());
-                        }
+                        assert!(
+                            darwin.contains("aarch64-apple-darwin"),
+                            "Darwin job omits aarch64-apple-darwin"
+                        );
+                        targets.insert("aarch64-apple-darwin".to_owned());
                         for target in targets {
                             published
                                 .insert(format!("npm:{}", npm_platform_package(&build, &target)));

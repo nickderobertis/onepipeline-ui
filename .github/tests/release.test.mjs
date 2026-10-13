@@ -14,6 +14,18 @@ import { workflows } from "../workflow-graph.mjs";
 
 const release = () =>
   workflows().find((w) => w.file === "release.yml").document;
+
+// The release scripts read the Actions ref they run under. A journey inherits
+// whatever runner it happens on — on a pull request that is `<n>/merge` — so
+// every command spawned here gets an environment without the runner's GITHUB_*
+// context, plus only what the case sets.
+const scratchRoot = () => process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir();
+const hermetic = (extra = {}) => ({
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GITHUB_")),
+  ),
+  ...extra,
+});
 test("all release platforms retain archive, wheel and npm producers; Darwin publishes verified bytes on Linux", () => {
   const jobs = release().jobs;
   const launcher = JSON.parse(
@@ -22,11 +34,9 @@ test("all release platforms retain archive, wheel and npm producers; Darwin publ
   const targets = jobs["build-npm"].strategy.matrix.include.map(
     (row) => row.target,
   );
-  const darwin = jobs.darwin.env.DARWIN_TARGETS;
-  for (const target of ["x86_64-apple-darwin", "aarch64-apple-darwin"]) {
-    assert.ok(darwin.includes(target));
-    targets.push(target);
-  }
+  // Apple Silicon is the one Darwin release; Intel macOS is discontinued.
+  assert.equal(jobs.darwin.env.DARWIN_TARGETS, "aarch64-apple-darwin");
+  targets.push("aarch64-apple-darwin");
   assert.equal(
     targets.length,
     Object.keys(launcher.optionalDependencies).length,
@@ -48,7 +58,9 @@ test("all release platforms retain archive, wheel and npm producers; Darwin publ
     assert.ok(
       commands.includes(`verify-staged-release.mjs darwin-dist ${target}`),
     );
-  assert.match(commands, /install-rosetta/);
+  assert.doesNotMatch(commands, /rosetta/i);
+  for (const step of jobs.darwin.steps)
+    assert.notEqual(step.with?.architecture, "x64", JSON.stringify(step));
   const names = jobs.darwin.steps
     .filter((s) => s.uses === "actions/upload-artifact@v4")
     .map((s) => s.with.name);
@@ -77,23 +89,27 @@ test("Darwin artifact contracts preserve wheel bytes and reject an architecture 
     )) {
       // A structural Mach-O fixture exercises the carrier boundary. It is never
       // executed; native installs remain the hosted Mac job's proof.
-      const arch = target.startsWith("x86_64") ? "x86_64" : "arm64";
-      const cpu = arch === "x86_64" ? 0x01000007 : 0x0100000c;
-      const wheel = join(
-        scratch,
-        `onepipeline_api_cli-1.0.0-py3-none-macosx_11_0_${arch}.whl`,
-      );
-      execFileSync("python3", [
-        "-c",
-        `import struct,zipfile,sys
+      assert.equal(target, "aarch64-apple-darwin");
+      const arch = "arm64";
+      const fixture = (cpu, wheelArch) => {
+        const wheel = join(
+          scratch,
+          `onepipeline_api_cli-1.0.0-py3-none-macosx_11_0_${wheelArch}.whl`,
+        );
+        execFileSync("python3", [
+          "-c",
+          `import struct,zipfile,sys
 with zipfile.ZipFile(sys.argv[1],'w') as z:
  z.writestr('onepipeline_api_cli-1.0.0.data/scripts/onepipeline-api',struct.pack('<IIIIIIII',0xfeedfacf,int(sys.argv[2]),0,2,0,0,0,0))
  z.writestr('onepipeline_api_cli-1.0.0.dist-info/METADATA','Name: onepipeline-api-cli\\nVersion: 1.0.0\\n')
  z.writestr('onepipeline_api_cli-1.0.0.dist-info/WHEEL','Wheel-Version: 1.0\\nTag: py3-none-macosx_11_0_'+sys.argv[3]+'\\n')`,
-        wheel,
-        String(cpu),
-        arch,
-      ]);
+          wheel,
+          String(cpu),
+          wheelArch,
+        ]);
+        return wheel;
+      };
+      const wheel = fixture(0x0100000c, arch);
       const args = [
         "scripts/release-package.py",
         "--target",
@@ -118,8 +134,7 @@ with tarfile.open(archive) as t:
  assert t.extractfile('onepipeline-api').read() == expected
 checksum=(root/'assets'/('onepipeline-api-v1.0.0-'+target+'.sha256')).read_text().split()[0]
 assert hashlib.sha256(archive.read_bytes()).hexdigest() == checksum
-arch='x64' if target.startswith('x86_64') else 'arm64'
-with tarfile.open(root/'npm-artifacts'/('onepipeline-api-cli-darwin-'+arch+'-1.0.0.tgz')) as t:
+with tarfile.open(root/'npm-artifacts'/'onepipeline-api-cli-darwin-arm64-1.0.0.tgz') as t:
  assert t.extractfile('package/bin/onepipeline-api').read() == expected
 `,
         scratch,
@@ -134,19 +149,24 @@ with tarfile.open(root/'npm-artifacts'/('onepipeline-api-cli-darwin-'+arch+'-1.0
       assert.equal(record.binarySha256, record.wheelBinarySha256);
       assert.equal(record.binarySha256, record.npmBinarySha256);
       assert.ok(record.archive.includes(`${target}.tar.gz`));
-      assert.ok(
-        record.npm.includes(`darwin-${arch === "arm64" ? "arm64" : "x64"}`),
-      );
-      const other = target.startsWith("x86_64")
-        ? "aarch64-apple-darwin"
-        : "x86_64-apple-darwin";
+      assert.ok(record.npm.includes("darwin-arm64"));
+      // An Intel Mach-O handed in as the Apple Silicon target is refused.
+      const intel = fixture(0x01000007, "x86_64");
       const refused = spawnSync(
         "python3",
-        args.map((value) => (value === target ? other : value)),
+        args.map((value) => (value === wheel ? intel : value)),
         { encoding: "utf8" },
       );
       assert.notEqual(refused.status, 0);
       assert.match(refused.stderr, /declared Darwin architecture/);
+      // And the discontinued Intel target is no longer a staging choice.
+      const discontinued = spawnSync(
+        "python3",
+        args.map((value) => (value === target ? "x86_64-apple-darwin" : value)),
+        { encoding: "utf8" },
+      );
+      assert.notEqual(discontinued.status, 0);
+      assert.match(discontinued.stderr, /invalid choice/);
       const provider = join(scratch, "npm-provider");
       mkdirSync(provider, { recursive: true });
       writeFileSync(
@@ -158,7 +178,7 @@ with tarfile.open(root/'npm-artifacts'/('onepipeline-api-cli-darwin-'+arch+'-1.0
         "[]",
         JSON.stringify([
           {
-            name: `onepipeline-api-cli-darwin-${arch === "arm64" ? "arm64" : "x64"}`,
+            name: "onepipeline-api-cli-darwin-arm64",
             version: "1.0.0",
             filename: "../escaped.tgz",
           },
@@ -188,6 +208,7 @@ with tarfile.open(root/'npm-artifacts'/('onepipeline-api-cli-darwin-'+arch+'-1.0
 test("production packaging commands reject unsupported targets and malformed versions with next actions", () => {
   for (const [args, message] of [
     [[".", "unrecognized-target", "1.0.0"], /unsupported staged target/],
+    [[".", "x86_64-apple-darwin", "1.0.0"], /unsupported staged target/],
     [[".", "aarch64-apple-darwin", "bad-version"], /invalid release version/],
     [
       ["package.json", "aarch64-apple-darwin", "1.0.0"],
@@ -279,16 +300,54 @@ test("real workflow command usage errors return 2 with an actionable diagnostic"
     ["bash", ["scripts/release-native-dry-run.sh"], {}],
     [
       "bash",
-      ["scripts/release-darwin.sh", process.env.ONEPIPELINE_NODE_SCRATCH_DIR],
+      ["scripts/release-darwin.sh", scratchRoot()],
       { DARWIN_TARGETS: "" },
     ],
   ]) {
     const result = spawnSync(command, args, {
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: hermetic(env),
     });
     assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, /ACTION:/);
+  }
+});
+
+test("the Darwin builder refuses the discontinued Intel macOS target before compiling", () => {
+  const out = mkdtempSync(join(scratchRoot(), "intel-refusal-"));
+  try {
+    const result = spawnSync("bash", ["scripts/release-darwin.sh", out], {
+      encoding: "utf8",
+      env: hermetic({ DARWIN_TARGETS: "x86_64-apple-darwin" }),
+    });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /Intel macOS is no longer released/);
+    assert.match(
+      result.stderr,
+      /ACTION: set DARWIN_TARGETS to aarch64-apple-darwin/,
+    );
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test("no workflow or release declaration still names an Intel macOS target or runner", () => {
+  const sources = [
+    ...workflows().map((w) => `.github/workflows/${w.file}`),
+    "release-targets.toml",
+    "npm/onepipeline-api-cli/package.json",
+    "npm/onepipeline-api-cli/bin/onepipeline-api.js",
+    "scripts/npm-build.mjs",
+    "scripts/release-package.py",
+    "scripts/verify-staged-release.mjs",
+    "rust-toolchain.toml",
+  ];
+  for (const source of sources) {
+    const text = readFileSync(source, "utf8");
+    assert.doesNotMatch(text, /x86_64-apple-darwin|macos-[\w.]*-intel/, source);
+    // The launcher may name darwin-x64 only to refuse it.
+    if (!source.endsWith("onepipeline-api.js"))
+      assert.doesNotMatch(text, /darwin-x64/, source);
   }
 });
 
@@ -321,11 +380,10 @@ test("real release commands diagnose failed external toolchain setup with next a
       );
       const result = spawnSync("bash", [script, join(scratch, "out")], {
         encoding: "utf8",
-        env: {
-          ...process.env,
+        env: hermetic({
           PATH: `${provider}:${process.env.PATH}`,
           DARWIN_TARGETS: "aarch64-apple-darwin",
-        },
+        }),
       });
       assert.equal(result.status, 1, result.stdout + result.stderr);
       assert.match(result.stderr, /failed/);
@@ -335,4 +393,37 @@ test("real release commands diagnose failed external toolchain setup with next a
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+// The two journeys above failed on a pull-request runner, whose GITHUB_REF_NAME
+// is `<n>/merge`, by reaching the release-tag check instead of the case under
+// test. Re-run them as a child under that same runner context.
+test("release command journeys hold under a pull-request runner's ref context", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--test",
+      "--test-reporter=tap",
+      "--test-name-pattern",
+      "^real (workflow command usage errors|release commands diagnose failed external toolchain setup)",
+      ".github/tests/release.test.mjs",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        // Without the parent runner's context the child reports on stdout.
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => key !== "NODE_TEST_CONTEXT",
+          ),
+        ),
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_REF: "refs/pull/315/merge",
+        GITHUB_REF_NAME: "315/merge",
+      },
+    },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^# pass 2$/m);
 });

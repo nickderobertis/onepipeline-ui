@@ -66,6 +66,17 @@ function releasePrefix() {
   return prefix;
 }
 
+// The non-PR events this repository's workflows are triggered by; a tag push
+// arrives as `push`. None of them requests a Mac runner automatically.
+const AUTOMATIC_NON_PR_EVENTS = new Set([
+  "push",
+  "release",
+  "workflow_run",
+  "repository_dispatch",
+  "schedule",
+  "workflow_dispatch",
+]);
+
 export function classify(event, base, head) {
   // Event kind comes from the runner, so an unreadable PR payload cannot turn a
   // PR into a non-PR. Offline callers can carry the same event_name in fixtures.
@@ -74,17 +85,20 @@ export function classify(event, base, head) {
     (typeof event?.event_name === "string" && event.event_name
       ? event.event_name
       : "pull_request");
-  if (kind !== "pull_request")
-    return {
-      isReleaseOnly: false,
-      macosRequired: false,
-      reason: `non-PR event: ${kind}`,
-    };
   const required = (reason) => ({
     isReleaseOnly: false,
     macosRequired: true,
     reason,
   });
+  if (AUTOMATIC_NON_PR_EVENTS.has(kind))
+    return {
+      isReleaseOnly: false,
+      macosRequired: false,
+      reason: `non-PR event: ${kind}`,
+    };
+  // A name this policy has never routed is not evidence that Mac work may be
+  // skipped, so it fails closed rather than joining the non-PR events above.
+  if (kind !== "pull_request") return required(`unrecognised event: ${kind}`);
   try {
     const pr = event.pull_request;
     if (
