@@ -125,10 +125,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "lock-acquired": "contention",
   "merge-queued": "publication",
   "merge-completed": "publication",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] onepipeline declares these kinds; this package decides only their display categories. tests/contract.rs::the_browser_files_every_kind_those_libraries_declare failed naming these four missing corpus entries when the engine moved to 0.70.0. This corpus exercises the public eventCategory boundary and reconciles its copied vocabulary to the producer; moving it upstream would move the browser category decision outside the package that owns it.
   "change-retitled": "publication",
   "title-unverified": "publication",
   "node-restack-started": "lifecycle",
   "node-restacked": "lifecycle",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "change-opened": "publication",
   "change-check": "verification",
   "change-merged": "publication",
