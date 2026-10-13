@@ -248,8 +248,9 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 ///
 /// **Schema 11 carries where a change request's review stood.** `onevcs` opens
 /// every remote change request as a draft while its required checks run, watches
-/// them, and then lifts the draft, lifts it early because the checks skip drafts,
-/// or keeps it a draft for its own user's review. An event produced by a
+/// them, and then lifts the draft, lifts it early because the checks skip drafts
+/// and nothing is in progress on the pushed head, or keeps it a draft for its
+/// own user's review. An event produced by a
 /// `change-check`, `change-drafted`, `draft-lifted`, `draft-lifted-early`,
 /// `draft-kept-for-review` or `checks-settled` carries **`review`**, that record's
 /// own fields — `name`, `required` and `state` on a check, where `state` is the
