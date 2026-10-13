@@ -18167,6 +18167,11 @@ fn an_invalidation_names_the_project_group_that_moved() {
     assert_eq!(data["project"], json!(fixture_run::PLAN_PROJECT), "{data}");
 }
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] This journey belongs
+// to the e2e tier that already owns server plan reads and adoption. It uses that tier's
+// existing CLI and server prerequisites, with no extra build, provisioning or paid
+// dependency; the only additional process is a loopback board. Both cache modes together
+// took 17.8 seconds under nextest, so there is no separate expensive dependency to isolate.
 /// The browser's retained engine reads and settles a remotely stored plan with
 /// caching enabled, using the same source configuration as the launching CLI.
 #[cfg(unix)]
@@ -18412,3 +18417,4 @@ fn remote_plan_cache_adoption(enabled: bool) {
     // llmlint: ignore-end[tests_mirror_real_usage]
     serving.stop_on(Stop::Terminate);
 }
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]

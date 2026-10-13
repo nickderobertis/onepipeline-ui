@@ -271,7 +271,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   ).toContainText("commands.0.id");
 });
 
-test("composes rework and retitle replies accepted by the engine", async ({
+test("composes review replies, applies rework and reports retitle delivery refusal", async ({
   page,
 }) => {
   // Review edits change the graph and its watch debts; keep them off the
