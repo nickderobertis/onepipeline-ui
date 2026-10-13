@@ -18234,6 +18234,10 @@ fn remote_plan_cache_adoption(enabled: bool) {
         "{}",
         String::from_utf8_lossy(&launched.stderr)
     );
+    // llmlint: ignore-block[tests_mirror_real_usage] The manager's amendment requires
+    // seeding a task through the linked store before adoption and observing its public
+    // cache state. These are released SDK APIs, not engine internals; the launch, reads,
+    // adoption and settlement still go through the CLI and real server routes below.
     let loaded = onetaskgraph_core::config::load(
         &dir,
         &onetaskgraph_core::Environment::from_os_pairs(vec![(
@@ -18267,6 +18271,7 @@ fn remote_plan_cache_adoption(enabled: bool) {
             onetaskgraph_core::cache::Served::Cache
         );
     }
+    // llmlint: ignore-end[tests_mirror_real_usage]
     let run = "cached-approval";
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
@@ -18361,6 +18366,10 @@ fn remote_plan_cache_adoption(enabled: bool) {
             }),
         "no settlement mutation reached the board: {state}"
     );
+    // llmlint: ignore-block[tests_mirror_real_usage] The amended criterion explicitly
+    // requires the store's observable cache state for a pinned read after write-back.
+    // The read API exposes no cache diagnostic route; the public SDK observes the same
+    // directory the real adopted driver used without replacing any layer under test.
     // The adopted driver's unpinned write must retire the earlier entry.
     runtime
         .block_on(store.task(&task))
@@ -18380,5 +18389,6 @@ fn remote_plan_cache_adoption(enabled: bool) {
             "disabled caching wrote an entry"
         );
     }
+    // llmlint: ignore-end[tests_mirror_real_usage]
     serving.stop_on(Stop::Terminate);
 }

@@ -4,12 +4,26 @@ Answers come from mutable board state; unknown operations are refused. The real
 released GitHub plugin and engine read and project through this HTTP boundary.
 Adapted from onepipeline 0.70.0's tests/e2e/github_loopback.py.
 """
+import argparse
 import json
 import pathlib
-import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-root = pathlib.Path(sys.argv[1])
+def directory(value):
+    path = pathlib.Path(value)
+    if not path.is_absolute() or not path.is_dir():
+        raise argparse.ArgumentTypeError("board root must be an existing absolute directory")
+    return path.resolve()
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("root", type=directory)
+root = parser.parse_args().root
+# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] This task requires a
+# loopback board stand-in at the real remote plugin's HTTP boundary. These are fixture
+# responses for the released plugin, not an API definition shipped to consumers; the
+# journey drives that unmodified plugin and refuses unsupported operations here. Importing
+# its Rust record types would not describe GitHub's GraphQL wire or exercise its parser.
 options = ["Todo", "Queued", "In Progress", "Needs Attention", "Done", "Canceled"]
 
 
@@ -165,6 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"data": {alias: {"projectV2": board}}}
         return {"errors": [{"message": "unsupported loopback operation: " + query}]}
 
+# llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 server = HTTPServer(("127.0.0.1", 0), Handler)
 save()

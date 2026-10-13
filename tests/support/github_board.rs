@@ -61,3 +61,20 @@ impl Drop for GitHubBoard {
         let _ = self.child.wait();
     }
 }
+
+#[test]
+fn the_board_refuses_missing_and_relative_roots_before_writing() {
+    for arguments in [Vec::<&str>::new(), vec!["relative-board"]] {
+        let output = Command::new("python3")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"))
+            .args(arguments)
+            .output()
+            .expect("run the board with invalid arguments");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("error:"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
