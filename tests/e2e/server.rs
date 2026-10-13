@@ -18171,7 +18171,7 @@ fn an_invalidation_names_the_project_group_that_moved() {
 /// caching enabled, using the same source configuration as the launching CLI.
 #[cfg(unix)]
 #[test]
-fn an_adopted_run_reads_and_settles_a_cache_enabled_remote_plan() {
+fn an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled() {
     for enabled in [true, false] {
         remote_plan_cache_adoption(enabled);
     }
@@ -18192,6 +18192,26 @@ fn remote_plan_cache_adoption(enabled: bool) {
     )
     .expect("the unused dispatch harness configuration");
     let board = crate::github_board::GitHubBoard::start(&dir);
+    let address = board
+        .url
+        .strip_prefix("http://")
+        .expect("HTTP board")
+        .parse()
+        .expect("loopback address");
+    let refused = http::post(
+        address,
+        "/graphql",
+        r#"{"query":"query { viewer { login } }","variables":{}}"#,
+    );
+    assert_eq!(refused.status, 401, "{}", refused.body);
+    assert_eq!(
+        refused.json()["errors"][0]["message"],
+        json!("invalid board token")
+    );
+    assert!(board.state()["requests"]
+        .as_array()
+        .expect("requests")
+        .is_empty());
     let cache = dir.join("source-cache");
     fs::write(
         dir.join("onetaskgraph.yaml"),

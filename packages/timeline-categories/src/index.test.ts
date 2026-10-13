@@ -76,10 +76,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "round-finished": "lifecycle",
   "round-budget-exceeded": "failure",
   "body-not-drafted": "publication",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] The engine owns these event kinds, while this package owns the browser's category decisions. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` requires corpus entries for all four; the corpus pins their meanings and the exception table implements that presentation vocabulary, which no producer draws.
   "change-retitled": "publication",
   "title-unverified": "verification",
   "node-restack-started": "repository",
   "node-restacked": "repository",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A run-end hook is the run's own boundary: it fires once the driver has let
   // go of the run, and what it reports is that the run ended one way or another.
   "run-hook-fired": "lifecycle",

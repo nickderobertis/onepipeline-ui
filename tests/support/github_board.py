@@ -108,6 +108,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_POST(self):
+        if self.headers.get("Authorization") != "Bearer loopback-token":
+            self.reply({"errors": [{"message": "invalid board token"}]}, 401)
+            return
         try:
             length = int(self.headers.get("Content-Length", ""))
             if not 0 < length <= 262144:
