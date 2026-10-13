@@ -18172,6 +18172,13 @@ fn an_invalidation_names_the_project_group_that_moved() {
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_reads_and_settles_a_cache_enabled_remote_plan() {
+    for enabled in [true, false] {
+        remote_plan_cache_adoption(enabled);
+    }
+}
+
+#[cfg(unix)]
+fn remote_plan_cache_adoption(enabled: bool) {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     // Start validates the dispatch graph even though this human-only plan never dispatches it.
@@ -18189,7 +18196,7 @@ fn an_adopted_run_reads_and_settles_a_cache_enabled_remote_plan() {
     fs::write(
         dir.join("onetaskgraph.yaml"),
         format!(
-            "sources:\n  board:\n    plugin: github-projects\n    cache:\n      enabled: true\n      dir: {cache:?}\n    config:\n      owner: generic\n      project_number: 1\n      token_env: CACHE_BOARD_TOKEN\n      endpoint: {}/graphql\n      status_mapping:\n        todo: Todo\n        queued: Queued\n        in-progress: In Progress\n        unknown: Needs Attention\n        done: Done\n        cancelled: Canceled\n",
+            "sources:\n  board:\n    plugin: github-projects\n    cache:\n      enabled: {enabled}\n      dir: {cache:?}\n    config:\n      owner: generic\n      project_number: 1\n      token_env: CACHE_BOARD_TOKEN\n      endpoint: {}/graphql\n      status_mapping:\n        todo: Todo\n        queued: Queued\n        in-progress: In Progress\n        unknown: Needs Attention\n        done: Done\n        cancelled: Canceled\n",
             board.url,
         ),
     ).expect("the cache-enabled store configuration");
@@ -18227,10 +18234,38 @@ fn an_adopted_run_reads_and_settles_a_cache_enabled_remote_plan() {
         "{}",
         String::from_utf8_lossy(&launched.stderr)
     );
-    // Discard the launching CLI's entries: only the read API's retained engine
-    // can refill this directory during adoption.
-    if cache.exists() {
-        fs::remove_dir_all(&cache).expect("discard the launch-time cache");
+    let loaded = onetaskgraph_core::config::load(
+        &dir,
+        &onetaskgraph_core::Environment::from_os_pairs(vec![(
+            "CACHE_BOARD_TOKEN".into(),
+            "loopback-token".into(),
+        )]),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the linked store loads the source configuration");
+    let store = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let task = "board:approve"
+        .parse::<onetaskgraph_core::GlobalId>()
+        .expect("source task");
+    let runtime = tokio::runtime::Runtime::new().expect("store runtime");
+    // Seed through the linked store, then prove the pinned read uses that entry.
+    let initial = runtime
+        .block_on(store.task(&task))
+        .expect("seed the task cache");
+    let version = initial.items[0]
+        .item
+        .version
+        .as_deref()
+        .expect("remote version");
+    store.pin(&task, version);
+    runtime
+        .block_on(store.task(&task))
+        .expect("read the pinned task");
+    if enabled {
+        assert_eq!(
+            store.cache_use(&task).expect("cache state").served,
+            onetaskgraph_core::cache::Served::Cache
+        );
     }
     let run = "cached-approval";
     let serving = Serving::start_in_as_with_env_removing(
@@ -18326,20 +18361,24 @@ fn an_adopted_run_reads_and_settles_a_cache_enabled_remote_plan() {
             }),
         "no settlement mutation reached the board: {state}"
     );
-    let entries: Vec<Value> = fs::read_dir(cache.join("tasks"))
-        .expect("source cache entries")
-        .map(|entry| {
-            serde_json::from_str(
-                &fs::read_to_string(entry.expect("cache entry").path()).expect("entry bytes"),
-            )
-            .expect("entry JSON")
-        })
-        .collect();
-    assert!(
-        entries
-            .iter()
-            .any(|entry| entry["task"]["id"] == json!("approve")),
-        "{entries:?}"
-    );
+    // The adopted driver's unpinned write must retire the earlier entry.
+    runtime
+        .block_on(store.task(&task))
+        .expect("read the earlier pinned version after settlement");
+    if enabled {
+        assert_eq!(
+            store.cache_use(&task).expect("cache state").served,
+            onetaskgraph_core::cache::Served::Remote
+        );
+    } else {
+        assert!(
+            !cache.exists()
+                || fs::read_dir(&cache)
+                    .expect("cache directory")
+                    .next()
+                    .is_none(),
+            "disabled caching wrote an entry"
+        );
+    }
     serving.stop_on(Stop::Terminate);
 }
