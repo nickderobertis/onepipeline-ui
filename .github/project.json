@@ -31,11 +31,6 @@
       "inputs": ["workflowPolicy"],
       "dependsOn": ["bootstrap"]
     },
-    "typecheck": {
-      "command": "node .github/lint.mjs --syntax",
-      "inputs": ["workflowPolicy"],
-      "dependsOn": ["bootstrap"]
-    },
     "budgets": {
       "command": "node .github/check-budgets.mjs",
       "dependsOn": ["test"],
@@ -43,7 +38,7 @@
     },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": ["lint", "typecheck", "budgets"]
+      "dependsOn": ["lint", "budgets"]
     }
   }
 }

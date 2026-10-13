@@ -97,7 +97,15 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
     package = run('node', 'scripts/npm-build.mjs', 'platform', '--target', target, '--binary', str(executable), '--version', version, '--expect-sha256', sha(binary), '--out', str(npm_out))
     npm_artifacts = (out / 'npm-artifacts').resolve()
     npm_artifacts.mkdir(exist_ok=True)
-    packed = json.loads(run('npm', 'pack', '--json', '--pack-destination', str(npm_artifacts), cwd=package))[0]['filename']
+    packed_info = json.loads(run('npm', 'pack', '--json', '--pack-destination', str(npm_artifacts), cwd=package))
+    expected_filename = f'{Path(package).name}-{version}.tgz'
+    if not (isinstance(packed_info, list) and len(packed_info) == 1
+            and isinstance(packed_info[0], dict)
+            and packed_info[0].get('name') == Path(package).name
+            and packed_info[0].get('version') == version
+            and packed_info[0].get('filename') == expected_filename):
+        raise StagingError('npm pack returned invalid package metadata', 'inspect npm pack --json output; it must describe exactly the staged platform package and release version')
+    packed = packed_info[0]['filename']
     with tarfile.open(npm_artifacts / packed) as archive:
         if sha(archive.extractfile(f'package/bin/{name}').read()) != sha(binary):
             raise StagingError('npm changed binary bytes', 'inspect npm-build.mjs and the packed payload; use the extracted wheel binary unchanged')

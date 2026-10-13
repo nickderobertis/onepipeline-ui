@@ -201,11 +201,23 @@ async function main() {
     ])
       .toString()
       .trim();
-    const launcherTarball = JSON.parse(
+    const launcherPack = JSON.parse(
       run("npm", ["pack", "--json", "--pack-destination", scratch], {
         cwd: launcher,
       }).toString(),
-    )[0].filename;
+    );
+    const launcherTarball = `onepipeline-api-cli-${version}.tgz`;
+    if (
+      !Array.isArray(launcherPack) ||
+      launcherPack.length !== 1 ||
+      launcherPack[0]?.name !== "onepipeline-api-cli" ||
+      launcherPack[0]?.version !== version ||
+      launcherPack[0]?.filename !== launcherTarball
+    )
+      throw fault(
+        "npm pack returned invalid launcher metadata",
+        "inspect npm pack --json output; rebuild the launcher for this release version",
+      );
     const arch = target.startsWith("x86_64") ? "x64" : "arm64";
     const platform = target.includes("darwin") ? "darwin" : "linux";
     const packageName = `onepipeline-api-cli-${platform}-${arch}`;
@@ -221,6 +233,25 @@ async function main() {
     const manifest = JSON.parse(
       readFileSync(join(root, "npm", packageName, "package.json"), "utf8"),
     );
+    if (
+      !manifest ||
+      typeof manifest !== "object" ||
+      Array.isArray(manifest) ||
+      manifest.name !== packageName ||
+      manifest.version !== version ||
+      !Array.isArray(manifest.os) ||
+      manifest.os.length !== 1 ||
+      manifest.os[0] !== platform ||
+      !Array.isArray(manifest.cpu) ||
+      manifest.cpu.length !== 1 ||
+      manifest.cpu[0] !== arch ||
+      !Array.isArray(manifest.files) ||
+      !manifest.files.includes("bin/onepipeline-api")
+    )
+      throw fault(
+        "invalid staged npm platform metadata",
+        "rebuild this target's platform package with npm-build.mjs; its name, version, os, cpu and binary contents must match the selected target",
+      );
     // Only registry transport is doubled: npm resolves the real launcher's
     // optional dependency and installs the producer's actual tarball.
     let registryUrl;

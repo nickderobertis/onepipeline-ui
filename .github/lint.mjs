@@ -8,10 +8,9 @@ const modules = [".github", ".github/tests"].flatMap((directory) =>
     .filter((file) => file.endsWith(".mjs"))
     .map((file) => `${directory}/${file}`),
 );
-if (process.argv.includes("--syntax")) {
-  for (const file of modules)
-    execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
-} else {
+for (const file of modules)
+  execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
+if (!process.argv.includes("--syntax")) {
   execFileSync(
     process.execPath,
     [

@@ -158,7 +158,7 @@ test("telemetry boundary rejects malformed measurements and nested rows from a c
 
 test("the production budget gate accepts recorded workflow rows and rejects a duplicate Mac job and missing telemetry", () => {
   const scratch = mkdtempSync(
-    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR, "budget-gate-"),
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "budget-gate-"),
   );
   try {
     cpSync(".github", join(scratch, ".github"), {

@@ -1935,6 +1935,73 @@ fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("embedded view passed"));
+    let record_path = fs::read_dir(scratch.path())
+        .expect("staging entries")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("reuse.json"))
+        .find(|path| path.is_file())
+        .expect("native reuse record");
+    let record: serde_json::Value =
+        serde_json::from_slice(&fs::read(record_path).expect("record bytes")).expect("reuse JSON");
+    let target = record["target"].as_str().expect("record target");
+    let manifest_path = fs::read_dir(scratch.path().join("npm"))
+        .expect("platform packages")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("package.json"))
+        .find(|path| path.is_file())
+        .expect("native platform manifest");
+    let original = fs::read(&manifest_path).expect("manifest bytes");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&original).expect("platform metadata");
+    manifest["version"] = serde_json::json!("9.9.9");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&manifest).expect("encode metadata"),
+    )
+    .expect("write mismatched metadata");
+    let verify = |provider: Option<&Path>| {
+        let mut command = std::process::Command::new("node");
+        command
+            .arg("scripts/verify-staged-release.mjs")
+            .arg(scratch.path())
+            .arg(target)
+            .arg(env!("CARGO_PKG_VERSION"))
+            .current_dir(env!("CARGO_MANIFEST_DIR"));
+        if let Some(provider) = provider {
+            let mut paths = vec![provider.to_path_buf()];
+            paths.extend(std::env::split_paths(
+                &std::env::var_os("PATH").expect("PATH"),
+            ));
+            command.env("PATH", std::env::join_paths(paths).expect("provider PATH"));
+        }
+        command.output().expect("verify actual staged products")
+    };
+    let mismatch = verify(None);
+    assert!(!mismatch.status.success());
+    let message = String::from_utf8_lossy(&mismatch.stderr);
+    assert!(
+        message.contains("invalid staged npm platform metadata"),
+        "{message}"
+    );
+    assert!(message.contains("ACTION:"), "{message}");
+    fs::write(&manifest_path, original).expect("restore platform manifest");
+    let provider = scratch.path().join("npm-provider");
+    fs::create_dir(&provider).expect("provider directory");
+    let npm = provider.join("npm");
+    fs::write(&npm, "#!/usr/bin/env bash\nprintf '[]\n'\n").expect("malformed pack provider");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(npm, fs::Permissions::from_mode(0o755)).expect("provider executable");
+    }
+    let malformed = verify(Some(&provider));
+    assert!(!malformed.status.success());
+    let message = String::from_utf8_lossy(&malformed.stderr);
+    assert!(
+        message.contains("npm pack returned invalid launcher metadata"),
+        "{message}"
+    );
+    assert!(message.contains("ACTION:"), "{message}");
 }
 
 #[test]

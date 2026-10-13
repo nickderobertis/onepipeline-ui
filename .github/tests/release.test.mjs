@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -141,6 +147,38 @@ with tarfile.open(root/'npm-artifacts'/('onepipeline-api-cli-darwin-'+arch+'-1.0
       );
       assert.notEqual(refused.status, 0);
       assert.match(refused.stderr, /declared Darwin architecture/);
+      const provider = join(scratch, "npm-provider");
+      mkdirSync(provider, { recursive: true });
+      writeFileSync(
+        join(provider, "npm"),
+        '#!/usr/bin/env bash\nprintf "%s\n" "$PACK_RESPONSE"\n',
+        { mode: 0o755 },
+      );
+      for (const response of [
+        "[]",
+        JSON.stringify([
+          {
+            name: `onepipeline-api-cli-darwin-${arch === "arm64" ? "arm64" : "x64"}`,
+            version: "1.0.0",
+            filename: "../escaped.tgz",
+          },
+        ]),
+      ]) {
+        const malformed = spawnSync("python3", args, {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${provider}:${process.env.PATH}`,
+            PACK_RESPONSE: response,
+          },
+        });
+        assert.notEqual(malformed.status, 0);
+        assert.match(
+          malformed.stderr,
+          /npm pack returned invalid package metadata/,
+        );
+        assert.match(malformed.stderr, /ACTION:/);
+      }
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -251,5 +289,50 @@ test("real workflow command usage errors return 2 with an actionable diagnostic"
     });
     assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, /ACTION:/);
+  }
+});
+
+test("real release commands diagnose failed external toolchain setup with next actions", () => {
+  const scratch = mkdtempSync(
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(),
+      "toolchain-failure-",
+    ),
+  );
+  try {
+    for (const [script, tool, expected] of [
+      [
+        "scripts/release-darwin.sh",
+        "rustup",
+        /confirm the pinned Rust toolchain/,
+      ],
+      [
+        "scripts/release-native-dry-run.sh",
+        "python3",
+        /install Python with venv support/,
+      ],
+    ]) {
+      const provider = join(scratch, tool);
+      mkdirSync(provider);
+      writeFileSync(
+        join(provider, tool),
+        '#!/usr/bin/env bash\necho "toolchain provider unavailable" >&2\nexit 1\n',
+        { mode: 0o755 },
+      );
+      const result = spawnSync("bash", [script, join(scratch, "out")], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${provider}:${process.env.PATH}`,
+          DARWIN_TARGETS: "aarch64-apple-darwin",
+        },
+      });
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.match(result.stderr, /failed/);
+      assert.match(result.stderr, /ACTION:/);
+      assert.match(result.stderr, expected);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

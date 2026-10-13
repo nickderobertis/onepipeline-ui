@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -289,7 +290,7 @@ test("actual reusable deploy condition respects cancellation", () => {
 
 test("snapshot verification strips only the approved annotation and rejects any upstream byte change", () => {
   const scratch = mkdtempSync(
-    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR, "snapshot-"),
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "snapshot-"),
   );
   try {
     mkdirSync(join(scratch, ".github/fixtures"), { recursive: true });
