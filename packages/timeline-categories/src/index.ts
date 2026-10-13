@@ -194,6 +194,13 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
  * would be a rule that generalises to nothing.
  */
 const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
+  // A change request's title changed; the record concerns its publication.
+  "change-retitled": "publication",
+  // The requested title could not be verified on the remote change request.
+  "title-unverified": "verification",
+  // Restacking moves a dependent branch onto its reworked ancestor's head.
+  "node-restack-started": "repository",
+  "node-restacked": "repository",
   // Asking a run to complete is a boundary of the run, not a plan being edited.
   "completion-requested": "lifecycle",
   // A command the run accepted that committed nothing a reader folds — a finding

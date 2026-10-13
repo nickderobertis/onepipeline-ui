@@ -980,6 +980,8 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "note",
     "finding",
     "settle",
+    "rework",
+    "retitle",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,
@@ -1023,6 +1025,40 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("review replies preserve rework comments and retitles and refuse malformed comments", () => {
+  const commands = [
+    {
+      op: "rework",
+      id: "build",
+      reason: "Review requested a correction",
+      instruction: "Fix the reported regression",
+      comments: [{ id: "review-1", url: "https://example.com/review/1" }],
+      title: "fix: correct the regression",
+      replacement: "build-rework-1",
+    },
+    {
+      op: "retitle",
+      id: "build",
+      title: "fix: correct the regression",
+      reason: "Match the change",
+    },
+  ];
+  const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
+  expect(replyEnvelopeSchema.parse(envelope)).toEqual(envelope);
+  expect(
+    replyEnvelopeSchema.safeParse({
+      ...envelope,
+      commands: [{ ...commands[0], comments: [{ id: "review-1" }] }],
+    }).success,
+  ).toBe(false);
+  expect(
+    replyEnvelopeSchema.safeParse({
+      ...envelope,
+      commands: [{ ...commands[1], title: "" }],
+    }).success,
+  ).toBe(false);
 });
 
 test("the model's reply commands are the engine's, op for op and field for field", async () => {
