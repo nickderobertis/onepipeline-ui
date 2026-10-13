@@ -37,14 +37,22 @@ import {
   existsSync,
   mkdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
+import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import {
   buildPreservedRuns,
   buildRuns,
@@ -294,6 +302,30 @@ async function serve(workspace, port, ui, corpus) {
   // These journeys ask for unbudgeted watches under the explicit --session
   // below; a dispatch host's wake promise and session belong to its own runs.
   const fixtureEnvironment = { ...process.env };
+  // Match tests/support/serving.rs: omit every PATH directory containing a
+  // registered harness. tests/contract.rs holds this corpus to the linked SDK.
+  // Keep node available even when it shares a directory with a host's adapters.
+  const utilityBin = join(workspace, "utility-bin");
+  mkdirSync(utilityBin, { recursive: true });
+  symlinkSync(process.execPath, join(utilityBin, "node"));
+  fixtureEnvironment.PATH = [
+    utilityBin,
+    ...(process.env.PATH ?? "")
+      .split(delimiter)
+      .filter(
+        (dir) => !harnessBinaries.some((bin) => existsSync(join(dir, bin))),
+      ),
+  ].join(delimiter);
+  // User configuration can name a provider by absolute path too. Give this
+  // server its own empty user config; explicit adopted-dispatch configs remain
+  // the fixture's real subprocess doubles.
+  const providerConfig = join(workspace, "provider-config.toml");
+  writeFileSync(providerConfig, "");
+  fixtureEnvironment.ONEHARNESS_CONFIG = providerConfig;
+  // Copilot's quota reader uses HTTP credentials instead of an executable.
+  delete fixtureEnvironment.COPILOT_GITHUB_TOKEN;
+  delete fixtureEnvironment.GH_TOKEN;
+  delete fixtureEnvironment.GITHUB_TOKEN;
   delete fixtureEnvironment.ONEPIPELINE_WAKE_BUDGET;
   delete fixtureEnvironment.ONEPIPELINE_LAUNCHER_SESSION;
   const server = spawn(

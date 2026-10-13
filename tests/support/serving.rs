@@ -601,6 +601,8 @@ impl Drop for ForeignServing {
 /// oneharness's own registry names, so the engine's provider sweep — which finds
 /// each harness on `PATH` — finds none and probes nothing. Read off the
 /// registry rather than a list kept here, so a harness it adds is left off too.
+/// The browser fixture applies this same rule using harness-binaries.json, held
+/// to this registry by tests/contract.rs.
 /// Configuration is left alone: a harness a config file names by its own path
 /// is still found, and would still be probed.
 fn path_without_harnesses() -> std::ffi::OsString {

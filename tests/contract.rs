@@ -3946,3 +3946,17 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
     // And so is a list this grammar does not have, for the same reason.
     assert!(serde_json::from_str::<EventFilter>(r#"{"only":[]}"#).is_err());
 }
+
+#[test]
+fn the_browser_fixture_excludes_the_linked_harness_binaries_from_its_path() {
+    let corpus: Vec<String> = serde_json::from_str(include_str!(
+        "../apps/dag-ui-e2e/fixtures/harness-binaries.json"
+    ))
+    .expect("browser harness binary corpus");
+    let mut declared: Vec<_> = oneharness_core::domain::harness::all()
+        .iter()
+        .map(|spec| spec.default_bin)
+        .collect();
+    declared.sort_unstable();
+    assert_eq!(corpus, declared);
+}

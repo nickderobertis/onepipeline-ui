@@ -446,7 +446,50 @@ test("adopts a run nothing is driving, then attests the human action its driver 
   ).toHaveCount(0);
 
   // A run nothing drives does, and the adoption answers the driver's pid.
+  const statusRead = page.waitForResponse((response) =>
+    response.url().includes(`/runs/${runs().adoptable}/status`),
+  );
   await page.goto(`/?run=${runs().adoptable}&view=channel`);
+  const statusResponse = await statusRead;
+  expect(statusResponse.status()).toBe(200);
+  const status = runStatusSchema.parse(await statusResponse.json());
+  expect(status.liveness).toBe("DRIVER DEAD");
+  // The real status rendering includes the SDK's provider report. Every
+  // executable is absent from this fixture's isolated PATH, so no host's
+  // subscription can be probed while the browser waits for its liveness.
+  const providerReport = z
+    .object({
+      identities: z.array(
+        z.object({
+          harness: z.string(),
+          availability: z.object({
+            state: z.string(),
+            reason: z.union([
+              z.string(),
+              z.object({
+                kind: z.string(),
+                bin: z.string().optional(),
+                message: z.string().optional(),
+              }),
+            ]),
+          }),
+        }),
+      ),
+    })
+    .parse(JSON.parse(status.rendered.split("  providers: ")[1] ?? "null"));
+  expect(providerReport.identities.length).toBeGreaterThan(0);
+  for (const { harness, availability } of providerReport.identities) {
+    if (harness === "copilot") {
+      expect(availability.reason).toMatchObject({
+        kind: "probe_failed",
+        message: expect.stringContaining("no GitHub token"),
+      });
+    } else if (typeof availability.reason !== "string") {
+      expect(availability.reason.kind).toBe("binary_missing");
+    } else {
+      expect(availability.state).toBe("unavailable");
+    }
+  }
   await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible();
   const actions = page.getByRole("region", { name: "Ready human actions" });
   await expect(actions).toContainText(
