@@ -529,6 +529,9 @@ onemessagebus = "0.9.0"
 # pre-registry dispatch gone when its last stop signalled workers and no
 # adoption followed. `host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone`
 # holds that rendering and a teardown refusal over HTTP.
+# 0.70.0 links onevcs 0.48.1: an early draft lift requires no work in
+# progress on the pushed head. The browser-adopted run uses this engine;
+# `healthz_answers_without_reading_run_storage` proves the linked release.
 onepipeline = "=0.70.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
