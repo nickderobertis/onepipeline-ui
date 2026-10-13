@@ -42,7 +42,9 @@
       "{workspaceRoot}/tests/support/journal_schema.rs",
       "{workspaceRoot}/tests/support/scratch_repo.rs",
       "{workspaceRoot}/tests/support/serving.rs",
-      "{workspaceRoot}/tests/support/sibling.rs"
+      "{workspaceRoot}/tests/support/sibling.rs",
+      "{workspaceRoot}/tests/support/github_board.rs",
+      "{workspaceRoot}/tests/support/github_board.py"
     ]
   }
 }

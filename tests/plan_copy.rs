@@ -60,6 +60,9 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
         recreate: false,
         create: false,
         dry_run: false,
+        comments: false,
+        expect: None,
+        no_link: false,
     };
     let plan = engine
         .copy(&request(

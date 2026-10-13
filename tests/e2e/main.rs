@@ -99,3 +99,7 @@ mod stub_bin;
 mod timeline_schema;
 #[path = "../support/workflow.rs"]
 mod workflow;
+
+#[cfg(unix)]
+#[path = "../support/github_board.rs"]
+mod github_board;
