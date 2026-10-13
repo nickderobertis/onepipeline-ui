@@ -10,6 +10,7 @@
       "{workspaceRoot}/release-plz.toml",
       "{workspaceRoot}/release-targets.toml",
       "{workspaceRoot}/scripts/release-darwin.sh",
+      "{workspaceRoot}/scripts/release-native-dry-run.sh",
       "{workspaceRoot}/scripts/release-package.py",
       "{workspaceRoot}/scripts/verify-staged-release.mjs",
       "{workspaceRoot}/scripts/npm-build.mjs"

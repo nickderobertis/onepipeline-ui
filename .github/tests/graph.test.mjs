@@ -314,7 +314,7 @@ test("snapshot verification strips only the approved annotation and rejects any 
     const file = join(scratch, ".github/fixtures/screencomp-v0.4.8.yml");
     writeFileSync(
       file,
-      readFileSync(file, "utf8") + "# changed upstream byte\n",
+      `${readFileSync(file, "utf8")}# changed upstream byte\n`,
     );
     const refused = run();
     assert.notEqual(refused.status, 0);
