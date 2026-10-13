@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.30.1...v0.31.0) - 2026-10-12
+
+### Added
+
+- *(deps)* [**breaking**] announce that the public surface follows onepipeline 0.69's types ([#313](https://github.com/nickderobertis/onepipeline-ui/pull/313))
+
+### Fixed
+
+- *(deps)* link the engine whose host view reads only live runs ([#311](https://github.com/nickderobertis/onepipeline-ui/pull/311))
+
 ## [0.30.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.30.0...v0.30.1) - 2026-10-12
 
 ### Added
