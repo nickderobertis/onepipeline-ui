@@ -620,7 +620,7 @@ directory are all chosen exactly as they are for the e2e run, and it adds what m
 capture reproducible: Chromium's determinism flags and the fixed instant the corpus and
 the browser clock are both pinned to.
 
-The capture lands in the directory `SHOTS_OUT` names — which is how the pre-push guard
+The capture lands in the directory `SHOTS_OUT` names — which is how manual review
 and `.github/workflows/visual-docs.yml` point it at `shots/current/<arch>` — and, when
 nothing names one, in a directory of that invocation's own under the gitignored
 `shots/local/`, so two operators or two agents capturing at the same time neither

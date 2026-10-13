@@ -14,8 +14,8 @@ import { repoFile, repoPath } from "./repo-file";
  * control for). A prose note asking a maintainer to keep copies in step is not a
  * gate; this is.
  *
- * The one that matters most is the image. The pre-push guard is what regenerates the
- * baseline CI compares against, so if the guard and CI render in different browsers
+ * The one that matters most is the image. Manual capture regenerates the
+ * baseline CI compares against, so if local capture and CI render in different browsers
  * the committed baseline is a record of one machine's pixels and CI fails on
  * everything — which reads as a broken gate rather than as a skewed pin.
  *
