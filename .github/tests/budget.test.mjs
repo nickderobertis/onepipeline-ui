@@ -12,6 +12,24 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { digest, resolveScenario } from "../workflow-graph.mjs";
 
+test("budget reporter distinguishes usage errors from telemetry failures", () => {
+  for (const args of [
+    [],
+    ["--metric", "unknown", "--telemetry", "missing.json"],
+    ["--metric", "jobs-per-run"],
+    ["--metric"],
+    ["--unknown"],
+    ["unexpected"],
+  ]) {
+    const result = spawnSync("node", [".github/macos-budget.mjs", ...args], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 2, JSON.stringify(args));
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /ACTION:/);
+  }
+});
+
 test("real telemetry reporter refuses missing and stale source evidence", () => {
   const scratch = mkdtempSync(
     join(
@@ -31,7 +49,7 @@ test("real telemetry reporter refuses missing and stale source evidence", () => 
       ],
       { encoding: "utf8" },
     );
-    assert.notEqual(missing.status, 0);
+    assert.equal(missing.status, 1);
     assert.match(missing.stderr, /ENOENT/);
     const stale = join(scratch, "stale.json");
     writeFileSync(
@@ -49,7 +67,7 @@ test("real telemetry reporter refuses missing and stale source evidence", () => 
       ],
       { encoding: "utf8" },
     );
-    assert.notEqual(refused.status, 0);
+    assert.equal(refused.status, 1);
     assert.match(refused.stderr, /missing or stale telemetry/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

@@ -135,6 +135,8 @@ function validate(telemetry) {
     "aggregate measurements",
   );
 }
+class UsageError extends Error {}
+
 try {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   process.chdir(root);
@@ -142,8 +144,8 @@ try {
     options: { metric: { type: "string" }, telemetry: { type: "string" } },
   });
   if (!["jobs-per-run", "runs-per-change"].includes(values.metric))
-    throw new Error("unknown metric");
-  if (!values.telemetry) throw new Error("--telemetry is required");
+    throw new UsageError("unknown metric");
+  if (!values.telemetry) throw new UsageError("--telemetry is required");
   const telemetry = JSON.parse(
     readFileSync(resolve(root, values.telemetry), "utf8"),
   );
@@ -173,5 +175,8 @@ try {
   console.error(
     "ACTION: supply a supported metric and freshly recorded telemetry from github-workflows:test",
   );
-  process.exitCode = 1;
+  process.exitCode =
+    error instanceof UsageError || error.code?.startsWith("ERR_PARSE_ARGS_")
+      ? 2
+      : 1;
 }
