@@ -40,6 +40,7 @@
 //
 // Every mode prints the created package directory on stdout.
 
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -190,6 +191,17 @@ function buildPlatform(args) {
     );
   }
 
+  if (args["expect-sha256"] !== undefined) {
+    const expected = args["expect-sha256"];
+    const actual = createHash("sha256").update(readFileSync(srcBin)).digest("hex");
+    if (!/^[a-f0-9]{64}$/.test(expected) || actual !== expected) {
+      die(
+        "platform: binary does not match the verified wheel SHA256",
+        "pass the SHA256 of the final wheel binary; do not rebuild it for npm"
+      );
+    }
+  }
+
   attempt(
     `cannot assemble ${pkgName} under ${outRoot}`,
     "check that --out names a writable directory with room for the binary",
@@ -312,7 +324,7 @@ function buildUi(args) {
 
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "platform") {
-  buildPlatform(parseArgs(rest, ["target", "binary", "version", "out"]));
+  buildPlatform(parseArgs(rest, ["target", "binary", "version", "out", "expect-sha256"]));
 } else if (mode === "launcher") {
   buildLauncher(parseArgs(rest, ["version", "out"]));
 } else if (mode === "ui") {

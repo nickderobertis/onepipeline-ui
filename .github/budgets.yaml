@@ -1,0 +1,34 @@
+schema_version: 1
+budgets:
+  # llmlint: ignore[budgets_track_product_owner_outcomes] The brief explicitly requests both jobs/run and Mac-spending runs/change bounds; the manager approved separate budgets for these two scheduling constraints.
+  - id: onepipeline-ui-macos-jobs-per-run
+    description: >-
+      Maximum Mac runner job instances per resolved workflow run, including
+      matrices and nested calls. Telemetry covers 12 event classes, 3 diff
+      classes, same-repository/fork ownership, release architectures and publish
+      switches. inner_measure_reason: one run can occupy several shared Mac slots
+      even when the lifecycle run count stays within its bound. Design bound;
+      analysis reads recorded telemetry only, approximately 2 seconds excluding
+      tests/install; no queue-time claim.
+    measure: reported
+    command: [node, macos-budget.mjs, --metric, jobs-per-run, --telemetry, .github/.telemetry/macos-policy.json]
+    unit: jobs
+    direction: max
+    threshold: 1
+    labels: [github-workflows]
+  # llmlint: ignore[budgets_track_product_owner_outcomes] The brief explicitly requests both jobs/run and Mac-spending runs/change bounds; the manager approved separate budgets for these two scheduling constraints.
+  - id: onepipeline-ui-macos-runs-per-change
+    description: >-
+      Maximum distinct Mac-spending runs across one ordinary PR push, its base
+      merge, the automation version/changelog PR and merge, release build and
+      downstream smoke fan-out. Explicit manual diagnostics are excluded.
+      Telemetry covers 12 event classes, 3 diff classes, same-repository/fork
+      ownership, release architectures and publish switches. Design bound;
+      analysis reads recorded telemetry only, approximately 2 seconds excluding
+      tests/install; no queue-time claim.
+    measure: reported
+    command: [node, macos-budget.mjs, --metric, runs-per-change, --telemetry, .github/.telemetry/macos-policy.json]
+    unit: runs
+    direction: max
+    threshold: 2
+    labels: [github-workflows]

@@ -1032,7 +1032,7 @@ fn published_names() -> BTreeSet<String> {
                 );
                 for mode in modes {
                     if mode == "platform" {
-                        let targets = names_after(
+                        let mut targets = names_after(
                             &workflow_job(&workflow, "build-npm"),
                             "- target: ",
                             |character| !character.is_whitespace(),
@@ -1042,6 +1042,11 @@ fn published_names() -> BTreeSet<String> {
                             "the build-npm job builds no target, so no platform package \
                              is published for the launcher to resolve"
                         );
+                        let darwin = workflow_job(&workflow, "darwin");
+                        for target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
+                            assert!(darwin.contains(target), "Darwin job omits {target}");
+                            targets.insert(target.to_owned());
+                        }
                         for target in targets {
                             published
                                 .insert(format!("npm:{}", npm_platform_package(&build, &target)));
@@ -1791,6 +1796,7 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
         ("taiki-e/upload-rust-binary-action", "features: {feature}"),
         ("PyO3/maturin-action", "--features {feature}"),
         ("cargo build", "--features {feature}"),
+        ("scripts/release-darwin.sh", "scripts/release-darwin.sh"),
     ];
     let mut compiling = Vec::new();
     for job in workflow_jobs(&workflow) {
@@ -1803,6 +1809,9 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
         else {
             continue;
         };
+        if *marker == "scripts/release-darwin.sh" {
+            assert!(read("scripts/release-darwin.sh").contains(&format!("--features {feature}")));
+        }
         compiling.push(job.clone());
         let built = block.find("just build").unwrap_or_else(|| {
             panic!(
@@ -1826,7 +1835,7 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
     compiling.sort();
     assert_eq!(
         compiling,
-        ["build-npm", "build-wheels", "upload"],
+        ["build-npm", "build-wheels", "darwin", "upload"],
         "the set of release jobs that compile the binary has changed; every prebuilt \
          distribution has to embed the view"
     );
@@ -1902,4 +1911,50 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
     assert!(refusal.contains("bundled-ui"), "{refusal}");
     assert!(refusal.contains("just build"), "{refusal}");
     assert!(refusal.contains("ACTION:"), "{refusal}");
+}
+
+/// Linux can rehearse the real producer and installers without pretending to
+/// execute Darwin bytes. The release job drives these same staging commands
+/// with maturin's native/cross-built Darwin wheels.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
+    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let scratch = tempfile::tempdir_in(root).expect("release staging directory");
+    let output = std::process::Command::new("bash")
+        .arg("scripts/release-native-dry-run.sh")
+        .arg(scratch.path())
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run production packaging dry run");
+    assert!(
+        output.status.success(),
+        "production dry run failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("embedded view passed"));
+}
+
+#[test]
+fn npm_packaging_refuses_bytes_other_than_the_verified_wheel_binary() {
+    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let scratch = tempfile::tempdir_in(root).expect("package scratch");
+    let binary = scratch.path().join("onepipeline-api");
+    fs::write(&binary, b"unexpected binary bytes").expect("write changed binary");
+    let output = npm_build(&[
+        "platform",
+        "--target",
+        "aarch64-apple-darwin",
+        "--binary",
+        binary.to_str().expect("binary path"),
+        "--expect-sha256",
+        &"0".repeat(64),
+        "--out",
+        scratch.path().to_str().expect("scratch path"),
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("verified wheel SHA256"));
 }

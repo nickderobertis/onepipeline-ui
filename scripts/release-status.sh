@@ -109,8 +109,9 @@ BANNER_CLOSE="<!-- release-status: end -->"
 # `verify-assets` are here because the GitHub Release's own assets are a
 # distribution too; `build-wheels` and `build-npm` because they run
 # unconditionally by design, so a packaging break reddens a release even where
-# publishing is switched off.
-required="test upload verify-assets build-wheels build-npm"
+# publishing is switched off. Darwin's staged proofs and its Linux asset upload
+# are required for the same reason.
+required="test upload verify-assets build-wheels build-npm darwin upload-darwin"
 if switched_on EXPECT_CRATE "$EXPECT_CRATE"; then
   required="$required publish-crate"
 fi

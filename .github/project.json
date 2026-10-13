@@ -1,0 +1,47 @@
+{
+  "name": "github-workflows",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
+  "namedInputs": {
+    "workflowPolicy": [
+      "{projectRoot}/**/*",
+      "{workspaceRoot}/screencomp.toml",
+      "{workspaceRoot}/release-plz.toml",
+      "{workspaceRoot}/release-targets.toml",
+      "{workspaceRoot}/scripts/release-darwin.sh",
+      "{workspaceRoot}/scripts/release-package.py",
+      "{workspaceRoot}/scripts/verify-staged-release.mjs",
+      "{workspaceRoot}/scripts/npm-build.mjs"
+    ]
+  },
+  "targets": {
+    "bootstrap": {
+      "command": "bun install --cwd .github --frozen-lockfile"
+    },
+    "test": {
+      "command": "node --test .github/tests/*.test.mjs",
+      "dependsOn": ["bootstrap"],
+      "inputs": ["workflowPolicy"],
+      "cache": false
+    },
+    "lint": {
+      "command": "node .github/lint.mjs",
+      "inputs": ["workflowPolicy"],
+      "dependsOn": ["bootstrap"]
+    },
+    "typecheck": {
+      "command": "node .github/lint.mjs --syntax",
+      "inputs": ["workflowPolicy"],
+      "dependsOn": ["bootstrap"]
+    },
+    "budgets": {
+      "command": "node .github/check-budgets.mjs",
+      "dependsOn": ["test"],
+      "cache": false
+    },
+    "check": {
+      "executor": "nx:noop",
+      "dependsOn": ["lint", "typecheck", "budgets"]
+    }
+  }
+}
