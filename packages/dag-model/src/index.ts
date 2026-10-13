@@ -1865,7 +1865,7 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
     .strict(),
 ]);
 
-/** The ops the envelope may carry, in the order the composer offers them. */
+/** The ops the envelope may carry, in declaration order. */
 export const REPLY_OPS = replyCommandSchema.options.map(
   (option) => option.shape.op.value,
 );

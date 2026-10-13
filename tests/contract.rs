@@ -1519,8 +1519,9 @@ const REPLY_COMMANDS: &str = "reply-commands.json";
 /// The browser's copy of the reply envelope's commands, held to the engine's own
 /// `Command` — one half of a gate whose other half is TypeScript.
 ///
-/// The composer composes, and `packages/dag-model` parses, every op the engine's
-/// `channel::Command` declares, which a Rust enum cannot be read across the
+/// `packages/dag-model` parses every op the engine's `channel::Command`
+/// declares, including commands sent as typed envelopes without a composer
+/// shortcut, which a Rust enum cannot be read across the
 /// language boundary to say. So this reads each op's fields off the schema that
 /// type itself derives — the declaration, never the engine's prose — and pins
 /// them to `tests/fixtures/reply-commands.json`, which

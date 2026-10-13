@@ -204,6 +204,9 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "command-accepted": "planning",
   // The PR body could not be drafted, which is a fact about the publication.
   "body-not-drafted": "publication",
+  // A publication whose change-request title could not be verified, like a body
+  // that could not be drafted. Neither word matches a publication rule.
+  "title-unverified": "publication",
   // One acceptance criterion ruled on. `checked` is not `check`, and a word is
   // matched whole — and adding it to the verification rule would be adding a
   // word that names this kind and no other, which is what this table is for.
