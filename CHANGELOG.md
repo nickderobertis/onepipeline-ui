@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.33.0...v0.34.0) - 2026-10-13
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose plan store carries comments and caches remote sources ([#320](https://github.com/nickderobertis/onepipeline-ui/pull/320))
+
 ## [0.33.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.32.0...v0.33.0) - 2026-10-13
 
 ### Fixed
