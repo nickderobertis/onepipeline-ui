@@ -531,11 +531,15 @@ onemessagebus = "0.9.0"
 # holds that rendering and a teardown refusal over HTTP.
 # 0.70.0 carries the native unpublished verdict and links onevcs 0.48.1.
 # The reader links that engine without adding a route or verb.
-# 0.70.1 links onevcs 0.49.0, whose retirement keeps open and closed-unmerged
-# change requests and ignores other repositories' records. A browser-adopted
-# run is driven by this copy of the engine, so its retirement uses that release
-# once this moves; this crate changes no route or response. The test-only
-# `onevcs` requirement below moves with it to the release its own lock resolves.
+# 0.70.1 links onevcs 0.49.0 and onetaskgraph 0.6.0. That onevcs's retirement
+# keeps open and closed-unmerged change requests and ignores other
+# repositories' records; that onetaskgraph's plan store carries comments and
+# caches remote reads. A browser-adopted run is driven by this copy of the
+# engine, so its retirement uses that release and its driver loads that same
+# cache configuration; this crate changes no route or response. The test-only
+# `onevcs` and `onetaskgraph-*` requirements below move with it to the releases
+# its own lock resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
 onepipeline = "=0.70.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }

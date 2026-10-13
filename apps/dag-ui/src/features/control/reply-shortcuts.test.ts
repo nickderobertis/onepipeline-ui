@@ -69,6 +69,19 @@ describe("reply shortcuts", () => {
         blocking: true,
         id: "docs",
       }),
+      rework: composeEnvelope("rework", {
+        id: "docs",
+        reason: "Review correction",
+        instruction: "Fix the regression",
+        comments: '[{"id":"review-1","url":"https://example.com/review/1"}]',
+        title: "fix: regression",
+        replacement: "docs-rework",
+      }),
+      retitle: composeEnvelope("retitle", {
+        id: "docs",
+        title: "fix: regression",
+        reason: "Match the change",
+      }),
       settle: composeEnvelope("settle", {
         id: "ship",
         outcome: "done",

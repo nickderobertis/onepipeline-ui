@@ -18166,3 +18166,255 @@ fn an_invalidation_names_the_project_group_that_moved() {
     assert_eq!(data["run_id"], json!(fixture_run::OTHER_RUN_ID));
     assert_eq!(data["project"], json!(fixture_run::PLAN_PROJECT), "{data}");
 }
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] This journey belongs
+// to the e2e tier that already owns server plan reads and adoption. It uses that tier's
+// existing CLI and server prerequisites, with no extra build, provisioning or paid
+// dependency; the only additional process is a loopback board. Both cache modes together
+// took 17.8 seconds under nextest, so there is no separate expensive dependency to isolate.
+/// The browser's retained engine reads and settles a remotely stored plan with
+/// caching enabled, using the same source configuration as the launching CLI.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled() {
+    for enabled in [true, false] {
+        remote_plan_cache_adoption(enabled);
+    }
+}
+
+#[cfg(unix)]
+fn remote_plan_cache_adoption(enabled: bool) {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    // Start validates the dispatch graph even though this human-only plan never dispatches it.
+    fs::create_dir_all(dir.join("graphs")).expect("graph directory");
+    fs::write(dir.join("graphs/node-scope.yaml"),
+        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: oneharness.toml\n")
+        .expect("the launch graph");
+    fs::write(
+        dir.join("graphs/oneharness.toml"),
+        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+    )
+    .expect("the unused dispatch harness configuration");
+    let board = crate::github_board::GitHubBoard::start(&dir);
+    let address = board
+        .url
+        .strip_prefix("http://")
+        .expect("HTTP board")
+        .parse()
+        .expect("loopback address");
+    let refused = http::post(
+        address,
+        "/graphql",
+        r#"{"query":"query { viewer { login } }","variables":{}}"#,
+    );
+    assert_eq!(refused.status, 401, "{}", refused.body);
+    assert_eq!(
+        refused.json()["errors"][0]["message"],
+        json!("invalid board token")
+    );
+    assert!(board.state()["requests"]
+        .as_array()
+        .expect("requests")
+        .is_empty());
+    let cache = dir.join("source-cache");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        format!(
+            "sources:\n  board:\n    plugin: github-projects\n    cache:\n      enabled: {enabled}\n      dir: {cache:?}\n    config:\n      owner: generic\n      project_number: 1\n      token_env: CACHE_BOARD_TOKEN\n      endpoint: {}/graphql\n      status_mapping:\n        todo: Todo\n        queued: Queued\n        in-progress: In Progress\n        unknown: Needs Attention\n        done: Done\n        cancelled: Canceled\n",
+            board.url,
+        ),
+    ).expect("the cache-enabled store configuration");
+
+    let version = std::process::Command::new(sibling::binary())
+        .arg("--version")
+        .output()
+        .expect("the provisioned CLI version");
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8(version.stdout)
+            .expect("CLI version")
+            .trim(),
+        format!("onepipeline {}", onepipeline::VERSION)
+    );
+
+    let inherited: Vec<String> = std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("ONETASKGRAPH_") || name.starts_with("ONEPIPELINE_"))
+        .collect();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args(["start", "board:plan"])
+        .current_dir(&dir)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env("CACHE_BOARD_TOKEN", &board.token)
+        .output()
+        .expect("launch the remote approval plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    // llmlint: ignore-block[tests_mirror_real_usage] The manager's amendment requires
+    // seeding a task through the linked store before adoption and observing its public
+    // cache state. These are released SDK APIs, not engine internals; the launch, reads,
+    // adoption and settlement still go through the CLI and real server routes below.
+    let loaded = onetaskgraph_core::config::load(
+        &dir,
+        &onetaskgraph_core::Environment::from_os_pairs(vec![(
+            "CACHE_BOARD_TOKEN".into(),
+            board.token.clone().into(),
+        )]),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the linked store loads the source configuration");
+    let store = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let task = "board:approve"
+        .parse::<onetaskgraph_core::GlobalId>()
+        .expect("source task");
+    let runtime = tokio::runtime::Runtime::new().expect("store runtime");
+    // Seed through the linked store, then prove the pinned read uses that entry.
+    let initial = runtime
+        .block_on(store.task(&task))
+        .expect("seed the task cache");
+    let version = initial.items[0]
+        .item
+        .version
+        .as_deref()
+        .expect("remote version");
+    store.pin(&task, version);
+    runtime
+        .block_on(store.task(&task))
+        .expect("read the pinned task");
+    if enabled {
+        assert_eq!(
+            store.cache_use(&task).expect("cache state").served,
+            onetaskgraph_core::cache::Served::Cache
+        );
+    }
+    // llmlint: ignore-end[tests_mirror_real_usage]
+    let run = "cached-approval";
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = http::get(serving.address, &detail_path);
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    let tasks = detail["graph"]["plan"]["tasks"]
+        .as_array()
+        .expect("the source tasks");
+    assert_eq!(tasks.len(), 1, "{detail}");
+    assert_eq!(tasks[0]["id"], json!("approve"));
+    assert_eq!(tasks[0]["task"], json!("## What\nDo approve.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- approve is done."));
+    assert_eq!(detail["graph"]["node_status"]["approve"], json!("waiting"));
+    let grouped = http::get(serving.address, "/api/v2/projects/board:plan");
+    assert_eq!(grouped.status, 200, "{}", grouped.body);
+    assert_eq!(grouped.json()["project"], json!("board:plan"));
+
+    // A mistyped run id is refused before anything is adopted.
+    let missing = http::post(serving.address, "/api/v2/runs/missing-approval/adopt", "");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], json!("run_not_found"));
+
+    let settled = http::post(serving.address, &format!("{detail_path}/channel/reply"),
+        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string());
+    assert_eq!(settled.status, 200, "{}", settled.body);
+    let before_adoption = board.state()["requests"]
+        .as_array()
+        .expect("requests")
+        .len();
+    let adopted = http::post(serving.address, &format!("{detail_path}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid = u32::try_from(adopted.json()["pid"].as_u64().expect("driver pid")).expect("pid");
+    let driver = RetainedDriver(pid);
+    eventually("the adopted engine settled the remote plan", || {
+        http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+    let events = events_on(
+        &http::get(
+            serving.address,
+            &format!("{detail_path}/timeline?scope=run"),
+        )
+        .json(),
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["kind"] == json!("driver-adopted"))
+            .count(),
+        1
+    );
+    let state = board.state();
+    assert_eq!(
+        state["issues"]["approve"]["status"],
+        json!("Done"),
+        "{state}"
+    );
+    let body = state["issues"]["approve"]["body"]
+        .as_str()
+        .expect("projected body");
+    let metadata: Value = serde_json::from_str(
+        body.split("<!-- onetaskgraph.metadata\n")
+            .nth(1)
+            .expect("metadata slot")
+            .split("\n-->")
+            .next()
+            .expect("slot JSON"),
+    )
+    .expect("metadata JSON");
+    assert_eq!(
+        metadata["onepipeline.settlement"],
+        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"}),
+        "{metadata}"
+    );
+    assert!(
+        state["requests"].as_array().expect("requests")[before_adoption..]
+            .iter()
+            .any(|request| {
+                request["query"]
+                    .as_str()
+                    .is_some_and(|query| query.contains("updateIssue("))
+                    && request["variables"]["input"]["id"] == json!("approve")
+                    && request["variables"]["input"]["body"]
+                        .as_str()
+                        .is_some_and(|body| body.contains("onepipeline.settlement"))
+            }),
+        "no settlement mutation reached the board: {state}"
+    );
+    // llmlint: ignore-block[tests_mirror_real_usage] The amended criterion explicitly
+    // requires the store's observable cache state for a pinned read after write-back.
+    // The read API exposes no cache diagnostic route; the public SDK observes the same
+    // directory the real adopted driver used without replacing any layer under test.
+    // The adopted driver's unpinned write must retire the earlier entry.
+    runtime
+        .block_on(store.task(&task))
+        .expect("read the earlier pinned version after settlement");
+    if enabled {
+        assert_eq!(
+            store.cache_use(&task).expect("cache state").served,
+            onetaskgraph_core::cache::Served::Remote
+        );
+    } else {
+        assert!(
+            !cache.exists()
+                || fs::read_dir(&cache)
+                    .expect("cache directory")
+                    .next()
+                    .is_none(),
+            "disabled caching wrote an entry"
+        );
+    }
+    // llmlint: ignore-end[tests_mirror_real_usage]
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]

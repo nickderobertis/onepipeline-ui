@@ -48,12 +48,6 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-ready": "lifecycle",
   "node-dispatched": "lifecycle",
   "node-settled": "lifecycle",
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds, while this package owns their display categories. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` failed naming all four after the 0.70.0 relink; these entries reconcile the category corpus with that declaration, without moving producer logic into the browser.
-  "node-restack-started": "lifecycle",
-  "node-restacked": "lifecycle",
-  "change-retitled": "publication",
-  "title-unverified": "activity",
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A dispatch that ended before any work began, for the host's reason rather
   // than the node's, hands the node back to the queue: the run doing it again
   // rather than a step of the node's life.
@@ -82,6 +76,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "round-finished": "lifecycle",
   "round-budget-exceeded": "failure",
   "body-not-drafted": "publication",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] The engine owns these event kinds, while this package owns the browser's category decisions. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` requires corpus entries for all four; the corpus pins their meanings and the exception table implements that presentation vocabulary, which no producer draws.
+  "change-retitled": "publication",
+  "title-unverified": "verification",
+  "node-restack-started": "repository",
+  "node-restacked": "repository",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A run-end hook is the run's own boundary: it fires once the driver has let
   // go of the run, and what it reports is that the run ended one way or another.
   "run-hook-fired": "lifecycle",

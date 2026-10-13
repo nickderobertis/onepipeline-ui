@@ -24,17 +24,14 @@ export const VERDICT_SHORTCUTS = {
 } as const;
 export type VerdictShortcut = keyof typeof VERDICT_SHORTCUTS;
 
-/** The composer keeps its existing shortcuts when the engine adds reply commands. */
-type ComposedOp = Exclude<ReplyOp, "rework" | "retitle">;
-export type Shortcut = VerdictShortcut | ComposedOp;
+/** Every engine reply command is available in the composer. */
+export type Shortcut = VerdictShortcut | ReplyOp;
 
 export const SHORTCUTS: readonly Shortcut[] = [
   "approve",
   "reject",
   "continue",
-  ...REPLY_OPS.filter(
-    (op): op is ComposedOp => op !== "rework" && op !== "retitle",
-  ),
+  ...REPLY_OPS,
 ];
 
 export function isShortcut(value: string): value is Shortcut {
@@ -45,6 +42,11 @@ export function isShortcut(value: string): value is Shortcut {
 export interface ShortcutFields {
   readonly message?: string;
   readonly reason?: string;
+  readonly instruction?: string;
+  readonly title?: string;
+  readonly replacement?: string;
+  /** Review comment references as a JSON array of id/url objects. */
+  readonly comments?: string;
   readonly id?: string;
   readonly text?: string;
   readonly addressee?: string;
@@ -89,6 +91,8 @@ export const SHORTCUT_FIELDS: Readonly<
   drop: ["id", "dependents"],
   reparent: ["id", "deps"],
   retry: ["id", "json"],
+  rework: ["id", "reason", "instruction", "comments", "title", "replacement"],
+  retitle: ["id", "title", "reason"],
   cancel: ["id", "reason"],
   requeue: ["id", "json"],
   "set-node-sets": ["id", "sets"],
@@ -177,7 +181,7 @@ function draftEnvelope(
 }
 
 function draftCommand(
-  op: ComposedOp,
+  op: ReplyOp,
   fields: ShortcutFields,
   text: (key: keyof ShortcutFields) => string | undefined,
 ): { command: unknown } | { problem: string } {
@@ -230,6 +234,34 @@ function draftCommand(
             .map((line) => line.trim())
             .filter((line) => line.length > 0),
         },
+      };
+    case "rework": {
+      let comments: unknown;
+      const references = text("comments");
+      if (references !== undefined) {
+        try {
+          comments = JSON.parse(references);
+        } catch (caught) {
+          return {
+            problem: `comments: ${caught instanceof Error ? caught.message : "not JSON"}`,
+          };
+        }
+      }
+      return {
+        command: {
+          op,
+          id,
+          reason: text("reason"),
+          instruction: text("instruction"),
+          ...optional("comments", comments),
+          ...optional("title", text("title")),
+          ...optional("replacement", text("replacement")),
+        },
+      };
+    }
+    case "retitle":
+      return {
+        command: { op, id, title: text("title"), reason: text("reason") },
       };
     case "cancel":
       return { command: { op, id, ...optional("reason", text("reason")) } };

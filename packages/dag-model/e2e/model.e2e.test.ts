@@ -959,6 +959,108 @@ test("the projects and every wrapped verb this repository serves parse through t
   expect(telemetry.telemetry.schema_version).toBe(2);
 });
 
+test("a reply envelope composed against the engine's grammar carries what the engine reads, and nothing else", () => {
+  // A verdict alone needs no version; an edit envelope names the one the engine
+  // reads, and every op the engine declares is one the grammar spells.
+  expect(
+    replyEnvelopeSchema.parse({ completion: false, message: "go on" }),
+  ).toEqual({ completion: false, message: "go on" });
+  expect(REPLY_OPS).toEqual([
+    "add",
+    "drop",
+    "reparent",
+    "retry",
+    "cancel",
+    "requeue",
+    "set-node-sets",
+    "set-run-node-sets",
+    "attest",
+    "complete",
+    "amend",
+    "note",
+    "finding",
+    "settle",
+    "rework",
+    "retitle",
+  ]);
+  const edit = replyEnvelopeSchema.parse({
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      { op: "note", id: "docs", addressee: "worker", text: "measure it too" },
+      { op: "drop", id: "obsolete", dependents: "detach" },
+      { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
+    ],
+  });
+  expect(edit.version).toBe(3);
+  expect(edit.commands).toHaveLength(3);
+  // The field the engine retired is refused by name, as the engine refuses it,
+  // and an op the engine does not declare never reaches the wire.
+  expect(
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [{ op: "context", id: "docs", note: "hi" }],
+    }).success,
+  ).toBe(false);
+  expect(replyEnvelopeSchema.safeParse({ bogus: true }).success).toBe(false);
+  expect(
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [{ op: "drop", id: "obsolete" }],
+    }).success,
+  ).toBe(false);
+  // Commands under no version, or another, are what the engine refuses as "an
+  // edit envelope requires version 3"; an envelope carrying neither half is one
+  // the engine answers, naming no verdict, so it parses.
+  const unversioned = replyEnvelopeSchema.safeParse({
+    commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
+  });
+  expect(unversioned.success).toBe(false);
+  expect(unversioned.error?.issues[0]?.message).toBe(
+    "an edit envelope requires version 3",
+  );
+  expect(
+    replyEnvelopeSchema.safeParse({
+      version: 2,
+      commands: [{ op: "complete", reason: "done" }],
+    }).success,
+  ).toBe(false);
+  expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("review replies preserve rework comments and retitles and refuse incomplete comments", () => {
+  const commands = [
+    {
+      op: "rework",
+      id: "build",
+      reason: "Review requested a correction",
+      instruction: "Fix the reported regression",
+      comments: [{ id: "review-1", url: "https://example.com/review/1" }],
+      title: "fix: correct the regression",
+      replacement: "build-rework-1",
+    },
+    {
+      op: "retitle",
+      id: "build",
+      title: "fix: correct the regression",
+      reason: "Match the change",
+    },
+  ];
+  const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
+  expect(replyEnvelopeSchema.parse(envelope)).toEqual(envelope);
+  expect(
+    replyEnvelopeSchema.safeParse({
+      ...envelope,
+      commands: [{ ...commands[0], comments: [{ id: "review-1" }] }],
+    }).success,
+  ).toBe(false);
+  expect(
+    replyEnvelopeSchema.safeParse({
+      ...envelope,
+      commands: [{ ...commands[1], title: "" }],
+    }).success,
+  ).toBe(false);
+});
+
 test("the model's reply commands are the engine's, op for op and field for field", async () => {
   // `tests/contract.rs` pins this golden to the fields the engine's own
   // `channel::Command` declares; this half holds the browser's copy to it, so an

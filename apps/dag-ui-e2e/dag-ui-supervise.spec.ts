@@ -12,8 +12,9 @@ import {
   runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { z } from "zod";
+import { z } from "zod";
 import { fixture, runs } from "./fixture-facts";
+import { startFixtureServer } from "./fixture-server";
 
 /**
  * Supervising a run from the browser: the projects the app opens on, and every
@@ -196,15 +197,14 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   // An edit by shortcut: a blocking finding, which the engine raises as a
   // surface holding the node it names — and claims into the pending slot.
   const composer = page.getByRole("region", { name: "Reply" });
-  // Relinking the engine updates the wire grammar, while the composer retains
-  // its existing controls. These commands remain available through typed JSON.
+  // Every engine reply command is available through the shortcut composer.
   const shortcut = composer.getByLabel("Shortcut");
   await expect(
     shortcut.getByRole("option", { name: "rework", exact: true }),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   await expect(
     shortcut.getByRole("option", { name: "retitle", exact: true }),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   await shortcut.selectOption("finding");
   await composer.getByLabel("Message").fill("stop and read this first");
   await composer.getByLabel("Blocking").check();
@@ -279,6 +279,161 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   ).toContainText("commands.0.id");
 });
 
+test("composes review replies, applies rework and reports retitle delivery refusal", async ({
+  page,
+}) => {
+  // Review edits change the graph and its watch debts; keep them off the
+  // shared corpus that the other supervising journeys drive.
+  const server = await startFixtureServer("review", ["--review-corpus"]);
+  try {
+    const run = z
+      .object({ runs: z.object({ supervised: z.string().min(1) }) })
+      .parse(server.facts).runs.supervised;
+    await page.goto(`${server.origin}/?run=${run}&view=channel`);
+    const composer = page.getByRole("region", { name: "Reply" });
+    await composer.getByLabel("Shortcut").selectOption("rework");
+    await composer.getByLabel("Node id", { exact: true }).fill("review-draft");
+    await composer
+      .getByLabel("Reason", { exact: true })
+      .fill("Review found a missing check");
+    await composer.getByLabel("Instruction").fill("Add the missing check");
+    const cannotCompose = async (
+      label: string,
+      valid: string,
+      problem: string,
+    ) => {
+      await composer.getByLabel(label, { exact: true }).fill("");
+      await composer.getByRole("button", { name: "Compose envelope" }).click();
+      await expect(
+        composer.getByRole("alert", { name: "Envelope not composed" }),
+      ).toContainText(problem);
+      await composer.getByLabel(label, { exact: true }).fill(valid);
+    };
+    await cannotCompose("Node id", "review-draft", "commands.0.id");
+    await cannotCompose(
+      "Reason",
+      "Review found a missing check",
+      "commands.0.reason",
+    );
+    await cannotCompose(
+      "Instruction",
+      "Add the missing check",
+      "commands.0.instruction",
+    );
+    const comments = [
+      {
+        id: "review-1",
+        url: "https://github.com/example/repo/pull/1#discussion_r1",
+      },
+    ];
+    await composer.getByLabel("Review comments (JSON, optional)").fill("{");
+    await composer.getByRole("button", { name: "Compose envelope" }).click();
+    await expect(composer).toContainText("comments:");
+    await composer
+      .getByLabel("Review comments (JSON, optional)")
+      .fill('[{"id":"review-1"}]');
+    await composer.getByRole("button", { name: "Compose envelope" }).click();
+    await expect(
+      composer.getByRole("alert", { name: "Envelope not composed" }),
+    ).toContainText("commands.0.comments.0.url");
+    await composer
+      .getByLabel("Review comments (JSON, optional)")
+      .fill(JSON.stringify(comments));
+    await composer
+      .getByLabel("Title", { exact: true })
+      .fill("fix: add review coverage");
+    await composer
+      .getByLabel("Replacement node id (optional)")
+      .fill("review-draft-rework");
+    const send = async (command: unknown, semanticRefusal?: string) => {
+      await composer.getByRole("button", { name: "Compose envelope" }).click();
+      const expected = { version: 3, commands: [command] };
+      const editor = composer.getByLabel("Envelope (sent as typed)");
+      await expect(editor).toHaveValue(JSON.stringify(expected, null, 2));
+      const answered = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().includes(`/runs/${run}/channel/reply`),
+      );
+      await composer.getByRole("button", { name: "Send reply" }).click();
+      const response = await answered;
+      expect(response.request().postDataJSON()).toEqual(expected);
+      if (semanticRefusal !== undefined) {
+        // A retitle with no host session passes the engine's reply schema and
+        // graph validation, then refuses delivery. Schema errors cannot satisfy
+        // this specific downstream refusal (the manager's agreed boundary).
+        const error = await refusedBy(response, 422);
+        expect(error.code).toBe("refused");
+        expect(error.message).toBe(semanticRefusal);
+        await expect(refusal(page, "Reply")).toContainText(semanticRefusal);
+      } else {
+        expect(response.status()).toBe(200);
+        await expect(receipt(page, "Reply")).toContainText(
+          '"state": "applied"',
+        );
+      }
+    };
+    await composer.getByLabel("Shortcut").selectOption("retitle");
+    await composer.getByLabel("Node id", { exact: true }).fill("review-draft");
+    await composer
+      .getByLabel("Title", { exact: true })
+      .fill("fix: cover the review findings");
+    await composer
+      .getByLabel("Reason", { exact: true })
+      .fill("Describe the reviewed scope");
+    await cannotCompose("Node id", "review-draft", "commands.0.id");
+    await cannotCompose(
+      "Title",
+      "fix: cover the review findings",
+      "commands.0.title",
+    );
+    await cannotCompose(
+      "Reason",
+      "Describe the reviewed scope",
+      "commands.0.reason",
+    );
+    await send(
+      {
+        op: "retitle",
+        id: "review-draft",
+        title: "fix: cover the review findings",
+        reason: "Describe the reviewed scope",
+      },
+      "refused: retitle: node 'review-draft' has no session on the run's record to address its change request through",
+    );
+    await composer.getByLabel("Shortcut").selectOption("rework");
+    await composer
+      .getByLabel("Title", { exact: true })
+      .fill("fix: add review coverage");
+    await composer
+      .getByLabel("Reason", { exact: true })
+      .fill("Review found a missing check");
+    await send({
+      op: "rework",
+      id: "review-draft",
+      reason: "Review found a missing check",
+      instruction: "Add the missing check",
+      comments,
+      title: "fix: add review coverage",
+      replacement: "review-draft-rework",
+    });
+    await composer
+      .getByLabel("Node id", { exact: true })
+      .fill("review-draft-optional");
+    await composer.getByLabel("Review comments (JSON, optional)").fill("");
+    await composer.getByLabel("Title", { exact: true }).fill("");
+    await composer.getByLabel("Replacement node id (optional)").fill("");
+    await send({
+      op: "rework",
+      id: "review-draft-optional",
+      reason: "Review found a missing check",
+      instruction: "Add the missing check",
+    });
+  } finally {
+    await server.stop();
+  }
+});
+
 test("adopts a run nothing is driving, then attests the human action its driver settled", async ({
   page,
 }) => {
@@ -291,7 +446,50 @@ test("adopts a run nothing is driving, then attests the human action its driver 
   ).toHaveCount(0);
 
   // A run nothing drives does, and the adoption answers the driver's pid.
+  const statusRead = page.waitForResponse((response) =>
+    response.url().includes(`/runs/${runs().adoptable}/status`),
+  );
   await page.goto(`/?run=${runs().adoptable}&view=channel`);
+  const statusResponse = await statusRead;
+  expect(statusResponse.status()).toBe(200);
+  const status = runStatusSchema.parse(await statusResponse.json());
+  expect(status.liveness).toBe("DRIVER DEAD");
+  // The real status rendering includes the SDK's provider report. Every
+  // executable is absent from this fixture's isolated PATH, so no host's
+  // subscription can be probed while the browser waits for its liveness.
+  const providerReport = z
+    .object({
+      identities: z.array(
+        z.object({
+          harness: z.string(),
+          availability: z.object({
+            state: z.string(),
+            reason: z.union([
+              z.string(),
+              z.object({
+                kind: z.string(),
+                bin: z.string().optional(),
+                message: z.string().optional(),
+              }),
+            ]),
+          }),
+        }),
+      ),
+    })
+    .parse(JSON.parse(status.rendered.split("  providers: ")[1] ?? "null"));
+  expect(providerReport.identities.length).toBeGreaterThan(0);
+  for (const { harness, availability } of providerReport.identities) {
+    if (harness === "copilot") {
+      expect(availability.reason).toMatchObject({
+        kind: "probe_failed",
+        message: expect.stringContaining("no GitHub token"),
+      });
+    } else if (typeof availability.reason !== "string") {
+      expect(availability.reason.kind).toBe("binary_missing");
+    } else {
+      expect(availability.state).toBe("unavailable");
+    }
+  }
   await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible();
   const actions = page.getByRole("region", { name: "Ready human actions" });
   await expect(actions).toContainText(
