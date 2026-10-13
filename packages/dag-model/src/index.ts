@@ -1849,7 +1849,9 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       reason: z.string().min(1),
       instruction: z.string().min(1),
       comments: z
-        .array(z.object({ id: z.string(), url: z.string() }).strict())
+        .array(
+          z.object({ id: z.string().min(1), url: z.string().url() }).strict(),
+        )
         .optional(),
       title: z.string().optional(),
       replacement: z.string().optional(),

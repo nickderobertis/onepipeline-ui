@@ -206,6 +206,7 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "body-not-drafted": "publication",
   // A publication whose change-request title could not be verified, like a body
   // that could not be drafted. Neither word matches a publication rule.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] onepipeline owns this event kind; this package owns the display category. The engine declaration drift gate in tests/contract.rs required its corpus entry, and the public eventCategory corpus test failed because the default filed this publication as activity. This exception decides only the browser category, which the producer does not declare.
   "title-unverified": "publication",
   // One acceptance criterion ruled on. `checked` is not `check`, and a word is
   // matched whole — and adding it to the verification rule would be adding a

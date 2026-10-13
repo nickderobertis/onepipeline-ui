@@ -1059,6 +1059,8 @@ test("review commands round-trip through the reply envelope and refuse malformed
   for (const command of [
     { ...commands[0], instruction: undefined },
     { ...commands[0], comments: [{ id: "review-12" }] },
+    { ...commands[0], comments: [{ id: "", url: "https://example.com" }] },
+    { ...commands[0], comments: [{ id: "review-12", url: "not a URL" }] },
     {
       ...commands[0],
       comments: [{ id: "review-12", url: "https://example.com", extra: true }],
