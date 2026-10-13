@@ -2,8 +2,8 @@
 # Photograph the DAG Observatory at every viewport in the matrix, reproducibly.
 #
 # This is the repository's one capture path. `just dag-ui-screens` runs it for an
-# operator who wants to look at the app, `.githooks/pre-push` runs it to regenerate
-# the digest baseline screencomp gates on, and `.github/workflows/visual-docs.yml`
+# operator who wants to review and update the digest baseline, and
+# `.github/workflows/visual-docs.yml`
 # drives the same Playwright config inside the same image on the CI side. There is
 # deliberately no second one: a gallery that came from anywhere else would be
 # compared, by content hash, against a baseline this one wrote.
@@ -27,7 +27,7 @@
 # Usage:
 #   scripts/visual-capture.sh [--] [playwright args...]
 #
-# `SHOTS_OUT` names the directory the capture is written to, which is how the guard
+# `SHOTS_OUT` names the directory the capture is written to, which is how manual review
 # and CI point it at `shots/current/<arch>`; with none named, one is made per
 # invocation so two operators — or two agents — capturing at the same time neither
 # overwrite each other's images nor dirty the tree.
