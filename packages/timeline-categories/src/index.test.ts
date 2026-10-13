@@ -37,6 +37,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "run-started": "lifecycle",
   "run-stopped": "lifecycle",
   "driver-adopted": "lifecycle",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these event kinds; this package owns their display categories. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` failed naming both when the pin moved to 0.69.0, requiring these corpus entries. Moving this category decision to the engine would put it outside the package that supplies the browser glyph vocabulary.
+  "driver-taken-over": "lifecycle",
+  "driver-superseded": "lifecycle",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A driver's account of how it let go of the run: the other end of the
   // driving an adoption begins, and no node's work.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the producer owns the kind and this package owns the category it reads under; this corpus is where that decision is pinned, as the doc comment above `CORPUS` states. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` named this kind when the engine pin moved to onepipeline 0.60.0, which declares it, and demands an entry here for it.
