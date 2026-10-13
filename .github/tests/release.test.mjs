@@ -161,7 +161,7 @@ test("production packaging commands reject unsupported targets and malformed ver
       ["scripts/verify-staged-release.mjs", ...args],
       { encoding: "utf8" },
     );
-    assert.notEqual(result.status, 0);
+    assert.equal(result.status, 2);
     assert.match(result.stderr, message);
     assert.match(result.stderr, /ACTION:/);
   }
@@ -183,4 +183,73 @@ test("production packaging commands reject unsupported targets and malformed ver
   assert.notEqual(unknown.status, 0);
   assert.match(unknown.stderr, /invalid choice/);
   assert.match(unknown.stderr, /ACTION:/);
+});
+
+test("all producer and installer target declarations match the actual release matrix", () => {
+  const jobs = release().jobs;
+  const targets = [
+    ...jobs["build-npm"].strategy.matrix.include.map((row) => row.target),
+    ...jobs.darwin.env.DARWIN_TARGETS.split(/\s+/),
+  ].sort();
+  const npmSource = readFileSync("scripts/npm-build.mjs", "utf8");
+  const npmTargets = Function(
+    `return (${npmSource.match(/const TARGETS = (\{[\s\S]*?\n\});/)[1]})`,
+  )();
+  assert.deepEqual(Object.keys(npmTargets).sort(), targets);
+  const wheelTargets = JSON.parse(
+    execFileSync(
+      "python3",
+      [
+        "-c",
+        "import runpy,json; print(json.dumps(runpy.run_path('scripts/release-package.py')['TARGET_ARCHES']))",
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  assert.deepEqual(Object.keys(wheelTargets).sort(), targets);
+  for (const target of targets) {
+    const { platform, arch } = npmTargets[target];
+    assert.equal(
+      wheelTargets[target],
+      arch === "x64"
+        ? platform === "win32"
+          ? "amd64"
+          : "x86_64"
+        : platform === "darwin"
+          ? "arm64"
+          : "aarch64",
+    );
+  }
+  const installer = readFileSync("scripts/verify-staged-release.mjs", "utf8");
+  const allowed = JSON.parse(
+    installer
+      .match(/const allowed = (\[[\s\S]*?\n {2}\]);/)[1]
+      .replace(/,\s*]/, "]"),
+  );
+  assert.deepEqual(
+    allowed.sort(),
+    targets.filter((target) => !npmTargets[target].exe),
+  );
+});
+
+test("real workflow command usage errors return 2 with an actionable diagnostic", () => {
+  for (const [command, args, env] of [
+    ["node", [".github/macos-policy.mjs"], {}],
+    ["node", [".github/macos-policy.mjs", "classify", "--unknown"], {}],
+    ["node", ["scripts/verify-staged-release.mjs"], {}],
+    ["bash", ["scripts/release-darwin.sh"], {}],
+    ["bash", ["scripts/release-native-dry-run.sh"], {}],
+    [
+      "bash",
+      ["scripts/release-darwin.sh", process.env.ONEPIPELINE_NODE_SCRATCH_DIR],
+      { DARWIN_TARGETS: "" },
+    ],
+  ]) {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /ACTION:/);
+  }
 });

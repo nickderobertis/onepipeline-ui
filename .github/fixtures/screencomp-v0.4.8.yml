@@ -1,3 +1,4 @@
+# llmlint: ignore-file[comments_earn_their_place] Verbatim upstream workflow snapshot: every upstream byte is verified against its pinned Git blob; its comments are not repository-authored prose.
 # screencomp reusable visual-docs workflow.
 #
 # Call it from a consumer repo and own only the capture; everything downstream —

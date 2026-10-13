@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   digest,
@@ -276,4 +285,41 @@ test("actual reusable deploy condition respects cancellation", () => {
     rows.find((row) => row.job === "visual-docs / deploy-pages").requested,
     false,
   );
+});
+
+test("snapshot verification strips only the approved annotation and rejects any upstream byte change", () => {
+  const scratch = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR, "snapshot-"),
+  );
+  try {
+    mkdirSync(join(scratch, ".github/fixtures"), { recursive: true });
+    for (const file of ["screencomp-v0.4.8.yml", "reusable-lock.json"])
+      cpSync(
+        `.github/fixtures/${file}`,
+        join(scratch, ".github/fixtures", file),
+      );
+    cpSync("screencomp.toml", join(scratch, "screencomp.toml"));
+    const document = workflows().find(
+      (w) => w.file === "visual-docs.yml",
+    ).document;
+    const script = `import {resolveWorkflow} from ${JSON.stringify(new URL("../workflow-graph.mjs", import.meta.url).href)};
+      resolveWorkflow("visual-docs.yml", JSON.parse(process.argv[1]), {event:"pull_request",action:"synchronize"}, {});`;
+    const run = () =>
+      spawnSync(
+        "node",
+        ["--input-type=module", "-e", script, JSON.stringify(document)],
+        { cwd: scratch, encoding: "utf8" },
+      );
+    assert.equal(run().status, 0);
+    const file = join(scratch, ".github/fixtures/screencomp-v0.4.8.yml");
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8") + "# changed upstream byte\n",
+    );
+    const refused = run();
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /differs from pinned blob/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });

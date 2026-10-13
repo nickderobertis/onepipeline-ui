@@ -148,23 +148,37 @@ export function classify(event, base, head) {
   }
 }
 if (process.argv[1]?.endsWith("macos-policy.mjs")) {
-  const { values, positionals } = parseArgs({
-    options: {
-      event: { type: "string" },
-      base: { type: "string" },
-      head: { type: "string" },
-    },
-    allowPositionals: true,
-  });
-  if (positionals[0] !== "classify")
-    throw new Error(
-      "usage: macos-policy.mjs classify --event JSON --base REF --head REF",
-    );
-  let event;
   try {
-    event = JSON.parse(readFileSync(values.event, "utf8"));
-  } catch {
-    event = null;
+    const { values, positionals } = parseArgs({
+      options: {
+        event: { type: "string" },
+        base: { type: "string" },
+        head: { type: "string" },
+      },
+      allowPositionals: true,
+    });
+    if (
+      positionals.length !== 1 ||
+      positionals[0] !== "classify" ||
+      !values.event ||
+      !values.base ||
+      !values.head
+    )
+      throw new Error(
+        "usage: macos-policy.mjs classify --event JSON --base REF --head REF",
+      );
+    let event;
+    try {
+      event = JSON.parse(readFileSync(values.event, "utf8"));
+    } catch {
+      event = null;
+    }
+    console.log(JSON.stringify(classify(event, values.base, values.head)));
+  } catch (error) {
+    console.error(`macos-policy: ${error.message}`);
+    console.error(
+      "ACTION: run classify --event JSON_PATH --base GIT_REF --head GIT_REF",
+    );
+    process.exitCode = 2;
   }
-  console.log(JSON.stringify(classify(event, values.base, values.head)));
 }

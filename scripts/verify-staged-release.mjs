@@ -20,10 +20,13 @@ import { setTimeout } from "node:timers/promises";
 function fault(message, action) {
   return Object.assign(new Error(message), { action });
 }
+function usage(message, action) {
+  return Object.assign(fault(message, action), { exitCode: 2 });
+}
 async function main() {
   const [rootArg, target, version] = process.argv.slice(2);
   if (!rootArg || !target || !version)
-    throw fault(
+    throw usage(
       "usage: verify-staged-release.mjs ROOT TARGET VERSION",
       "pass ROOT TARGET VERSION from the release workflow; ROOT must contain staged artifacts",
     );
@@ -34,18 +37,18 @@ async function main() {
     "aarch64-unknown-linux-gnu",
   ];
   if (!allowed.includes(target))
-    throw fault(
+    throw usage(
       `unsupported staged target: ${target}`,
       `pass one of ${allowed.join(", ")}`,
     );
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))
-    throw fault(
+    throw usage(
       "invalid release version",
       "pass the Cargo.toml package version without the tag's v prefix",
     );
   const root = realpathSync(resolve(rootArg));
   if (!statSync(root).isDirectory())
-    throw fault(
+    throw usage(
       "staged ROOT is not a directory",
       "pass the output directory produced by release-package.py",
     );
@@ -335,5 +338,5 @@ try {
   console.error(
     `ACTION: ${error.action || "inspect the failed installer command, confirm ROOT contains this target's staged artifacts, and rebuild the bundled-ui distributions from this tag"}`,
   );
-  process.exitCode = 1;
+  process.exitCode = error.exitCode || 1;
 }

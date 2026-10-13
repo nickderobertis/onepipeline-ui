@@ -263,7 +263,17 @@ export function resolveWorkflow(
         if (job.uses.startsWith("./.github/workflows/"))
           child = parse(readFileSync(job.uses, "utf8"));
         else if (job.uses === reusable) {
-          const source = readFileSync(".github/fixtures/screencomp-v0.4.8.yml");
+          const annotation =
+            "# llmlint: ignore-file[comments_earn_their_place] Verbatim upstream workflow snapshot: every upstream byte is verified against its pinned Git blob; its comments are not repository-authored prose.\n";
+          const annotated = readFileSync(
+            ".github/fixtures/screencomp-v0.4.8.yml",
+            "utf8",
+          );
+          if (!annotated.startsWith(annotation))
+            throw new Error(
+              "upstream snapshot annotation differs from the approved wrapper",
+            );
+          const source = Buffer.from(annotated.slice(annotation.length));
           const lock = JSON.parse(
             readFileSync(".github/fixtures/reusable-lock.json", "utf8"),
           );
