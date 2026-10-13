@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.32.0...v0.33.0) - 2026-10-13
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose onevcs retires a branch only on its own repository's merged change request ([#323](https://github.com/nickderobertis/onepipeline-ui/pull/323))
+- *(contract)* say a draft is lifted early only when nothing runs on its head ([#319](https://github.com/nickderobertis/onepipeline-ui/pull/319))
+
 ## [0.32.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.31.1...v0.32.0) - 2026-10-13
 
 ### Added
