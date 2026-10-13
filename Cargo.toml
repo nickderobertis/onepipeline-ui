@@ -535,7 +535,12 @@ onemessagebus = "0.9.0"
 # that scope once this moves; this crate makes no retirement decision itself.
 # Its onetaskgraph family moves to 0.6.0, which the test-only siblings below
 # move with so their rendering journeys use the store the engine links.
-onepipeline = "=0.70.0"
+# 0.70.1 links onevcs 0.49.0, whose retirement keeps open and closed-unmerged
+# change requests and ignores other repositories' records. A browser-adopted
+# run is driven by this copy of the engine, so its retirement uses that release
+# once this moves; this crate changes no route or response. The test-only
+# `onevcs` requirement below moves with it to the release its own lock resolves.
+onepipeline = "=0.70.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -568,7 +573,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.48.1"
+onevcs = "0.49.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
