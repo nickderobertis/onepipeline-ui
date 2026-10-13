@@ -5626,8 +5626,9 @@ const REVIEW_DRAFT_MEMBER_STREAM: &str = "node-scope-1786925518252-4252";
 /// classifies, and one advisory check is written as a release before it did, by
 /// its `conclusion` alone — and the draft is kept for its user's review, so the
 /// node settles `done` as `change-review-draft`. `lifted` publishes to a
-/// repository whose checks skip drafts, so its draft is lifted early, beside the
-/// `draft-lifted` every lift writes, and settles `change-open`.
+/// repository whose checks skip drafts, with nothing in progress on the pushed
+/// head, so its draft is lifted early, beside the `draft-lifted` every lift
+/// writes, and settles `change-open`.
 pub fn write_review_draft(root: &Path, run: &str) -> PathBuf {
     let dir = root.join(run);
     fs::create_dir_all(&dir).expect("the run directory");
@@ -5845,8 +5846,9 @@ pub fn write_review_draft(root: &Path, run: &str) -> PathBuf {
                 "detail": "its checks are green and its change request is a draft for its user's review",
             }),
         );
-    // The lifted node: the repository's checks skip drafts, so the grace window
-    // elapsed with nothing run and the draft was lifted early, with the warning.
+    // The lifted node: the repository's checks skip drafts and nothing is in
+    // progress on the pushed head, so the grace window elapsed with nothing run
+    // and the draft was lifted early, with the warning.
     // Its publication relayed on a stream of its own, interleaved with the kept
     // node's by the merge rather than by the order this writes them in.
     let mut lifting = Journal::new("a-recording-host-4253");
