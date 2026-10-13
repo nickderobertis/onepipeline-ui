@@ -116,22 +116,22 @@ just dag-ui-screens                        # capture into a directory of this in
 just dag-ui-screens --grep "at 390x844"    # one width; extra arguments reach Playwright
 ```
 
-The guard is what re-blesses. `just bootstrap` points `core.hooksPath` at
-`.githooks/` (`scripts/enable-hooks.sh`), so a provisioned clone has it active and
-`screencomp doctor --env` says so. Then the whole loop is: **change the view, then
-`git push`.** If nothing matching `[guard].paths` in `screencomp.toml` changed, the
-hook is a no-op. If something did, it re-captures in the pinned container and
-compares against `shots/baseline/x86_64.json`:
+CI compares captures against `shots/baseline/x86_64.json`; local pushes run no
+visual guard. When the view changes, capture and review it explicitly:
 
-- unchanged — it says so and the push goes through;
-- changed — it regenerates that baseline, builds a review gallery at `shots/review/`,
-  and **blocks the push**. Look at the gallery. If the change is what you meant,
-  `git add shots/baseline/x86_64.json`, commit, and push again; if any of it is in
-  `README.md`, copy the new image over the committed one under `docs/screens/` in the
-  same commit, because those are what a reader sees. If it is not what you meant, you
-  have just found a visual regression nothing else in this repository would have
-  caught.
+```sh
+SHOTS_OUT=shots/current/x86_64 just dag-ui-screens
+screencomp classify --baseline-manifest shots/baseline/x86_64.json --current shots/current --exit-code
+screencomp gallery --input shots/current --output shots/review --title "Screenshot review"
+```
 
-Never bypass it with `--no-verify` to get a push through: the baseline is the only
-record of what this app looked like, and a bypassed push leaves CI red for the next
-person instead.
+Review `shots/review/index.html`. If the changes are intended, update the baseline:
+
+```sh
+screencomp manifest --input shots/current --output shots/baseline/x86_64.json
+```
+
+Commit the baseline with the view change. If a changed image appears in `README.md`,
+copy it over the committed image under `docs/screens/` in the same commit. Investigate
+unexpected changes before updating the baseline. `just gate` remains the manual
+check command; CI verifies the deterministic checks and visual comparison.

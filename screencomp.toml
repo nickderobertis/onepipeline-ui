@@ -11,8 +11,8 @@
 # The CPU architectures this repository maintains screenshots for, and the only
 # source of that list: the capture lanes in .github/workflows/visual-docs.yml are
 # read from here, the committed baseline is shots/baseline/<arch>.json, and
-# .githooks/pre-push detects the host's arch and lets screencomp refuse one this
-# list does not name. Rendering happens in a pinned Linux container, so nothing but
+# manual captures use the host architecture. Rendering happens in a pinned Linux
+# container, so nothing but
 # the CPU varies — and every entry adds a CI job to each run.
 arches = ["x86_64"]
 
@@ -38,9 +38,9 @@ label = "Viewport"
 values = ["1920x1080", "1440x900", "1280x800", "1024x768", "390x844"]
 
 [guard]
-# Local pre-push guard (.githooks/pre-push): re-capture only when these globs change.
+# Paths used by manual `screencomp scope` to identify screenshot-relevant changes.
 # Everything whose bytes can reach a pixel is here and nothing else, because the
-# capture is a minute of Docker that the common push must not pay. That is wider than
+# capture uses Docker. That is wider than
 # the frontend: the view draws whatever the read API serves, so the crate's own
 # sources are in the set, and so is the lockfile that pins what Vite inlines into the
 # bundle. The corpus and the capture's own machinery are in it for the same reason —

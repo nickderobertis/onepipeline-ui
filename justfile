@@ -57,15 +57,8 @@ default:
 # Every project's `bootstrap` target, so one clean-clone command provisions the
 # whole graph rather than the crate alone. Serialized: projects share installers,
 # and two of them recreating the same tool directory at once race each other.
-#
-# The hook activation comes first and is not a project's: `core.hooksPath` is
-# per-clone state git cannot commit, so the committed screencomp guard runs nothing
-# until a clone points at it, and a guard nobody activated is what lets the visual
-# baseline drift until CI says so. `scripts/enable-hooks.sh` holds what it points at
-# and what it deliberately does not wire in.
 # Set up the project from a clean clone.
 bootstrap:
-    @bash scripts/enable-hooks.sh
     @bash scripts/nx.sh run-many -t bootstrap --parallel=1
 
 # The Rust crate's own provisioning (the `onepipeline-ui:bootstrap` target).
