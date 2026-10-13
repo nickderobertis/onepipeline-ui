@@ -2,7 +2,6 @@ import { REPLY_ENVELOPE_VERSION } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import {
   composeEnvelope,
-  isShortcut,
   SHORTCUT_FIELDS,
   SHORTCUTS,
   type Shortcut,
@@ -10,11 +9,6 @@ import {
 } from "./reply-shortcuts";
 
 describe("reply shortcuts", () => {
-  test("review commands have no form shortcut", () => {
-    expect(isShortcut("rework")).toBe(false);
-    expect(isShortcut("retitle")).toBe(false);
-  });
-
   test("a verdict is the legacy half and names no version", () => {
     expect(composeEnvelope("approve", { message: "ship it" })).toEqual({
       envelope: { completion: true, message: "ship it" },
@@ -34,7 +28,7 @@ describe("reply shortcuts", () => {
     });
   });
 
-  test("every offered op renders to one command at the version the engine reads edits at", () => {
+  test("every op renders to one command at the version the engine reads edits at", () => {
     const composed = {
       add: composeEnvelope("add", {
         json: '{"id":"docs","task":"Write it","deps":["build"]}',

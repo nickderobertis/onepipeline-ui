@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.31.1"
+version = "0.32.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -529,9 +529,8 @@ onemessagebus = "0.9.0"
 # pre-registry dispatch gone when its last stop signalled workers and no
 # adoption followed. `host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone`
 # holds that rendering and a teardown refusal over HTTP.
-# 0.70.0 links onevcs 0.48.1: an early draft lift requires no work in
-# progress on the pushed head. The browser-adopted run uses this engine;
-# `healthz_answers_without_reading_run_storage` proves the linked release.
+# 0.70.0 carries the native unpublished verdict and links onevcs 0.48.1.
+# The reader links that engine without adding a route or verb.
 onepipeline = "=0.70.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
@@ -565,7 +564,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.48.1"
+onevcs = "=0.48.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
