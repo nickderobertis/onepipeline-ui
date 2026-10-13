@@ -1842,6 +1842,27 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
         .optional(),
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("rework"),
+      id: z.string().min(1),
+      reason: z.string().min(1),
+      instruction: z.string().min(1),
+      comments: z
+        .array(z.object({ id: z.string(), url: z.string() }).strict())
+        .optional(),
+      title: z.string().optional(),
+      replacement: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("retitle"),
+      id: z.string().min(1),
+      reason: z.string().min(1),
+      title: z.string().min(1),
+    })
+    .strict(),
 ]);
 
 /** The ops the envelope may carry, in the order the composer offers them. */

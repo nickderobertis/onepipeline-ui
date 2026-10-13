@@ -980,6 +980,8 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "note",
     "finding",
     "settle",
+    "rework",
+    "retitle",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,
@@ -1023,6 +1025,54 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("review commands round-trip through the reply envelope and refuse malformed edits", () => {
+  const commands = [
+    {
+      op: "rework",
+      id: "ship",
+      reason: "review feedback",
+      instruction: "fix the regression",
+      comments: [{ id: "review-12", url: "https://example.com/review/12" }],
+      title: "fix: repair the regression",
+      replacement: "ship-rework-1",
+    },
+    {
+      op: "retitle",
+      id: "ship",
+      reason: "correct the release class",
+      title: "fix!: repair it",
+    },
+  ];
+  const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
+  expect(
+    replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
+  ).toEqual(envelope);
+  const minimal = {
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      { op: "rework", id: "ship", reason: "feedback", instruction: "fix it" },
+    ],
+  };
+  expect(replyEnvelopeSchema.parse(minimal)).toEqual(minimal);
+  for (const command of [
+    { ...commands[0], instruction: undefined },
+    { ...commands[0], comments: [{ id: "review-12" }] },
+    {
+      ...commands[0],
+      comments: [{ id: "review-12", url: "https://example.com", extra: true }],
+    },
+    { ...commands[1], title: undefined },
+    { ...commands[1], extra: true },
+  ]) {
+    expect(
+      replyEnvelopeSchema.safeParse({
+        version: REPLY_ENVELOPE_VERSION,
+        commands: [command],
+      }).success,
+    ).toBe(false);
+  }
 });
 
 test("the model's reply commands are the engine's, op for op and field for field", async () => {

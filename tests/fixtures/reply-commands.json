@@ -109,6 +109,26 @@
         "landing",
         "release"
       ]
+    },
+    "rework": {
+      "required": [
+        "id",
+        "instruction",
+        "reason"
+      ],
+      "optional": [
+        "comments",
+        "replacement",
+        "title"
+      ]
+    },
+    "retitle": {
+      "required": [
+        "id",
+        "reason",
+        "title"
+      ],
+      "optional": []
     }
   },
   "node_list_fields": [
