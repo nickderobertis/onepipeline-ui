@@ -463,7 +463,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1529,9 +1529,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.69.0"
+version = "0.70.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e69a674f3079a3ff20caa6ed1c7cddf838cc97dd7d7d488f8f5500a28cee020"
+checksum = "cbb208111878ae7b6efdb6c402c4864f7602f72917d8391447a5d32724319a76"
 dependencies = [
  "async-trait",
  "clap",
@@ -1588,9 +1588,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-core"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24cd85ee54cc74349b68d6e9f0da895867c2a804cb8e61e059e6e34a74970dc3"
+checksum = "f8e591073da836bc7923f3596ca222449b0eb3e4e5318f100d32ff465aa23026"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1614,9 +1614,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-github-projects"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0c208e176e396e2ccaf6bc713b81eab497bcaceed2672acb0e5f0e98be1d5b2"
+checksum = "bb61420d24736cae48d2730616dfe36dc54f35594f4049ff327ec500177a8608"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1632,9 +1632,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-in-memory"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08e64ca9aebb43d797b585e213ca03ad01a515d4cbd3da9be82841c3d5e2431d"
+checksum = "c9a932266f98275293793d3f16faeb756e72379f1bb4666bc0aa7626870d5643"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1646,9 +1646,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-linear"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2efc8fe63120d5dcc1b7600242876649c6e74204fdec8ea3ba8bf0f9c446ef35"
+checksum = "7c47c81105de231d6bd99e978692100c4ed59b904a4408371a1da0aefbb93503"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1662,9 +1662,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-local-md"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b33db879a72b57ddf110a1ba86a7e9b47641c9e657f4ae83f7cac46af4c952a5"
+checksum = "ed1f6ce4ab482cbd6c5e877e9666e879d4821e3dab5d8aa889cde3fa0a4f7fe4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1678,9 +1678,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-plugin-api"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bc633bc7862ef08fd4ea6e5039bdc5bfd485078d77461346ca2681bf0d60e80"
+checksum = "5c7c22e8c199b941eae89f5223fe99dd4207faa6c6659a55891495baa6213dc6"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1697,9 +1697,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.48.0"
+version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc49c31391354485e179506b43da91b70cab2e4f57c58b888b99f7bd767500f8"
+checksum = "7c57640d7ca59746171fcfcb6da3545033a307a1b2c6b381162ec2d71330e735"
 dependencies = [
  "aho-corasick",
  "clap",
@@ -2088,7 +2088,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2145,7 +2145,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2540,7 +2540,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3120,7 +3120,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

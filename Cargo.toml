@@ -529,7 +529,9 @@ onemessagebus = "0.9.0"
 # pre-registry dispatch gone when its last stop signalled workers and no
 # adoption followed. `host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone`
 # holds that rendering and a teardown refusal over HTTP.
-onepipeline = "=0.69.0"
+# 0.70.0 carries the native unpublished verdict and links onevcs 0.48.1.
+# The reader links that engine without adding a route or verb.
+onepipeline = "=0.70.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -562,7 +564,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "0.48.0"
+onevcs = "=0.48.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -581,8 +583,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.4.0"
-onetaskgraph-plugin-api = "=0.4.0"
+onetaskgraph-core = "=0.6.0"
+onetaskgraph-plugin-api = "=0.6.0"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was
