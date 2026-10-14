@@ -118,7 +118,7 @@ _ensure-tool tool:
 _ensure-pruner:
     @[ "$(cargo-prune-superseded --version 2>/dev/null)" = "cargo-prune-superseded {{prune-superseded-version}}" ] \
       || cargo install --locked cargo-prune-superseded --version {{prune-superseded-version}} --quiet \
-      || { echo "cannot install cargo-prune-superseded {{prune-superseded-version}} — 'just pool-maintenance' cannot run without it" >&2; exit 1; }
+      || { echo "cannot install cargo-prune-superseded {{prune-superseded-version}}, which 'just pool-maintenance' runs — fix the cargo error above (crates.io reachable, toolchain installed), then re-run 'just bootstrap'" >&2; exit 1; }
 
 # What onevcs runs in each idle warm-pool slot of this repository (`onevcs.toml`).
 # `target` is every directory this repository's cargo builds write to: the one
