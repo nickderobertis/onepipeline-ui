@@ -11,7 +11,9 @@
 #   b. the gate's test-target build under `--features bundled-ui`, which gives
 #      this crate's own units new metadata hashes, and exactly the entries that
 #      build created backdated past the window — they stand in for a run's
-#      builds that a later run has since superseded;
+#      builds that a later run has since superseded. The ordinary build runs
+#      first, untimed, so that build creates only what the feature changes and
+#      never a dependency both configurations share;
 #   c. the ordinary gate build, so each unit's newest build is the ordinary one;
 #   d. one declared pass, timed — the figure — which removes (b)'s builds.
 #
@@ -64,6 +66,7 @@ backlog_seconds="$(awk -v a="$started" -v b="$(now)" 'BEGIN { printf "%.3f", b -
 
 # (b) One superseded run's builds, backdated past the window. `-h` stamps a
 # symlink itself rather than what it points at, as the pruner never follows one.
+cargo nextest run --locked --no-run
 list_entries >"$EVIDENCE/before-alternative"
 cargo nextest run --locked --no-run --features bundled-ui
 list_entries >"$EVIDENCE/after-alternative"
