@@ -192,7 +192,9 @@ jobs:
         run: bash scripts/release-darwin.sh darwin-dist
       - name: Generate CycloneDX SBOM
         run: |
-          cargo cyclonedx --format json --all --features bundled-ui --target all
+          # cargo-cyclonedx names its output after the crate (onepipeline-ui.cdx.json)
+          # unless told otherwise; --override-filename bom writes the literal bom.json.
+          cargo cyclonedx --format json --all --features bundled-ui --target all --override-filename bom
           cp bom.json "darwin-dist/assets/onepipeline-api-${GITHUB_REF_NAME}.cdx.json"
       - name: Install and run native archive, wheel and npm before publication
         env:
