@@ -82,6 +82,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-restack-started": "repository",
   "node-restacked": "repository",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // A host read of a draft's review comments, about the publication under review.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.71.
+  "review-comments-read": "publication",
   // A run-end hook is the run's own boundary: it fires once the driver has let
   // go of the run, and what it reports is that the run ended one way or another.
   "run-hook-fired": "lifecycle",

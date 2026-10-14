@@ -1,6 +1,10 @@
 {
   "reply_envelope_version": 3,
   "commands": {
+    "review": {
+      "required": [],
+      "optional": []
+    },
     "set-node-sets": {
       "required": [
         "id",
