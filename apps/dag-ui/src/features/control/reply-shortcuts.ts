@@ -29,8 +29,9 @@ export type VerdictShortcut = keyof typeof VERDICT_SHORTCUTS;
  * the driver for a discovery pass and edits nothing; the grammar still spells
  * it, so an envelope carrying it is validated and listed like any other.
  */
-const UNOFFERED_OPS = ["review"] as const;
-type ComposerOp = Exclude<ReplyOp, (typeof UNOFFERED_OPS)[number]>;
+type UnofferedOp = Extract<ReplyOp, "review">;
+const UNOFFERED_OPS: readonly UnofferedOp[] = ["review"];
+type ComposerOp = Exclude<ReplyOp, UnofferedOp>;
 
 const isComposerOp = (op: ReplyOp): op is ComposerOp =>
   !UNOFFERED_OPS.some((unoffered) => unoffered === op);
