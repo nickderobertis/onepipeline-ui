@@ -24,14 +24,25 @@ export const VERDICT_SHORTCUTS = {
 } as const;
 export type VerdictShortcut = keyof typeof VERDICT_SHORTCUTS;
 
-/** Every engine reply command is available in the composer. */
-export type Shortcut = VerdictShortcut | ReplyOp;
+/**
+ * The engine reply commands the composer offers no shortcut for. `review` asks
+ * the driver for a discovery pass and edits nothing; the grammar still spells
+ * it, so an envelope carrying it is validated and listed like any other.
+ */
+const UNOFFERED_OPS = ["review"] as const;
+type ComposerOp = Exclude<ReplyOp, (typeof UNOFFERED_OPS)[number]>;
+
+const isComposerOp = (op: ReplyOp): op is ComposerOp =>
+  !UNOFFERED_OPS.some((unoffered) => unoffered === op);
+
+/** Every engine reply command but those above is available in the composer. */
+export type Shortcut = VerdictShortcut | ComposerOp;
 
 export const SHORTCUTS: readonly Shortcut[] = [
   "approve",
   "reject",
   "continue",
-  ...REPLY_OPS,
+  ...REPLY_OPS.filter(isComposerOp),
 ];
 
 export function isShortcut(value: string): value is Shortcut {
@@ -181,7 +192,7 @@ function draftEnvelope(
 }
 
 function draftCommand(
-  op: ReplyOp,
+  op: ComposerOp,
   fields: ShortcutFields,
   text: (key: keyof ShortcutFields) => string | undefined,
 ): { command: unknown } | { problem: string } {

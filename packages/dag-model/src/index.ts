@@ -1865,6 +1865,9 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
     })
     .strict(),
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // An explicit discovery pass: the engine reads the run's review comments and
+  // changes nothing in the graph, so the command carries no field at all.
+  z.object({ op: z.literal("review") }).strict(),
 ]);
 
 /** The ops the envelope may carry, in schema order. */

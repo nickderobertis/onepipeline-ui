@@ -1,7 +1,9 @@
-import { REPLY_ENVELOPE_VERSION } from "@onepipeline-ui/dag-model";
+import { REPLY_ENVELOPE_VERSION, REPLY_OPS } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import {
   composeEnvelope,
+  isKnownOp,
+  isShortcut,
   SHORTCUT_FIELDS,
   SHORTCUTS,
   type Shortcut,
@@ -232,5 +234,17 @@ describe("reply shortcuts", () => {
     ).toMatchObject({
       problem: expect.stringMatching(/^commands\.0\.addressee: /),
     });
+  });
+
+  test("the engine's review op is spelled by the grammar but offered as no shortcut", () => {
+    expect(REPLY_OPS).toContain("review");
+    expect(isKnownOp("review")).toBe(true);
+    expect(isShortcut("review")).toBe(false);
+    expect(SHORTCUTS).toEqual([
+      "approve",
+      "reject",
+      "continue",
+      ...REPLY_OPS.filter((op) => op !== "review"),
+    ]);
   });
 });

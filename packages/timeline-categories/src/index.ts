@@ -203,6 +203,9 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "node-restack-started": "repository",
   "node-restacked": "repository",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // A host read of a draft change request's review comments: a fact about the
+  // publication under review, like its retitling, and none of its words names a rule.
+  "review-comments-read": "publication",
   // Asking a run to complete is a boundary of the run, not a plan being edited.
   "completion-requested": "lifecycle",
   // A command the run accepted that committed nothing a reader folds — a finding
