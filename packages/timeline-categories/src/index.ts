@@ -195,17 +195,18 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
  */
 const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // A change request's title changed; the record concerns its publication.
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] The engine owns these event kinds, while this package owns the browser's category decisions. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` requires corpus entries for all five; the corpus pins their meanings and the exception table implements that presentation vocabulary, which no producer draws.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] The engine owns these event kinds, while this package owns the browser's category decisions. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` requires corpus entries for all four; the corpus pins their meanings and the exception table implements that presentation vocabulary, which no producer draws.
   "change-retitled": "publication",
   // The requested title could not be verified on the remote change request.
   "title-unverified": "verification",
   // Restacking moves a dependent branch onto its reworked ancestor's head.
   "node-restack-started": "repository",
   "node-restacked": "repository",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A host read of a draft change request's review comments: a fact about the
   // publication under review, like its retitling, and none of its words names a rule.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.71.
   "review-comments-read": "publication",
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // Asking a run to complete is a boundary of the run, not a plan being edited.
   "completion-requested": "lifecycle",
   // A command the run accepted that committed nothing a reader folds — a finding
