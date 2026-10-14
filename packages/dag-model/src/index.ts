@@ -1842,7 +1842,7 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
         .optional(),
     })
     .strict(),
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these command declarations; this browser package validates the reply wire format it consumes. `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` reads the linked engine schema into the golden, and the consumer journey compares this union with that golden op for op and field for field. These are reconciled wire schemas, not implementations of rework or retitle.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these command declarations; this browser package validates the reply wire format it consumes. `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` reads the linked engine schema into the golden, and the consumer journey compares this union with that golden op for op and field for field. These are reconciled wire schemas, not implementations of rework, retitle or review.
   z
     .object({
       op: z.literal("rework"),
@@ -1864,10 +1864,10 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       reason: z.string().min(1),
     })
     .strict(),
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // An explicit discovery pass: the engine reads the run's review comments and
   // changes nothing in the graph, so the command carries no field at all.
   z.object({ op: z.literal("review") }).strict(),
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 ]);
 
 /** The ops the envelope may carry, in schema order. */
