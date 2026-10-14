@@ -543,7 +543,15 @@ onemessagebus = "0.9.0"
 # `onevcs` and `onetaskgraph-*` requirements below move with it to the releases
 # its own lock resolves. This changes the engine types carried by
 # ApiError::from_engine and the other engine-typed public items.
-onepipeline = "=0.70.1"
+# 0.71.1 links onevcs 0.50.1's boundary, which accepts a repository's root
+# workspace members, so a browser-adopted run's driver publishes such a
+# repository the way every other dispatch on the host does once this moves.
+# 0.71.0, which this passes through, brings review comments into a run with
+# their state read from the host. This crate changes no route or response; the
+# test-only `onevcs` requirement below moves with it to the release its lock
+# resolves. This changes the engine types carried by ApiError::from_engine and
+# the other engine-typed public items.
+onepipeline = "=0.71.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -576,7 +584,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "=0.49.0"
+onevcs = "=0.50.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
