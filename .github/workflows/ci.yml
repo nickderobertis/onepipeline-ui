@@ -164,6 +164,11 @@ jobs:
         run: just bootstrap
       - name: Quality gate (every project)
         run: just check
+      # The host-labelled budgets no per-change run reaches, after the gate they
+      # are no part of: `pool-maintenance`'s builds the crate twice to time one
+      # pass of the pool maintenance `onevcs.toml` declares.
+      - name: Budgets, host-labelled included
+        run: just budgets
 
   # Prove the artifact builds and its tests pass on macOS and Windows (without
   # the coverage threshold, which is enforced on Linux).

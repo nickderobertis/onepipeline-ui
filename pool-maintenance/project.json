@@ -1,0 +1,28 @@
+{
+  "name": "pool-maintenance",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling"],
+  "targets": {
+    "bootstrap": {
+      "command": "just _ensure-pruner"
+    },
+    "test": {
+      "command": "node --test pool-maintenance/tests/*.test.mjs",
+      "dependsOn": ["bootstrap"],
+      "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/justfile"]
+    },
+    "check": {
+      "executor": "nx:noop",
+      "dependsOn": ["test"]
+    },
+    "budgets-host": {
+      "command": "node_modules/.bin/onebudgetspec check pool-maintenance/budgets.yaml --label host",
+      "dependsOn": [
+        "bootstrap",
+        { "projects": ["onepipeline-ui"], "target": "bootstrap" },
+        { "projects": ["dag-ui"], "target": "build" }
+      ]
+    }
+  }
+}

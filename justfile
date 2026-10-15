@@ -50,6 +50,10 @@ export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onep
 # installed, so nothing on PATH can be it.
 export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
 
+# The `cargo-prune-superseded` release `pool-maintenance` runs, pinned once here:
+# `_ensure-pruner` installs exactly this and nothing else reads a version for it.
+prune-superseded-version := "0.1.1"
+
 # List available recipes.
 default:
     @just --list
@@ -106,6 +110,28 @@ _ensure-baseline:
 # Install a cargo dev tool if it is missing. Quiet when already present.
 _ensure-tool tool:
     @command -v {{tool}} >/dev/null 2>&1 || cargo install {{tool}} --locked --quiet
+
+# The `pool-maintenance` project's provisioning (its `bootstrap` target): the
+# pinned pruner, onto PATH, where onevcs's maintenance of an idle slot runs it.
+# Skipped when that release is already the one on PATH, so a second bootstrap
+# installs nothing.
+_ensure-pruner:
+    @[ "$(cargo-prune-superseded --version 2>/dev/null)" = "cargo-prune-superseded {{prune-superseded-version}}" ] \
+      || cargo install --locked cargo-prune-superseded --version {{prune-superseded-version}} --quiet \
+      || { echo "cannot install cargo-prune-superseded {{prune-superseded-version}}, which 'just pool-maintenance' runs — fix the cargo error above (crates.io reachable, toolchain installed), then re-run 'just bootstrap'" >&2; exit 1; }
+
+# What onevcs runs in each idle warm-pool slot of this repository (`onevcs.toml`).
+# `target` is every directory this repository's cargo builds write to: the one
+# `target-dir` `.cargo/config.toml` sets, resolved against this root as cargo
+# resolves it, and every other build here (coverage, the wheels, semver-checks)
+# nests under it. In each profile directory the pruner removes a unit's
+# superseded builds older than the window and keeps its newest, so a slot stays
+# warm. `pool-maintenance/measure.sh` times this same recipe for the budget.
+# Remove superseded cargo builds older than 2 days, keeping each unit's newest.
+pool-maintenance:
+    @command -v cargo-prune-superseded >/dev/null \
+      || { echo "cargo-prune-superseded is not on PATH — run 'just bootstrap'" >&2; exit 1; }
+    @cargo-prune-superseded --keep-within 2d target
 
 # The tiers run in fail-fast order as dependencies, each fanned across every
 # project by Nx. The body then runs the per-project `check` aggregate — the same
@@ -213,6 +239,15 @@ test-baseline:
 # The bounds on what a read costs, which need `strace` installed.
 test-cost:
     @bash scripts/nx.sh run-many -t test-cost
+
+# Every project's onebudgetspec budgets, the host-labelled ones included. Not in
+# `check` or `gate`, and no per-change run reaches it: the host budgets measure
+# this machine rather than a diff — `pool-maintenance:budgets-host` builds the
+# crate twice to time one pool-maintenance pass — so ci.yml's `sweep` runs this
+# after the full gate, on the release pull request alone.
+# Check every project's budgets, host-labelled ones included.
+budgets:
+    @bash scripts/nx.sh run-many -t budgets budgets-host
 
 # Build every project's docs with warnings denied.
 doc:

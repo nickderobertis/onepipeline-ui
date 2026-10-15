@@ -15,6 +15,7 @@
       "{workspaceRoot}/tsconfig.base.json"
     ],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": ["default"],
     "wholeWorkspace": ["{workspaceRoot}/**/*"],
     "apiServerSurface": [
       "{workspaceRoot}/src/**/*.rs",
@@ -57,6 +58,16 @@
     "coverage": { "cache": false },
     "msrv": { "cache": false },
     "deps-check": { "cache": false },
+    "budgets": {
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/**/*",
+        "^production",
+        { "dependentTasksOutputFiles": "**/telemetry/*.json" },
+        { "externalDependencies": ["@onebudgetspec/cli"] }
+      ]
+    },
+    "budgets-host": { "cache": false },
     "lint-llm-diff": {
       "cache": true,
       "inputs": [
