@@ -156,10 +156,9 @@ export const API_V2_TIMELINE_SCOPES = {
  * launched with. A run's own launch config may define further names, which are
  * this client's to pass through rather than to enumerate.
  *
- * `planner` is the decisions-level view: onepipeline's own event vocabulary is a
- * closed set and it is exactly the decision vocabulary — a node became ready, was
- * dispatched, settled; an edit was committed; a decision began holding dependents
- * back and was cleared. `detailed` is detailed activity: the whole merged stream,
+ * `planner` is the planner's attention as the engine ships it: every pipeline
+ * decision but one its producer stamped `progress`, beside every `vcs` milestone
+ * and blocker. `detailed` is detailed activity: the whole merged stream,
  * all three sources, which is what an observer of a run reads. Both are the
  * engine's own shipped names — it named the second `monitor` until it stopped
  * naming an observer member at all, and ships no alias — so a run launched with
@@ -1869,6 +1868,10 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
   // changes nothing in the graph, so the command carries no field at all.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
   z.object({ op: z.literal("review") }).strict(),
+  // Readjust the run's drafts onto what has landed: the engine surfaces no
+  // comment and changes nothing in the graph, so the command carries no field.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
+  z.object({ op: z.literal("readjust") }).strict(),
 ]);
 
 /** The ops the envelope may carry, in schema order. */

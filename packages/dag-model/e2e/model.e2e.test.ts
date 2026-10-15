@@ -983,6 +983,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "rework",
     "retitle",
     "review",
+    "readjust",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,

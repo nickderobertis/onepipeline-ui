@@ -28,6 +28,7 @@
 use std::collections::BTreeMap;
 
 use onepipeline::event::{Envelope, Labels, Phase, Source};
+use onepipeline::vocabulary::Significance;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -93,6 +94,12 @@ pub struct Matcher {
     /// matches no phase a matcher asks for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<Phase>,
+    /// The `significance` its producer stamped among the envelope's labels —
+    /// `milestone`, `blocker` or `progress` — by exact equality. Which event is
+    /// which is that producer's table, never this crate's: an envelope carrying
+    /// no stamp matches no significance a matcher asks for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub significance: Option<Significance>,
     /// The `run_id` label the envelope was stamped with, by exact equality.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -229,6 +236,13 @@ impl Matcher {
         if self.phase.is_some_and(|named| Some(named) != phase) {
             return false;
         }
+        // The stamp travels among the extras under its own key, as the word its
+        // producer serialized; that word is what the engine compares too.
+        if self.significance.is_some_and(|named| {
+            serde_json::to_value(named).ok().as_ref() != labels.extra.get("significance")
+        }) {
+            return false;
+        }
         // Every reserved label has a typed slot on the engine's envelope, `member`
         // included, and [`stamped`] falls back to the extras for each of them
         // anyway — which is where a producer that predates the slot stamped it.
@@ -253,7 +267,9 @@ impl Matcher {
 
     /// Whether this matcher could match anything; see [`EventFilter::validate`].
     fn check(&self) -> Result<(), String> {
-        let mut named = usize::from(self.source.is_some()) + usize::from(self.phase.is_some());
+        let mut named = usize::from(self.source.is_some())
+            + usize::from(self.phase.is_some())
+            + usize::from(self.significance.is_some());
         for (field, asked) in
             std::iter::once(("kind", self.kind.as_deref())).chain(self.labels_asked())
         {
@@ -269,7 +285,8 @@ impl Matcher {
         if named == 0 {
             return Err(
                 "a matcher naming no field matches every event — name at least one of \
-                        `source`, `kind`, `phase`, `run_id`, `node`, `step`, `member`, or `persona`"
+                        `source`, `kind`, `phase`, `significance`, `run_id`, `node`, `step`, \
+                        `member`, or `persona`"
                     .to_owned(),
             );
         }
@@ -336,12 +353,12 @@ fn glob(pattern: &str, text: &str) -> bool {
 /// `planner` and `detailed`, which it ships under those names and no alias.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Profile {
-    /// **Decisions only.** `onepipeline`'s own vocabulary is a closed set and it
-    /// is exactly the decision vocabulary — a node became ready, was dispatched,
-    /// settled; an edit was committed or refused; a decision began holding
-    /// dependents back and was cleared; the planner was surfaced to and replied.
-    /// Everything a sibling relays is the *activity* those decisions are made
-    /// about, and none of it is a decision.
+    /// **The planner's attention**, exactly as the engine ships it under that
+    /// name: every pipeline-level decision but one its producer stamped
+    /// `progress`, beside every `vcs` event its producer stamped a `milestone`
+    /// or a `blocker`. The detailed `agentgraph` activity and `vcs` progress are
+    /// left out. Which event carries which stamp is each producer's own table,
+    /// so an unstamped pipeline event is in and an unstamped `vcs` event is out.
     Planner,
     /// **Detailed activity**: the whole merged stream, all three sources. An
     /// observer's whole job is to read the detail and compare activity against
@@ -378,13 +395,16 @@ impl Profile {
     #[must_use]
     pub fn filter(self) -> EventFilter {
         match self {
-            Self::Planner => EventFilter {
-                include: vec![Matcher {
-                    source: Some(Source::Pipeline),
-                    ..Matcher::default()
-                }],
-                exclude: Vec::new(),
-            },
+            // The engine's shipped table rather than a copy of it, so the browser
+            // and `onepipeline next --filter planner` narrow to one selection.
+            Self::Planner => {
+                let shipped = onepipeline::filter::Filters::default()
+                    .profile(onepipeline::filter::DEFAULT_PROFILE)
+                    .expect("the engine ships its default profile");
+                serde_json::to_value(shipped)
+                    .and_then(serde_json::from_value)
+                    .expect("this crate's grammar reads the engine's shipped profile")
+            }
             Self::Detailed => EventFilter::default(),
         }
     }

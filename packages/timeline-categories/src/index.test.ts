@@ -85,6 +85,24 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // A host read of a draft's review comments, about the publication under review.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.71.
   "review-comments-read": "publication",
+  // A manager landing's lifecycle, a draft's change request landing, being
+  // absorbed, closed or reopened, and the readjustment that follows a landing.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these kinds when the pin moved to 0.72.
+  "landing-registered": "publication",
+  "landing-drafting": "publication",
+  "landing-started": "publication",
+  "landing-finished": "publication",
+  "landing-refused": "failure",
+  "landing-died": "failure",
+  "node-landed": "publication",
+  "node-absorbed": "publication",
+  "stack-landed-out-of-order": "publication",
+  "change-closed": "publication",
+  "change-reopened": "publication",
+  "node-readjusted": "repository",
+  "node-checks-read": "verification",
+  "readjust-read-failed": "failure",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A run-end hook is the run's own boundary: it fires once the driver has let
   // go of the run, and what it reports is that the run ended one way or another.
   "run-hook-fired": "lifecycle",

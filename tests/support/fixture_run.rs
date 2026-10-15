@@ -1833,6 +1833,38 @@ pub fn append_relayed_at_phase(
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
 }
 
+/// Stamp the first `source` record of `kind` already in a run's journal with the
+/// `significance` its producer would carry among its labels.
+///
+/// `onevcs` stamps its records `milestone`, `blocker` or `progress`, and the
+/// engine its own the same way; a journey about a matcher or a profile over that
+/// stamp needs records carrying one, and stamping what [`write_live`] already
+/// wrote keeps every payload the one the fold reads. The record is parsed back
+/// through the SDK's own envelope, as [`append_relayed_at_phase`] does.
+pub fn stamp_significance(dir: &Path, source: &str, kind: &str, significance: &str) {
+    let journal = dir.join("events.jsonl");
+    let existing = fs::read_to_string(&journal).expect("the journal");
+    let mut stamped = false;
+    let lines: Vec<String> = existing
+        .lines()
+        .map(|line| {
+            let mut record: Value = serde_json::from_str(line).expect("a journal record");
+            if stamped || record["source"] != json!(source) || record["kind"] != json!(kind) {
+                return line.to_owned();
+            }
+            stamped = true;
+            record["labels"]["significance"] = json!(significance);
+            let _: Envelope = serde_json::from_value(record.clone()).expect("the stamped envelope");
+            record.to_string()
+        })
+        .collect();
+    assert!(
+        stamped,
+        "the journal holds no {source} {kind} record to stamp"
+    );
+    fs::write(&journal, format!("{}\n", lines.join("\n"))).expect("rewrite the journal");
+}
+
 /// One member's settlement, as the producing library relays it.
 ///
 /// The stream is deliberately a parameter and deliberately unconstrained: it is

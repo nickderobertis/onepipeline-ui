@@ -6470,9 +6470,9 @@ fn a_named_profile_narrows_the_stream_to_the_decisions_or_leaves_it_whole() {
         "{whole:?}"
     );
 
-    // `planner` is the decisions-level reading: onepipeline's own vocabulary is a
-    // closed set and it is exactly the decisions. Nothing a sibling relayed is a
-    // decision, so none of it survives.
+    // `planner` is the decisions-level reading: the engine's pipeline records, and
+    // only the sibling records their producer stamped a milestone or a blocker.
+    // This fixture stamps none, so nothing a sibling relayed survives.
     let decisions = kinds_on(&timeline_under(&serving, Some("planner")));
     assert!(!decisions.is_empty(), "the decisions are still served");
     for kind in [
@@ -6522,6 +6522,129 @@ fn a_named_profile_narrows_the_stream_to_the_decisions_or_leaves_it_whole() {
         message.contains("planner") && message.contains("detailed"),
         "{message}"
     );
+}
+
+#[test]
+fn the_planner_profile_selects_what_the_linked_engines_planner_selects() {
+    // A journal carrying every stamp the engine's planner reads: a `vcs`
+    // milestone and blocker, `vcs` progress, a pipeline record stamped progress,
+    // and the unstamped records of every source beside them. Which record is
+    // which is the producer's stamp; this server classifies nothing.
+    let mut runs = PathBuf::new();
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fixture_run::stamp_significance(&dir, "vcs", "change-opened", "milestone");
+        fixture_run::stamp_significance(&dir, "vcs", "change-check", "blocker");
+        fixture_run::stamp_significance(&dir, "vcs", "push", "progress");
+        fixture_run::stamp_significance(&dir, "pipeline", "edit-committed", "progress");
+        runs = root.to_path_buf();
+    });
+    // The run's merged store as the linked engine opens it, which is the list a
+    // timeline event's index is into.
+    let recorded = onepipeline::views::RunView::open(&onepipeline::views::RunPaths::under(
+        &runs,
+        fixture_run::RUN_ID,
+    ))
+    .expect("the engine opens the run")
+    .events;
+    // A timeline event names the merged record it projects as `e{index}`; a
+    // turn's records are named by the turn instead, and none of them is the
+    // planner's. Each index is held to the record's own kind, so a projection
+    // that stopped naming records that way fails here rather than comparing
+    // the wrong records.
+    let served = |filter: Option<&str>| -> Vec<usize> {
+        events_on(&timeline_under(&serving, filter))
+            .iter()
+            .filter_map(|event| {
+                let index: usize = event["id"].as_str()?.strip_prefix('e')?.parse().ok()?;
+                assert_eq!(event["kind"], json!(recorded[index].kind.0), "{event}");
+                Some(index)
+            })
+            .collect()
+    };
+
+    // The engine's own `planner`, as `onepipeline next` and `monitor` read
+    // through it when a launch overrides nothing, applied to exactly the records
+    // the unfiltered timeline serves.
+    let engine_planner = onepipeline::filter::Filters::default()
+        .profile(onepipeline::filter::DEFAULT_PROFILE)
+        .expect("the engine ships its planner profile");
+    let expected: Vec<usize> = served(None)
+        .into_iter()
+        .filter(|index| engine_planner.matches(&recorded[*index]))
+        .collect();
+    let planner = served(Some("planner"));
+    assert_eq!(
+        planner.len(),
+        events_on(&timeline_under(&serving, Some("planner"))).len(),
+        "every record the planner is served is a journal record"
+    );
+    assert_eq!(
+        planner, expected,
+        "the API's planner selects what the engine's planner selects"
+    );
+
+    // And what that selection is, in the producers' words: the stamped `vcs`
+    // milestone and blocker are in, `vcs` progress and unstamped `vcs` are out,
+    // a pipeline record stamped progress is out and an unstamped one is in.
+    let kinds: Vec<(&str, Option<&str>)> = planner
+        .iter()
+        .map(|index| {
+            let envelope = &recorded[*index];
+            (
+                envelope.kind.0.as_str(),
+                envelope
+                    .labels
+                    .extra
+                    .get("significance")
+                    .and_then(Value::as_str),
+            )
+        })
+        .collect();
+    for kept in [
+        ("change-opened", Some("milestone")),
+        ("change-check", Some("blocker")),
+        ("node-settled", None),
+        ("edit-committed", None),
+    ] {
+        assert!(
+            kinds.contains(&kept),
+            "{kept:?} is the planner's: {kinds:?}"
+        );
+    }
+    for left in [
+        ("push", Some("progress")),
+        ("lock-wait", None),
+        ("edit-committed", Some("progress")),
+        ("turn-started", None),
+    ] {
+        assert!(!kinds.contains(&left), "{left:?} is detail: {kinds:?}");
+    }
+
+    // A reader may ask for the stamp directly, in the grammar the engine shares:
+    // one milestone, and the one `vcs` blocker.
+    let milestones = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"significance":"milestone"}]}"#),
+    ));
+    assert_eq!(milestones, vec!["change-opened"], "{milestones:?}");
+    let blockers = kinds_on(&timeline_under(
+        &serving,
+        Some(r#"{"include":[{"source":"vcs","significance":"blocker"}]}"#),
+    ));
+    assert_eq!(blockers, vec!["change-check"], "{blockers:?}");
+    // And a word no producer stamps is refused, as the engine's reader refuses
+    // it, rather than served as a filter that matches nothing.
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run&filter={}",
+            fixture_run::RUN_ID,
+            urlencode(r#"{"include":[{"significance":"urgent"}]}"#)
+        ),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
 }
 
 #[test]
