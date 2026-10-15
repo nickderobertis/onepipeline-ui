@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.35.0...v0.36.0) - 2026-10-15
+
+### Added
+
+- *(deps)* [**breaking**] link the engine with supervised manager landings ([#337](https://github.com/nickderobertis/onepipeline-ui/pull/337))
+
 ## [0.35.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.34.1...v0.35.0) - 2026-10-14
 
 ### Added
