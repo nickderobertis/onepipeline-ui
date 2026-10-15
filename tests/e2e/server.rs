@@ -6530,7 +6530,7 @@ fn the_planner_profile_selects_what_the_linked_engines_planner_selects() {
     // milestone and blocker, `vcs` progress, a pipeline record stamped progress,
     // and the unstamped records of every source beside them. Which record is
     // which is the producer's stamp; this server classifies nothing.
-    let mut runs = PathBuf::new();
+    let mut runs = std::path::PathBuf::new();
     let serving = Serving::start(|root| {
         let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
         fixture_run::stamp_significance(&dir, "vcs", "change-opened", "milestone");
