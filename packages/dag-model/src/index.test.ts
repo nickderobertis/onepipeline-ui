@@ -1320,6 +1320,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "rework",
     "retitle",
     "review",
+    "readjust",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,
@@ -1416,23 +1417,26 @@ test("rework and retitle envelopes round-trip and refuse incomplete commands", (
   }
 });
 
-test("a review envelope round-trips bare and refuses any field or a missing version", () => {
-  const envelope = {
-    version: REPLY_ENVELOPE_VERSION,
-    commands: [{ op: "review" }],
-  };
-  expect(
-    replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
-  ).toEqual(envelope);
-  // The engine's `review` declares no field, so one the browser added would be
-  // refused there; it is refused here first, by the same strictness.
-  expect(
-    replyEnvelopeSchema.safeParse({
-      ...envelope,
-      commands: [{ op: "review", id: "docs" }],
-    }).success,
-  ).toBe(false);
-  expect(
-    replyEnvelopeSchema.safeParse({ commands: [{ op: "review" }] }).success,
-  ).toBe(false);
-});
+test.each(["review", "readjust"])(
+  "a %s envelope round-trips bare and refuses any field or a missing version",
+  (op) => {
+    const envelope = {
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [{ op }],
+    };
+    expect(
+      replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
+    ).toEqual(envelope);
+    // The engine's bare commands declare no field, so one the browser added
+    // would be refused there; it is refused here first, by the same strictness.
+    expect(
+      replyEnvelopeSchema.safeParse({
+        ...envelope,
+        commands: [{ op, id: "docs" }],
+      }).success,
+    ).toBe(false);
+    expect(replyEnvelopeSchema.safeParse({ commands: [{ op }] }).success).toBe(
+      false,
+    );
+  },
+);

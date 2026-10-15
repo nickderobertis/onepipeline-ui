@@ -112,7 +112,12 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
         "cron",
       ],
     ],
-    ["failure", ["failed", "died", "rejected", "exceeded", "conflict"]],
+    // `refused` is an attempted act the host turned down — a manager landing's
+    // forwarded verb ending non-zero — which a reader scans for as a failure.
+    [
+      "failure",
+      ["failed", "died", "rejected", "refused", "exceeded", "conflict"],
+    ],
     ["human", ["human"]],
     // `note` is a manager's note reaching a running conversation — the planner and
     // the run talking, whichever party of the conversation it reached.
@@ -154,6 +159,10 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
         "merged",
         "change",
         "drafting",
+        // A manager landing, and a draft found landed on its root, are the
+        // publication reaching its base: the same act as a merge.
+        "landing",
+        "landed",
       ],
     ],
     // `branches` because a word is matched whole: the engine's records of the branches
@@ -207,6 +216,14 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // publication under review, like its retitling, and none of its words names a rule.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.71.
   "review-comments-read": "publication",
+  // A draft merged into another node's branch lands with that node: it is the
+  // publication reaching a base, like a merge, though no word of it says so.
+  // A draft brought onto its placement after a neighbour landed is a branch
+  // moved, the same act as a restack.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these kinds when the pin moved to 0.72.
+  "node-absorbed": "publication",
+  "node-readjusted": "repository",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // Asking a run to complete is a boundary of the run, not a plan being edited.
   "completion-requested": "lifecycle",
   // A command the run accepted that committed nothing a reader folds — a finding

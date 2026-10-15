@@ -551,7 +551,16 @@ onemessagebus = "0.9.0"
 # test-only `onevcs` requirement below moves with it to the release its lock
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items.
-onepipeline = "=0.71.1"
+# 0.72.0 supervises manager-started landings through flows and links onevcs
+# 0.51.2's operation-scoped reader and the significance its producer stamps, so
+# a browser-adopted run's driver relays the same audience the CLI does once this
+# moves. Its filter grammar gains `significance` and its `planner` profile reads
+# it, so `?filter=` accepts that matcher and `planner` is the engine's shipped
+# profile; the lock follows its own to oneagentgraph 0.5.7. No route is added;
+# the test-only `onevcs` requirement below moves with it to the release its lock
+# resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
+onepipeline = "=0.72.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -584,7 +593,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right.
-onevcs = "=0.50.1"
+onevcs = "=0.51.2"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so

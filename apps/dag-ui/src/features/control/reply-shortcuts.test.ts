@@ -236,15 +236,17 @@ describe("reply shortcuts", () => {
     });
   });
 
-  test("the engine's review op is spelled by the grammar but offered as no shortcut", () => {
-    expect(REPLY_OPS).toContain("review");
-    expect(isKnownOp("review")).toBe(true);
-    expect(isShortcut("review")).toBe(false);
+  test("the engine's review and readjust ops are spelled by the grammar but offered as no shortcut", () => {
+    for (const op of ["review", "readjust"]) {
+      expect(REPLY_OPS).toContain(op);
+      expect(isKnownOp(op)).toBe(true);
+      expect(isShortcut(op)).toBe(false);
+    }
     expect(SHORTCUTS).toEqual([
       "approve",
       "reject",
       "continue",
-      ...REPLY_OPS.filter((op) => op !== "review"),
+      ...REPLY_OPS.filter((op) => op !== "review" && op !== "readjust"),
     ]);
   });
 });

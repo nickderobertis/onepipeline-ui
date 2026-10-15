@@ -3857,6 +3857,7 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
         source: Some(onepipeline::event::Source::Agentgraph),
         kind: Some("turn-*".into()),
         phase: Some(onepipeline::event::Phase::Review),
+        significance: Some(onepipeline::vocabulary::Significance::Milestone),
         run_id: Some("run-1".into()),
         node: Some("build".into()),
         step: Some("compile".into()),
@@ -3870,6 +3871,7 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
             "source": "agentgraph",
             "kind": "turn-*",
             "phase": "review",
+            "significance": "milestone",
             "run_id": "run-1",
             "node": "build",
             "step": "compile",
@@ -3890,6 +3892,7 @@ fn the_filter_grammar_this_crate_reads_is_the_one_the_stack_shares() {
             source: Some(onepipeline::event::Source::Agentgraph),
             kind: Some("turn-*".into()),
             fields: onepipeline::vocabulary::MatchFields {
+                significance: Some(onepipeline::vocabulary::Significance::Milestone),
                 phase: Some(onepipeline::event::Phase::Review),
                 run_id: Some("run-1".into()),
                 node: Some("build".into()),
