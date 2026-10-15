@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.36.0...v0.36.1) - 2026-10-15
+
+### Fixed
+
+- *(deps)* align the API with the generic test-word engine ([#339](https://github.com/nickderobertis/onepipeline-ui/pull/339))
+
 ## [0.36.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.35.0...v0.36.0) - 2026-10-15
 
 ### Added
