@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.36.1...v0.37.0) - 2026-10-16
+
+### Added
+
+- *(deps)* [**breaking**] link the engine with the extended source cache ([#345](https://github.com/nickderobertis/onepipeline-ui/pull/345))
+
 ## [0.36.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.36.0...v0.36.1) - 2026-10-15
 
 ### Fixed
