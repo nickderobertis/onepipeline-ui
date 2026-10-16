@@ -1,0 +1,55 @@
+{
+  "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/branches/main/protection/required_status_checks",
+  "strict": false,
+  "contexts": [
+    "gate",
+    "deny",
+    "pr-title",
+    "llmlint",
+    "msrv",
+    "cross (windows-latest)",
+    "install (ubuntu-latest)",
+    "install (windows-latest)",
+    "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)"
+  ],
+  "contexts_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/branches/main/protection/required_status_checks/contexts",
+  "checks": [
+    {
+      "context": "gate",
+      "app_id": null
+    },
+    {
+      "context": "deny",
+      "app_id": null
+    },
+    {
+      "context": "pr-title",
+      "app_id": 15368
+    },
+    {
+      "context": "llmlint",
+      "app_id": 15368
+    },
+    {
+      "context": "msrv",
+      "app_id": null
+    },
+    {
+      "context": "cross (windows-latest)",
+      "app_id": null
+    },
+    {
+      "context": "install (ubuntu-latest)",
+      "app_id": null
+    },
+    {
+      "context": "install (windows-latest)",
+      "app_id": null
+    },
+    {
+      "context": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+      "app_id": 15368
+    }
+  ],
+  "taken_at": "2026-10-16T00:01:43+00:00"
+}
