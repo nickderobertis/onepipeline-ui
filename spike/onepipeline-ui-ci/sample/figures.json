@@ -1,0 +1,2547 @@
+{
+ "cycle_time": {
+  "checks_phase_s": {
+   "max": 2577.0,
+   "median": 2577.0,
+   "n": 1,
+   "p90": 2577.0
+  },
+  "eligible_prs": 1,
+  "ineligible": {
+   "head-commit jobs not fetched (sampling)": 2,
+   "no head-commit runs in the run list": 54,
+   "release PR (its merge is the release itself)": 37
+  },
+  "merge_to_release_commit_s": {
+   "max": 2644.0,
+   "median": 2644.0,
+   "n": 1,
+   "p90": 2644.0
+  },
+  "merge_to_release_s": {
+   "max": 6671.0,
+   "median": 6671.0,
+   "n": 1,
+   "p90": 6671.0
+  },
+  "per_release_max_detail": {
+   "v0.36.1": 9248.0
+  },
+  "per_release_max_total_s": {
+   "max": 9248.0,
+   "median": 9248.0,
+   "n": 1,
+   "p90": 9248.0
+  },
+  "prs": [
+   {
+    "checks_phase_s": 2577.0,
+    "head_runs": [
+     38696669476,
+     38696669526,
+     38696669809
+    ],
+    "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+    "merge_commit_sha": "cd4be04240b1d889e560f6be537bdf4780faaeb1",
+    "merge_to_release_commit_s": 2644.0,
+    "merge_to_release_s": 6671.0,
+    "merged_at": "2026-10-15T07:47:46Z",
+    "pr": 339,
+    "release": "v0.36.1",
+    "release_cd_wall_s": 4027.0,
+    "title": "fix(deps): align the API with the generic test-word engine",
+    "total_s": 9248.0
+   }
+  ],
+  "total_s": {
+   "max": 9248.0,
+   "median": 9248.0,
+   "n": 1,
+   "p90": 9248.0
+  }
+ },
+ "fetch_stopped": null,
+ "inputs": {
+  "pulls_read": 100,
+  "runs_by_workflow_event": {
+   "CI / pull_request": 7,
+   "CI / push": 5,
+   "Published smoke / workflow_run": 2,
+   "Release / release": 2,
+   "Release-plz / push": 5,
+   "Visual docs / pull_request": 12,
+   "Visual docs / push": 5,
+   "notignored / pull_request": 7
+  },
+  "runs_in_window": 45,
+  "runs_with_jobs_read": 8
+ },
+ "invocation": "python3 -I spike/onepipeline-ui-ci/measure.py --repo nickderobertis/onepipeline-ui --since 2026-09-15 --raw spike/onepipeline-ui-ci/sample/raw --out spike/onepipeline-ui-ci/sample/figures.json --offline",
+ "needs_holds": [
+  {
+   "dependent": "^install \\((ubuntu|windows)-latest\\)$",
+   "held_s": {
+    "max": 1604.0,
+    "median": 1553.0,
+    "n": 2,
+    "p90": 1604.0
+   },
+   "needs": "quality",
+   "runs": 2,
+   "workflow": "CI"
+  },
+  {
+   "dependent": "^macos$",
+   "held_s": null,
+   "needs": "quality",
+   "runs": 0,
+   "workflow": "CI"
+  },
+  {
+   "dependent": "^darwin$",
+   "held_s": {
+    "max": 2323.0,
+    "median": 2323.0,
+    "n": 1,
+    "p90": 2323.0
+   },
+   "needs": "test",
+   "runs": 1,
+   "workflow": "Release"
+  },
+  {
+   "dependent": "^upload \\(",
+   "held_s": {
+    "max": 2323.0,
+    "median": 2323.0,
+    "n": 1,
+    "p90": 2323.0
+   },
+   "needs": "test",
+   "runs": 1,
+   "workflow": "Release"
+  },
+  {
+   "dependent": "^build-wheels \\(",
+   "held_s": {
+    "max": 2323.0,
+    "median": 2323.0,
+    "n": 1,
+    "p90": 2323.0
+   },
+   "needs": "test",
+   "runs": 1,
+   "workflow": "Release"
+  },
+  {
+   "dependent": "^build-npm \\(",
+   "held_s": {
+    "max": 2323.0,
+    "median": 2323.0,
+    "n": 1,
+    "p90": 2323.0
+   },
+   "needs": "test",
+   "runs": 1,
+   "workflow": "Release"
+  },
+  {
+   "dependent": "^publish-crate$",
+   "held_s": {
+    "max": 2318.0,
+    "median": 2318.0,
+    "n": 1,
+    "p90": 2318.0
+   },
+   "needs": "test",
+   "runs": 1,
+   "workflow": "Release"
+  }
+ ],
+ "per_job": [
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 107.0,
+    "median": 107.0,
+    "n": 1,
+    "p90": 107.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "browser-windows",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 15.0,
+    "median": 15.0,
+    "n": 1,
+    "p90": 15.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "changes",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "failure": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 1,
+   "job": "cross (macos-latest)",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 1854.0,
+    "median": 1854.0,
+    "n": 1,
+    "p90": 1854.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "cross (windows-latest)",
+   "queue_wait_s": {
+    "max": 20.0,
+    "median": 20.0,
+    "n": 1,
+    "p90": 20.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 34.0,
+    "median": 34.0,
+    "n": 1,
+    "p90": 34.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "deny",
+   "queue_wait_s": {
+    "max": 20.0,
+    "median": 20.0,
+    "n": 1,
+    "p90": 20.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 7.0,
+    "median": 7.0,
+    "n": 1,
+    "p90": 7.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "gate",
+   "queue_wait_s": {
+    "max": 1624.0,
+    "median": 1624.0,
+    "n": 1,
+    "p90": 1624.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "failure": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 1,
+   "job": "install (macos-latest)",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 355.0,
+    "median": 355.0,
+    "n": 1,
+    "p90": 355.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "install (ubuntu-latest)",
+   "queue_wait_s": {
+    "max": 1624.0,
+    "median": 1624.0,
+    "n": 1,
+    "p90": 1624.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 755.0,
+    "median": 755.0,
+    "n": 1,
+    "p90": 755.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "install (windows-latest)",
+   "queue_wait_s": {
+    "max": 1625.0,
+    "median": 1625.0,
+    "n": 1,
+    "p90": 1625.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 160.0,
+    "median": 160.0,
+    "n": 1,
+    "p90": 160.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "llmlint",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 0,
+   "job": "macos",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 74.0,
+    "median": 74.0,
+    "n": 1,
+    "p90": 74.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "msrv",
+   "queue_wait_s": {
+    "max": 35.0,
+    "median": 35.0,
+    "n": 1,
+    "p90": 35.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 4.0,
+    "median": 4.0,
+    "n": 1,
+    "p90": 4.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "pr-title",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 1618.0,
+    "median": 1618.0,
+    "n": 1,
+    "p90": 1618.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "quality",
+   "queue_wait_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 0,
+   "job": "sweep",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 515.0,
+    "median": 515.0,
+    "n": 1,
+    "p90": 515.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "wheel (aarch64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 33.0,
+    "median": 33.0,
+    "n": 1,
+    "p90": 33.0
+   },
+   "runner_os": [
+    "linux-arm64"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 558.0,
+    "median": 558.0,
+    "n": 1,
+    "p90": 558.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "wheel (x86_64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 19.0,
+    "median": 19.0,
+    "n": 1,
+    "p90": 19.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 142.0,
+    "median": 142.0,
+    "n": 1,
+    "p90": 142.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "browser-windows",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 17.0,
+    "median": 17.0,
+    "n": 1,
+    "p90": 17.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "changes",
+   "queue_wait_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 6.0,
+    "median": 6.0,
+    "n": 1,
+    "p90": 6.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "cross (macos-latest)",
+   "queue_wait_s": {
+    "max": 1575.0,
+    "median": 1575.0,
+    "n": 1,
+    "p90": 1575.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 1545.0,
+    "median": 1545.0,
+    "n": 1,
+    "p90": 1545.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "cross (windows-latest)",
+   "queue_wait_s": {
+    "max": 22.0,
+    "median": 22.0,
+    "n": 1,
+    "p90": 22.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 34.0,
+    "median": 34.0,
+    "n": 1,
+    "p90": 34.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "deny",
+   "queue_wait_s": {
+    "max": 22.0,
+    "median": 22.0,
+    "n": 1,
+    "p90": 22.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 5.0,
+    "median": 5.0,
+    "n": 1,
+    "p90": 5.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "gate",
+   "queue_wait_s": {
+    "max": 1568.0,
+    "median": 1568.0,
+    "n": 1,
+    "p90": 1568.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 6.0,
+    "median": 6.0,
+    "n": 1,
+    "p90": 6.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "install (macos-latest)",
+   "queue_wait_s": {
+    "max": 1569.0,
+    "median": 1569.0,
+    "n": 1,
+    "p90": 1569.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 193.0,
+    "median": 193.0,
+    "n": 1,
+    "p90": 193.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "install (ubuntu-latest)",
+   "queue_wait_s": {
+    "max": 1572.0,
+    "median": 1572.0,
+    "n": 1,
+    "p90": 1572.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "install (windows-latest)",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "llmlint",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "macos",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 50.0,
+    "median": 50.0,
+    "n": 1,
+    "p90": 50.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "msrv",
+   "queue_wait_s": {
+    "max": 22.0,
+    "median": 22.0,
+    "n": 1,
+    "p90": 22.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "pr-title",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 1520.0,
+    "median": 1520.0,
+    "n": 1,
+    "p90": 1520.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "quality",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "sweep",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 520.0,
+    "median": 520.0,
+    "n": 1,
+    "p90": 520.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "wheel (aarch64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 24.0,
+    "median": 24.0,
+    "n": 1,
+    "p90": 24.0
+   },
+   "runner_os": [
+    "linux-arm64"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 677.0,
+    "median": 677.0,
+    "n": 1,
+    "p90": 677.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "wheel (x86_64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 23.0,
+    "median": 23.0,
+    "n": 1,
+    "p90": 23.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "CI"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "macos-diagnostic",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 8.0,
+    "median": 8.0,
+    "n": 1,
+    "p90": 8.0
+   },
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "npm (ubuntu-latest)",
+   "queue_wait_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 19.0,
+    "median": 19.0,
+    "n": 1,
+    "p90": 19.0
+   },
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "npm (windows-latest)",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 7.0,
+    "median": 7.0,
+    "n": 1,
+    "p90": 7.0
+   },
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "probe",
+   "queue_wait_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 10.0,
+    "median": 10.0,
+    "n": 1,
+    "p90": 10.0
+   },
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "pypi (ubuntu-latest)",
+   "queue_wait_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 26.0,
+    "median": 26.0,
+    "n": 1,
+    "p90": 26.0
+   },
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "pypi (windows-latest)",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "workflow_run",
+   "failed": 0,
+   "job": "report a failure",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Published smoke"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 494.0,
+    "median": 494.0,
+    "n": 1,
+    "p90": 494.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "build-npm (aarch64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 2413.0,
+    "median": 2413.0,
+    "n": 1,
+    "p90": 2413.0
+   },
+   "runner_os": [
+    "linux-arm64"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 1191.0,
+    "median": 1191.0,
+    "n": 1,
+    "p90": 1191.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "build-npm (x86_64-pc-windows-msvc)",
+   "queue_wait_s": {
+    "max": 2509.0,
+    "median": 2509.0,
+    "n": 1,
+    "p90": 2509.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 593.0,
+    "median": 593.0,
+    "n": 1,
+    "p90": 593.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "build-npm (x86_64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 2376.0,
+    "median": 2376.0,
+    "n": 1,
+    "p90": 2376.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 521.0,
+    "median": 521.0,
+    "n": 1,
+    "p90": 521.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "build-wheels (aarch64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 2410.0,
+    "median": 2410.0,
+    "n": 1,
+    "p90": 2410.0
+   },
+   "runner_os": [
+    "linux-arm64"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 988.0,
+    "median": 988.0,
+    "n": 1,
+    "p90": 988.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "build-wheels (x86_64-pc-windows-msvc)",
+   "queue_wait_s": {
+    "max": 2728.0,
+    "median": 2728.0,
+    "n": 1,
+    "p90": 2728.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 489.0,
+    "median": 489.0,
+    "n": 1,
+    "p90": 489.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "build-wheels (x86_64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 2781.0,
+    "median": 2781.0,
+    "n": 1,
+    "p90": 2781.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 446.0,
+    "median": 446.0,
+    "n": 1,
+    "p90": 446.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "darwin",
+   "queue_wait_s": {
+    "max": 3325.0,
+    "median": 3325.0,
+    "n": 1,
+    "p90": 3325.0
+   },
+   "runner_os": [
+    "macos"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "guard",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 225.0,
+    "median": 225.0,
+    "n": 1,
+    "p90": 225.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "publish-crate",
+   "queue_wait_s": {
+    "max": 2741.0,
+    "median": 2741.0,
+    "n": 1,
+    "p90": 2741.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 58.0,
+    "median": 58.0,
+    "n": 1,
+    "p90": 58.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "publish-npm",
+   "queue_wait_s": {
+    "max": 3773.0,
+    "median": 3773.0,
+    "n": 1,
+    "p90": 3773.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 31.0,
+    "median": 31.0,
+    "n": 1,
+    "p90": 31.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "publish-pypi",
+   "queue_wait_s": {
+    "max": 3773.0,
+    "median": 3773.0,
+    "n": 1,
+    "p90": 3773.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "failure": 1
+   },
+   "duration_s": null,
+   "event": "release",
+   "failed": 1,
+   "job": "release-status",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 2320.0,
+    "median": 2320.0,
+    "n": 1,
+    "p90": 2320.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "test",
+   "queue_wait_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 483.0,
+    "median": 483.0,
+    "n": 1,
+    "p90": 483.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "upload (aarch64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 2601.0,
+    "median": 2601.0,
+    "n": 1,
+    "p90": 2601.0
+   },
+   "runner_os": [
+    "linux-arm64"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 1164.0,
+    "median": 1164.0,
+    "n": 1,
+    "p90": 1164.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "upload (x86_64-pc-windows-msvc)",
+   "queue_wait_s": {
+    "max": 2778.0,
+    "median": 2778.0,
+    "n": 1,
+    "p90": 2778.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 508.0,
+    "median": 508.0,
+    "n": 1,
+    "p90": 508.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "upload (x86_64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 2363.0,
+    "median": 2363.0,
+    "n": 1,
+    "p90": 2363.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 10.0,
+    "median": 10.0,
+    "n": 1,
+    "p90": 10.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "upload-darwin",
+   "queue_wait_s": {
+    "max": 3773.0,
+    "median": 3773.0,
+    "n": 1,
+    "p90": 3773.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 6.0,
+    "median": 6.0,
+    "n": 1,
+    "p90": 6.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "verify-assets (aarch64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 3946.0,
+    "median": 3946.0,
+    "n": 1,
+    "p90": 3946.0
+   },
+   "runner_os": [
+    "linux-arm64"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 8.0,
+    "median": 8.0,
+    "n": 1,
+    "p90": 8.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "verify-assets (x86_64-unknown-linux-gnu)",
+   "queue_wait_s": {
+    "max": 3944.0,
+    "median": 3944.0,
+    "n": 1,
+    "p90": 3944.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "failure": 1
+   },
+   "duration_s": null,
+   "event": "release",
+   "failed": 1,
+   "job": "verify-npm (ubuntu-latest)",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "failure": 1
+   },
+   "duration_s": null,
+   "event": "release",
+   "failed": 1,
+   "job": "verify-npm (windows-latest)",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 6.0,
+    "median": 6.0,
+    "n": 1,
+    "p90": 6.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "verify-pypi (ubuntu-latest)",
+   "queue_wait_s": {
+    "max": 3806.0,
+    "median": 3806.0,
+    "n": 1,
+    "p90": 3806.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 17.0,
+    "median": 17.0,
+    "n": 1,
+    "p90": 17.0
+   },
+   "event": "release",
+   "failed": 0,
+   "job": "verify-pypi (windows-latest)",
+   "queue_wait_s": {
+    "max": 3806.0,
+    "median": 3806.0,
+    "n": 1,
+    "p90": 3806.0
+   },
+   "runner_os": [
+    "windows"
+   ],
+   "workflow": "Release"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 3.0,
+    "median": 3.0,
+    "n": 1,
+    "p90": 3.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "guard",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release-plz"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 39.0,
+    "median": 39.0,
+    "n": 1,
+    "p90": 39.0
+   },
+   "event": "push",
+   "failed": 0,
+   "job": "release-plz",
+   "queue_wait_s": {
+    "max": 7.0,
+    "median": 7.0,
+    "n": 1,
+    "p90": 7.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Release-plz"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / aggregate-comment",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 8.0,
+    "median": 8.0,
+    "n": 1,
+    "p90": 8.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / arches",
+   "queue_wait_s": {
+    "max": 8.0,
+    "median": 8.0,
+    "n": 1,
+    "p90": 8.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 837.0,
+    "median": 837.0,
+    "n": 1,
+    "p90": 837.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / capture (x86_64, shots/current, shots/verify, Visual docs)",
+   "queue_wait_s": {
+    "max": 18.0,
+    "median": 18.0,
+    "n": 1,
+    "p90": 18.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / cleanup-preview",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 110.0,
+    "median": 110.0,
+    "n": 1,
+    "p90": 110.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / deploy-pages",
+   "queue_wait_s": {
+    "max": 881.0,
+    "median": 881.0,
+    "n": 1,
+    "p90": 881.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 4.0,
+    "median": 4.0,
+    "n": 1,
+    "p90": 4.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / pages-preflight",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "skipped": 1
+   },
+   "duration_s": null,
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / prune-history",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 21.0,
+    "median": 21.0,
+    "n": 1,
+    "p90": 21.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+   "queue_wait_s": {
+    "max": 858.0,
+    "median": 858.0,
+    "n": 1,
+    "p90": 858.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / aggregate-comment",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / arches",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / capture",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / cleanup-preview",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / deploy-pages",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / pages-preflight",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / prune-history",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 1,
+   "conclusions": {
+    "cancelled": 1
+   },
+   "duration_s": null,
+   "event": "push",
+   "failed": 0,
+   "job": "visual-docs / report",
+   "queue_wait_s": null,
+   "runner_os": [],
+   "workflow": "Visual docs"
+  },
+  {
+   "cancelled": 0,
+   "conclusions": {
+    "success": 1
+   },
+   "duration_s": {
+    "max": 9.0,
+    "median": 9.0,
+    "n": 1,
+    "p90": 9.0
+   },
+   "event": "pull_request",
+   "failed": 0,
+   "job": "suppressions",
+   "queue_wait_s": {
+    "max": 2.0,
+    "median": 2.0,
+    "n": 1,
+    "p90": 2.0
+   },
+   "runner_os": [
+    "linux"
+   ],
+   "workflow": "notignored"
+  }
+ ],
+ "per_pr_head_commit": {
+  "by_runner_os": {},
+  "by_workflow": {},
+  "ci_longest_job_detail": [],
+  "ci_longest_job_s": null,
+  "heads_measured": 0,
+  "jobs_executed": null
+ },
+ "per_release_cd": {
+  "cd_wall_s": {
+   "max": 4027.0,
+   "median": 4027.0,
+   "n": 1,
+   "p90": 4027.0
+  },
+  "job_count": {
+   "max": 43,
+   "median": 43,
+   "n": 1,
+   "p90": 43
+  },
+  "longest_job_s": {
+   "max": 2320.0,
+   "median": 2320.0,
+   "n": 1,
+   "p90": 2320.0
+  },
+  "releases": [
+   {
+    "cd_wall_s": null,
+    "commit": "5a2daca4e2201d95a06107b89ebe658d65bf97b1",
+    "first_run_created": "2026-10-15T04:35:24+00:00",
+    "job_count": 0,
+    "job_count_by_os": {},
+    "job_count_by_workflow": {},
+    "jobs_fetched_for_every_run": false,
+    "last_job_completed": null,
+    "longest_job": null,
+    "longest_job_s": null,
+    "release_conclusion": "failure",
+    "run_workflows": [
+     "CI (push, success)",
+     "Published smoke (workflow_run, failure)",
+     "Release (release, failure)",
+     "Release-plz (push, success)",
+     "Visual docs (push, success)"
+    ],
+    "runs": [
+     38682259529,
+     38682259785,
+     38682259986,
+     38682328162,
+     38695272935
+    ],
+    "tag": "v0.36.0"
+   },
+   {
+    "cd_wall_s": 4027.0,
+    "commit": "6ebaa28d1b7b7773d31c3090a394fa643bee76dc",
+    "first_run_created": "2026-10-15T08:31:50+00:00",
+    "job_count": 43,
+    "job_count_by_os": {
+     "linux": 27,
+     "linux-arm64": 5,
+     "macos": 1,
+     "windows": 10
+    },
+    "job_count_by_workflow": {
+     "CI (push)": 13,
+     "Published smoke (workflow_run)": 5,
+     "Release (release)": 23,
+     "Release-plz (push)": 2
+    },
+    "jobs_fetched_for_every_run": true,
+    "last_job_completed": "2026-10-15T09:38:57+00:00",
+    "longest_job": "Release / test",
+    "longest_job_s": 2320.0,
+    "release_conclusion": "failure",
+    "run_workflows": [
+     "CI (push, cancelled)",
+     "Published smoke (workflow_run, success)",
+     "Release (release, failure)",
+     "Release-plz (push, success)",
+     "Visual docs (push, cancelled)"
+    ],
+    "runs": [
+     38706314578,
+     38706314579,
+     38706314891,
+     38706388926,
+     38714430690
+    ],
+    "tag": "v0.36.1"
+   }
+  ]
+ },
+ "per_step_over_30s_median": [
+  {
+   "duration_s": {
+    "max": 119.0,
+    "median": 102.5,
+    "n": 2,
+    "p90": 119.0
+   },
+   "job": "browser-windows",
+   "step": "Build the browser view (shared with release.yml)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 1233.0,
+    "median": 1197.5,
+    "n": 2,
+    "p90": 1233.0
+   },
+   "job": "cross (windows-latest)",
+   "step": "Bootstrap",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 159.0,
+    "median": 79.5,
+    "n": 2,
+    "p90": 159.0
+   },
+   "job": "cross (windows-latest)",
+   "step": "Post Run Swatinem/rust-cache@v2",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 350.0,
+    "median": 318.5,
+    "n": 2,
+    "p90": 350.0
+   },
+   "job": "cross (windows-latest)",
+   "step": "Quality gate (platform-sensitive tiers)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 66.0,
+    "median": 66.0,
+    "n": 2,
+    "p90": 66.0
+   },
+   "job": "cross (windows-latest)",
+   "step": "Run Swatinem/rust-cache@v2",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 317.0,
+    "median": 242.0,
+    "n": 2,
+    "p90": 317.0
+   },
+   "job": "install (ubuntu-latest)",
+   "step": "Install (this revision)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 668.0,
+    "median": 668.0,
+    "n": 1,
+    "p90": 668.0
+   },
+   "job": "install (windows-latest)",
+   "step": "Install (this revision)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 48.0,
+    "median": 48.0,
+    "n": 1,
+    "p90": 48.0
+   },
+   "job": "install (windows-latest)",
+   "step": "Run Swatinem/rust-cache@v2",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 137.0,
+    "median": 137.0,
+    "n": 1,
+    "p90": 137.0
+   },
+   "job": "llmlint",
+   "step": "Lint changed files",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 642.0,
+    "median": 623.0,
+    "n": 2,
+    "p90": 642.0
+   },
+   "job": "quality",
+   "step": "Bootstrap",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 867.0,
+    "median": 850.5,
+    "n": 2,
+    "p90": 867.0
+   },
+   "job": "quality",
+   "step": "Quality gate (affected projects)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 59.0,
+    "median": 59.0,
+    "n": 2,
+    "p90": 59.0
+   },
+   "job": "quality",
+   "step": "Run Swatinem/rust-cache@v2",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 499.0,
+    "median": 496.5,
+    "n": 2,
+    "p90": 499.0
+   },
+   "job": "wheel (aarch64-unknown-linux-gnu)",
+   "step": "Build wheel (shared with the Linux build-wheels legs in release.yml)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 640.0,
+    "median": 582.0,
+    "n": 2,
+    "p90": 640.0
+   },
+   "job": "wheel (x86_64-unknown-linux-gnu)",
+   "step": "Build wheel (shared with the Linux build-wheels legs in release.yml)",
+   "workflow": "CI"
+  },
+  {
+   "duration_s": {
+    "max": 457.0,
+    "median": 457.0,
+    "n": 1,
+    "p90": 457.0
+   },
+   "job": "build-npm (aarch64-unknown-linux-gnu)",
+   "step": "Build the platform binary",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 75.0,
+    "median": 75.0,
+    "n": 1,
+    "p90": 75.0
+   },
+   "job": "build-npm (x86_64-pc-windows-msvc)",
+   "step": "Build the browser view",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 1036.0,
+    "median": 1036.0,
+    "n": 1,
+    "p90": 1036.0
+   },
+   "job": "build-npm (x86_64-pc-windows-msvc)",
+   "step": "Build the platform binary",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 537.0,
+    "median": 537.0,
+    "n": 1,
+    "p90": 537.0
+   },
+   "job": "build-npm (x86_64-unknown-linux-gnu)",
+   "step": "Build the platform binary",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 499.0,
+    "median": 499.0,
+    "n": 1,
+    "p90": 499.0
+   },
+   "job": "build-wheels (aarch64-unknown-linux-gnu)",
+   "step": "Build wheel (Linux, shared with ci.yml's wheel)",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 117.0,
+    "median": 117.0,
+    "n": 1,
+    "p90": 117.0
+   },
+   "job": "build-wheels (x86_64-pc-windows-msvc)",
+   "step": "Build the browser view",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 846.0,
+    "median": 846.0,
+    "n": 1,
+    "p90": 846.0
+   },
+   "job": "build-wheels (x86_64-pc-windows-msvc)",
+   "step": "Build wheel",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 464.0,
+    "median": 464.0,
+    "n": 1,
+    "p90": 464.0
+   },
+   "job": "build-wheels (x86_64-unknown-linux-gnu)",
+   "step": "Build wheel (Linux, shared with ci.yml's wheel)",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 382.0,
+    "median": 382.0,
+    "n": 1,
+    "p90": 382.0
+   },
+   "job": "darwin",
+   "step": "Build the Apple Silicon distributions from one binary",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 195.0,
+    "median": 195.0,
+    "n": 1,
+    "p90": 195.0
+   },
+   "job": "publish-crate",
+   "step": "Publish (skip a version already live)",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 33.0,
+    "median": 33.0,
+    "n": 1,
+    "p90": 33.0
+   },
+   "job": "publish-npm",
+   "step": "Publish the platform packages, then the launcher",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 753.0,
+    "median": 753.0,
+    "n": 1,
+    "p90": 753.0
+   },
+   "job": "test",
+   "step": "Run just bootstrap",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 1520.0,
+    "median": 1520.0,
+    "n": 1,
+    "p90": 1520.0
+   },
+   "job": "test",
+   "step": "Run just check",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 462.0,
+    "median": 462.0,
+    "n": 1,
+    "p90": 462.0
+   },
+   "job": "upload (aarch64-unknown-linux-gnu)",
+   "step": "Build, archive, checksum, and upload",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 67.0,
+    "median": 67.0,
+    "n": 1,
+    "p90": 67.0
+   },
+   "job": "upload (x86_64-pc-windows-msvc)",
+   "step": "Build the browser view",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 1074.0,
+    "median": 1074.0,
+    "n": 1,
+    "p90": 1074.0
+   },
+   "job": "upload (x86_64-pc-windows-msvc)",
+   "step": "Build, archive, checksum, and upload",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 483.0,
+    "median": 483.0,
+    "n": 1,
+    "p90": 483.0
+   },
+   "job": "upload (x86_64-unknown-linux-gnu)",
+   "step": "Build, archive, checksum, and upload",
+   "workflow": "Release"
+  },
+  {
+   "duration_s": {
+    "max": 288.0,
+    "median": 288.0,
+    "n": 1,
+    "p90": 288.0
+   },
+   "job": "visual-docs / capture (x86_64, shots/current, shots/verify, Visual docs)",
+   "step": "Capture again for the reproducibility gate",
+   "workflow": "Visual docs"
+  },
+  {
+   "duration_s": {
+    "max": 515.0,
+    "median": 515.0,
+    "n": 1,
+    "p90": 515.0
+   },
+   "job": "visual-docs / capture (x86_64, shots/current, shots/verify, Visual docs)",
+   "step": "Capture screenshots",
+   "workflow": "Visual docs"
+  },
+  {
+   "duration_s": {
+    "max": 105.0,
+    "median": 105.0,
+    "n": 1,
+    "p90": 105.0
+   },
+   "job": "visual-docs / deploy-pages",
+   "step": "Run nickderobertis/screencomp/visual-docs-pages@v0",
+   "workflow": "Visual docs"
+  }
+ ],
+ "repeats": {
+  "per_merged_pr": {
+   "head_runner_s": {
+    "max": 7057.0,
+    "median": 7057.0,
+    "n": 1,
+    "p90": 7057.0
+   },
+   "head_steps_s": {
+    "just bootstrap": {
+     "max": 1875.0,
+     "median": 1875.0,
+     "n": 1,
+     "p90": 1875.0
+    },
+    "just build (browser view)": {
+     "max": 114.0,
+     "median": 114.0,
+     "n": 1,
+     "p90": 114.0
+    },
+    "just check / check-affected": {
+     "max": 867.0,
+     "median": 867.0,
+     "n": 1,
+     "p90": 867.0
+    },
+    "just check-cross": {
+     "max": 350.0,
+     "median": 350.0,
+     "n": 1,
+     "p90": 350.0
+    },
+    "release-profile compile of the binary": {
+     "max": 2003.0,
+     "median": 2003.0,
+     "n": 1,
+     "p90": 2003.0
+    },
+    "screenshot capture": {
+     "max": 803.0,
+     "median": 803.0,
+     "n": 1,
+     "p90": 803.0
+    }
+   },
+   "n": 1,
+   "push_rerun_of_head_jobs_runner_s": {
+    "max": 0,
+    "median": 0,
+    "n": 1,
+    "p90": 0
+   },
+   "push_runner_s": {
+    "max": 0,
+    "median": 0,
+    "n": 1,
+    "p90": 0
+   },
+   "push_steps_s": {}
+  },
+  "per_release": {
+   "cd_runner_s": {
+    "max": 15536.0,
+    "median": 15536.0,
+    "n": 1,
+    "p90": 15536.0
+   },
+   "cd_steps_s": {
+    "just bootstrap": {
+     "max": 2519.0,
+     "median": 2519.0,
+     "n": 1,
+     "p90": 2519.0
+    },
+    "just build (browser view)": {
+     "max": 489.0,
+     "median": 489.0,
+     "n": 1,
+     "p90": 489.0
+    },
+    "just check / check-affected": {
+     "max": 2354.0,
+     "median": 2354.0,
+     "n": 1,
+     "p90": 2354.0
+    },
+    "just check-cross": {
+     "max": 287.0,
+     "median": 287.0,
+     "n": 1,
+     "p90": 287.0
+    },
+    "release-profile compile of the binary": {
+     "max": 7546.0,
+     "median": 7546.0,
+     "n": 1,
+     "p90": 7546.0
+    }
+   },
+   "n": 1,
+   "release_pr_head_runner_s": {
+    "max": 0,
+    "median": 0,
+    "n": 1,
+    "p90": 0
+   },
+   "release_pr_head_steps_s": {},
+   "release_test_s": {
+    "max": 2320.0,
+    "median": 2320.0,
+    "n": 1,
+    "p90": 2320.0
+   },
+   "releases": [
+    {
+     "cd_runner_s": 15536.0,
+     "cd_steps_s": {
+      "just bootstrap": 2519.0,
+      "just build (browser view)": 489.0,
+      "just check / check-affected": 2354.0,
+      "just check-cross": 287.0,
+      "release-profile compile of the binary": 7546.0
+     },
+     "release_pr": 340,
+     "release_pr_head_runner_s": 0,
+     "release_pr_head_steps_s": {},
+     "release_test_s": 2320.0,
+     "sweep_s": null,
+     "tag": "v0.36.1"
+    }
+   ],
+   "sweep_s": null
+  }
+ },
+ "schema": "onepipeline-ui-ci-spike/1",
+ "since": "2026-09-15"
+}

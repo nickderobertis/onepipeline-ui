@@ -1,0 +1,1695 @@
+{
+ "jobs": [
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294723109",
+   "completed_at": "2026-10-15T07:10:13Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:31Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294723109",
+   "id": 116294723109,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "llmlint",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7SmJQ",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234724,
+   "runner_name": "GitHub Actions 1000234724",
+   "started_at": "2026-10-15T07:07:33Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:36Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:34Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:38Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:36Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:39Z",
+     "conclusion": "success",
+     "name": "Run extractions/setup-just@v3",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:38Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:41Z",
+     "conclusion": "success",
+     "name": "Run astral-sh/setup-uv@v6",
+     "number": 4,
+     "started_at": "2026-10-15T07:07:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:41Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 5,
+     "started_at": "2026-10-15T07:07:41Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:43Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 6,
+     "started_at": "2026-10-15T07:07:41Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:48Z",
+     "conclusion": "success",
+     "name": "Install the Codex harness",
+     "number": 7,
+     "started_at": "2026-10-15T07:07:43Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:51Z",
+     "conclusion": "success",
+     "name": "Install the Claude Code harness (oneharness fallback)",
+     "number": 8,
+     "started_at": "2026-10-15T07:07:48Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:52Z",
+     "conclusion": "success",
+     "name": "Install llmlint toolchain",
+     "number": 9,
+     "started_at": "2026-10-15T07:07:51Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:53Z",
+     "conclusion": "success",
+     "name": "Validate llmlint config",
+     "number": 10,
+     "started_at": "2026-10-15T07:07:52Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:10:10Z",
+     "conclusion": "success",
+     "name": "Lint changed files",
+     "number": 11,
+     "started_at": "2026-10-15T07:07:53Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:10:10Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 19,
+     "started_at": "2026-10-15T07:10:10Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:10:10Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 20,
+     "started_at": "2026-10-15T07:10:10Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:10:11Z",
+     "conclusion": "success",
+     "name": "Post Run astral-sh/setup-uv@v6",
+     "number": 21,
+     "started_at": "2026-10-15T07:10:10Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:10:11Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 22,
+     "started_at": "2026-10-15T07:10:11Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:10:11Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 23,
+     "started_at": "2026-10-15T07:10:11Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294723109",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294723316",
+   "completed_at": "2026-10-15T07:07:48Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:31Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294723316",
+   "id": 116294723316,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "changes",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7Sm9A",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234725,
+   "runner_name": "GitHub Actions 1000234725",
+   "started_at": "2026-10-15T07:07:33Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:36Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:34Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:38Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:36Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:39Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:38Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:40Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 4,
+     "started_at": "2026-10-15T07:07:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:42Z",
+     "conclusion": "success",
+     "name": "Run extractions/setup-just@v3",
+     "number": 5,
+     "started_at": "2026-10-15T07:07:40Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:44Z",
+     "conclusion": "success",
+     "name": "Which projects the diff reaches",
+     "number": 6,
+     "started_at": "2026-10-15T07:07:42Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:44Z",
+     "conclusion": "success",
+     "name": "Which tier of the gate this build owes",
+     "number": 7,
+     "started_at": "2026-10-15T07:07:44Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:44Z",
+     "conclusion": "success",
+     "name": "Classify the Mac lane from the semantic diff",
+     "number": 8,
+     "started_at": "2026-10-15T07:07:44Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:45Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 14,
+     "started_at": "2026-10-15T07:07:44Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:45Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 15,
+     "started_at": "2026-10-15T07:07:45Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:45Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 16,
+     "started_at": "2026-10-15T07:07:45Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:45Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 17,
+     "started_at": "2026-10-15T07:07:45Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294723316",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294723368",
+   "completed_at": "2026-10-15T07:07:37Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:31Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294723368",
+   "id": 116294723368,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "pr-title",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7SnKA",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234728,
+   "runner_name": "GitHub Actions 1000234728",
+   "started_at": "2026-10-15T07:07:33Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:34Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:34Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:35Z",
+     "conclusion": "success",
+     "name": "Run amannn/action-semantic-pull-request@v5",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:34Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:35Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:35Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294723368",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294723417",
+   "completed_at": "2026-10-15T07:09:20Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:31Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294723417",
+   "id": 116294723417,
+   "labels": [
+    "windows-latest"
+   ],
+   "name": "browser-windows",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7SnWQ",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234726,
+   "runner_name": "GitHub Actions 1000234726",
+   "started_at": "2026-10-15T07:07:33Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:35Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:34Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:40Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:35Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:46Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:40Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:48Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 4,
+     "started_at": "2026-10-15T07:07:46Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:51Z",
+     "conclusion": "success",
+     "name": "Run taiki-e/install-action@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:07:48Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:17Z",
+     "conclusion": "success",
+     "name": "Build the browser view (shared with release.yml)",
+     "number": 6,
+     "started_at": "2026-10-15T07:07:51Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:17Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 10,
+     "started_at": "2026-10-15T07:09:17Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:17Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 11,
+     "started_at": "2026-10-15T07:09:17Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:19Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 12,
+     "started_at": "2026-10-15T07:09:17Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:19Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 13,
+     "started_at": "2026-10-15T07:09:19Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294723417",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294723534",
+   "completed_at": "2026-10-15T07:34:32Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:31Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294723534",
+   "id": 116294723534,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "quality",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7Snzg",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234729,
+   "runner_name": "GitHub Actions 1000234729",
+   "started_at": "2026-10-15T07:07:34Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:38Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:34Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:40Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:38Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:39Z",
+     "conclusion": "success",
+     "name": "Run Swatinem/rust-cache@v2",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:40Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:42Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 4,
+     "started_at": "2026-10-15T07:08:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:44Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:08:42Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:45Z",
+     "conclusion": "success",
+     "name": "Run taiki-e/install-action@v2",
+     "number": 6,
+     "started_at": "2026-10-15T07:08:44Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:51Z",
+     "conclusion": "success",
+     "name": "Install the syscall tracer the cost journeys count with",
+     "number": 7,
+     "started_at": "2026-10-15T07:08:45Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:19:33Z",
+     "conclusion": "success",
+     "name": "Bootstrap",
+     "number": 8,
+     "started_at": "2026-10-15T07:08:51Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:00Z",
+     "conclusion": "success",
+     "name": "Quality gate (affected projects)",
+     "number": 9,
+     "started_at": "2026-10-15T07:19:33Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:00Z",
+     "conclusion": "success",
+     "name": "Committed generated files are up to date",
+     "number": 10,
+     "started_at": "2026-10-15T07:34:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:00Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 17,
+     "started_at": "2026-10-15T07:34:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:00Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 18,
+     "started_at": "2026-10-15T07:34:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:30Z",
+     "conclusion": "success",
+     "name": "Post Run Swatinem/rust-cache@v2",
+     "number": 19,
+     "started_at": "2026-10-15T07:34:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:31Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 20,
+     "started_at": "2026-10-15T07:34:30Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:31Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 21,
+     "started_at": "2026-10-15T07:34:31Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294723534",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294824279",
+   "completed_at": "2026-10-15T07:38:45Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:48Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294824279",
+   "id": 116294824279,
+   "labels": [
+    "windows-latest"
+   ],
+   "name": "cross (windows-latest)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7YxVw",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234735,
+   "runner_name": "GitHub Actions 1000234735",
+   "started_at": "2026-10-15T07:07:51Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:54Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:52Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:00Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:54Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:06Z",
+     "conclusion": "success",
+     "name": "Run Swatinem/rust-cache@v2",
+     "number": 3,
+     "started_at": "2026-10-15T07:08:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:21Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 4,
+     "started_at": "2026-10-15T07:09:06Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:24Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:09:21Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:29Z",
+     "conclusion": "success",
+     "name": "Run taiki-e/install-action@v2",
+     "number": 6,
+     "started_at": "2026-10-15T07:09:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:30:02Z",
+     "conclusion": "success",
+     "name": "Bootstrap",
+     "number": 7,
+     "started_at": "2026-10-15T07:09:29Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:35:52Z",
+     "conclusion": "success",
+     "name": "Quality gate (platform-sensitive tiers)",
+     "number": 8,
+     "started_at": "2026-10-15T07:30:02Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:35:52Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 13,
+     "started_at": "2026-10-15T07:35:52Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:35:53Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 14,
+     "started_at": "2026-10-15T07:35:52Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:38:32Z",
+     "conclusion": "success",
+     "name": "Post Run Swatinem/rust-cache@v2",
+     "number": 15,
+     "started_at": "2026-10-15T07:35:53Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:38:34Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 16,
+     "started_at": "2026-10-15T07:38:32Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:38:35Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 17,
+     "started_at": "2026-10-15T07:38:34Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294824279",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294824295",
+   "completed_at": "2026-10-15T07:08:25Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:48Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294824295",
+   "id": 116294824295,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "deny",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7YxZw",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234734,
+   "runner_name": "GitHub Actions 1000234734",
+   "started_at": "2026-10-15T07:07:51Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:53Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:52Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:54Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:53Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:55Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:54Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:57Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 4,
+     "started_at": "2026-10-15T07:07:55Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:58Z",
+     "conclusion": "success",
+     "name": "Run taiki-e/install-action@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:07:57Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:22Z",
+     "conclusion": "success",
+     "name": "Run just deps-check",
+     "number": 6,
+     "started_at": "2026-10-15T07:07:58Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:22Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 10,
+     "started_at": "2026-10-15T07:08:22Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:22Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 11,
+     "started_at": "2026-10-15T07:08:22Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:22Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 12,
+     "started_at": "2026-10-15T07:08:22Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:22Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 13,
+     "started_at": "2026-10-15T07:08:22Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294824295",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294824330",
+   "completed_at": "2026-10-15T07:17:08Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:48Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294824330",
+   "id": 116294824330,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "wheel (x86_64-unknown-linux-gnu)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7Yxig",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234733,
+   "runner_name": "GitHub Actions 1000234733",
+   "started_at": "2026-10-15T07:07:50Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:07:52Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:07:51Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:54Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:07:52Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:58Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:07:54Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:59Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 4,
+     "started_at": "2026-10-15T07:07:58Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:07:59Z",
+     "conclusion": "success",
+     "name": "Run taiki-e/install-action@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:07:59Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:18Z",
+     "conclusion": "success",
+     "name": "Build the browser view",
+     "number": 6,
+     "started_at": "2026-10-15T07:07:59Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:17:02Z",
+     "conclusion": "success",
+     "name": "Build wheel (shared with the Linux build-wheels legs in release.yml)",
+     "number": 7,
+     "started_at": "2026-10-15T07:08:18Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:17:06Z",
+     "conclusion": "success",
+     "name": "Install the wheel and smoke-test its binary",
+     "number": 8,
+     "started_at": "2026-10-15T07:17:02Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:17:06Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 14,
+     "started_at": "2026-10-15T07:17:06Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:17:06Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 15,
+     "started_at": "2026-10-15T07:17:06Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:17:07Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 16,
+     "started_at": "2026-10-15T07:17:06Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:17:07Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 17,
+     "started_at": "2026-10-15T07:17:07Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294824330",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294824418",
+   "completed_at": "2026-10-15T07:09:20Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:48Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294824418",
+   "id": 116294824418,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "msrv",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7Yx4g",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234737,
+   "runner_name": "GitHub Actions 1000234737",
+   "started_at": "2026-10-15T07:08:06Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:08:08Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:08:07Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:09Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:08:08Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:09Z",
+     "conclusion": "success",
+     "name": "Read the MSRV from Cargo.toml",
+     "number": 3,
+     "started_at": "2026-10-15T07:08:09Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:18Z",
+     "conclusion": "success",
+     "name": "Run dtolnay/rust-toolchain@master",
+     "number": 4,
+     "started_at": "2026-10-15T07:08:09Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:39Z",
+     "conclusion": "success",
+     "name": "Run Swatinem/rust-cache@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:08:18Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:43Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 6,
+     "started_at": "2026-10-15T07:08:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:44Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 7,
+     "started_at": "2026-10-15T07:08:43Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:45Z",
+     "conclusion": "success",
+     "name": "Run extractions/setup-just@v3",
+     "number": 8,
+     "started_at": "2026-10-15T07:08:44Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:14Z",
+     "conclusion": "success",
+     "name": "Run just msrv",
+     "number": 9,
+     "started_at": "2026-10-15T07:08:45Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:14Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 15,
+     "started_at": "2026-10-15T07:09:14Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:14Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 16,
+     "started_at": "2026-10-15T07:09:14Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:19Z",
+     "conclusion": "success",
+     "name": "Post Run Swatinem/rust-cache@v2",
+     "number": 17,
+     "started_at": "2026-10-15T07:09:14Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:19Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 18,
+     "started_at": "2026-10-15T07:09:19Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:09:19Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 19,
+     "started_at": "2026-10-15T07:09:19Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294824418",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294824433",
+   "completed_at": "2026-10-15T07:16:39Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:07:48Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294824433",
+   "id": 116294824433,
+   "labels": [
+    "ubuntu-24.04-arm"
+   ],
+   "name": "wheel (aarch64-unknown-linux-gnu)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7Yx8Q",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234736,
+   "runner_name": "GitHub Actions 1000234736",
+   "started_at": "2026-10-15T07:08:04Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:08:06Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:08:05Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:07Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:08:06Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:08Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:08:07Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:09Z",
+     "conclusion": "success",
+     "name": "Run oven-sh/setup-bun@v2",
+     "number": 4,
+     "started_at": "2026-10-15T07:08:08Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:10Z",
+     "conclusion": "success",
+     "name": "Run taiki-e/install-action@v2",
+     "number": 5,
+     "started_at": "2026-10-15T07:08:09Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:08:19Z",
+     "conclusion": "success",
+     "name": "Build the browser view",
+     "number": 6,
+     "started_at": "2026-10-15T07:08:10Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:16:33Z",
+     "conclusion": "success",
+     "name": "Build wheel (shared with the Linux build-wheels legs in release.yml)",
+     "number": 7,
+     "started_at": "2026-10-15T07:08:19Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:16:37Z",
+     "conclusion": "success",
+     "name": "Install the wheel and smoke-test its binary",
+     "number": 8,
+     "started_at": "2026-10-15T07:16:33Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:16:37Z",
+     "conclusion": "success",
+     "name": "Post Run oven-sh/setup-bun@v2",
+     "number": 14,
+     "started_at": "2026-10-15T07:16:37Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:16:37Z",
+     "conclusion": "success",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 15,
+     "started_at": "2026-10-15T07:16:37Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:16:38Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 16,
+     "started_at": "2026-10-15T07:16:37Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:16:38Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 17,
+     "started_at": "2026-10-15T07:16:38Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294824433",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116294825160",
+   "completed_at": "2026-10-15T07:07:48Z",
+   "conclusion": "skipped",
+   "created_at": "2026-10-15T07:07:49Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116294825160",
+   "id": 116294825160,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "sweep",
+   "node_id": "CR_kwDOTx3Fc88AAAAbE7Y0yA",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": null,
+   "runner_group_name": null,
+   "runner_id": null,
+   "runner_name": null,
+   "started_at": "2026-10-15T07:07:49Z",
+   "status": "completed",
+   "steps": [],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116294825160",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116304529062",
+   "completed_at": "2026-10-15T07:47:11Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:34:33Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116304529062",
+   "id": 116304529062,
+   "labels": [
+    "windows-latest"
+   ],
+   "name": "install (windows-latest)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbFEpGpg",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234799,
+   "runner_name": "GitHub Actions 1000234799",
+   "started_at": "2026-10-15T07:34:36Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:34:38Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:34:37Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:43Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:34:38Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:35:31Z",
+     "conclusion": "success",
+     "name": "Run Swatinem/rust-cache@v2",
+     "number": 3,
+     "started_at": "2026-10-15T07:34:43Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:46:39Z",
+     "conclusion": "success",
+     "name": "Install (this revision)",
+     "number": 4,
+     "started_at": "2026-10-15T07:35:31Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:46:40Z",
+     "conclusion": "success",
+     "name": "Smoke-test the installed binary",
+     "number": 5,
+     "started_at": "2026-10-15T07:46:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:47:07Z",
+     "conclusion": "success",
+     "name": "Post Run Swatinem/rust-cache@v2",
+     "number": 9,
+     "started_at": "2026-10-15T07:46:40Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:47:09Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 10,
+     "started_at": "2026-10-15T07:47:07Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:47:09Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 11,
+     "started_at": "2026-10-15T07:47:09Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116304529062",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116304529085",
+   "completed_at": "2026-10-15T07:40:30Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:34:33Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116304529085",
+   "id": 116304529085,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "install (ubuntu-latest)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbFEpGvQ",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234798,
+   "runner_name": "GitHub Actions 1000234798",
+   "started_at": "2026-10-15T07:34:35Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:34:37Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:34:36Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:39Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:34:37Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:35:03Z",
+     "conclusion": "success",
+     "name": "Run Swatinem/rust-cache@v2",
+     "number": 3,
+     "started_at": "2026-10-15T07:34:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:40:20Z",
+     "conclusion": "success",
+     "name": "Install (this revision)",
+     "number": 4,
+     "started_at": "2026-10-15T07:35:03Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:40:20Z",
+     "conclusion": "success",
+     "name": "Smoke-test the installed binary",
+     "number": 5,
+     "started_at": "2026-10-15T07:40:20Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:40:28Z",
+     "conclusion": "success",
+     "name": "Post Run Swatinem/rust-cache@v2",
+     "number": 9,
+     "started_at": "2026-10-15T07:40:20Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:40:28Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 10,
+     "started_at": "2026-10-15T07:40:28Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:40:29Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 11,
+     "started_at": "2026-10-15T07:40:29Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116304529085",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116304529124",
+   "completed_at": "2026-10-15T07:50:18Z",
+   "conclusion": "cancelled",
+   "created_at": "2026-10-15T07:34:33Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116304529124",
+   "id": 116304529124,
+   "labels": [
+    "macos-latest"
+   ],
+   "name": "macos",
+   "node_id": "CR_kwDOTx3Fc88AAAAbFEpG5A",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "",
+   "runner_id": 0,
+   "runner_name": "",
+   "started_at": "2026-10-15T07:34:33Z",
+   "status": "completed",
+   "steps": [],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116304529124",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116304529138",
+   "completed_at": "2026-10-15T07:34:42Z",
+   "conclusion": "success",
+   "created_at": "2026-10-15T07:34:33Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116304529138",
+   "id": 116304529138,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "gate",
+   "node_id": "CR_kwDOTx3Fc88AAAAbFEpG8g",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234800,
+   "runner_name": "GitHub Actions 1000234800",
+   "started_at": "2026-10-15T07:34:35Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:34:37Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:34:36Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:39Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:34:37Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:39Z",
+     "conclusion": "success",
+     "name": "The quality gate, Linux wheels and Windows browser build passed",
+     "number": 3,
+     "started_at": "2026-10-15T07:34:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:39Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 6,
+     "started_at": "2026-10-15T07:34:39Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:34:39Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 7,
+     "started_at": "2026-10-15T07:34:39Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116304529138",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116310365727",
+   "completed_at": "2026-10-15T07:50:26Z",
+   "conclusion": "failure",
+   "created_at": "2026-10-15T07:50:19Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116310365727",
+   "id": 116310365727,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "cross (macos-latest)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbFKNWHw",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234859,
+   "runner_name": "GitHub Actions 1000234859",
+   "started_at": "2026-10-15T07:50:21Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:50:22Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:50:21Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:23Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:50:22Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:50:23Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "failure",
+     "name": "Report Mac proof or authorized omission",
+     "number": 4,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "skipped",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 7,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 8,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 9,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116310365727",
+   "workflow_name": "CI"
+  },
+  {
+   "check_run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/116310365752",
+   "completed_at": "2026-10-15T07:50:28Z",
+   "conclusion": "failure",
+   "created_at": "2026-10-15T07:50:19Z",
+   "head_branch": "nick/327/api-link-generic-words",
+   "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+   "html_url": "https://github.com/nickderobertis/onepipeline-ui/actions/runs/38696669476/job/116310365752",
+   "id": 116310365752,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "install (macos-latest)",
+   "node_id": "CR_kwDOTx3Fc88AAAAbFKNWOA",
+   "run_attempt": 1,
+   "run_id": 38696669476,
+   "run_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/38696669476",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions",
+   "runner_id": 1000234858,
+   "runner_name": "GitHub Actions 1000234858",
+   "started_at": "2026-10-15T07:50:21Z",
+   "status": "completed",
+   "steps": [
+    {
+     "completed_at": "2026-10-15T07:50:23Z",
+     "conclusion": "success",
+     "name": "Set up job",
+     "number": 1,
+     "started_at": "2026-10-15T07:50:22Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "success",
+     "name": "Run actions/checkout@v4",
+     "number": 2,
+     "started_at": "2026-10-15T07:50:23Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "success",
+     "name": "Run actions/setup-node@v4",
+     "number": 3,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "failure",
+     "name": "Report Mac proof or authorized omission",
+     "number": 4,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:24Z",
+     "conclusion": "skipped",
+     "name": "Post Run actions/setup-node@v4",
+     "number": 7,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:25Z",
+     "conclusion": "success",
+     "name": "Post Run actions/checkout@v4",
+     "number": 8,
+     "started_at": "2026-10-15T07:50:24Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-10-15T07:50:25Z",
+     "conclusion": "success",
+     "name": "Complete job",
+     "number": 9,
+     "started_at": "2026-10-15T07:50:25Z",
+     "status": "completed"
+    }
+   ],
+   "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/116310365752",
+   "workflow_name": "CI"
+  }
+ ],
+ "total_count": 17
+}

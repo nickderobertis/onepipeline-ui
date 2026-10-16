@@ -470,7 +470,149 @@ def analyse(raw: Path, since: dt.date, shape_since: dt.datetime | None = None) -
             "per_release_max_detail": release_cycle_max,
             "prs": cycles,
         },
+        "repeats": repeats(runs, pulls, jobs, tags, cycles, releases),
+        "needs_holds": needs_holds(runs, jobs),
     }
+
+
+# Steps that run the same recipe in several jobs. Matched on the step's display
+# name, which each workflow writes in one of these spellings.
+REPEATED_STEPS = {
+    "just bootstrap": re.compile(r"^(Bootstrap|Run just bootstrap)$"),
+    "just build (browser view)": re.compile(r"^(Build the browser view.*|Build the distributable bundles)$"),
+    "just check / check-affected": re.compile(r"^(Quality gate \((affected projects|every project)\)|Run just check)$"),
+    "just check-cross": re.compile(r"^Quality gate \(platform-sensitive tiers\)$"),
+    "release-profile compile of the binary": re.compile(
+        r"^(Install \(this revision\)|Build wheel.*|Build the platform binary|Build, archive, checksum, and upload|Build the Apple Silicon distributions from one binary)$"),
+    "screenshot capture": re.compile(r"^(Capture screenshots|Capture again for the reproducibility gate)$"),
+}
+
+
+def step_seconds(js: list[dict]) -> dict:
+    out: dict[str, float] = defaultdict(float)
+    for j in js:
+        for step in j.get("steps") or []:
+            d = secs(step.get("started_at"), step.get("completed_at"))
+            if d is None or step.get("conclusion") != "success":
+                continue
+            for label, rx in REPEATED_STEPS.items():
+                if rx.match(step["name"]):
+                    out[label] += d
+    return dict(out)
+
+
+def repeats(runs, pulls, jobs, tags, cycles, releases) -> dict:
+    """What one change pays more than once.
+
+    * per ordinary merged PR: its head-commit runs, then the push-to-main runs on
+      its merge commit, which re-run every CI job on (when the PR was up to date)
+      the same tree — by job, and by repeated recipe step;
+    * per release: the release PR's head-commit runs (where `sweep` runs), and the
+      release's CD runs (push CI on the release commit, Release's `test`, the
+      builds), by repeated recipe step.
+    """
+    per_pr = []
+    for c in cycles:
+        pr = pulls[c["pr"]]
+        head = [j for rid in c["head_runs"] for j in executed(jobs.get(rid, []))]
+        push = [r for r in runs.values() if r["event"] == "push" and r["head_sha"] == pr["merge_commit_sha"] and r["id"] in jobs]
+        push_jobs = [j for r in push for j in executed(jobs[r["id"]])]
+        head_names = {j["name"] for j in head}
+        rerun = [j for j in push_jobs if j["name"] in head_names]
+        per_pr.append({
+            "pr": c["pr"],
+            "head_runner_s": sum(job_dur(j) or 0 for j in head),
+            "push_runner_s": sum(job_dur(j) or 0 for j in push_jobs),
+            "push_rerun_of_head_jobs_runner_s": sum(job_dur(j) or 0 for j in rerun),
+            "head_steps_s": step_seconds(head),
+            "push_steps_s": step_seconds(push_jobs),
+        })
+    per_rel = []
+    rel_prs = {p["merge_commit_sha"]: p for p in pulls.values() if p.get("merged_at") and p["head"]["ref"].startswith("release-plz-")}
+    for rel in releases:
+        if not rel["jobs_fetched_for_every_run"]:
+            continue
+        rpr = rel_prs.get(rel["commit"])
+        head_runs = pr_head_runs(runs, rpr) if rpr else []
+        head = [j for r in head_runs if r["id"] in jobs for j in executed(jobs[r["id"]])]
+        cd = [j for rid in rel["runs"] for j in executed(jobs.get(rid, []))]
+        sweep = [job_dur(j) for j in head if j["name"] == "sweep"]
+        test = [job_dur(j) for rid in rel["runs"] if runs[rid]["name"] == "Release" for j in executed(jobs[rid]) if j["name"] == "test"]
+        per_rel.append({
+            "tag": rel["tag"], "release_pr": rpr["number"] if rpr else None,
+            "release_pr_head_runner_s": sum(job_dur(j) or 0 for j in head),
+            "cd_runner_s": sum(job_dur(j) or 0 for j in cd),
+            "sweep_s": sweep[0] if sweep else None,
+            "release_test_s": test[0] if test else None,
+            "release_pr_head_steps_s": step_seconds(head),
+            "cd_steps_s": step_seconds(cd),
+        })
+
+    def steps_dist(rows, key):
+        labels = sorted({k for r in rows for k in r[key]})
+        return {k: dist([r[key].get(k, 0.0) for r in rows]) for k in labels}
+
+    return {
+        "per_merged_pr": {
+            "n": len(per_pr),
+            "head_runner_s": dist([r["head_runner_s"] for r in per_pr]),
+            "push_runner_s": dist([r["push_runner_s"] for r in per_pr]),
+            "push_rerun_of_head_jobs_runner_s": dist([r["push_rerun_of_head_jobs_runner_s"] for r in per_pr]),
+            "head_steps_s": steps_dist(per_pr, "head_steps_s"),
+            "push_steps_s": steps_dist(per_pr, "push_steps_s"),
+        },
+        "per_release": {
+            "n": len(per_rel),
+            "release_pr_head_runner_s": dist([r["release_pr_head_runner_s"] for r in per_rel]),
+            "cd_runner_s": dist([r["cd_runner_s"] for r in per_rel]),
+            "sweep_s": dist([r["sweep_s"] for r in per_rel if r["sweep_s"]]),
+            "release_test_s": dist([r["release_test_s"] for r in per_rel if r["release_test_s"]]),
+            "release_pr_head_steps_s": steps_dist(per_rel, "release_pr_head_steps_s"),
+            "cd_steps_s": steps_dist(per_rel, "cd_steps_s"),
+            "releases": per_rel,
+        },
+    }
+
+
+# `needs` edges whose dependent reads nothing the needed job produces — no
+# output, no artifact — so the edge only orders them. For each, `others` are the
+# dependent's remaining needs, which it would still wait for without the edge.
+WAIT_ONLY_EDGES = [
+    ("CI", r"^install \((ubuntu|windows)-latest\)$", "quality", ["changes"]),
+    ("CI", r"^macos$", "quality", ["changes"]),
+    ("Release", r"^darwin$", "test", []),
+    ("Release", r"^upload \(", "test", []),
+    ("Release", r"^build-wheels \(", "test", []),
+    ("Release", r"^build-npm \(", "test", []),
+    ("Release", r"^publish-crate$", "test", ["guard"]),
+]
+
+
+def needs_holds(runs, jobs) -> list[dict]:
+    """How long each wait-only edge held its dependent, per run it ran in.
+
+    held = the needed job's completion minus the moment the dependent could
+    otherwise have started (its other needs' last completion, or the run's
+    creation when it has none); never negative.
+    """
+    out = []
+    for wf, dep_rx, needed, others in WAIT_ONLY_EDGES:
+        rx = re.compile(dep_rx)
+        holds = []
+        for rid, js in jobs.items():
+            run = runs.get(rid)
+            if not run or run["name"] != wf:
+                continue
+            by_name = {j["name"]: j for j in js}
+            y = by_name.get(needed)
+            deps = [j for j in executed(js) if rx.match(j["name"])]
+            if not y or not deps or y.get("conclusion") != "success":
+                continue
+            origin = max([ts(by_name[o]["completed_at"]) for o in others if o in by_name and by_name[o].get("completed_at")]
+                         or [ts(run["created_at"] if run.get("run_attempt", 1) == 1 else run["run_started_at"])])
+            holds.append(max(0.0, (ts(y["completed_at"]) - origin).total_seconds()))
+        out.append({"workflow": wf, "dependent": dep_rx, "needs": needed, "runs": len(holds), "held_s": dist(holds)})
+    return out
 
 
 def _count(items, key) -> dict:
