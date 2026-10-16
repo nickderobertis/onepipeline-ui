@@ -258,6 +258,8 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "dispatch-stopped": "lifecycle",
   "host-shutdown": "lifecycle",
   // llmlint: ignore-end[changed_behavior_has_e2e]
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
   // A dispatch's scratch removed at its success, or measured and kept at any
   // other ending: housekeeping of the dispatch's ending, like a deferred
   // cleanup, and no node's work. `scratch`, `removed` and `retained` name no
@@ -266,8 +268,6 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "scratch-removed": "lifecycle",
   "scratch-retained": "lifecycle",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
-  // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
