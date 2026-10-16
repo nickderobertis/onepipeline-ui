@@ -560,7 +560,14 @@ onemessagebus = "0.9.0"
 # the test-only `onevcs` requirement below moves with it to the release its lock
 # resolves. This changes the engine types carried by
 # ApiError::from_engine and the other engine-typed public items.
-onepipeline = "=0.72.0"
+# 0.73.0 links onetaskgraph 0.7.0, whose store caches remote plan reads for a
+# dispatched driver the way a standalone board read does, so a browser-adopted
+# run's driver reads a cached source as fresh as the CLI's once this moves. No
+# route is added and this crate keeps no cache of its own; the test-only
+# `onetaskgraph-*` requirements below move with it to the release its lock
+# resolves. This changes the engine types carried by ApiError::from_engine and
+# the other engine-typed public items.
+onepipeline = "=0.73.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -614,8 +621,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.6.0"
-onetaskgraph-plugin-api = "=0.6.0"
+onetaskgraph-core = "=0.7.0"
+onetaskgraph-plugin-api = "=0.7.0"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was

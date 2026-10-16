@@ -18296,17 +18296,51 @@ fn an_invalidation_names_the_project_group_that_moved() {
 // dependency; the only additional process is a loopback board. Both cache modes together
 // took 17.8 seconds under nextest, so there is no separate expensive dependency to isolate.
 /// The browser's retained engine reads and settles a remotely stored plan with
-/// caching enabled, using the same source configuration as the launching CLI.
+/// caching enabled, using the same source configuration as the launching CLI,
+/// and the server's reads of that plan's project answer the same with the cache
+/// on or off.
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled() {
-    for enabled in [true, false] {
-        remote_plan_cache_adoption(enabled);
+    let cached = remote_plan_cache_adoption(true);
+    let uncached = remote_plan_cache_adoption(false);
+    // The source cache only answers pinned reads, so the project the server
+    // reads unpinned, and what that read asks the board, are the same either way.
+    assert_eq!(cached, uncached);
+}
+
+/// What one project's plan reads through the server returned, and how many
+/// requests each one made of the board.
+#[cfg(unix)]
+#[derive(Debug, PartialEq)]
+struct ProjectReads {
+    responses: Vec<(String, Value)>,
+    board_requests: Vec<usize>,
+}
+
+/// Drops what a read stamps from the clock, which two launches never share.
+#[cfg(unix)]
+fn strip_clock(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            for clock in [
+                "observed_at",
+                "last_progress_at",
+                "last_write_at",
+                "timing",
+                "node_work_ms",
+            ] {
+                fields.remove(clock);
+            }
+            fields.values_mut().for_each(strip_clock);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_clock),
+        _ => {}
     }
 }
 
 #[cfg(unix)]
-fn remote_plan_cache_adoption(enabled: bool) {
+fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     // Start validates the dispatch graph even though this human-only plan never dispatches it.
@@ -18404,12 +18438,12 @@ fn remote_plan_cache_adoption(enabled: bool) {
     let initial = runtime
         .block_on(store.task(&task))
         .expect("seed the task cache");
-    let version = initial.items[0]
+    let earlier = initial.items[0]
         .item
         .version
-        .as_deref()
+        .clone()
         .expect("remote version");
-    store.pin(&task, version);
+    store.pin(&task, &earlier);
     runtime
         .block_on(store.task(&task))
         .expect("read the pinned task");
@@ -18428,6 +18462,32 @@ fn remote_plan_cache_adoption(enabled: bool) {
         &inherited,
     );
     let detail_path = format!("/api/v2/runs/{run}");
+    let mut reads = ProjectReads {
+        responses: Vec::new(),
+        board_requests: Vec::new(),
+    };
+    for path in [
+        detail_path.as_str(),
+        "/api/v2/projects/board:plan",
+        "/api/v2/projects",
+    ] {
+        let before = board.state()["requests"]
+            .as_array()
+            .expect("requests")
+            .len();
+        let read = http::get(serving.address, path);
+        assert_eq!(read.status, 200, "{path}: {}", read.body);
+        reads.board_requests.push(
+            board.state()["requests"]
+                .as_array()
+                .expect("requests")
+                .len()
+                - before,
+        );
+        let mut body = read.json();
+        strip_clock(&mut body);
+        reads.responses.push((path.to_owned(), body));
+    }
     let detail = http::get(serving.address, &detail_path);
     assert_eq!(detail.status, 200, "{}", detail.body);
     let detail = detail.json();
@@ -18518,10 +18578,22 @@ fn remote_plan_cache_adoption(enabled: bool) {
     // requires the store's observable cache state for a pinned read after write-back.
     // The read API exposes no cache diagnostic route; the public SDK observes the same
     // directory the real adopted driver used without replacing any layer under test.
-    // The adopted driver's unpinned write must retire the earlier entry.
-    runtime
+    // The adopted driver's unpinned write must retire the earlier entry, so the
+    // read pinned to the earlier token answers with the settled task.
+    let after = runtime
         .block_on(store.task(&task))
         .expect("read the earlier pinned version after settlement");
+    let after = &after.items[0].item;
+    assert_ne!(after.version.as_deref(), Some(earlier.as_str()));
+    assert_eq!(after.status.name, "Done");
+    assert_eq!(
+        after.metadata.get("onepipeline.settlement"),
+        Some(
+            &json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"})
+        ),
+        "{:?}",
+        after.metadata
+    );
     if enabled {
         assert_eq!(
             store.cache_use(&task).expect("cache state").served,
@@ -18539,5 +18611,6 @@ fn remote_plan_cache_adoption(enabled: bool) {
     }
     // llmlint: ignore-end[tests_mirror_real_usage]
     serving.stop_on(Stop::Terminate);
+    reads
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
