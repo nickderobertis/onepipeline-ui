@@ -1,0 +1,2099 @@
+[
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "quality",
+  "job_id": 116332032552,
+  "run_id": 38707980516,
+  "duration_s": 1136.0,
+  "head_sha": "9b82f659b73313b1bef150e1d1c9c8be9ba2deab",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T08:54:42.8428228Z",
+    "targets": "bootstrap",
+    "projects": 4,
+    "line": "NX   Successfully ran target bootstrap for 4 projects and 2 tasks they depend on",
+    "run_duration_s": 443.0
+   },
+   {
+    "at": "2026-10-15T09:04:38.9843020Z",
+    "targets": "check",
+    "projects": 15,
+    "line": "NX   Successfully ran target check for 15 projects and 50 tasks they depend on",
+    "run_duration_s": 595.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T08:54:58.8545811Z",
+    "seconds": 2.146,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:57:34.1366574Z",
+    "seconds": 157.362,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T08:59:40.6195363Z",
+    "seconds": 8.389,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:59:57.6581457Z",
+    "seconds": 5.554,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T09:01:04.7446073Z",
+    "seconds": 1.717,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T09:03:12.7045041Z",
+    "seconds": 496.024,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T09:00:49.0870089Z",
+    "passed": 2,
+    "seconds": 17.5
+   },
+   {
+    "at": "2026-10-15T09:04:38.9841199Z",
+    "passed": 139,
+    "seconds": 282.0
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T08:55:25.4933909Z",
+    "seconds": 1.4
+   },
+   {
+    "at": "2026-10-15T08:55:53.0166254Z",
+    "seconds": 0.3
+   },
+   {
+    "at": "2026-10-15T08:56:07.3423239Z",
+    "seconds": 1.0
+   },
+   {
+    "at": "2026-10-15T08:57:48.6281710Z",
+    "seconds": 0.5
+   },
+   {
+    "at": "2026-10-15T08:59:06.7893257Z",
+    "seconds": 55.9
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T08:54:42.8438829Z",
+    "task": "onepipeline-ui:bootstrap",
+    "seconds": 406.0
+   },
+   {
+    "at": "2026-10-15T09:04:38.9886181Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 509.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T08:45:48.8285699Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T08:45:50.7182219Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T08:47:03.1778537Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T08:47:03.8540832Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T08:47:05.2850777Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T08:47:05.3345126Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T08:47:07.2016619Z",
+    "step": "sudo apt-get update && sudo apt-get install -y strace"
+   },
+   {
+    "at": "2026-10-15T08:47:17.2349708Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T08:54:42.9344664Z",
+    "step": "just check-affected"
+   },
+   {
+    "at": "2026-10-15T09:04:39.0071234Z",
+    "step": "git diff --exit-code -- Cargo.lock bun.lock"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "quality",
+  "job_id": 116310448757,
+  "run_id": 38701477639,
+  "duration_s": 1582.0,
+  "head_sha": "2f88d9b9720194b57618a8814c95599e4cf33fc3",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T08:02:06.4230894Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 632.0
+   },
+   {
+    "at": "2026-10-15T08:16:20.2663913Z",
+    "targets": "check",
+    "projects": 8,
+    "line": "NX   Successfully ran target check for 8 projects and 22 tasks they depend on",
+    "run_duration_s": 853.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T08:03:00.4042743Z",
+    "seconds": 2.385,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:06:37.3606064Z",
+    "seconds": 219.046,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T08:10:48.6376532Z",
+    "seconds": 7.636,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T08:12:23.0805101Z",
+    "seconds": 3.392,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T08:15:27.7816260Z",
+    "seconds": 749.719,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T08:12:18.7757031Z",
+    "passed": 2,
+    "seconds": 22.5
+   },
+   {
+    "at": "2026-10-15T08:16:20.2661580Z",
+    "passed": 139,
+    "seconds": 330.0
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T08:08:44.7251968Z",
+    "seconds": 94.3
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T08:02:06.4253374Z",
+    "task": "onepipeline-ui:bootstrap",
+    "seconds": 579.0
+   },
+   {
+    "at": "2026-10-15T08:16:20.2672976Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 800.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T07:50:35.7655680Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T07:50:37.4653185Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:21.4969390Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T07:51:23.9932485Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:24.7525584Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:24.7649053Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T07:51:25.5710836Z",
+    "step": "sudo apt-get update && sudo apt-get install -y strace"
+   },
+   {
+    "at": "2026-10-15T07:51:30.9846828Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T08:02:06.5347763Z",
+    "step": "just check-affected"
+   },
+   {
+    "at": "2026-10-15T08:16:20.2886346Z",
+    "step": "git diff --exit-code -- Cargo.lock bun.lock"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "quality",
+  "job_id": 116294723534,
+  "run_id": 38696669476,
+  "duration_s": 1618.0,
+  "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T07:19:33.7298232Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 640.0
+   },
+   {
+    "at": "2026-10-15T07:34:00.3200070Z",
+    "targets": "check",
+    "projects": 8,
+    "line": "NX   Successfully ran target check for 8 projects and 22 tasks they depend on",
+    "run_duration_s": 865.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T07:20:27.1778388Z",
+    "seconds": 2.321,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T07:24:01.6428892Z",
+    "seconds": 216.624,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T07:28:06.1070593Z",
+    "seconds": 8.782,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T07:29:37.5731150Z",
+    "seconds": 3.294,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T07:33:29.2304686Z",
+    "seconds": 784.384,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T07:29:33.4592830Z",
+    "passed": 2,
+    "seconds": 21.4
+   },
+   {
+    "at": "2026-10-15T07:34:00.3198246Z",
+    "passed": 139,
+    "seconds": 354.0
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T07:26:05.3969817Z",
+    "seconds": 90.9
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T07:19:33.7302857Z",
+    "task": "onepipeline-ui:bootstrap",
+    "seconds": 586.0
+   },
+   {
+    "at": "2026-10-15T07:34:00.3211405Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 834.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T07:07:38.0603603Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T07:07:40.4905936Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T07:08:39.4047859Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T07:08:42.6722806Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T07:08:44.5010105Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T07:08:44.5134344Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T07:08:45.9045978Z",
+    "step": "sudo apt-get update && sudo apt-get install -y strace"
+   },
+   {
+    "at": "2026-10-15T07:08:51.0038399Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T07:19:33.7897017Z",
+    "step": "just check-affected"
+   },
+   {
+    "at": "2026-10-15T07:34:00.3368897Z",
+    "step": "git diff --exit-code -- Cargo.lock bun.lock"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "sweep",
+  "job_id": 116310541349,
+  "run_id": 38701477639,
+  "duration_s": 2537.0,
+  "head_sha": "2f88d9b9720194b57618a8814c95599e4cf33fc3",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T08:04:49.3565668Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 797.0
+   },
+   {
+    "at": "2026-10-15T08:04:51.6636445Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 1.5
+   },
+   {
+    "at": "2026-10-15T08:06:04.3739601Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 72.0
+   },
+   {
+    "at": "2026-10-15T08:06:18.8866484Z",
+    "targets": "typecheck",
+    "projects": 6,
+    "line": "NX   Successfully ran target typecheck for 6 projects",
+    "run_duration_s": 13.9
+   },
+   {
+    "at": "2026-10-15T08:06:27.4818129Z",
+    "targets": "build",
+    "projects": 5,
+    "line": "NX   Successfully ran target build for 5 projects",
+    "run_duration_s": 8.0
+   },
+   {
+    "at": "2026-10-15T08:32:41.5803752Z",
+    "targets": "check",
+    "projects": 14,
+    "line": "NX   Successfully ran target check for 14 projects and 48 tasks they depend on",
+    "run_duration_s": 27.3
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T08:10:17.6523685Z",
+    "seconds": 2.478,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:15:08.1363368Z",
+    "seconds": 18.097,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:19:59.0703467Z",
+    "seconds": 583.673,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T08:27:55.1278209Z",
+    "seconds": 1059.945,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T08:31:29.0338289Z",
+    "seconds": 2.363,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T08:31:50.5040734Z",
+    "seconds": 5.863,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T08:32:14.3420161Z",
+    "seconds": 18.097,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:32:14.4204625Z",
+    "seconds": 2.478,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:32:14.4212966Z",
+    "seconds": 1059.945,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T08:32:14.6158876Z",
+    "seconds": 583.673,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T08:32:14.6169766Z",
+    "seconds": 5.863,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T08:32:14.6242026Z",
+    "seconds": 2.363,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T08:23:22.2302899Z",
+    "passed": 139,
+    "seconds": 492.0
+   },
+   {
+    "at": "2026-10-15T08:32:24.8194048Z",
+    "passed": 139,
+    "seconds": 492.0
+   },
+   {
+    "at": "2026-10-15T08:32:41.5761071Z",
+    "passed": 2,
+    "seconds": 15.3
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T08:10:23.8983487Z",
+    "seconds": 3.4
+   },
+   {
+    "at": "2026-10-15T08:10:27.3963367Z",
+    "seconds": 1.1
+   },
+   {
+    "at": "2026-10-15T08:10:33.4568374Z",
+    "seconds": 2.4
+   },
+   {
+    "at": "2026-10-15T08:10:38.0045795Z",
+    "seconds": 1.5
+   },
+   {
+    "at": "2026-10-15T08:12:28.1163232Z",
+    "seconds": 105.2
+   },
+   {
+    "at": "2026-10-15T08:32:14.3215820Z",
+    "seconds": 3.4
+   },
+   {
+    "at": "2026-10-15T08:32:14.3249723Z",
+    "seconds": 2.4
+   },
+   {
+    "at": "2026-10-15T08:32:14.3259327Z",
+    "seconds": 1.5
+   },
+   {
+    "at": "2026-10-15T08:32:14.3277455Z",
+    "seconds": 1.1
+   },
+   {
+    "at": "2026-10-15T08:32:14.3407617Z",
+    "seconds": 105.2
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T08:06:04.3785944Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 68.0
+   },
+   {
+    "at": "2026-10-15T08:27:56.2465977Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 1287.0
+   },
+   {
+    "at": "2026-10-15T08:31:29.0400620Z",
+    "task": "onepipeline-ui:ensure-baseline",
+    "seconds": 193.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T07:50:52.7341838Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T07:50:54.7377548Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:11.2777462Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T07:51:13.7603399Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:21.6639713Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:21.6762177Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T07:51:22.8330491Z",
+    "step": "sudo apt-get update && sudo apt-get install -y strace"
+   },
+   {
+    "at": "2026-10-15T07:51:29.0856499Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T08:04:49.4508766Z",
+    "step": "just check"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "sweep",
+  "job_id": 116238010610,
+  "run_id": 38678650196,
+  "duration_s": 1925.0,
+  "head_sha": "3a3a2cad83806c693e1c4d5ffb30fc621e7c79a2",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T04:07:54.4448477Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 611.0
+   },
+   {
+    "at": "2026-10-15T04:07:56.3340519Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 1.2
+   },
+   {
+    "at": "2026-10-15T04:08:50.7512922Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 53.9
+   },
+   {
+    "at": "2026-10-15T04:09:01.2159632Z",
+    "targets": "typecheck",
+    "projects": 6,
+    "line": "NX   Successfully ran target typecheck for 6 projects",
+    "run_duration_s": 9.9
+   },
+   {
+    "at": "2026-10-15T04:09:07.1470544Z",
+    "targets": "build",
+    "projects": 5,
+    "line": "NX   Successfully ran target build for 5 projects",
+    "run_duration_s": 5.5
+   },
+   {
+    "at": "2026-10-15T04:28:43.3295311Z",
+    "targets": "check",
+    "projects": 14,
+    "line": "NX   Successfully ran target check for 14 projects and 48 tasks they depend on",
+    "run_duration_s": 31.4
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T04:11:49.8751354Z",
+    "seconds": 1.903,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T04:15:09.9336919Z",
+    "seconds": 13.356,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T04:18:58.8766632Z",
+    "seconds": 430.703,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T04:24:52.1193300Z",
+    "seconds": 784.118,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T04:27:33.5581693Z",
+    "seconds": 1.691,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T04:27:51.5177849Z",
+    "seconds": 5.584,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T04:28:11.9571134Z",
+    "seconds": 13.356,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T04:28:12.0487141Z",
+    "seconds": 1.903,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T04:28:12.0494763Z",
+    "seconds": 784.118,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T04:28:12.4841865Z",
+    "seconds": 430.703,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T04:28:12.4862291Z",
+    "seconds": 5.584,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T04:28:13.0073856Z",
+    "seconds": 1.691,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T04:21:55.9834499Z",
+    "passed": 139,
+    "seconds": 402.0
+   },
+   {
+    "at": "2026-10-15T04:28:23.9977758Z",
+    "passed": 139,
+    "seconds": 402.0
+   },
+   {
+    "at": "2026-10-15T04:28:43.2280248Z",
+    "passed": 2,
+    "seconds": 18.0
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T04:11:53.4251363Z",
+    "seconds": 1.5
+   },
+   {
+    "at": "2026-10-15T04:11:56.1219653Z",
+    "seconds": 0.8
+   },
+   {
+    "at": "2026-10-15T04:12:00.4987451Z",
+    "seconds": 1.9
+   },
+   {
+    "at": "2026-10-15T04:12:03.1441374Z",
+    "seconds": 1.0
+   },
+   {
+    "at": "2026-10-15T04:13:05.0739844Z",
+    "seconds": 59.7
+   },
+   {
+    "at": "2026-10-15T04:28:11.9457478Z",
+    "seconds": 1.5
+   },
+   {
+    "at": "2026-10-15T04:28:11.9472178Z",
+    "seconds": 1.9
+   },
+   {
+    "at": "2026-10-15T04:28:11.9486040Z",
+    "seconds": 1.0
+   },
+   {
+    "at": "2026-10-15T04:28:11.9490500Z",
+    "seconds": 0.8
+   },
+   {
+    "at": "2026-10-15T04:28:11.9562290Z",
+    "seconds": 59.7
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T04:08:50.7546433Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 51.0
+   },
+   {
+    "at": "2026-10-15T04:24:53.0435271Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 944.0
+   },
+   {
+    "at": "2026-10-15T04:27:33.5641506Z",
+    "task": "onepipeline-ui:ensure-baseline",
+    "seconds": 146.0
+   },
+   {
+    "at": "2026-10-15T04:28:43.3328793Z",
+    "task": "dag-ui-e2e:test-isolation",
+    "seconds": 19.2
+   },
+   {
+    "at": "2026-10-15T04:28:43.3329057Z",
+    "task": "dag-ui:build-api-server",
+    "seconds": 11.9
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T03:57:11.4801375Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T03:57:13.1365682Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T03:57:27.4988833Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T03:57:28.4338919Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T03:57:29.1496331Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T03:57:29.1595073Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T03:57:29.8959961Z",
+    "step": "sudo apt-get update && sudo apt-get install -y strace"
+   },
+   {
+    "at": "2026-10-15T03:57:38.5810953Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T04:07:54.6293851Z",
+    "step": "just check"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "sweep",
+  "job_id": 115685440269,
+  "run_id": 38512956470,
+  "duration_s": 2393.0,
+  "head_sha": "48207ac29a9d1770dab56186c1009c2ef233a2c3",
+  "nx_invocations": [
+   {
+    "at": "2026-10-14T04:57:51.2186942Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 739.0
+   },
+   {
+    "at": "2026-10-14T04:57:53.4072611Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 1.4
+   },
+   {
+    "at": "2026-10-14T04:59:00.9496896Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 67.0
+   },
+   {
+    "at": "2026-10-14T04:59:15.3078586Z",
+    "targets": "typecheck",
+    "projects": 6,
+    "line": "NX   Successfully ran target typecheck for 6 projects",
+    "run_duration_s": 13.7
+   },
+   {
+    "at": "2026-10-14T04:59:23.6083767Z",
+    "targets": "build",
+    "projects": 5,
+    "line": "NX   Successfully ran target build for 5 projects",
+    "run_duration_s": 7.7
+   },
+   {
+    "at": "2026-10-14T05:24:23.3256733Z",
+    "targets": "check",
+    "projects": 14,
+    "line": "NX   Successfully ran target check for 14 projects and 48 tasks they depend on",
+    "run_duration_s": 28.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-14T05:02:51.5676072Z",
+    "seconds": 2.77,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T05:07:32.6136280Z",
+    "seconds": 17.271,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T05:12:26.6306441Z",
+    "seconds": 577.579,
+    "summary": "250 tests run: 250 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-14T05:19:47.0023799Z",
+    "seconds": 1018.131,
+    "summary": "223 tests run: 223 passed (1 slow), 268 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:09.9129162Z",
+    "seconds": 2.232,
+    "summary": "5 tests run: 5 passed, 450 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:31.9377001Z",
+    "seconds": 5.926,
+    "summary": "13 tests run: 13 passed, 442 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:55.4261232Z",
+    "seconds": 17.271,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:55.5044998Z",
+    "seconds": 2.77,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:55.5052811Z",
+    "seconds": 1018.131,
+    "summary": "223 tests run: 223 passed (1 slow), 268 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:55.6999725Z",
+    "seconds": 577.579,
+    "summary": "250 tests run: 250 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:55.7010266Z",
+    "seconds": 5.926,
+    "summary": "13 tests run: 13 passed, 442 skipped"
+   },
+   {
+    "at": "2026-10-14T05:23:55.7098712Z",
+    "seconds": 2.232,
+    "summary": "5 tests run: 5 passed, 450 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-14T05:15:42.9519603Z",
+    "passed": 139,
+    "seconds": 486.0
+   },
+   {
+    "at": "2026-10-14T05:24:06.5344051Z",
+    "passed": 139,
+    "seconds": 486.0
+   },
+   {
+    "at": "2026-10-14T05:24:23.3204159Z",
+    "passed": 2,
+    "seconds": 15.3
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-14T05:02:56.9851851Z",
+    "seconds": 3.0
+   },
+   {
+    "at": "2026-10-14T05:03:01.1066860Z",
+    "seconds": 0.7
+   },
+   {
+    "at": "2026-10-14T05:03:06.6767432Z",
+    "seconds": 2.6
+   },
+   {
+    "at": "2026-10-14T05:03:11.0096756Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-14T05:04:56.9436582Z",
+    "seconds": 102.9
+   },
+   {
+    "at": "2026-10-14T05:23:55.4063621Z",
+    "seconds": 3.0
+   },
+   {
+    "at": "2026-10-14T05:23:55.4087904Z",
+    "seconds": 2.6
+   },
+   {
+    "at": "2026-10-14T05:23:55.4100373Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-14T05:23:55.4106998Z",
+    "seconds": 0.7
+   },
+   {
+    "at": "2026-10-14T05:23:55.4248188Z",
+    "seconds": 102.9
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-14T04:59:00.9540954Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 63.0
+   },
+   {
+    "at": "2026-10-14T05:19:48.0979257Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 1223.0
+   },
+   {
+    "at": "2026-10-14T05:23:09.9200331Z",
+    "task": "onepipeline-ui:ensure-baseline",
+    "seconds": 184.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-14T04:44:54.7498480Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-14T04:44:56.5269408Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-14T04:45:14.9144319Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-14T04:45:18.1741777Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-14T04:45:19.3097002Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-14T04:45:19.3218290Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-14T04:45:20.2278831Z",
+    "step": "sudo apt-get update && sudo apt-get install -y strace"
+   },
+   {
+    "at": "2026-10-14T04:45:28.7579690Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-14T04:57:51.3135598Z",
+    "step": "just check"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "cross (windows-latest)",
+  "job_id": 116332137712,
+  "run_id": 38707980516,
+  "duration_s": 1558.0,
+  "head_sha": "9b82f659b73313b1bef150e1d1c9c8be9ba2deab",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T09:06:55.1694283Z",
+    "targets": "bootstrap",
+    "projects": 4,
+    "line": "NX   Successfully ran target bootstrap for 4 projects and 2 tasks they depend on",
+    "run_duration_s": 1097.0
+   },
+   {
+    "at": "2026-10-15T09:07:53.9445374Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 55.4
+   },
+   {
+    "at": "2026-10-15T09:08:41.8307981Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 46.6
+   },
+   {
+    "at": "2026-10-15T09:11:56.0891525Z",
+    "targets": "test-quick",
+    "projects": 3,
+    "line": "NX   Successfully ran target test-quick for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 193.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T09:09:14.0097085Z",
+    "seconds": 3.225,
+    "summary": "63 tests run: 63 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T09:11:39.7245515Z",
+    "seconds": 148.591,
+    "summary": "216 tests run: 216 passed (1 slow), 121 skipped"
+   },
+   {
+    "at": "2026-10-15T09:11:56.0862999Z",
+    "seconds": 165.247,
+    "summary": "151 tests run: 151 passed (3 slow), 221 skipped"
+   }
+  ],
+  "playwright": [],
+  "vitest": [],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T09:06:55.1702661Z",
+    "task": "onepipeline-ui:bootstrap",
+    "seconds": 983.0
+   },
+   {
+    "at": "2026-10-15T09:07:53.9482456Z",
+    "task": "dag-model:format-check",
+    "seconds": 55.4
+   },
+   {
+    "at": "2026-10-15T09:11:56.0931466Z",
+    "task": "onepipeline-ui-repo-tooling:test-quick",
+    "seconds": 193.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T08:46:06.2488085Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T08:46:12.6358845Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T08:47:22.9799679Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T08:47:29.6383101Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T08:47:32.2002357Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T08:47:32.2279088Z",
+    "step": "Set-StrictMode -Version Latest"
+   },
+   {
+    "at": "2026-10-15T08:47:37.3030465Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T09:06:57.0864202Z",
+    "step": "just check-cross"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "cross (windows-latest)",
+  "job_id": 116310541656,
+  "run_id": 38701477639,
+  "duration_s": 2238.0,
+  "head_sha": "2f88d9b9720194b57618a8814c95599e4cf33fc3",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T08:17:22.6127016Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 1472.0
+   },
+   {
+    "at": "2026-10-15T08:18:03.2738265Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 36.1
+   },
+   {
+    "at": "2026-10-15T08:20:14.1732654Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 129.0
+   },
+   {
+    "at": "2026-10-15T08:27:36.7308475Z",
+    "targets": "test-quick",
+    "projects": 3,
+    "line": "NX   Successfully ran target test-quick for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 441.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T08:21:56.4988700Z",
+    "seconds": 4.061,
+    "summary": "63 tests run: 63 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:25:07.2228896Z",
+    "seconds": 194.477,
+    "summary": "151 tests run: 151 passed (3 slow), 221 skipped"
+   },
+   {
+    "at": "2026-10-15T08:27:36.7272703Z",
+    "seconds": 343.937,
+    "summary": "216 tests run: 216 passed (1 slow), 121 skipped"
+   }
+  ],
+  "playwright": [],
+  "vitest": [],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T08:17:22.6143042Z",
+    "task": "onepipeline-ui:bootstrap",
+    "seconds": 1183.0
+   },
+   {
+    "at": "2026-10-15T08:18:03.2781967Z",
+    "task": "dag-model:format-check",
+    "seconds": 36.1
+   },
+   {
+    "at": "2026-10-15T08:20:14.1787022Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 111.0
+   },
+   {
+    "at": "2026-10-15T08:27:36.7358144Z",
+    "task": "onepipeline-ui-e2e:test-quick",
+    "seconds": 440.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T07:50:51.7662547Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T07:50:58.7511944Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:34.0214448Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T07:51:40.0049273Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:42.6230911Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T07:51:42.6482828Z",
+    "step": "Set-StrictMode -Version Latest"
+   },
+   {
+    "at": "2026-10-15T07:51:46.8813673Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T08:17:25.3260314Z",
+    "step": "just check-cross"
+   }
+  ]
+ },
+ {
+  "workflow": "CI",
+  "event": "pull_request",
+  "job": "cross (windows-latest)",
+  "job_id": 116294824279,
+  "run_id": 38696669476,
+  "duration_s": 1854.0,
+  "head_sha": "080aaffd36ba68ecff4d0ea5d5727bc822bf4b83",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T07:30:01.4176635Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 1184.0
+   },
+   {
+    "at": "2026-10-15T07:30:52.6888488Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 48.2
+   },
+   {
+    "at": "2026-10-15T07:31:58.2662704Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 64.0
+   },
+   {
+    "at": "2026-10-15T07:35:52.4231067Z",
+    "targets": "test-quick",
+    "projects": 3,
+    "line": "NX   Successfully ran target test-quick for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 233.0
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T07:33:14.7735314Z",
+    "seconds": 3.964,
+    "summary": "63 tests run: 63 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T07:35:43.0788696Z",
+    "seconds": 152.117,
+    "summary": "151 tests run: 151 passed (2 slow), 221 skipped"
+   },
+   {
+    "at": "2026-10-15T07:35:52.4200210Z",
+    "seconds": 160.857,
+    "summary": "216 tests run: 216 passed (1 slow), 121 skipped"
+   }
+  ],
+  "playwright": [],
+  "vitest": [],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T07:30:01.4182148Z",
+    "task": "onepipeline-ui:bootstrap",
+    "seconds": 1071.0
+   },
+   {
+    "at": "2026-10-15T07:30:52.6928970Z",
+    "task": "timeline-categories:format-check",
+    "seconds": 43.9
+   },
+   {
+    "at": "2026-10-15T07:35:52.4277999Z",
+    "task": "onepipeline-ui-e2e:test-quick",
+    "seconds": 232.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T07:07:54.3846200Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T07:08:00.5232675Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T07:09:06.9886015Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T07:09:21.7800413Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T07:09:24.8871777Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T07:09:24.9151436Z",
+    "step": "Set-StrictMode -Version Latest"
+   },
+   {
+    "at": "2026-10-15T07:09:29.4059478Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T07:30:02.9336676Z",
+    "step": "just check-cross"
+   }
+  ]
+ },
+ {
+  "workflow": "Release",
+  "event": "release",
+  "job": "test",
+  "job_id": 116326736463,
+  "run_id": 38706388926,
+  "duration_s": 2320.0,
+  "head_sha": "6ebaa28d1b7b7773d31c3090a394fa643bee76dc",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T08:45:26.4400458Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 748.0
+   },
+   {
+    "at": "2026-10-15T08:45:28.5249564Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 1.4
+   },
+   {
+    "at": "2026-10-15T08:46:32.8984904Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 64.0
+   },
+   {
+    "at": "2026-10-15T08:46:45.7210601Z",
+    "targets": "typecheck",
+    "projects": 6,
+    "line": "NX   Successfully ran target typecheck for 6 projects",
+    "run_duration_s": 12.2
+   },
+   {
+    "at": "2026-10-15T08:46:53.0974510Z",
+    "targets": "build",
+    "projects": 5,
+    "line": "NX   Successfully ran target build for 5 projects",
+    "run_duration_s": 6.8
+   },
+   {
+    "at": "2026-10-15T09:10:46.6543050Z",
+    "targets": "check",
+    "projects": 14,
+    "line": "NX   Successfully ran target check for 14 projects and 48 tasks they depend on",
+    "run_duration_s": 25.6
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T08:50:06.9354950Z",
+    "seconds": 2.385,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:54:27.3590147Z",
+    "seconds": 15.632,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T08:58:46.9906444Z",
+    "seconds": 522.288,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T09:06:21.6715615Z",
+    "seconds": 977.152,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T09:09:37.4165364Z",
+    "seconds": 2.112,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T09:09:57.9360123Z",
+    "seconds": 5.536,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T09:10:21.1450071Z",
+    "seconds": 15.632,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T09:10:21.2293295Z",
+    "seconds": 2.385,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T09:10:21.2299888Z",
+    "seconds": 977.152,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T09:10:21.3972277Z",
+    "seconds": 522.288,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T09:10:21.3980670Z",
+    "seconds": 5.536,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T09:10:21.4059777Z",
+    "seconds": 2.112,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T09:02:01.6375288Z",
+    "passed": 139,
+    "seconds": 450.0
+   },
+   {
+    "at": "2026-10-15T09:10:30.8697894Z",
+    "passed": 139,
+    "seconds": 450.0
+   },
+   {
+    "at": "2026-10-15T09:10:46.6504983Z",
+    "passed": 2,
+    "seconds": 14.5
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T08:50:11.9202008Z",
+    "seconds": 2.6
+   },
+   {
+    "at": "2026-10-15T08:50:15.6691590Z",
+    "seconds": 0.7
+   },
+   {
+    "at": "2026-10-15T08:50:20.5040612Z",
+    "seconds": 2.4
+   },
+   {
+    "at": "2026-10-15T08:50:24.4350767Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-15T08:52:00.0889693Z",
+    "seconds": 92.0
+   },
+   {
+    "at": "2026-10-15T09:10:21.1225374Z",
+    "seconds": 2.6
+   },
+   {
+    "at": "2026-10-15T09:10:21.1252920Z",
+    "seconds": 2.4
+   },
+   {
+    "at": "2026-10-15T09:10:21.1272966Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-15T09:10:21.1284198Z",
+    "seconds": 0.7
+   },
+   {
+    "at": "2026-10-15T09:10:21.1437219Z",
+    "seconds": 92.0
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T08:46:32.9024166Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 60.0
+   },
+   {
+    "at": "2026-10-15T09:06:22.9667286Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 1168.0
+   },
+   {
+    "at": "2026-10-15T09:09:37.4228780Z",
+    "task": "onepipeline-ui:ensure-baseline",
+    "seconds": 177.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T08:32:31.6862268Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T08:32:33.6424017Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T08:32:50.6758230Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T08:32:51.1349049Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T08:32:52.2951321Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T08:32:52.3071226Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T08:32:53.2557978Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T08:45:26.5225257Z",
+    "step": "just check"
+   }
+  ]
+ },
+ {
+  "workflow": "Release",
+  "event": "release",
+  "job": "test",
+  "job_id": 116249411000,
+  "run_id": 38682328162,
+  "duration_s": 2431.0,
+  "head_sha": "5a2daca4e2201d95a06107b89ebe658d65bf97b1",
+  "nx_invocations": [
+   {
+    "at": "2026-10-15T04:50:54.8956090Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 774.0
+   },
+   {
+    "at": "2026-10-15T04:50:57.1109943Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 1.4
+   },
+   {
+    "at": "2026-10-15T04:52:06.3023352Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 69.0
+   },
+   {
+    "at": "2026-10-15T04:52:20.4115138Z",
+    "targets": "typecheck",
+    "projects": 6,
+    "line": "NX   Successfully ran target typecheck for 6 projects",
+    "run_duration_s": 13.5
+   },
+   {
+    "at": "2026-10-15T04:52:28.5178796Z",
+    "targets": "build",
+    "projects": 5,
+    "line": "NX   Successfully ran target build for 5 projects",
+    "run_duration_s": 7.5
+   },
+   {
+    "at": "2026-10-15T05:17:43.9418111Z",
+    "targets": "check",
+    "projects": 14,
+    "line": "NX   Successfully ran target check for 14 projects and 48 tasks they depend on",
+    "run_duration_s": 26.7
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-15T04:55:57.9458916Z",
+    "seconds": 2.542,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T05:00:38.5986920Z",
+    "seconds": 17.576,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T05:05:24.3551472Z",
+    "seconds": 568.842,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T05:13:02.0124779Z",
+    "seconds": 1026.619,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T05:16:32.1585357Z",
+    "seconds": 2.294,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   },
+   {
+    "at": "2026-10-15T05:16:53.8084454Z",
+    "seconds": 5.873,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T05:17:17.3080480Z",
+    "seconds": 17.576,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T05:17:17.3821248Z",
+    "seconds": 2.542,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-15T05:17:17.3828422Z",
+    "seconds": 1026.619,
+    "summary": "223 tests run: 223 passed (1 slow), 269 skipped"
+   },
+   {
+    "at": "2026-10-15T05:17:17.5587268Z",
+    "seconds": 568.842,
+    "summary": "251 tests run: 251 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-15T05:17:17.5593584Z",
+    "seconds": 5.873,
+    "summary": "13 tests run: 13 passed, 443 skipped"
+   },
+   {
+    "at": "2026-10-15T05:17:17.5703503Z",
+    "seconds": 2.294,
+    "summary": "5 tests run: 5 passed, 451 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-15T05:08:36.5584082Z",
+    "passed": 139,
+    "seconds": 474.0
+   },
+   {
+    "at": "2026-10-15T05:17:27.7364314Z",
+    "passed": 139,
+    "seconds": 474.0
+   },
+   {
+    "at": "2026-10-15T05:17:43.9376273Z",
+    "passed": 2,
+    "seconds": 14.7
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-15T04:56:03.8303606Z",
+    "seconds": 2.7
+   },
+   {
+    "at": "2026-10-15T04:56:08.2538816Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-15T04:56:14.0069311Z",
+    "seconds": 2.6
+   },
+   {
+    "at": "2026-10-15T04:56:17.8662182Z",
+    "seconds": 0.9
+   },
+   {
+    "at": "2026-10-15T04:58:07.9101085Z",
+    "seconds": 105.9
+   },
+   {
+    "at": "2026-10-15T05:17:17.2894251Z",
+    "seconds": 2.7
+   },
+   {
+    "at": "2026-10-15T05:17:17.2920307Z",
+    "seconds": 2.6
+   },
+   {
+    "at": "2026-10-15T05:17:17.2926644Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-15T05:17:17.2943106Z",
+    "seconds": 0.9
+   },
+   {
+    "at": "2026-10-15T05:17:17.3068173Z",
+    "seconds": 105.9
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-15T04:52:06.3069394Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 65.0
+   },
+   {
+    "at": "2026-10-15T05:13:03.1117522Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 1233.0
+   },
+   {
+    "at": "2026-10-15T05:16:32.1651718Z",
+    "task": "onepipeline-ui:ensure-baseline",
+    "seconds": 191.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-15T04:37:37.1052119Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-15T04:37:38.7448890Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-15T04:37:55.2814688Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-15T04:37:55.8351912Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-15T04:37:56.6234167Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-15T04:37:56.6363249Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-15T04:37:57.4330234Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-15T04:50:54.9895422Z",
+    "step": "just check"
+   }
+  ]
+ },
+ {
+  "workflow": "Release",
+  "event": "release",
+  "job": "test",
+  "job_id": 115695595201,
+  "run_id": 38516249011,
+  "duration_s": 2405.0,
+  "head_sha": "301d81210b14a79b5b2c3e570bffc1ef26d05d7e",
+  "nx_invocations": [
+   {
+    "at": "2026-10-14T05:35:14.7615379Z",
+    "targets": "bootstrap",
+    "projects": 3,
+    "line": "NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on",
+    "run_duration_s": 761.0
+   },
+   {
+    "at": "2026-10-14T05:35:16.9978929Z",
+    "targets": "format-check",
+    "projects": 7,
+    "line": "NX   Successfully ran target format-check for 7 projects",
+    "run_duration_s": 1.4
+   },
+   {
+    "at": "2026-10-14T05:36:26.0427433Z",
+    "targets": "lint",
+    "projects": 9,
+    "line": "NX   Successfully ran target lint for 9 projects and 1 task they depend on",
+    "run_duration_s": 68.0
+   },
+   {
+    "at": "2026-10-14T05:36:39.7554530Z",
+    "targets": "typecheck",
+    "projects": 6,
+    "line": "NX   Successfully ran target typecheck for 6 projects",
+    "run_duration_s": 13.1
+   },
+   {
+    "at": "2026-10-14T05:36:47.8237877Z",
+    "targets": "build",
+    "projects": 5,
+    "line": "NX   Successfully ran target build for 5 projects",
+    "run_duration_s": 7.5
+   },
+   {
+    "at": "2026-10-14T06:01:49.2794700Z",
+    "targets": "check",
+    "projects": 14,
+    "line": "NX   Successfully ran target check for 14 projects and 48 tasks they depend on",
+    "run_duration_s": 26.7
+   }
+  ],
+  "nextest_summaries": [
+   {
+    "at": "2026-10-14T05:40:16.0733030Z",
+    "seconds": 2.469,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T05:45:00.9783388Z",
+    "seconds": 17.83,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T05:49:48.7409473Z",
+    "seconds": 574.916,
+    "summary": "250 tests run: 250 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-14T05:57:08.4027125Z",
+    "seconds": 1014.748,
+    "summary": "223 tests run: 223 passed (1 slow), 268 skipped"
+   },
+   {
+    "at": "2026-10-14T06:00:37.7630878Z",
+    "seconds": 2.286,
+    "summary": "5 tests run: 5 passed, 450 skipped"
+   },
+   {
+    "at": "2026-10-14T06:00:59.3669385Z",
+    "seconds": 5.623,
+    "summary": "13 tests run: 13 passed, 442 skipped"
+   },
+   {
+    "at": "2026-10-14T06:01:22.6542328Z",
+    "seconds": 17.83,
+    "summary": "1 test run: 1 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T06:01:22.7315379Z",
+    "seconds": 2.469,
+    "summary": "64 tests run: 64 passed, 0 skipped"
+   },
+   {
+    "at": "2026-10-14T06:01:22.7322761Z",
+    "seconds": 1014.748,
+    "summary": "223 tests run: 223 passed (1 slow), 268 skipped"
+   },
+   {
+    "at": "2026-10-14T06:01:22.9115310Z",
+    "seconds": 574.916,
+    "summary": "250 tests run: 250 passed (1 slow), 205 skipped"
+   },
+   {
+    "at": "2026-10-14T06:01:22.9125399Z",
+    "seconds": 5.623,
+    "summary": "13 tests run: 13 passed, 442 skipped"
+   },
+   {
+    "at": "2026-10-14T06:01:22.9206587Z",
+    "seconds": 2.286,
+    "summary": "5 tests run: 5 passed, 450 skipped"
+   }
+  ],
+  "playwright": [
+   {
+    "at": "2026-10-14T05:53:04.9159657Z",
+    "passed": 139,
+    "seconds": 480.0
+   },
+   {
+    "at": "2026-10-14T06:01:33.2037450Z",
+    "passed": 139,
+    "seconds": 480.0
+   },
+   {
+    "at": "2026-10-14T06:01:49.2754713Z",
+    "passed": 2,
+    "seconds": 14.6
+   }
+  ],
+  "vitest": [
+   {
+    "at": "2026-10-14T05:40:20.9573459Z",
+    "seconds": 2.3
+   },
+   {
+    "at": "2026-10-14T05:40:25.0312348Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-14T05:40:31.0340387Z",
+    "seconds": 2.1
+   },
+   {
+    "at": "2026-10-14T05:40:35.9204925Z",
+    "seconds": 1.6
+   },
+   {
+    "at": "2026-10-14T05:42:28.3995541Z",
+    "seconds": 108.4
+   },
+   {
+    "at": "2026-10-14T06:01:22.6349543Z",
+    "seconds": 2.3
+   },
+   {
+    "at": "2026-10-14T06:01:22.6372553Z",
+    "seconds": 2.1
+   },
+   {
+    "at": "2026-10-14T06:01:22.6378999Z",
+    "seconds": 1.6
+   },
+   {
+    "at": "2026-10-14T06:01:22.6392167Z",
+    "seconds": 1.2
+   },
+   {
+    "at": "2026-10-14T06:01:22.6510585Z",
+    "seconds": 108.4
+   }
+  ],
+  "critical_path_tasks": [
+   {
+    "at": "2026-10-14T05:36:26.0473499Z",
+    "task": "onepipeline-ui:lint",
+    "seconds": 65.0
+   },
+   {
+    "at": "2026-10-14T05:57:09.4963094Z",
+    "task": "onepipeline-ui-repo-tooling:test",
+    "seconds": 1220.0
+   },
+   {
+    "at": "2026-10-14T06:00:37.7695993Z",
+    "task": "onepipeline-ui:ensure-baseline",
+    "seconds": 190.0
+   }
+  ],
+  "steps": [
+   {
+    "at": "2026-10-14T05:22:09.0925933Z",
+    "step": "actions/checkout@v4"
+   },
+   {
+    "at": "2026-10-14T05:22:10.7444671Z",
+    "step": "Swatinem/rust-cache@v2"
+   },
+   {
+    "at": "2026-10-14T05:22:27.2920183Z",
+    "step": "actions/setup-node@v4"
+   },
+   {
+    "at": "2026-10-14T05:22:27.9010687Z",
+    "step": "oven-sh/setup-bun@v2"
+   },
+   {
+    "at": "2026-10-14T05:22:28.7196355Z",
+    "step": "taiki-e/install-action@v2"
+   },
+   {
+    "at": "2026-10-14T05:22:28.7318721Z",
+    "step": "bail() {"
+   },
+   {
+    "at": "2026-10-14T05:22:29.5955488Z",
+    "step": "just bootstrap"
+   },
+   {
+    "at": "2026-10-14T05:35:14.8605504Z",
+    "step": "just check"
+   }
+  ]
+ }
+]

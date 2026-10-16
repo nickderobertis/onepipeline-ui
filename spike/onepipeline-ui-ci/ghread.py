@@ -25,14 +25,18 @@ def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def _gh_json(path: str) -> object:
+def _gh_raw(path: str) -> str:
     out = subprocess.run(
         ["gh", "api", "--method", "GET", path],
         check=True,
         capture_output=True,
         text=True,
     )
-    return json.loads(out.stdout)
+    return out.stdout
+
+
+def _gh_json(path: str) -> object:
+    return json.loads(_gh_raw(path))
 
 
 @dataclass
@@ -79,7 +83,7 @@ class Reader:
         )
         return int(core["remaining"]), int(core["reset"])
 
-    def get(self, path: str) -> object:
+    def get(self, path: str, raw: bool = False) -> object:
         if self.made >= self.max_requests:
             raise QuotaStop(f"request cap {self.max_requests} reached before {path}")
         remaining, _ = self.core_remaining()
@@ -96,7 +100,7 @@ class Reader:
             "core_remaining_before": remaining,
         }
         try:
-            body = _gh_json(path)
+            body = _gh_raw(path) if raw else _gh_json(path)
         except subprocess.CalledProcessError as err:
             entry["error"] = (err.stderr or "").strip()[:500]
             self._log(entry)
