@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.37.0...v0.38.0) - 2026-10-16
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that copies a private source's documents ([#351](https://github.com/nickderobertis/onepipeline-ui/pull/351))
+
+### Fixed
+
+- *(deps)* adopt the engine that copies a private source's documents ([#348](https://github.com/nickderobertis/onepipeline-ui/pull/348))
+
 ## [0.37.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.36.1...v0.37.0) - 2026-10-16
 
 ### Added
