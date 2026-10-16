@@ -153,7 +153,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
       - run: just bootstrap
       # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] the sweep the release pull request runs is not this path's. A Release created by hand in the GitHub UI is supported — this workflow's header says so — and it can name any commit, including one no push to `main` ever swept, while every job below publishes artifacts built from whatever it names. This is the only gate that commit meets.
       - run: just check

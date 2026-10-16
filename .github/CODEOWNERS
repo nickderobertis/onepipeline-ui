@@ -16,6 +16,7 @@
 /tests/tiers/repo-tooling/ @nickderobertis
 /tests/tiers/baseline/   @nickderobertis
 /tests/tiers/cost/       @nickderobertis
+/tests/tiers/linked-report/ @nickderobertis
 /tests/tiers/coverage/   @nickderobertis
 /docs/contract.md        @nickderobertis
 /Cargo.toml              @nickderobertis

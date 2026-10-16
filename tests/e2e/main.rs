@@ -9,7 +9,8 @@
 //! as a subprocess and
 //! asserts on its exit code, stdout, and stderr; `server` starts that binary on
 //! a real port over a directory the onepipeline SDK itself writes and reads the
-//! bytes it serves; `packaging` assembles the real npm packages with
+//! bytes it serves; `linked_report` builds that binary with `cargo auditable`
+//! and reads back the dependency record it embedded; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
 //! platform package through node's own resolution; `lint_llm_diff` runs the
 //! gate's own llmlint recipe over a real git repository, `llmlint_cache` runs
@@ -41,6 +42,7 @@ mod cli;
 mod cost;
 mod ensure_baseline;
 mod ensure_sibling;
+mod linked_report;
 mod lint_llm_diff;
 // llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
 // image compiling the whole release binary, minutes per target, which ci.yml's

@@ -72,6 +72,7 @@ _crate-bootstrap:
       || { echo "cannot add toolchain components — install rustup (https://rustup.rs/) and re-run" >&2; exit 1; }
     @just _ensure-tool cargo-nextest
     @just _ensure-tool cargo-llvm-cov
+    @just _ensure-tool cargo-auditable
     @just _ensure-sibling
     @cargo fetch --locked --quiet
 
@@ -265,12 +266,14 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as five Nx projects, one per tier, each selecting its
+# The crate's suite runs as six Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the five filters are written and partition the suite. Three
-# tiers are instrumented and run here; the baseline comparison and the cost
-# journeys run through `_tier-test` below, for what each needs that the rest do
-# not — another commit of this repository compiled, and a syscall tracer.
+# which is where the six filters are written and partition the suite. Three
+# tiers are instrumented and run here; the baseline comparison, the cost
+# journeys and the linked-report journeys run through `_tier-test` below, for
+# what each needs that the rest do not — another commit of this repository
+# compiled, a syscall tracer, and a second build of this one with `cargo
+# auditable`.
 #
 # Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
 # named for the tier, and reports nothing: `_crate-coverage` merges every tier's
@@ -300,9 +303,9 @@ _crate-coverage:
     @cargo llvm-cov report --locked --fail-under-lines 95 \
       || { echo "coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
 
-# A tier without instrumentation: the baseline comparison and the cost journeys,
-# which ask what two binaries serve and what a read asks the kernel for rather
-# than which lines ran, and `test-quick` on the platforms coverage is not measured
+# A tier without instrumentation: the baseline comparison, the cost journeys and
+# the linked-report journeys, which ask what two binaries serve, what a read asks
+# the kernel for and what a build links rather than which lines ran, and `test-quick` on the platforms coverage is not measured
 # on.
 # One tier of the crate's suite, uninstrumented.
 # llmlint: ignore-block[diagnostics_error_or_absent] the compiler's diagnostics over these tests are denied by `_crate-lint` — `clippy --all-targets --locked -- -D warnings`, which compiles this very test target and denies rustc's own lints as well as its own. `RUSTFLAGS` here would deny them a second time at the price of rebuilding the shared `target/debug` under a second flag set every time a test recipe alternates with `build`, `lint` or `msrv`, which is minutes per alternation and buys no diagnostic the gate does not already fail on. The cross-platform legs this recipe serves run `_crate-lint` beside it, so the deny reaches these tests on every platform the gate rules on.

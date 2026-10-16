@@ -399,6 +399,7 @@ fn a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery() {
         "onepipeline-ui-repo-tooling",
         "onepipeline-ui-baseline",
         "onepipeline-ui-cost",
+        "onepipeline-ui-linked-report",
     ] {
         assert!(
             !selected(&tasks, tier),

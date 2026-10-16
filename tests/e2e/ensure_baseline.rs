@@ -42,12 +42,13 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 5] = [
+const TIERS: [(&str, &str, &str); 6] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
     ("onepipeline-ui-baseline", "test-baseline", "baseline"),
     ("onepipeline-ui-cost", "test-cost", "cost"),
+    ("onepipeline-ui-linked-report", "test", "linked-report"),
 ];
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
@@ -805,20 +806,20 @@ fn every_tier_is_keyed_by_every_module_its_journeys_read() {
 
 /// Every test runs under exactly one tier.
 ///
-/// The suite is five Nx projects, each running its own nextest profile, and the
-/// five filters are the halves of one partition: `unit` is every binary but the
+/// The suite is six Nx projects, each running its own nextest profile, and the
+/// six filters are the halves of one partition: `unit` is every binary but the
 /// two the other tiers draw on, and inside `e2e` the `e2e` profile is `not` what
-/// the other three select. They are written as module lists in two places, so
+/// the other four select. They are written as module lists in two places, so
 /// nothing but this holds them to each other — and either side drifting alone is
 /// silent: widen an exclusion and tests stop running under the coverage floor,
 /// narrow an inclusion and a whole tier is declared for and runs nowhere. The
 /// tier projects are held to the profiles too, since a target naming the wrong
 /// profile runs another tier's tests twice and its own never.
 // llmlint: ignore-block[tests_mirror_real_usage] there is no command surface to drive here:
-// the property is that five *declarations* in one file partition one name space, and the
-// only way to observe it through the recipes would be to run all five tiers and see which
+// the property is that six *declarations* in one file partition one name space, and the
+// only way to observe it through the recipes would be to run all six tiers and see which
 // tests executed — which means compiling the base commit's server and provisioning a syscall
-// tracer to learn something about five strings. Asking `cargo nextest list` what each
+// tracer to learn something about six strings. Asking `cargo nextest list` what each
 // profile selects is the real interface, and is refused here for a different reason: a nested
 // cargo inside a running suite contends for the target-directory lock, which is a hang rather
 // than a verdict. Every other test in this module drives the real recipe.
@@ -835,7 +836,7 @@ fn the_tier_profiles_partition_the_suite() {
     // Inside the `e2e` binary: the three selections are disjoint, and the `e2e`
     // profile excludes exactly their union.
     let mut drawn = std::collections::BTreeSet::new();
-    for profile in ["repo-tooling", "baseline", "cost"] {
+    for profile in ["repo-tooling", "baseline", "cost", "linked-report"] {
         for module in &profiles[profile].modules {
             assert!(
                 journeys.contains(module),
@@ -854,10 +855,11 @@ fn the_tier_profiles_partition_the_suite() {
     );
 
     // Across binaries: `unit` is every binary but the ones the others draw on.
-    let others: std::collections::BTreeSet<String> = ["e2e", "repo-tooling", "baseline", "cost"]
-        .iter()
-        .flat_map(|profile| profiles[*profile].binaries.iter().cloned())
-        .collect();
+    let others: std::collections::BTreeSet<String> =
+        ["e2e", "repo-tooling", "baseline", "cost", "linked-report"]
+            .iter()
+            .flat_map(|profile| profiles[*profile].binaries.iter().cloned())
+            .collect();
     assert_eq!(
         profiles["unit"].excluded_binaries, others,
         "the `unit` profile does not exclude exactly the binaries the other tiers run"

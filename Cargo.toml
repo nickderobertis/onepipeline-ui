@@ -601,6 +601,11 @@ libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"
+# The reader of the dependency record `cargo auditable` embeds in a binary, so
+# the journey that holds the built server to the engine and plan-store
+# releases `Cargo.lock` resolves reads that record the way an auditor's tooling
+# does rather than through a second parser of its format.
+auditable-info = "0.10"
 libc = "0.2"
 # The drift gate on the sibling vocabulary `src/payload.rs` reads from `onevcs`.
 # That library's `event` module is private, but it re-exports `EventKind` from
@@ -610,7 +615,8 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. 0.52.0 is the
-# release the engine's caret on 0.52 resolves to, so the lock keeps one copy.
+# release engine 0.74.1 requires (^0.52.0), so the lock moves both to it and
+# keeps one copy.
 onevcs = "=0.52.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`

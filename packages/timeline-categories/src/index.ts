@@ -260,13 +260,16 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // llmlint: ignore-end[changed_behavior_has_e2e]
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-  // The run's scratch at its end: reclaimed after success or a discard, or kept
-  // for inspection after any other ending. Both are the run's own cleanup, which
-  // the lifecycle rule names, and no node's work; but `scratch`, `removed` and
-  // `retained` name no rule, and `removed` alone would generalise to anything
-  // that took something away.
+  // A dispatch's scratch removed at its success, or measured and kept at any
+  // other ending: housekeeping of the dispatch's ending, like a deferred
+  // cleanup, and no node's work. `scratch`, `removed` and `retained` name no
+  // rule, and none generalises to one.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these two kinds when the pin moved to 0.74.1.
+  // llmlint: ignore-block[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary. What the browser tier proves is the drawing, which filing these two kinds does not change.
   "scratch-removed": "lifecycle",
   "scratch-retained": "lifecycle",
+  // llmlint: ignore-end[changed_behavior_has_e2e]
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
