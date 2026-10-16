@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Render the spike-report answers for spike-onepipeline-ui-ci from the harness's outputs.
 
+    tar xJf spike/onepipeline-ui-ci/raw.tar.xz -C spike/onepipeline-ui-ci   # raw/ it reads
     python3 -B -I spike/onepipeline-ui-ci/report_answers.py > answers.json
 
 Every measured figure below is read from figures.json (measure.py), ci-logs.json
