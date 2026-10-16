@@ -1,0 +1,72 @@
+{
+ "label": "gate-wt-bootstrap",
+ "command": [
+  "just",
+  "bootstrap"
+ ],
+ "cwd": "/home/nick.guest/ai-orchestrator/runs/ci-time-budgets-wave1-brief-spikes/scratch/3446778-3/wtgate",
+ "note": "just bootstrap in the scratch worktree at cd4be04 before the gate runs (not part of the gate); .tools/bin/onepipeline copied in from this branch's worktree; empty cargo target",
+ "exit_code": 0,
+ "wall_seconds": 127.6,
+ "started_at": 1792135092.4267402,
+ "task_history_ids": [
+  247,
+  252
+ ],
+ "load_average_at_end": [
+  "14.73",
+  "14.91",
+  "12.99"
+ ],
+ "tasks": [
+  {
+   "id": 248,
+   "task": "dag-ui:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.1,
+   "start_ms": 1792135097005,
+   "end_ms": 1792135099151
+  },
+  {
+   "id": 249,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 119.3,
+   "start_ms": 1792135099208,
+   "end_ms": 1792135218469
+  },
+  {
+   "id": 250,
+   "task": "onepipeline-ui:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.7,
+   "start_ms": 1792135218472,
+   "end_ms": 1792135219202
+  },
+  {
+   "id": 251,
+   "task": "dag-ui-e2e:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.7,
+   "start_ms": 1792135219203,
+   "end_ms": 1792135219884
+  },
+  {
+   "id": 252,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792135219884,
+   "end_ms": 1792135219896
+  }
+ ],
+ "tasks_executed": 5,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

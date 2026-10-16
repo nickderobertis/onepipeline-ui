@@ -1,0 +1,66 @@
+
+ NX   Running target bootstrap for 3 projects and 2 tasks they depend on:
+
+- dag-ui-e2e
+- github-workflows
+- onepipeline-ui
+
+
+
+> nx run dag-ui:build
+
+> cd apps/dag-ui && npx vite build --config vite.config.ts
+
+[36mvite v8.1.5 [32mbuilding client environment for production...[36m[39m
+[2K
+transforming...[32m✓[0m 2901 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[0m[32mindex.html                 [0m[1;2m    0.71 kB[0m[2m │ gzip:   0.44 kB[0m
+[2mdist/[0m[2massets/[0m[35mindex-m7hUhIQ5.css  [0m[1;2m   98.37 kB[0m[2m │ gzip:  18.31 kB[0m
+[2mdist/[0m[2massets/[0m[36mindex-OQQMF0Hn.js   [0m[33;1m1,109.02 kB[0m[2m │ gzip: 342.29 kB[0m
+
+[32m✓ built in 1.10s[39m
+[33m[plugin builtin:vite-reporter] [33;1m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[0m[39m
+
+> nx run dag-ui:build-api-server
+
+> cargo build --locked --quiet --bin onepipeline-api
+
+
+> nx run onepipeline-ui:bootstrap
+
+> just _crate-bootstrap
+
+info: component rustfmt is up to date
+info: component clippy is up to date
+info: component llvm-tools is up to date
+
+> nx run dag-ui-e2e:bootstrap
+
+> npx playwright install chromium
+
+
+> nx run github-workflows:bootstrap
+
+> bash scripts/workspace-install.sh
+
+
+
+
+ NX   Successfully ran target bootstrap for 3 projects and 2 tasks they depend on
+
+
+  Run duration:      2m 3s
+  Cache:             0/5 hit (0%)
+  Critical path:     2m 2s (3 tasks)
+  Recoverable time:  928ms (1% of the run)
+
+  Recommendations:
+    - Drastically reduce your run duration by sharing a cache across your team and CI → https://nx.dev/ci/features/remote-cache?utm_source=nx-cli&utm_medium=cli&utm_campaign=performance-report&utm_content=remote-cache.
+    - Speed up or split the longest tasks on the critical path:
+        dag-ui:build-api-server    1m 59s
