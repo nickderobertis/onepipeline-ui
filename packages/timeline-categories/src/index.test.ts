@@ -187,6 +187,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "publication-failed": "failure",
   "pr-merged": "publication",
   "cleanup-deferred": "lifecycle",
+  // Dispatch scratch removed or kept at an ending: housekeeping, like the
+  // deferred cleanup above.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these event kinds; this package owns their display categories. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` failed naming both when the pin moved to 0.74.1, requiring these corpus entries.
+  "scratch-removed": "lifecycle",
+  "scratch-retained": "lifecycle",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "human-waiting": "human",
   "conflict-resolution-started": "recovery",
   "conflict-resolution-finished": "recovery",

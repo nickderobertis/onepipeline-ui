@@ -103,7 +103,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
       # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
       # what a read may do to a runs root — the bug that made one open subscriber
       # cost a core — and they count operations from the kernel's own record of
@@ -156,7 +156,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
       # The cost journeys count with it, as in `quality` above.
       - name: Install the syscall tracer the cost journeys count with
         run: sudo apt-get update && sudo apt-get install -y strace
@@ -201,7 +201,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest
+          tool: just,nextest,cargo-auditable
       - name: Bootstrap
         run: just bootstrap
       - name: Quality gate (platform-sensitive tiers)
@@ -234,7 +234,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest
+          tool: just,nextest,cargo-auditable
       - name: Bootstrap
         run: just bootstrap
       - name: Quality gate (platform-sensitive tiers)
