@@ -116,6 +116,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // done — the run's driving ending, like a stop, and no node's work.
   "dispatch-stopped": "lifecycle",
   "host-shutdown": "lifecycle",
+  // The run's scratch at its end: reclaimed after success or a discard, or kept
+  // for inspection after any other ending — the run's own cleanup, and no node's work.
+  "scratch-removed": "lifecycle",
+  "scratch-retained": "lifecycle",
   // What the engine did to branches rather than to a node: the earlier attempts a
   // landed lineage superseded, and the finished branches a sweep retired.
   // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the producer owns the kinds and this package owns the category they read under; this corpus is where that decision is pinned, as the doc comment above `CORPUS` states. `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` named exactly these two kinds when the engine pin moved to the release that declares them, and demands an entry here for each.

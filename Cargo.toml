@@ -567,7 +567,17 @@ onemessagebus = "0.9.0"
 # `onetaskgraph-*` requirements below move with it to the release its lock
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items.
-onepipeline = "=0.73.0"
+# 0.74.1 reclaims a run's scratch when it succeeds or is discarded and keeps it
+# otherwise, journalling `scratch-removed` and `scratch-retained`, and links onevcs
+# 0.52, whose pool maintenance runs the command a repository declares in its own
+# `onevcs.toml` and reports each slot's disk around it, so a browser-adopted run's
+# driver reclaims and maintains the way every other run on the host does once this
+# moves. Payloads pass through as the engine wrote them, so no route or response
+# changes; `packages/timeline-categories` files the two new kinds. The test-only
+# `onevcs` and `onetaskgraph-*` requirements below move with it to the releases
+# its own lock resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
+onepipeline = "=0.74.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -599,10 +609,9 @@ libc = "0.2"
 # major `onepipeline` resolves, so the gate reads the same declaration the
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
-# dependency above, which the crate now links in its own right. 0.51.3 is the
-# release whose boundary stops reading generic words as test words; the engine's
-# caret on 0.51.2 accepts it, so the lock moves both to it and keeps one copy.
-onevcs = "=0.51.3"
+# dependency above, which the crate now links in its own right. 0.52.0 is the
+# release the engine's caret on 0.52 resolves to, so the lock keeps one copy.
+onevcs = "=0.52.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -621,8 +630,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.7.0"
-onetaskgraph-plugin-api = "=0.7.0"
+onetaskgraph-core = "=0.7.1"
+onetaskgraph-plugin-api = "=0.7.1"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was

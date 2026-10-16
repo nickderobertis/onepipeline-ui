@@ -13328,6 +13328,126 @@ fn a_stop_is_judged_by_the_acting_session() {
     assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
 }
 
+#[test]
+fn a_run_lists_scratch_reclamation_and_declared_maintenance_as_the_engine_wrote_them() {
+    // The linked engine reclaims a run's scratch when it succeeds or is
+    // discarded and keeps it otherwise, and journals its pool maintenance as
+    // `onevcs`'s own report — whose slots now carry the disk they held around the
+    // command, and whose identities can answer that their declaration could not
+    // be read. The timeline lists each of those records in the shape the
+    // contract gives every event, which carries no record's payload; what holds
+    // the payloads to what the engine writes is the schema it publishes for each
+    // kind.
+    let ran = onevcs::IdentityOutcome::Slots(vec![onevcs::SlotMaintenance {
+        number: 1,
+        outcome: onevcs::SlotOutcome::Ran {
+            outcome: onevcs::MaintenanceOutcome::Succeeded,
+            duration_ms: 4_210,
+            log: None,
+            disk: Some(onevcs::SlotDisk {
+                before_bytes: 9_663_676_416,
+                after_bytes: 2_147_483_648,
+            }),
+        },
+    }]);
+    let unreadable = onevcs::IdentityOutcome::MaintenanceUnreadable {
+        reason: "onevcs.toml: [pool.maintain] command must not be empty".to_owned(),
+    };
+    let removed = json!({
+        "trigger": "success",
+        "dirs": 2,
+        "bytes": 1_073_741_824_u64,
+        "failed": [{
+            "path": "/scratch/run-20260807-d4e5f6/announce",
+            "error": "Permission denied (os error 13)",
+        }],
+    });
+    let retained = json!({
+        "ending": "failed",
+        "dirs": [
+            { "path": "/scratch/run-20260807-d4e5f6/write-page", "bytes": 524_288 },
+            { "path": "/scratch/run-20260807-d4e5f6/review", "bytes": 4_096 },
+        ],
+        "total_bytes": 528_384,
+    });
+    let maintained = json!({
+        "started_at": "2026-08-07T12:00:50Z",
+        "identities": [
+            {
+                "identity": "github.com-nickderobertis-onepipeline-ui",
+                "every": "1d",
+                "outcome": serde_json::to_value(&ran).expect("an outcome serializes"),
+            },
+            {
+                "identity": "github.com-nickderobertis-onevcs",
+                "every": "1d",
+                "outcome": serde_json::to_value(&unreadable).expect("an outcome serializes"),
+            },
+        ],
+    });
+    // The wire spelling `onevcs` gives the two changed outcomes, so the journey
+    // fails here rather than passing on a spelling nobody writes.
+    assert_eq!(
+        maintained["identities"][0]["outcome"]["slots"][0]["outcome"]["ran"]["disk"],
+        json!({ "before_bytes": 9_663_676_416_u64, "after_bytes": 2_147_483_648_u64 }),
+    );
+    assert_eq!(
+        maintained["identities"][1]["outcome"],
+        json!({ "maintenance-unreadable": {
+            "reason": "onevcs.toml: [pool.maintain] command must not be empty",
+        } }),
+    );
+    let run = fixture_run::OTHER_RUN_ID;
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, run);
+        fixture_run::append(&dir, "pool-maintenance", maintained.clone());
+        fixture_run::append(&dir, "scratch-retained", retained.clone());
+        fixture_run::append(&dir, "scratch-removed", removed.clone());
+    });
+
+    // The timeline lists each record by its kind, in the event shape the
+    // contract states, which carries no record's payload.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let body = timeline.json();
+    let kinds = ["pool-maintenance", "scratch-retained", "scratch-removed"];
+    for kind in kinds {
+        let listed = relayed(&body, kind);
+        assert_eq!(listed.len(), 1, "one {kind} on the run timeline: {body}");
+        assert!(listed[0].get("payload").is_none(), "{}", listed[0]);
+    }
+    // The run detail reports the newest of them as the run's last event.
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    assert_eq!(
+        detail.json()["run"]["last_event"],
+        json!("scratch-removed"),
+        "{}",
+        detail.body
+    );
+    // Each record, as `onevcs` 0.52 and the engine write it, conforms to the
+    // schema the linked engine publishes for its kind.
+    journal_schema::assert_conforms(&serving.runs_root());
+    // And that check reads the new kinds rather than passing them unread: an
+    // ending the engine never writes is refused, naming the record.
+    let journal = serving.run_dir(run).join("events.jsonl");
+    let conforming = fs::read_to_string(&journal).expect("read the journal");
+    fixture_run::append(
+        &serving.run_dir(run),
+        "scratch-retained",
+        json!({ "ending": "succeeded", "dirs": [], "total_bytes": 0 }),
+    );
+    let found = journal_schema::departures(&serving.runs_root());
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains(": scratch-retained: "), "{found:#?}");
+    assert!(found[0].contains("ending"), "{found:#?}");
+    // Put back as written, so the root this server leaves conforms when it stops.
+    fs::write(&journal, conforming).expect("restore the journal");
+}
+
 /// The `host-shutdown` records one run's journal carries.
 fn host_shutdowns(serving: &Serving, run: &str) -> Vec<Value> {
     events_on(

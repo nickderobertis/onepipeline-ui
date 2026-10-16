@@ -260,6 +260,13 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // llmlint: ignore-end[changed_behavior_has_e2e]
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+  // The run's scratch at its end: reclaimed after success or a discard, or kept
+  // for inspection after any other ending. Both are the run's own cleanup, which
+  // the lifecycle rule names, and no node's work; but `scratch`, `removed` and
+  // `retained` name no rule, and `removed` alone would generalise to anything
+  // that took something away.
+  "scratch-removed": "lifecycle",
+  "scratch-retained": "lifecycle",
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */
