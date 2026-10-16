@@ -116,7 +116,12 @@ def main() -> int:
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    # The command's log is written outside the tree while it runs and copied in
+    # afterwards: `github-workflows:budgets` digests every untracked file, so a
+    # log growing inside the checkout makes the telemetry the test just wrote
+    # stale before the budget reads it.
     log = args.out.with_suffix(".log")
+    live = Path(os.environ.get("ONEPIPELINE_NODE_SCRATCH_DIR", "/tmp")) / f"{args.label}.{os.getpid()}.log"
     args.out.parent.mkdir(parents=True, exist_ok=True)
     if args.reparse:
         old = json.loads(args.out.read_text())
@@ -127,9 +132,10 @@ def main() -> int:
         first, last = max_history_id(), None
         env = dict(os.environ, NEXTEST_STATUS_LEVEL="pass")
         t0 = time.time()
-        with log.open("w") as fh:
+        with live.open("w") as fh:
             rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
         t1 = time.time()
+        log.write_text(live.read_text(errors="replace"))
     tasks = tasks_since(first, last)
     tests = sorted(tests_from_log(log.read_text(errors="replace")), key=lambda t: -t["seconds"])
     doc = {

@@ -1938,8 +1938,10 @@
  "per_pr_head_commit": {
   "by_runner_os": {},
   "by_workflow": {},
+  "ci_longest_job_by_name": {},
   "ci_longest_job_detail": [],
   "ci_longest_job_s": null,
+  "ci_longest_job_s_by_kind": {},
   "heads_measured": 0,
   "jobs_executed": null
  },
@@ -1955,6 +1957,58 @@
    "median": 43,
    "n": 1,
    "p90": 43
+  },
+  "job_count_by_runner_os": {
+   "linux": {
+    "max": 27,
+    "median": 27,
+    "n": 1,
+    "p90": 27
+   },
+   "linux-arm64": {
+    "max": 5,
+    "median": 5,
+    "n": 1,
+    "p90": 5
+   },
+   "macos": {
+    "max": 1,
+    "median": 1,
+    "n": 1,
+    "p90": 1
+   },
+   "windows": {
+    "max": 10,
+    "median": 10,
+    "n": 1,
+    "p90": 10
+   }
+  },
+  "job_count_by_workflow": {
+   "CI (push)": {
+    "max": 13,
+    "median": 13,
+    "n": 1,
+    "p90": 13
+   },
+   "Published smoke (workflow_run)": {
+    "max": 5,
+    "median": 5,
+    "n": 1,
+    "p90": 5
+   },
+   "Release (release)": {
+    "max": 23,
+    "median": 23,
+    "n": 1,
+    "p90": 23
+   },
+   "Release-plz (push)": {
+    "max": 2,
+    "median": 2,
+    "n": 1,
+    "p90": 2
+   }
   },
   "longest_job_s": {
    "max": 2320.0,

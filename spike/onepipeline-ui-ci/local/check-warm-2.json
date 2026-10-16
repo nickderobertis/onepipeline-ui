@@ -1,0 +1,1378 @@
+{
+ "label": "check-warm-2",
+ "command": [
+  "just",
+  "check"
+ ],
+ "note": "Nx cache as left by check-cold, the three cold tier runs and check-warm-1 (in which dag-ui:test and dag-ui-e2e:test passed and were cached); same tree; log kept outside the tree while running; load avg at start 24.94 32.88 34.15",
+ "exit_code": 0,
+ "wall_seconds": 160.7,
+ "started_at": 1792127980.8261917,
+ "task_history_ids": [
+  180,
+  299
+ ],
+ "load_average_at_end": [
+  "35.55",
+  "36.13",
+  "35.24"
+ ],
+ "tasks": [
+  {
+   "id": 181,
+   "task": "dag-model:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 182,
+   "task": "timeline-categories:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 183,
+   "task": "telemetry-client:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 184,
+   "task": "onepipeline-ui:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 185,
+   "task": "dag-layout:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 186,
+   "task": "dag-ui:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 187,
+   "task": "dag-ui-e2e:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127981960,
+   "end_ms": 1792127981961
+  },
+  {
+   "id": 188,
+   "task": "dag-model:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 189,
+   "task": "onepipeline-ui:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 190,
+   "task": "telemetry-client:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 191,
+   "task": "timeline-categories:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 192,
+   "task": "dag-layout:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 193,
+   "task": "dag-ui:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 194,
+   "task": "dag-ui-build-cache:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 195,
+   "task": "dag-ui-e2e:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983049,
+   "end_ms": 1792127983050
+  },
+  {
+   "id": 196,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983051,
+   "end_ms": 1792127983078
+  },
+  {
+   "id": 197,
+   "task": "github-workflows:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127983098,
+   "end_ms": 1792127983098
+  },
+  {
+   "id": 198,
+   "task": "dag-model:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127984202,
+   "end_ms": 1792127984204
+  },
+  {
+   "id": 199,
+   "task": "telemetry-client:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127984202,
+   "end_ms": 1792127984204
+  },
+  {
+   "id": 200,
+   "task": "timeline-categories:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127984202,
+   "end_ms": 1792127984204
+  },
+  {
+   "id": 201,
+   "task": "dag-layout:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127984202,
+   "end_ms": 1792127984204
+  },
+  {
+   "id": 202,
+   "task": "dag-ui:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127984202,
+   "end_ms": 1792127984204
+  },
+  {
+   "id": 203,
+   "task": "dag-ui-e2e:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127984202,
+   "end_ms": 1792127984204
+  },
+  {
+   "id": 204,
+   "task": "dag-model:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792127985085,
+   "end_ms": 1792127985193
+  },
+  {
+   "id": 205,
+   "task": "telemetry-client:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792127985085,
+   "end_ms": 1792127985193
+  },
+  {
+   "id": 206,
+   "task": "dag-layout:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792127985085,
+   "end_ms": 1792127985193
+  },
+  {
+   "id": 207,
+   "task": "timeline-categories:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792127985085,
+   "end_ms": 1792127985193
+  },
+  {
+   "id": 208,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792127985085,
+   "end_ms": 1792127985193
+  },
+  {
+   "id": 209,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 210,
+   "task": "dag-model:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 211,
+   "task": "telemetry-client:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 212,
+   "task": "timeline-categories:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 213,
+   "task": "dag-layout:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 214,
+   "task": "dag-ui:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 215,
+   "task": "dag-ui-build-cache:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127986295,
+   "end_ms": 1792127986299
+  },
+  {
+   "id": 216,
+   "task": "onepipeline-ui:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.8,
+   "start_ms": 1792127986310,
+   "end_ms": 1792127987140
+  },
+  {
+   "id": 217,
+   "task": "onepipeline-ui-repo-tooling:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.8,
+   "start_ms": 1792127986310,
+   "end_ms": 1792127987140
+  },
+  {
+   "id": 218,
+   "task": "pool-maintenance:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792127987144,
+   "end_ms": 1792127987290
+  },
+  {
+   "id": 220,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.2,
+   "start_ms": 1792127987144,
+   "end_ms": 1792127987357
+  },
+  {
+   "id": 225,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 73.0,
+   "start_ms": 1792127987144,
+   "end_ms": 1792128060113
+  },
+  {
+   "id": 219,
+   "task": "pool-maintenance:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792127987306,
+   "end_ms": 1792127987306
+  },
+  {
+   "id": 222,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 1.2,
+   "start_ms": 1792127987307,
+   "end_ms": 1792127988538
+  },
+  {
+   "id": 221,
+   "task": "onepipeline-ui-e2e:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 1.1,
+   "start_ms": 1792127987374,
+   "end_ms": 1792127988499
+  },
+  {
+   "id": 223,
+   "task": "onepipeline-ui-coverage:coverage",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.3,
+   "start_ms": 1792127988500,
+   "end_ms": 1792127991758
+  },
+  {
+   "id": 224,
+   "task": "github-workflows:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 12.8,
+   "start_ms": 1792127988542,
+   "end_ms": 1792128001293
+  },
+  {
+   "id": 226,
+   "task": "dag-ui-e2e:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128060333,
+   "end_ms": 1792128060342
+  },
+  {
+   "id": 227,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128063482,
+   "end_ms": 1792128063498
+  },
+  {
+   "id": 228,
+   "task": "onepipeline-ui:ensure-baseline",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128063502,
+   "end_ms": 1792128063621
+  },
+  {
+   "id": 229,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128063502,
+   "end_ms": 1792128063643
+  },
+  {
+   "id": 230,
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128063656,
+   "end_ms": 1792128063656
+  },
+  {
+   "id": 231,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128066180,
+   "end_ms": 1792128066191
+  },
+  {
+   "id": 232,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128066192,
+   "end_ms": 1792128066297
+  },
+  {
+   "id": 233,
+   "task": "onepipeline-ui-cost:test-cost",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128066307,
+   "end_ms": 1792128066307
+  },
+  {
+   "id": 234,
+   "task": "onepipeline-ui:doc",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128068220,
+   "end_ms": 1792128068221
+  },
+  {
+   "id": 235,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 236,
+   "task": "dag-model:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 237,
+   "task": "dag-model:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 238,
+   "task": "dag-model:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 239,
+   "task": "dag-model:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 240,
+   "task": "dag-model:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 241,
+   "task": "onepipeline-ui:doc",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 242,
+   "task": "onepipeline-ui:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 243,
+   "task": "telemetry-client:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 244,
+   "task": "timeline-categories:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 245,
+   "task": "dag-layout:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 246,
+   "task": "telemetry-client:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 247,
+   "task": "timeline-categories:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 248,
+   "task": "telemetry-client:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 249,
+   "task": "dag-layout:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 250,
+   "task": "telemetry-client:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 251,
+   "task": "dag-layout:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 252,
+   "task": "timeline-categories:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 253,
+   "task": "timeline-categories:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 254,
+   "task": "dag-layout:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 255,
+   "task": "timeline-categories:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 256,
+   "task": "telemetry-client:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 257,
+   "task": "onepipeline-ui:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 258,
+   "task": "dag-layout:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 259,
+   "task": "dag-ui:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 260,
+   "task": "dag-ui:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 261,
+   "task": "dag-ui:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 262,
+   "task": "dag-ui:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 263,
+   "task": "dag-ui-build-cache:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 264,
+   "task": "dag-ui-build-cache:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 265,
+   "task": "dag-ui-e2e:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 266,
+   "task": "dag-ui-e2e:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 267,
+   "task": "dag-ui-e2e:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128072262,
+   "end_ms": 1792128072392
+  },
+  {
+   "id": 268,
+   "task": "onepipeline-ui:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 3.0,
+   "start_ms": 1792128072412,
+   "end_ms": 1792128075398
+  },
+  {
+   "id": 269,
+   "task": "onepipeline-ui-repo-tooling:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 3.0,
+   "start_ms": 1792128072412,
+   "end_ms": 1792128075398
+  },
+  {
+   "id": 270,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.3,
+   "start_ms": 1792128075415,
+   "end_ms": 1792128075688
+  },
+  {
+   "id": 273,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 4.6,
+   "start_ms": 1792128075416,
+   "end_ms": 1792128080065
+  },
+  {
+   "id": 296,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 65.7,
+   "start_ms": 1792128075416,
+   "end_ms": 1792128141142
+  },
+  {
+   "id": 271,
+   "task": "onepipeline-ui-e2e:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 4.1,
+   "start_ms": 1792128075721,
+   "end_ms": 1792128079870
+  },
+  {
+   "id": 272,
+   "task": "onepipeline-ui-cost:test-cost",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 4.1,
+   "start_ms": 1792128075721,
+   "end_ms": 1792128079870
+  },
+  {
+   "id": 275,
+   "task": "onepipeline-ui:ensure-baseline",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.3,
+   "start_ms": 1792128079903,
+   "end_ms": 1792128080228
+  },
+  {
+   "id": 274,
+   "task": "github-workflows:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128080120,
+   "end_ms": 1792128080120
+  },
+  {
+   "id": 293,
+   "task": "github-workflows:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 26.7,
+   "start_ms": 1792128080121,
+   "end_ms": 1792128106785
+  },
+  {
+   "id": 276,
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128080358,
+   "end_ms": 1792128080358
+  },
+  {
+   "id": 277,
+   "task": "onepipeline-ui-coverage:coverage",
+   "status": "success",
+   "code": 0,
+   "seconds": 9.7,
+   "start_ms": 1792128080359,
+   "end_ms": 1792128090022
+  },
+  {
+   "id": 278,
+   "task": "pool-maintenance:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128090133,
+   "end_ms": 1792128090250
+  },
+  {
+   "id": 279,
+   "task": "pool-maintenance:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090295,
+   "end_ms": 1792128090295
+  },
+  {
+   "id": 280,
+   "task": "dag-model:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090296,
+   "end_ms": 1792128090307
+  },
+  {
+   "id": 281,
+   "task": "telemetry-client:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090310,
+   "end_ms": 1792128090333
+  },
+  {
+   "id": 282,
+   "task": "timeline-categories:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090339,
+   "end_ms": 1792128090348
+  },
+  {
+   "id": 283,
+   "task": "dag-layout:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090356,
+   "end_ms": 1792128090361
+  },
+  {
+   "id": 284,
+   "task": "onepipeline-ui:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090370,
+   "end_ms": 1792128090377
+  },
+  {
+   "id": 285,
+   "task": "dag-ui:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090379,
+   "end_ms": 1792128090380
+  },
+  {
+   "id": 286,
+   "task": "onepipeline-ui-repo-tooling:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090382,
+   "end_ms": 1792128090393
+  },
+  {
+   "id": 287,
+   "task": "onepipeline-ui-coverage:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090395,
+   "end_ms": 1792128090399
+  },
+  {
+   "id": 288,
+   "task": "onepipeline-ui-cost:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090401,
+   "end_ms": 1792128090405
+  },
+  {
+   "id": 289,
+   "task": "dag-ui-build-cache:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090409,
+   "end_ms": 1792128090411
+  },
+  {
+   "id": 290,
+   "task": "onepipeline-ui-baseline:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090412,
+   "end_ms": 1792128090421
+  },
+  {
+   "id": 291,
+   "task": "onepipeline-ui-e2e:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090424,
+   "end_ms": 1792128090430
+  },
+  {
+   "id": 292,
+   "task": "pool-maintenance:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128090434,
+   "end_ms": 1792128090445
+  },
+  {
+   "id": 294,
+   "task": "github-workflows:budgets",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.6,
+   "start_ms": 1792128106909,
+   "end_ms": 1792128110508
+  },
+  {
+   "id": 295,
+   "task": "github-workflows:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128110521,
+   "end_ms": 1792128110525
+  },
+  {
+   "id": 297,
+   "task": "dag-ui-e2e:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128141339,
+   "end_ms": 1792128141340
+  },
+  {
+   "id": 298,
+   "task": "dag-ui-e2e:test-isolation",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128141339,
+   "end_ms": 1792128141340
+  },
+  {
+   "id": 299,
+   "task": "dag-ui-e2e:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128141344,
+   "end_ms": 1792128141360
+  }
+ ],
+ "tasks_executed": 33,
+ "tasks_replayed": 86,
+ "tests_parsed": 1388,
+ "slowest_tests": [
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::packaging",
+   "test": "the_release_staging_path_builds_installs_and_serves_the_native_artifact",
+   "seconds": 5649.233
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::packaging",
+   "test": "the_release_staging_path_builds_installs_and_serves_the_native_artifact",
+   "seconds": 5649.233
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+   "seconds": 1588.443
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+   "seconds": 1588.443
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_shared_package_checks_it_and_its_dependents_and_no_unrelated_package",
+   "seconds": 134.969
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_shared_package_checks_it_and_its_dependents_and_no_unrelated_package",
+   "seconds": 134.969
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it",
+   "seconds": 107.706
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it",
+   "seconds": 107.706
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_the_repository_machinery_selects_its_tier_and_not_the_journeys",
+   "seconds": 83.847
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_the_repository_machinery_selects_its_tier_and_not_the_journeys",
+   "seconds": 83.847
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "workspace_install::a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target",
+   "seconds": 80.108
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "workspace_install::a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target",
+   "seconds": 80.108
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::the_read_verbs_serve_what_the_cli_prints",
+   "seconds": 62.921
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::the_read_verbs_serve_what_the_cli_prints",
+   "seconds": 62.921
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_upgrade_landing_after_a_refused_adoption_never_starts_the_new_build",
+   "seconds": 62.753
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_upgrade_landing_after_a_refused_adoption_never_starts_the_new_build",
+   "seconds": 62.753
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_base_commit_that_does_not_resolve_runs_everything_and_says_which_variable",
+   "seconds": 62.575
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_base_commit_that_does_not_resolve_runs_everything_and_says_which_variable",
+   "seconds": 62.575
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_runs",
+   "seconds": 59.24
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_runs",
+   "seconds": 59.24
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_belongs_to_its_readers_and_to_no_project_of_its_own",
+   "seconds": 57.849
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_belongs_to_its_readers_and_to_no_project_of_its_own",
+   "seconds": 57.849
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_test_only_change_still_reaches_the_rust_matrices",
+   "seconds": 57.634
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_test_only_change_still_reaches_the_rust_matrices",
+   "seconds": 57.634
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery",
+   "seconds": 52.086
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery",
+   "seconds": 52.086
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_ci_build_with_no_base_runs_everything",
+   "seconds": 51.273
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_ci_build_with_no_base_runs_everything",
+   "seconds": 51.273
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_push_build_is_scoped_to_the_commit_before_the_push",
+   "seconds": 50.195
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_push_build_is_scoped_to_the_commit_before_the_push",
+   "seconds": 50.195
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::the_base_commit_outranks_the_base_branch",
+   "seconds": 48.231
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::the_base_commit_outranks_the_base_branch",
+   "seconds": 48.231
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled",
+   "seconds": 41.649
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled",
+   "seconds": 41.649
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_release_moving_the_engine_without_announcing_it_is_refused",
+   "seconds": 37.279
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_release_moving_the_engine_without_announcing_it_is_refused",
+   "seconds": 37.279
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::every_field_the_base_commit_served_is_served_by_this_build",
+   "seconds": 35.625
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::every_field_the_base_commit_served_is_served_by_this_build",
+   "seconds": 35.625
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_propagates_the_binarys_exit_code_and_stderr",
+   "seconds": 33.428
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_propagates_the_binarys_exit_code_and_stderr",
+   "seconds": 33.428
+  }
+ ]
+}

@@ -1,0 +1,98 @@
+{
+ "label": "test-baseline-cold",
+ "command": [
+  "just",
+  "test-baseline"
+ ],
+ "note": "first run of this recipe on this tree (no Nx cache entry for it); load avg at start 33.79 32.70 34.49",
+ "exit_code": 0,
+ "wall_seconds": 747.4,
+ "started_at": 1792125767.2235472,
+ "task_history_ids": [
+  54,
+  58
+ ],
+ "load_average_at_end": [
+  "31.16",
+  "33.67",
+  "36.04"
+ ],
+ "tasks": [
+  {
+   "id": 55,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792125771034,
+   "end_ms": 1792125771062
+  },
+  {
+   "id": 56,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.2,
+   "start_ms": 1792125771063,
+   "end_ms": 1792125771226
+  },
+  {
+   "id": 57,
+   "task": "onepipeline-ui:ensure-baseline",
+   "status": "success",
+   "code": 0,
+   "seconds": 541.1,
+   "start_ms": 1792125771063,
+   "end_ms": 1792126312130
+  },
+  {
+   "id": 58,
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "status": "success",
+   "code": 0,
+   "seconds": 202.4,
+   "start_ms": 1792126312150,
+   "end_ms": 1792126514535
+  }
+ ],
+ "tasks_executed": 3,
+ "tasks_replayed": 1,
+ "tests_parsed": 5,
+ "slowest_tests": [
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::every_field_the_base_commit_served_is_served_by_this_build",
+   "seconds": 35.625
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::a_span_or_event_served_differently_from_the_base_fails_the_comparison",
+   "seconds": 1.122
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::every_span_and_event_the_base_commits_timeline_served_is_served_unchanged",
+   "seconds": 0.653
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::every_run_the_base_commit_listed_is_listed_now",
+   "seconds": 0.521
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::the_comparison_asks_for_every_route_the_contract_defines",
+   "seconds": 0.017
+  }
+ ]
+}

@@ -1,0 +1,80 @@
+{
+ "label": "bootstrap-warm",
+ "command": [
+  "just",
+  "bootstrap"
+ ],
+ "note": ".tools/bin/onepipeline already provisioned at the locked version (what a cache hit on .tools would leave); load avg at start 15.25 24.97 30.76",
+ "exit_code": 0,
+ "wall_seconds": 6.6,
+ "started_at": 1792128981.2939448,
+ "task_history_ids": [
+  448,
+  454
+ ],
+ "load_average_at_end": [
+  "15.79",
+  "24.92",
+  "30.71"
+ ],
+ "tasks": [
+  {
+   "id": 449,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128983996,
+   "end_ms": 1792128983997
+  },
+  {
+   "id": 450,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.7,
+   "start_ms": 1792128983998,
+   "end_ms": 1792128984659
+  },
+  {
+   "id": 451,
+   "task": "onepipeline-ui:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.9,
+   "start_ms": 1792128984561,
+   "end_ms": 1792128985433
+  },
+  {
+   "id": 452,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128985445,
+   "end_ms": 1792128985496
+  },
+  {
+   "id": 453,
+   "task": "dag-ui-e2e:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.2,
+   "start_ms": 1792128985502,
+   "end_ms": 1792128987677
+  },
+  {
+   "id": 454,
+   "task": "pool-maintenance:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128987699,
+   "end_ms": 1792128987774
+  }
+ ],
+ "tasks_executed": 5,
+ "tasks_replayed": 1,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

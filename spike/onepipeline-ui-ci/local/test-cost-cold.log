@@ -1,0 +1,68 @@
+
+ NX   Running target test-cost for project onepipeline-ui-cost and 2 tasks it depends on:
+
+- onepipeline-ui-cost
+
+
+
+> nx run dag-ui:build  [local cache]
+
+> cd apps/dag-ui && npx vite build --config vite.config.ts
+
+[36mvite v8.1.5 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...[32m✓[0m 2901 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[0m[32mindex.html                 [0m[1;2m    0.71 kB[0m[2m │ gzip:   0.44 kB[0m
+[2mdist/[0m[2massets/[0m[35mindex-m7hUhIQ5.css  [0m[1;2m   98.37 kB[0m[2m │ gzip:  18.31 kB[0m
+[2mdist/[0m[2massets/[0m[36mindex-OQQMF0Hn.js   [0m[33;1m1,109.02 kB[0m[2m │ gzip: 342.29 kB[0m
+
+[33m[plugin builtin:vite-reporter] [33;1m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[0m[39m
+[32m✓ built in 1.27s[39m
+
+> nx run onepipeline-ui:ensure-sibling
+
+> just _ensure-sibling
+
+
+> nx run onepipeline-ui-cost:test-cost
+
+> just _tier-test cost
+
+────────────
+[32;1m Nextest run[0m ID [1m25a2f489-fc36-4c70-b7dc-71aed323d621[0m with nextest profile: [1mcost[0m
+[32;1m    Starting[0m [1m13[0m tests across [1m1[0m binary ([1m443[0m tests and [1m5[0m binaries [33;1mskipped[0m via [1mprofile.cost.default-filter[0m)
+[32;1m        PASS[0m [   0.432s] ( 1/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_route_serving_one_named_run_touches_that_run_alone[0m
+[32;1m        PASS[0m [   0.460s] ( 2/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_run_detail_starts_no_process_and_folds_its_clock_once_per_change[0m
+[32;1m        PASS[0m [   0.503s] ( 3/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_run_with_no_summary_is_folded_once_across_two_listings[0m
+[32;1m        PASS[0m [   0.550s] ( 4/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_session_is_recorded_and_served_without_reading_an_index_or_walking_the_store[0m
+[32;1m        PASS[0m [   0.651s] ( 5/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_run_list_over_summarised_runs_folds_no_journal_and_starts_no_process[0m
+[32;1m        PASS[0m [   1.186s] ( 6/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_selection_touches_only_the_runs_it_names[0m
+[32;1m        PASS[0m [   2.262s] ( 7/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_run_the_page_does_not_serve_costs_its_summary_and_nothing_else[0m
+[32;1m        PASS[0m [   2.415s] ( 8/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1man_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin[0m
+[32;1m        PASS[0m [   2.661s] ( 9/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_row_is_read_from_the_summary_however_large_the_journal_behind_it[0m
+[32;1m        PASS[0m [   3.954s] (10/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1mthe_work_a_page_does_per_row_does_not_grow_with_the_store[0m
+[32;1m        PASS[0m [   4.269s] (11/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1masking_for_one_row_never_costs_more_than_asking_for_fifty[0m
+[32;1m        PASS[0m [   4.858s] (12/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1ma_subscriber_whose_filter_narrows_nothing_pays_nothing_to_narrow_it[0m
+[32;1m        PASS[0m [   6.001s] (13/13) [35;1monepipeline-ui::e2e[0m [36mcost[0m[36m::[0m[34;1man_idle_subscribers_tick_grows_only_by_one_lookup_per_run[0m
+────────────
+[32;1m     Summary[0m [   6.003s] [1m13[0m tests run: [1m13[0m [32;1mpassed[0m, [1m443[0m [33;1mskipped[0m
+
+
+
+ NX   Successfully ran target test-cost for project onepipeline-ui-cost and 2 tasks it depends on
+
+Nx read the output from the cache instead of running the command for 1 out of 3 tasks.
+
+  Run duration:      45.3s
+  Cache:             1/3 hit (33%)
+  Critical path:     45.3s (2 tasks)
+  Recoverable time:  <1ms
+
+  Recommendations:
+    - Speed up or split the longest tasks on the critical path:
+        onepipeline-ui-cost:test-cost    45.2s

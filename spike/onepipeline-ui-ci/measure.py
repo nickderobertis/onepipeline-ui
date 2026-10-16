@@ -338,6 +338,7 @@ def analyse(raw: Path, since: dt.date, shape_since: dt.datetime | None = None) -
         by_head[r["head_sha"]].append(r)
     head_counts, head_by_wf, head_by_os, ci_longest = [], defaultdict(list), defaultdict(list), []
     ci_longest_detail = []
+    ci_longest_by_kind: dict[str, list[float]] = defaultdict(list)
     for sha, rs in by_head.items():
         latest = latest_per_workflow(rs)
         if not all(r["id"] in jobs for r in latest):
@@ -355,12 +356,19 @@ def analyse(raw: Path, since: dt.date, shape_since: dt.datetime | None = None) -
             head_by_wf[k].append(wf_c.get(k, 0))
         for k in ("linux", "linux-arm64", "windows", "macos"):
             head_by_os[k].append(os_c.get(k, 0))
-        ci = [r for r in latest if r["name"] == "CI" and r["conclusion"] == "success"]
-        for r in ci:
+        # Every completed CI run counts, whatever it concluded: a red Mac
+        # reporter fails the run without shortening any job, and the longest
+        # executed job is what holds the head commit either way.
+        for r in (r for r in latest if r["name"] == "CI" and r["conclusion"] in ("success", "failure")):
             ex_ci = executed(jobs[r["id"]])
+            if not ex_ci:
+                continue
             longest = max(ex_ci, key=lambda j: job_dur(j) or 0)
+            kind = "release PR" if (r.get("head_branch") or "").startswith("release-plz-") else "ordinary PR"
             ci_longest.append(job_dur(longest))
-            ci_longest_detail.append({"run_id": r["id"], "head_sha": sha, "longest_job": longest["name"], "seconds": job_dur(longest), "jobs": len(ex_ci)})
+            ci_longest_by_kind[kind].append(job_dur(longest))
+            ci_longest_detail.append({"run_id": r["id"], "head_sha": sha, "kind": kind, "conclusion": r["conclusion"],
+                                      "longest_job": longest["name"], "seconds": job_dur(longest), "jobs": len(ex_ci)})
 
     # --- per release CD -------------------------------------------------------
     releases = []
@@ -451,11 +459,17 @@ def analyse(raw: Path, since: dt.date, shape_since: dt.datetime | None = None) -
             "by_workflow": {k: dist(v) for k, v in head_by_wf.items()},
             "by_runner_os": {k: dist(v) for k, v in head_by_os.items()},
             "ci_longest_job_s": dist(ci_longest),
+            "ci_longest_job_s_by_kind": {k: dist(v) for k, v in sorted(ci_longest_by_kind.items())},
+            "ci_longest_job_by_name": dict(sorted(_count(ci_longest_detail, lambda d: f"{d['kind']}: {d['longest_job']}").items())),
             "ci_longest_job_detail": sorted(ci_longest_detail, key=lambda d: -d["seconds"])[:15],
         },
         "per_release_cd": {
             "releases": releases,
             "job_count": dist([r["job_count"] for r in rel_measured]),
+            "job_count_by_workflow": {k: dist([r["job_count_by_workflow"].get(k, 0) for r in rel_measured])
+                                      for k in sorted({k for r in rel_measured for k in r["job_count_by_workflow"]})},
+            "job_count_by_runner_os": {k: dist([r["job_count_by_os"].get(k, 0) for r in rel_measured])
+                                       for k in ("linux", "linux-arm64", "windows", "macos")},
             "longest_job_s": dist([r["longest_job_s"] for r in rel_measured if r["longest_job_s"]]),
             "cd_wall_s": dist([r["cd_wall_s"] for r in rel_measured if r["cd_wall_s"]]),
         },

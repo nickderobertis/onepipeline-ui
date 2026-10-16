@@ -1,0 +1,26 @@
+
+ NX   Running target doc for project onepipeline-ui:
+
+- onepipeline-ui
+
+
+
+> nx run onepipeline-ui:doc
+
+> just _crate-doc
+
+
+
+
+ NX   Successfully ran target doc for project onepipeline-ui
+
+
+  Run duration:      1m 12s
+  Cache:             0/1 hit (0%)
+  Critical path:     1m 12s (1 task)
+  Recoverable time:  <1ms
+
+  Recommendations:
+    - Drastically reduce your run duration by sharing a cache across your team and CI → https://nx.dev/ci/features/remote-cache?utm_source=nx-cli&utm_medium=cli&utm_campaign=performance-report&utm_content=remote-cache.
+    - Speed up or split the longest tasks on the critical path:
+        onepipeline-ui:doc    1m 12s

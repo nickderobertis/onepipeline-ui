@@ -1,0 +1,145 @@
+{
+ "label": "test-cost-cold",
+ "command": [
+  "just",
+  "test-cost"
+ ],
+ "note": "first run of this recipe on this tree (no Nx cache entry for it); load avg at start 31.16 33.67 36.04",
+ "exit_code": 0,
+ "wall_seconds": 46.8,
+ "started_at": 1792126514.685289,
+ "task_history_ids": [
+  58,
+  61
+ ],
+ "load_average_at_end": [
+  "27.38",
+  "32.18",
+  "35.41"
+ ],
+ "tasks": [
+  {
+   "id": 59,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792126515993,
+   "end_ms": 1792126516004
+  },
+  {
+   "id": 60,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792126516005,
+   "end_ms": 1792126516078
+  },
+  {
+   "id": 61,
+   "task": "onepipeline-ui-cost:test-cost",
+   "status": "success",
+   "code": 0,
+   "seconds": 45.2,
+   "start_ms": 1792126516082,
+   "end_ms": 1792126561273
+  }
+ ],
+ "tasks_executed": 2,
+ "tasks_replayed": 1,
+ "tests_parsed": 13,
+ "slowest_tests": [
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::an_idle_subscribers_tick_grows_only_by_one_lookup_per_run",
+   "seconds": 6.001
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_subscriber_whose_filter_narrows_nothing_pays_nothing_to_narrow_it",
+   "seconds": 4.858
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::asking_for_one_row_never_costs_more_than_asking_for_fifty",
+   "seconds": 4.269
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::the_work_a_page_does_per_row_does_not_grow_with_the_store",
+   "seconds": 3.954
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_row_is_read_from_the_summary_however_large_the_journal_behind_it",
+   "seconds": 2.661
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin",
+   "seconds": 2.415
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_run_the_page_does_not_serve_costs_its_summary_and_nothing_else",
+   "seconds": 2.262
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_selection_touches_only_the_runs_it_names",
+   "seconds": 1.186
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_run_list_over_summarised_runs_folds_no_journal_and_starts_no_process",
+   "seconds": 0.651
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_store",
+   "seconds": 0.55
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_run_with_no_summary_is_folded_once_across_two_listings",
+   "seconds": 0.503
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_run_detail_starts_no_process_and_folds_its_clock_once_per_change",
+   "seconds": 0.46
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-cost:test-cost",
+   "binary": "onepipeline-ui::e2e",
+   "test": "cost::a_route_serving_one_named_run_touches_that_run_alone",
+   "seconds": 0.432
+  }
+ ]
+}

@@ -1,0 +1,35 @@
+{
+ "label": "doc-cold",
+ "command": [
+  "just",
+  "doc"
+ ],
+ "note": "first run of this recipe on this tree (no Nx cache entry for it); load avg at start 27.38 32.18 35.41",
+ "exit_code": 0,
+ "wall_seconds": 73.5,
+ "started_at": 1792126561.5983946,
+ "task_history_ids": [
+  61,
+  62
+ ],
+ "load_average_at_end": [
+  "27.17",
+  "31.15",
+  "34.82"
+ ],
+ "tasks": [
+  {
+   "id": 62,
+   "task": "onepipeline-ui:doc",
+   "status": "success",
+   "code": 0,
+   "seconds": 71.8,
+   "start_ms": 1792126563148,
+   "end_ms": 1792126634939
+  }
+ ],
+ "tasks_executed": 1,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

@@ -1,0 +1,66 @@
+
+ NX   Running target test-baseline for project onepipeline-ui-baseline and 3 tasks it depends on:
+
+- onepipeline-ui-baseline
+
+
+
+> nx run dag-ui:build  [local cache]
+
+> cd apps/dag-ui && npx vite build --config vite.config.ts
+
+[36mvite v8.1.5 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...[32m✓[0m 2901 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[0m[32mindex.html                 [0m[1;2m    0.71 kB[0m[2m │ gzip:   0.44 kB[0m
+[2mdist/[0m[2massets/[0m[35mindex-m7hUhIQ5.css  [0m[1;2m   98.37 kB[0m[2m │ gzip:  18.31 kB[0m
+[2mdist/[0m[2massets/[0m[36mindex-OQQMF0Hn.js   [0m[33;1m1,109.02 kB[0m[2m │ gzip: 342.29 kB[0m
+
+[33m[plugin builtin:vite-reporter] [33;1m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[0m[39m
+[32m✓ built in 1.27s[39m
+
+> nx run onepipeline-ui:ensure-sibling
+
+> just _ensure-sibling
+
+
+> nx run onepipeline-ui:ensure-baseline
+
+> just _ensure-baseline
+
+
+> nx run onepipeline-ui-baseline:test-baseline
+
+> just _tier-test baseline
+
+────────────
+[32;1m Nextest run[0m ID [1md2f6362c-ec88-4e93-9486-5d31ca4a57a1[0m with nextest profile: [1mbaseline[0m
+[32;1m    Starting[0m [1m5[0m tests across [1m1[0m binary ([1m451[0m tests and [1m5[0m binaries [33;1mskipped[0m via [1mprofile.baseline.default-filter[0m)
+[32;1m        PASS[0m [   0.017s] (1/5) [35;1monepipeline-ui::e2e[0m [36mbaseline[0m[36m::[0m[34;1mthe_comparison_asks_for_every_route_the_contract_defines[0m
+[32;1m        PASS[0m [   0.521s] (2/5) [35;1monepipeline-ui::e2e[0m [36mbaseline[0m[36m::[0m[34;1mevery_run_the_base_commit_listed_is_listed_now[0m
+[32;1m        PASS[0m [   0.653s] (3/5) [35;1monepipeline-ui::e2e[0m [36mbaseline[0m[36m::[0m[34;1mevery_span_and_event_the_base_commits_timeline_served_is_served_unchanged[0m
+[32;1m        PASS[0m [   1.122s] (4/5) [35;1monepipeline-ui::e2e[0m [36mbaseline[0m[36m::[0m[34;1ma_span_or_event_served_differently_from_the_base_fails_the_comparison[0m
+[32;1m        PASS[0m [  35.625s] (5/5) [35;1monepipeline-ui::e2e[0m [36mbaseline[0m[36m::[0m[34;1mevery_field_the_base_commit_served_is_served_by_this_build[0m
+────────────
+[32;1m     Summary[0m [  35.627s] [1m5[0m tests run: [1m5[0m [32;1mpassed[0m, [1m451[0m [33;1mskipped[0m
+
+
+
+ NX   Successfully ran target test-baseline for project onepipeline-ui-baseline and 3 tasks it depends on
+
+Nx read the output from the cache instead of running the command for 1 out of 4 tasks.
+
+  Run duration:      12m 24s
+  Cache:             1/4 hit (25%)
+  Critical path:     12m 23s (2 tasks)
+  Recoverable time:  <1ms
+
+  Recommendations:
+    - Speed up or split the longest tasks on the critical path:
+        onepipeline-ui:ensure-baseline            9m 1s
+        onepipeline-ui-baseline:test-baseline    3m 22s

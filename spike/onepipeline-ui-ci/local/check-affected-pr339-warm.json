@@ -1,0 +1,581 @@
+{
+ "label": "check-affected-pr339-warm",
+ "command": [
+  "bash",
+  "scripts/nx.sh",
+  "affected",
+  "--base=5a2daca",
+  "--head=cd4be04",
+  "-t",
+  "check"
+ ],
+ "note": "the command just check-affected execs (scripts/nx-affected.sh), with PR #339's base and head named explicitly: 5a2daca..cd4be04, 8 projects affected; Nx cache as left by check-warm-2",
+ "exit_code": 0,
+ "wall_seconds": 36.4,
+ "started_at": 1792128167.4816148,
+ "task_history_ids": [
+  299,
+  329
+ ],
+ "load_average_at_end": [
+  "27.75",
+  "33.43",
+  "34.34"
+ ],
+ "tasks": [
+  {
+   "id": 300,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 301,
+   "task": "onepipeline-ui:doc",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 302,
+   "task": "onepipeline-ui:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 303,
+   "task": "onepipeline-ui:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 304,
+   "task": "dag-ui:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 305,
+   "task": "dag-ui:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 306,
+   "task": "dag-ui:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 307,
+   "task": "dag-ui:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 308,
+   "task": "dag-ui-e2e:lint",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 309,
+   "task": "dag-ui-e2e:typecheck",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 310,
+   "task": "dag-ui-e2e:format-check",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128168931,
+   "end_ms": 1792128168940
+  },
+  {
+   "id": 311,
+   "task": "onepipeline-ui:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.7,
+   "start_ms": 1792128168947,
+   "end_ms": 1792128169610
+  },
+  {
+   "id": 312,
+   "task": "onepipeline-ui-repo-tooling:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.7,
+   "start_ms": 1792128168947,
+   "end_ms": 1792128169610
+  },
+  {
+   "id": 313,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792128169612,
+   "end_ms": 1792128169662
+  },
+  {
+   "id": 316,
+   "task": "onepipeline-ui:ensure-baseline",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.7,
+   "start_ms": 1792128169612,
+   "end_ms": 1792128170294
+  },
+  {
+   "id": 326,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 34.0,
+   "start_ms": 1792128169612,
+   "end_ms": 1792128203642
+  },
+  {
+   "id": 314,
+   "task": "onepipeline-ui-e2e:test",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.6,
+   "start_ms": 1792128169667,
+   "end_ms": 1792128170242
+  },
+  {
+   "id": 315,
+   "task": "onepipeline-ui-cost:test-cost",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.6,
+   "start_ms": 1792128169667,
+   "end_ms": 1792128170242
+  },
+  {
+   "id": 324,
+   "task": "onepipeline-ui-coverage:coverage",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.5,
+   "start_ms": 1792128170243,
+   "end_ms": 1792128172706
+  },
+  {
+   "id": 317,
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170304,
+   "end_ms": 1792128170304
+  },
+  {
+   "id": 318,
+   "task": "onepipeline-ui:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170305,
+   "end_ms": 1792128170309
+  },
+  {
+   "id": 319,
+   "task": "dag-ui:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170313,
+   "end_ms": 1792128170318
+  },
+  {
+   "id": 320,
+   "task": "onepipeline-ui-repo-tooling:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170319,
+   "end_ms": 1792128170322
+  },
+  {
+   "id": 321,
+   "task": "onepipeline-ui-baseline:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170327,
+   "end_ms": 1792128170330
+  },
+  {
+   "id": 322,
+   "task": "onepipeline-ui-cost:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170332,
+   "end_ms": 1792128170335
+  },
+  {
+   "id": 323,
+   "task": "onepipeline-ui-e2e:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128170341,
+   "end_ms": 1792128170344
+  },
+  {
+   "id": 325,
+   "task": "onepipeline-ui-coverage:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128172714,
+   "end_ms": 1792128172722
+  },
+  {
+   "id": 327,
+   "task": "dag-ui-e2e:test",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128203757,
+   "end_ms": 1792128203758
+  },
+  {
+   "id": 328,
+   "task": "dag-ui-e2e:test-isolation",
+   "status": "local-cache-kept-existing",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128203757,
+   "end_ms": 1792128203758
+  },
+  {
+   "id": 329,
+   "task": "dag-ui-e2e:check",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792128203759,
+   "end_ms": 1792128203766
+  }
+ ],
+ "tasks_executed": 12,
+ "tasks_replayed": 18,
+ "tests_parsed": 695,
+ "slowest_tests": [
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::packaging",
+   "test": "the_release_staging_path_builds_installs_and_serves_the_native_artifact",
+   "seconds": 5649.233
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+   "seconds": 1588.443
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_shared_package_checks_it_and_its_dependents_and_no_unrelated_package",
+   "seconds": 134.969
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it",
+   "seconds": 107.706
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_the_repository_machinery_selects_its_tier_and_not_the_journeys",
+   "seconds": 83.847
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "workspace_install::a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target",
+   "seconds": 80.108
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::the_read_verbs_serve_what_the_cli_prints",
+   "seconds": 62.921
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_upgrade_landing_after_a_refused_adoption_never_starts_the_new_build",
+   "seconds": 62.753
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_base_commit_that_does_not_resolve_runs_everything_and_says_which_variable",
+   "seconds": 62.575
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_runs",
+   "seconds": 59.24
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_belongs_to_its_readers_and_to_no_project_of_its_own",
+   "seconds": 57.849
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_test_only_change_still_reaches_the_rust_matrices",
+   "seconds": 57.634
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery",
+   "seconds": 52.086
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_ci_build_with_no_base_runs_everything",
+   "seconds": 51.273
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_push_build_is_scoped_to_the_commit_before_the_push",
+   "seconds": 50.195
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::the_base_commit_outranks_the_base_branch",
+   "seconds": 48.231
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled",
+   "seconds": 41.649
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_release_moving_the_engine_without_announcing_it_is_refused",
+   "seconds": 37.279
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-baseline:test-baseline",
+   "binary": "onepipeline-ui::e2e",
+   "test": "baseline::every_field_the_base_commit_served_is_served_by_this_build",
+   "seconds": 35.625
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_propagates_the_binarys_exit_code_and_stderr",
+   "seconds": 33.428
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_runs_the_binary_its_platform_package_carries",
+   "seconds": 30.537
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility",
+   "seconds": 30.29
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_stops_the_server_on_a_terminals_interrupt",
+   "seconds": 28.011
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test-isolation",
+   "test": "apps/dag-ui-e2e/isolation/concurrent-runs.spec.ts:74:1 \u203a two runs of the browser tier at once stay out of each other's way",
+   "seconds": 27.8
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_stops_the_server_when_a_supervisor_asks",
+   "seconds": 27.471
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::the_per_invocation_option_re_judges_without_reading_or_writing_the_cache",
+   "seconds": 27.041
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_changed_shard_budget_is_judged_again",
+   "seconds": 26.813
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::an_upgraded_llmlint_is_judged_again",
+   "seconds": 26.706
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_judge_configuration_that_moved_outside_the_tree_is_judged_again",
+   "seconds": 26.238
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::an_ambient_global_cache_skip_is_reported_and_ignored",
+   "seconds": 25.435
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_tree_with_no_built_browser_view_is_read_to_a_verdict",
+   "seconds": 25.424
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_only_the_export",
+   "seconds": 24.314
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_callers_environment_cannot_change_the_key_for_one_judged_diff",
+   "seconds": 23.239
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_changed_tree_is_judged_again",
+   "seconds": 22.691
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_base_that_moved_is_judged_again",
+   "seconds": 22.596
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_colourized_nx_report_is_still_read_as_a_replay",
+   "seconds": 21.962
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "ensure_sibling::every_suite_that_compiles_the_read_api_builds_the_view_first",
+   "seconds": 21.722
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "ensure_sibling::every_suite_that_starts_the_read_api_provisions_the_sibling_first",
+   "seconds": 21.57
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::findings_are_judged_again_rather_than_replayed",
+   "seconds": 21.179
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_judge_that_never_reached_a_verdict_is_judged_again_and_keeps_its_exit_code",
+   "seconds": 20.974
+  }
+ ]
+}

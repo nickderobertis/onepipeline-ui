@@ -1,0 +1,76 @@
+{
+ "label": "bootstrap-cold",
+ "command": [
+  "just",
+  "bootstrap"
+ ],
+ "note": "fresh worktree: no node_modules, no .tools, empty target; timed with date before and after (488.9 s) before local_profile.py existed; tasks from Nx task history ids 1-6",
+ "exit_code": 0,
+ "wall_seconds": 488.9,
+ "started_at": 0,
+ "task_history_ids": [
+  0,
+  6
+ ],
+ "load_average_at_end": null,
+ "tasks": [
+  {
+   "id": 1,
+   "task": "dag-ui:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 4.4,
+   "start_ms": 1792109160953,
+   "end_ms": 1792109165371
+  },
+  {
+   "id": 2,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 91.9,
+   "start_ms": 1792109165383,
+   "end_ms": 1792109257300
+  },
+  {
+   "id": 3,
+   "task": "onepipeline-ui:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 388.6,
+   "start_ms": 1792109257304,
+   "end_ms": 1792109645866
+  },
+  {
+   "id": 4,
+   "task": "pool-maintenance:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792109645868,
+   "end_ms": 1792109645906
+  },
+  {
+   "id": 5,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.0,
+   "start_ms": 1792109645906,
+   "end_ms": 1792109645918
+  },
+  {
+   "id": 6,
+   "task": "dag-ui-e2e:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.6,
+   "start_ms": 1792109645919,
+   "end_ms": 1792109646552
+  }
+ ],
+ "tasks_executed": 6,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

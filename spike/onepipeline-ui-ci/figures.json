@@ -2330,31 +2330,52 @@
      "p90": 1
     }
    },
+   "ci_longest_job_by_name": {
+    "ordinary PR: cross (windows-latest)": 1,
+    "release PR: sweep": 4
+   },
    "ci_longest_job_detail": [
     {
+     "conclusion": "success",
      "head_sha": "2f88d9b9720194b57618a8814c95599e4cf33fc3",
      "jobs": 16,
+     "kind": "release PR",
      "longest_job": "sweep",
      "run_id": 38701477639,
      "seconds": 2537.0
     },
     {
+     "conclusion": "success",
      "head_sha": "48207ac29a9d1770dab56186c1009c2ef233a2c3",
      "jobs": 16,
+     "kind": "release PR",
      "longest_job": "sweep",
      "run_id": 38512956470,
      "seconds": 2393.0
     },
     {
+     "conclusion": "failure",
+     "head_sha": "0251e4a58bcb35aef14fdee8987c2f5bb84e8139",
+     "jobs": 16,
+     "kind": "ordinary PR",
+     "longest_job": "cross (windows-latest)",
+     "run_id": 38647782811,
+     "seconds": 2260.0
+    },
+    {
+     "conclusion": "success",
      "head_sha": "4de8357e26cd53ecdc32e7837adb14391fbd3ee2",
      "jobs": 16,
+     "kind": "release PR",
      "longest_job": "sweep",
      "run_id": 38483757967,
      "seconds": 2073.0
     },
     {
+     "conclusion": "success",
      "head_sha": "3a3a2cad83806c693e1c4d5ffb30fc621e7c79a2",
      "jobs": 16,
+     "kind": "release PR",
      "longest_job": "sweep",
      "run_id": 38678650196,
      "seconds": 1925.0
@@ -2362,9 +2383,23 @@
    ],
    "ci_longest_job_s": {
     "max": 2537.0,
-    "median": 2233.0,
-    "n": 4,
+    "median": 2260.0,
+    "n": 5,
     "p90": 2537.0
+   },
+   "ci_longest_job_s_by_kind": {
+    "ordinary PR": {
+     "max": 2260.0,
+     "median": 2260.0,
+     "n": 1,
+     "p90": 2260.0
+    },
+    "release PR": {
+     "max": 2537.0,
+     "median": 2233.0,
+     "n": 4,
+     "p90": 2537.0
+    }
    },
    "heads_measured": 6,
    "jobs_executed": {
@@ -2386,6 +2421,64 @@
     "median": 42.5,
     "n": 4,
     "p90": 49
+   },
+   "job_count_by_runner_os": {
+    "linux": {
+     "max": 33,
+     "median": 27.0,
+     "n": 4,
+     "p90": 33
+    },
+    "linux-arm64": {
+     "max": 5,
+     "median": 5.0,
+     "n": 4,
+     "p90": 5
+    },
+    "macos": {
+     "max": 1,
+     "median": 1.0,
+     "n": 4,
+     "p90": 1
+    },
+    "windows": {
+     "max": 10,
+     "median": 9.5,
+     "n": 4,
+     "p90": 10
+    }
+   },
+   "job_count_by_workflow": {
+    "CI (push)": {
+     "max": 13,
+     "median": 13.0,
+     "n": 4,
+     "p90": 13
+    },
+    "Published smoke (workflow_run)": {
+     "max": 6,
+     "median": 5.5,
+     "n": 4,
+     "p90": 6
+    },
+    "Release (release)": {
+     "max": 23,
+     "median": 23.0,
+     "n": 4,
+     "p90": 23
+    },
+    "Release-plz (push)": {
+     "max": 2,
+     "median": 2.0,
+     "n": 4,
+     "p90": 2
+    },
+    "Visual docs (push)": {
+     "max": 5,
+     "median": 2.5,
+     "n": 4,
+     "p90": 5
+    }
    },
    "longest_job_s": {
     "max": 2431.0,
@@ -7714,118 +7807,172 @@
     "p90": 1
    }
   },
+  "ci_longest_job_by_name": {
+   "ordinary PR: cross (macos-latest)": 1,
+   "ordinary PR: cross (windows-latest)": 81,
+   "ordinary PR: gate": 5,
+   "ordinary PR: quality": 30,
+   "release PR: cross (windows-latest)": 29,
+   "release PR: gate": 2,
+   "release PR: quality": 10,
+   "release PR: sweep": 14
+  },
   "ci_longest_job_detail": [
    {
+    "conclusion": "success",
     "head_sha": "2f88d9b9720194b57618a8814c95599e4cf33fc3",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38701477639,
     "seconds": 2537.0
    },
    {
+    "conclusion": "success",
     "head_sha": "48207ac29a9d1770dab56186c1009c2ef233a2c3",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38512956470,
     "seconds": 2393.0
    },
    {
+    "conclusion": "failure",
+    "head_sha": "0251e4a58bcb35aef14fdee8987c2f5bb84e8139",
+    "jobs": 16,
+    "kind": "ordinary PR",
+    "longest_job": "cross (windows-latest)",
+    "run_id": 38647782811,
+    "seconds": 2260.0
+   },
+   {
+    "conclusion": "failure",
+    "head_sha": "3425549202d67a5adc55e3770975d6e391c35d49",
+    "jobs": 15,
+    "kind": "ordinary PR",
+    "longest_job": "cross (windows-latest)",
+    "run_id": 38246026641,
+    "seconds": 2099.0
+   },
+   {
+    "conclusion": "success",
     "head_sha": "4de8357e26cd53ecdc32e7837adb14391fbd3ee2",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38483757967,
     "seconds": 2073.0
    },
    {
+    "conclusion": "failure",
+    "head_sha": "17950bf6b6f23840aed3fc7bcd4c6620404c156a",
+    "jobs": 15,
+    "kind": "ordinary PR",
+    "longest_job": "cross (windows-latest)",
+    "run_id": 38256535046,
+    "seconds": 1974.0
+   },
+   {
+    "conclusion": "success",
     "head_sha": "0c2c309dc1d4fa3e499f717bfbdb23f965a0dad2",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38134019004,
     "seconds": 1959.0
    },
    {
+    "conclusion": "success",
     "head_sha": "14f838c1ee7cf895c7d2f73cf32c7b4651011dc1",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38119288536,
     "seconds": 1942.0
    },
    {
+    "conclusion": "success",
     "head_sha": "3a3a2cad83806c693e1c4d5ffb30fc621e7c79a2",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38678650196,
     "seconds": 1925.0
    },
    {
+    "conclusion": "success",
     "head_sha": "8400c205ce013b8d580925a4d3a4141d0304dcc2",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38173503449,
     "seconds": 1910.0
    },
    {
+    "conclusion": "success",
     "head_sha": "fced23f4b6e0f39c081ea5589262cf572ad19aa1",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 37991836111,
     "seconds": 1907.0
    },
    {
+    "conclusion": "success",
     "head_sha": "1a71cafe769cb76607e8b9ae153a4dd2ab843a7b",
     "jobs": 15,
+    "kind": "ordinary PR",
     "longest_job": "quality",
     "run_id": 38431871928,
     "seconds": 1842.0
    },
    {
+    "conclusion": "success",
     "head_sha": "db35ba5494b7eba60944176b17810fd8ec3cce0c",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "cross (windows-latest)",
     "run_id": 38405055035,
     "seconds": 1835.0
    },
    {
+    "conclusion": "success",
     "head_sha": "a323da7b1c50a7c59f3d6f650b2ef0deec33e5b3",
     "jobs": 15,
+    "kind": "ordinary PR",
     "longest_job": "quality",
     "run_id": 38413945025,
     "seconds": 1832.0
    },
    {
+    "conclusion": "success",
     "head_sha": "2de844e5dbe791b226ddc757276acd349d36c7e1",
     "jobs": 16,
+    "kind": "release PR",
     "longest_job": "sweep",
     "run_id": 38277249467,
     "seconds": 1830.0
-   },
-   {
-    "head_sha": "c0f69ecb1f80ee6c84249ed0048f60b5b7c1b3a3",
-    "jobs": 14,
-    "longest_job": "cross (windows-latest)",
-    "run_id": 36967700919,
-    "seconds": 1823.0
-   },
-   {
-    "head_sha": "3bd23a74926f22f413134f7a3cc97852af2280c4",
-    "jobs": 16,
-    "longest_job": "sweep",
-    "run_id": 38035142303,
-    "seconds": 1814.0
-   },
-   {
-    "head_sha": "85b1b53dac68b7bb98a909b6c61935c7b6ddc30d",
-    "jobs": 16,
-    "longest_job": "sweep",
-    "run_id": 37832787972,
-    "seconds": 1800.0
    }
   ],
   "ci_longest_job_s": {
    "max": 2537.0,
-   "median": 1289.0,
-   "n": 140,
+   "median": 1294.0,
+   "n": 172,
    "p90": 1800.0
+  },
+  "ci_longest_job_s_by_kind": {
+   "ordinary PR": {
+    "max": 2260.0,
+    "median": 1285.0,
+    "n": 117,
+    "p90": 1613.0
+   },
+   "release PR": {
+    "max": 2537.0,
+    "median": 1362.0,
+    "n": 55,
+    "p90": 1925.0
+   }
   },
   "heads_measured": 173,
   "jobs_executed": {
@@ -7847,6 +7994,64 @@
    "median": 55.0,
    "n": 54,
    "p90": 60
+  },
+  "job_count_by_runner_os": {
+   "linux": {
+    "max": 33,
+    "median": 24.0,
+    "n": 54,
+    "p90": 29
+   },
+   "linux-arm64": {
+    "max": 5,
+    "median": 5.0,
+    "n": 54,
+    "p90": 5
+   },
+   "macos": {
+    "max": 17,
+    "median": 17.0,
+    "n": 54,
+    "p90": 17
+   },
+   "windows": {
+    "max": 10,
+    "median": 9.0,
+    "n": 54,
+    "p90": 10
+   }
+  },
+  "job_count_by_workflow": {
+   "CI (push)": {
+    "max": 13,
+    "median": 12.0,
+    "n": 54,
+    "p90": 13
+   },
+   "Published smoke (workflow_run)": {
+    "max": 10,
+    "median": 9.0,
+    "n": 54,
+    "p90": 10
+   },
+   "Release (release)": {
+    "max": 32,
+    "median": 32.0,
+    "n": 54,
+    "p90": 32
+   },
+   "Release-plz (push)": {
+    "max": 2,
+    "median": 2.0,
+    "n": 54,
+    "p90": 2
+   },
+   "Visual docs (push)": {
+    "max": 5,
+    "median": 0.0,
+    "n": 54,
+    "p90": 5
+   }
   },
   "longest_job_s": {
    "max": 2431.0,
