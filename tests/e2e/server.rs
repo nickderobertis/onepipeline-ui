@@ -13419,7 +13419,6 @@ fn a_run_lists_scratch_reclamation_and_declared_maintenance_as_the_engine_wrote_
         assert_eq!(listed.len(), 1, "one {kind} on the run timeline: {body}");
         assert!(listed[0].get("payload").is_none(), "{}", listed[0]);
     }
-    // The run detail reports the newest of them as the run's last event.
     let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
     assert_eq!(detail.status, 200, "{}", detail.body);
     assert_eq!(
@@ -13428,8 +13427,6 @@ fn a_run_lists_scratch_reclamation_and_declared_maintenance_as_the_engine_wrote_
         "{}",
         detail.body
     );
-    // Each record, as `onevcs` 0.52 and the engine write it, conforms to the
-    // schema the linked engine publishes for its kind.
     journal_schema::assert_conforms(&serving.runs_root());
     // And that check reads the new kinds rather than passing them unread: an
     // ending the engine never writes is refused, naming the record.
