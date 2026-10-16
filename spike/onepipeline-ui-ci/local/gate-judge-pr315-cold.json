@@ -1,0 +1,37 @@
+{
+ "label": "gate-judge-pr315-cold",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "a86ec83~1"
+ ],
+ "cwd": "/home/nick.guest/ai-orchestrator/runs/ci-time-budgets-wave1-brief-spikes/scratch/3446778-3/wt339",
+ "note": "just lint-llm-diff a86ec83~1 in the worktree at a86ec83 (PR #315's diff), no memo for it; load avg at start 4.08 8.19 14.56",
+ "exit_code": 2,
+ "wall_seconds": 10.8,
+ "started_at": 1792133903.8534012,
+ "task_history_ids": [
+  120,
+  121
+ ],
+ "load_average_at_end": [
+  "3.84",
+  "8.00",
+  "14.43"
+ ],
+ "tasks": [
+  {
+   "id": 121,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "failure",
+   "code": 1,
+   "seconds": 10.4,
+   "start_ms": 1792133904237,
+   "end_ms": 1792133914630
+  }
+ ],
+ "tasks_executed": 0,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

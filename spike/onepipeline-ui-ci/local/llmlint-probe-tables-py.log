@@ -1,0 +1,13 @@
+FAIL boundary_inputs_validated
+     rationale: tables.py:20–21 consumes unchecked positional arguments and flags; lines 20–32 deserialize JSON without validating its expected structure or field types.
+     spike/onepipeline-ui-ci/tables.py:20-21: Validate argument count, positional placement, and supported flags before opening the input; missing arguments crash and unknown arguments are silently accepted.
+     spike/onepipeline-ui-ci/tables.py:20-32: Validate the loaded document, selected current_shape, job records, and distribution field types before indexing and formatting them.
+FAIL changed_behavior_has_e2e
+     rationale: tables.py:20–32 adds report rendering whose incorrect figures or omitted rows could pass silently; no tests or justified structural assertions exercise this entry point.
+     spike/onepipeline-ui-ci/tables.py:20-32: No integration proof covers default/current selection, row inclusion and exclusion, missing distributions, rounding, job-name escaping, rendered counts, or invalid-input handling.
+FAIL cli_output_contract
+     rationale: tables.py:20 lets argument and input errors escape as undifferentiated exceptions; its invocation docstring documents no failure exit codes.
+     spike/onepipeline-ui-ci/tables.py:20-22: Define and document distinct failure exit codes and handle usage/input failures explicitly; missing arguments, unreadable files, malformed JSON, and missing current_shape currently all produce uncaught exceptions and exit 1.
+
+52 rules: 4 passed, 3 failed, 38 skipped, 7 not relevant
+See full results with `llmlint history 20261016T062721Z-ba961`

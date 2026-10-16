@@ -1,0 +1,36 @@
+{
+ "label": "gate-judge-pr339-cold",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "5a2daca"
+ ],
+ "note": "just lint-llm-diff 5a2daca in a worktree at cd4be04 (PR #339's diff: Cargo.toml/Cargo.lock), after the same nx reset (no llmlint memo); load avg at start 28.41 23.89 25.09",
+ "exit_code": 2,
+ "wall_seconds": 226.9,
+ "started_at": 1792132614.4980762,
+ "task_history_ids": [
+  45,
+  46
+ ],
+ "load_average_at_end": [
+  "26.81",
+  "25.58",
+  "25.41"
+ ],
+ "tasks": [
+  {
+   "id": 46,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "failure",
+   "code": 1,
+   "seconds": 224.3,
+   "start_ms": 1792132616937,
+   "end_ms": 1792132841287
+  }
+ ],
+ "tasks_executed": 0,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

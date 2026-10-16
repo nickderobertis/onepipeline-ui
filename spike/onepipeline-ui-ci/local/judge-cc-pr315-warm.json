@@ -1,0 +1,37 @@
+{
+ "label": "judge-cc-pr315-warm",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "a86ec83~1"
+ ],
+ "cwd": "/home/nick.guest/ai-orchestrator/runs/ci-time-budgets-wave1-brief-spikes/scratch/3446778-3/wt339",
+ "note": "same, memo as the cold run left it; ONEHARNESS_HARNESSES=claude-code (env override, by manager ruling; CI's judge is codex/gpt-5.5); load avg at start 8.19 6.85 10.07",
+ "exit_code": 0,
+ "wall_seconds": 348.8,
+ "started_at": 1792134590.56635,
+ "task_history_ids": [
+  245,
+  246
+ ],
+ "load_average_at_end": [
+  "18.78",
+  "14.18",
+  "12.20"
+ ],
+ "tasks": [
+  {
+   "id": 246,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "success",
+   "code": 0,
+   "seconds": 348.1,
+   "start_ms": 1792134591173,
+   "end_ms": 1792134939274
+  }
+ ],
+ "tasks_executed": 1,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

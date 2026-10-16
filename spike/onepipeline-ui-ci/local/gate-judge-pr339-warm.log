@@ -1,0 +1,27 @@
+
+> nx run onepipeline-ui:lint-llm-diff
+
+> bash scripts/llmlint-judge.sh
+
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, new_command_or_client_gets_its_own_project, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated, crates_stay_in_one_cargo_workspace, new_projects_keep_the_graph_uniform, budget_descriptions_durable_and_terse, budgets_scoped_to_minimal_tree, onebudgetspec_is_the_only_judge, budget_commands_measure_directly, budgets_reuse_gate_telemetry]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+55 rules: 0 passed, 0 failed, 54 skipped, 1 not relevant, 1 errored
+
+
+  Run duration:      8.4s
+  Critical path:     8.4s (1 task)
+  Recoverable time:  <1ms
+See full results with `llmlint history 20261016T065909Z-e46a8`
+lint-llm-diff: the judge never reached a verdict (llmlint exit 2)
+ACTION: repair the harness or the llmlint toolchain — this is not a finding to clear
+Warning: command "bash scripts/llmlint-judge.sh" exited with non-zero status code
+ NX   Running target lint-llm-diff for project onepipeline-ui failed
+
+Failed tasks:
+
+- onepipeline-ui:lint-llm-diff
+
+Hint: run the command with --verbose for more details.
+
+lint-llm-diff: judged this diff against base 5a2daca4e2201d95a06107b89ebe658d65bf97b1 (Nx cache miss)
+error: recipe `lint-llm-diff` failed on line 412 with exit code 2

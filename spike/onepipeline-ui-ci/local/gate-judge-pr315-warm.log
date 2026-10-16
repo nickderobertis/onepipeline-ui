@@ -1,0 +1,29 @@
+
+> nx run onepipeline-ui:lint-llm-diff
+
+> bash scripts/llmlint-judge.sh
+
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, tests_assert_real_behavior, names_match_behavior, suppressions_justified, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated, new_projects_keep_the_graph_uniform, shell_test_tiers_stay_split, budget_descriptions_durable_and_terse, budgets_scoped_to_minimal_tree, onebudgetspec_is_the_only_judge, budget_commands_measure_directly, budgets_reuse_gate_telemetry, tests_hold_no_nonfunctional_thresholds]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+ERROR agent default judge 1 [e2e_not_mocked, tests_mirror_real_usage, boundary_inputs_validated, diagnostics_error_or_absent, tool_output_is_signal, new_code_lands_in_a_project, work_goes_through_command_surface, new_command_or_client_gets_its_own_project, e2e_uses_accessible_selectors, browser_journeys_run_against_the_built_app, crates_stay_in_one_cargo_workspace, live_tier_compiles_and_requires_credential, no_untrusted_interpolation_in_run, ci_invokes_gate_recipe_not_inline_stages, external_service_suite_stays_out_of_the_affected_tier, no_second_broader_sweep_over_an_already_gated_commit, expensive_tests_stay_behind_their_own_edge, code_lands_in_the_domain_that_owns_it, robust_shell, portable_to_target_shell]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+ERROR agent default judge 1 [server_state_not_duplicated_in_global_store, shared_ui_graduates_to_its_own_project, projects_stay_in_one_js_workspace, each_skill_is_its_own_project, structural_pattern_matching, modern_domain_modeling, protocol_based_seams, no_injection_from_untrusted_input, projects_stay_in_one_uv_workspace, budgets_track_product_owner_outcomes]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+24 rules: 0 passed, 0 failed, 23 skipped, 1 not relevant, 3 errored
+
+
+  Run duration:      9.7s
+  Critical path:     9.7s (1 task)
+  Recoverable time:  <1ms
+See full results with `llmlint history 20261016T065919Z-8e90b`
+lint-llm-diff: the judge never reached a verdict (llmlint exit 2)
+ACTION: repair the harness or the llmlint toolchain — this is not a finding to clear
+Warning: command "bash scripts/llmlint-judge.sh" exited with non-zero status code
+ NX   Running target lint-llm-diff for project onepipeline-ui failed
+
+Failed tasks:
+
+- onepipeline-ui:lint-llm-diff
+
+Hint: run the command with --verbose for more details.
+
+lint-llm-diff: judged this diff against base 45ac04670e1606c9c56fd9c61abbf2423e1ed09c (Nx cache miss)
+error: recipe `lint-llm-diff` failed on line 412 with exit code 2

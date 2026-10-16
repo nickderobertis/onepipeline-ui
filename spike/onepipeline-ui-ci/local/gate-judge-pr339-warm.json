@@ -1,0 +1,37 @@
+{
+ "label": "gate-judge-pr339-warm",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "5a2daca"
+ ],
+ "cwd": "/home/nick.guest/ai-orchestrator/runs/ci-time-budgets-wave1-brief-spikes/scratch/3446778-3/wt339",
+ "note": "same as gate-judge-pr339-cold, memo as it left it; load avg at start 4.31 7.78 14.18",
+ "exit_code": 2,
+ "wall_seconds": 9.0,
+ "started_at": 1792133940.6404576,
+ "task_history_ids": [
+  240,
+  241
+ ],
+ "load_average_at_end": [
+  "4.33",
+  "7.67",
+  "14.08"
+ ],
+ "tasks": [
+  {
+   "id": 241,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "failure",
+   "code": 1,
+   "seconds": 8.4,
+   "start_ms": 1792133941171,
+   "end_ms": 1792133949565
+  }
+ ],
+ "tasks_executed": 0,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

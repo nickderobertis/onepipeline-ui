@@ -1,0 +1,713 @@
+{
+ "label": "gate-cold",
+ "command": [
+  "just",
+  "gate"
+ ],
+ "note": "just gate (base origin/main = ecb96f6, so the judge rules on this branch's spike/ diff) after 'nx reset' (no Nx cache, no llmlint memo); cargo target warm; load avg at start 35.00 24.05 27.61",
+ "exit_code": 1,
+ "wall_seconds": 1430.9,
+ "started_at": 1792129384.309123,
+ "task_history_ids": [
+  0,
+  46
+ ],
+ "load_average_at_end": [
+  "30.39",
+  "29.25",
+  "30.52"
+ ],
+ "tasks": [
+  {
+   "id": 1,
+   "task": "timeline-categories:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.4,
+   "start_ms": 1792129390908,
+   "end_ms": 1792129394276
+  },
+  {
+   "id": 2,
+   "task": "dag-model:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.5,
+   "start_ms": 1792129390908,
+   "end_ms": 1792129394370
+  },
+  {
+   "id": 3,
+   "task": "telemetry-client:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.5,
+   "start_ms": 1792129390908,
+   "end_ms": 1792129394403
+  },
+  {
+   "id": 5,
+   "task": "dag-layout:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 1.8,
+   "start_ms": 1792129394304,
+   "end_ms": 1792129396059
+  },
+  {
+   "id": 6,
+   "task": "onepipeline-ui:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.4,
+   "start_ms": 1792129394375,
+   "end_ms": 1792129396813
+  },
+  {
+   "id": 4,
+   "task": "dag-ui:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 1.4,
+   "start_ms": 1792129394408,
+   "end_ms": 1792129395857
+  },
+  {
+   "id": 7,
+   "task": "dag-ui-e2e:format-check",
+   "status": "success",
+   "code": 0,
+   "seconds": 1.5,
+   "start_ms": 1792129395866,
+   "end_ms": 1792129397348
+  },
+  {
+   "id": 8,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792129401591,
+   "end_ms": 1792129401719
+  },
+  {
+   "id": 9,
+   "task": "timeline-categories:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 16.4,
+   "start_ms": 1792129401591,
+   "end_ms": 1792129417941
+  },
+  {
+   "id": 11,
+   "task": "dag-model:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 18.4,
+   "start_ms": 1792129401591,
+   "end_ms": 1792129419989
+  },
+  {
+   "id": 10,
+   "task": "telemetry-client:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 17.5,
+   "start_ms": 1792129401731,
+   "end_ms": 1792129419267
+  },
+  {
+   "id": 14,
+   "task": "dag-layout:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 13.8,
+   "start_ms": 1792129418041,
+   "end_ms": 1792129431847
+  },
+  {
+   "id": 12,
+   "task": "onepipeline-ui:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 5.3,
+   "start_ms": 1792129419274,
+   "end_ms": 1792129424619
+  },
+  {
+   "id": 16,
+   "task": "dag-ui:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 19.4,
+   "start_ms": 1792129420001,
+   "end_ms": 1792129439352
+  },
+  {
+   "id": 13,
+   "task": "dag-ui-build-cache:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 5.9,
+   "start_ms": 1792129424679,
+   "end_ms": 1792129430584
+  },
+  {
+   "id": 17,
+   "task": "dag-ui-e2e:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 18.0,
+   "start_ms": 1792129430637,
+   "end_ms": 1792129448650
+  },
+  {
+   "id": 15,
+   "task": "github-workflows:lint",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.5,
+   "start_ms": 1792129431874,
+   "end_ms": 1792129434369
+  },
+  {
+   "id": 18,
+   "task": "timeline-categories:typecheck",
+   "status": "success",
+   "code": 0,
+   "seconds": 15.5,
+   "start_ms": 1792129455089,
+   "end_ms": 1792129470627
+  },
+  {
+   "id": 19,
+   "task": "dag-model:typecheck",
+   "status": "success",
+   "code": 0,
+   "seconds": 26.4,
+   "start_ms": 1792129455089,
+   "end_ms": 1792129481459
+  },
+  {
+   "id": 20,
+   "task": "telemetry-client:typecheck",
+   "status": "success",
+   "code": 0,
+   "seconds": 31.3,
+   "start_ms": 1792129455089,
+   "end_ms": 1792129486406
+  },
+  {
+   "id": 21,
+   "task": "dag-layout:typecheck",
+   "status": "success",
+   "code": 0,
+   "seconds": 18.3,
+   "start_ms": 1792129470732,
+   "end_ms": 1792129488996
+  },
+  {
+   "id": 23,
+   "task": "dag-ui:typecheck",
+   "status": "success",
+   "code": 0,
+   "seconds": 60.0,
+   "start_ms": 1792129481535,
+   "end_ms": 1792129541526
+  },
+  {
+   "id": 22,
+   "task": "dag-ui-e2e:typecheck",
+   "status": "success",
+   "code": 0,
+   "seconds": 27.4,
+   "start_ms": 1792129486499,
+   "end_ms": 1792129513921
+  },
+  {
+   "id": 24,
+   "task": "timeline-categories:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 17.1,
+   "start_ms": 1792129546932,
+   "end_ms": 1792129564061
+  },
+  {
+   "id": 25,
+   "task": "dag-model:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 29.9,
+   "start_ms": 1792129546932,
+   "end_ms": 1792129576811
+  },
+  {
+   "id": 27,
+   "task": "telemetry-client:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 35.6,
+   "start_ms": 1792129546932,
+   "end_ms": 1792129582557
+  },
+  {
+   "id": 26,
+   "task": "dag-layout:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 17.5,
+   "start_ms": 1792129564191,
+   "end_ms": 1792129581643
+  },
+  {
+   "id": 28,
+   "task": "dag-ui:build",
+   "status": "success",
+   "code": 0,
+   "seconds": 21.2,
+   "start_ms": 1792129576979,
+   "end_ms": 1792129598175
+  },
+  {
+   "id": 29,
+   "task": "dag-ui:build",
+   "status": "local-cache",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792129605118,
+   "end_ms": 1792129605237
+  },
+  {
+   "id": 30,
+   "task": "onepipeline-ui:ensure-sibling",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.5,
+   "start_ms": 1792129605258,
+   "end_ms": 1792129605759
+  },
+  {
+   "id": 32,
+   "task": "onepipeline-ui:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 255.0,
+   "start_ms": 1792129605258,
+   "end_ms": 1792129860240
+  },
+  {
+   "id": 33,
+   "task": "dag-ui:build-api-server",
+   "status": "success",
+   "code": 0,
+   "seconds": 257.7,
+   "start_ms": 1792129605258,
+   "end_ms": 1792129862927
+  },
+  {
+   "id": 31,
+   "task": "pool-maintenance:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792129605867,
+   "end_ms": 1792129605997
+  },
+  {
+   "id": 44,
+   "task": "onepipeline-ui-repo-tooling:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 622.0,
+   "start_ms": 1792129606006,
+   "end_ms": 1792130227957
+  },
+  {
+   "id": 40,
+   "task": "onepipeline-ui-e2e:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 118.5,
+   "start_ms": 1792129862753,
+   "end_ms": 1792129981237
+  },
+  {
+   "id": 34,
+   "task": "github-workflows:bootstrap",
+   "status": "success",
+   "code": 0,
+   "seconds": 0.1,
+   "start_ms": 1792129862938,
+   "end_ms": 1792129863030
+  },
+  {
+   "id": 35,
+   "task": "dag-model:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 16.7,
+   "start_ms": 1792129863034,
+   "end_ms": 1792129879709
+  },
+  {
+   "id": 36,
+   "task": "timeline-categories:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.7,
+   "start_ms": 1792129879737,
+   "end_ms": 1792129883450
+  },
+  {
+   "id": 37,
+   "task": "telemetry-client:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.7,
+   "start_ms": 1792129883465,
+   "end_ms": 1792129886176
+  },
+  {
+   "id": 38,
+   "task": "dag-layout:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 2.7,
+   "start_ms": 1792129886185,
+   "end_ms": 1792129888865
+  },
+  {
+   "id": 39,
+   "task": "dag-ui:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 90.7,
+   "start_ms": 1792129888957,
+   "end_ms": 1792129979650
+  },
+  {
+   "id": 42,
+   "task": "dag-ui-build-cache:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 64.7,
+   "start_ms": 1792129979677,
+   "end_ms": 1792130044419
+  },
+  {
+   "id": 41,
+   "task": "pool-maintenance:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 4.8,
+   "start_ms": 1792129982075,
+   "end_ms": 1792129986895
+  },
+  {
+   "id": 46,
+   "task": "dag-ui-e2e:test",
+   "status": "failure",
+   "code": 1,
+   "seconds": 827.8,
+   "start_ms": 1792129986906,
+   "end_ms": 1792130814741
+  },
+  {
+   "id": 43,
+   "task": "github-workflows:test",
+   "status": "success",
+   "code": 0,
+   "seconds": 27.6,
+   "start_ms": 1792130044483,
+   "end_ms": 1792130072101
+  },
+  {
+   "id": 45,
+   "task": "onepipeline-ui-coverage:coverage",
+   "status": "success",
+   "code": 0,
+   "seconds": 3.1,
+   "start_ms": 1792130229211,
+   "end_ms": 1792130232307
+  }
+ ],
+ "tasks_executed": 44,
+ "tasks_replayed": 1,
+ "tests_parsed": 674,
+ "slowest_tests": [
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::packaging",
+   "test": "the_release_staging_path_builds_installs_and_serves_the_native_artifact",
+   "seconds": 334.116
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+   "seconds": 86.546
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_shared_package_checks_it_and_its_dependents_and_no_unrelated_package",
+   "seconds": 37.906
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it",
+   "seconds": 24.802
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_the_repository_machinery_selects_its_tier_and_not_the_journeys",
+   "seconds": 24.633
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled",
+   "seconds": 22.809
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "workspace_install::a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target",
+   "seconds": 18.223
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_release_moving_the_engine_without_announcing_it_is_refused",
+   "seconds": 17.769
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui.spec.ts:2180:1 \u203a keeps a node of hundreds of recorded sessions scannable",
+   "seconds": 17.6
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_base_commit_that_does_not_resolve_runs_everything_and_says_which_variable",
+   "seconds": 17.139
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_turn",
+   "seconds": 17.067
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_fixture_belongs_to_its_readers_and_to_no_project_of_its_own",
+   "seconds": 16.083
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility",
+   "seconds": 15.637
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_only_the_export",
+   "seconds": 15.34
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery",
+   "seconds": 14.838
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_upgrade_landing_after_a_refused_adoption_never_starts_the_new_build",
+   "seconds": 14.837
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_ci_build_with_no_base_runs_everything",
+   "seconds": 14.768
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::the_per_invocation_option_re_judges_without_reading_or_writing_the_cache",
+   "seconds": 14.62
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::an_upgraded_llmlint_is_judged_again",
+   "seconds": 14.367
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_test_only_change_still_reaches_the_rust_matrices",
+   "seconds": 14.008
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::a_push_build_is_scoped_to_the_commit_before_the_push",
+   "seconds": 13.785
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui.spec.ts:1150:1 \u203a draws every category a record can be as a glyph of its own",
+   "seconds": 13.7
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_runs",
+   "seconds": 13.479
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui.spec.ts:1402:1 \u203a shows the release that carried a node's work and the waits before it",
+   "seconds": 13.4
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_propagates_the_binarys_exit_code_and_stderr",
+   "seconds": 13.342
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "packaging::the_launcher_stops_the_server_when_a_supervisor_asks",
+   "seconds": 13.216
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::the_read_verbs_serve_what_the_cli_prints",
+   "seconds": 13.12
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_tree_with_no_built_browser_view_is_read_to_a_verdict",
+   "seconds": 12.871
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui-preserve.spec.ts:53:1 \u203a shows a node its plan kept as done, on its branch at its head, and never as landed",
+   "seconds": 12.5
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release",
+   "seconds": 12.262
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "nx_affected::the_base_commit_outranks_the_base_branch",
+   "seconds": 12.199
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui-navigation.spec.ts:519:1 \u203a reads a marker the keyboard reached",
+   "seconds": 11.9
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui.spec.ts:555:1 \u203a opens a node's timeline, reads one recorded moment, and returns",
+   "seconds": 11.9
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_judge_configuration_that_moved_outside_the_tree_is_judged_again",
+   "seconds": 11.714
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-e2e:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "server::a_kept_node_that_depends_on_a_kept_node_starts_from_the_branch_it_kept",
+   "seconds": 11.667
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::a_changed_shard_budget_is_judged_again",
+   "seconds": 11.55
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "llmlint_cache::findings_are_judged_again_rather_than_replayed",
+   "seconds": 11.45
+  },
+  {
+   "runner": "nextest",
+   "task": "onepipeline-ui-repo-tooling:test",
+   "binary": "onepipeline-ui::e2e",
+   "test": "semver_check::several_readings_of_this_crate_at_once_each_get_their_own_answer",
+   "seconds": 11.193
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui.spec.ts:470:1 \u203a renders the outcomes only a recorded result carries",
+   "seconds": 11.1
+  },
+  {
+   "runner": "playwright",
+   "task": "dag-ui-e2e:test",
+   "test": "apps/dag-ui-e2e/dag-ui-navigation.spec.ts:592:1 \u203a reads a segment of the graph timeline, and follows it as the view scrolls",
+   "seconds": 11.0
+  }
+ ]
+}

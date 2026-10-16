@@ -1,0 +1,36 @@
+{
+ "label": "gate-judge-pr339-warm",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "5a2daca"
+ ],
+ "note": "same as gate-judge-pr339-cold, memo as it left it; load avg at start 29.38 22.48 23.82",
+ "exit_code": 2,
+ "wall_seconds": 122.6,
+ "started_at": 1792133076.9150872,
+ "task_history_ids": [
+  92,
+  93
+ ],
+ "load_average_at_end": [
+  "11.25",
+  "17.60",
+  "21.83"
+ ],
+ "tasks": [
+  {
+   "id": 93,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "failure",
+   "code": 1,
+   "seconds": 122.2,
+   "start_ms": 1792133077302,
+   "end_ms": 1792133199498
+  }
+ ],
+ "tasks_executed": 0,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

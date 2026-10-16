@@ -111,6 +111,7 @@ def main() -> int:
     ap.add_argument("--label", required=True)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--note", default="")
+    ap.add_argument("--cwd", type=Path, default=ROOT, help="run the command here (default: this repository's root)")
     ap.add_argument("--reparse", nargs=2, type=int, metavar=("AFTER_ID", "LAST_ID"),
                     help="run nothing: rebuild --out from its existing log and the task-history rows after AFTER_ID up to LAST_ID")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -133,13 +134,13 @@ def main() -> int:
         env = dict(os.environ, NEXTEST_STATUS_LEVEL="pass")
         t0 = time.time()
         with live.open("w") as fh:
-            rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
+            rc = subprocess.run(cmd, cwd=args.cwd, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
         t1 = time.time()
         log.write_text(live.read_text(errors="replace"))
     tasks = tasks_since(first, last)
     tests = sorted(tests_from_log(log.read_text(errors="replace")), key=lambda t: -t["seconds"])
     doc = {
-        "label": args.label, "command": cmd, "note": args.note, "exit_code": rc,
+        "label": args.label, "command": cmd, "cwd": str(args.cwd), "note": args.note, "exit_code": rc,
         "wall_seconds": round(t1 - t0, 1), "started_at": t0,
         "task_history_ids": [first, max((t["id"] for t in tasks), default=first)],
         "load_average_at_end": open("/proc/loadavg").read().split()[:3] if not args.reparse else None,

@@ -1,0 +1,36 @@
+{
+ "label": "gate-judge-pr315-cold",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "a86ec83~1"
+ ],
+ "note": "just lint-llm-diff a86ec83~1 in the worktree at a86ec83 (PR #315's diff), no memo for it; load avg at start 26.81 25.58 25.41",
+ "exit_code": 2,
+ "wall_seconds": 137.1,
+ "started_at": 1792132841.7752259,
+ "task_history_ids": [
+  46,
+  47
+ ],
+ "load_average_at_end": [
+  "9.17",
+  "19.30",
+  "23.12"
+ ],
+ "tasks": [
+  {
+   "id": 47,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "failure",
+   "code": 1,
+   "seconds": 135.8,
+   "start_ms": 1792132842975,
+   "end_ms": 1792132978783
+  }
+ ],
+ "tasks_executed": 0,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}

@@ -1,0 +1,71 @@
+
+> nx run onepipeline-ui:lint-llm-diff
+
+> bash scripts/llmlint-judge.sh
+
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, diagnostics_error_or_absent, no_redundant_instruction_pointers, new_code_lands_in_a_project, work_goes_through_command_surface, contracts_have_one_source_or_a_drift_gate, cli_output_contract, new_command_or_client_gets_its_own_project, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated, crates_stay_in_one_cargo_workspace, external_service_suite_stays_out_of_the_affected_tier, code_lands_in_the_domain_that_owns_it]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+ERROR agent default judge 1 [tests_assert_real_behavior, tool_output_is_signal, browser_journeys_run_against_the_built_app, shared_ui_graduates_to_its_own_project, projects_stay_in_one_js_workspace, live_tier_compiles_and_requires_credential, no_untrusted_interpolation_in_run, ci_invokes_gate_recipe_not_inline_stages, no_second_broader_sweep_over_an_already_gated_commit, expensive_tests_stay_behind_their_own_edge, new_projects_keep_the_graph_uniform]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+21 rules: 0 passed, 0 failed, 21 skipped, 2 errored
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+40 rules: 0 passed, 0 failed, 40 skipped, 1 errored
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+40 rules: 0 passed, 0 failed, 40 skipped, 1 errored
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, no_redundant_instruction_pointers, new_code_lands_in_a_project, work_goes_through_command_surface, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated, code_lands_in_the_domain_that_owns_it]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+36 rules: 0 passed, 0 failed, 36 skipped, 1 errored
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+40 rules: 0 passed, 0 failed, 40 skipped, 1 errored
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+40 rules: 0 passed, 0 failed, 40 skipped, 1 errored
+52 rules: 0 passed, 0 failed, 40 skipped, 12 not relevant
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+40 rules: 0 passed, 0 failed, 40 skipped, 1 errored
+ERROR agent default judge 1 [comments_earn_their_place, changed_behavior_has_e2e, names_match_behavior, suppressions_justified, boundary_inputs_validated, no_hardcoded_secrets, least_privilege_grants, new_code_lands_in_a_project, contracts_have_one_source_or_a_drift_gate, cli_output_contract, secrets_stay_server_side, authorization_enforced_server_side, url_state_validated, code_lands_in_the_domain_that_owns_it]: oneharness run failed: harness oneharness default produced output that failed schema validation: no JSON value could be extracted from the response
+
+38 rules: 0 passed, 0 failed, 38 skipped, 1 errored
+
+
+  Run duration:      2m 2s
+  Critical path:     2m 2s (1 task)
+  Recoverable time:  <1ms
+
+  Recommendations:
+    - Speed up or split the longest tasks on the critical path:
+        onepipeline-ui:lint-llm-diff    2m 2s
+lint-llm-diff: 61 changed file(s), 5789385 diff chars, 9 shards of <= 700000
+See full results with `llmlint history 20261016T064448Z-3e70f`
+lint-llm-diff: shard 1/9 — 25 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064459Z-3ea4e`
+lint-llm-diff: shard 2/9 — 5 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064508Z-88dcc`
+lint-llm-diff: shard 3/9 — 2 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064517Z-25de2`
+lint-llm-diff: shard 4/9 — 13 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064527Z-42313`
+lint-llm-diff: shard 5/9 — 10 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064536Z-1f3f1`
+lint-llm-diff: shard 6/9 — 2 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064616Z-8c1c3`
+See full results with `llmlint history 20261016T064631Z-0d6a1`
+lint-llm-diff: shard 8/9 — 1 file(s) judged, exit 2
+See full results with `llmlint history 20261016T064639Z-fde21`
+lint-llm-diff: shard 9/9 — 2 file(s) judged, exit 2
+lint-llm-diff: the judge never reached a verdict (llmlint exit 2)
+ACTION: repair the harness or the llmlint toolchain — this is not a finding to clear
+Warning: command "bash scripts/llmlint-judge.sh" exited with non-zero status code
+ NX   Running target lint-llm-diff for project onepipeline-ui failed
+
+Failed tasks:
+
+- onepipeline-ui:lint-llm-diff
+
+Hint: run the command with --verbose for more details.
+
+lint-llm-diff: judged this diff against base 5a2daca4e2201d95a06107b89ebe658d65bf97b1 (Nx cache miss)
+error: recipe `lint-llm-diff` failed on line 447 with exit code 2

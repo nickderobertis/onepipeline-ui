@@ -1,0 +1,30 @@
+
+> nx run onepipeline-ui:lint-llm-diff
+
+> bash scripts/llmlint-judge.sh
+
+74 rules: 2 passed, 0 failed, 54 skipped, 18 not relevant
+
+
+
+ NX   Successfully ran target lint-llm-diff for project onepipeline-ui
+
+
+  Run duration:      1m 53s
+  Cache:             0/1 hit (0%)
+  Critical path:     1m 53s (1 task)
+  Recoverable time:  <1ms
+
+  Recommendations:
+    - Drastically reduce your run duration by sharing a cache across your team and CI → https://nx.dev/ci/features/remote-cache?utm_source=nx-cli&utm_medium=cli&utm_campaign=performance-report&utm_content=remote-cache.
+    - Speed up or split the longest tasks on the critical path:
+        onepipeline-ui:lint-llm-diff    1m 53s
+See full results with `llmlint history 20261016T070244Z-e31b6`
+
+ NX   Nx detected a flaky task
+
+  onepipeline-ui:lint-llm-diff
+
+Flaky tasks can disrupt your CI pipeline. Automatically retry them with Nx Cloud. Learn more at https://nx.dev/ci/features/flaky-tasks
+
+lint-llm-diff: judged this diff against base 5a2daca4e2201d95a06107b89ebe658d65bf97b1 (Nx cache miss)

@@ -1,0 +1,26 @@
+
+> nx run onepipeline-ui:lint-llm-diff  [existing outputs match the cache, left as is]
+
+> bash scripts/llmlint-judge.sh
+
+74 rules: 38 passed, 0 failed, 23 skipped, 13 not relevant
+See full results with `llmlint history 20261016T071539Z-b40ae`
+
+
+
+ NX   Successfully ran target lint-llm-diff for project onepipeline-ui
+
+Nx read the output from the cache instead of running the command for 1 out of 1 tasks.
+
+  Run duration:      5ms
+  Cache:             1/1 hit (100%)
+  Critical path:     <1ms (1 task)
+  Recoverable time:  <1ms
+
+ NX   Nx detected a flaky task
+
+  onepipeline-ui:lint-llm-diff
+
+Flaky tasks can disrupt your CI pipeline. Automatically retry them with Nx Cloud. Learn more at https://nx.dev/ci/features/flaky-tasks
+
+lint-llm-diff: replayed the recorded verdict for base 45ac04670e1606c9c56fd9c61abbf2423e1ed09c (Nx cache hit)

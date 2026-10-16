@@ -1,0 +1,32 @@
+
+> nx run onepipeline-ui:lint-llm-diff
+
+> bash scripts/llmlint-judge.sh
+
+FAIL comments_earn_their_place
+     rationale: Nearly every comment in the scoped files explains durable intent (macos-policy.mjs's fail-closed rationale, ci.yml's fetch-depth/-D warnings reasons, release-package.py's PEP 440 note, onepipeline-api.js's darwin-x64 discontinuation note). The exception is budgets.yaml lines 3 and 17, which duplicate a requirement/approval provenance note ("The brief explicitly requests ... the manager approved separate budgets") — a session/decision-log artifact; the durable content is only that jobs/run and runs/change are distinct scheduling constraints.
+     .github/budgets.yaml:3: Comment narrates requirement/approval provenance ("The brief explicitly requests ... the manager approved") — a session note; keep only the durable why (two distinct scheduling constraints).
+     .github/budgets.yaml:17: Duplicate session-note comment ("The brief explicitly requests ... the manager approved") restating requirement/approval provenance rather than durable intent.
+
+74 rules: 37 passed, 1 failed, 23 skipped, 13 not relevant
+
+
+  Run duration:      7m 5s
+  Critical path:     7m 5s (1 task)
+  Recoverable time:  <1ms
+
+  Recommendations:
+    - Speed up or split the longest tasks on the critical path:
+        onepipeline-ui:lint-llm-diff    7m 5s
+See full results with `llmlint history 20261016T070950Z-b4be8`
+Warning: command "bash scripts/llmlint-judge.sh" exited with non-zero status code
+ NX   Running target lint-llm-diff for project onepipeline-ui failed
+
+Failed tasks:
+
+- onepipeline-ui:lint-llm-diff
+
+Hint: run the command with --verbose for more details.
+
+lint-llm-diff: judged this diff against base 45ac04670e1606c9c56fd9c61abbf2423e1ed09c (Nx cache miss)
+error: recipe `lint-llm-diff` failed on line 412 with exit code 1

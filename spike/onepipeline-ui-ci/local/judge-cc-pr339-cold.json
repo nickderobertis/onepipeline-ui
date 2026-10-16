@@ -1,0 +1,37 @@
+{
+ "label": "judge-cc-pr339-cold",
+ "command": [
+  "just",
+  "lint-llm-diff",
+  "5a2daca"
+ ],
+ "cwd": "/home/nick.guest/ai-orchestrator/runs/ci-time-budgets-wave1-brief-spikes/scratch/3446778-3/wt339",
+ "note": "just lint-llm-diff 5a2daca in a scratch worktree at cd4be04 (PR #339's diff), no green memo for it; ONEHARNESS_HARNESSES=claude-code (env override, by manager ruling; CI's judge is codex/gpt-5.5); load avg at start 2.48 6.07 12.85",
+ "exit_code": 0,
+ "wall_seconds": 113.0,
+ "started_at": 1792134051.7152777,
+ "task_history_ids": [
+  242,
+  243
+ ],
+ "load_average_at_end": [
+  "1.86",
+  "4.73",
+  "11.57"
+ ],
+ "tasks": [
+  {
+   "id": 243,
+   "task": "onepipeline-ui:lint-llm-diff",
+   "status": "success",
+   "code": 0,
+   "seconds": 112.5,
+   "start_ms": 1792134052157,
+   "end_ms": 1792134164664
+  }
+ ],
+ "tasks_executed": 1,
+ "tasks_replayed": 0,
+ "tests_parsed": 0,
+ "slowest_tests": []
+}
