@@ -6,9 +6,12 @@
 //! The read API copies no plans itself, so what a host can prove about the plan
 //! store behind it is which release that is. Both reports are read off one
 //! binary, built from this tree under the lock, and held to the
-//! `onepipeline`/`onetaskgraph-*` releases `Cargo.lock` resolves — exactly, so a
-//! member of the plan-store family left behind, or a second copy of one at
+//! `onepipeline`/`onetaskgraph-*` releases a `Cargo.lock` resolves — exactly, so
+//! a member of the plan-store family left behind, or a second copy of one at
 //! another release, is a disagreement rather than a pass.
+//!
+//! A tier of its own (`onepipeline-ui-linked-report`), because the second build
+//! is what it costs and only a change that can move the linked set owes it.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -22,18 +25,20 @@ use crate::serving::Serving;
 /// One linked crate, as `(name, version)`.
 type Release = (String, String);
 
-/// The engine and the plan-store family whose releases this journey holds.
+/// The engine and the plan-store family whose releases this tier holds.
 fn in_family(name: &str) -> bool {
     name == "onepipeline" || name.starts_with("onetaskgraph-")
 }
 
-/// The family's releases as `Cargo.lock` resolves them.
-fn locked_releases() -> BTreeSet<Release> {
-    let lock: toml::Table =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock"))
-            .expect("Cargo.lock")
-            .parse()
-            .expect("Cargo.lock parses");
+fn repo_lock() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock")
+}
+
+fn locked_releases(lock: &Path) -> BTreeSet<Release> {
+    let lock: toml::Table = fs::read_to_string(lock)
+        .unwrap_or_else(|err| panic!("{}: {err}", lock.display()))
+        .parse()
+        .expect("the lock parses");
     lock["package"]
         .as_array()
         .expect("the lock lists packages")
@@ -99,7 +104,6 @@ fn an_auditable_build() -> PathBuf {
         .join(format!("onepipeline-api{}", std::env::consts::EXE_SUFFIX))
 }
 
-/// The family's releases as the binary's embedded dependency record names them.
 fn reported_releases(binary: &Path) -> BTreeSet<Release> {
     let report = auditable_info::audit_info_from_file(binary, auditable_info::Limits::default())
         .unwrap_or_else(|err| {
@@ -116,24 +120,18 @@ fn reported_releases(binary: &Path) -> BTreeSet<Release> {
         .collect()
 }
 
-/// What a report says that an expectation does not, and the reverse — empty
-/// when the two name the same releases.
-fn disagreement(reported: &BTreeSet<Release>, expected: &BTreeSet<Release>) -> Vec<String> {
+/// Every way `binary`'s dependency record and the releases `lock` resolves
+/// disagree, as a reader would be told them.
+fn disagreements(binary: &Path, lock: &Path) -> Vec<String> {
+    let reported = reported_releases(binary);
+    let expected = locked_releases(lock);
     let unexpected = reported
-        .difference(expected)
-        .map(|(name, version)| format!("links {name} {version}, which was not expected"));
+        .difference(&expected)
+        .map(|(name, version)| format!("links {name} {version}, which the lock does not resolve"));
     let missing = expected
-        .difference(reported)
-        .map(|(name, version)| format!("does not link {name} {version}"));
+        .difference(&reported)
+        .map(|(name, version)| format!("does not link {name} {version}, which the lock resolves"));
     unexpected.chain(missing).collect()
-}
-
-/// The release the server answers over `/healthz`.
-fn served_engine(binary: &Path) -> Value {
-    let serving = Serving::start_binary_with_args(binary, |_| {}, &[]);
-    let response = http::get(serving.address, "/healthz");
-    assert_eq!(response.status, 200);
-    response.json()["onepipeline_version"].clone()
 }
 
 /// A server built under the lock reports linking exactly the engine and
@@ -141,7 +139,7 @@ fn served_engine(binary: &Path) -> Value {
 /// `/healthz` — the release the checked-in golden pins.
 #[test]
 fn a_built_server_reports_linking_the_engine_and_plan_store_the_lock_resolves() {
-    let expected = locked_releases();
+    let expected = locked_releases(&repo_lock());
     let engine = expected
         .iter()
         .find(|(name, _)| name == "onepipeline")
@@ -156,55 +154,67 @@ fn a_built_server_reports_linking_the_engine_and_plan_store_the_lock_resolves() 
     );
 
     let binary = an_auditable_build();
-    let reported = reported_releases(&binary);
-    let disagrees = disagreement(&reported, &expected);
+    let disagrees = disagreements(&binary, &repo_lock());
     assert!(
         disagrees.is_empty(),
         "the built server's dependency record disagrees with Cargo.lock: it {}",
         disagrees.join("; ")
     );
 
+    let serving = Serving::start_binary_with_args(&binary, |_| {}, &[]);
+    let response = http::get(serving.address, "/healthz");
+    assert_eq!(response.status, 200);
+    let served = response.json()["onepipeline_version"].clone();
     let golden: Value = serde_json::from_str(include_str!("../fixtures/healthz.json"))
         .expect("tests/fixtures/healthz.json parses");
-    let served = served_engine(&binary);
     assert_eq!(served, Value::String(engine));
     assert_eq!(served, golden["onepipeline_version"]);
 }
 
-/// The same reading refuses an expectation one release off: a lock that named
-/// another engine or plan-store release than the one the server links is a
-/// disagreement naming both, not a pass.
+/// A lock moved one release past the server built from it — the engine and a
+/// plan-store crate each — is a disagreement naming both releases, not a pass:
+/// the stale build a host would otherwise be serving.
 #[test]
-fn a_built_server_disagrees_with_an_expectation_one_release_off() {
+fn a_lock_moved_past_the_built_server_disagrees_naming_both_releases() {
     let binary = an_auditable_build();
-    let reported = reported_releases(&binary);
+    let lock = fs::read_to_string(repo_lock()).expect("Cargo.lock");
+    let locked = locked_releases(&repo_lock());
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let mut moved = lock.clone();
+    let mut expected = Vec::new();
     for name in ["onepipeline", "onetaskgraph-core"] {
-        let mut expected = locked_releases();
-        let linked = expected
+        let (_, version) = locked
             .iter()
             .find(|(candidate, _)| candidate == name)
-            .unwrap_or_else(|| panic!("the lock resolves {name}"))
-            .clone();
-        let mut bumped: Vec<u64> = linked
-            .1
+            .unwrap_or_else(|| panic!("the lock resolves {name}"));
+        let mut parts: Vec<u64> = version
             .split('.')
             .map(|part| part.parse().expect("a numeric release"))
             .collect();
-        *bumped.last_mut().expect("a patch number") += 1;
-        let bumped = bumped
+        *parts.last_mut().expect("a patch number") += 1;
+        let next = parts
             .iter()
             .map(u64::to_string)
             .collect::<Vec<_>>()
             .join(".");
-        expected.remove(&linked);
-        expected.insert((name.to_owned(), bumped.clone()));
-
-        assert_eq!(
-            disagreement(&reported, &expected),
-            vec![
-                format!("links {name} {}, which was not expected", linked.1),
-                format!("does not link {name} {bumped}"),
-            ]
+        let entry = format!("name = \"{name}\"\nversion = \"{version}\"\n");
+        assert_eq!(moved.matches(&entry).count(), 1, "one {name} entry");
+        moved = moved.replace(
+            &entry,
+            &format!("name = \"{name}\"\nversion = \"{next}\"\n"),
         );
+        expected.push(format!(
+            "links {name} {version}, which the lock does not resolve"
+        ));
+        expected.push(format!(
+            "does not link {name} {next}, which the lock resolves"
+        ));
     }
+    let moved_lock = scratch.path().join("Cargo.lock");
+    fs::write(&moved_lock, moved).expect("write the moved lock");
+
+    let mut disagrees = disagreements(&binary, &moved_lock);
+    disagrees.sort();
+    expected.sort();
+    assert_eq!(disagrees, expected);
 }
