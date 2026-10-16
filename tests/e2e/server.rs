@@ -77,6 +77,64 @@ fn healthz_answers_without_reading_run_storage() {
     assert_eq!(response.json(), golden);
 }
 
+/// The built binary links the engine and plan-store releases `Cargo.lock`
+/// resolves, read off the binary rather than off the manifest.
+///
+/// The engine reports its own release over `/healthz`; the plan store reports
+/// nothing on the wire, so its releases are read from the registry source paths
+/// the compiler records in the binary for every crate it linked code from. A
+/// stale build, or a lock that moved one family member without the others,
+/// fails here rather than serving a host a store it was not built against.
+#[test]
+fn the_built_binary_links_the_engine_and_plan_store_the_lock_resolves() {
+    let lock: toml::Table =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock"))
+            .expect("Cargo.lock")
+            .parse()
+            .expect("Cargo.lock parses");
+    let resolved = |prefix: &str| -> Vec<(String, String)> {
+        lock["package"]
+            .as_array()
+            .expect("the lock lists packages")
+            .iter()
+            .filter_map(|package| {
+                let name = package["name"].as_str()?;
+                (name == prefix || name.starts_with(&format!("{prefix}-"))).then(|| {
+                    (
+                        name.to_owned(),
+                        package["version"].as_str().expect("a version").to_owned(),
+                    )
+                })
+            })
+            .collect()
+    };
+    let engine = resolved("onepipeline")
+        .into_iter()
+        .find(|(name, _)| name == "onepipeline")
+        .expect("the lock resolves onepipeline")
+        .1;
+    let store = resolved("onetaskgraph");
+    assert!(!store.is_empty(), "the lock resolves no onetaskgraph crate");
+
+    let serving = Serving::start(|_| {});
+    let health = http::get(serving.address, "/healthz").json();
+    assert_eq!(health["onepipeline_version"], json!(engine));
+
+    let binary =
+        fs::read(assert_cmd::cargo::cargo_bin("onepipeline-api")).expect("the built binary");
+    let binary = String::from_utf8_lossy(&binary);
+    let carries = |needle: &str| binary.contains(needle);
+    for (name, version) in store
+        .iter()
+        .chain([&("onepipeline".to_owned(), engine.clone())])
+    {
+        assert!(
+            carries(&format!("{name}-{version}/")) || carries(&format!("{name}-{version}\\")),
+            "the built binary links no {name} {version}, the release Cargo.lock resolves"
+        );
+    }
+}
+
 #[test]
 fn the_run_list_serves_every_recorded_run_with_its_session_attribution() {
     let serving = two_runs();
