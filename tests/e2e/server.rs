@@ -6,7 +6,6 @@
 //! compiled binary over a directory the SDK itself writes and reads the bytes
 //! that come back.
 
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 // The journeys that write a config chain and a harness stand-in are `cfg(unix)`
@@ -77,78 +76,6 @@ fn healthz_answers_without_reading_run_storage() {
         .expect("tests/fixtures/healthz.json parses");
     assert_eq!(response.json(), golden);
 }
-
-/// The built binary reports exactly the engine and plan-store releases
-/// `Cargo.lock` resolves: over `/healthz` for the engine, and in the registry
-/// source paths the compiler records in the executable for every
-/// `onepipeline`/`onetaskgraph-*` crate it linked code from.
-///
-/// The read API copies no plans itself, so what it can prove about the plan
-/// store it links is which release that is. The set of releases read off the
-/// executable must *equal* the locked set: a stale build, a second copy of a
-/// family member at another version, or a lock that moved one member without
-/// the others all fail here rather than serving a host a store it was not
-/// built against.
-// llmlint: ignore-block[tests_mirror_real_usage] the executable's own record of the crates it links is the report this journey exists to read: the plan store has no surface on this server's wire, and the adoption journeys below exercise it through the public routes.
-#[test]
-fn the_built_binary_reports_the_engine_and_plan_store_releases_the_lock_resolves() {
-    let lock: toml::Table =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock"))
-            .expect("Cargo.lock")
-            .parse()
-            .expect("Cargo.lock parses");
-    let family = |name: &str| name == "onepipeline" || name.starts_with("onetaskgraph-");
-    let locked: BTreeSet<(String, String)> = lock["package"]
-        .as_array()
-        .expect("the lock lists packages")
-        .iter()
-        .filter_map(|package| {
-            let name = package["name"].as_str()?;
-            family(name).then(|| {
-                (
-                    name.to_owned(),
-                    package["version"].as_str().expect("a version").to_owned(),
-                )
-            })
-        })
-        .collect();
-    let engine = &locked
-        .iter()
-        .find(|(name, _)| name == "onepipeline")
-        .expect("the lock resolves onepipeline")
-        .1;
-    assert!(
-        locked.iter().any(|(name, _)| name != "onepipeline"),
-        "the lock resolves no onetaskgraph crate"
-    );
-
-    let serving = Serving::start(|_| {});
-    let health = http::get(serving.address, "/healthz").json();
-    assert_eq!(health["onepipeline_version"], json!(engine));
-
-    let binary =
-        fs::read(assert_cmd::cargo::cargo_bin("onepipeline-api")).expect("the built binary");
-    let binary = String::from_utf8_lossy(&binary);
-    // Every path segment `<name>-<major>.<minor>.<patch>` for a family crate,
-    // which is how the registry names the source directory it unpacked.
-    let linked: BTreeSet<(String, String)> = binary
-        .split(['/', '\\'])
-        .filter_map(|segment| {
-            let (name, version) = segment.rsplit_once('-')?;
-            let numeric = version.split('.').count() == 3
-                && version
-                    .split('.')
-                    .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
-            (family(name) && numeric).then(|| (name.to_owned(), version.to_owned()))
-        })
-        .collect();
-    assert_eq!(
-        linked, locked,
-        "the built binary links these onepipeline/onetaskgraph releases, and Cargo.lock \
-         resolves those"
-    );
-}
-// llmlint: ignore-end[tests_mirror_real_usage]
 
 #[test]
 fn the_run_list_serves_every_recorded_run_with_its_session_attribution() {

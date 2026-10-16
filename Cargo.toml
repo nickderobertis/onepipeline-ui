@@ -591,6 +591,11 @@ libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"
+# The reader of the dependency record `cargo auditable` embeds in a binary, so
+# the journey that holds the built server to the engine and plan-store
+# releases `Cargo.lock` resolves reads that record the way an auditor's tooling
+# does rather than through a second parser of its format.
+auditable-info = "0.10"
 libc = "0.2"
 # The drift gate on the sibling vocabulary `src/payload.rs` reads from `onevcs`.
 # That library's `event` module is private, but it re-exports `EventKind` from

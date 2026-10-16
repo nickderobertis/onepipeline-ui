@@ -72,6 +72,7 @@ _crate-bootstrap:
       || { echo "cannot add toolchain components — install rustup (https://rustup.rs/) and re-run" >&2; exit 1; }
     @just _ensure-tool cargo-nextest
     @just _ensure-tool cargo-llvm-cov
+    @just _ensure-tool cargo-auditable
     @just _ensure-sibling
     @cargo fetch --locked --quiet
 
