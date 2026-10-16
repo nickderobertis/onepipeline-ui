@@ -423,6 +423,10 @@ def analyse(raw: Path, since: dt.date, shape_since: dt.datetime | None = None) -
             "merge_commit_sha": pr["merge_commit_sha"], "release": tag,
             "head_runs": sorted(r["id"] for r in hr),
             "checks_phase_s": checks, "merge_to_release_s": m2r, "total_s": checks + m2r,
+            # merge_to_release split at the release commit's first CD run: the
+            # wait for the release PR to be cut, swept and merged, then CD itself.
+            "merge_to_release_commit_s": (ts(rel["first_run_created"]) - ts(pr["merged_at"])).total_seconds(),
+            "release_cd_wall_s": rel["cd_wall_s"],
         })
     release_cycle = defaultdict(list)
     for c in cycles:
@@ -460,6 +464,7 @@ def analyse(raw: Path, since: dt.date, shape_since: dt.datetime | None = None) -
             "ineligible": dict(ineligible),
             "checks_phase_s": dist([c["checks_phase_s"] for c in cycles]),
             "merge_to_release_s": dist([c["merge_to_release_s"] for c in cycles]),
+            "merge_to_release_commit_s": dist([c["merge_to_release_commit_s"] for c in cycles]),
             "total_s": dist([c["total_s"] for c in cycles]),
             "per_release_max_total_s": dist(list(release_cycle_max.values())),
             "per_release_max_detail": release_cycle_max,

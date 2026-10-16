@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,7 +55,18 @@ class Reader:
             fh.write(json.dumps(entry, sort_keys=True) + "\n")
 
     def core_remaining(self) -> tuple[int, int]:
-        body = _gh_json("rate_limit")
+        # The rate-limit read is free of quota; a transient failure of it is
+        # retried rather than ending the fetch, and never skipped.
+        for attempt in range(3):
+            try:
+                body = _gh_json("rate_limit")
+                break
+            except subprocess.CalledProcessError as err:
+                self._log({"at": _now(), "kind": "rate_limit_error", "counts_against_core": False,
+                           "attempt": attempt + 1, "error": (err.stderr or "").strip()[:300]})
+                if attempt == 2:
+                    raise
+                time.sleep(10)
         core = body["resources"]["core"]  # type: ignore[index]
         self._log(
             {

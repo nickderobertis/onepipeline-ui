@@ -35,8 +35,24 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def db_path() -> Path | None:
-    found = sorted(glob.glob(str(ROOT / ".nx/workspace-data/*-v*.db")))
-    return Path(found[-1]) if found else None
+    """Nx's task-history database.
+
+    In a git worktree Nx keeps its cache, and the task history beside it, under
+    the main clone's `.nx/` (the git common directory's parent), not the
+    worktree's own `.nx/workspace-data`, so both are tried, that one first.
+    """
+    common = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                            capture_output=True, text=True).stdout.strip()
+    candidates = []
+    if common:
+        candidates += sorted(glob.glob(str(Path(common).parent / ".nx/workspace-data/*-v*.db")))
+    candidates += sorted(glob.glob(str(ROOT / ".nx/workspace-data/*-v*.db")))
+    for c in candidates:
+        with sqlite3.connect(c) as conn:
+            if conn.execute("select count(*) from sqlite_master where name='task_history'").fetchone()[0] and \
+               conn.execute("select count(*) from task_history").fetchone()[0]:
+                return Path(c)
+    return Path(candidates[0]) if candidates else None
 
 
 def max_history_id() -> int:
@@ -47,7 +63,7 @@ def max_history_id() -> int:
         return c.execute("select coalesce(max(id), 0) from task_history").fetchone()[0]
 
 
-def tasks_since(first_id: int) -> list[dict]:
+def tasks_since(first_id: int, last_id: int | None = None) -> list[dict]:
     p = db_path()
     if p is None:
         return []
@@ -55,8 +71,8 @@ def tasks_since(first_id: int) -> list[dict]:
         rows = c.execute(
             "select h.id, d.project, d.target, h.status, h.code, h.start, h.end "
             "from task_history h join task_details d on d.hash = h.hash "
-            "where h.id > ? order by h.start",
-            (first_id,),
+            "where h.id > ? and h.id <= ? order by h.start",
+            (first_id, last_id if last_id is not None else 1 << 62),
         ).fetchall()
     return [
         {"id": r[0], "task": f"{r[1]}:{r[2]}", "status": r[3], "code": r[4],
@@ -95,23 +111,32 @@ def main() -> int:
     ap.add_argument("--label", required=True)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--note", default="")
+    ap.add_argument("--reparse", nargs=2, type=int, metavar=("AFTER_ID", "LAST_ID"),
+                    help="run nothing: rebuild --out from its existing log and the task-history rows after AFTER_ID up to LAST_ID")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     log = args.out.with_suffix(".log")
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    first = max_history_id()
-    env = dict(os.environ, NEXTEST_STATUS_LEVEL="pass")
-    t0 = time.time()
-    with log.open("w") as fh:
-        rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
-    t1 = time.time()
-    tasks = tasks_since(first)
+    if args.reparse:
+        old = json.loads(args.out.read_text())
+        first, last = args.reparse
+        rc, t0, t1, cmd = old["exit_code"], old["started_at"], old["started_at"] + old["wall_seconds"], old["command"]
+        args.note = args.note or old.get("note", "")
+    else:
+        first, last = max_history_id(), None
+        env = dict(os.environ, NEXTEST_STATUS_LEVEL="pass")
+        t0 = time.time()
+        with log.open("w") as fh:
+            rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
+        t1 = time.time()
+    tasks = tasks_since(first, last)
     tests = sorted(tests_from_log(log.read_text(errors="replace")), key=lambda t: -t["seconds"])
     doc = {
         "label": args.label, "command": cmd, "note": args.note, "exit_code": rc,
         "wall_seconds": round(t1 - t0, 1), "started_at": t0,
-        "nx_cache_entries_before": None,
+        "task_history_ids": [first, max((t["id"] for t in tasks), default=first)],
+        "load_average_at_end": open("/proc/loadavg").read().split()[:3] if not args.reparse else None,
         "tasks": tasks,
         "tasks_executed": sum(1 for t in tasks if t["status"] == "success"),
         "tasks_replayed": sum(1 for t in tasks if "cache" in (t["status"] or "")),
