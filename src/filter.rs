@@ -127,6 +127,13 @@ impl EventFilter {
     /// refused would be a drift the gate has not caught, and is a projection
     /// failure rather than a served answer.
     ///
+    /// It returns the engine's own [`onepipeline::filter::EventFilter`], so this
+    /// crate's public surface follows the linked engine's here as it does at
+    /// [`ApiError::from_engine`]: moving the exact `onepipeline` requirement in
+    /// `Cargo.toml` across an incompatible version leaves this signature spelled
+    /// as before while the type it returns changes identity, which makes that
+    /// move a breaking change of this crate.
+    ///
     /// # Errors
     ///
     /// When the engine's parser refuses what this crate's grammar admitted.
