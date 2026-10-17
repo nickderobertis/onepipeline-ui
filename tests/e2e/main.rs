@@ -15,14 +15,13 @@
 //! platform package through node's own resolution; `lint_llm_diff` runs the
 //! gate's own llmlint recipe over a real git repository, `llmlint_cache` runs
 //! the memo around that recipe over a real Nx workspace, `release_status` runs
-//! the release workflow's own last job over a real GitHub Release's notes,
+//! the release's demotion step over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
 //! surface, `release_probe` runs the probe a consumer waiting on a release of
 //! this repository asks, `nx_affected` asks the affected tier's own selection
 //! what a committed change would run, `ci_tier` runs the step that tells a CI
 //! build which tier of the gate it owes beside the workflow wiring that obeys
-//! it, `report_workflow_failure` runs the reporter that is the
-//! only alarm on a published-smoke failure, `ensure_sibling` runs the recipe
+//! it, `ensure_sibling` runs the recipe
 //! the gate provisions the sibling CLI with, plus the task graph Nx itself builds
 //! for `test`, `linux_wheel` runs the one Linux wheel build both workflows share
 //! up to the container it hands that build to, `workspace_install` runs the
@@ -71,7 +70,6 @@ mod nx_affected;
 mod packaging;
 mod release_probe;
 mod release_status;
-mod report_workflow_failure;
 mod semver_check;
 mod server;
 mod ui;

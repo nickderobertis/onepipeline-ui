@@ -60,7 +60,6 @@
       "{workspaceRoot}/tests/e2e/packaging.rs",
       "{workspaceRoot}/tests/e2e/release_probe.rs",
       "{workspaceRoot}/tests/e2e/release_status.rs",
-      "{workspaceRoot}/tests/e2e/report_workflow_failure.rs",
       "{workspaceRoot}/tests/e2e/semver_check.rs",
       "{workspaceRoot}/tests/e2e/workspace_install.rs",
       "{workspaceRoot}/tests/support/fixture_run.rs",

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Make archive/npm carriers from maturin's final binary, without recompilation."""
+"""Make archive/npm carriers from maturin's final binary, without recompilation.
+
+Every release target is compiled once, by maturin, and this takes the binary out
+of that wheel and packs it, byte for byte, into the GitHub Release archive and the
+npm platform package beside the wheel itself. scripts/release.mjs's `build` phase
+runs it for each target its platform job releases.
+"""
 import argparse
 import hashlib
 import json
@@ -15,7 +21,6 @@ import zipfile
 
 TARGET_ARCHES = {
     "x86_64-unknown-linux-gnu": "x86_64",
-    "aarch64-unknown-linux-gnu": "aarch64",
     "aarch64-apple-darwin": "arm64",
     "x86_64-pc-windows-msvc": "amd64",
 }
@@ -29,11 +34,12 @@ class StagingError(ValueError):
 
 class Arguments(argparse.ArgumentParser):
     def error(self, message):
-        super().error(message + "; ACTION: pass a target from release.yml, its built wheel, an output directory and the Cargo version tag")
+        super().error(message + "; ACTION: pass a target from scripts/release.mjs, its built wheel, an output directory and the Cargo version tag")
 
 
-def run(*args, **kwargs):
-    return subprocess.check_output(args, text=True, **kwargs).strip()
+def run(command, *args, **kwargs):
+    # On Windows npm is npm.cmd, which only a resolved path reaches.
+    return subprocess.check_output([shutil.which(command) or command, *args], text=True, **kwargs).strip()
 
 
 def sha(data):
@@ -42,7 +48,7 @@ def sha(data):
 
 def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
     if target not in TARGET_ARCHES:
-        raise StagingError("unsupported release target", "choose a target declared by release.yml")
+        raise StagingError("unsupported release target", "choose a target declared in scripts/release.mjs")
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", tag):
         raise StagingError("release tag must be vX.Y.Z", "pass v followed by the Cargo.toml package version")
     version = tag.removeprefix("v")
@@ -56,9 +62,13 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
             if binary[:4] != b"\xcf\xfa\xed\xfe" or struct.unpack("<I", binary[4:8])[0] != expected_cpu:
                 raise StagingError("wheel binary does not have the declared Darwin architecture", "rebuild the wheel with maturin --target set to this Darwin target")
         elif "linux" in target:
-            expected_machine = 62 if target.startswith("x86_64") else 183
-            if binary[:6] != b"\x7fELF\x02\x01" or struct.unpack("<H", binary[18:20])[0] != expected_machine:
+            if binary[:6] != b"\x7fELF\x02\x01" or struct.unpack("<H", binary[18:20])[0] != 62:
                 raise StagingError("wheel binary does not have the declared Linux architecture", "choose the wheel built for this Linux target")
+        else:
+            # PE: the MZ stub points at the PE header, whose machine is AMD64.
+            offset = struct.unpack("<I", binary[0x3C:0x40])[0] if binary[:2] == b"MZ" else 0
+            if not offset or binary[offset:offset + 4] != b"PE\0\0" or struct.unpack("<H", binary[offset + 4:offset + 6])[0] != 0x8664:
+                raise StagingError("wheel binary does not have the declared Windows architecture", "choose the wheel built for this Windows target")
         metadata = archive.read(next(p for p in archive.namelist() if p.endswith('.dist-info/METADATA'))).decode()
         if "Name: onepipeline-api-cli\n" not in metadata:
             raise StagingError("wheel name differs from the release", "restore pyproject.toml project.name and rebuild with maturin")
@@ -84,14 +94,28 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
     stem = f"onepipeline-api-{tag}-{target}"
     assets = out / 'assets'
     assets.mkdir(exist_ok=True)
-    archive_path = assets / f'{stem}.tar.gz'
-    with tarfile.open(archive_path, 'w:gz') as archive:
-        for filename in [name, 'README.md', 'LICENSE', 'CHANGELOG.md']:
-            archive.add(root / filename, arcname=filename)
-    with tarfile.open(archive_path) as archive:
-        if sha(archive.extractfile(name).read()) != sha(binary):
-            raise StagingError('archive changed binary bytes', 'inspect the archive assembly; it must copy the final wheel binary without altering bytes')
-    (assets / f'{stem}.sha256').write_text(f'{sha(archive_path.read_bytes())}  {archive_path.name}\n')
+    # The shapes v0.37.0 published: a .tar.gz with a two-space checksum line,
+    # and for Windows a .zip with sha256sum's binary-mode `*` line.
+    members = [name, 'README.md', 'LICENSE', 'CHANGELOG.md']
+    if target.endswith('msvc'):
+        archive_path = assets / f'{stem}.zip'
+        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for filename in members:
+                archive.write(root / filename, arcname=filename)
+        with zipfile.ZipFile(archive_path) as archive:
+            archived = archive.read(name)
+        separator = ' *'
+    else:
+        archive_path = assets / f'{stem}.tar.gz'
+        with tarfile.open(archive_path, 'w:gz') as archive:
+            for filename in members:
+                archive.add(root / filename, arcname=filename)
+        with tarfile.open(archive_path) as archive:
+            archived = archive.extractfile(name).read()
+        separator = '  '
+    if sha(archived) != sha(binary):
+        raise StagingError('archive changed binary bytes', 'inspect the archive assembly; it must copy the final wheel binary without altering bytes')
+    (assets / f'{stem}.sha256').write_text(f'{sha(archive_path.read_bytes())}{separator}{archive_path.name}\n', newline='\n')
     npm_out = (out / 'npm').resolve()
     package = run('node', 'scripts/npm-build.mjs', 'platform', '--target', target, '--binary', str(executable), '--version', version, '--expect-sha256', sha(binary), '--out', str(npm_out))
     npm_artifacts = (out / 'npm-artifacts').resolve()

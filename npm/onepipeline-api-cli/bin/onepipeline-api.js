@@ -19,11 +19,10 @@
 const { spawn } = require("node:child_process");
 
 // process.platform-process.arch -> the platform package that carries the binary.
-// The keys mirror the Rust target matrix in .github/workflows/release.yml and
-// the optionalDependencies in package.json; keep the three in lockstep.
+// The keys mirror the release targets in scripts/release.mjs and the
+// optionalDependencies in package.json; keep the three in lockstep.
 const PACKAGES = {
   "linux-x64": "onepipeline-api-cli-linux-x64",
-  "linux-arm64": "onepipeline-api-cli-linux-arm64",
   "darwin-arm64": "onepipeline-api-cli-darwin-arm64",
   "win32-x64": "onepipeline-api-cli-win32-x64",
 };
@@ -39,20 +38,26 @@ function fail(message) {
   process.exit(1);
 }
 
-// Intel macOS was released up to the version before Darwin builds moved to one
-// Apple Silicon job; no later release carries a darwin-x64 package, so say that
-// rather than sending the user looking for an optional dependency that never
-// existed.
+// Platforms an earlier release carried and no later one does, each with the way
+// to install there now, rather than sending the user looking for an optional
+// dependency that never existed. Intel macOS stopped when Darwin builds moved to
+// one Apple Silicon job; arm64 Linux stopped when every release target came to
+// be built once on its own platform's runner, and since no wheel ships for it
+// either, cargo is the only way left.
 const DISCONTINUED = {
   "darwin-x64":
     "Intel macOS is no longer supported: prebuilt binaries ship for Apple " +
-    "Silicon (darwin-arm64) only.",
+    `Silicon (darwin-arm64) only. ${OTHER_INSTALLS}`,
+  "linux-arm64":
+    "arm64 Linux is no longer supported: prebuilt binaries ship for " +
+    "linux-x64 only, on npm and PyPI alike. Build it from source instead: " +
+    "'cargo install onepipeline-ui --locked'.",
 };
 
 function binaryPath() {
   const key = `${process.platform}-${process.arch}`;
   if (DISCONTINUED[key]) {
-    fail(`${DISCONTINUED[key]} ${OTHER_INSTALLS}`);
+    fail(DISCONTINUED[key]);
   }
   const pkg = PACKAGES[key];
   // llmlint: ignore-block[changed_behavior_has_e2e] reaching this branch means running

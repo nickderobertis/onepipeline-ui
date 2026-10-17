@@ -13,7 +13,7 @@
 //! manylinux image compiling the whole release binary — four to nine minutes of
 //! network-bound build per target — which an offline, quick suite cannot drive.
 //! It is driven for real instead by ci.yml's `wheel` legs on every pull request
-//! that reaches the crate, which build both targets through this same recipe and
+//! that reaches the crate, which builds the release's target through this same recipe and
 //! then install and smoke-test the wheel. Here only `docker` and the image's own
 //! tools are stand-ins on PATH; the recipe, the script and the in-container
 //! script it hands the image are the real ones, run by bash with the environment
@@ -239,24 +239,40 @@ fn matrix_legs(block: &str) -> Vec<(String, String)> {
     legs
 }
 
+/// Each Linux target the release builds, with the runner its job runs on — read
+/// from the recipe's own plan (`just release-linux plan`).
 fn release_linux_legs() -> Vec<(String, String)> {
-    let legs = matrix_legs(&job_block("release.yml", "build-wheels"));
-    assert!(
-        !legs.is_empty(),
-        "release.yml's build-wheels matrix has legs"
-    );
-    legs.into_iter()
-        .filter(|(_, os)| os.starts_with("ubuntu"))
-        .collect()
+    let output = Command::new("node")
+        .args(["scripts/release.mjs", "linux", "plan"])
+        .current_dir(repo_root())
+        .output()
+        .expect("node is on PATH");
+    assert!(output.status.success(), "the Linux release plan reads");
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("a JSON plan");
+    let runner = plan["runner"].as_str().expect("a runner").to_owned();
+    let legs: Vec<(String, String)> = plan["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .map(|target| {
+            (
+                target.as_str().expect("a triple").to_owned(),
+                runner.clone(),
+            )
+        })
+        .collect();
+    assert!(!legs.is_empty(), "the release builds a Linux target");
+    legs
 }
 
-/// The one maturin release.yml pins for the legs maturin-action still builds.
+/// The one maturin release.yml installs for the jobs that run it on the runner.
 fn release_maturin_version() -> String {
     let text = fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
         .expect("release.yml is readable");
     let pins: Vec<&str> = text
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("maturin-version: v"))
+        .split("maturin==")
+        .skip(1)
+        .filter_map(|rest| rest.split_whitespace().next())
         .collect();
     assert!(!pins.is_empty(), "release.yml pins a maturin version");
     assert!(
@@ -274,8 +290,8 @@ fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() 
         .collect();
     assert_eq!(
         targets,
-        ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"],
-        "release.yml's Linux wheel targets"
+        ["x86_64-unknown-linux-gnu"],
+        "the release's Linux targets"
     );
     let maturin = release_maturin_version();
     for target in &targets {
@@ -286,11 +302,7 @@ fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() 
         assert!(output.status.success(), "{target}: the build succeeds");
         let invocation = fs::read_to_string(dir.join("docker.log")).expect("docker was run");
         let arch = target.split('-').next().expect("a triple names its arch");
-        let platform = if arch == "x86_64" {
-            "linux/amd64"
-        } else {
-            "linux/arm64"
-        };
+        let platform = "linux/amd64";
         let args: Vec<&str> = invocation.lines().collect();
         for expected in [
             platform,
@@ -439,19 +451,28 @@ fn the_pull_request_check_builds_the_release_linux_legs_through_the_recipe() {
         block.contains("--expect-version \"$version\""),
         "the smoke test holds the installed binary to this tree's version"
     );
-    let release = job_block("release.yml", "build-wheels");
+    // The release reaches the same script through its own recipe's build phase.
+    let release = job_block("release.yml", "build-linux");
     assert!(
-        release.contains("run: just wheel-linux \"$TARGET\"")
-            && release.contains("if: runner.os == 'Linux'"),
-        "release.yml's Linux legs build through the recipe"
+        release.contains("run: just release-linux build"),
+        "release.yml's build-linux job builds through its recipe"
+    );
+    let phase = fs::read_to_string(repo_root().join("scripts/release.mjs")).expect("release.mjs");
+    assert!(
+        phase.contains("\"scripts/build-linux-wheel.sh\""),
+        "the release's Linux build phase compiles through scripts/build-linux-wheel.sh"
     );
     // Every step of both that builds the browser view comes before the wheel.
-    for (name, block) in [
-        ("ci.yml wheel", &block),
-        ("release.yml build-wheels", &release),
+    for (name, block, wheel) in [
+        ("ci.yml wheel", &block, "just wheel-linux"),
+        (
+            "release.yml build-linux",
+            &release,
+            "just release-linux build",
+        ),
     ] {
         let built = block.find("run: just build").expect("the view is built");
-        let wheel = block.find("just wheel-linux").expect("the wheel is built");
+        let wheel = block.find(wheel).expect("the wheel is built");
         assert!(
             built < wheel,
             "{name} builds the browser view before the wheel"

@@ -16,6 +16,11 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { TARGETS } from "./release.mjs";
+
+// Native runners only: each platform job installs its own targets.
+const WINDOWS = process.platform === "win32";
+const portable = (path) => (WINDOWS ? path.replace(/\\/g, "/") : path);
 
 function fault(message, action) {
   return Object.assign(new Error(message), { action });
@@ -30,11 +35,7 @@ async function main() {
       "usage: verify-staged-release.mjs ROOT TARGET VERSION",
       "pass ROOT TARGET VERSION from the release workflow; ROOT must contain staged artifacts",
     );
-  const allowed = [
-    "aarch64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-  ];
+  const allowed = Object.keys(TARGETS);
   if (!allowed.includes(target))
     throw usage(
       `unsupported staged target: ${target}`,
@@ -57,10 +58,13 @@ async function main() {
       "staged-release-",
     ),
   );
+  const facts = TARGETS[target];
+  const exe = `onepipeline-api${facts.exe}`;
   const run = (cmd, args, options = {}) =>
     execFileSync(cmd, args, {
       stdio: "pipe",
       env: { ...process.env, TMPDIR: scratch },
+      shell: WINDOWS && cmd === "npm",
       ...options,
     });
   async function smoke(command) {
@@ -69,20 +73,17 @@ async function main() {
       "--expect-version",
       version,
       "--command",
-      command,
+      portable(command),
       "--label",
       `staged ${target}`,
     ]);
     const runs = join(scratch, "runs");
     mkdirSync(runs, { recursive: true });
-    const server = spawn(command, [
-      "serve",
-      "--ui",
-      "--runs-root",
-      runs,
-      "--bind",
-      "127.0.0.1:0",
-    ]);
+    const server = spawn(
+      command,
+      ["serve", "--ui", "--runs-root", runs, "--bind", "127.0.0.1:0"],
+      { shell: WINDOWS && command.endsWith(".cmd") },
+    );
     let log = "";
     server.stdout.on("data", (data) => {
       log += data;
@@ -148,25 +149,34 @@ async function main() {
     const archive = join(
       root,
       "assets",
-      `onepipeline-api-v${version}-${target}.tar.gz`,
+      `onepipeline-api-v${version}-${target}.${facts.archive}`,
     );
     const dl = join(scratch, "archive");
     mkdirSync(dl);
-    run("tar", ["-xzf", archive, "-C", dl]);
-    run("shasum", ["-a", "256", "-c", archive.replace(".tar.gz", ".sha256")], {
-      cwd: join(root, "assets"),
-    });
-    await smoke(join(dl, "onepipeline-api"));
+    // Windows' own tar is bsdtar, which reads the .zip; Git's GNU tar does not.
+    const tar = WINDOWS
+      ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
+      : "tar";
+    run(tar, ["-xf", archive, "-C", dl]);
+    const recorded = readFileSync(
+      join(root, "assets", `onepipeline-api-v${version}-${target}.sha256`),
+      "utf8",
+    ).split(/\s+\*?/);
+    if (
+      recorded[0] !==
+        createHash("sha256").update(readFileSync(archive)).digest("hex") ||
+      recorded[1] !== `onepipeline-api-v${version}-${target}.${facts.archive}`
+    )
+      throw fault(
+        "the staged checksum does not describe the staged archive",
+        "regenerate both from one release-package.py run",
+      );
+    await smoke(join(dl, exe));
+    const wheelArch = { linux: "x86_64", macos: "arm64", windows: "amd64" }[
+      facts.platform
+    ];
     const wheel = readdirSync(join(root, "wheels")).find(
-      (name) =>
-        name.endsWith(".whl") &&
-        name.includes(
-          target.startsWith("x86_64")
-            ? "x86_64"
-            : target.includes("darwin")
-              ? "arm64"
-              : "aarch64",
-        ),
+      (name) => name.endsWith(".whl") && name.includes(wheelArch),
     );
     if (!wheel)
       throw fault(
@@ -174,22 +184,24 @@ async function main() {
         "run release-package.py for this target and check its wheel platform tag",
       );
     const venv = join(scratch, "venv");
-    run("python3", ["-m", "venv", venv]);
-    run(join(venv, "bin", "pip"), [
+    const bin = join(venv, WINDOWS ? "Scripts" : "bin");
+    run(WINDOWS ? "python" : "python3", ["-m", "venv", venv]);
+    run(join(bin, "pip"), [
       "install",
+      "--disable-pip-version-check",
       "--no-index",
       join(root, "wheels", wheel),
     ]);
     if (
-      !readFileSync(join(venv, "bin", "onepipeline-api")).equals(
-        readFileSync(join(root, target, "onepipeline-api")),
+      !readFileSync(join(bin, exe)).equals(
+        readFileSync(join(root, target, exe)),
       )
     )
       throw fault(
         "pip installed different binary bytes",
         "inspect the staged wheel and recreate the venv; it must install the final wheel binary unchanged",
       );
-    await smoke(join(venv, "bin", "onepipeline-api"));
+    await smoke(join(bin, exe));
     const npmRoot = join(scratch, "npm");
     mkdirSync(npmRoot);
     const launcher = run("node", [
@@ -217,9 +229,8 @@ async function main() {
         "npm pack returned invalid launcher metadata",
         "inspect npm pack --json output; rebuild the launcher for this release version",
       );
-    const arch = target.startsWith("x86_64") ? "x64" : "arm64";
-    const platform = target.includes("darwin") ? "darwin" : "linux";
-    const packageName = `onepipeline-api-cli-${platform}-${arch}`;
+    const [platform, arch] = facts.npm.split("-");
+    const packageName = `onepipeline-api-cli-${facts.npm}`;
     const tgz = readdirSync(join(root, "npm-artifacts")).find((name) =>
       name.startsWith(`${packageName}-`),
     );
@@ -245,7 +256,7 @@ async function main() {
       manifest.cpu.length !== 1 ||
       manifest.cpu[0] !== arch ||
       !Array.isArray(manifest.files) ||
-      !manifest.files.includes("bin/onepipeline-api")
+      !manifest.files.includes(`bin/${exe}`)
     )
       throw fault(
         "invalid staged npm platform metadata",
@@ -307,7 +318,7 @@ async function main() {
             "--no-fund",
             join(scratch, launcherTarball),
           ],
-          { env: { ...process.env, TMPDIR: scratch } },
+          { env: { ...process.env, TMPDIR: scratch }, shell: WINDOWS },
         );
         let output = "";
         child.stdout.on("data", (data) => {
@@ -336,23 +347,20 @@ async function main() {
     } finally {
       await new Promise((resolve) => registry.close(resolve));
     }
-    const installed = join(
-      npmRoot,
-      "node_modules",
-      packageName,
-      "bin",
-      "onepipeline-api",
-    );
-    if (
-      !readFileSync(installed).equals(
-        readFileSync(join(root, target, "onepipeline-api")),
-      )
-    )
+    const installed = join(npmRoot, "node_modules", packageName, "bin", exe);
+    if (!readFileSync(installed).equals(readFileSync(join(root, target, exe))))
       throw fault(
         "npm installed different binary bytes",
         "inspect the platform package and launcher resolution; regenerate npm from the final wheel binary",
       );
-    await smoke(join(npmRoot, "node_modules", ".bin", "onepipeline-api"));
+    await smoke(
+      join(
+        npmRoot,
+        "node_modules",
+        ".bin",
+        WINDOWS ? "onepipeline-api.cmd" : "onepipeline-api",
+      ),
+    );
     console.log(
       `${target}: staged archive/wheel/npm install, server and embedded view passed`,
     );

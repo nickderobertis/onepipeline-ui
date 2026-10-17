@@ -50,6 +50,14 @@ export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onep
 # installed, so nothing on PATH can be it.
 export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
 
+# The release tools `release-tools` provisions, pinned to what the release
+# workflows install: release-plz.yml's RELEASE_PLZ_VERSION, and the
+# cargo-cyclonedx and twine release.yml installs. `.github/tests/release.test.mjs`
+# holds each pair equal.
+release-plz-version := "0.3.158"
+cyclonedx-version := "0.5.7"
+twine-version := "6.1.0"
+
 # The `cargo-prune-superseded` release `pool-maintenance` runs, pinned once here:
 # `_ensure-pruner` installs exactly this and nothing else reads a version for it.
 prune-superseded-version := "0.1.1"
@@ -210,13 +218,58 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Shared by release.yml's Linux `build-wheels` legs and ci.yml's `wheel` legs, so
-# a pull request meets the prerequisites and maturin invocation a release does.
-# Needs Docker, and the browser view `just build` writes.
+# Shared by the release's `build-linux` job (through `release-linux build`) and
+# ci.yml's `wheel` job, so a pull request meets the prerequisites and maturin
+# invocation a release does. Needs Docker, and the browser view `just build`
+# writes.
 # Build the onepipeline-api-cli wheel for one Linux target in the release's image.
 [positional-arguments]
 wheel-linux target out="dist":
     @bash scripts/build-linux-wheel.sh --target "$1" --out "$2"
+
+# One recipe per release job in `.github/workflows/release.yml`, each a phase
+# of scripts/release.mjs, whose header says what every phase does: `plan` lists
+# what the job produces without building it; a platform job runs `build`,
+# `test-install`, `upload github|pypi|npm` and `verify`, and `all --dry-run`
+# rehearses the lot without publishing; `publish` runs `check`, `build`,
+# `upload crate|npm|github`, `verify` and `settle`. `build` needs `just build`
+# first; the Linux one needs Docker, the macOS and Windows ones maturin.
+# The build-linux release job: build, install, publish and verify Linux.
+[positional-arguments]
+release-linux *args:
+    @node scripts/release.mjs linux "$@"
+
+# The build-macos release job: build, install, publish and verify Apple Silicon.
+[positional-arguments]
+release-macos *args:
+    @node scripts/release.mjs macos "$@"
+
+# The build-windows release job: build, install, publish and verify Windows.
+[positional-arguments]
+release-windows *args:
+    @node scripts/release.mjs windows "$@"
+
+# The publish release job: the platform-independent artifacts and the verdict.
+[positional-arguments]
+release-publish *args:
+    @node scripts/release.mjs publish "$@"
+
+# The tools the release recipes reach that no lockfile pins, at the versions the
+# release workflows install, into `.tools`: release-plz and cargo-cyclonedx, and
+# a Python environment with twine. The release journeys (tests/release) put
+# `.tools/bin` and `.tools/release-venv/bin` first on PATH; the workflows install
+# the same pins themselves.
+# Provision the release recipes' tools into .tools.
+release-tools:
+    @[ "$(.tools/bin/release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
+      || cargo install release-plz --version {{release-plz-version}} --locked --root .tools --quiet \
+      || { echo "cannot install release-plz {{release-plz-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
+    @[ "$(.tools/bin/cargo-cyclonedx cyclonedx --version 2>/dev/null)" = "cargo-cyclonedx {{cyclonedx-version}}" ] \
+      || cargo install cargo-cyclonedx --version {{cyclonedx-version}} --locked --root .tools --quiet \
+      || { echo "cannot install cargo-cyclonedx {{cyclonedx-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
+    @[ "$(.tools/release-venv/bin/python -m twine --version 2>/dev/null | head -n1 | cut -d' ' -f2)" = "{{twine-version}}" ] \
+      || { python3 -m venv .tools/release-venv && .tools/release-venv/bin/pip install --quiet --disable-pip-version-check twine=={{twine-version}} packaging==25.0; } \
+      || { echo "cannot install twine {{twine-version}} into .tools/release-venv — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
 
 # Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
 # the frontend's components, and the browser journeys — and the coverage floor

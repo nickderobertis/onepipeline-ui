@@ -116,7 +116,7 @@ jobs:
       - name: Bootstrap
         run: just bootstrap
       # The browser tier is in this sweep, and has to be: it is the only proof the
-      # served UI works, and it gates every publish job in `release.yml`, so a
+      # served UI works, and `release.yml` publishes the view it serves, so a
       # pull request it skips can only redden main after the merge.
       # `apps/dag-ui/project.json` is what puts it here — it declares `check`, and
       # names the crate a dependency because `dag-ui:test` serves the UI through
@@ -136,9 +136,9 @@ jobs:
   # affected selection could miss. It is deliberately not an input to `gate`:
   # `gate` rules on what every pull request owes, and this runs on one kind of
   # pull request only. Whether branch protection lists it is the repository
-  # settings' call, not this file's. Publication does not wait on it either way —
-  # release.yml's `test` job re-sweeps whatever commit a Release names before any
-  # artifact is built, for the reason its own comment gives.
+  # settings' call, not this file's. It is also the last whole-gate run a release
+  # gets: release.yml re-runs no tests, and proves the artifacts instead, by
+  # installing and running each one before and after it publishes.
   sweep:
     needs: changes
     if: needs.changes.outputs.tier == 'broader'
@@ -408,8 +408,8 @@ jobs:
   # change that linked onetaskgraph's HTTP stores, whose vendored OpenSSL could
   # not configure in the manylinux image, and the release was the first place
   # anything compiled there — so it published no wheel. `just wheel-linux` is the
-  # one definition release.yml's Linux `build-wheels` legs also run, on the same
-  # native runners, and tests/e2e/linux_wheel.rs holds the two matrices equal.
+  # one definition release.yml's `build-linux` job also builds through, on the
+  # same runner, and tests/e2e/linux_wheel.rs holds the two target sets equal.
   wheel:
     needs: changes
     if: needs.changes.outputs.crate == 'true'
@@ -419,8 +419,6 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
     name: wheel (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     steps:
@@ -437,7 +435,7 @@ jobs:
       - name: Build the browser view
         run: just build
       # llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this is not a suite exercising an external service: it is the release's own Linux build, and what it reaches over the network is its pinned image, toolchain and maturin, as `gate` reaches crates.io and npm. It sits in the pull-request tier on purpose — v0.16.0 published no wheel because the release was the first place anything compiled in this image, with every required check green — so moving it to a credential-gated or promoted tier would reinstate exactly that gap. It needs no credential.
-      - name: Build wheel (shared with the Linux build-wheels legs in release.yml)
+      - name: Build wheel (shared with release.yml's build-linux job)
         env:
           TARGET: ${{ matrix.target }}
         run: just wheel-linux "$TARGET"
@@ -451,8 +449,8 @@ jobs:
             --expect-version "$version" \
             --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
 
-  # The `gate` context branch protection requires: the quality gate and both
-  # Linux wheel legs plus the Windows browser build, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
+  # The `gate` context branch protection requires: the quality gate and the
+  # Linux wheel plus the Windows browser build, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
   # wheels are in it — `wheel` was not a required context, so a wheel that could
   # not build in the release's image left every required check green. Aggregated
   # here rather than by making the quality gate wait on `wheel`, so the two still

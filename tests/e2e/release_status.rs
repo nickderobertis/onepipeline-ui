@@ -1,5 +1,6 @@
 //! The release's last word: `scripts/release-status.sh`, driven the way the
-//! `release-status` job in `.github/workflows/release.yml` drives it.
+//! `publish` job's `settle` step in `.github/workflows/release.yml` drives it
+//! (through `just release-publish settle`).
 //!
 //! What it guards is a state this repository has actually been left in twice: a
 //! red job skips every publish job, and the tag, the GitHub Release and its
@@ -28,34 +29,32 @@ const NOTES: &str = "### Fixed\n\n- build the read API before the browser tier (
 
 const TAG: &str = "v0.3.1";
 
-/// Every job the workflow reports, in the order it reports them. A test names
-/// only the ones it is bending, so a new job here does not rewrite every case.
+/// Every job and step the workflow reports, in the order it reports them: the
+/// three platform jobs, then the publish job's own steps. A test names only the
+/// ones it is bending, so a new one here does not rewrite every case.
 const REPORTED_JOBS: &[&str] = &[
-    "test",
-    "upload",
-    "darwin",
-    "upload-darwin",
-    "verify-assets",
-    "publish-crate",
-    "build-wheels",
-    "publish-pypi",
-    "verify-pypi",
-    "build-npm",
-    "publish-npm",
-    "verify-npm",
+    "build-linux",
+    "build-macos",
+    "build-windows",
+    "check",
+    "build",
+    "upload-crate",
+    "upload-npm",
+    "upload-github",
+    "verify",
 ];
 
 /// Which registries the operator has switched on, as the workflow passes them.
+/// PyPI is not among them: each platform job publishes its own wheels, so its
+/// result already says whether they shipped.
 struct Switches {
     krate: &'static str,
-    pypi: &'static str,
     npm: &'static str,
 }
 
 /// Everything on, which is how this repository is configured to release.
 const ALL_ON: Switches = Switches {
     krate: "true",
-    pypi: "true",
     npm: "true",
 };
 
@@ -144,7 +143,7 @@ impl Fixture {
         self.dir.path().join(name)
     }
 
-    /// Run the script the way the `release-status` job does. `bent` overrides
+    /// Run the script the way the `settle` step does. `bent` overrides
     /// the result of the jobs it names; everything else succeeded.
     fn run(&self, bent: &[(&str, &str)], switches: &Switches) -> Output {
         self.run_with(&reported(bent), switches)
@@ -185,7 +184,6 @@ impl Fixture {
             .env("RELEASE_TAG", TAG)
             .env("JOB_RESULTS", job_results)
             .env("EXPECT_CRATE", switches.krate)
-            .env("EXPECT_PYPI", switches.pypi)
             .env("EXPECT_NPM", switches.npm);
         command
     }
@@ -249,14 +247,23 @@ fn a_release_whose_every_required_job_succeeded_is_left_alone() {
     );
 }
 
-/// The shape v0.2.0 and v0.3.0 were left in: the gate went red, so every publish
-/// job was *skipped* rather than failed, and nothing about the Release said so.
+/// The shape v0.2.0 and v0.3.0 were left in: one job went red, so everything
+/// after it was *skipped* rather than failed, and nothing about the Release said
+/// so. Here a platform job fails, the availability check refuses, and every
+/// publish step after it is skipped.
 #[test]
-fn a_gate_failure_that_skips_every_publish_demotes_the_release() {
+fn a_failed_platform_job_that_skips_every_publish_demotes_the_release() {
     let fixture = Fixture::fresh();
     let skipped: Vec<(&str, &str)> = REPORTED_JOBS
         .iter()
-        .map(|job| (*job, if *job == "test" { "failure" } else { "skipped" }))
+        .map(|job| {
+            let result = match *job {
+                "build-linux" | "check" => "failure",
+                "build-macos" | "build-windows" => "success",
+                _ => "skipped",
+            };
+            (*job, result)
+        })
         .collect();
     let output = fixture.run(&skipped, &ALL_ON);
 
@@ -276,9 +283,10 @@ fn a_gate_failure_that_skips_every_publish_demotes_the_release() {
     // is the person this exists for.
     let body = fixture.edited_body().expect("the notes were rewritten");
     assert!(body.contains("did not publish"), "{body}");
-    assert!(body.contains("test (failure)"), "{body}");
-    assert!(body.contains("publish-npm (skipped)"), "{body}");
-    assert!(body.contains("verify-pypi (skipped)"), "{body}");
+    assert!(body.contains("build-linux (failure)"), "{body}");
+    assert!(body.contains("upload-npm (skipped)"), "{body}");
+    assert!(body.contains("verify (skipped)"), "{body}");
+    assert!(!body.contains("build-macos ("), "{body}");
     // And it must not cost the reader the changelog they came for.
     assert!(body.contains(NOTES.trim()), "the notes were lost: {body}");
 
@@ -291,32 +299,27 @@ fn a_gate_failure_that_skips_every_publish_demotes_the_release() {
 #[test]
 fn a_single_failed_publish_leg_demotes_the_release() {
     let fixture = Fixture::fresh();
-    let output = fixture.run(&[("verify-npm", "failure")], &ALL_ON);
+    let output = fixture.run(&[("verify", "failure")], &ALL_ON);
 
     assert!(!output.status.success(), "{}", stdout(&output));
     let body = fixture.edited_body().expect("the notes were rewritten");
-    assert!(body.contains("verify-npm (failure)"), "{body}");
-    // Only the leg that failed is named — a banner that blamed everything would
+    assert!(body.contains("verify (failure)"), "{body}");
+    // Only the step that failed is named — a banner that blamed everything would
     // send the next reader looking in nine wrong places.
-    assert!(!body.contains("publish-npm ("), "{body}");
+    assert!(!body.contains("upload-npm ("), "{body}");
 }
 
-/// A publish job the operator has switched off is not a job the release was
+/// A publish step the operator has switched off is not one the release was
 /// waiting for. Only the switches decide that, so a repository that publishes
 /// nowhere still gets a truthful Release.
 #[test]
 fn a_registry_that_is_switched_off_is_not_a_stranded_release() {
     let fixture = Fixture::fresh();
     let output = fixture.run(
-        &[
-            ("publish-pypi", "skipped"),
-            ("verify-pypi", "skipped"),
-            ("publish-crate", "skipped"),
-        ],
+        &[("upload-npm", "skipped"), ("upload-crate", "skipped")],
         &Switches {
             krate: "false",
-            pypi: "false",
-            npm: "true",
+            npm: "false",
         },
     );
 
@@ -331,7 +334,7 @@ fn a_registry_that_is_switched_off_is_not_a_stranded_release() {
 fn a_re_run_that_finishes_the_publish_restores_the_release() {
     let stranded = Fixture::fresh();
     assert!(!stranded
-        .run(&[("publish-npm", "failure")], &ALL_ON)
+        .run(&[("upload-npm", "failure")], &ALL_ON)
         .status
         .success());
     let demoted = stranded.edited_body().expect("the notes were rewritten");
@@ -365,7 +368,7 @@ fn a_re_run_that_finishes_the_publish_restores_the_release() {
 fn a_deliberate_prerelease_is_not_promoted_by_recovering() {
     let stranded = Fixture::new(NOTES, true);
     assert!(!stranded
-        .run(&[("upload", "failure")], &ALL_ON)
+        .run(&[("upload-github", "failure")], &ALL_ON)
         .status
         .success());
 
@@ -386,12 +389,12 @@ fn a_deliberate_prerelease_is_not_promoted_by_recovering() {
 fn demoting_an_already_demoted_release_writes_nothing_further() {
     let stranded = Fixture::fresh();
     assert!(!stranded
-        .run(&[("test", "failure")], &ALL_ON)
+        .run(&[("build-linux", "failure")], &ALL_ON)
         .status
         .success());
 
     let fixture = Fixture::new(&stranded.edited_body().expect("rewritten"), true);
-    let output = fixture.run(&[("test", "failure")], &ALL_ON);
+    let output = fixture.run(&[("build-linux", "failure")], &ALL_ON);
 
     assert!(!output.status.success());
     assert!(
@@ -406,21 +409,21 @@ fn demoting_an_already_demoted_release_writes_nothing_further() {
     );
 }
 
-/// A job the workflow never reported is a hole in this gate, not a pass: it means
-/// release.yml grew a publish job nothing holds the Release to.
+/// A job or step the workflow never reported is a hole in this gate, not a pass:
+/// it means release.yml grew publish work nothing holds the Release to.
 #[test]
 fn a_job_the_workflow_never_reported_strands_the_release() {
     let fixture = Fixture::fresh();
     let reported: Vec<String> = REPORTED_JOBS
         .iter()
-        .filter(|job| **job != "verify-assets")
+        .filter(|job| **job != "upload-github")
         .map(|job| format!("{job}=success"))
         .collect();
     let output = fixture.run_with(&reported.join(" "), &ALL_ON);
 
     assert!(!output.status.success(), "{}", stdout(&output));
     assert!(
-        stderr(&output).contains("verify-assets (not reported)"),
+        stderr(&output).contains("upload-github (not reported)"),
         "{}",
         stderr(&output)
     );
@@ -435,7 +438,7 @@ fn no_release_to_hold_is_a_usage_error() {
     // than a command assembled by hand: what is missing is then the difference
     // between this run and every other, and not whatever this one forgot.
     let output = fixture
-        .command("test=success", &ALL_ON)
+        .command("build-linux=success", &ALL_ON)
         .env_remove("RELEASE_TAG")
         .output()
         .expect("bash is on PATH");
@@ -503,7 +506,11 @@ fn a_tag_that_is_not_a_version_is_a_usage_error() {
 #[test]
 fn a_release_it_cannot_read_fails_rather_than_passing() {
     let fixture = Fixture::fresh();
-    let output = fixture.run_refused("--json isPrerelease", &[("test", "failure")], &ALL_ON);
+    let output = fixture.run_refused(
+        "--json isPrerelease",
+        &[("build-linux", "failure")],
+        &ALL_ON,
+    );
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(
@@ -521,7 +528,7 @@ fn a_release_it_cannot_read_fails_rather_than_passing() {
 #[test]
 fn notes_it_cannot_read_fail_rather_than_being_republished_empty() {
     let fixture = Fixture::fresh();
-    let output = fixture.run_refused("--json body", &[("test", "failure")], &ALL_ON);
+    let output = fixture.run_refused("--json body", &[("build-linux", "failure")], &ALL_ON);
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(
@@ -543,7 +550,7 @@ fn notes_it_cannot_read_fail_rather_than_being_republished_empty() {
 #[test]
 fn a_release_it_cannot_demote_names_the_grant_it_is_missing() {
     let fixture = Fixture::fresh();
-    let output = fixture.run_refused("release edit", &[("publish-npm", "failure")], &ALL_ON);
+    let output = fixture.run_refused("release edit", &[("upload-npm", "failure")], &ALL_ON);
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(
@@ -569,7 +576,7 @@ fn a_release_it_cannot_demote_names_the_grant_it_is_missing() {
 fn a_prerelease_flag_it_cannot_read_is_not_read_as_false() {
     let fixture = Fixture::fresh();
     fixture.gh_answers_the_flag_with("null");
-    let output = fixture.run(&[("test", "failure")], &ALL_ON);
+    let output = fixture.run(&[("build-linux", "failure")], &ALL_ON);
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(
@@ -581,7 +588,7 @@ fn a_prerelease_flag_it_cannot_read_is_not_read_as_false() {
     assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
 }
 
-/// A switch the operator misspelled must not read as "off". `PYPI_PUBLISH` is a
+/// A switch the operator misspelled must not read as "off". `NPM_PUBLISH` is a
 /// repository variable typed by hand, and a `yes` silently treated as `false`
 /// would leave this gate asking nothing at all of the registry it was set for.
 #[test]
@@ -591,14 +598,13 @@ fn a_switch_that_is_not_a_boolean_is_a_usage_error() {
         &[],
         &Switches {
             krate: "true",
-            pypi: "yes",
-            npm: "true",
+            npm: "yes",
         },
     );
 
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(
-        stderr(&output).contains("EXPECT_PYPI must be 'true', 'false' or unset, not 'yes'"),
+        stderr(&output).contains("EXPECT_NPM must be 'true', 'false' or unset, not 'yes'"),
         "{}",
         stderr(&output)
     );
@@ -611,7 +617,7 @@ fn a_switch_that_is_not_a_boolean_is_a_usage_error() {
 #[test]
 fn notes_it_cannot_assemble_fail_rather_than_leaving_the_release_alone() {
     let fixture = Fixture::fresh();
-    let output = fixture.run_without_a_tmpdir(&[("test", "failure")], &ALL_ON);
+    let output = fixture.run_without_a_tmpdir(&[("build-linux", "failure")], &ALL_ON);
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(
@@ -626,34 +632,42 @@ fn notes_it_cannot_assemble_fail_rather_than_leaving_the_release_alone() {
     );
 }
 
-/// The gate is only as complete as the list of jobs the workflow hands it, so
-/// the workflow must report every job it runs.
+/// The gate is only as complete as the list the workflow hands it, so the
+/// publish job must report every platform job it needs and every step of its
+/// own before the verdict.
 #[test]
-fn the_workflow_reports_every_job_it_runs_to_this_gate() {
+fn the_workflow_reports_every_job_and_step_it_runs_to_this_gate() {
     let workflow = fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
         .expect("read release.yml");
-    for job in jobs_in(&workflow) {
-        // `guard` decides whether a publish was expected and `release-status` is
-        // this gate itself; every other job is one the release depends on.
-        if job == "guard" || job == "release-status" {
-            continue;
-        }
-        assert!(
-            REPORTED_JOBS.contains(&job.as_str()),
-            "release.yml runs a job called {job} that release-status.sh is never told about"
-        );
+    let (jobs, publish_steps) = jobs_and_publish_steps(&workflow);
+    let mut reported = Vec::new();
+    for job in jobs.iter().filter(|job| *job != "publish") {
         assert!(
             workflow.contains(&format!("{job}=${{{{ needs.{job}.result }}}}")),
             "release.yml does not report {job}'s result to release-status.sh"
         );
+        reported.push(job.clone());
     }
+    for step in publish_steps.iter().filter(|step| *step != "settle") {
+        assert!(
+            workflow.contains(&format!("{step}=${{{{ steps.{step}.outcome }}}}")),
+            "release.yml does not report the publish job's {step} step to release-status.sh"
+        );
+        reported.push(step.clone());
+    }
+    assert_eq!(
+        reported, REPORTED_JOBS,
+        "release.yml reports a different set than these journeys hold release-status.sh to"
+    );
 }
 
 /// The job ids under the workflow's top-level `jobs:` key — the lines indented
-/// by exactly two spaces after it. A YAML parser would be a dependency for one
-/// assertion, and the shape being read is a fixed two-level one.
-fn jobs_in(workflow: &str) -> Vec<String> {
+/// by exactly two spaces after it — and the step `id:`s of the `publish` job. A
+/// YAML parser would be a dependency for one assertion, and the shape being
+/// read is a fixed one.
+fn jobs_and_publish_steps(workflow: &str) -> (Vec<String>, Vec<String>) {
     let mut jobs = Vec::new();
+    let mut steps = Vec::new();
     let mut inside = false;
     for line in workflow.lines() {
         if !line.starts_with([' ', '\t', '#']) && !line.is_empty() {
@@ -661,6 +675,12 @@ fn jobs_in(workflow: &str) -> Vec<String> {
             continue;
         }
         if !inside {
+            continue;
+        }
+        if let Some(id) = line.trim_start().strip_prefix("id: ") {
+            if jobs.last().is_some_and(|job: &String| job == "publish") {
+                steps.push(id.to_owned());
+            }
             continue;
         }
         let Some(rest) = line.strip_prefix("  ") else {
@@ -674,7 +694,7 @@ fn jobs_in(workflow: &str) -> Vec<String> {
         }
     }
     assert!(!jobs.is_empty(), "release.yml declares no jobs");
-    jobs
+    (jobs, steps)
 }
 
 /// The stand-in must be the only `gh` this suite reaches, or a machine with a
@@ -690,11 +710,12 @@ fn the_stand_in_is_what_the_script_calls() {
     );
 }
 
-/// Darwin verification happens before publication, and neither a failed proof
-/// nor a failed Linux asset upload may leave a Release claiming it shipped.
+/// Each platform job builds, installs, publishes and verifies its own files, so
+/// one that did not succeed — failed, cancelled, or never run — leaves a release
+/// some platform cannot install, which the Release must not claim it shipped.
 #[test]
-fn failed_or_cancelled_darwin_work_demotes_the_release() {
-    for job in ["darwin", "upload-darwin"] {
+fn a_platform_job_that_did_not_succeed_demotes_the_release() {
+    for job in ["build-linux", "build-macos", "build-windows"] {
         for result in ["failure", "cancelled", "skipped"] {
             let fixture = Fixture::fresh();
             let output = fixture.run(&[(job, result)], &ALL_ON);

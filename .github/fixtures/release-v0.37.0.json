@@ -1,0 +1,82 @@
+{
+  "//": "What release v0.37.0 published, read from the registries on 2026-10-17: the GitHub Release's asset names (gh release view v0.37.0 --json assets), PyPI's files for onepipeline-api-cli 0.37.0 (https://pypi.org/pypi/onepipeline-api-cli/0.37.0/json), npm's tarball for each package (npm view <package>@0.37.0 dist.tarball), the crate on crates.io, and the newest GLIBC_ symbol version each x86_64 Linux artifact's binary needs (objdump -T). .github/tests/release.test.mjs holds every release job's plan to it, and tests/release/linux.test.mjs holds what build-linux builds to it.",
+  "version": "0.37.0",
+  "github": [
+    "onepipeline-api-v0.37.0-aarch64-apple-darwin.sha256",
+    "onepipeline-api-v0.37.0-aarch64-apple-darwin.tar.gz",
+    "onepipeline-api-v0.37.0-aarch64-unknown-linux-gnu.sha256",
+    "onepipeline-api-v0.37.0-aarch64-unknown-linux-gnu.tar.gz",
+    "onepipeline-api-v0.37.0-x86_64-pc-windows-msvc.sha256",
+    "onepipeline-api-v0.37.0-x86_64-pc-windows-msvc.zip",
+    "onepipeline-api-v0.37.0-x86_64-unknown-linux-gnu.sha256",
+    "onepipeline-api-v0.37.0-x86_64-unknown-linux-gnu.tar.gz",
+    "onepipeline-api-v0.37.0.cdx.json"
+  ],
+  "pypi": [
+    {
+      "file": "onepipeline_api_cli-0.37.0-py3-none-macosx_11_0_arm64.whl",
+      "tags": [
+        "py3-none-macosx_11_0_arm64"
+      ]
+    },
+    {
+      "file": "onepipeline_api_cli-0.37.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+      "tags": [
+        "py3-none-manylinux_2_17_aarch64",
+        "py3-none-manylinux2014_aarch64"
+      ]
+    },
+    {
+      "file": "onepipeline_api_cli-0.37.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "tags": [
+        "py3-none-manylinux_2_17_x86_64",
+        "py3-none-manylinux2014_x86_64"
+      ]
+    },
+    {
+      "file": "onepipeline_api_cli-0.37.0-py3-none-win_amd64.whl",
+      "tags": [
+        "py3-none-win_amd64"
+      ]
+    }
+  ],
+  "npm": [
+    {
+      "package": "onepipeline-api-cli",
+      "file": "onepipeline-api-cli-0.37.0.tgz"
+    },
+    {
+      "package": "onepipeline-api-cli-linux-x64",
+      "file": "onepipeline-api-cli-linux-x64-0.37.0.tgz"
+    },
+    {
+      "package": "onepipeline-api-cli-linux-arm64",
+      "file": "onepipeline-api-cli-linux-arm64-0.37.0.tgz"
+    },
+    {
+      "package": "onepipeline-api-cli-darwin-arm64",
+      "file": "onepipeline-api-cli-darwin-arm64-0.37.0.tgz"
+    },
+    {
+      "package": "onepipeline-api-cli-win32-x64",
+      "file": "onepipeline-api-cli-win32-x64-0.37.0.tgz"
+    },
+    {
+      "package": "onepipeline-ui",
+      "file": "onepipeline-ui-0.37.0.tgz"
+    }
+  ],
+  "crate": [
+    {
+      "package": "onepipeline-ui",
+      "file": "onepipeline-ui-0.37.0.crate"
+    }
+  ],
+  "glibc": {
+    "x86_64-unknown-linux-gnu": {
+      "archive": "2.39",
+      "wheel": "2.17",
+      "npm": "2.39"
+    }
+  }
+}

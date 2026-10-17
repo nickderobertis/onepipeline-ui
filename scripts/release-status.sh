@@ -2,15 +2,17 @@
 # Decide whether a release actually reached the registries, and make the GitHub
 # Release say so.
 #
-# The failure this exists for: a red `test` job in release.yml *skips* the ten
-# publish and verify jobs rather than failing them, so the run goes red in a
-# corner of the Actions tab while the tag and the GitHub Release stay exactly as
-# a successful release leaves them — assets attached, marked Latest. v0.2.0 and
+# The failure this exists for: a red job in release.yml *skips* the publish and
+# verify work after it rather than failing it, so the run goes red in a corner of
+# the Actions tab while the tag and the GitHub Release stay exactly as a
+# successful release leaves them — assets attached, marked Latest. v0.2.0 and
 # v0.3.0 both ended that way, and only querying npm and PyPI directly showed
 # that neither had shipped. release-plz then reads the tag as proof the version
 # released and never retries it.
 #
-# So the last job of every release runs this. It reads the result of every job
+# So the last step of every release runs this — the `publish` job's `settle`,
+# through `just release-publish settle` (scripts/release.mjs), in a job that
+# runs whatever the platform jobs did. It reads the result of every job and step
 # that had to succeed for the tag to mean "published", and:
 #
 #   * if they all did — leaves the Release alone, unless a previous attempt had
@@ -23,28 +25,30 @@
 # version that shipped. The tag is left alone: tags here are immutable (see
 # AGENTS.md), and the recovery is a new patch version, which the banner says.
 #
-# Whether a publish job *had* to succeed is the operator's choice, so the
+# Whether a publish step *had* to succeed is the operator's choice, so the
 # expectation is passed in rather than assumed: the crates.io publish
-# self-activates on a secret, and PyPI and npm publishing are switched by
-# repository variables. A job that is switched off is not required; a job that is
-# switched on and did not succeed is a failed release.
+# self-activates on a secret, and npm publishing is switched by a repository
+# variable. A step that is switched off is not required; a step that is switched
+# on and did not succeed is a failed release. PyPI has no step of its own here:
+# each platform job publishes and installs its own wheels, so its result already
+# says whether they shipped.
 #
 # Input comes from the environment, because that is how a workflow hands over
 # `needs.*.result` without interpolating it into a shell command:
 #
 #   RELEASE_TAG   the tag of the Release to hold, e.g. v0.3.1
-#   JOB_RESULTS   whitespace-separated `job=result` pairs, one per job
-#   EXPECT_CRATE  'true' when publish-crate had to run
-#   EXPECT_PYPI   'true' when publish-pypi and verify-pypi had to run
-#   EXPECT_NPM    'true' when publish-npm and verify-npm had to run
+#   JOB_RESULTS   whitespace-separated `name=result` pairs: the three platform
+#                 jobs and the publish job's own steps
+#   EXPECT_CRATE  'true' when upload-crate had to publish the crate
+#   EXPECT_NPM    'true' when upload-npm had to publish the launcher and frontend
 #
-# The three switches take 'true', 'false' or nothing; anything else is a usage
+# The two switches take 'true', 'false' or nothing; anything else is a usage
 # error rather than an "off".
 #
 # `gh` must be on PATH and authenticated for the repository (GH_TOKEN).
 set -euo pipefail
 
-usage="set RELEASE_TAG and JOB_RESULTS (and the EXPECT_* switches), then run 'release-status.sh'"
+usage="set RELEASE_TAG and JOB_RESULTS (and the EXPECT_CRATE/EXPECT_NPM switches), then run 'release-status.sh'"
 
 fail_usage() {
   echo "$1" >&2
@@ -61,15 +65,14 @@ fail() {
 RELEASE_TAG="${RELEASE_TAG:-}"
 JOB_RESULTS="${JOB_RESULTS:-}"
 EXPECT_CRATE="${EXPECT_CRATE:-}"
-EXPECT_PYPI="${EXPECT_PYPI:-}"
 EXPECT_NPM="${EXPECT_NPM:-}"
 
 [ -n "$RELEASE_TAG" ] || fail_usage "RELEASE_TAG is required"
 [ -n "$JOB_RESULTS" ] || fail_usage "JOB_RESULTS is required"
 
-# The tag names the Release this rewrites, so it is held to the same shape
-# release.yml's verify jobs hold it to: a Release cut by hand under some other
-# tag is not one this pipeline built, and saying so beats gh's 404.
+# The tag names the Release this rewrites, so it is held to the shape every
+# release tag has: a Release cut by hand under some other tag is not one this
+# pipeline built, and saying so beats gh's 404.
 if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
   fail_usage "RELEASE_TAG must be a vX.Y.Z version tag, not '$RELEASE_TAG'"
 fi
@@ -105,21 +108,18 @@ switched_on() {
 BANNER_OPEN="<!-- release-status: publish-failed"
 BANNER_CLOSE="<!-- release-status: end -->"
 
-# The jobs a release cannot be called published without. `upload` and
-# `verify-assets` are here because the GitHub Release's own assets are a
-# distribution too; `build-wheels` and `build-npm` because they run
-# unconditionally by design, so a packaging break reddens a release even where
-# publishing is switched off. Darwin's staged proofs and its Linux asset upload
-# are required for the same reason.
-required="test upload verify-assets build-wheels build-npm darwin upload-darwin"
+# What a release cannot be called published without. Each platform job builds,
+# installs, publishes and verifies its own files, the GitHub Release's assets
+# among them, so its one result covers all of that; it runs whatever the switches
+# say, so a packaging break reddens a release even where publishing is off. Then
+# the publish job's own steps: the availability check, the assembly, the SBOM on
+# the Release and the read-back, and each switched-on registry's upload.
+required="build-linux build-macos build-windows check build upload-github verify"
 if switched_on EXPECT_CRATE "$EXPECT_CRATE"; then
-  required="$required publish-crate"
-fi
-if switched_on EXPECT_PYPI "$EXPECT_PYPI"; then
-  required="$required publish-pypi verify-pypi"
+  required="$required upload-crate"
 fi
 if switched_on EXPECT_NPM "$EXPECT_NPM"; then
-  required="$required publish-npm verify-npm"
+  required="$required upload-npm"
 fi
 
 # No associative arrays: the suite runs this on macOS, whose bash is 3.2.
@@ -136,8 +136,8 @@ result_of() {
   return 1
 }
 
-# A job with no entry at all is as much a hole as a failed one: it means the
-# workflow grew a job this gate was never told about.
+# A name with no entry at all is as much a hole as a failed one: it means the
+# workflow grew a job or step this gate was never told about.
 stranded=""
 for job in $required; do
   if ! result="$(result_of "$job")" || [ -z "$result" ]; then

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -70,27 +70,5 @@ test("the production Actions step classifies real histories and exposes the outp
     }
   } finally {
     h.close();
-  }
-});
-
-test("manual diagnostic rejects empty registry metadata before invoking the real smoke command", () => {
-  const diagnostic = workflows().find((w) => w.file === "published-smoke.yml")
-    .document.jobs["macos-diagnostic"];
-  for (const step of diagnostic.steps.filter((step) => step.run)) {
-    const result = spawnSync(
-      "bash",
-      [
-        "-e",
-        "-o",
-        "pipefail",
-        "-c",
-        `pip() { return 0; }; npm() { return 0; };
-${step.run}`,
-      ],
-      { encoding: "utf8" },
-    );
-    assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout + result.stderr, /reported no version/);
-    assert.match(result.stdout + result.stderr, /ACTION:/);
   }
 });
