@@ -506,6 +506,79 @@ fn a_lockfile_the_checkout_rewrote_fails_the_linux_job_alone() {
     );
 }
 
+/// A project graph Nx cannot read stops a job before it runs anything, saying
+/// so, rather than leaving it to pass on whatever it could plan.
+#[test]
+fn a_project_graph_nx_cannot_read_refuses_the_job() {
+    let workspace = workspace(None);
+    fs::write(
+        workspace.root().join("packages/dag-layout/project.json"),
+        "{ this is not JSON",
+    )
+    .expect("break a project definition");
+    workspace.git(&[
+        "commit",
+        "--quiet",
+        "--no-verify",
+        "-am",
+        "a broken project",
+    ]);
+
+    for job in ["lint", "test-linux"] {
+        let run = recipe(&workspace, &format!("ci-{job}"), &[], false);
+        assert!(
+            !run.output.status.success(),
+            "ci-{job} ran over a broken graph:\n{}",
+            run.log
+        );
+        assert!(
+            run.log.contains("Nx could not plan") && run.log.contains("ACTION:"),
+            "ci-{job} did not say it could not plan:\n{}",
+            run.log
+        );
+        assert!(run.ran().is_empty(), "ci-{job} ran tasks: {:?}", run.ran());
+    }
+}
+
+/// The selection is read off a graph whose task map has to be there: a
+/// document of any other shape is refused, never read as "nothing selected".
+#[test]
+fn a_graph_without_a_task_map_is_refused_not_read_as_an_empty_selection() {
+    let decode = |document: &str| {
+        let mut child = Command::new("node")
+            .arg("scripts/ci-job-tasks.mjs")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("node is on PATH");
+        std::io::Write::write_all(child.stdin.as_mut().expect("stdin"), document.as_bytes())
+            .expect("hand over the document");
+        child.wait_with_output().expect("the decoder ends")
+    };
+    for (document, says) in [
+        ("Nx printed this instead", "no JSON task graph"),
+        ("{\"tasks\": {}}", "no task map"),
+        ("{\"tasks\": {\"tasks\": []}}", "no task map"),
+    ] {
+        let output = decode(document);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{document:?} was read as a selection"
+        );
+        assert!(
+            plain(&output.stderr).contains(says),
+            "{document:?}: {}",
+            plain(&output.stderr)
+        );
+    }
+    let output = decode("warming up\n{\"tasks\": {\"tasks\": {\"b:test\": {}, \"a:lint\": {}}}}");
+    assert!(output.status.success(), "{}", plain(&output.stderr));
+    assert_eq!(plain(&output.stdout), "a:lint b:test");
+}
+
 #[test]
 fn a_job_or_tier_the_script_does_not_know_is_refused_with_its_usage() {
     let workspace = workspace(None);

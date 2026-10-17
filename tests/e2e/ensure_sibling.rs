@@ -328,6 +328,16 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// Whether this suite runs as root, for whom no file mode refuses a read.
+#[cfg(unix)]
+fn running_as_root() -> bool {
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "0")
+        .unwrap_or(false)
+}
+
 /// This host's target triple as rustc reports it — what the recipe names the
 /// archive it fetches by.
 #[cfg(unix)]
@@ -669,7 +679,25 @@ fn an_archived_binary_that_fails_its_version_probe_is_refused() {
 #[test]
 fn every_refusal_names_what_to_do_and_compiles_nothing() {
     type Arrange = fn(&Fixture) -> Vec<(String, String)>;
-    let cases: [(&str, Arrange, &str); 9] = [
+    let cases: [(&str, Arrange, &str); 10] = [
+        (
+            "a mirror whose archive cannot be read",
+            |f| {
+                use std::os::unix::fs::PermissionsExt;
+                f.publish_archive(Release::linked().as_str(), None);
+                let pin = Release::linked().as_str().to_owned();
+                let archive = f
+                    .dir
+                    .path()
+                    .join("releases")
+                    .join(format!("v{pin}"))
+                    .join(format!("onepipeline-v{pin}-{}.tar.gz", host_triple()));
+                fs::set_permissions(&archive, fs::Permissions::from_mode(0o000))
+                    .expect("make the archive unreadable");
+                Vec::new()
+            },
+            "could not copy",
+        ),
         (
             "a mirror directory that is not there",
             |f| {
@@ -788,6 +816,11 @@ fn every_refusal_names_what_to_do_and_compiles_nothing() {
         // macOS's `mktemp` falls back to /tmp when TMPDIR names nothing, so
         // that refusal is only reachable on Linux.
         if what == "no temporary storage" && !cfg!(target_os = "linux") {
+            continue;
+        }
+        // Root reads a file whatever its mode, so an unreadable mirror cannot
+        // be arranged for it.
+        if what == "a mirror whose archive cannot be read" && running_as_root() {
             continue;
         }
         let fixture = Fixture::new();
