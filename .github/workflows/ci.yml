@@ -153,7 +153,8 @@ jobs:
         if: github.event_name == 'pull_request' && !cancelled()
         with:
           # Pinned with the reusable workflow visual-docs.yml calls, so both
-          # paths judge with one CLI.
+          # paths judge with one CLI; .github/tests/ci-jobs.test.mjs holds the
+          # two pins, and the comment's lane below to classify's inputs, equal.
           version: v0.4.8
       - name: Classify, gate and build the gallery
         id: classify

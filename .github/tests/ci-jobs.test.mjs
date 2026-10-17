@@ -93,6 +93,45 @@ export function jobProblems(workflows) {
   for (const action of COMPOSITES)
     if (!lintSteps.some((step) => (step.uses ?? "").startsWith(action)))
       problems.push(`lint does not use ${action}`);
+  // One screencomp release judges both capture paths, and the comment describes
+  // the lane classify gated: both read off the steps they repeat.
+  const reusable = workflows["visual-docs.yml"]?.jobs?.["visual-docs"];
+  const cli = lintSteps.find((step) =>
+    (step.uses ?? "").startsWith("nickderobertis/screencomp@"),
+  );
+  if (
+    cli?.with?.version !== reusable?.with?.["screencomp-version"] ||
+    !(reusable?.uses ?? "").endsWith(`@${cli?.with?.version}`)
+  )
+    problems.push(
+      `lint's screencomp ${cli?.with?.version} is not visual-docs.yml's ${reusable?.with?.["screencomp-version"]}`,
+    );
+  const classify = lintSteps.find((step) =>
+    (step.uses ?? "").startsWith("nickderobertis/screencomp/visual-docs@"),
+  )?.with;
+  const aggregate = lintSteps.find((step) =>
+    (step.uses ?? "").startsWith(
+      "nickderobertis/screencomp/visual-docs-aggregate@",
+    ),
+  )?.with;
+  let lanes = [];
+  try {
+    lanes = JSON.parse(aggregate?.matrix ?? "[]");
+  } catch {
+    problems.push("lint's aggregate matrix is not JSON");
+  }
+  const lane = {
+    arch: classify?.arch,
+    project: classify?.project,
+    current: classify?.current,
+    verify: classify?.["verify-second"],
+    manifest: classify?.manifest,
+    gallery_title: classify?.["gallery-title"],
+  };
+  if (JSON.stringify(lanes) !== JSON.stringify([lane]))
+    problems.push(
+      `lint's aggregate matrix ${aggregate?.matrix} is not the lane classify gated`,
+    );
   if (!lintSteps.some((step) => /^just dag-ui-screens\b/.test(step.run ?? "")))
     problems.push("the visual docs capture is not a step of lint");
   for (const [id, job] of Object.entries(ci?.jobs ?? {}))
@@ -321,6 +360,23 @@ test("a missing, renamed, waiting or uncapped job is refused", () => {
       `${problem}: ${jobProblems(workflows)}`,
     );
   }
+});
+
+test("a screencomp release or comment lane that parts from what it repeats is refused", () => {
+  const version = clone(load());
+  version["ci.yml"].jobs.lint.steps.find((s) =>
+    (s.uses ?? "").startsWith("nickderobertis/screencomp@"),
+  ).with.version = "v0.4.9";
+  assert.ok(
+    jobProblems(version).some((p) => p.startsWith("lint's screencomp v0.4.9")),
+  );
+  const lane = clone(load());
+  lane["ci.yml"].jobs.lint.steps.find((s) =>
+    (s.uses ?? "").startsWith("nickderobertis/screencomp/visual-docs@"),
+  ).with["gallery-title"] = "Docs";
+  assert.ok(
+    jobProblems(lane).some((p) => p.endsWith("is not the lane classify gated")),
+  );
 });
 
 test("the visual docs capture leaving lint, or running through the reusable workflow, is refused", () => {
