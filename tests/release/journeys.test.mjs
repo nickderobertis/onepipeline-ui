@@ -267,6 +267,31 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
     assert.doesNotMatch(failed.stdout, /would run/);
     assert.deepEqual(gh.calls(), []);
   });
+
+  test("a staged checksum that does not describe its archive fails the test-install", () => {
+    const tampered = join(ROOT, "target/release-journey/tampered");
+    const checksum = join(tampered, "assets", fileOf("checksum").file);
+    const env = releaseEnv({
+      gh,
+      registries: { base: "http://127.0.0.1:9", npm: "http://127.0.0.1:9/" },
+      home: dir,
+    });
+    for (const line of [
+      `${"0".repeat(64)}  ${fileOf("archive").file}\n`,
+      `${sha(readFileSync(staged(fileOf("archive"))))}  another-archive.tar.gz\n`,
+    ]) {
+      rmSync(tampered, { recursive: true, force: true });
+      execFileSync("cp", ["-a", OUT, tampered]);
+      writeFileSync(checksum, line);
+      const run = recipe("linux", ["test-install", "--out", tampered], env);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /the staged checksum does not describe the staged archive/,
+      );
+    }
+    rmSync(tampered, { recursive: true, force: true });
+  });
 });
 
 describe("publication against registry doubles", () => {
@@ -292,6 +317,25 @@ describe("publication against registry doubles", () => {
   const linux = (...args) => recipe("linux", [...args, "--out", OUT], env);
 
   test("build-linux publishes exactly the files it built, and a failed upload is finished by a re-run", () => {
+    // A switched-on registry without its credential is a failure, not a skip,
+    // and it publishes nothing.
+    for (const [registry, token, message] of [
+      ["pypi", "PYPI_TOKEN", /PYPI_PUBLISH is on but PYPI_TOKEN is empty/],
+      [
+        "npm",
+        "NODE_AUTH_TOKEN",
+        /NPM_PUBLISH is on but NODE_AUTH_TOKEN is empty/,
+      ],
+    ]) {
+      const run = recipe("linux", ["upload", registry, "--out", OUT], {
+        ...env,
+        [token]: "",
+      });
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(run.stderr, message);
+    }
+    assert.deepEqual(registries.uploads(), []);
+
     // The checksum, the second asset, fails until the Release accepts it again.
     gh.failUploads(fileOf("checksum").file);
     const first = linux("upload", "github");
@@ -377,6 +421,29 @@ describe("publication against registry doubles", () => {
       assert.match(run.output, new RegExp(label.replace(/[.]/g, "\\.")));
   });
 
+  test("a registry that is switched off is neither verified nor required", () => {
+    // Were either asked, it would fail: neither serves this platform now.
+    registries.hide([
+      fileOf("wheel").file,
+      `${fileOf("npm").package}@${VERSION}`,
+    ]);
+    try {
+      const run = recipe("linux", ["verify", "--out", OUT], {
+        ...env,
+        PYPI_PUBLISH: "false",
+        NPM_PUBLISH: "false",
+      });
+      assert.equal(run.status, 0, run.output);
+      assert.doesNotMatch(
+        run.output,
+        /PyPI onepipeline-api-cli|npm onepipeline/,
+      );
+      assert.match(run.output, new RegExp(`GitHub Release ${TAG}`));
+    } finally {
+      registries.clear();
+    }
+  });
+
   test("verification fails when a registry serves another version, an unusable package, or none for this platform", () => {
     const cases = [
       [
@@ -428,7 +495,6 @@ describe("publication against registry doubles", () => {
     assert.equal(linux("verify").status, 0, "restored, it verifies again");
   });
 
-  // ---------------------------------------------------------------- publish
   const publishOut = join(ROOT, "target/release-journey/publish");
   const publish = (args, extra = {}) =>
     recipe(
@@ -528,6 +594,47 @@ describe("publication against registry doubles", () => {
     );
   });
 
+  test("a registry read that fails is refused, never read as nothing served", () => {
+    const extra = { BUILD_RESULTS: allBuilt, NPM_CONFIG_FETCH_RETRIES: "0" };
+    for (const [name, bend, args, message] of [
+      ["PyPI answers 503", ["pypi-json=503"], ["check"], /PyPI answered 503/],
+      [
+        "PyPI answers without a file list",
+        ["pypi-json=malformed"],
+        ["check"],
+        /PyPI answered .* with no list of files/,
+      ],
+      [
+        "npm answers 503",
+        ["npm-packument=503"],
+        ["check"],
+        /cannot ask npm about/,
+      ],
+      [
+        "the crate index serves a record that is not JSON",
+        ["crate-index=malformed"],
+        ["upload", "crate"],
+        /serves a record that is not JSON/,
+      ],
+    ]) {
+      registries.breakReads(bend);
+      try {
+        const run = publish(args, extra);
+        assert.notEqual(run.status, 0, `${name}: ${run.output}`);
+        assert.match(run.stderr, message, name);
+      } finally {
+        registries.clear();
+      }
+    }
+    const unreachable = publish(["check"], {
+      ...extra,
+      RELEASE_PYPI_URL: "http://127.0.0.1:9",
+    });
+    assert.notEqual(unreachable.status, 0);
+    assert.match(unreachable.stderr, /cannot reach PyPI/);
+    assert.deepEqual(independent(), [], "nothing was published");
+  });
+
   test("with one platform missing, publish uploads nothing platform-independent and demotes the release", () => {
     const windowsNpm = platforms.windows.artifacts.find(
       (a) => a.registry === "npm",
@@ -583,6 +690,27 @@ describe("publication against registry doubles", () => {
     registries.failUploads(`onepipeline-ui-${VERSION}.tgz`);
     const extra = { BUILD_RESULTS: allBuilt };
     assert.equal(publish(["check"], extra).status, 0);
+    // Without its secret the crate is switched off, which is not a failure.
+    const off = publish(["upload", "crate"], {
+      ...extra,
+      CARGO_REGISTRY_TOKEN: "",
+    });
+    assert.equal(off.status, 0, off.output);
+    assert.match(
+      off.stdout,
+      /CARGO_REGISTRY_TOKEN is not set; the crate is not published/,
+    );
+    // npm switched on without its token is a failure that publishes nothing.
+    const noToken = publish(["upload", "npm"], {
+      ...extra,
+      NODE_AUTH_TOKEN: "",
+    });
+    assert.notEqual(noToken.status, 0, noToken.output);
+    assert.match(
+      noToken.stderr,
+      /NPM_PUBLISH is on but NODE_AUTH_TOKEN is empty/,
+    );
+    assert.deepEqual(independent(), []);
     const crate = publish(["upload", "crate"], extra);
     assert.equal(crate.status, 0, crate.output);
     const npmFirst = publish(["upload", "npm"], extra);
@@ -649,6 +777,36 @@ describe("publication against registry doubles", () => {
       verify.stdout,
       new RegExp(`crate:onepipeline-ui -> ${VERSION.replace(/\./g, "\\.")}`),
     );
+    // A registry whose newest release is not this one fails the probe's
+    // question, and so does one the probe cannot get an answer from.
+    const newer = join(registries.state, "npm", "onepipeline-ui");
+    writeFileSync(
+      join(newer, "99.0.0.json"),
+      JSON.stringify({ name: "onepipeline-ui", version: "99.0.0" }),
+    );
+    writeFileSync(join(newer, "99.0.0.tgz"), "a later release");
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /the release probe answers 99\.0\.0 for npm:onepipeline-ui/,
+      );
+    } finally {
+      rmSync(join(newer, "99.0.0.json"));
+      rmSync(join(newer, "99.0.0.tgz"));
+    }
+    registries.breakReads(["crate-api=503"]);
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /could not establish what crate:onepipeline-ui serves/,
+      );
+    } finally {
+      registries.clear();
+    }
 
     // The earlier runs demoted it; this one published, so the Release is one again.
     const settle = publish(["settle"], {

@@ -50,13 +50,17 @@ export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onep
 # installed, so nothing on PATH can be it.
 export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
 
-# The release tools `release-tools` provisions, pinned to what the release
-# workflows install: release-plz.yml's RELEASE_PLZ_VERSION, and the
-# cargo-cyclonedx and twine release.yml installs. `.github/tests/release.test.mjs`
-# holds each pair equal.
+# The release tools, pinned once: release-plz.yml installs release-plz at its
+# RELEASE_PLZ_VERSION and release.yml cargo-cyclonedx, which
+# `.github/tests/release.test.mjs` holds to these; the Python ones are installed
+# from here by `release-python-tools`, and maturin is the one the manylinux
+# build (scripts/build-linux-wheel.sh) pins too.
 release-plz-version := "0.3.158"
 cyclonedx-version := "0.5.7"
+maturin-version := "1.14.1"
 twine-version := "6.1.0"
+packaging-version := "25.0"
+python := if os_family() == "windows" { "python" } else { "python3" }
 
 # The `cargo-prune-superseded` release `pool-maintenance` runs, pinned once here:
 # `_ensure-pruner` installs exactly this and nothing else reads a version for it.
@@ -254,11 +258,18 @@ release-windows *args:
 release-publish *args:
     @node scripts/release.mjs publish "$@"
 
+# The Python tools the release jobs run, at their pins, into the Python on PATH
+# (`just python=… release-python-tools` names another): maturin for the macOS
+# and Windows builds, twine for `upload pypi`, and packaging for reading a
+# wheel's version.
+# Install the release jobs' Python tools.
+release-python-tools:
+    @{{python}} -m pip install --quiet --disable-pip-version-check maturin=={{maturin-version}} twine=={{twine-version}} packaging=={{packaging-version}}
+
 # The tools the release recipes reach that no lockfile pins, at the versions the
 # release workflows install, into `.tools`: release-plz and cargo-cyclonedx, and
-# a Python environment with twine. The release journeys (tests/release) put
-# `.tools/bin` and `.tools/release-venv/bin` first on PATH; the workflows install
-# the same pins themselves.
+# a Python environment with `release-python-tools`. The release journeys
+# (tests/release) put `.tools/bin` and `.tools/release-venv/bin` first on PATH.
 # Provision the release recipes' tools into .tools.
 release-tools:
     @[ "$(.tools/bin/release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
@@ -268,7 +279,7 @@ release-tools:
       || cargo install cargo-cyclonedx --version {{cyclonedx-version}} --locked --root .tools --quiet \
       || { echo "cannot install cargo-cyclonedx {{cyclonedx-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
     @[ "$(.tools/release-venv/bin/python -m twine --version 2>/dev/null | head -n1 | cut -d' ' -f3)" = "{{twine-version}}" ] \
-      || { python3 -m venv .tools/release-venv && .tools/release-venv/bin/pip install --quiet --disable-pip-version-check twine=={{twine-version}} packaging==25.0; } \
+      || { python3 -m venv .tools/release-venv && just python=.tools/release-venv/bin/python release-python-tools; } \
       || { echo "cannot install twine {{twine-version}} into .tools/release-venv — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
 
 # Every project's own test target — the crate's unit, e2e and repo-tooling tiers,

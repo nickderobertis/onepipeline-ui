@@ -265,21 +265,15 @@ fn release_linux_legs() -> Vec<(String, String)> {
     legs
 }
 
-/// The one maturin release.yml installs for the jobs that run it on the runner.
+/// The one maturin the justfile pins for every release build, which
+/// `just release-python-tools` installs for the jobs that run it on the runner.
 fn release_maturin_version() -> String {
-    let text = fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
-        .expect("release.yml is readable");
-    let pins: Vec<&str> = text
-        .split("maturin==")
-        .skip(1)
-        .filter_map(|rest| rest.split_whitespace().next())
-        .collect();
-    assert!(!pins.is_empty(), "release.yml pins a maturin version");
-    assert!(
-        pins.iter().all(|pin| *pin == pins[0]),
-        "release.yml pins one maturin version, found {pins:?}"
-    );
-    pins[0].to_string()
+    let text = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
+    text.lines()
+        .find_map(|line| line.strip_prefix("maturin-version := \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .expect("the justfile pins maturin-version")
+        .to_string()
 }
 
 #[test]

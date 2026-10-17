@@ -424,8 +424,21 @@ test("the tools the release recipes reach are pinned once for the workflows and 
     rel.match(/cargo-cyclonedx@([\d.]+)/)[1],
     pin("cyclonedx-version"),
   );
-  for (const version of rel.matchAll(/twine==([\d.]+)/g))
-    assert.equal(version[1], pin("twine-version"));
+  assert.equal(
+    readFileSync("scripts/build-linux-wheel.sh", "utf8").match(
+      /^maturin_version="([^"]+)"$/m,
+    )[1],
+    pin("maturin-version"),
+  );
+  // The Python tools reach every build job through the one recipe.
+  assert.doesNotMatch(rel, /pip install/);
+  for (const job of BUILD_JOBS)
+    assert.ok(
+      release().jobs[job].steps.some(
+        (s) => s.run === "just release-python-tools",
+      ),
+      job,
+    );
 });
 
 test("Darwin artifact contracts preserve wheel bytes and reject an architecture mismatch without executing them", () => {
@@ -680,6 +693,10 @@ test("real workflow command usage errors return 2 with an actionable diagnostic"
       {},
     ],
     ["node", ["scripts/release.mjs", "linux", "verify", "--bogus"], {}],
+    // Every staging phase deletes --out first, so it is held to target/.
+    ["node", ["scripts/release.mjs", "linux", "build", "--out", "."], {}],
+    ["node", ["scripts/release.mjs", "publish", "build", "--out", ".."], {}],
+    ["node", ["scripts/release.mjs", "linux", "build", "--out", "target"], {}],
     [
       "node",
       ["scripts/release.mjs", "publish", "check"],
@@ -700,7 +717,13 @@ test("a release tag that is not Cargo.toml's version is refused before anything 
   try {
     const result = spawnSync(
       "node",
-      ["scripts/release.mjs", "linux", "build", "--out", out],
+      [
+        "scripts/release.mjs",
+        "linux",
+        "build",
+        "--out",
+        "target/release-test/tag-refusal",
+      ],
       { encoding: "utf8", env: hermetic({ RELEASE_TAG: "v0.0.1-not-this" }) },
     );
     assert.equal(result.status, 1, result.stderr);
@@ -743,7 +766,13 @@ test("real release commands diagnose failed external toolchain setup with next a
     );
     const result = spawnSync(
       "node",
-      ["scripts/release.mjs", "macos", "build", "--out", join(scratch, "out")],
+      [
+        "scripts/release.mjs",
+        "macos",
+        "build",
+        "--out",
+        "target/release-test/toolchain-failure",
+      ],
       {
         encoding: "utf8",
         env: hermetic({ PATH: `${provider}:${process.env.PATH}` }),

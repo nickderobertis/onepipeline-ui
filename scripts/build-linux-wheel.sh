@@ -110,9 +110,9 @@ channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "$root/rust-toolchain.toml")" \
   || fail "the browser view is not built at $root/apps/dag-ui/dist, and the wheel's binary embeds it" \
     "run 'just build', then re-run"
 
-# The image maturin-action's `manylinux: auto` selected for these targets on the
-# release's native runners, and the maturin every release leg pins —
-# tests/e2e/linux_wheel.rs holds this to release.yml's `maturin-version`.
+# The image maturin-action's `manylinux: auto` selected for this target, and the
+# maturin the justfile pins for every release build — tests/e2e/linux_wheel.rs
+# holds this to its `maturin-version`.
 image="quay.io/pypa/manylinux2014_$arch"
 maturin_version="1.14.1"
 

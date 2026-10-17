@@ -206,33 +206,20 @@ fans one uniformly-named target across all of them.
   `release.yml` re-runs no tests. A Release made by hand naming a commit no sweep
   covered therefore gets only the artifact proofs below — every file installed
   and run before it publishes and again from the registry after.
-- **A release is five jobs, and each job's work is one recipe.** `release-plz.yml`
-  runs `release-plz` (its guard is its first step); `release.yml` runs
-  `build-linux`, `build-macos` and `build-windows` side by side, and `publish`
-  after all three, whatever they did. `just release-<linux|macos|windows|publish>`
-  is the whole of each, implemented by `scripts/release.mjs` — its header says
-  what every phase does, and its target table is the one list of what is built
-  where. A platform job compiles each of its targets **once** (Linux inside the
-  manylinux2014 image, through the same `build-linux-wheel.sh` ci.yml's `wheel`
-  runs), packs the archive, the wheel and the npm platform package from that one
-  binary, installs and runs those exact files, publishes them, and installs them
-  back from every switched-on registry on its own OS. `publish` checks that every
-  platform's files are served before it publishes anything platform-independent
-  (the crate, the npm launcher and frontend, the SBOM) — every upload repeats that
-  check — then installs the launcher back, asks `release-probe.sh` what each
-  declared target serves, and holds the Release to the outcome. **A failed
-  platform job leaves the other platforms' files published and the
-  platform-independent ones unpublished**: re-run the failed jobs, and every
-  upload, which asks its registry first and publishes only what is missing,
-  finishes the release. Every phase takes `plan`, which lists without building
-  what a job produces; `.github/tests/release.test.mjs` holds the plans to what
-  v0.37.0 published and the workflows to this shape, and `tests/release/` drives
-  the Linux recipe for real and the publication phases against local doubles of
-  every registry and the Release. Released targets: x86_64 Linux, Apple Silicon
-  and x86_64 Windows. arm64 Linux stopped after v0.38.0 (the npm launcher refuses
-  it, naming `cargo install`) and Intel macOS before it; since every Linux carrier
-  is the manylinux binary, the archive and npm package need glibc 2.17, as the
-  wheel does.
+- **A release is five jobs, and each job's work is one recipe.** `release-plz`,
+  then `build-linux`, `build-macos` and `build-windows` side by side, then
+  `publish`; `just release-<linux|macos|windows|publish>` is the whole of each,
+  and `scripts/release.mjs` says what its phases do and what is built where. Two
+  rules hold it together: every target is compiled **once**, and the archive,
+  wheel and npm package are packed from that binary and installed and run before
+  anything publishes; and nothing platform-independent (the crate, the npm
+  launcher and frontend, the SBOM) publishes until every platform's files are
+  served. So **a failed platform job leaves the other platforms published and
+  the platform-independent artifacts unpublished** until it is re-run — and a
+  re-run finishes the release, because every upload publishes only what its
+  registry does not already serve. Change a target in `scripts/release.mjs`'s
+  table, whose `plan` phase the workflow test holds to the last release's
+  artifacts; arm64 Linux and Intel macOS are no longer released.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

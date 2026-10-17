@@ -130,7 +130,6 @@ class Fault extends Error {
 }
 const usage = (message, action) => new Fault(message, action, 2);
 
-// ---------------------------------------------------------------------------
 // What is released, without building it.
 
 function cargoVersion() {
@@ -249,7 +248,6 @@ function stagedPath(out, artifact) {
   return join(out, dir, artifact.file);
 }
 
-// ---------------------------------------------------------------------------
 // Running the real tools.
 
 function run(command, args, options = {}) {
@@ -369,7 +367,6 @@ function scratch(name) {
   return mkdtempSync(join(root, `release-${name}-`));
 }
 
-// ---------------------------------------------------------------------------
 // Registry reads. Each answers which of the planned files a registry already
 // serves, which is what makes every upload idempotent and what `check` reads.
 
@@ -403,12 +400,22 @@ async function fetchJson(url, what) {
   return response.json();
 }
 
+// PyPI's JSON for one release: its files are what it already serves. Anything
+// else in that shape is refused rather than read as "serves nothing", which
+// would upload over a release PyPI already has.
 async function pypiFiles(version) {
-  const body = await fetchJson(
-    `${pypiUrl()}/pypi/${WHEEL_PACKAGE}/${pep440(version)}/json`,
-    "PyPI",
-  );
-  return new Set((body?.urls ?? []).map((url) => url.filename));
+  const url = `${pypiUrl()}/pypi/${WHEEL_PACKAGE}/${pep440(version)}/json`;
+  const body = await fetchJson(url, "PyPI");
+  if (body === null) return new Set();
+  if (
+    !Array.isArray(body?.urls) ||
+    !body.urls.every((entry) => typeof entry?.filename === "string")
+  )
+    throw new Fault(
+      `PyPI answered ${url} with no list of files`,
+      "re-run when PyPI serves its JSON API",
+    );
+  return new Set(body.urls.map((entry) => entry.filename));
 }
 
 function npmServes(pkg, version) {
@@ -417,8 +424,23 @@ function npmServes(pkg, version) {
     ["view", `${pkg}@${version}`, "version", "--json", "--prefer-online"],
     { capture: true },
   );
-  if (result.status === 0) return result.stdout.trim().length > 0;
   if (/E404|404 Not Found/.test(result.stderr)) return false;
+  if (result.status === 0) {
+    // `npm view` prints nothing for a version the package does not have, and
+    // the version as JSON for one it does.
+    if (!result.stdout.trim()) return false;
+    let served;
+    try {
+      served = JSON.parse(result.stdout);
+    } catch {
+      served = undefined;
+    }
+    if (served === version) return true;
+    throw new Fault(
+      `npm answered ${pkg}@${version} with ${result.stdout.trim()}`,
+      "re-run when the npm registry answers; it named no such version",
+    );
+  }
   process.stderr.write(result.stderr);
   throw new Fault(
     `cannot ask npm about ${pkg}@${version}`,
@@ -441,12 +463,21 @@ async function crateServes(version) {
       `the crates.io index answered ${response.status}`,
       "re-run when it answers",
     );
-  return (await response.text())
-    .split("\n")
-    .some((line) => line.includes(`"vers":"${version}"`));
+  const records = (await response.text()).split("\n").filter(Boolean);
+  return records.some((line) => {
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      throw new Fault(
+        `the crate index serves a record that is not JSON: ${line.slice(0, 80)}`,
+        "re-run when the crate index serves its records",
+      );
+    }
+    return record?.name === CRATE && record.vers === version;
+  });
 }
 
-// ---------------------------------------------------------------------------
 // Platform phases.
 
 function requireStaged(out, artifacts) {
@@ -799,7 +830,6 @@ function verifyPlatform(job, out) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Publish phases.
 
 function pairs(name) {
@@ -1026,7 +1056,9 @@ function probe(id) {
 // answers this version. Then the probe's other two answers, which only a live
 // registry can give: a name nobody released is answered empty, and an
 // identifier it cannot read is refused rather than answered.
+// Returns what each declared target answered, for the one success line.
 function probeDeclaredTargets(version) {
+  const answers = [];
   const live = {
     crate: crateSwitchedOn(),
     pypi: switchedOn("PYPI_PUBLISH"),
@@ -1052,7 +1084,7 @@ function probeDeclaredTargets(version) {
         `the release probe answers ${served || "nothing"} for ${id}, not ${version}`,
         "check that registry for the version this release published",
       );
-    console.log(`release publish: ${id} -> ${served || "nothing yet"}`);
+    answers.push(`${id} -> ${served || "nothing yet"}`);
   }
   for (const registry of ["crate", "pypi", "npm"]) {
     const id = `${registry}:onepipeline-ui-has-never-been-published`;
@@ -1073,6 +1105,7 @@ function probeDeclaredTargets(version) {
         `the release probe answered ${id} instead of refusing it`,
         "fix scripts/release-probe.sh's identifier checks",
       );
+  return answers;
 }
 
 async function verifyPublish() {
@@ -1127,9 +1160,9 @@ async function verifyPublish() {
       rmSync(work, { recursive: true, force: true });
     }
   }
-  probeDeclaredTargets(version);
+  const answers = probeDeclaredTargets(version);
   console.log(
-    `release publish: ${tag}'s platform-independent artifacts are served`,
+    `release publish: ${tag}'s platform-independent artifacts are served; the release probe answers ${answers.join(", ")}`,
   );
 }
 
@@ -1155,7 +1188,23 @@ function settle() {
     );
 }
 
-// ---------------------------------------------------------------------------
+// Every phase that stages files starts by deleting --out, so it is held to the
+// build tree: a directory under the checkout's target/, never the checkout, an
+// ancestor of it, or anything else a mistyped argument could name.
+function stagingDirectory(path) {
+  const out = resolve(path);
+  const inside = relative(join(REPO_ROOT, "target"), out);
+  if (
+    !inside ||
+    inside.startsWith("..") ||
+    resolve(REPO_ROOT, "target", inside) !== out
+  )
+    throw usage(
+      `--out ${path} is not a directory under ${join(REPO_ROOT, "target")}`,
+      "pass an --out under the checkout's target/, which the build may delete and recreate",
+    );
+  return out;
+}
 
 async function main(argv) {
   const [job, phase, ...rest] = argv;
@@ -1175,7 +1224,7 @@ async function main(argv) {
     else if (arg === "--out" || arg === "--version") {
       if (rest[i + 1] === undefined)
         throw usage(`${arg} needs a value`, `give ${arg} a value`);
-      if (arg === "--out") out = resolve(rest[++i]);
+      if (arg === "--out") out = stagingDirectory(rest[++i]);
       else version = rest[++i];
     } else if (arg.startsWith("--"))
       throw usage(
@@ -1258,9 +1307,15 @@ if (
   try {
     await main(process.argv.slice(2));
   } catch (error) {
-    if (!(error instanceof Fault)) throw error;
-    console.error(`release: ${error.message}`);
-    console.error(`ACTION: ${error.action}`);
-    process.exitCode = error.exitCode;
+    const fault =
+      error instanceof Fault
+        ? error
+        : new Fault(
+            `${error.message}\n${error.stack}`,
+            "an unexpected failure, named above; fix its cause and re-run this phase",
+          );
+    console.error(`release: ${fault.message}`);
+    console.error(`ACTION: ${fault.action}`);
+    process.exitCode = fault.exitCode;
   }
 }

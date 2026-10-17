@@ -22,6 +22,10 @@ import { execFileSync } from "node:child_process";
 //   control/hide                 lines naming files or package@version this
 //                                registry pretends not to serve
 //   control/corrupt              lines naming files served with other bytes
+//   control/broken               lines `<read>=<status>` or `<read>=malformed`,
+//                                for the reads a release makes of a registry:
+//                                pypi-json, npm-packument, crate-index and
+//                                crate-api
 //
 // Prefixes: /pypi/..., /simple/..., /files/... and /legacy/ for PyPI; /npm/...
 // for npm; /index/... and /api/v1/... for the crate registry.
@@ -63,6 +67,20 @@ const lines = (name) =>
         .filter(Boolean)
     : [];
 const hidden = (key) => lines("hide").includes(key);
+// What a broken read answers instead, or nothing when it is not broken.
+function broken(read, response) {
+  const entry = lines("broken").find((line) => line.startsWith(`${read}=`));
+  if (!entry) return false;
+  const answer = entry.slice(read.length + 1);
+  if (answer === "malformed")
+    reply(
+      response,
+      200,
+      read === "crate-index" ? "{not json\n" : { urls: "not a list" },
+    );
+  else reply(response, Number(answer), { error: `the double broke ${read}` });
+  return true;
+}
 const corrupted = (key) => lines("corrupt").includes(key);
 const failing = (file) => existsSync(join(state, "control", "fail", file));
 const served = (key, bytes) =>
@@ -89,7 +107,6 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-// ---------------------------------------------------------------- PyPI
 const normalize = (name) => name.toLowerCase().replace(/[-_.]+/g, "-");
 const wheelVersion = (file) => file.split("-")[1];
 const wheels = () =>
@@ -139,6 +156,7 @@ async function pypi(request, response, path) {
     return reply(response, 200, "OK", "text/plain");
   }
   let match = path.match(/^\/pypi\/([^/]+)\/(?:([^/]+)\/)?json$/);
+  if (match && broken("pypi-json", response)) return;
   if (match) {
     const [, project, version] = match;
     const files = wheels().filter((f) => projectOf(f) === normalize(project));
@@ -182,7 +200,6 @@ async function pypi(request, response, path) {
   return reply(response, 404, { message: "Not Found" });
 }
 
-// ---------------------------------------------------------------- npm
 function npmVersions(pkg) {
   const dir = join(state, "npm", pkg);
   if (!existsSync(dir)) return [];
@@ -234,6 +251,7 @@ async function npm(request, response, path) {
     return reply(response, 200, versions[newest]);
   }
   const pkg = decodeURIComponent(path.slice(1));
+  if (request.method === "GET" && broken("npm-packument", response)) return;
   if (request.method === "PUT") {
     if (!/^Bearer \S+/.test(request.headers.authorization ?? ""))
       return reply(response, 401, {
@@ -272,7 +290,6 @@ async function npm(request, response, path) {
   });
 }
 
-// ---------------------------------------------------------------- crates
 function crateVersions(name) {
   return readdirSync(join(state, "crates"))
     .filter((f) => f.startsWith(`${name}-`) && f.endsWith(".json"))
@@ -287,6 +304,7 @@ async function crates(request, response, path) {
       api: `http://${request.headers.host}`,
     });
   const index = path.match(/^\/index\/(?:[^/]+\/){1,2}([^/]+)$/);
+  if (index && broken("crate-index", response)) return;
   if (index) {
     const entries = crateVersions(index[1]);
     if (!entries.length) return reply(response, 404, "Not Found", "text/plain");
@@ -334,6 +352,7 @@ async function crates(request, response, path) {
     });
   }
   const api = path.match(/^\/api\/v1\/crates\/([^/]+)$/);
+  if (api && broken("crate-api", response)) return;
   if (api) {
     const versions = crateVersions(api[1])
       .map((e) => e.vers)

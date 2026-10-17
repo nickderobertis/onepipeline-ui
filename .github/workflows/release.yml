@@ -100,7 +100,7 @@ jobs:
         with:
           tool: just
       - name: Install the release's Python tools
-        run: python -m pip install twine==6.1.0 packaging==25.0
+        run: just release-python-tools
       # The view the binary embeds, built before the binary is: with the
       # `bundled-ui` feature on, a build that finds none fails rather than
       # publishing a binary whose `--ui` refuses.
@@ -151,7 +151,7 @@ jobs:
         with:
           tool: just
       - name: Install the release's Python tools
-        run: python -m pip install maturin==1.14.1 twine==6.1.0 packaging==25.0
+        run: just release-python-tools
       - name: Build the browser view
         run: just build
       # Apple Silicon only: Intel macOS is no longer released.
@@ -201,7 +201,7 @@ jobs:
         with:
           tool: just
       - name: Install the release's Python tools
-        run: python -m pip install maturin==1.14.1 twine==6.1.0 packaging==25.0
+        run: just release-python-tools
       - name: Build the browser view
         run: just build
       - name: Build every Windows target once, and pack its archive, wheel and npm package
@@ -302,4 +302,3 @@ jobs:
             upload-github=${{ steps.upload-github.outcome }}
             verify=${{ steps.verify.outcome }}
         run: just release-publish settle
-      # The final step position is left free for the CD budget tail.
