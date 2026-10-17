@@ -20,8 +20,9 @@
 //! with a verdict, so "was the judge asked again?" is a file count.
 
 // The tier runs bash recipes under Nx, and the scratch workspace borrows this
-// checkout's `node_modules` through a symlink. `ci.yml`'s `llmlint` job runs the
-// tier on ubuntu alone, and so does the lane that runs these journeys.
+// checkout's `node_modules` through a symlink. The lanes that run these journeys
+// — `ci.yml`'s `quality` and `sweep`, `release.yml`'s `test` — are ubuntu, and
+// `check-cross` reaches no tier without a `test-quick` target, which this has not.
 #![cfg(unix)]
 
 use std::fs;
