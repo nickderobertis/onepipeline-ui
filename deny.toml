@@ -9,13 +9,7 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = [
-    # Temporary, authorized by the user on 2026-10-12: `unsafe-libyaml` is
-    # unmaintained (informational, no fixed version), reached through
-    # `serde_yaml` / `serde_yaml_ng`. The planned move to `serde_norway`
-    # (plan authoring:serde-yaml-replacement) removes this entry.
-    "RUSTSEC-2024-0449",
-]
+ignore = []
 
 [licenses]
 # Permissive licenses compatible with this MIT-licensed binary. Adding a
@@ -66,7 +60,19 @@ exceptions = []
 multiple-versions = "allow"
 wildcards = "deny"
 allow = []
-deny = []
+# The fleet reads and writes YAML through serde-saphyr. Every crate that wraps
+# or is a translation of libyaml is refused, so one re-entering the graph —
+# directly or through a relinked sibling — turns `cargo deny check bans` red
+# rather than coming back as an advisory to ignore.
+deny = [
+    { crate = "serde_yaml", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+    { crate = "serde_yaml_ng", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+    { crate = "serde_norway", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+    { crate = "serde_yml", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+    { crate = "unsafe-libyaml", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+    { crate = "unsafe-libyaml-norway", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+    { crate = "libyml", reason = "RUSTSEC-2024-0449: is or wraps a translation of libyaml, which is unmaintained; YAML is read through serde-saphyr" },
+]
 skip = []
 skip-tree = []
 
