@@ -264,10 +264,10 @@ release-tools:
     @[ "$(.tools/bin/release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
       || cargo install release-plz --version {{release-plz-version}} --locked --root .tools --quiet \
       || { echo "cannot install release-plz {{release-plz-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
-    @[ "$(.tools/bin/cargo-cyclonedx cyclonedx --version 2>/dev/null)" = "cargo-cyclonedx {{cyclonedx-version}}" ] \
+    @[ "$(.tools/bin/cargo-cyclonedx cyclonedx --version 2>/dev/null | cut -d' ' -f2)" = "{{cyclonedx-version}}" ] \
       || cargo install cargo-cyclonedx --version {{cyclonedx-version}} --locked --root .tools --quiet \
       || { echo "cannot install cargo-cyclonedx {{cyclonedx-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
-    @[ "$(.tools/release-venv/bin/python -m twine --version 2>/dev/null | head -n1 | cut -d' ' -f2)" = "{{twine-version}}" ] \
+    @[ "$(.tools/release-venv/bin/python -m twine --version 2>/dev/null | head -n1 | cut -d' ' -f3)" = "{{twine-version}}" ] \
       || { python3 -m venv .tools/release-venv && .tools/release-venv/bin/pip install --quiet --disable-pip-version-check twine=={{twine-version}} packaging==25.0; } \
       || { echo "cannot install twine {{twine-version}} into .tools/release-venv — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
 

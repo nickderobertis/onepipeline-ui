@@ -18,6 +18,8 @@
 /tests/tiers/cost/       @nickderobertis
 /tests/tiers/linked-report/ @nickderobertis
 /tests/tiers/coverage/   @nickderobertis
+# The release jobs' own recipes, driven against local registry doubles.
+/tests/release/          @nickderobertis
 /docs/contract.md        @nickderobertis
 /Cargo.toml              @nickderobertis
 
