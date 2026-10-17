@@ -60,6 +60,25 @@
     "deps-check": {
       "command": "just _crate-deps-check"
     },
+    "release-staging": {
+      "command": "just _crate-release-staging",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "inputs": [
+        "apiServerSurface",
+        "embeddedView",
+        "sharedGlobals",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/pyproject.toml",
+        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/LICENSE",
+        "{workspaceRoot}/npm/**/*",
+        "{workspaceRoot}/scripts/release-native-dry-run.sh",
+        "{workspaceRoot}/scripts/release-package.py",
+        "{workspaceRoot}/scripts/verify-staged-release.mjs",
+        "{workspaceRoot}/scripts/npm-build.mjs"
+      ],
+      "outputs": ["{workspaceRoot}/target/release-staging"]
+    },
     "lint-llm-diff": {
       "command": "bash scripts/llmlint-judge.sh",
       "options": { "cwd": "." }

@@ -6,7 +6,13 @@
   "targets": {
     "test": {
       "command": "just _tier-test-covered repo-tooling",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        { "projects": ["dag-ui"], "target": "build" },
+        { "projects": ["onepipeline-ui"], "target": "release-staging" }
+      ],
+      "options": {
+        "env": { "ONEPIPELINE_UI_RELEASE_STAGING": "target/release-staging" }
+      },
       "inputs": ["repoMachinery"],
       "outputs": [
         "{workspaceRoot}/target/llvm-cov-target/repo-tooling-*.profraw"
@@ -50,6 +56,7 @@
       "{workspaceRoot}/tests/packaging.rs",
       "{workspaceRoot}/tests/e2e/main.rs",
       "{workspaceRoot}/tests/e2e/baseline.rs",
+      "{workspaceRoot}/tests/e2e/ci_jobs.rs",
       "{workspaceRoot}/tests/e2e/ci_tier.rs",
       "{workspaceRoot}/tests/e2e/ensure_baseline.rs",
       "{workspaceRoot}/tests/e2e/ensure_sibling.rs",
@@ -72,7 +79,8 @@
       "{workspaceRoot}/tests/support/sibling.rs",
       "{workspaceRoot}/tests/support/stub_bin.rs",
       "{workspaceRoot}/tests/support/timeline_schema.rs",
-      "{workspaceRoot}/tests/support/workflow.rs"
+      "{workspaceRoot}/tests/support/workflow.rs",
+      "{workspaceRoot}/tests/support/workspace_copy.rs"
     ]
   },
   "//end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
