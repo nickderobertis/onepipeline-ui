@@ -258,9 +258,11 @@ impl Fixture {
         self.dir.path().join("home")
     }
 
-    /// The environment every program here runs under: the scratch home, the
-    /// installed llmlint first on PATH, the stand-in named as its harness, and
-    /// nothing inherited that would steer llmlint, oneharness or Nx.
+    /// The environment every program here runs under: the scratch home, as both
+    /// `HOME` and the config home under it, the installed llmlint first on PATH,
+    /// the stand-in named as its harness, and nothing inherited that would steer
+    /// llmlint, oneharness or Nx. GitHub's runners export `XDG_CONFIG_HOME`,
+    /// which outranks `HOME` for oneharness's user-level configuration.
     fn command(&self, program: &str) -> Command {
         let mut command = Command::new(program);
         for (name, _) in std::env::vars_os() {
@@ -289,6 +291,7 @@ impl Fixture {
             .current_dir(self.workspace())
             .env("PATH", std::env::join_paths(path).expect("join PATH"))
             .env("HOME", self.home())
+            .env("XDG_CONFIG_HOME", self.home().join(".config"))
             .env("LLMLINT_ONEHARNESS_BIN", self.dir.path().join("oneharness"))
             .env("STANDIN_REAL_ONEHARNESS", real)
             .env("STANDIN_CALLS", self.dir.path().join("calls"));
