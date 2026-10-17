@@ -74,20 +74,11 @@ A new CLI verb, flag, or route is not done until its journey lands in
 
 ## The tiers are projects
 
-The suite runs as seven Nx projects, so a change pays for the tiers it can reach
-rather than for all of them. Each selects its tests through the nextest profile
-of the same name in `.config/nextest.toml`; the projects under `tests/tiers/`
+The suite runs as one Nx project per tier, so a change pays for the tiers it can
+reach rather than for all of them. Each selects its tests through the nextest
+profile of the same name in `.config/nextest.toml`, whose comment on each profile
+says what it runs and which project runs it; the projects under `tests/tiers/`
 hold nothing but their `project.json`, and these rules are theirs.
-
-| Project | Target | Profile | Runs |
-| --- | --- | --- | --- |
-| `onepipeline-ui` | `test` | `unit` | the library's and binary's unit tests, `tests/contract.rs` |
-| `onepipeline-ui-e2e` | `test` | `e2e` | `cli`, `server`, `ui` |
-| `onepipeline-ui-repo-tooling` | `test` | `repo-tooling` | `tests/packaging.rs` and the e2e modules that drive scripts, workflows and recipes |
-| `onepipeline-ui-baseline` | `test-baseline` | `baseline` | `baseline` |
-| `onepipeline-ui-cost` | `test-cost` | `cost` | `cost` |
-| `onepipeline-ui-linked-report` | `test` | `linked-report` | `linked_report` |
-| `onepipeline-ui-judged-tier` | `test` | `judged-tier` | `judged_tier`, which needs `just setup-llmlint` |
 
 - **A new module of the e2e binary lands in `e2e`** unless its name joins
   another profile's list — the `e2e` filter is the complement of the other
