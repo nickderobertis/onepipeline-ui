@@ -35,7 +35,7 @@ export function githubDouble(dir, tag, notes = "### Added\n\n- the release\n") {
   const state = join(dir, "gh");
   const bin = join(dir, "gh-bin");
   mkdirSync(join(state, "releases", tag, "assets"), { recursive: true });
-  mkdirSync(join(state, "fail-once"), { recursive: true });
+  mkdirSync(join(state, "fail"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(state, "releases", tag, "body"), notes);
   writeFileSync(join(state, "releases", tag, "prerelease"), "false");
@@ -60,7 +60,11 @@ export function githubDouble(dir, tag, notes = "### Added\n\n- the release\n") {
     body: () => readFileSync(join(release, "body"), "utf8"),
     prerelease: () =>
       readFileSync(join(release, "prerelease"), "utf8").trim() === "true",
-    failOnce: (file) => writeFileSync(join(state, "fail-once", file), ""),
+    failUploads: (file) => writeFileSync(join(state, "fail", file), ""),
+    healUploads: () => {
+      rmSync(join(state, "fail"), { recursive: true, force: true });
+      mkdirSync(join(state, "fail"));
+    },
   };
 }
 
@@ -99,13 +103,14 @@ export async function registryDoubles(dir) {
             .split("\n")
             .filter(Boolean)
         : [],
-    failOnce: (file) =>
-      writeFileSync(join(state, "control", "fail-once", file), ""),
+    failUploads: (file) =>
+      writeFileSync(join(state, "control", "fail", file), ""),
     hide: (entries) => control("hide", entries),
     corrupt: (entries) => control("corrupt", entries),
     clear: () => {
-      for (const name of ["hide", "corrupt"])
-        rmSync(join(state, "control", name), { force: true });
+      for (const name of ["hide", "corrupt", "fail"])
+        rmSync(join(state, "control", name), { recursive: true, force: true });
+      mkdirSync(join(state, "control", "fail"));
     },
     close: () =>
       new Promise((done) => {
@@ -124,7 +129,7 @@ export function releaseEnv({ gh, registries, home, extra = {} }) {
   const token = "double-token";
   writeFileSync(
     npmrc,
-    `//127.0.0.1:${new URL(registries.base).port}/:_authToken=\${NODE_AUTH_TOKEN}\n`,
+    `${registries.npm.replace(/^https?:/, "")}:_authToken=\${NODE_AUTH_TOKEN}\n`,
   );
   const path = [
     gh.bin,

@@ -16,8 +16,9 @@ import { execFileSync } from "node:child_process";
 //   npm/<package>/<version>.tgz  every npm package published, with .json beside it
 //   crates/<name>-<vers>.crate   every crate published, with .json beside it
 //   uploads.log                  one line per accepted upload: registry and file
-//   control/fail-once/<file>     the next upload of <file> answers 500 (and the
-//                                marker is removed, so a re-run succeeds)
+//   control/fail/<file>          every upload of <file> answers 500 until the
+//                                marker is removed — persistent, because the
+//                                clients retry a 500 themselves
 //   control/hide                 lines naming files or package@version this
 //                                registry pretends not to serve
 //   control/corrupt              lines naming files served with other bytes
@@ -40,7 +41,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -53,7 +53,7 @@ if (!state) {
   console.error("usage: registries.mjs STATE_DIR");
   process.exit(2);
 }
-for (const dir of ["pypi", "npm", "crates", "control/fail-once"])
+for (const dir of ["pypi", "npm", "crates", "control/fail"])
   mkdirSync(join(state, dir), { recursive: true });
 
 const lines = (name) =>
@@ -64,12 +64,7 @@ const lines = (name) =>
     : [];
 const hidden = (key) => lines("hide").includes(key);
 const corrupted = (key) => lines("corrupt").includes(key);
-const failsOnce = (file) => {
-  const marker = join(state, "control", "fail-once", file);
-  if (!existsSync(marker)) return false;
-  rmSync(marker);
-  return true;
-};
+const failing = (file) => existsSync(join(state, "control", "fail", file));
 const served = (key, bytes) =>
   corrupted(key) ? Buffer.from(`not ${key}\n`) : bytes;
 const accepted = (registry, file) =>
@@ -130,7 +125,7 @@ async function pypi(request, response, path) {
     const fields = multipart(request, await body(request));
     const file = fields.content?.filename;
     if (!file) return reply(response, 400, "no content", "text/plain");
-    if (failsOnce(file))
+    if (failing(file))
       return reply(
         response,
         500,
@@ -248,7 +243,7 @@ async function npm(request, response, path) {
     const [version, manifest] = Object.entries(document.versions)[0];
     const [attachment] = Object.values(document._attachments);
     const file = `${pkg}-${version}.tgz`;
-    if (failsOnce(file))
+    if (failing(file))
       return reply(response, 500, { error: "the double failed this publish" });
     if (existsSync(join(state, "npm", pkg, `${version}.json`)))
       return reply(response, 403, {
@@ -311,7 +306,7 @@ async function crates(request, response, path) {
     const crateLength = bytes.readUInt32LE(4 + length);
     const crate = bytes.subarray(8 + length, 8 + length + crateLength);
     const file = `${metadata.name}-${metadata.vers}.crate`;
-    if (failsOnce(file))
+    if (failing(file))
       return reply(response, 500, {
         errors: [{ detail: "the double failed" }],
       });

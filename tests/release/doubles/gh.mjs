@@ -11,7 +11,7 @@
 //   releases/<tag>/body           its notes
 //   releases/<tag>/prerelease     'true' or 'false'
 //   calls.log                     every invocation, one JSON argv per line
-//   fail-once/<file>              the next upload of <file> fails, once
+//   fail/<file>                   every upload of <file> fails until removed
 //   prs                           what `gh pr list --jq ...` prints
 import {
   appendFileSync,
@@ -20,7 +20,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
@@ -81,11 +80,8 @@ switch (verb) {
   case "upload": {
     for (const file of args.slice(3).filter((a) => !a.startsWith("--"))) {
       const name = basename(file);
-      const marker = join(state, "fail-once", name);
-      if (existsSync(marker)) {
-        rmSync(marker);
+      if (existsSync(join(state, "fail", name)))
         fail(`HTTP 502: upload of ${name} failed`);
-      }
       if (existsSync(join(assets, name)) && !args.includes("--clobber"))
         fail(`HTTP 422: asset ${name} already exists`);
       copyFileSync(file, join(assets, name));

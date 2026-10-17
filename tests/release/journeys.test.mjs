@@ -292,12 +292,13 @@ describe("publication against registry doubles", () => {
   const linux = (...args) => recipe("linux", [...args, "--out", OUT], env);
 
   test("build-linux publishes exactly the files it built, and a failed upload is finished by a re-run", () => {
-    // The checksum, the second asset, fails once.
-    gh.failOnce(fileOf("checksum").file);
+    // The checksum, the second asset, fails until the Release accepts it again.
+    gh.failUploads(fileOf("checksum").file);
     const first = linux("upload", "github");
     assert.notEqual(first.status, 0, first.output);
     assert.match(first.stderr, /uploading .*\.sha256 failed/);
     assert.deepEqual(readdirSync(gh.assets), [fileOf("archive").file]);
+    gh.healUploads();
     const before = gh.uploads().length;
     const again = linux("upload", "github");
     assert.equal(again.status, 0, again.output);
@@ -311,9 +312,12 @@ describe("publication against registry doubles", () => {
       "only what was missing",
     );
 
-    registries.failOnce(fileOf("wheel").file);
-    assert.notEqual(linux("upload", "pypi").status, 0);
+    registries.failUploads(fileOf("wheel").file);
+    const refused = linux("upload", "pypi");
+    assert.notEqual(refused.status, 0, refused.output);
+    assert.match(refused.stderr, /uploading .*\.whl to PyPI failed/);
     assert.deepEqual(registries.uploads(), []);
+    registries.clear();
     for (const registry of ["pypi", "npm"]) {
       const run = linux("upload", registry);
       assert.equal(run.status, 0, run.output);
@@ -567,22 +571,32 @@ describe("publication against registry doubles", () => {
     for (const id of ["upload-crate", "upload-npm", "upload-github"])
       assert.equal(results[id], "failure", id);
     assert.deepEqual(independent(), []);
+    // Still demoted (the journey above demoted it, and a demoted Release is not
+    // bannered twice), and this run's verdict names the failed job.
     assert.notEqual(settle.status, 0);
     assert.ok(gh.prerelease());
-    assert.match(gh.body(), /build-macos \(failure\)/);
+    assert.match(settle.stderr, /did not publish — build-macos \(failure\)/);
   });
 
   test("once every platform is served, publish publishes exactly its files, finishes a failed upload on a re-run, and restores the release", () => {
-    // The frontend, the second npm package, fails once.
-    registries.failOnce(`onepipeline-ui-${VERSION}.tgz`);
+    // The frontend, the second npm package, fails until npm accepts it again.
+    registries.failUploads(`onepipeline-ui-${VERSION}.tgz`);
     const extra = { BUILD_RESULTS: allBuilt };
     assert.equal(publish(["check"], extra).status, 0);
     const crate = publish(["upload", "crate"], extra);
     assert.equal(crate.status, 0, crate.output);
     const npmFirst = publish(["upload", "npm"], extra);
     assert.notEqual(npmFirst.status, 0, npmFirst.output);
+    assert.match(npmFirst.stderr, /publishing onepipeline-ui-.*\.tgz failed/);
+    registries.clear();
+    const published = registries.uploads().length;
     const npmAgain = publish(["upload", "npm"], extra);
     assert.equal(npmAgain.status, 0, npmAgain.output);
+    assert.deepEqual(
+      registries.uploads().slice(published),
+      [`npm onepipeline-ui-${VERSION}.tgz`],
+      "the re-run publishes only what was missing",
+    );
     const sbom = publish(["upload", "github"], extra);
     assert.equal(sbom.status, 0, sbom.output);
     assert.deepEqual(independent().sort(), [
