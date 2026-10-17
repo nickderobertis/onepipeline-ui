@@ -31,10 +31,9 @@ const FOUR = {
   "test-windows": "windows-latest",
   "test-macos": "macos-latest",
 };
-// The one job condition the four may carry: the manager's ruling (correlation
-// c-803e513e6593308491a091d79cc88083) that `test-macos` never starts on a
-// same-repository release-plz branch, which keeps the macOS runs-per-change
-// budget at two.
+// The one job condition the four may carry: `test-macos` never starts on a
+// same-repository release-plz branch, whose version-only diff the Mac policy
+// lets skip, which keeps the macOS runs-per-change budget at two.
 const MAC_CONDITION =
   "github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.head.repo.full_name == github.repository)";
 const REUSABLE =

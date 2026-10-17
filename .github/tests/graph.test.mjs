@@ -93,9 +93,9 @@ test("actual workflows, expressions and reusable calls record the complete lifec
                       (row) => row.macos && row.requested,
                     );
                     // `test-macos` never starts on a same-repository
-                    // release-plz branch (the manager's ruling recorded at the
-                    // job), so the policy's answer there is the carriers' to
-                    // report rather than a Mac runner's to spend.
+                    // release-plz branch (the condition at the job), so the
+                    // policy's answer there is the carriers' to report rather
+                    // than a Mac runner's to spend.
                     assert.equal(
                       mac.some((row) => row.workflow === "ci.yml"),
                       policy.macosRequired && !(releaseBranch && !fork),
