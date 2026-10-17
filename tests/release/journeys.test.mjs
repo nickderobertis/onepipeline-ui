@@ -294,6 +294,24 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
         /the staged checksum does not describe the staged archive/,
       );
     }
+    // A staged npm platform package whose manifest names another version, or
+    // another platform, than the one it is staged for.
+    const pkg = fileOf("npm").package;
+    for (const bend of [
+      (manifest) => ({ ...manifest, version: "9.9.9" }),
+      (manifest) => ({ ...manifest, os: ["darwin"] }),
+    ]) {
+      rmSync(tampered, { recursive: true, force: true });
+      execFileSync("cp", ["-a", OUT, tampered]);
+      const path = join(tampered, "npm", pkg, "package.json");
+      writeFileSync(
+        path,
+        JSON.stringify(bend(JSON.parse(readFileSync(path, "utf8")))),
+      );
+      const run = recipe("linux", ["test-install", "--out", tampered], env);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(run.stderr, /invalid staged npm platform metadata/);
+    }
     rmSync(tampered, { recursive: true, force: true });
   });
 });

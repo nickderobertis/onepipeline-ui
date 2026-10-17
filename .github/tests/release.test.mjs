@@ -689,8 +689,10 @@ test("real workflow command usage errors return 2 with an actionable diagnostic"
       {},
     ],
     ["node", ["scripts/release.mjs", "linux", "verify", "--bogus"], {}],
-    // `all` is the rehearsal alone.
+    // `all` is the rehearsal alone, and only publishing phases rehearse.
     ["node", ["scripts/release.mjs", "linux", "all"], {}],
+    ["node", ["scripts/release.mjs", "linux", "build", "--dry-run"], {}],
+    ["node", ["scripts/release.mjs", "publish", "settle", "--dry-run"], {}],
     // Every staging phase deletes --out first, so it is held to target/.
     ["node", ["scripts/release.mjs", "linux", "build", "--out", "."], {}],
     ["node", ["scripts/release.mjs", "publish", "build", "--out", ".."], {}],

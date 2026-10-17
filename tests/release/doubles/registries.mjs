@@ -286,7 +286,14 @@ async function npm(request, response, path) {
     const [version, manifest] =
       Object.entries(document.versions ?? {})[0] ?? [];
     const [attachment] = Object.values(document._attachments ?? {});
-    if (!valid(PACKAGE, pkg) || !valid(VERSION, version) || !attachment?.data)
+    if (
+      !valid(PACKAGE, pkg) ||
+      !valid(VERSION, version) ||
+      manifest?.name !== pkg ||
+      manifest.version !== version ||
+      typeof attachment?.data !== "string" ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(attachment.data)
+    )
       return reply(response, 400, {
         error: "not a package this registry takes",
       });
@@ -351,11 +358,20 @@ async function crates(request, response, path) {
   if (request.method === "PUT" && path === "/api/v1/crates/new") {
     if (!request.headers.authorization)
       return reply(response, 403, { errors: [{ detail: "no token" }] });
+    // cargo's framing: a little-endian length, the metadata JSON, another
+    // length and the .crate — refused unless both lengths fit the request.
     const bytes = await body(request);
-    const length = bytes.readUInt32LE(0);
+    const length = bytes.length >= 4 ? bytes.readUInt32LE(0) : -1;
+    const crateLength =
+      length >= 0 && bytes.length >= 8 + length
+        ? bytes.readUInt32LE(4 + length)
+        : -1;
+    if (crateLength < 0 || bytes.length !== 8 + length + crateLength)
+      return reply(response, 400, {
+        errors: [{ detail: "malformed publish request" }],
+      });
     const metadata = JSON.parse(bytes.subarray(4, 4 + length).toString());
-    const crateLength = bytes.readUInt32LE(4 + length);
-    const crate = bytes.subarray(8 + length, 8 + length + crateLength);
+    const crate = bytes.subarray(8 + length);
     if (!valid(PACKAGE, metadata.name) || !valid(VERSION, metadata.vers))
       return reply(response, 400, {
         errors: [{ detail: "invalid crate name or version" }],
