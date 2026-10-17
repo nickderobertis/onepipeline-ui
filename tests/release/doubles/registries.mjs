@@ -92,6 +92,13 @@ const served = (key, bytes) =>
 const accepted = (registry, file) =>
   appendFileSync(join(state, "uploads.log"), `${registry} ${file}\n`);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+// Every name a client hands over becomes a path under STATE_DIR, so each is
+// held to what a registry would accept before it is used as one.
+const FILE = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
+const PACKAGE = /^[a-z0-9][a-z0-9._-]*$/;
+const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const valid = (pattern, value) =>
+  typeof value === "string" && pattern.test(value) && !value.includes("..");
 
 function reply(response, status, body, type = "application/json") {
   const bytes = Buffer.isBuffer(body)
@@ -145,7 +152,8 @@ async function pypi(request, response, path) {
   if (request.method === "POST" && path === "/legacy/") {
     const fields = multipart(request, await body(request));
     const file = fields.content?.filename;
-    if (!file) return reply(response, 400, "no content", "text/plain");
+    if (!valid(FILE, file) || !file.endsWith(".whl"))
+      return reply(response, 400, "not a wheel filename", "text/plain");
     if (failing(file))
       return reply(
         response,
@@ -205,6 +213,7 @@ async function pypi(request, response, path) {
 }
 
 function npmVersions(pkg) {
+  if (!valid(PACKAGE, pkg)) return [];
   const dir = join(state, "npm", pkg);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
@@ -268,8 +277,13 @@ async function npm(request, response, path) {
         error: "you must be logged in to publish",
       });
     const document = JSON.parse((await body(request)).toString());
-    const [version, manifest] = Object.entries(document.versions)[0];
-    const [attachment] = Object.values(document._attachments);
+    const [version, manifest] =
+      Object.entries(document.versions ?? {})[0] ?? [];
+    const [attachment] = Object.values(document._attachments ?? {});
+    if (!valid(PACKAGE, pkg) || !valid(VERSION, version) || !attachment?.data)
+      return reply(response, 400, {
+        error: "not a package this registry takes",
+      });
     const file = `${pkg}-${version}.tgz`;
     if (failing(file))
       return reply(response, 500, { error: "the double failed this publish" });
@@ -336,6 +350,10 @@ async function crates(request, response, path) {
     const metadata = JSON.parse(bytes.subarray(4, 4 + length).toString());
     const crateLength = bytes.readUInt32LE(4 + length);
     const crate = bytes.subarray(8 + length, 8 + length + crateLength);
+    if (!valid(PACKAGE, metadata.name) || !valid(VERSION, metadata.vers))
+      return reply(response, 400, {
+        errors: [{ detail: "invalid crate name or version" }],
+      });
     const file = `${metadata.name}-${metadata.vers}.crate`;
     if (failing(file))
       return reply(response, 500, {

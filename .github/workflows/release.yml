@@ -282,7 +282,7 @@ jobs:
       - name: Attach the SBOM to the Release
         id: upload-github
         run: just release-publish upload github
-      - name: Install the launcher from npm and read the crate and the SBOM back
+      - name: Install the launcher from npm, and find the crate on its index and the SBOM on the Release
         id: verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

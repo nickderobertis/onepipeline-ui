@@ -52,7 +52,14 @@ if (noun === "pr" && verb === "list") {
 if (noun !== "release")
   fail(`gh double: '${args.join(" ")}' is not a call it answers`);
 
-const release = join(state, "releases", tag ?? "");
+// The tag becomes a path under the state directory, so it is held to a tag's
+// shape first.
+if (
+  !/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^[a-z][a-z-]*$/.test(tag ?? "") ||
+  tag.includes("..")
+)
+  fail(`HTTP 404: Not Found (no release ${tag})`);
+const release = join(state, "releases", tag);
 const assets = join(release, "assets");
 if (!tag || !existsSync(release))
   fail("HTTP 404: Not Found (release not found)");

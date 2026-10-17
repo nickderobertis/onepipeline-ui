@@ -173,7 +173,6 @@ test("every release target is uploaded by the jobs release-targets.toml says pub
           `${id} is uploaded by ${job}, which ${target.name}'s published_by does not name: ${target.published_by}`,
         );
     }
-    // A target spread across platforms is each build job together.
     const all = new Set(ids.flatMap((id) => [...uploaders.get(id)]));
     assert.deepEqual(
       [...named].sort(),

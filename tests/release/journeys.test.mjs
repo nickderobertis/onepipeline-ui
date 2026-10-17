@@ -164,19 +164,21 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
       "staged archive/wheel/npm install, server and embedded view passed",
     );
     assert.ok(installed > 0, rehearsal.output);
-    const publishes = [
-      ...rehearsal.stdout.matchAll(/release: would run: (.*)/g),
-    ].map((m) => m[1]);
+    // One line reports the dry run, naming every publish command it skipped.
+    const summary = rehearsal.stdout
+      .split("\n")
+      .find((line) =>
+        line.includes(
+          "dry run — registry verification skipped, nothing was published",
+        ),
+      );
+    assert.ok(summary, rehearsal.stdout);
     for (const artifact of linuxPlan.artifacts)
       assert.ok(
-        publishes.some((p) => p.includes(staged(artifact))),
-        `${artifact.file} would be published: ${publishes}`,
+        summary.includes(staged(artifact)),
+        `${artifact.file} would be published: ${summary}`,
       );
-    assert.ok(rehearsal.stdout.indexOf("release: would run:") > installed);
-    assert.match(
-      rehearsal.stdout,
-      /dry run — registry verification skipped, nothing was published/,
-    );
+    assert.ok(rehearsal.stdout.indexOf(summary) > installed);
     assert.deepEqual(
       gh.calls(),
       [],
@@ -684,6 +686,33 @@ describe("publication against registry doubles", () => {
       !existsSync(join(ROOT, "bom.json")),
       "the SBOM is moved out of the checkout",
     );
+    // A dry run of each upload names what it would publish, and neither reads
+    // nor writes any registry or the Release.
+    const calls = gh.calls().length;
+    for (const [registry, command] of [
+      ["crate", "cargo publish --locked"],
+      [
+        "npm",
+        `scripts/publish-npm.sh ${join(publishOut, "npm-artifacts", `onepipeline-api-cli-${VERSION}.tgz`)}`,
+      ],
+      [
+        "github",
+        `gh release upload ${TAG} ${join(publishOut, "assets", `onepipeline-api-${TAG}.cdx.json`)}`,
+      ],
+    ]) {
+      const dry = publish(["upload", registry, "--dry-run"], {
+        BUILD_RESULTS: allBuilt,
+      });
+      assert.equal(dry.status, 0, dry.output);
+      assert.match(dry.stdout, new RegExp(`dry run — ${registry} would run: `));
+      assert.ok(dry.stdout.includes(command), dry.stdout);
+    }
+    assert.equal(
+      gh.calls().length,
+      calls,
+      "a dry run asks the Release nothing",
+    );
+    assert.deepEqual(independent(), [], "a dry run publishes nothing");
   });
 
   test("a registry read that fails is refused, never read as nothing served", () => {
@@ -900,6 +929,37 @@ describe("publication against registry doubles", () => {
 
     const verify = publish(["verify"], extra);
     assert.equal(verify.status, 0, verify.output);
+    // With every registry switched off, publish asks none of them for the
+    // release: the crate and the frontend lost, it still verifies, by the
+    // SBOM on the Release and what the probe answers.
+    registries.hide([`onepipeline-ui@${VERSION}`]);
+    try {
+      const off = publish(["verify"], {
+        ...extra,
+        PYPI_PUBLISH: "false",
+        NPM_PUBLISH: "false",
+        CARGO_REGISTRY_TOKEN: "",
+      });
+      assert.equal(off.status, 0, off.output);
+      assert.doesNotMatch(off.output, /npm onepipeline-api-cli \d/);
+    } finally {
+      registries.clear();
+    }
+    // The Release without its SBOM fails the read-back.
+    const sbomAsset = join(gh.assets, `onepipeline-api-${TAG}.cdx.json`);
+    renameSync(sbomAsset, join(dir, "sbom-aside"));
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        new RegExp(
+          `the Release has no onepipeline-api-${TAG.replace(/\./g, "\\.")}\\.cdx\\.json`,
+        ),
+      );
+    } finally {
+      renameSync(join(dir, "sbom-aside"), sbomAsset);
+    }
     assert.match(
       verify.output,
       new RegExp(`npm onepipeline-api-cli ${VERSION.replace(/\./g, "\\.")}`),

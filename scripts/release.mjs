@@ -623,9 +623,11 @@ function testInstall(job, out) {
     );
 }
 
+// What a dry run would have published with, reported once by the phase.
+const wouldRun = [];
 function announce(dryRun, command, args) {
   if (dryRun) {
-    console.log(`release: would run: ${[command, ...args].join(" ")}`);
+    wouldRun.push([command, ...args].join(" "));
     return false;
   }
   return true;
@@ -713,10 +715,11 @@ async function uploadPlatform(job, out, registry, dryRun) {
       }
     }
   }
-  if (!dryRun)
-    say(
-      `release ${job}: ${registry} published ${published.join(", ") || "nothing"}; already served ${present.join(", ") || "nothing"}`,
-    );
+  say(
+    dryRun
+      ? `release ${job}: dry run — ${registry} would run: ${wouldRun.join("; ")}`
+      : `release ${job}: ${registry} published ${published.join(", ") || "nothing"}; already served ${present.join(", ") || "nothing"}`,
+  );
 }
 
 // Install this platform's files back from each registry, on this OS, and run
@@ -1049,10 +1052,11 @@ async function uploadPublish(out, registry, dryRun) {
         published.push(a.file);
       }
   }
-  if (!dryRun)
-    console.log(
-      `release publish: ${registry} published ${published.join(", ") || "nothing new"}`,
-    );
+  say(
+    dryRun
+      ? `release publish: dry run — ${registry} would run: ${wouldRun.join("; ")}`
+      : `release publish: ${registry} published ${published.join(", ") || "nothing new"}`,
+  );
 }
 
 // What release-targets.toml declares, read the way its consumers read it: with a
@@ -1315,7 +1319,7 @@ async function main(argv) {
       quiet = false;
       say(
         dryRun
-          ? `release ${job}: built, installed and ran ${plan(job).targets.join(", ")}; dry run — registry verification skipped, nothing was published`
+          ? `release ${job}: built, installed and ran ${plan(job).targets.join(", ")}; dry run — registry verification skipped, nothing was published; it would run: ${wouldRun.join("; ")}`
           : `release ${job}: built, installed, published to ${registries.join(", ")} and verified ${plan(job).targets.join(", ")}`,
       );
       return;
