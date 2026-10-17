@@ -809,8 +809,6 @@ describe("publication against registry doubles", () => {
   });
 
   test("once every platform is served, publish publishes exactly its files, finishes a failed upload on a re-run, and restores the release", () => {
-    // The frontend, the second npm package, fails until npm accepts it again.
-    registries.failUploads(`onepipeline-ui-${VERSION}.tgz`);
     const extra = { BUILD_RESULTS: allBuilt };
     assert.equal(publish(["check"], extra).status, 0);
     // Without its secret the crate is switched off, which is not a failure.
@@ -842,6 +840,8 @@ describe("publication against registry doubles", () => {
     registries.clear();
     const crate = publish(["upload", "crate"], extra);
     assert.equal(crate.status, 0, crate.output);
+    // The frontend, the second npm package, fails until npm accepts it again.
+    registries.failUploads(`onepipeline-ui-${VERSION}.tgz`);
     const npmFirst = publish(["upload", "npm"], extra);
     assert.notEqual(npmFirst.status, 0, npmFirst.output);
     assert.match(npmFirst.stderr, /publishing onepipeline-ui-.*\.tgz failed/);
