@@ -62,6 +62,7 @@
     },
     "install-smoke": {
       "command": "just _crate-install-smoke",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "cache": false
     },
     "wheel-smoke": {

@@ -68,8 +68,10 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// them beside each other. A tier that compiled a bundle-less binary there would
 /// leave the next one to rebuild it, which is minutes of the gate spent producing
 /// a binary that was already correct the run before. `test-quick` is each tier as
-/// the cross-platform legs run it, where nothing else builds the view first.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 10] = [
+/// the cross-platform legs run it, where nothing else builds the view first. The
+/// packaging targets compile the crate in release beside those tiers, so a view
+/// rebuilt under them deletes a file `build.rs` is embedding.
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 13] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-quick",
     "onepipeline-ui-e2e:test",
@@ -80,10 +82,14 @@ const TASKS_THAT_COMPILE_THE_READ_API: [&str; 10] = [
     "onepipeline-ui-cost:test-cost",
     "onepipeline-ui-linked-report:test",
     "dag-ui:build-api-server",
+    "onepipeline-ui:install-smoke",
+    "onepipeline-ui:wheel-smoke",
+    "onepipeline-ui:release-staging",
 ];
 
 /// The targets those tasks are reached through.
-const COMPILING_TIERS: &str = "test,test-quick,test-baseline,test-cost";
+const COMPILING_TIERS: &str =
+    "test,test-quick,test-baseline,test-cost,install-smoke,wheel-smoke,release-staging";
 
 /// What builds the view the binary embeds.
 const VIEW_BUILD: &str = "dag-ui:build";
