@@ -37,8 +37,7 @@ test("every version spelling a plan accepts names its wheel as PEP 440 does", ()
     "1.2.3-rc1",
     "1.2.3-alpha.2",
     "1.2.3-beta.10",
-    "1.2.3+build.5",
-    "1.2.3-rc.1+abc-def",
+    "1.2.3-rc.01",
   ]) {
     const run = planned(version);
     assert.equal(run.status, 0, `${version}: ${run.stderr}`);
@@ -59,7 +58,13 @@ test("every version spelling a plan accepts names its wheel as PEP 440 does", ()
 });
 
 test("a prerelease the plan cannot spell is refused before anything is named", () => {
-  for (const version of ["1.2.3-foo", "1.2.3-dev.1", "1.2.3-rc.x"]) {
+  for (const version of [
+    "1.2.3-foo",
+    "1.2.3-dev.1",
+    "1.2.3-rc.x",
+    "1.2.3+build.5",
+    "1.2.3+ABC.01",
+  ]) {
     const run = planned(version);
     assert.equal(run.status, 2, `${version}: ${run.stdout}`);
     assert.match(run.stderr, /has no PEP 440 spelling this release knows/);

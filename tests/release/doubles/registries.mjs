@@ -23,7 +23,9 @@ import { execFileSync } from "node:child_process";
 //                                registry pretends not to serve
 //   control/corrupt              lines naming files served with other bytes
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
-//                                `crate-index=foreign` (JSON, not an entry),
+//                                `crate-index=foreign` (JSON, not an entry) or
+//                                `npm-packument=other-version` (each version's
+//                                manifest names another),
 //                                for the reads a release makes of a registry:
 //                                pypi-json, npm-packument, crate-index and
 //                                crate-api
@@ -253,7 +255,13 @@ async function npm(request, response, path) {
     return reply(response, 200, versions[newest]);
   }
   const pkg = decodeURIComponent(path.slice(1));
-  if (request.method === "GET" && broken("npm-packument", response)) return;
+  const otherVersion = lines("broken").includes("npm-packument=other-version");
+  if (
+    request.method === "GET" &&
+    !otherVersion &&
+    broken("npm-packument", response)
+  )
+    return;
   if (request.method === "PUT") {
     if (!/^Bearer \S+/.test(request.headers.authorization ?? ""))
       return reply(response, 401, {
@@ -283,6 +291,9 @@ async function npm(request, response, path) {
     return reply(response, 201, { ok: true });
   }
   const versions = packument(request.headers.host, pkg);
+  if (otherVersion)
+    for (const manifest of Object.values(versions))
+      manifest.version = "0.0.0-other";
   const names = Object.keys(versions);
   if (!names.length) return reply(response, 404, { error: "Not found" });
   return reply(response, 200, {

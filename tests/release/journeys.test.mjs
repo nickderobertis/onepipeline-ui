@@ -21,6 +21,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -366,7 +367,6 @@ describe("publication against registry doubles", () => {
       const run = linux("upload", registry);
       assert.equal(run.status, 0, run.output);
     }
-    // A complete release re-run publishes nothing more.
     for (const registry of ["github", "pypi", "npm"]) {
       const count = gh.uploads().length;
       const log = registries.uploads().length;
@@ -375,7 +375,6 @@ describe("publication against registry doubles", () => {
       assert.equal(gh.uploads().length, count);
       assert.equal(registries.uploads().length, log);
     }
-    // Exactly the build's files, byte for byte, at the release's version.
     for (const artifact of linuxPlan.artifacts.filter(
       (a) => a.registry === "github",
     ))
@@ -507,8 +506,72 @@ describe("publication against registry doubles", () => {
     } finally {
       writeFileSync(tarball, published);
     }
-    // The Release serving an archive its checksum does not describe.
+    // PyPI serving an installable wheel, and the Release an archive with a
+    // checksum that matches it, each carrying some other binary.
+    const wheel = join(registries.state, "pypi", fileOf("wheel").file);
+    const wheelBytes = readFileSync(wheel);
+    execFileSync("python3", [
+      "-c",
+      "import sys,zipfile\nsrc=zipfile.ZipFile(sys.argv[1]).infolist(), zipfile.ZipFile(sys.argv[1])\nentries=[(i.filename, src[1].read(i.filename)) for i in src[0]]\nwith zipfile.ZipFile(sys.argv[1],'w') as z:\n  for name,data in entries: z.writestr(name, b'#!/bin/sh\\necho another build\\n' if name.endswith('.data/scripts/onepipeline-api') else data)",
+      wheel,
+    ]);
     const archive = join(gh.assets, fileOf("archive").file);
+    const checksumFile = join(gh.assets, fileOf("checksum").file);
+    const archiveBytes = readFileSync(archive);
+    const checksumBytes = readFileSync(checksumFile);
+    const rebuilt = join(dir, "other-archive");
+    rmSync(rebuilt, { recursive: true, force: true });
+    mkdirSync(rebuilt, { recursive: true });
+    execFileSync("tar", ["-xzf", archive, "-C", rebuilt]);
+    writeFileSync(
+      join(rebuilt, "onepipeline-api"),
+      "#!/bin/sh\necho another build\n",
+      { mode: 0o755 },
+    );
+    execFileSync("tar", ["-czf", archive, "-C", rebuilt, "."]);
+    writeFileSync(
+      checksumFile,
+      `${sha(readFileSync(archive))}  ${fileOf("archive").file}\n`,
+    );
+    try {
+      const run = linux("verify");
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /the GitHub Release archive installed a different binary than this job built/,
+      );
+    } finally {
+      writeFileSync(archive, archiveBytes);
+      writeFileSync(checksumFile, checksumBytes);
+    }
+    try {
+      const run = linux("verify");
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /PyPI installed a different binary than this job built/,
+      );
+    } finally {
+      writeFileSync(wheel, wheelBytes);
+    }
+    // npm serving the platform package without its binary.
+    const hollow = join(dir, "hollow");
+    rmSync(hollow, { recursive: true, force: true });
+    mkdirSync(hollow, { recursive: true });
+    execFileSync("tar", ["-xzf", tarball, "-C", hollow]);
+    rmSync(join(hollow, "package/bin"), { recursive: true });
+    execFileSync("tar", ["-czf", tarball, "-C", hollow, "package"]);
+    try {
+      const run = linux("verify");
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /npm installed onepipeline-api-cli-linux-x64 without its binary/,
+      );
+    } finally {
+      writeFileSync(tarball, published);
+    }
+    // The Release serving an archive its checksum does not describe.
     const original = readFileSync(archive);
     writeFileSync(archive, Buffer.from("not the archive"));
     try {
@@ -634,6 +697,12 @@ describe("publication against registry doubles", () => {
         /PyPI answered .* with no list of files/,
       ],
       [
+        "npm names another version than the one asked for",
+        ["npm-packument=other-version"],
+        ["check"],
+        /npm answered onepipeline-api-cli-.*@.* with "0\.0\.0-other"/,
+      ],
+      [
         "npm answers 503",
         ["npm-packument=503"],
         ["check"],
@@ -671,36 +740,55 @@ describe("publication against registry doubles", () => {
   });
 
   test("with one platform missing, publish uploads nothing platform-independent and demotes the release", () => {
-    const windowsNpm = platforms.windows.artifacts.find(
-      (a) => a.registry === "npm",
-    );
-    registries.hide([`${windowsNpm.package}@${VERSION}`]);
-    try {
-      const { results, settle } = publishJob(allBuilt);
-      assert.equal(results.check, "failure");
-      assert.match(
-        results["check-output"],
-        new RegExp(`npm ${windowsNpm.package}@`),
-      );
-      for (const id of ["upload-crate", "upload-npm", "upload-github"]) {
-        assert.equal(results[id], "failure", id);
-        assert.match(
-          results[`${id}-output`],
-          /not every platform published/,
-          id,
+    const of = (job, registry) =>
+      platforms[job].artifacts.find((a) => a.registry === registry);
+    const macosArchive = join(gh.assets, of("macos", "github").file);
+    const aside = join(dir, "aside");
+    for (const [missing, bend, mend, named] of [
+      [
+        "the Windows npm package",
+        () => registries.hide([`${of("windows", "npm").package}@${VERSION}`]),
+        () => registries.clear(),
+        `npm ${of("windows", "npm").package}@`,
+      ],
+      [
+        "the macOS archive on the Release",
+        () => renameSync(macosArchive, aside),
+        () => renameSync(aside, macosArchive),
+        `GitHub Release ${of("macos", "github").file}`,
+      ],
+      [
+        "the Windows wheel",
+        () => registries.hide([of("windows", "pypi").file]),
+        () => registries.clear(),
+        `PyPI ${of("windows", "pypi").file}`,
+      ],
+    ]) {
+      bend();
+      try {
+        const { results, settle } = publishJob(allBuilt);
+        assert.equal(results.check, "failure", missing);
+        assert.ok(results["check-output"].includes(named), missing);
+        for (const id of ["upload-crate", "upload-npm", "upload-github"]) {
+          assert.equal(results[id], "failure", `${missing}: ${id}`);
+          assert.match(
+            results[`${id}-output`],
+            /not every platform published/,
+            `${missing}: ${id}`,
+          );
+        }
+        assert.deepEqual(
+          independent(),
+          [],
+          `${missing}: nothing platform-independent was published`,
         );
+        assert.notEqual(settle.status, 0, missing);
+        assert.match(settle.stderr, /did not publish — check \(failure\)/);
+        assert.ok(gh.prerelease(), `${missing}: the Release is demoted`);
+        assert.match(gh.body(), /This release did not publish/);
+      } finally {
+        mend();
       }
-      assert.deepEqual(
-        independent(),
-        [],
-        "nothing platform-independent was published",
-      );
-      assert.notEqual(settle.status, 0);
-      assert.ok(gh.prerelease(), "the Release is demoted");
-      assert.match(gh.body(), /This release did not publish/);
-      assert.match(gh.body(), /check \(failure\)/);
-    } finally {
-      registries.clear();
     }
   });
 
@@ -746,6 +834,12 @@ describe("publication against registry doubles", () => {
       /NPM_PUBLISH is on but NODE_AUTH_TOKEN is empty/,
     );
     assert.deepEqual(independent(), []);
+    // A crate upload the registry refuses fails the step; the re-run publishes it.
+    registries.failUploads(`onepipeline-ui-${VERSION}.crate`);
+    const refusedCrate = publish(["upload", "crate"], extra);
+    assert.notEqual(refusedCrate.status, 0, refusedCrate.output);
+    assert.match(refusedCrate.stderr, /cargo publish failed/);
+    registries.clear();
     const crate = publish(["upload", "crate"], extra);
     assert.equal(crate.status, 0, crate.output);
     const npmFirst = publish(["upload", "npm"], extra);
@@ -760,6 +854,14 @@ describe("publication against registry doubles", () => {
       [`npm onepipeline-ui-${VERSION}.tgz`],
       "the re-run publishes only what was missing",
     );
+    gh.failUploads(`onepipeline-api-${TAG}.cdx.json`);
+    const refusedSbom = publish(["upload", "github"], extra);
+    assert.notEqual(refusedSbom.status, 0, refusedSbom.output);
+    assert.match(
+      refusedSbom.stderr,
+      /uploading onepipeline-api-.*\.cdx\.json failed/,
+    );
+    gh.healUploads();
     const sbom = publish(["upload", "github"], extra);
     assert.equal(sbom.status, 0, sbom.output);
     assert.deepEqual(independent().sort(), [
@@ -768,7 +870,6 @@ describe("publication against registry doubles", () => {
       `npm onepipeline-ui-${VERSION}.tgz`,
       `onepipeline-api-${TAG}.cdx.json`,
     ]);
-    // Each exactly as the build staged it.
     for (const [registryFile, stagedFile] of [
       [
         join(registries.state, "crates", `onepipeline-ui-${VERSION}.crate`),
@@ -792,7 +893,6 @@ describe("publication against registry doubles", () => {
         sha(readFileSync(stagedFile)),
         registryFile,
       );
-    // A re-run of every upload publishes nothing more.
     const count = registries.uploads().length;
     for (const registry of ["crate", "npm", "github"])
       assert.equal(publish(["upload", registry], extra).status, 0);
@@ -812,6 +912,31 @@ describe("publication against registry doubles", () => {
       verify.stdout,
       new RegExp(`crate:onepipeline-ui -> ${VERSION.replace(/\./g, "\\.")}`),
     );
+    // A registry that has lost the crate or the frontend fails the read-back.
+    registries.hide([`onepipeline-ui@${VERSION}`]);
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(run.stderr, /the crate index does not list onepipeline-ui/);
+    } finally {
+      registries.clear();
+    }
+    // Hiding is keyed by name@version for the crate and npm alike, so the
+    // frontend is lost by moving its files aside instead.
+    const frontend = join(registries.state, "npm", "onepipeline-ui");
+    renameSync(frontend, join(dir, "frontend-aside"));
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        new RegExp(
+          `npm does not serve onepipeline-ui@${VERSION.replace(/\./g, "\\.")}`,
+        ),
+      );
+    } finally {
+      renameSync(join(dir, "frontend-aside"), frontend);
+    }
     // A registry whose newest release is not this one fails the probe's
     // question, and so does one the probe cannot get an answer from.
     const newer = join(registries.state, "npm", "onepipeline-ui");

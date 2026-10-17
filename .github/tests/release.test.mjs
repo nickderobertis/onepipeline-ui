@@ -218,7 +218,6 @@ test("in each build job the test-install comes before every publish, and the reg
         `${job} verifies before publishing to ${upload.registry}`,
       );
     }
-    // The view the binary embeds is built before the binary.
     const view = release().jobs[job].steps.findIndex((s) =>
       /^just build$/m.test(s.run ?? ""),
     );
@@ -362,7 +361,6 @@ test("every release job's plan is what v0.37.0 published, with arm64 Linux dropp
   );
   const dropped = /aarch64-unknown-linux-gnu|_aarch64|linux-arm64/;
   const planned = (job) => {
-    // The recipe itself, the way the workflow reaches it.
     const os = job === "publish" ? "publish" : job.replace(/^build-/, "");
     const result = spawnSync(
       "node",
@@ -405,7 +403,6 @@ test("every release job's plan is what v0.37.0 published, with arm64 Linux dropp
       .map((a) => ({ package: a.package, file: a.file })),
     published.crate,
   );
-  // Each platform's plan names exactly its own targets' files.
   for (const p of plans.filter((p) => p.job !== "publish"))
     for (const artifact of p.artifacts)
       assert.equal(TARGETS[artifact.target].platform, p.job, artifact.file);
@@ -431,7 +428,6 @@ test("the tools the release recipes reach are pinned once for the workflows and 
     )[1],
     pin("maturin-version"),
   );
-  // The Python tools reach every build job through the one recipe.
   assert.doesNotMatch(rel, /pip install/);
   for (const job of BUILD_JOBS)
     assert.ok(

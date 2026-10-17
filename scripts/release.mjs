@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // The whole of a release's work, one recipe per CD job.
 //
-// release.yml runs five jobs and four of them live here: `build-linux`,
-// `build-macos` and `build-windows` each call `just release-<os>`, and `publish`
-// calls `just release-publish`. The workflow only sets up a runner and calls a
+// release.yml's jobs live here: `build-linux`, `build-macos` and
+// `build-windows` each call `just release-<os>`, and `publish` calls
+// `just release-publish` (release-plz.yml's one job is release-plz itself). The workflow only sets up a runner and calls a
 // phase; what is built, under which name, and what is uploaded where is decided
 // in this file, so it can be planned without building, driven on a developer's
 // host and held to the last release's published artifacts.
@@ -39,8 +39,8 @@
 //                 scripts/release-status.sh: a release that did not publish is
 //                 demoted to a prerelease.
 //
-// Every phase also takes `plan`, which prints, without building anything, every
-// file, package name, wheel tag and target the job produces.
+// Each job also has a `plan` phase, which prints, without building anything,
+// every file, package name, wheel tag and target the job produces.
 //
 // Registries are reached through their real clients — gh, twine, npm, cargo,
 // pip — and every endpoint can be pointed elsewhere, which is how the journeys
@@ -130,6 +130,13 @@ const WHEEL_PACKAGE = "onepipeline-api-cli";
 const CRATE = "onepipeline-ui";
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
+// A phase's one success line, which a phase run inside another (`all`, or the
+// check every publish upload repeats) leaves to the phase that ran it.
+let quiet = false;
+const say = (line) => {
+  if (!quiet) console.log(line);
+};
+
 class Fault extends Error {
   constructor(message, action, exitCode = 1) {
     super(message);
@@ -153,17 +160,19 @@ function cargoVersion() {
 
 // maturin spells a prerelease the PEP 440 way, and so does every wheel name.
 export function pep440(version) {
-  const [core, local] = version.split("+");
-  const match = core.match(/^(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)\.?(\d+))?$/);
+  // Build metadata (`+…`) is refused rather than spelled: no release here
+  // carries it, and a PEP 440 local version is a different, lowercased one.
+  const match = version.match(/^(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)\.?(\d+))?$/);
   if (!match)
     throw usage(
       `${version} has no PEP 440 spelling this release knows`,
       "release X.Y.Z, or X.Y.Z-alpha.N, -beta.N or -rc.N",
     );
+  const core = match[1].split(".").map(Number).join(".");
   const pre = match[2]
-    ? { alpha: "a", beta: "b", rc: "rc" }[match[2]] + match[3]
+    ? { alpha: "a", beta: "b", rc: "rc" }[match[2]] + Number(match[3])
     : "";
-  return `${match[1]}${pre}${local ? `+${local.replace(/-/g, ".")}` : ""}`;
+  return `${core}${pre}`;
 }
 
 function platformArtifacts(target, version) {
@@ -597,7 +606,7 @@ function buildPlatform(job, out) {
       `the build staged files the plan does not name: ${extra.join(", ")}`,
       "make plan() and release-package.py agree",
     );
-  console.log(
+  say(
     `release ${job}: built and packaged ${targets.join(", ")} from one binary each`,
   );
 }
@@ -705,7 +714,7 @@ async function uploadPlatform(job, out, registry, dryRun) {
     }
   }
   if (!dryRun)
-    console.log(
+    say(
       `release ${job}: ${registry} published ${published.join(", ") || "nothing"}; already served ${present.join(", ") || "nothing"}`,
     );
 }
@@ -838,7 +847,7 @@ function verifyPlatform(job, out) {
       rmSync(work, { recursive: true, force: true });
     }
   }
-  console.log(
+  say(
     `release ${job}: ${targets.join(", ")} installed from every switched-on registry and ran`,
   );
 }
@@ -895,7 +904,7 @@ async function check() {
       `not every platform published ${tag}, so nothing platform-independent will: ${missing.join(", ")}`,
       "re-run the failed build job; the publish job publishes once every platform is served",
     );
-  console.log(`release publish: every platform's ${tag} files are served`);
+  say(`release publish: every platform's ${tag} files are served`);
 }
 
 function buildPublish(out) {
@@ -969,7 +978,11 @@ async function uploadPublish(out, registry, dryRun) {
       `the publish job publishes nothing to '${registry}'`,
       "upload crate, npm or github",
     );
-  if (!dryRun) await check();
+  if (!dryRun) {
+    quiet = true;
+    await check();
+    quiet = false;
+  }
   requireStaged(out, files);
   const published = [];
   if (registry === "crate") {
@@ -1104,7 +1117,7 @@ function probeDeclaredTargets(version) {
     const answer = probe(id);
     if (answer.status !== 0 || answer.stdout.trim())
       throw new Fault(
-        `the release probe answered '${answer.stdout.trim()}' (exit ${answer.status}) for ${id}`,
+        `the release probe answered '${answer.stdout.trim()}' (exit ${answer.status}) for ${id}: ${answer.stderr.trim() || "no diagnostic"}`,
         "a name nobody released must be answered empty; check the registry and the probe",
       );
   }
@@ -1237,7 +1250,7 @@ async function main(argv) {
       `unknown job ${job ?? "(none)"}`,
       `pass one of ${jobs.join(", ")}`,
     );
-  let out = join(REPO_ROOT, "target", "release-dist", job);
+  let out = stagingDirectory(join(REPO_ROOT, "target", "release-dist", job));
   let version;
   let dryRun = false;
   const positional = [];
@@ -1289,20 +1302,24 @@ async function main(argv) {
       return uploadPlatform(job, out, positional[0], dryRun);
     case "platform:verify":
       return verifyPlatform(job, out);
-    case "platform:all":
+    case "platform:all": {
+      quiet = true;
       buildPlatform(job, out);
       testInstall(job, out);
-      await uploadPlatform(job, out, "github", dryRun);
-      if (switchedOn("PYPI_PUBLISH"))
-        await uploadPlatform(job, out, "pypi", dryRun);
-      if (switchedOn("NPM_PUBLISH"))
-        await uploadPlatform(job, out, "npm", dryRun);
-      if (dryRun)
-        console.log(
-          `release ${job}: dry run — registry verification skipped, nothing was published`,
-        );
-      else verifyPlatform(job, out);
+      const registries = ["github"];
+      if (switchedOn("PYPI_PUBLISH")) registries.push("pypi");
+      if (switchedOn("NPM_PUBLISH")) registries.push("npm");
+      for (const registry of registries)
+        await uploadPlatform(job, out, registry, dryRun);
+      if (!dryRun) verifyPlatform(job, out);
+      quiet = false;
+      say(
+        dryRun
+          ? `release ${job}: built, installed and ran ${plan(job).targets.join(", ")}; dry run — registry verification skipped, nothing was published`
+          : `release ${job}: built, installed, published to ${registries.join(", ")} and verified ${plan(job).targets.join(", ")}`,
+      );
       return;
+    }
     case "publish:check":
       return check();
     case "publish:build":
