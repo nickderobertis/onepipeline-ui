@@ -1869,7 +1869,11 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
     // The two ways the build phase compiles: maturin on the runner, and maturin
     // inside the manylinux image.
     let spelled = format!("--features {feature}");
-    let phase = read("scripts/release.mjs");
+    // Whitespace-insensitive: a formatter may put each argument on its own line.
+    let phase: String = read("scripts/release.mjs")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
         phase.contains(&format!("\"--features\", \"{feature}\"")),
         "scripts/release.mjs compiles without `{spelled}`"
