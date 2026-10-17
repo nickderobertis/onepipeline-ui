@@ -121,6 +121,11 @@ hold nothing but their `project.json`, and these rules are theirs.
 - `tests/packaging.rs` — what a released package must *contain*. Three manifests
   (Cargo.toml, `pyproject.toml`, the npm launcher) and `release.yml` describe one
   artifact; without this they would only disagree in public, mid-release.
+- `tests/release/` — the release jobs' own recipes, in their own Nx project
+  (`onepipeline-ui-release`): the Linux build for real, and every publication
+  phase against local registry and Release doubles. The publish build packages
+  the crate, which cargo refuses over uncommitted packaged files, so run it on a
+  committed tree.
 - `tests/contract.rs` — the crate against `docs/contract.md`.
 
 ## The fixtures are goldens, not hand-written claims

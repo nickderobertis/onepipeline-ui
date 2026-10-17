@@ -55,6 +55,8 @@
 //   RELEASE_PYPI_UPLOAD_URL  PyPI's upload endpoint (https://upload.pypi.org/legacy/)
 //   NPM_CONFIG_REGISTRY      npm's own registry setting
 //   RELEASE_CRATES_INDEX     the sparse index read for the crate (https://index.crates.io)
+//   RELEASE_CRATES_API       the crate registry's API, which the release probe
+//                            reads (https://crates.io)
 //   RELEASE_CARGO_PUBLISH_FLAGS extra `cargo publish` flags, as words
 //   RELEASE_VERIFY_BUDGET    seconds a registry install is retried (600)
 //   BUILD_RESULTS            `build-<os>=<result>` pairs the publish job was handed
