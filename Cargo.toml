@@ -567,18 +567,10 @@ onemessagebus = "0.9.1"
 # `onetaskgraph-*` requirements below move with it to the release its lock
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items.
-# 0.75.0 reads and writes YAML through serde-saphyr and links the releases of
-# oneagentgraph (0.5.13), onejudge (0.19.5), onemessagebus (0.9.1), onevcs
-# (0.52.0), onetaskgraph (0.7.1) and oneharness-core (0.28.2) that do the same,
-# so no libyaml translation is left in this crate's graph and a browser-adopted
-# run's driver links none either once this moves. It also names an added node's
-# scratch directory the same way on Windows and has an adopting driver wait for
-# the one it displaces. No route is added and no response changes; the
-# `oneagentgraph`, `onejudge`, `onemessagebus` and `oneharness-core`
-# requirements above move with it to the versions its own lock resolves, and
-# `deny.toml` bans the libyaml crates so none re-enters. This changes the engine
-# types carried by ApiError::from_engine and the other engine-typed public
-# items.
+# 0.75.0 and the siblings it links read YAML through serde-saphyr, so no libyaml
+# translation is left in this graph or in a browser-adopted run's driver. Its
+# adopted driver dispatches nothing until it has read its project's claim off
+# the store, so a run adopted from a project no store holds stays put.
 onepipeline = "=0.75.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
