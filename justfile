@@ -159,6 +159,59 @@ check-affected:
 check-cross: fmt-check lint test-quick
     @echo "check-cross: ok"
 
+# ci.yml's four jobs, each one recipe the job's step calls and a developer can run:
+# `scripts/ci-job.sh` holds which Nx targets each runs and why it is one Nx
+# invocation. All four are scoped to the projects this branch's diff can reach,
+# failing closed as `check-affected` does; `--plan` prints the selection and runs
+# nothing, which is how a Linux host reads what the Windows and macOS jobs select.
+# The platform-independent checks: formatting, lints, type checks, MSRV, audit.
+[positional-arguments]
+ci-lint *args:
+    @bash scripts/ci-job.sh lint "$@"
+
+# `--tier broader`, `scripts/ci-tier.sh`'s answer on the release pull request,
+# sweeps every project with the host-labelled budgets instead.
+# The Linux gate with its packaging alongside: `check`, install, the x86_64 wheel.
+[positional-arguments]
+ci-test-linux *args:
+    @bash scripts/ci-job.sh test-linux "$@"
+
+# The Windows job: the platform-sensitive tiers, the browser build, the install.
+[positional-arguments]
+ci-test-windows *args:
+    @bash scripts/ci-job.sh test-windows "$@"
+
+# The macOS job: the platform-sensitive tiers and the install.
+[positional-arguments]
+ci-test-macos *args:
+    @bash scripts/ci-job.sh test-macos "$@"
+
+# The documented install path, `cargo install --path .`, in a target directory of
+# its own so it compiles beside the test tiers rather than waiting on their lock,
+# smoke-tested as every published artifact is. Warnings denied for the reason
+# release.yml denies them: this is the one release-profile compile of the crate on
+# the platform, and the gate's own builds are debug ones.
+# Install this revision the documented way and smoke-test the installed binary.
+_crate-install-smoke:
+    @RUSTFLAGS="-D warnings" cargo install --path . --locked --quiet \
+      --root target/install-smoke --target-dir target/install-smoke/build
+    @PATH="$PWD/target/install-smoke/bin:$PATH" bash scripts/smoke-published.sh \
+      --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
+      --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
+
+# The release's x86_64 Linux wheel, built by the one definition release.yml's
+# `build-wheels` leg runs (`wheel-linux`), then installed into a fresh virtualenv
+# and smoke-tested. Needs Docker and the browser view `dag-ui:build` writes.
+# Build the x86_64 Linux wheel as the release does, install it, smoke-test it.
+_crate-wheel-smoke:
+    @rm -rf target/wheel-smoke
+    @just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke
+    @python3 -m venv target/wheel-smoke/venv
+    @target/wheel-smoke/venv/bin/pip install --quiet --no-index target/wheel-smoke/*.whl
+    @PATH="$PWD/target/wheel-smoke/venv/bin:$PATH" bash scripts/smoke-published.sh \
+      --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
+      --label "onepipeline-api-cli wheel on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
+
 # The release-staging journey's artifact, built once as a cached Nx target rather
 # than inside the repo-tooling tier: the tier's critical path was this one test.
 # `ONEPIPELINE_UI_RELEASE_STAGING` hands the journey the directory; without it the

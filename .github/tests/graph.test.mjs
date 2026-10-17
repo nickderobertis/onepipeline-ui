@@ -97,9 +97,13 @@ test("actual workflows, expressions and reusable calls record the complete lifec
                     const mac = rows.filter(
                       (row) => row.macos && row.requested,
                     );
+                    // `test-macos` never starts on a same-repository
+                    // release-plz branch (the manager's ruling recorded at the
+                    // job), so the policy's answer there is the carriers' to
+                    // report rather than a Mac runner's to spend.
                     assert.equal(
                       mac.some((row) => row.workflow === "ci.yml"),
-                      policy.macosRequired,
+                      policy.macosRequired && !(releaseBranch && !fork),
                       scenario.id,
                     );
                   }
@@ -258,14 +262,24 @@ test("unsupported runners/calls are explicit failures; real matrix include/exclu
 });
 test("Mac PR job contains the original cross and installed-binary proofs", () => {
   const ci = workflows().find((w) => w.file === "ci.yml").document;
-  const steps = ci.jobs.macos.steps;
-  const commands = steps.map((s) => s.run || "").join("\n");
-  assert.match(commands, /just check-cross/);
-  assert.match(commands, /cargo install --path \. --locked/);
-  assert.match(commands, /scripts\/smoke-published.sh/);
+  const commands = ci.jobs["test-macos"].steps
+    .map((s) => s.run || "")
+    .join("\n");
+  assert.match(commands, /just ci-test-macos/);
+  // The recipe is `scripts/ci-job.sh test-macos`: `check-cross`'s tiers and the
+  // documented install, which `_crate-install-smoke` runs and smoke-tests.
+  const job = readFileSync("scripts/ci-job.sh", "utf8");
+  assert.match(
+    job,
+    /test-macos\) targets="format-check,lint,test-quick,install-smoke" ;;/,
+  );
+  const justfile = readFileSync("justfile", "utf8");
+  const install = justfile.slice(justfile.indexOf("_crate-install-smoke:"));
+  assert.match(install, /cargo install --path \. --locked/);
+  assert.match(install, /scripts\/smoke-published.sh/);
   for (const id of ["cross-macos", "install-macos"]) {
     assert.equal(ci.jobs[id].if, "always()");
-    assert.ok(ci.jobs[id].needs.includes("macos"));
+    assert.ok(ci.jobs[id].needs.includes("test-macos"));
     assert.match(ci.jobs[id].steps.at(-1).run, /macos-verdict.mjs/);
   }
 });

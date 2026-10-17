@@ -129,6 +129,15 @@ archive for the host, held to the `.sha256` published beside it and to its
 (`scripts/ensure-sibling.sh`); an archive that fails either check is refused, never
 compiled around.
 
+**Pull-request CI is four jobs, each one recipe.** `lint`, `test-linux`,
+`test-windows` and `test-macos` in `ci.yml` run `just ci-lint`, `ci-test-linux`,
+`ci-test-windows` and `ci-test-macos`, which are `scripts/ci-job.sh`: one Nx
+invocation over the affected projects per job, so a job's checks — the packaging
+included — run beside each other rather than in sequence. `--plan` prints a job's
+selection without running it. Those ids and their 30-minute cap are an interface
+other work builds against (`.github/tests/ci-jobs.test.mjs`); speed a job up by
+cutting its work, never by splitting one suite across more jobs.
+
 **`.tools/` holds a second clone-local binary, and it is the server this branch
 forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
 served is served now — a question no fixture on a branch can answer, because a

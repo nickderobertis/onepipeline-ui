@@ -60,6 +60,15 @@
     "deps-check": {
       "command": "just _crate-deps-check"
     },
+    "install-smoke": {
+      "command": "just _crate-install-smoke",
+      "cache": false
+    },
+    "wheel-smoke": {
+      "command": "just _crate-wheel-smoke",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "cache": false
+    },
     "release-staging": {
       "command": "just _crate-release-staging",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
