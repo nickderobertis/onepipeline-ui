@@ -354,7 +354,7 @@ test("no workflow, recipe or release declaration builds or names arm64 Linux", (
   assert.match(pkg.stderr, /invalid choice/);
 });
 
-// llmlint: ignore[plan_criteria_require_realistic_tests] The macOS and Windows build recipes need native macOS and Windows toolchains this Linux host cannot run, so inside the dispatch their proof is the recipes' plan mode checked against the last release's published artifacts; the Linux recipe is driven for real end to end, and the hosted build jobs build and run the foreign artifacts on every release.
+// Plan mode is the macOS and Windows contract here: the macOS and Windows build recipes need native macOS and Windows toolchains this Linux host cannot run, so inside the dispatch their proof is the recipes' plan mode checked against the last release's published artifacts; the Linux recipe is driven for real end to end, and the hosted build jobs build and run the foreign artifacts on every release.
 test("every release job's plan is what v0.37.0 published, with arm64 Linux dropped and no Intel macOS", () => {
   const published = JSON.parse(
     readFileSync(".github/fixtures/release-v0.37.0.json", "utf8"),
