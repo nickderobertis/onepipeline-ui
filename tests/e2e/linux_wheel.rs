@@ -453,8 +453,8 @@ fn the_pull_request_check_builds_the_release_linux_legs_through_the_recipe() {
     );
     let phase = fs::read_to_string(repo_root().join("scripts/release.mjs")).expect("release.mjs");
     assert!(
-        phase.contains("\"scripts/build-linux-wheel.sh\""),
-        "the release's Linux build phase compiles through scripts/build-linux-wheel.sh"
+        phase.contains("\"wheel-linux\""),
+        "the release's Linux build phase compiles through `just wheel-linux`"
     );
     // Every step of both that builds the browser view comes before the wheel.
     for (name, block, wheel) in [

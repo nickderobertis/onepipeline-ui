@@ -68,15 +68,24 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -129,8 +138,6 @@ class Fault extends Error {
   }
 }
 const usage = (message, action) => new Fault(message, action, 2);
-
-// What is released, without building it.
 
 function cargoVersion() {
   const toml = readFileSync(join(REPO_ROOT, "Cargo.toml"), "utf8");
@@ -247,8 +254,6 @@ function stagedPath(out, artifact) {
   }[artifact.kind];
   return join(out, dir, artifact.file);
 }
-
-// Running the real tools.
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -474,11 +479,18 @@ async function crateServes(version) {
         "re-run when the crate index serves its records",
       );
     }
-    return record?.name === CRATE && record.vers === version;
+    if (
+      typeof record?.name !== "string" ||
+      typeof record.vers !== "string" ||
+      !Array.isArray(record.deps)
+    )
+      throw new Fault(
+        `the crate index serves a record that is not an index entry: ${line.slice(0, 80)}`,
+        "re-run when the crate index serves its records",
+      );
+    return record.name === CRATE && record.vers === version;
   });
 }
-
-// Platform phases.
 
 function requireStaged(out, artifacts) {
   const missing = artifacts
@@ -513,8 +525,9 @@ function buildPlatform(job, out) {
     const wheels = join(out, `build-${target}`);
     if (job === "linux") {
       // The manylinux image, through the one Linux wheel definition ci.yml's
-      // `wheel` job also runs: the binary the wheel, the archive and the npm
-      // package all carry is compiled here once, to a glibc 2.17 floor.
+      // `wheel` job also runs (`just wheel-linux`): the binary the wheel, the
+      // archive and the npm package all carry is compiled here once, to a
+      // glibc 2.17 floor.
       const inside = relative(REPO_ROOT, wheels);
       if (inside.startsWith("..") || resolve(REPO_ROOT, inside) !== wheels)
         throw usage(
@@ -524,8 +537,8 @@ function buildPlatform(job, out) {
       must(
         `the ${target} build`,
         `fix the build error above; 'just wheel-linux ${target}' reproduces it`,
-        "bash",
-        ["scripts/build-linux-wheel.sh", "--target", target, "--out", inside],
+        "just",
+        ["wheel-linux", target, inside],
       );
     } else {
       must(
@@ -830,8 +843,6 @@ function verifyPlatform(job, out) {
   );
 }
 
-// Publish phases.
-
 function pairs(name) {
   const value = process.env[name] ?? "";
   const out = {};
@@ -1074,11 +1085,13 @@ function probeDeclaredTargets(version) {
       );
     }
     const served = answer.stdout.trim();
+    // A probe answers a registry's newest release, so a prerelease cut by hand
+    // behind a newer stable one fails here too, and is demoted as unpublished:
+    // that is what a consumer waiting on it would be told.
     if (
       live[id.split(":")[0]] &&
       served !== version &&
-      served !== pep440(version) &&
-      !version.includes("-")
+      served !== pep440(version)
     )
       throw new Fault(
         `the release probe answers ${served || "nothing"} for ${id}, not ${version}`,
@@ -1191,18 +1204,28 @@ function settle() {
 // Every phase that stages files starts by deleting --out, so it is held to the
 // build tree: a directory under the checkout's target/, never the checkout, an
 // ancestor of it, or anything else a mistyped argument could name.
+// Containment is checked on real paths — the nearest existing ancestor
+// resolved through any symlink — so a link under target/ cannot carry the
+// deletion somewhere else.
 function stagingDirectory(path) {
-  const out = resolve(path);
-  const inside = relative(join(REPO_ROOT, "target"), out);
-  if (
-    !inside ||
-    inside.startsWith("..") ||
-    resolve(REPO_ROOT, "target", inside) !== out
-  )
-    throw usage(
+  const refuse = () =>
+    usage(
       `--out ${path} is not a directory under ${join(REPO_ROOT, "target")}`,
       "pass an --out under the checkout's target/, which the build may delete and recreate",
     );
+  const target = join(REPO_ROOT, "target");
+  mkdirSync(target, { recursive: true });
+  const out = resolve(path);
+  let existing = out;
+  const rest = [];
+  while (!existsSync(existing)) {
+    rest.unshift(basename(existing));
+    existing = dirname(existing);
+  }
+  const real = join(realpathSync(existing), ...rest);
+  const inside = relative(realpathSync(target), real);
+  if (!inside || inside.startsWith("..") || isAbsolute(inside)) throw refuse();
+  if (existsSync(out) && lstatSync(out).isSymbolicLink()) throw refuse();
   return out;
 }
 

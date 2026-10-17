@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -709,6 +710,30 @@ test("real workflow command usage errors return 2 with an actionable diagnostic"
     });
     assert.equal(result.status, 2, `${args.join(" ")}: ${result.stderr}`);
     assert.match(result.stderr, /ACTION:/);
+  }
+});
+
+test("an --out that leaves target/ through a symlink is refused before anything is deleted", () => {
+  const outside = mkdtempSync(join(scratchRoot(), "symlinked-out-"));
+  const link = "target/release-test/escape";
+  try {
+    mkdirSync("target/release-test", { recursive: true });
+    rmSync(link, { force: true });
+    symlinkSync(outside, link);
+    writeFileSync(join(outside, "keep"), "a file the build must not delete");
+    for (const out of [link, `${link}/staging`]) {
+      const result = spawnSync(
+        "node",
+        ["scripts/release.mjs", "linux", "build", "--out", out],
+        { encoding: "utf8", env: hermetic() },
+      );
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(result.stderr, /is not a directory under/);
+    }
+    assert.ok(existsSync(join(outside, "keep")));
+  } finally {
+    rmSync(link, { force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 

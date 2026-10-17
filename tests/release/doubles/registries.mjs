@@ -22,7 +22,8 @@ import { execFileSync } from "node:child_process";
 //   control/hide                 lines naming files or package@version this
 //                                registry pretends not to serve
 //   control/corrupt              lines naming files served with other bytes
-//   control/broken               lines `<read>=<status>` or `<read>=malformed`,
+//   control/broken               lines `<read>=<status>`, `<read>=malformed` or
+//                                `crate-index=foreign` (JSON, not an entry),
 //                                for the reads a release makes of a registry:
 //                                pypi-json, npm-packument, crate-index and
 //                                crate-api
@@ -72,7 +73,8 @@ function broken(read, response) {
   const entry = lines("broken").find((line) => line.startsWith(`${read}=`));
   if (!entry) return false;
   const answer = entry.slice(read.length + 1);
-  if (answer === "malformed")
+  if (answer === "foreign") reply(response, 200, "{}\n", "text/plain");
+  else if (answer === "malformed")
     reply(
       response,
       200,

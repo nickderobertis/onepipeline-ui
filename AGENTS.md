@@ -206,20 +206,18 @@ fans one uniformly-named target across all of them.
   `release.yml` re-runs no tests. A Release made by hand naming a commit no sweep
   covered therefore gets only the artifact proofs below — every file installed
   and run before it publishes and again from the registry after.
-- **A release is five jobs, and each job's work is one recipe.** `release-plz`,
-  then `build-linux`, `build-macos` and `build-windows` side by side, then
-  `publish`; `just release-<linux|macos|windows|publish>` is the whole of each,
-  and `scripts/release.mjs` says what its phases do and what is built where. Two
-  rules hold it together: every target is compiled **once**, and the archive,
-  wheel and npm package are packed from that binary and installed and run before
-  anything publishes; and nothing platform-independent (the crate, the npm
-  launcher and frontend, the SBOM) publishes until every platform's files are
-  served. So **a failed platform job leaves the other platforms published and
-  the platform-independent artifacts unpublished** until it is re-run — and a
-  re-run finishes the release, because every upload publishes only what its
-  registry does not already serve. Change a target in `scripts/release.mjs`'s
-  table, whose `plan` phase the workflow test holds to the last release's
-  artifacts; arm64 Linux and Intel macOS are no longer released.
+- **Each release job's work is one recipe, and two rules hold the release
+  together** (`scripts/release.mjs` says what each phase does): every target is
+  compiled **once**, and the archive, wheel and npm package are packed from that
+  binary and installed and run before anything publishes; and nothing
+  platform-independent (the crate, the npm launcher and frontend, the SBOM)
+  publishes until every platform's files are served. So **a failed platform job
+  leaves the other platforms published and the platform-independent artifacts
+  unpublished** until it is re-run — and a re-run finishes the release, because
+  every upload publishes only what its registry does not already serve. Change a
+  target in `scripts/release.mjs`'s table, whose `plan` phase the workflow test
+  holds to the last release's artifacts; arm64 Linux and Intel macOS are no
+  longer released.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

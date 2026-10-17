@@ -478,6 +478,35 @@ describe("publication against registry doubles", () => {
         registries.clear();
       }
     }
+    // npm serving an installable package that carries some other binary: it
+    // installs, and is refused before anything runs it.
+    const tarball = join(
+      registries.state,
+      "npm",
+      fileOf("npm").package,
+      `${VERSION}.tgz`,
+    );
+    const published = readFileSync(tarball);
+    const other = join(dir, "other-build");
+    rmSync(other, { recursive: true, force: true });
+    mkdirSync(other, { recursive: true });
+    execFileSync("tar", ["-xzf", tarball, "-C", other]);
+    writeFileSync(
+      join(other, "package/bin/onepipeline-api"),
+      "#!/bin/sh\necho another build\n",
+      { mode: 0o755 },
+    );
+    execFileSync("tar", ["-czf", tarball, "-C", other, "package"]);
+    try {
+      const run = linux("verify");
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /npm installed a different binary than this job built/,
+      );
+    } finally {
+      writeFileSync(tarball, published);
+    }
     // The Release serving an archive its checksum does not describe.
     const archive = join(gh.assets, fileOf("archive").file);
     const original = readFileSync(archive);
@@ -615,6 +644,12 @@ describe("publication against registry doubles", () => {
         ["crate-index=malformed"],
         ["upload", "crate"],
         /serves a record that is not JSON/,
+      ],
+      [
+        "the crate index serves JSON that is no index entry",
+        ["crate-index=foreign"],
+        ["upload", "crate"],
+        /serves a record that is not an index entry/,
       ],
     ]) {
       registries.breakReads(bend);
