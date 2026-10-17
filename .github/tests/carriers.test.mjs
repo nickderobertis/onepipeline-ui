@@ -19,7 +19,7 @@ test("actual carrier wiring rules on real result commands, including prerequisit
                   outputs: { crate: "true", macos: required },
                 },
                 quality: { result: quality },
-                macos: { result: macos },
+                "test-macos": { result: macos },
               },
             };
             const env = Object.fromEntries(
@@ -48,6 +48,13 @@ test("actual carrier wiring rules on real result commands, including prerequisit
     { event: "pull_request", action: "synchronize", crate: "false" },
     { macosRequired: true },
   );
-  assert.ok(rows.filter((row) => row.macos).every((row) => !row.requested));
+  // `test-macos` starts on every pull request but a release-plz branch's, and
+  // affected selection — not a job condition — decides what it runs, so an
+  // unaffected crate still costs one Mac job and never a second.
+  assert.equal(
+    rows.filter((row) => row.macos && row.requested).map((row) => row.job)
+      .length,
+    1,
+  );
   assert.ok(rows.find((row) => row.job === "cross-macos").requested);
 });

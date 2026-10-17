@@ -1959,18 +1959,42 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
     assert!(refusal.contains("ACTION:"), "{refusal}");
 }
 
-/// Linux can rehearse the real producer and installers without pretending to
-/// execute Darwin bytes. The release job drives these same staging commands
-/// with maturin's native/cross-built Darwin wheels.
+/// The staged release this journey reads: the `onepipeline-ui:release-staging`
+/// Nx target's output when the tier hands it over, copied so the journey's edits
+/// never reach a cached output; otherwise staged here by the same script, so a
+/// bare `cargo nextest` still proves the whole path. Answers the dry run's stdout
+/// beside the directory.
 #[cfg(target_os = "linux")]
-#[test]
-fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
-    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
-        .map_or_else(std::env::temp_dir, PathBuf::from);
-    let scratch = tempfile::tempdir_in(root).expect("release staging directory");
+fn staged_release(scratch: &Path) -> String {
+    if let Some(staged) = std::env::var_os("ONEPIPELINE_UI_RELEASE_STAGING") {
+        let staged = Path::new(env!("CARGO_MANIFEST_DIR")).join(staged);
+        let stdout = fs::read_to_string(staged.join("dry-run.stdout")).unwrap_or_else(|error| {
+            panic!(
+                "{} holds no dry run's stdout ({error}); run 'just nx run onepipeline-ui:release-staging'",
+                staged.display()
+            )
+        });
+        // The producer's virtualenv links the host interpreter and nothing below
+        // reads it, so it stays where it was built.
+        let copied = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("cd \"$1\" && tar --exclude=./producer -cf - . | tar -xf - -C \"$2\"")
+            .arg("copy-staging")
+            .arg(&staged)
+            .arg(scratch)
+            .output()
+            .expect("copy the staged release");
+        assert!(
+            copied.status.success(),
+            "copying {} failed: {}",
+            staged.display(),
+            String::from_utf8_lossy(&copied.stderr)
+        );
+        return stdout;
+    }
     let output = std::process::Command::new("bash")
         .arg("scripts/release-native-dry-run.sh")
-        .arg(scratch.path())
+        .arg(scratch)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("run production packaging dry run");
@@ -1980,7 +2004,20 @@ fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("embedded view passed"));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// Linux can rehearse the real producer and installers without pretending to
+/// execute Darwin bytes. The release job drives these same staging commands
+/// with maturin's native/cross-built Darwin wheels.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
+    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let scratch = tempfile::tempdir_in(root).expect("release staging directory");
+    let stdout = staged_release(scratch.path());
+    assert!(stdout.contains("embedded view passed"), "{stdout}");
     let record_path = fs::read_dir(scratch.path())
         .expect("staging entries")
         .filter_map(Result::ok)

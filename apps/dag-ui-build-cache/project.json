@@ -6,6 +6,7 @@
   "targets": {
     "lint": {
       "command": "cargo clippy --locked --quiet --test build-cache -- -D warnings",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "cache": true,
       "inputs": [
         "{workspaceRoot}/tests/build_cache.rs",
