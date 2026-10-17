@@ -771,6 +771,18 @@ describe("publication against registry doubles", () => {
         /serves a record that is not JSON/,
       ],
       [
+        "PyPI answers 200 with null",
+        ["pypi-json=empty"],
+        ["check"],
+        /PyPI answered .* with no list of files/,
+      ],
+      [
+        "the crate index answers 200 with no records",
+        ["crate-index=empty"],
+        ["upload", "crate"],
+        /the crate index answered with no records/,
+      ],
+      [
         "the crate index serves JSON that is no index entry",
         ["crate-index=foreign"],
         ["upload", "crate"],

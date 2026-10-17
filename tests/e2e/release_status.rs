@@ -661,6 +661,46 @@ fn the_workflow_reports_every_job_and_step_it_runs_to_this_gate() {
     );
 }
 
+/// Every outcome the workflow reports is one this gate requires: each, failing
+/// alone with every registry switched on, demotes the release naming it. With
+/// the test above holding the workflow's reports to `REPORTED_JOBS`, this is
+/// the drift gate between the workflow and the script's own list — and the two
+/// switched uploads are the only outcomes a switch makes optional.
+#[test]
+fn every_outcome_the_workflow_reports_is_required_unless_its_switch_is_off() {
+    for job in REPORTED_JOBS {
+        let fixture = Fixture::fresh();
+        let output = fixture.run(&[(job, "failure")], &ALL_ON);
+        assert!(
+            !output.status.success(),
+            "{job} failing alone left the release alone"
+        );
+        let body = fixture.edited_body().expect("the release was demoted");
+        assert!(body.contains(&format!("{job} (failure)")), "{body}");
+    }
+    for (job, switches) in [
+        (
+            "upload-crate",
+            Switches {
+                krate: "false",
+                npm: "true",
+            },
+        ),
+        (
+            "upload-npm",
+            Switches {
+                krate: "true",
+                npm: "false",
+            },
+        ),
+    ] {
+        let fixture = Fixture::fresh();
+        let output = fixture.run(&[(job, "skipped")], &switches);
+        assert!(output.status.success(), "{job}: {}", stderr(&output));
+        assert!(fixture.edits().is_empty(), "{:?}", fixture.edits());
+    }
+}
+
 /// The job ids under the workflow's top-level `jobs:` key — the lines indented
 /// by exactly two spaces after it — and the step `id:`s of the `publish` job. A
 /// YAML parser would be a dependency for one assertion, and the shape being

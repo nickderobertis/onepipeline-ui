@@ -24,7 +24,8 @@ import { execFileSync } from "node:child_process";
 //                                registry pretends not to serve
 //   control/corrupt              lines naming files served with other bytes
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
-//                                `crate-index=foreign` (JSON, not an entry) or
+//                                `crate-index=foreign` (JSON, not an entry),
+//                                `<read>=empty` (a 200 with nothing, or null) or
 //                                `npm-packument=other-version` (each version's
 //                                manifest names another),
 //                                for the reads a release makes of a registry:
@@ -77,6 +78,8 @@ function broken(read, response) {
   if (!entry) return false;
   const answer = entry.slice(read.length + 1);
   if (answer === "foreign") reply(response, 200, "{}\n", "text/plain");
+  else if (answer === "empty")
+    reply(response, 200, read === "crate-index" ? "" : "null", "text/plain");
   else if (answer === "malformed")
     reply(
       response,

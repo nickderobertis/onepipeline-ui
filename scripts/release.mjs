@@ -411,13 +411,22 @@ async function fetchJson(url, what) {
       `re-run when ${what} is reachable`,
     );
   }
-  if (response.status === 404) return null;
+  // `undefined` is the 404 alone; whatever a 200 carries, null included, is
+  // handed back for the caller to validate.
+  if (response.status === 404) return undefined;
   if (!response.ok)
     throw new Fault(
       `${what} answered ${response.status} for ${url}`,
       `re-run when ${what} answers`,
     );
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new Fault(
+      `${what} answered ${url} with something that is not JSON`,
+      `re-run when ${what} answers`,
+    );
+  }
 }
 
 // PyPI's JSON for one release: its files are what it already serves. Anything
@@ -426,7 +435,7 @@ async function fetchJson(url, what) {
 async function pypiFiles(version) {
   const url = `${pypiUrl()}/pypi/${WHEEL_PACKAGE}/${pep440(version)}/json`;
   const body = await fetchJson(url, "PyPI");
-  if (body === null) return new Set();
+  if (body === undefined) return new Set();
   if (
     !Array.isArray(body?.urls) ||
     !body.urls.every((entry) => typeof entry?.filename === "string")
@@ -484,6 +493,12 @@ async function crateServes(version) {
       "re-run when it answers",
     );
   const records = (await response.text()).split("\n").filter(Boolean);
+  // A name the index has nothing under is a 404; a 200 lists records.
+  if (!records.length)
+    throw new Fault(
+      "the crate index answered with no records",
+      "re-run when the crate index serves its records",
+    );
   return records.some((line) => {
     let record;
     try {
