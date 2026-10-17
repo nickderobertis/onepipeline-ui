@@ -380,6 +380,73 @@ fn a_job_runs_what_it_selects_and_a_failing_target_fails_it() {
     }
 }
 
+/// The release pull request's tier is the sweep: every project, whatever the
+/// diff reached, with the host-labelled budgets `just budgets` runs.
+#[test]
+fn the_broader_tier_sweeps_every_project_with_the_budgets() {
+    let workspace = workspace(None);
+    let run = recipe(
+        &workspace,
+        "ci-test-linux",
+        &["--tier", "broader", "--plan"],
+        false,
+    );
+    assert!(
+        run.output.status.success(),
+        "the broader plan failed:\n{}",
+        run.log
+    );
+    let selected = run.selected("test-linux");
+    for task in [
+        "dag-layout:check",
+        "telemetry-client:test",
+        "pool-maintenance:check",
+        "pool-maintenance:budgets-host",
+        "github-workflows:budgets",
+        "dag-ui-build-cache:test",
+        "onepipeline-ui:check",
+        "onepipeline-ui:install-smoke",
+        "onepipeline-ui:wheel-smoke",
+        "onepipeline-ui-coverage:coverage",
+    ] {
+        assert!(
+            selected.contains(task),
+            "the sweep does not select {task}: {selected:?}"
+        );
+    }
+    assert!(run.ran().is_empty(), "--plan ran tasks: {:?}", run.ran());
+}
+
+/// A lockfile the checkout no longer matches fails `test-linux` and names what
+/// to do, even when the diff selected nothing to run; the other jobs leave that
+/// question to it.
+#[test]
+fn a_lockfile_the_checkout_rewrote_fails_the_linux_job_alone() {
+    let workspace = workspace(None);
+    let lock = workspace.root().join("Cargo.lock");
+    let mut bytes = fs::read(&lock).expect("read Cargo.lock");
+    bytes.extend_from_slice(b"\n");
+    fs::write(&lock, bytes).expect("rewrite Cargo.lock");
+
+    let linux = recipe(&workspace, "ci-test-linux", &[], false);
+    assert!(
+        !linux.output.status.success(),
+        "a rewritten lockfile passed:\n{}",
+        linux.log
+    );
+    assert!(
+        linux.log.contains("a committed lockfile differs") && linux.log.contains("ACTION:"),
+        "the failure does not say a lockfile drifted and what to do:\n{}",
+        linux.log
+    );
+    let lint = recipe(&workspace, "ci-lint", &[], false);
+    assert!(
+        lint.output.status.success(),
+        "ci-lint judged the lockfile:\n{}",
+        lint.log
+    );
+}
+
 #[test]
 fn a_job_or_tier_the_script_does_not_know_is_refused_with_its_usage() {
     let workspace = workspace(None);

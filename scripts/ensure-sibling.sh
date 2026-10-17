@@ -5,7 +5,7 @@
 # The journeys hold what the read API serves to what this CLI prints, so it has to
 # be the release this build links and no other: a stray build on PATH speaks a
 # different document. That is why the probe looks at one path, the one the
-# justfile exports, and why every way of filling that path ends in the same
+# justfile exports, and why both ways of filling that path end in the same
 # version probe.
 #
 # Two ways to fill it, in this order:
@@ -64,18 +64,24 @@ install_from_source() {
   cargo install onepipeline --version "$version" --locked --root .tools --quiet ||
     fail "cannot provision onepipeline $version — the journeys that compare the read API against it cannot run without it" \
       "fix the cargo error above (crates.io reachable, toolchain installed), then re-run 'just bootstrap'"
+  probe || fail "cargo installed onepipeline $version, but $binary does not report 'onepipeline $version'" \
+    "remove .tools and re-run 'just bootstrap'; if it recurs, the crate's binary name or version output changed upstream"
 }
 
-triple="$(rustc -vV 2>/dev/null | sed -n 's/^host: //p')"
-[ -n "$triple" ] || fail "rustc did not report this host's triple" \
+host="$(rustc -vV 2>&1)" || fail "rustc -vV failed: $host" \
+  "install the toolchain rust-toolchain.toml pins ('rustup toolchain install'), then retry"
+triple="$(printf '%s\n' "$host" | sed -n 's/^host: //p')"
+[ -n "$triple" ] || fail "rustc -vV named no host triple: $host" \
   "install the toolchain rust-toolchain.toml pins ('rustup toolchain install'), then retry"
 case "$triple" in
   *-windows-*) archive_kind="zip"; member="onepipeline.exe" ;;
   *) archive_kind="tar.gz"; member="onepipeline" ;;
 esac
+# llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] these names are onepipeline's release contract, which its own release workflow writes and no offline copy here could be reconciled against. Drift cannot install a wrong binary: an archive is used only when it matches the checksum published beside it and reports the pinned version, and a renamed asset reads as "no archive", which compiles — the slower, still-correct path — and says so on stderr.
 asset="onepipeline-v$version-$triple.$archive_kind"
 # The checksum is published beside the archive under the triple's own name.
 checksum="onepipeline-v$version-$triple.sha256"
+# llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 releases="${ONEPIPELINE_UI_SIBLING_RELEASES:-https://github.com/nickderobertis/onepipeline/releases/download}"
 
 work="$(mktemp -d)" || fail "could not open temporary storage for the download" "free disk space and retry"
@@ -87,6 +93,7 @@ trap 'rm -rf "$work"' EXIT
 fetch() {
   local name="$1" code status=0
   case "$releases" in
+    # llmlint: ignore-block[changed_behavior_has_e2e] the https branch is the one every `just bootstrap` and every CI job's bootstrap takes, against onepipeline's real Releases; the offline gate cannot reach a forge, and the journeys drive everything after the fetch — checksum, unpack, version probe, and the no-archive fallback — through the mirror branch below, which shares it.
     https://*)
       code="$(curl --proto '=https' --tlsv1.2 --silent --show-error --location \
         --retry 3 --output "$work/$name" --write-out '%{http_code}' \
@@ -99,6 +106,7 @@ fetch() {
         *) fail "$releases answered HTTP $code for $name" "retry once the release host answers" ;;
       esac
       ;;
+    # llmlint: ignore-end[changed_behavior_has_e2e]
     *://*)
       fail "ONEPIPELINE_UI_SIBLING_RELEASES='$releases' is neither an https URL nor a directory" \
         "unset it to use onepipeline's GitHub Releases, or name an https base URL or a local mirror directory"
@@ -111,12 +119,13 @@ fetch() {
   esac
 }
 
+# GNU's tool where it runs, else the one macOS ships.
 sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | cut -d' ' -f1
-  else
-    shasum -a 256 "$1" | cut -d' ' -f1
-  fi
+  local sum
+  sum="$(sha256sum "$1" 2>/dev/null)" || sum="$(shasum -a 256 "$1" 2>/dev/null)" ||
+    fail "neither sha256sum nor shasum could hash $1" \
+      "install coreutils (sha256sum) or perl's shasum, then retry"
+  printf '%s' "${sum%% *}"
 }
 
 status=0
@@ -131,14 +140,16 @@ status=0
 fetch "$checksum" || status=$?
 [ "$status" -eq 0 ] || fail "onepipeline v$version publishes $asset but no $checksum to check it against" \
   "report the incomplete release upstream; nothing unverified is installed"
-expected="$(cut -d' ' -f1 <"$work/$checksum" | tr -d '\r\n')"
+expected="$(cut -d' ' -f1 <"$work/$checksum" | tr -d '\r\n')" ||
+  fail "could not read $checksum" "free disk space and retry"
 actual="$(sha256_of "$work/$asset")"
 [ -n "$expected" ] && [ "$expected" = "$actual" ] ||
   fail "$asset does not match its published checksum (expected '$expected', got '$actual')" \
     "do not use this archive; retry, and report the release upstream if it still differs"
 
-mkdir -p "$work/unpacked"
+mkdir -p "$work/unpacked" || fail "could not create $work/unpacked to unpack into" "free disk space and retry"
 case "$archive_kind" in
+  # llmlint: ignore-block[changed_behavior_has_e2e] the zip branch is Windows', whose journeys cannot pack a fixture zip with any tool the Windows runner is sure to carry; `test-windows`'s own bootstrap takes this branch against onepipeline's real Windows archive on every run, and the checksum and version probe after it are the journeys' shared path.
   zip)
     if command -v unzip >/dev/null 2>&1; then
       unzip -q -o "$work/$asset" "$member" -d "$work/unpacked"
@@ -146,6 +157,7 @@ case "$archive_kind" in
       python3 -m zipfile -e "$work/$asset" "$work/unpacked"
     fi
     ;;
+  # llmlint: ignore-end[changed_behavior_has_e2e]
   *) tar -xzf "$work/$asset" -C "$work/unpacked" "$member" ;;
 esac || fail "could not unpack $member from $asset" "free disk space and retry"
 

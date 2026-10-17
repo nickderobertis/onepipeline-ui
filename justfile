@@ -214,12 +214,13 @@ _crate-wheel-smoke:
 
 # The release-staging journey's artifact, built once as a cached Nx target rather
 # than inside the repo-tooling tier: the tier's critical path was this one test.
+# Warnings denied, as on every other release-profile compile here.
 # `ONEPIPELINE_UI_RELEASE_STAGING` hands the journey the directory; without it the
 # journey stages its own, so a bare `cargo nextest` still proves the path.
 # Rehearse the native release staging into target/release-staging.
 _crate-release-staging:
     @rm -rf target/release-staging && mkdir -p target/release-staging
-    @bash scripts/release-native-dry-run.sh target/release-staging | tee target/release-staging/dry-run.stdout
+    @RUSTFLAGS="-D warnings" bash scripts/release-native-dry-run.sh target/release-staging | tee target/release-staging/dry-run.stdout
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free

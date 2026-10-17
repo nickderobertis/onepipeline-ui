@@ -116,7 +116,9 @@ impl Fixture {
         fs::create_dir_all(dir.path().join("releases")).expect("the empty release mirror");
 
         // Records what the recipe asked for, and answers with the status the case
-        // under test is about.
+        // under test is about. A successful install leaves a program in
+        // `<root>/bin` reporting the version it was asked for — or
+        // INSTALL_REPORTS — as `cargo install` leaves the CLI there.
         //
         // llmlint: ignore-block[e2e_not_mocked] the real call downloads and
         // compiles the sibling CLI, which is the one thing an offline,
@@ -132,7 +134,12 @@ impl Fixture {
             "#!/usr/bin/env bash\n\
              set -eu\n\
              printf '%s\\n' \"$*\" >> \"$CARGO_CALLS\"\n\
-             exit \"${INSTALL_STATUS:-0}\"\n",
+             [ \"${INSTALL_STATUS:-0}\" = 0 ] || exit \"$INSTALL_STATUS\"\n\
+             version=; root=\n\
+             while [ $# -gt 0 ]; do case \"$1\" in --version) version=\"$2\"; shift 2 ;; --root) root=\"$2\"; shift 2 ;; *) shift ;; esac; done\n\
+             mkdir -p \"$root/bin\"\n\
+             printf '#!/usr/bin/env bash\\nprintf \"onepipeline %s\\\\n\"\\n' \"${INSTALL_REPORTS:-$version}\" > \"$root/bin/onepipeline$SIBLING_EXE\"\n\
+             chmod +x \"$root/bin/onepipeline$SIBLING_EXE\"\n",
         );
         // llmlint: ignore-end[e2e_not_mocked]
 
@@ -174,6 +181,7 @@ impl Fixture {
             .current_dir(self.dir.path())
             .env("PATH", &self.search_path)
             .env("CARGO_CALLS", self.dir.path().join("cargo-calls"))
+            .env("SIBLING_EXE", std::env::consts::EXE_SUFFIX)
             .env(
                 "ONEPIPELINE_UI_SIBLING_RELEASES",
                 self.dir.path().join("releases"),
@@ -186,22 +194,25 @@ impl Fixture {
 
     /// Publish an archive of a CLI reporting `reports` in the mirror's Release
     /// for the pinned version, under the name the recipe asks for on this host,
-    /// with a checksum file beside it that is `checksum`, or the archive's own.
+    /// with a checksum file beside it: the archive's own digest for `None`,
+    /// `Some(Some(digest))` for another, and none at all for `Some(None)`.
     #[cfg(unix)]
-    fn publish_archive(&self, reports: &str, checksum: Option<&str>) {
+    fn publish_archive(&self, reports: &str, checksum: Option<Option<&str>>) {
         let pin = Release::linked().as_str().to_owned();
         let triple = host_triple();
         let release = self.dir.path().join("releases").join(format!("v{pin}"));
         let staging = self.dir.path().join("archive-staging");
-        // llmlint: ignore[e2e_not_mocked] the archived program stands in for the
-        // released CLI the way `write_stub_sibling` does: what the recipe is asked
-        // to prove is that it installs the archive it verified and asks it its
-        // version, which a program answering `--version` is enough to observe.
+        // llmlint: ignore-block[e2e_not_mocked] the archived program stands in
+        // for the released CLI the way `write_stub_sibling` does: what the recipe
+        // is asked to prove is that it installs the archive it verified and asks
+        // it its version, which a program answering `--version` is enough to
+        // observe, and downloading the real one is what this suite runs without.
         stub_bin::install(
             &staging,
             "onepipeline",
             &format!("#!/usr/bin/env bash\nprintf 'onepipeline {reports}\\n'\n"),
         );
+        // llmlint: ignore-end[e2e_not_mocked]
         fs::create_dir_all(&release).expect("the mirror's release directory");
         let archive = release.join(format!("onepipeline-v{pin}-{triple}.tar.gz"));
         let packed = Command::new("tar")
@@ -214,18 +225,15 @@ impl Fixture {
             .expect("tar is on PATH");
         assert!(packed.status.success(), "tar: {}", stderr(&packed));
         let digest = match checksum {
-            Some(checksum) => checksum.to_owned(),
+            Some(Some(checksum)) => checksum.to_owned(),
+            Some(None) => return,
             None => {
-                let summed = Command::new("sha256sum")
-                    .arg(&archive)
-                    .output()
-                    .expect("sha256sum is on PATH");
-                assert!(summed.status.success(), "sha256sum: {}", stderr(&summed));
-                String::from_utf8_lossy(&summed.stdout)
-                    .split_whitespace()
-                    .next()
-                    .expect("a digest")
-                    .to_owned()
+                use sha2::Digest;
+                let bytes = fs::read(&archive).expect("read the archive");
+                sha2::Sha256::digest(&bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect()
             }
         };
         fs::write(
@@ -436,7 +444,7 @@ fn a_release_archive_for_this_host_is_installed_without_compiling() {
 #[test]
 fn an_archive_that_fails_its_checksum_is_refused_and_not_compiled_around() {
     let fixture = Fixture::new();
-    fixture.publish_archive(Release::linked().as_str(), Some(&"0".repeat(64)));
+    fixture.publish_archive(Release::linked().as_str(), Some(Some(&"0".repeat(64))));
 
     let output = fixture.run();
 
@@ -489,6 +497,94 @@ fn an_archive_whose_binary_reports_another_release_is_refused() {
         fixture.provisioned_version(),
         None,
         "the mislabelled binary was left where the journeys look"
+    );
+}
+
+/// A release that publishes this host's archive with no checksum beside it is
+/// refused: nothing unverified is installed, and nothing is compiled around it.
+#[cfg(unix)]
+#[test]
+fn an_archive_published_without_its_checksum_is_refused_and_not_compiled_around() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), Some(None));
+
+    let output = fixture.run();
+
+    assert!(
+        !output.status.success(),
+        "an archive with no checksum was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains(".sha256") && stderr.contains("ACTION:"),
+        "the refusal does not name the missing checksum and what to do:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around an unverifiable archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "an unverified archive was installed"
+    );
+}
+
+/// Where GNU's `sha256sum` cannot run — macOS ships `shasum` instead — the
+/// archive is checked with `shasum`, and still installed only when it matches.
+#[cfg(unix)]
+#[test]
+fn the_checksum_is_read_with_shasum_where_sha256sum_cannot_run() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+    // llmlint: ignore[e2e_not_mocked] a `sha256sum` that cannot run is the host this journey is about — a Mac's — and PATH is the only place it can be arranged on a host that has one.
+    let path = stub_bin::install(
+        &fixture.dir.path().join("no-sha256sum"),
+        "sha256sum",
+        "#!/usr/bin/env bash\nexit 127\n",
+    );
+    let search_path = std::env::join_paths(
+        std::env::split_paths(&path)
+            .take(1)
+            .chain(std::env::split_paths(&fixture.search_path)),
+    )
+    .expect("join PATH");
+
+    let output = fixture.run_with(&[("PATH", search_path.to_str().expect("a UTF-8 PATH"))]);
+
+    assert!(
+        output.status.success(),
+        "the archive was not installed with shasum:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled although the archive verified"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str())
+    );
+}
+
+/// A compiled sibling is held to the same version probe an archive is: a
+/// `cargo install` that leaves something reporting another release fails the
+/// recipe instead of reporting success.
+#[test]
+fn a_compiled_sibling_that_reports_another_release_is_refused() {
+    let fixture = Fixture::new();
+    let output = fixture.run_with(&[("INSTALL_REPORTS", "0.0.1-stray")]);
+
+    assert!(
+        !output.status.success(),
+        "a compiled stray release was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains(Release::linked().as_str()) && stderr.contains("ACTION:"),
+        "the refusal does not name the pinned release and what to do:\n{stderr}"
     );
 }
 

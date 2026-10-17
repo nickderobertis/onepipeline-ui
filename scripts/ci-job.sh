@@ -101,28 +101,48 @@ graph="$(nx_run --graph=stdout)" || {
   echo "ACTION: fix the Nx error above; 'just nx show projects' lists what it can read" >&2
   exit 1
 }
+# Read as a parsed graph whose task map must be there: a document of another
+# shape is refused rather than read as an empty selection, which would pass a job
+# that checked nothing.
 tasks="$(printf '%s' "$graph" | node -e '
   const fs = require("node:fs");
   const text = fs.readFileSync(0, "utf8");
-  const graph = JSON.parse(text.slice(text.indexOf("{")));
-  process.stdout.write(Object.keys(graph.tasks?.tasks ?? {}).sort().join(" "));
-')"
+  let graph;
+  try {
+    graph = JSON.parse(text.slice(text.indexOf("{")));
+  } catch (error) {
+    process.stderr.write(`Nx answered no JSON task graph: ${error.message}\n`);
+    process.exit(1);
+  }
+  const tasks = graph?.tasks?.tasks;
+  if (!tasks || typeof tasks !== "object" || Array.isArray(tasks)) {
+    process.stderr.write("Nx answered a graph with no task map\n");
+    process.exit(1);
+  }
+  process.stdout.write(Object.keys(tasks).sort().join(" "));
+')" || {
+  echo "ci-job: could not read the task graph Nx planned for $job" >&2
+  echo "ACTION: run 'just nx run-many -t $targets --graph=stdout' and fix what it reports" >&2
+  exit 1
+}
 count=0
 [ -z "$tasks" ] || count="$(printf '%s\n' $tasks | wc -l | tr -d ' ')"
 echo "ci-job: $job runs $count task(s): ${tasks:-none}"
 [ -z "$plan" ] || exit 0
-[ "$count" -gt 0 ] || exit 0
 
 # Four at once: a hosted runner has four cores, and the packaging targets spend
 # most of their time on release-profile compiles that would otherwise queue
 # behind the tiers rather than run beside them.
-nx_run --parallel=4 --outputStyle=static
+if [ "$count" -gt 0 ]; then
+  nx_run --parallel=4 --outputStyle=static || exit $?
+fi
 
-# A committed lockfile the gate had to change is a stale generated file; fail
-# rather than let it drift. The gate's own job is the one that would change it.
+# A committed lockfile the bootstrap or the gate had to change is a stale
+# generated file; fail rather than let it drift. Asked whether or not a task ran,
+# because the job's bootstrap installs from both lockfiles before this runs.
 if [ "$job" = "test-linux" ]; then
   git diff --exit-code -- Cargo.lock bun.lock || {
-    echo "ci-job: the run rewrote a committed lockfile (diff above)" >&2
+    echo "ci-job: a committed lockfile differs from what this checkout resolves (diff above)" >&2
     echo "ACTION: run 'just bootstrap', commit the updated lockfile, and push" >&2
     exit 1
   }

@@ -29,8 +29,7 @@ env:
   ONEPIPELINE_UI_NX_BASE_SHA: ${{ github.event_name == 'push' && github.event.before || '' }}
 
 jobs:
-  # ---- One lint job and one test job per platform --------------------------
-  # Each of the four runs its checks through one recipe of its own — `just
+  # One lint job and one test job per platform. Each of the four runs its checks through one recipe of its own — `just
   # ci-lint`, `ci-test-linux`, `ci-test-windows`, `ci-test-macos`, all of them
   # `scripts/ci-job.sh` — as one Nx invocation scoped to the projects the diff
   # reaches, so a job's checks run side by side rather than one after another and
@@ -47,18 +46,20 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # What this job writes while VISUAL_DOCS_PUBLISH is off: notignored's comment
+    # and the PR-title read. Turning publishing on adds `contents: write` (the
+    # gallery deploy) and `pages: read` (the Pages build screencomp gates on).
     permissions:
-      contents: write # screencomp's gallery deploy, once VISUAL_DOCS_PUBLISH is on
-      pull-requests: write # the PR title, notignored's and screencomp's comments
-      pages: read # screencomp gates its deploy on the Pages build it triggers
+      contents: read
+      pull-requests: write
     env:
       # The one switch for the visual docs' side effects: the sticky comment and
       # the /pr-<n>/ preview deploy. Off while visual-docs.yml still captures,
       # comments and deploys on pull requests, because two deploys per push race
       # the Pages build screencomp gates on, and a required check must not go red
       # on that race. The change that removes visual-docs.yml's pull_request
-      # trigger turns it on. The capture, the reproducibility gate, classify and
-      # the gallery build run either way.
+      # trigger turns it on, with the two grants above. The capture, the
+      # reproducibility gate, classify and the gallery build run either way.
       VISUAL_DOCS_PUBLISH: "false"
     steps:
       - uses: actions/checkout@v4
@@ -240,6 +241,7 @@ jobs:
       - name: Which tier of the gate this build owes
         id: tier
         run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
+      # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] transitional by the plan's sequencing: this job takes over `sweep` below, which stays only until branch protection moves to the four jobs, and removing it then is the CI-budgets change's work, not this one's — the two sweep the release pull request side by side for that window only, and neither feeds `gate`.
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
 
