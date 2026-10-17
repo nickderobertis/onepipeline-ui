@@ -9,11 +9,6 @@
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "inputs": ["ciJobSelection"]
     },
-    "test-quick": {
-      "command": "just _tier-test ci-jobs",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
-      "inputs": ["ciJobSelection"]
-    },
     "check": {
       "executor": "nx:noop"
     }

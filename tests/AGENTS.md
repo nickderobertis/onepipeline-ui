@@ -112,7 +112,7 @@ hold nothing but their `project.json`, and these rules are theirs.
   and the suite's own files, so a change that cannot move coverage does not
   re-measure it.
 - **`test-quick`** is a tier without instrumentation, for the cross-platform
-  legs; the baseline, cost and linked-report tiers have none, for the reasons the justfile's
+  legs; the baseline, cost, linked-report and ci-jobs tiers have none, for the reasons the justfile's
   `test-quick` recipe gives.
 
 ## Which tier a test belongs to

@@ -774,6 +774,11 @@ fn every_refusal_names_what_to_do_and_compiles_nothing() {
         ),
     ];
     for (what, arrange, says) in cases {
+        // macOS's `mktemp` falls back to /tmp when TMPDIR names nothing, so
+        // that refusal is only reachable on Linux.
+        if what == "no temporary storage" && !cfg!(target_os = "linux") {
+            continue;
+        }
         let fixture = Fixture::new();
         let environment = arrange(&fixture);
         let pairs: Vec<(&str, &str)> = environment
@@ -804,7 +809,10 @@ fn every_refusal_names_what_to_do_and_compiles_nothing() {
 }
 
 /// A call the recipe would never make is refused as a usage error, before
-/// anything is fetched.
+/// anything is fetched. Unix only, as the archive journeys are: the script is
+/// called by its own `bash` here, which on Windows is not the shell the recipe
+/// runs under.
+#[cfg(unix)]
 #[test]
 fn a_malformed_call_is_refused_as_usage() {
     let fixture = Fixture::new();
