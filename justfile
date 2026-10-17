@@ -84,15 +84,11 @@ _crate-bootstrap:
 # through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
 # need is clone-local (`AGENTS.md`).
 #
-# The probe reads the exported variable instead of interpolating it: an
-# interpolation is pasted into the shell line, and `justfile_directory()` is
-# separated by backslashes on Windows, which that line would spend as escapes.
-# Either way the path never resolves, and a probe that cannot resolve reinstalls
-# on every run rather than failing — quietly, and only on that platform.
+# Fetched as the release's own archive for this host when that release publishes
+# one, checked against its published checksum and version, and compiled only when
+# it does not; `scripts/ensure-sibling.sh` holds the order and its refusals.
 _ensure-sibling:
-    @[ "$("$ONEPIPELINE_UI_ONEPIPELINE_BIN" --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
-      || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
-      || { echo "cannot provision onepipeline {{onepipeline-version}} — the journeys that compare the read API against it cannot run without it" >&2; exit 1; }
+    @bash scripts/ensure-sibling.sh "{{onepipeline-version}}"
 
 # The base commit's own server, for the journeys that compare what this build
 # serves against what it served. Behind its own Nx target rather than inside the

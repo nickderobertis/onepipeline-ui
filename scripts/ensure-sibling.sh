@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Provision the sibling `onepipeline` CLI at the release the lock pins, into the
+# tree — the `_ensure-sibling` recipe's body.
+#
+# The journeys hold what the read API serves to what this CLI prints, so it has to
+# be the release this build links and no other: a stray build on PATH speaks a
+# different document. That is why the probe looks at one path, the one the
+# justfile exports, and why every way of filling that path ends in the same
+# version probe.
+#
+# Two ways to fill it, in this order:
+#   1. the release's own archive for this host's triple, from the onepipeline
+#      Release named by the pin, checked against the `.sha256` published beside
+#      it. Seconds, where compiling the CLI is the largest single cost of a clean
+#      bootstrap — 400-590 s on a Linux runner and 980-1,180 s on Windows.
+#   2. `cargo install` of that version, only when the Release carries no archive
+#      for this triple. A Release that has one and fails its checksum, or whose
+#      binary reports another version, is refused rather than compiled around: an
+#      archive that is not what it says it is is a fact somebody has to look at.
+#
+# Usage:
+#   ensure-sibling.sh VERSION
+#
+# Reads ONEPIPELINE_UI_ONEPIPELINE_BIN, the path the justfile exports, and
+# ONEPIPELINE_UI_SIBLING_RELEASES, where the Releases are: an https base URL (the
+# default is onepipeline's GitHub Releases) or a local directory laid out the same
+# way, `<dir>/v<VERSION>/<asset>`, for a mirror or a machine without the network.
+#
+# Exit 0: the pinned sibling is at that path. Exit 1: it could not be provisioned,
+# named on stderr with what to do. Exit 2: the call was malformed.
+set -euo pipefail
+
+fail() {
+  echo "ensure-sibling: $1" >&2
+  echo "ACTION: $2" >&2
+  exit 1
+}
+
+version="${1:-}"
+binary="${ONEPIPELINE_UI_ONEPIPELINE_BIN:-}"
+if [ -z "$version" ] || [ -z "$binary" ]; then
+  echo "ensure-sibling: needs the pinned version and ONEPIPELINE_UI_ONEPIPELINE_BIN" >&2
+  echo "ACTION: run 'just _ensure-sibling', which passes both" >&2
+  exit 2
+fi
+# The version reaches a URL and a file name, so it is held to what a release
+# version looks like rather than trusted.
+printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || {
+  echo "ensure-sibling: '$version' is not a release version" >&2
+  echo "ACTION: run 'just _ensure-sibling', which reads it from Cargo.lock" >&2
+  exit 2
+}
+
+# The probe reads the exported variable instead of having it interpolated into a
+# shell line: `justfile_directory()` is separated by backslashes on Windows, which
+# that line would spend as escapes, and a probe that cannot resolve reinstalls on
+# every run rather than failing — quietly, and only on that platform.
+probe() {
+  [ "$("$binary" --version 2>/dev/null)" = "onepipeline $version" ]
+}
+probe && exit 0
+
+install_from_source() {
+  cargo install onepipeline --version "$version" --locked --root .tools --quiet ||
+    fail "cannot provision onepipeline $version — the journeys that compare the read API against it cannot run without it" \
+      "fix the cargo error above (crates.io reachable, toolchain installed), then re-run 'just bootstrap'"
+}
+
+triple="$(rustc -vV 2>/dev/null | sed -n 's/^host: //p')"
+[ -n "$triple" ] || fail "rustc did not report this host's triple" \
+  "install the toolchain rust-toolchain.toml pins ('rustup toolchain install'), then retry"
+case "$triple" in
+  *-windows-*) archive_kind="zip"; member="onepipeline.exe" ;;
+  *) archive_kind="tar.gz"; member="onepipeline" ;;
+esac
+asset="onepipeline-v$version-$triple.$archive_kind"
+# The checksum is published beside the archive under the triple's own name.
+checksum="onepipeline-v$version-$triple.sha256"
+releases="${ONEPIPELINE_UI_SIBLING_RELEASES:-https://github.com/nickderobertis/onepipeline/releases/download}"
+
+work="$(mktemp -d)" || fail "could not open temporary storage for the download" "free disk space and retry"
+trap 'rm -rf "$work"' EXIT
+
+# Fetch one file of the release into the work directory. Answers 0 when it
+# arrived, 3 when the Release has no such file, and stops the script on anything
+# else: an unreachable host is not evidence that no archive exists.
+fetch() {
+  local name="$1" code status=0
+  case "$releases" in
+    https://*)
+      code="$(curl --proto '=https' --tlsv1.2 --silent --show-error --location \
+        --retry 3 --output "$work/$name" --write-out '%{http_code}' \
+        "$releases/v$version/$name")" || status=$?
+      [ "$status" -eq 0 ] || fail "could not reach $releases for $name (curl exit $status)" \
+        "check the network, or point ONEPIPELINE_UI_SIBLING_RELEASES at a reachable mirror, then retry"
+      case "$code" in
+        200) return 0 ;;
+        404) return 3 ;;
+        *) fail "$releases answered HTTP $code for $name" "retry once the release host answers" ;;
+      esac
+      ;;
+    *://*)
+      fail "ONEPIPELINE_UI_SIBLING_RELEASES='$releases' is neither an https URL nor a directory" \
+        "unset it to use onepipeline's GitHub Releases, or name an https base URL or a local mirror directory"
+      ;;
+    *)
+      [ -f "$releases/v$version/$name" ] || return 3
+      cp "$releases/v$version/$name" "$work/$name" ||
+        fail "could not copy $name out of $releases" "check the mirror directory is readable and retry"
+      ;;
+  esac
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+status=0
+fetch "$asset" || status=$?
+if [ "$status" -eq 3 ]; then
+  echo "ensure-sibling: onepipeline v$version publishes no $asset; compiling it instead" >&2
+  install_from_source
+  exit 0
+fi
+
+status=0
+fetch "$checksum" || status=$?
+[ "$status" -eq 0 ] || fail "onepipeline v$version publishes $asset but no $checksum to check it against" \
+  "report the incomplete release upstream; nothing unverified is installed"
+expected="$(cut -d' ' -f1 <"$work/$checksum" | tr -d '\r\n')"
+actual="$(sha256_of "$work/$asset")"
+[ -n "$expected" ] && [ "$expected" = "$actual" ] ||
+  fail "$asset does not match its published checksum (expected '$expected', got '$actual')" \
+    "do not use this archive; retry, and report the release upstream if it still differs"
+
+mkdir -p "$work/unpacked"
+case "$archive_kind" in
+  zip)
+    if command -v unzip >/dev/null 2>&1; then
+      unzip -q -o "$work/$asset" "$member" -d "$work/unpacked"
+    else
+      python3 -m zipfile -e "$work/$asset" "$work/unpacked"
+    fi
+    ;;
+  *) tar -xzf "$work/$asset" -C "$work/unpacked" "$member" ;;
+esac || fail "could not unpack $member from $asset" "free disk space and retry"
+
+directory="$(dirname -- "$binary")"
+mkdir -p "$directory" && rm -f "$binary" && cp "$work/unpacked/$member" "$binary" && chmod +x "$binary" ||
+  fail "could not install $member into $directory" \
+    "check the directory is writable — a container run as root can leave it unwritable — and retry"
+
+probe || {
+  reported="$("$binary" --version 2>&1 || true)"
+  rm -f "$binary"
+  fail "the binary in $asset reports '$reported', not 'onepipeline $version'" \
+    "report the mislabelled release upstream; the journeys need exactly the release the lock pins"
+}

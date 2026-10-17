@@ -9,8 +9,11 @@
 //! the pinned one, and whether the suites that start the read API reach the recipe
 //! at all.
 //!
-//! One thing is stood in for: `cargo` on PATH, because the real provisioning
-//! downloads and compiles the sibling CLI, which is neither offline nor quick.
+//! Two things are stood in for: `cargo` on PATH, because the real provisioning
+//! downloads and compiles the sibling CLI, which is neither offline nor quick;
+//! and the Releases the recipe fetches the CLI's own archive from, which are a
+//! local mirror directory laid out as a Release is — empty unless a journey puts
+//! an archive in it, so a Release with no archive for this host is the default.
 //! The recipe under test is the real one, run out of a copy of the real justfile
 //! over the real `Cargo.lock`, so the version it pins to is the version this
 //! tree resolves — and what it asked cargo for is readable here. The copy is the
@@ -100,10 +103,17 @@ impl Fixture {
     /// A tree with no `.tools/` at all — a clone nobody has bootstrapped.
     fn new() -> Self {
         let dir = TempDir::new().expect("temp dir");
-        for name in ["justfile", "Cargo.lock", "Cargo.toml"] {
+        fs::create_dir_all(dir.path().join("scripts")).expect("the copy's scripts directory");
+        for name in [
+            "justfile",
+            "Cargo.lock",
+            "Cargo.toml",
+            "scripts/ensure-sibling.sh",
+        ] {
             fs::copy(repo_root().join(name), dir.path().join(name))
                 .unwrap_or_else(|error| panic!("copy {name} into the scratch tree: {error}"));
         }
+        fs::create_dir_all(dir.path().join("releases")).expect("the empty release mirror");
 
         // Records what the recipe asked for, and answers with the status the case
         // under test is about.
@@ -163,11 +173,78 @@ impl Fixture {
             .arg("_ensure-sibling")
             .current_dir(self.dir.path())
             .env("PATH", &self.search_path)
-            .env("CARGO_CALLS", self.dir.path().join("cargo-calls"));
+            .env("CARGO_CALLS", self.dir.path().join("cargo-calls"))
+            .env(
+                "ONEPIPELINE_UI_SIBLING_RELEASES",
+                self.dir.path().join("releases"),
+            );
         for (name, value) in environment {
             command.env(name, value);
         }
         command.output().expect("just is on PATH")
+    }
+
+    /// Publish an archive of a CLI reporting `reports` in the mirror's Release
+    /// for the pinned version, under the name the recipe asks for on this host,
+    /// with a checksum file beside it that is `checksum`, or the archive's own.
+    #[cfg(unix)]
+    fn publish_archive(&self, reports: &str, checksum: Option<&str>) {
+        let pin = Release::linked().as_str().to_owned();
+        let triple = host_triple();
+        let release = self.dir.path().join("releases").join(format!("v{pin}"));
+        let staging = self.dir.path().join("archive-staging");
+        // llmlint: ignore[e2e_not_mocked] the archived program stands in for the
+        // released CLI the way `write_stub_sibling` does: what the recipe is asked
+        // to prove is that it installs the archive it verified and asks it its
+        // version, which a program answering `--version` is enough to observe.
+        stub_bin::install(
+            &staging,
+            "onepipeline",
+            &format!("#!/usr/bin/env bash\nprintf 'onepipeline {reports}\\n'\n"),
+        );
+        fs::create_dir_all(&release).expect("the mirror's release directory");
+        let archive = release.join(format!("onepipeline-v{pin}-{triple}.tar.gz"));
+        let packed = Command::new("tar")
+            .arg("-czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&staging)
+            .arg("onepipeline")
+            .output()
+            .expect("tar is on PATH");
+        assert!(packed.status.success(), "tar: {}", stderr(&packed));
+        let digest = match checksum {
+            Some(checksum) => checksum.to_owned(),
+            None => {
+                let summed = Command::new("sha256sum")
+                    .arg(&archive)
+                    .output()
+                    .expect("sha256sum is on PATH");
+                assert!(summed.status.success(), "sha256sum: {}", stderr(&summed));
+                String::from_utf8_lossy(&summed.stdout)
+                    .split_whitespace()
+                    .next()
+                    .expect("a digest")
+                    .to_owned()
+            }
+        };
+        fs::write(
+            release.join(format!("onepipeline-v{pin}-{triple}.sha256")),
+            format!("{digest}  onepipeline-v{pin}-{triple}.tar.gz\n"),
+        )
+        .expect("write the published checksum");
+    }
+
+    /// What the provisioned path answers to `--version`, or nothing when the
+    /// recipe left no program there.
+    fn provisioned_version(&self) -> Option<String> {
+        let binary = self
+            .dir
+            .path()
+            .join(".tools/bin")
+            .join(provisioned_sibling());
+        let output = Command::new(&binary).arg("--version").output().ok()?;
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
     /// Everything the recipe asked `cargo` for, in order.
@@ -190,6 +267,21 @@ fn provisioned_sibling() -> String {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// This host's target triple as rustc reports it — what the recipe names the
+/// archive it fetches by.
+#[cfg(unix)]
+fn host_triple() -> String {
+    let output = Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .expect("rustc is on PATH");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .expect("rustc names its host")
+        .to_owned()
 }
 
 /// The install the recipe must ask for, spelled out: the release this build
@@ -305,6 +397,98 @@ fn provisioning_that_fails_says_which_release_could_not_be_installed() {
     assert!(
         stderr.contains(Release::linked().as_str()) && stderr.contains("onepipeline"),
         "the failure does not name the release that could not be provisioned:\n{stderr}"
+    );
+}
+
+/// A Release that publishes this host's archive is installed from it, checked
+/// against its published checksum, and nothing is compiled: the archive is the
+/// same release the lock pins, and compiling it is the largest single cost of a
+/// clean bootstrap.
+#[cfg(unix)]
+#[test]
+fn a_release_archive_for_this_host_is_installed_without_compiling() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+
+    let output = fixture.run();
+
+    assert!(
+        output.status.success(),
+        "installing the published archive failed:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled the CLI although its release publishes an archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str()),
+        "the archive's binary is not the provisioned sibling"
+    );
+}
+
+/// An archive that does not match the checksum published beside it is refused,
+/// and the recipe neither installs it nor compiles around it: a release that is
+/// not what it says it is has to be looked at, not papered over.
+#[cfg(unix)]
+#[test]
+fn an_archive_that_fails_its_checksum_is_refused_and_not_compiled_around() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), Some(&"0".repeat(64)));
+
+    let output = fixture.run();
+
+    assert!(
+        !output.status.success(),
+        "an archive failing its checksum was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("checksum") && stderr.contains("ACTION:"),
+        "the refusal does not say the checksum failed and what to do:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around a bad archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "an unverified archive was installed"
+    );
+}
+
+/// An archive whose binary reports another release is refused and removed:
+/// whatever the file is named, the journeys need the release the lock pins.
+#[cfg(unix)]
+#[test]
+fn an_archive_whose_binary_reports_another_release_is_refused() {
+    let fixture = Fixture::new();
+    fixture.publish_archive("0.0.1-stray", None);
+
+    let output = fixture.run();
+
+    assert!(
+        !output.status.success(),
+        "an archive of another release was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("0.0.1-stray") && stderr.contains(Release::linked().as_str()),
+        "the refusal does not name both releases:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around a mislabelled archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "the mislabelled binary was left where the journeys look"
     );
 }
 
