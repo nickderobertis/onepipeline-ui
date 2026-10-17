@@ -98,7 +98,6 @@ function scratchRepository() {
   return { dir, repo, remote: join(dir, "remote.git") };
 }
 
-// Run the job's steps the way a runner does.
 function runJob({ dir, repo }, { token, headCommit }) {
   const gh = githubDouble(dir, "unused");
   writeFileSync(join(gh.state, "prs"), "7\n");
@@ -251,13 +250,11 @@ test("on an eligible push the job prepares the version bump, and writes no remot
   );
   assert.ok(changelog.includes(`## [${bumped}]`), changelog);
   assert.match(changelog, /add a second function/);
-  // What it read from the forge, it read: nothing was written there.
   assert.ok(
     forgeCalls().every((call) => call.startsWith("GET ")),
     forgeCalls().join("\n"),
   );
   assert.match(output, /Would enable auto-merge on release PR #7/);
-  // Read-only calls only: nothing was merged, tagged or pushed.
   assert.ok(
     gh.calls().every((call) => call[0] === "pr" && call[1] === "list"),
     JSON.stringify(gh.calls()),

@@ -1025,10 +1025,7 @@ async function uploadPublish(out, registry, dryRun) {
         "fix the error above and re-run this job; a version already live is skipped",
         "cargo",
         ["publish", "--locked", ...flags],
-        {
-          env: { RUSTFLAGS: "-D warnings" },
-          log: join(out, `build-${target}.log`),
-        },
+        { env: { RUSTFLAGS: "-D warnings" } },
       );
       published.push(files[0].file);
     }
@@ -1295,6 +1292,13 @@ async function main(argv) {
       );
     else positional.push(arg);
   }
+  // Only the phases that publish can be rehearsed; a dry-run build or verdict
+  // would still stage files or rewrite the Release.
+  if (dryRun && phase !== "upload" && phase !== "all")
+    throw usage(
+      `--dry-run is taken by upload and all, not ${phase}`,
+      "omit --dry-run, or rehearse with upload <registry> --dry-run or all --dry-run",
+    );
   if (version !== undefined && (phase !== "plan" || !VERSION.test(version)))
     throw usage(
       "--version X.Y.Z is taken by the plan phase alone",

@@ -181,7 +181,6 @@ export function releaseEnv({ gh, registries, home, extra = {} }) {
   };
 }
 
-// One release recipe, the way its workflow step runs it.
 export function recipe(job, args, env) {
   const result = spawnSync("just", [`release-${job}`, ...args], {
     cwd: ROOT,
