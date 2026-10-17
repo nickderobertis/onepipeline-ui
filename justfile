@@ -325,14 +325,14 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as six Nx projects, one per tier, each selecting its
+# The crate's suite runs as seven Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the six filters are written and partition the suite. Three
+# which is where the seven filters are written and partition the suite. Three
 # tiers are instrumented and run here; the baseline comparison, the cost
-# journeys and the linked-report journeys run through `_tier-test` below, for
-# what each needs that the rest do not — another commit of this repository
-# compiled, a syscall tracer, and a second build of this one with `cargo
-# auditable`.
+# journeys, the linked-report journeys and the CI jobs' recipes run through
+# `_tier-test` below, for what each needs that the rest do not — another commit
+# of this repository compiled, a syscall tracer, a second build of this one with
+# `cargo auditable`, and inputs that are the project graph rather than the crate.
 #
 # Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
 # named for the tier, and reports nothing: `_crate-coverage` merges every tier's

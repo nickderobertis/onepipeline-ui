@@ -312,7 +312,17 @@ jobs:
         run: |
           result="$(node .github/macos-policy.mjs classify --event "$GITHUB_EVENT_PATH" --base "$BASE" --head "$HEAD")"
           echo "$result"
-          echo "required=$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).macosRequired))' "$result")" >> "$GITHUB_OUTPUT"
+          # Anything but a boolean is refused: a missing or garbled answer must
+          # fail this job, never read as "not required" and skip the Mac work.
+          required="$(node -e '
+            const { macosRequired } = JSON.parse(process.argv[1]);
+            if (typeof macosRequired !== "boolean") {
+              console.error(`the Mac policy answered macosRequired=${JSON.stringify(macosRequired)}, not a boolean`);
+              process.exit(1);
+            }
+            process.stdout.write(String(macosRequired));
+          ' "$result")"
+          echo "required=$required" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         if: steps.macos.outputs.required == 'true'
       - uses: oven-sh/setup-bun@v2

@@ -140,15 +140,15 @@ status=0
 fetch "$checksum" || status=$?
 [ "$status" -eq 0 ] || fail "onepipeline v$version publishes $asset but no $checksum to check it against" \
   "report the incomplete release upstream; nothing unverified is installed"
-expected="$(cut -d' ' -f1 <"$work/$checksum" | tr -d '\r\n')" ||
-  fail "could not read $checksum" "free disk space and retry"
+# An unreadable checksum file reads as an empty one, which the comparison below
+# refuses with the same diagnostic as a wrong one.
+expected="$(cut -d' ' -f1 <"$work/$checksum" 2>/dev/null | tr -d '\r\n')" || expected=""
 actual="$(sha256_of "$work/$asset")"
 [ -n "$expected" ] && [ "$expected" = "$actual" ] ||
   fail "$asset does not match its published checksum (expected '$expected', got '$actual')" \
     "do not use this archive; retry, and report the release upstream if it still differs"
 
-mkdir -p "$work/unpacked" || fail "could not create $work/unpacked to unpack into" "free disk space and retry"
-case "$archive_kind" in
+{ mkdir -p "$work/unpacked" && case "$archive_kind" in
   # llmlint: ignore-block[changed_behavior_has_e2e] the zip branch is Windows', whose journeys cannot pack a fixture zip with any tool the Windows runner is sure to carry; `test-windows`'s own bootstrap takes this branch against onepipeline's real Windows archive on every run, and the checksum and version probe after it are the journeys' shared path.
   zip)
     if command -v unzip >/dev/null 2>&1; then
@@ -159,7 +159,8 @@ case "$archive_kind" in
     ;;
   # llmlint: ignore-end[changed_behavior_has_e2e]
   *) tar -xzf "$work/$asset" -C "$work/unpacked" "$member" ;;
-esac || fail "could not unpack $member from $asset" "free disk space and retry"
+esac; } || fail "could not unpack $member from $asset, although it matches its checksum" \
+  "free disk space and retry; if it recurs, the release's archive lacks $member — report it upstream"
 
 directory="$(dirname -- "$binary")"
 mkdir -p "$directory" && rm -f "$binary" && cp "$work/unpacked/$member" "$binary" && chmod +x "$binary" ||

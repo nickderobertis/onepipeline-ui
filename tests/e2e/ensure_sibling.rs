@@ -243,6 +243,43 @@ impl Fixture {
         .expect("write the published checksum");
     }
 
+    /// Publish `bytes` as this host's archive in the mirror's Release for the
+    /// pinned version, with their own digest beside them — a release whose
+    /// checksum vouches for whatever it ships.
+    #[cfg(unix)]
+    fn publish_bytes(&self, bytes: &[u8]) {
+        use sha2::Digest;
+        let pin = Release::linked().as_str().to_owned();
+        let triple = host_triple();
+        let release = self.dir.path().join("releases").join(format!("v{pin}"));
+        fs::create_dir_all(&release).expect("the mirror's release directory");
+        let name = format!("onepipeline-v{pin}-{triple}.tar.gz");
+        fs::write(release.join(&name), bytes).expect("write the archive");
+        let digest: String = sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        fs::write(
+            release.join(format!("onepipeline-v{pin}-{triple}.sha256")),
+            format!("{digest}  {name}\n"),
+        )
+        .expect("write the published checksum");
+    }
+
+    /// This fixture's PATH with `programs` — name and script — in front of it.
+    #[cfg(unix)]
+    fn path_with(&self, label: &str, programs: &[(&str, &str)]) -> String {
+        let dir = self.dir.path().join(label);
+        for (name, script) in programs {
+            // llmlint: ignore[e2e_not_mocked] each stand-in is the host condition its journey is about — a toolchain that fails, a hasher that cannot run — and PATH is the only place to arrange one on a host that has the real program.
+            stub_bin::install(&dir, name, script);
+        }
+        std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&self.search_path)))
+            .expect("join PATH")
+            .into_string()
+            .expect("a UTF-8 PATH")
+    }
+
     /// What the provisioned path answers to `--version`, or nothing when the
     /// recipe left no program there.
     fn provisioned_version(&self) -> Option<String> {
@@ -538,20 +575,12 @@ fn an_archive_published_without_its_checksum_is_refused_and_not_compiled_around(
 fn the_checksum_is_read_with_shasum_where_sha256sum_cannot_run() {
     let fixture = Fixture::new();
     fixture.publish_archive(Release::linked().as_str(), None);
-    // llmlint: ignore[e2e_not_mocked] a `sha256sum` that cannot run is the host this journey is about — a Mac's — and PATH is the only place it can be arranged on a host that has one.
-    let path = stub_bin::install(
-        &fixture.dir.path().join("no-sha256sum"),
-        "sha256sum",
-        "#!/usr/bin/env bash\nexit 127\n",
+    let path = fixture.path_with(
+        "no-sha256sum",
+        &[("sha256sum", "#!/usr/bin/env bash\nexit 127\n")],
     );
-    let search_path = std::env::join_paths(
-        std::env::split_paths(&path)
-            .take(1)
-            .chain(std::env::split_paths(&fixture.search_path)),
-    )
-    .expect("join PATH");
 
-    let output = fixture.run_with(&[("PATH", search_path.to_str().expect("a UTF-8 PATH"))]);
+    let output = fixture.run_with(&[("PATH", &path)]);
 
     assert!(
         output.status.success(),
@@ -586,6 +615,177 @@ fn a_compiled_sibling_that_reports_another_release_is_refused() {
         stderr.contains(Release::linked().as_str()) && stderr.contains("ACTION:"),
         "the refusal does not name the pinned release and what to do:\n{stderr}"
     );
+}
+
+/// Every way the recipe can be unable to provision fails it with a sentence and
+/// an `ACTION:`, installs nothing, and compiles nothing around the refusal.
+#[cfg(unix)]
+#[test]
+fn every_refusal_names_what_to_do_and_compiles_nothing() {
+    type Arrange = fn(&Fixture) -> Vec<(String, String)>;
+    let cases: [(&str, Arrange, &str); 8] = [
+        (
+            "a release source that is neither https nor a directory",
+            |_| {
+                vec![(
+                    "ONEPIPELINE_UI_SIBLING_RELEASES".into(),
+                    "ftp://example.invalid".into(),
+                )]
+            },
+            "neither an https URL nor a directory",
+        ),
+        (
+            "rustc that cannot run",
+            |f| {
+                vec![(
+                    "PATH".into(),
+                    f.path_with(
+                        "rustc-fails",
+                        &[("rustc", "#!/usr/bin/env bash\necho broken >&2\nexit 1\n")],
+                    ),
+                )]
+            },
+            "rustc -vV failed",
+        ),
+        (
+            "rustc that names no host",
+            |f| {
+                vec![(
+                    "PATH".into(),
+                    f.path_with(
+                        "rustc-hostless",
+                        &[("rustc", "#!/usr/bin/env bash\necho 'rustc 1.0.0'\n")],
+                    ),
+                )]
+            },
+            "named no host triple",
+        ),
+        (
+            "no temporary storage",
+            |f| {
+                vec![(
+                    "TMPDIR".into(),
+                    f.dir.path().join("no-such-dir").display().to_string(),
+                )]
+            },
+            "temporary storage",
+        ),
+        (
+            "an archive that is not one, though its checksum matches",
+            |f| {
+                f.publish_bytes(b"not a gzip stream");
+                Vec::new()
+            },
+            "could not unpack",
+        ),
+        (
+            "an archive without the CLI in it",
+            |f| {
+                let staging = f.dir.path().join("wrong-member");
+                fs::create_dir_all(&staging).expect("staging");
+                fs::write(staging.join("README.md"), "no binary here").expect("member");
+                let packed = Command::new("tar")
+                    .arg("-czf")
+                    .arg(f.dir.path().join("wrong.tar.gz"))
+                    .arg("-C")
+                    .arg(&staging)
+                    .arg("README.md")
+                    .output()
+                    .expect("tar is on PATH");
+                assert!(packed.status.success(), "tar: {}", stderr(&packed));
+                f.publish_bytes(&fs::read(f.dir.path().join("wrong.tar.gz")).expect("archive"));
+                Vec::new()
+            },
+            "lacks onepipeline",
+        ),
+        (
+            "no hasher that runs",
+            |f| {
+                f.publish_archive(Release::linked().as_str(), None);
+                let path = f.path_with(
+                    "no-hashers",
+                    &[
+                        ("sha256sum", "#!/usr/bin/env bash\nexit 127\n"),
+                        ("shasum", "#!/usr/bin/env bash\nexit 127\n"),
+                    ],
+                );
+                vec![("PATH".into(), path)]
+            },
+            "neither sha256sum nor shasum",
+        ),
+        (
+            "a destination that cannot be written",
+            |f| {
+                f.publish_archive(Release::linked().as_str(), None);
+                fs::create_dir_all(f.dir.path().join(".tools")).expect(".tools");
+                fs::write(
+                    f.dir.path().join(".tools/bin"),
+                    "a file where the directory goes",
+                )
+                .expect("block the destination");
+                Vec::new()
+            },
+            "could not install",
+        ),
+    ];
+    for (what, arrange, says) in cases {
+        let fixture = Fixture::new();
+        let environment = arrange(&fixture);
+        let pairs: Vec<(&str, &str)> = environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let output = fixture.run_with(&pairs);
+        let stderr = stderr(&output);
+        assert!(
+            !output.status.success(),
+            "{what}: the recipe succeeded:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(says) && stderr.contains("ACTION:"),
+            "{what}: the refusal does not say `{says}` and what to do:\n{stderr}"
+        );
+        assert_eq!(
+            fixture.calls(),
+            "",
+            "{what}: the recipe compiled around the refusal"
+        );
+        assert_eq!(
+            fixture.provisioned_version(),
+            None,
+            "{what}: something was installed"
+        );
+    }
+}
+
+/// A call the recipe would never make is refused as a usage error, before
+/// anything is fetched.
+#[test]
+fn a_malformed_call_is_refused_as_usage() {
+    let fixture = Fixture::new();
+    for (arguments, binary) in [
+        (&[][..], ".tools/bin/onepipeline"),
+        (&["not-a-version"][..], ".tools/bin/onepipeline"),
+        (&["1.2.3"][..], ""),
+    ] {
+        let output = Command::new("bash")
+            .arg("scripts/ensure-sibling.sh")
+            .args(arguments)
+            .current_dir(fixture.dir.path())
+            .env("ONEPIPELINE_UI_ONEPIPELINE_BIN", binary)
+            .output()
+            .expect("bash is on PATH");
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{arguments:?} was not refused as usage"
+        );
+        assert!(
+            stderr(&output).contains("ACTION:"),
+            "{arguments:?}: {}",
+            stderr(&output)
+        );
+    }
 }
 
 /// Every suite that starts the read API reaches the provisioning through Nx's

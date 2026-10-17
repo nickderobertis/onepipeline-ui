@@ -58,7 +58,6 @@
       "{workspaceRoot}/tests/packaging.rs",
       "{workspaceRoot}/tests/e2e/main.rs",
       "{workspaceRoot}/tests/e2e/baseline.rs",
-      "{workspaceRoot}/tests/e2e/ci_jobs.rs",
       "{workspaceRoot}/tests/e2e/ci_tier.rs",
       "{workspaceRoot}/tests/e2e/ensure_baseline.rs",
       "{workspaceRoot}/tests/e2e/ensure_sibling.rs",

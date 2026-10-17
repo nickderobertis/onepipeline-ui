@@ -33,7 +33,7 @@ final-status-level = "fail"
 # and CI scripts, the llmlint tier and the provisioning recipes.
 # `onepipeline-ui-repo-tooling:test`.
 [profile.repo-tooling]
-default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_jobs|ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/))"
+default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/))"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -51,6 +51,14 @@ status-level = "fail"
 final-status-level = "fail"
 
 # The bounds on what a read costs, counted with `strace`. `onepipeline-ui-cost:test-cost`.
+# The four CI jobs' recipes, driven through real Nx over a scratch copy of the
+# workspace: a tier of their own so a change to the API or the browser view does
+# not re-run them — they read the project graph and the scripts, nothing else.
+[profile.ci-jobs]
+default-filter = "binary(=e2e) and test(/^ci_jobs::/)"
+status-level = "fail"
+final-status-level = "fail"
+
 [profile.cost]
 default-filter = "binary(=e2e) and test(/^cost::/)"
 status-level = "fail"

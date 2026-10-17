@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parse } from "yaml";
+import { REQUIRED_CONTEXTS } from "../required-contexts.mjs";
 
 function load() {
   return Object.fromEntries(
@@ -108,7 +109,8 @@ export function jobProblems(workflows) {
   return problems;
 }
 
-// Each context branch protection requires today, and the job that reports it:
+// Each context branch protection requires today (../required-contexts.mjs),
+// and the job that reports it:
 // a job id with no name override reports under its id, a matrix leg as
 // `id (value)`, and the visual-docs context as the caller job's id, then the
 // reusable workflow's `report` leg, named from the defaults it is not passed.
@@ -357,6 +359,7 @@ test("the visual docs capture leaving lint, or running through the reusable work
 });
 
 test("every job behind today's required contexts is still in place", () => {
+  assert.deepEqual(Object.keys(REQUIRED).sort(), [...REQUIRED_CONTEXTS].sort());
   assert.deepEqual(requiredContextProblems(load()), []);
   for (const [context, where] of Object.entries(REQUIRED)) {
     const workflows = clone(load());

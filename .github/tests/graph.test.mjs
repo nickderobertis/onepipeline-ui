@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { REQUIRED_CONTEXTS } from "../required-contexts.mjs";
 import {
   digest,
   expandMatrix,
@@ -34,18 +35,12 @@ const events = [
   ["manual-default", "workflow_dispatch", null],
   ["manual-opt-in", "workflow_dispatch", null],
 ];
+// What protection requires, and the two Mac carriers' names, which report
+// beside them on every pull request.
 const protectedNames = [
+  ...REQUIRED_CONTEXTS,
   "cross (macos-latest)",
-  "cross (windows-latest)",
-  "deny",
-  "gate",
   "install (macos-latest)",
-  "install (ubuntu-latest)",
-  "install (windows-latest)",
-  "llmlint",
-  "msrv",
-  "pr-title",
-  "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
 ];
 test("actual workflows, expressions and reusable calls record the complete lifecycle", () => {
   const h = history();

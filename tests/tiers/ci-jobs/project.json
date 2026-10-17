@@ -1,0 +1,38 @@
+{
+  "name": "onepipeline-ui-ci-jobs",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:rust"],
+  "targets": {
+    "test": {
+      "command": "just _tier-test ci-jobs",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "inputs": ["ciJobSelection"]
+    },
+    "test-quick": {
+      "command": "just _tier-test ci-jobs",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "inputs": ["ciJobSelection"]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  },
+  "namedInputs": {
+    "ciJobSelection": [
+      "testTiers",
+      "sharedGlobals",
+      "embeddedView",
+      "{workspaceRoot}/scripts/**/*",
+      "{workspaceRoot}/**/project.json",
+      "{workspaceRoot}/**/package.json",
+      "{workspaceRoot}/**/tsconfig*.json",
+      "{workspaceRoot}/**/.nxignore",
+      "{workspaceRoot}/.gitignore",
+      "{workspaceRoot}/tests/e2e/main.rs",
+      "{workspaceRoot}/tests/e2e/ci_jobs.rs",
+      "{workspaceRoot}/tests/support/stub_bin.rs",
+      "{workspaceRoot}/tests/support/workspace_copy.rs"
+    ]
+  }
+}
