@@ -73,8 +73,7 @@
       "inputs": [
         "wholeWorkspace",
         { "env": "LLMLINT_DIFF_BASE_SHA" },
-        { "env": "LLMLINT_JUDGE_FINGERPRINT" },
-        { "env": "LLMLINT_SHARD_BUDGET_CHARS" }
+        { "runtime": "llmlint fingerprint" }
       ]
     },
     "check": {

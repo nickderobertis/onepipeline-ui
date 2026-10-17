@@ -266,14 +266,14 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as six Nx projects, one per tier, each selecting its
+# The crate's suite runs as seven Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the six filters are written and partition the suite. Three
+# which is where the seven filters are written and partition the suite. Three
 # tiers are instrumented and run here; the baseline comparison, the cost
-# journeys and the linked-report journeys run through `_tier-test` below, for
-# what each needs that the rest do not — another commit of this repository
-# compiled, a syscall tracer, and a second build of this one with `cargo
-# auditable`.
+# journeys, the linked-report journeys and the judged tier's journeys run
+# through `_tier-test` below, for what each needs that the rest do not — another
+# commit of this repository compiled, a syscall tracer, a second build of this
+# one with `cargo auditable`, and an installed llmlint.
 #
 # Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
 # named for the tier, and reports nothing: `_crate-coverage` merges every tier's
@@ -337,7 +337,7 @@ test-quick:
     @bash scripts/nx.sh run-many -t test-quick
 
 # Drives the compiled binary and the committed npm launcher — never a stub. The
-# whole e2e binary, which four tiers share between them (`.config/nextest.toml`):
+# whole e2e binary, which six tiers share between them (`.config/nextest.toml`):
 # that split is about what each change pays for and what the gate provisions for
 # which tier, and reaching for the journeys themselves should not have to know it.
 # The whole `e2e` test binary in one run, every tier's share of it together.
@@ -432,19 +432,23 @@ lint-llm-validate *args:
 
 # The blocking `llmlint` PR check; `just gate` runs it before you push.
 #
-# Memoized: the judge is non-deterministic, so this runs the cached Nx target
-# `onepipeline-ui:lint-llm-diff` rather than llmlint directly, and one tree judged
-# against one base with one judge configuration gets one verdict — a second run
-# over an unchanged tree replays the first run's report instead of rolling again.
-# `scripts/llmlint-cached-diff.sh` holds what is keyed and why; only a clean run
-# is replayed, because Nx caches successful tasks only.
-#
-# The name and the argument shape are what they always were, so the CI job and
-# the operator calling `just lint-llm-diff origin/main` are unaffected. What the
-# trailing arguments reach changed: they are Nx's now, not llmlint's, which is
-# what makes `just lint-llm-diff origin/main --skip-nx-cache` the one supported
-# way to force a fresh roll. Reach llmlint's own flags through `just lint-llm`,
-# or `scripts/lint-llm-diff.sh` for the diff-scoped run without the memo.
+# Runs the cached Nx target `onepipeline-ui:lint-llm-diff`, which is llmlint
+# itself keyed on the tracked tree, the resolved base commit and `llmlint
+# fingerprint`: a pass is replayed only for that tree, base and judge, and a
+# failure is never cached. Trailing arguments are Nx's — `--skip-nx-cache`
+# forces a fresh roll.
 # llmlint scoped to the files this branch changed since it forked from main.
+[positional-arguments]
 lint-llm-diff base="origin/main" *nx_args:
-    @./scripts/llmlint-cached-diff.sh "{{base}}" {{nx_args}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sha="$(git rev-parse --verify --quiet "$1^{commit}")" \
+      || { echo "lint-llm-diff: base '$1' does not resolve to a commit in this checkout" >&2; exit 2; }
+    echo "lint-llm-diff: judging against base $sha"
+    shift
+    # Nx resolves a run-commands task on the child's `exit` before reading its
+    # pipes, so a fast failure's whole output is lost when Nx's stdout is not a
+    # terminal (the spike-nx-output-loss report). Remove once Nx collects
+    # run-commands output on `close`.
+    export NX_RUN_COMMANDS_DIRECTLY=false
+    LLMLINT_DIFF_BASE_SHA="$sha" exec bash scripts/nx.sh run onepipeline-ui:lint-llm-diff "$@"

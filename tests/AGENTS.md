@@ -74,7 +74,7 @@ A new CLI verb, flag, or route is not done until its journey lands in
 
 ## The tiers are projects
 
-The suite runs as six Nx projects, so a change pays for the tiers it can reach
+The suite runs as seven Nx projects, so a change pays for the tiers it can reach
 rather than for all of them. Each selects its tests through the nextest profile
 of the same name in `.config/nextest.toml`; the projects under `tests/tiers/`
 hold nothing but their `project.json`, and these rules are theirs.
@@ -87,10 +87,11 @@ hold nothing but their `project.json`, and these rules are theirs.
 | `onepipeline-ui-baseline` | `test-baseline` | `baseline` | `baseline` |
 | `onepipeline-ui-cost` | `test-cost` | `cost` | `cost` |
 | `onepipeline-ui-linked-report` | `test` | `linked-report` | `linked_report` |
+| `onepipeline-ui-judged-tier` | `test` | `judged-tier` | `judged_tier`, which needs `just setup-llmlint` |
 
 - **A new module of the e2e binary lands in `e2e`** unless its name joins
   another profile's list — the `e2e` filter is the complement of the other
-  four, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
+  five, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
   `tests/e2e/ensure_baseline.rs` holds the profiles to one partition and every
   tier project to the profile it names.
 - **A tier is reached only through its inputs.** No tier has a project-graph
