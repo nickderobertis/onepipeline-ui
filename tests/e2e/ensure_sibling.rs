@@ -284,6 +284,7 @@ impl Fixture {
 
     /// What the provisioned path answers to `--version`, or nothing when the
     /// recipe left no program there.
+    #[cfg(unix)]
     fn provisioned_version(&self) -> Option<String> {
         let binary = self
             .dir

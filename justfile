@@ -186,16 +186,18 @@ ci-test-windows *args:
 ci-test-macos *args:
     @bash scripts/ci-job.sh test-macos "$@"
 
-# The documented install path, `cargo install --path .`, in a target directory of
-# its own so it compiles beside the test tiers rather than waiting on their lock,
-# smoke-tested as every published artifact is. Warnings denied for the reason
-# release.yml denies them: this is the one release-profile compile of the crate on
-# the platform, and the gate's own builds are debug ones.
+# The documented install path, `cargo install --path .`, into a root under
+# `target/` rather than the user's own, smoke-tested as every published artifact
+# is. Warnings denied for the reason release.yml denies them, which is also what
+# lets it share `target/release`'s dependencies with `release-staging` on Linux.
+# The bin directory is resolved by `cd`, so a root cargo did not write is named
+# rather than read as a command missing from PATH.
 # Install this revision the documented way and smoke-test the installed binary.
 _crate-install-smoke:
-    @RUSTFLAGS="-D warnings" cargo install --path . --locked --quiet \
-      --root target/install-smoke --target-dir target/install-smoke/build
-    @PATH="$PWD/target/install-smoke/bin:$PATH" bash scripts/smoke-published.sh \
+    @RUSTFLAGS="-D warnings" cargo install --path . --locked --quiet --root target/install-smoke
+    @bin="$(cd target/install-smoke/bin && pwd)" \
+      || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
+      PATH="$bin:$PATH" bash scripts/smoke-published.sh \
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
 

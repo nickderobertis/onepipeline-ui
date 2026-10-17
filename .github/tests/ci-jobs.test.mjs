@@ -209,7 +209,8 @@ export function cacheProblems(workflows) {
   for (const [file, document] of Object.entries(workflows))
     for (const [id, job] of Object.entries(document?.jobs ?? {}))
       for (const step of job.steps ?? []) {
-        if (!/^actions\/cache(\/restore)?@/.test(step.uses ?? "")) continue;
+        if (!/^actions\/cache(\/restore|\/save)?@/.test(step.uses ?? ""))
+          continue;
         const where = `${file} ${id}`;
         const key = String(step.with?.key ?? "");
         const paths = String(step.with?.path ?? "")
@@ -396,13 +397,22 @@ test("every job behind today's required contexts is still in place", () => {
 test("every restored cache is keyed on what produced it", () => {
   const workflows = load();
   assert.deepEqual(cacheProblems(workflows), []);
-  const caches = Object.values(workflows["ci.yml"].jobs).flatMap((job) =>
-    (job.steps ?? []).filter((s) =>
-      (s.uses ?? "").startsWith("actions/cache@"),
-    ),
+  const steps = Object.values(workflows["ci.yml"].jobs).flatMap(
+    (job) => job.steps ?? [],
   );
-  // The sibling on all three platforms and the baseline server on Linux.
-  assert.equal(caches.length, 4);
+  const restores = steps.filter((s) =>
+    (s.uses ?? "").startsWith("actions/cache/restore@"),
+  );
+  const saves = steps.filter((s) =>
+    (s.uses ?? "").startsWith("actions/cache/save@"),
+  );
+  // The sibling on all three platforms and the baseline server on Linux, each
+  // saved under exactly the key and paths it is restored by.
+  assert.equal(restores.length, 4);
+  assert.deepEqual(
+    saves.map((s) => [s.with.path, s.with.key]).sort(),
+    restores.map((s) => [s.with.path, s.with.key]).sort(),
+  );
 });
 
 test("a cache key that omits the lockfile pin or a pinned tool is refused", () => {
@@ -411,7 +421,7 @@ test("a cache key that omits the lockfile pin or a pinned tool is refused", () =
       .flatMap((job) => job.steps ?? [])
       .find(
         (s) =>
-          (s.uses ?? "").startsWith("actions/cache@") &&
+          (s.uses ?? "").startsWith("actions/cache/restore@") &&
           s.with.path.includes(path),
       );
   const cases = [
