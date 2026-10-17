@@ -21,7 +21,6 @@ const workflow = (file) => workflows().find((w) => w.file === file)?.document;
 const release = () => workflow("release.yml");
 const BUILD_JOBS = Object.keys(PLATFORMS).map((os) => `build-${os}`);
 const RELEASE_JOBS = [...BUILD_JOBS, "publish"];
-// The job a recipe belongs to: `release-linux` is build-linux's, and so on.
 const jobOfRecipe = (recipe) =>
   recipe === "publish" ? "publish" : `build-${recipe}`;
 const planOf = (job, version) =>

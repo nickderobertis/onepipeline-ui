@@ -1153,7 +1153,7 @@ function probeDeclaredTargets(version) {
   return answers;
 }
 
-async function verifyPublish() {
+async function verifyPublish(out) {
   const { version, artifacts } = plan("publish");
   const tag = releaseTag(version);
   const sbom = artifacts.find((a) => a.kind === "sbom").file;
@@ -1173,6 +1173,40 @@ async function verifyPublish() {
         `npm does not serve onepipeline-ui@${version}`,
         "re-run this job's upload npm",
       );
+    // The frontend, installed as a consumer installs it, carries the bundle
+    // this job built and packed.
+    const frontend = scratch("verify-frontend");
+    try {
+      retried(
+        `npm onepipeline-ui ${version}`,
+        "check that npm serves the frontend package at this version",
+        "npm",
+        [
+          "install",
+          "--prefix",
+          portable(frontend),
+          "--prefer-online",
+          "--no-audit",
+          "--no-fund",
+          "--cache",
+          portable(join(frontend, ".cache")),
+          `onepipeline-ui@${version}`,
+        ],
+      );
+      const index = (root) =>
+        join(root, "onepipeline-ui", "dist", "index.html");
+      const installed = index(join(frontend, "node_modules"));
+      if (
+        !existsSync(installed) ||
+        !readFileSync(installed).equals(readFileSync(index(join(out, "npm"))))
+      )
+        throw new Fault(
+          `npm's onepipeline-ui@${version} does not carry the frontend this release built`,
+          "re-publish the frontend package from this job's build",
+        );
+    } finally {
+      rmSync(frontend, { recursive: true, force: true });
+    }
     const work = scratch("verify-launcher");
     try {
       retried(
@@ -1359,7 +1393,7 @@ async function main(argv) {
     case "publish:upload":
       return uploadPublish(out, positional[0], dryRun);
     case "publish:verify":
-      return verifyPublish();
+      return verifyPublish(out);
     case "publish:settle":
       return settle();
     default:

@@ -622,7 +622,7 @@ describe("publication against registry doubles", () => {
       "publish",
       [
         ...args,
-        ...(args[0] === "upload" || args[0] === "build"
+        ...(["upload", "build", "verify"].includes(args[0])
           ? ["--out", publishOut]
           : []),
       ],
@@ -957,12 +957,40 @@ describe("publication against registry doubles", () => {
     const launcherServed = registries.served().length;
     const verify = publish(["verify"], extra);
     assert.equal(verify.status, 0, verify.output);
-    // The launcher it installed came from the npm double, and pulled this
-    // platform's package in beside it.
-    assert.deepEqual(registries.served().slice(launcherServed).sort(), [
-      `npm onepipeline-api-cli-${VERSION}.tgz`,
-      `npm ${fileOf("npm").file}`,
-    ]);
+    // The launcher it installed came from the npm double and pulled this
+    // platform's package in beside it, and the frontend was installed too.
+    assert.deepEqual(
+      registries.served().slice(launcherServed).sort(),
+      [
+        `npm onepipeline-api-cli-${VERSION}.tgz`,
+        `npm ${fileOf("npm").file}`,
+        `npm onepipeline-ui-${VERSION}.tgz`,
+      ].sort(),
+    );
+    // A frontend package published without its bundle fails the read-back.
+    const uiTarball = join(
+      registries.state,
+      "npm",
+      "onepipeline-ui",
+      `${VERSION}.tgz`,
+    );
+    const uiBytes = readFileSync(uiTarball);
+    const bare = join(dir, "bare-frontend");
+    rmSync(bare, { recursive: true, force: true });
+    mkdirSync(bare, { recursive: true });
+    execFileSync("tar", ["-xzf", uiTarball, "-C", bare]);
+    rmSync(join(bare, "package/dist"), { recursive: true });
+    execFileSync("tar", ["-czf", uiTarball, "-C", bare, "package"]);
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /does not carry the frontend this release built/,
+      );
+    } finally {
+      writeFileSync(uiTarball, uiBytes);
+    }
     // With every registry switched off, publish asks none of them for the
     // release: the crate and the frontend lost, it still verifies, by the
     // SBOM on the Release and what the probe answers.
