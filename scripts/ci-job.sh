@@ -97,6 +97,7 @@ nx_run() {
   fi
 }
 graph="$(nx_run --graph=stdout)" || {
+  printf '%s\n' "$graph" >&2
   echo "ci-job: Nx could not plan $job's tasks" >&2
   echo "ACTION: fix the Nx error above; 'just nx show projects' lists what it can read" >&2
   exit 1
@@ -121,6 +122,7 @@ tasks="$(printf '%s' "$graph" | node -e '
   }
   process.stdout.write(Object.keys(tasks).sort().join(" "));
 ')" || {
+  printf '%s\n' "$graph" >&2
   echo "ci-job: could not read the task graph Nx planned for $job" >&2
   echo "ACTION: run 'just nx run-many -t $targets --graph=stdout' and fix what it reports" >&2
   exit 1

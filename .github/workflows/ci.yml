@@ -241,9 +241,10 @@ jobs:
       - name: Which tier of the gate this build owes
         id: tier
         run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
-      # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] transitional by the plan's sequencing: this job takes over `sweep` below, which stays only until branch protection moves to the four jobs, and removing it then is the CI-budgets change's work, not this one's — the two sweep the release pull request side by side for that window only, and neither feeds `gate`.
+      # llmlint: ignore-block[no_second_broader_sweep_over_an_already_gated_commit] transitional by the plan's sequencing: this job takes over `sweep` below, which stays only until branch protection moves to the four jobs, and removing it then is the CI-budgets change's work, not this one's — the two sweep the release pull request side by side for that window only, and neither feeds `gate`.
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
+      # llmlint: ignore-end[no_second_broader_sweep_over_an_already_gated_commit]
 
   # The platform-sensitive tiers on Windows (`check-cross`: formatting, lints and
   # the suite against a real binary, without the Linux-only coverage floor), the

@@ -52,8 +52,9 @@ final-status-level = "fail"
 
 # The bounds on what a read costs, counted with `strace`. `onepipeline-ui-cost:test-cost`.
 # The four CI jobs' recipes, driven through real Nx over a scratch copy of the
-# workspace: a tier of their own so a change to the API or the browser view does
-# not re-run them — they read the project graph and the scripts, nothing else.
+# workspace: a tier of their own, keyed on the project graph's declarations and
+# the scripts, so a change to the API's or the browser view's sources does not
+# re-run them.
 [profile.ci-jobs]
 default-filter = "binary(=e2e) and test(/^ci_jobs::/)"
 status-level = "fail"

@@ -22,7 +22,6 @@
     "ciJobSelection": [
       "testTiers",
       "sharedGlobals",
-      "embeddedView",
       "{workspaceRoot}/scripts/**/*",
       "{workspaceRoot}/**/project.json",
       "{workspaceRoot}/**/package.json",

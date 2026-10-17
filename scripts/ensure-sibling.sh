@@ -83,6 +83,16 @@ asset="onepipeline-v$version-$triple.$archive_kind"
 checksum="onepipeline-v$version-$triple.sha256"
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 releases="${ONEPIPELINE_UI_SIBLING_RELEASES:-https://github.com/nickderobertis/onepipeline/releases/download}"
+# A mirror is a directory that has to be there: one that is misspelled or
+# unreadable would otherwise read as a release without an archive, and compile.
+case "$releases" in
+  *://*) ;;
+  *)
+    [ -d "$releases" ] && [ -r "$releases" ] && [ -x "$releases" ] ||
+      fail "ONEPIPELINE_UI_SIBLING_RELEASES='$releases' is not a readable directory" \
+        "name an existing mirror directory, or unset it to use onepipeline's GitHub Releases"
+    ;;
+esac
 
 work="$(mktemp -d)" || fail "could not open temporary storage for the download" "free disk space and retry"
 trap 'rm -rf "$work"' EXIT

@@ -71,6 +71,7 @@
     },
     "release-staging": {
       "command": "just _crate-release-staging",
+      "cache": true,
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "inputs": [
         "apiServerSurface",

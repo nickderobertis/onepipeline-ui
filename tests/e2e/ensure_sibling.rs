@@ -623,7 +623,17 @@ fn a_compiled_sibling_that_reports_another_release_is_refused() {
 #[test]
 fn every_refusal_names_what_to_do_and_compiles_nothing() {
     type Arrange = fn(&Fixture) -> Vec<(String, String)>;
-    let cases: [(&str, Arrange, &str); 8] = [
+    let cases: [(&str, Arrange, &str); 9] = [
+        (
+            "a mirror directory that is not there",
+            |f| {
+                vec![(
+                    "ONEPIPELINE_UI_SIBLING_RELEASES".into(),
+                    f.dir.path().join("no-mirror").display().to_string(),
+                )]
+            },
+            "is not a readable directory",
+        ),
         (
             "a release source that is neither https nor a directory",
             |_| {
