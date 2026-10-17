@@ -12,9 +12,9 @@
 //! bytes it serves; `linked_report` builds that binary with `cargo auditable`
 //! and reads back the dependency record it embedded; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
-//! platform package through node's own resolution; `lint_llm_diff` runs the
-//! gate's own llmlint recipe over a real git repository, `llmlint_cache` runs
-//! the memo around that recipe over a real Nx workspace, `release_status` runs
+//! platform package through node's own resolution; `judged_tier` runs the
+//! gate's own llmlint recipe through the real Nx and the installed llmlint over
+//! a real git repository, `release_status` runs
 //! the release workflow's own last job over a real GitHub Release's notes,
 //! `semver_check` runs the reading the release takes of this crate's public
 //! surface, `release_probe` runs the probe a consumer waiting on a release of
@@ -42,8 +42,8 @@ mod cli;
 mod cost;
 mod ensure_baseline;
 mod ensure_sibling;
+mod judged_tier;
 mod linked_report;
-mod lint_llm_diff;
 // llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
 // image compiling the whole release binary, minutes per target, which ci.yml's
 // `wheel` legs run for real — then install and smoke-test — on every pull request
@@ -57,15 +57,6 @@ mod lint_llm_diff;
 // llmlint: ignore[expensive_tests_stay_behind_their_own_edge] nothing in this suite is expensive: it never starts Docker or compiles anything, and all of it runs in well under a second (17 journeys, 0.11s under nextest). The expensive half — the real build in the manylinux image — is already behind an edge of its own: `just wheel-linux`, run by ci.yml's `wheel` job and never by `test`.
 mod linux_wheel;
 // llmlint: ignore-end[tests_mirror_real_usage]
-// llmlint: ignore-end[e2e_not_mocked]
-// llmlint: ignore-block[e2e_not_mocked] the real `llmlint` bills a model call
-// and answers differently on each roll, so a journey that drove it could not
-// tell a replayed verdict from a lucky reroll — which is the entire subject of
-// the suite this line declares. It substitutes exactly one program at the PATH
-// boundary and nothing above it: the recipe, the Nx target, the scripts and the
-// workspace it drives are all real, and the module records that substitution and
-// its reason at the constant that makes it.
-mod llmlint_cache;
 // llmlint: ignore-end[e2e_not_mocked]
 mod nx_affected;
 mod packaging;

@@ -6,9 +6,9 @@
 # and differ only in which of those binaries' tests they select, which is declared
 # here once and named by profile from every recipe that runs a tier.
 #
-# The six filters partition the default collection: `unit` is every binary but the
+# The seven filters partition the default collection: `unit` is every binary but the
 # two the other tiers draw on, and inside `e2e` the `e2e` profile is the complement
-# of the other four. So a test added anywhere runs under exactly one tier, and one
+# of the other five. So a test added anywhere runs under exactly one tier, and one
 # added to a new module of the `e2e` binary lands in `e2e` rather than nowhere.
 # `tests/e2e/ensure_baseline.rs` holds the module lists below to each other, and to
 # the recipes that run them.
@@ -25,15 +25,15 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linked_report|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/)"
+default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_tier|ensure_baseline|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
 # The repository's own machinery: the published packages' contents, the release
-# and CI scripts, the llmlint tier and the provisioning recipes.
+# and CI scripts and the provisioning recipes.
 # `onepipeline-ui-repo-tooling:test`.
 [profile.repo-tooling]
-default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|lint_llm_diff|linux_wheel|llmlint_cache|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/))"
+default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|linux_wheel|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/))"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -53,5 +53,12 @@ final-status-level = "fail"
 # The bounds on what a read costs, counted with `strace`. `onepipeline-ui-cost:test-cost`.
 [profile.cost]
 default-filter = "binary(=e2e) and test(/^cost::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# `just lint-llm-diff` through the real Nx and the installed llmlint, which
+# `just setup-llmlint` provides. `onepipeline-ui-judged-tier:test`.
+[profile.judged-tier]
+default-filter = "binary(=e2e) and test(/^judged_tier::/)"
 status-level = "fail"
 final-status-level = "fail"

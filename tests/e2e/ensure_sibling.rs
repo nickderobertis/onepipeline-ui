@@ -66,7 +66,7 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// leave the next one to rebuild it, which is minutes of the gate spent producing
 /// a binary that was already correct the run before. `test-quick` is each tier as
 /// the cross-platform legs run it, where nothing else builds the view first.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 10] = [
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 11] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-quick",
     "onepipeline-ui-e2e:test",
@@ -76,6 +76,7 @@ const TASKS_THAT_COMPILE_THE_READ_API: [&str; 10] = [
     "onepipeline-ui-baseline:test-baseline",
     "onepipeline-ui-cost:test-cost",
     "onepipeline-ui-linked-report:test",
+    "onepipeline-ui-judged-tier:test",
     "dag-ui:build-api-server",
 ];
 
