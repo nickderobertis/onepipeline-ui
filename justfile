@@ -61,6 +61,7 @@ maturin-version := "1.14.1"
 twine-version := "6.1.0"
 packaging-version := "25.0"
 python := if os_family() == "windows" { "python" } else { "python3" }
+python-pins := "maturin==" + maturin-version + " twine==" + twine-version + " packaging==" + packaging-version
 
 # The `cargo-prune-superseded` release `pool-maintenance` runs, pinned once here:
 # `_ensure-pruner` installs exactly this and nothing else reads a version for it.
@@ -264,7 +265,7 @@ release-publish *args:
 # wheel's version.
 # Install the release jobs' Python tools.
 release-python-tools:
-    @{{python}} -m pip install --quiet --disable-pip-version-check maturin=={{maturin-version}} twine=={{twine-version}} packaging=={{packaging-version}}
+    @{{python}} -m pip install --quiet --disable-pip-version-check {{python-pins}}
 
 # The tools the release recipes reach that no lockfile pins, at the versions the
 # release workflows install, into `.tools`: release-plz and cargo-cyclonedx, and
@@ -278,9 +279,17 @@ release-tools:
     @[ "$(.tools/bin/cargo-cyclonedx cyclonedx --version 2>/dev/null | cut -d' ' -f2)" = "{{cyclonedx-version}}" ] \
       || cargo install cargo-cyclonedx --version {{cyclonedx-version}} --locked --root .tools --quiet \
       || { echo "cannot install cargo-cyclonedx {{cyclonedx-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
-    @[ "$(.tools/release-venv/bin/python -m twine --version 2>/dev/null | head -n1 | cut -d' ' -f3)" = "{{twine-version}}" ] \
-      || { python3 -m venv .tools/release-venv && just python=.tools/release-venv/bin/python release-python-tools; } \
-      || { echo "cannot install twine {{twine-version}} into .tools/release-venv — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
+    @just _release-venv
+
+# The release journeys' Python environment, rebuilt from nothing whenever any
+# pin differs from the ones its stamp records, so a changed pin never leaves an
+# old tool installed beside it.
+_release-venv:
+    @[ "$(cat .tools/release-venv/pins 2>/dev/null)" = "{{python-pins}}" ] \
+      || { rm -rf .tools/release-venv && python3 -m venv .tools/release-venv \
+           && just python=.tools/release-venv/bin/python release-python-tools \
+           && echo "{{python-pins}}" > .tools/release-venv/pins; } \
+      || { echo "cannot provision {{python-pins}} into .tools/release-venv — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
 
 # Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
 # the frontend's components, and the browser journeys — and the coverage floor

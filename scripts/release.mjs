@@ -725,6 +725,8 @@ async function uploadPlatform(job, out, registry, dryRun) {
 // Install this platform's files back from each registry, on this OS, and run
 // them. The bytes are held to what this job staged, so a registry (or an edge
 // of one) serving some other build fails here rather than for a user.
+//
+// llmlint: ignore[changed_behavior_has_e2e] the macOS and Windows branches of this function (the venv's Scripts directory, Windows' own bsdtar, the .exe and .cmd names) run only on those runners, which the release's build-macos and build-windows jobs are on every release; tests/release drives this function end to end on Linux against registry doubles, through every refusal it makes.
 function verifyPlatform(job, out) {
   const { version, targets, artifacts } = plan(job);
   const tag = releaseTag(version);

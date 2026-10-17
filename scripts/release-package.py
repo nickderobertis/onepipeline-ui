@@ -66,8 +66,8 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
                 raise StagingError("wheel binary does not have the declared Linux architecture", "choose the wheel built for this Linux target")
         else:
             # PE: the MZ stub points at the PE header, whose machine is AMD64.
-            offset = struct.unpack("<I", binary[0x3C:0x40])[0] if binary[:2] == b"MZ" else 0
-            if not offset or binary[offset:offset + 4] != b"PE\0\0" or struct.unpack("<H", binary[offset + 4:offset + 6])[0] != 0x8664:
+            offset = struct.unpack("<I", binary[0x3C:0x40])[0] if len(binary) >= 0x40 and binary[:2] == b"MZ" else 0
+            if not offset or len(binary) < offset + 6 or binary[offset:offset + 4] != b"PE\0\0" or struct.unpack("<H", binary[offset + 4:offset + 6])[0] != 0x8664:
                 raise StagingError("wheel binary does not have the declared Windows architecture", "choose the wheel built for this Windows target")
         metadata = archive.read(next(p for p in archive.namelist() if p.endswith('.dist-info/METADATA'))).decode()
         if "Name: onepipeline-api-cli\n" not in metadata:

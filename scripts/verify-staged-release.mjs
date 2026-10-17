@@ -151,13 +151,8 @@ async function main() {
       "assets",
       `onepipeline-api-v${version}-${target}.${facts.archive}`,
     );
-    const dl = join(scratch, "archive");
-    mkdirSync(dl);
-    // Windows' own tar is bsdtar, which reads the .zip; Git's GNU tar does not.
-    const tar = WINDOWS
-      ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
-      : "tar";
-    run(tar, ["-xf", archive, "-C", dl]);
+    // The checksum first: nothing is extracted from an archive it does not
+    // describe.
     const recorded = readFileSync(
       join(root, "assets", `onepipeline-api-v${version}-${target}.sha256`),
       "utf8",
@@ -171,6 +166,13 @@ async function main() {
         "the staged checksum does not describe the staged archive",
         "regenerate both from one release-package.py run",
       );
+    const dl = join(scratch, "archive");
+    mkdirSync(dl);
+    // Windows' own tar is bsdtar, which reads the .zip; Git's GNU tar does not.
+    const tar = WINDOWS
+      ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
+      : "tar";
+    run(tar, ["-xf", archive, "-C", dl]);
     await smoke(join(dl, exe));
     const wheelArch = { linux: "x86_64", macos: "arm64", windows: "amd64" }[
       facts.platform
