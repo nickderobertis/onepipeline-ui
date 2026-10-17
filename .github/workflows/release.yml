@@ -34,6 +34,9 @@ name: Release
 # finishes the release, because every upload asks the registry first and
 # publishes only what it does not already serve.
 #
+# No job restores a Rust cache: a cache saved under one release tag is one no
+# later tag's run may read, so saving it would only cost each job its upload.
+#
 # There is no test re-run here. The tree a Release names is the one ci.yml's
 # `sweep` already ran the whole gate over on the release pull request; what this
 # workflow proves is the artifacts, by installing and running each one before it
@@ -112,18 +115,20 @@ jobs:
         run: just release-linux build
       - name: Install and run those exact files before anything publishes
         run: just release-linux test-install
-      - name: Publish the archives and checksums to the Release
-        run: just release-linux upload github
-      - name: Publish the wheels to PyPI
-        if: vars.PYPI_PUBLISH == 'true'
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: just release-linux upload pypi
+      # npm first in each build job: its registry is the slowest to serve a
+      # new version, so the other uploads run while it propagates.
       - name: Publish the npm platform packages
         if: vars.NPM_PUBLISH == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: just release-linux upload npm
+      - name: Publish the wheels to PyPI
+        if: vars.PYPI_PUBLISH == 'true'
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: just release-linux upload pypi
+      - name: Publish the archives and checksums to the Release
+        run: just release-linux upload github
       - name: Install the version from every registry on Linux and run it
         run: just release-linux verify
 
@@ -136,7 +141,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -159,18 +163,18 @@ jobs:
         run: just release-macos build
       - name: Install and run those exact files before anything publishes
         run: just release-macos test-install
-      - name: Publish the archives and checksums to the Release
-        run: just release-macos upload github
-      - name: Publish the wheels to PyPI
-        if: vars.PYPI_PUBLISH == 'true'
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: just release-macos upload pypi
       - name: Publish the npm platform packages
         if: vars.NPM_PUBLISH == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: just release-macos upload npm
+      - name: Publish the wheels to PyPI
+        if: vars.PYPI_PUBLISH == 'true'
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: just release-macos upload pypi
+      - name: Publish the archives and checksums to the Release
+        run: just release-macos upload github
       - name: Install the version from every registry on macOS and run it
         run: just release-macos verify
 
@@ -186,7 +190,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -208,18 +211,18 @@ jobs:
         run: just release-windows build
       - name: Install and run those exact files before anything publishes
         run: just release-windows test-install
-      - name: Publish the archives and checksums to the Release
-        run: just release-windows upload github
-      - name: Publish the wheels to PyPI
-        if: vars.PYPI_PUBLISH == 'true'
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: just release-windows upload pypi
       - name: Publish the npm platform packages
         if: vars.NPM_PUBLISH == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: just release-windows upload npm
+      - name: Publish the wheels to PyPI
+        if: vars.PYPI_PUBLISH == 'true'
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: just release-windows upload pypi
+      - name: Publish the archives and checksums to the Release
+        run: just release-windows upload github
       - name: Install the version from every registry on Windows and run it
         run: just release-windows verify
 
@@ -247,7 +250,6 @@ jobs:
         build-windows=${{ needs.build-windows.result }}
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
