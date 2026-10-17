@@ -159,13 +159,10 @@ advisory database, and the gate stays offline and deterministic.
 CI owns verification. Existing `core.hooksPath` settings are left alone so unrelated
 hooks remain active. `just gate` remains a deliberate manual check.
 
-**The judged tier is llmlint under Nx's own cache.** `just lint-llm-diff <base>`
-resolves the base to a commit and runs `onepipeline-ui:lint-llm-diff`, whose
-command is `llmlint --diff` and whose inputs are the tracked tree, that commit and
-`llmlint fingerprint`: a pass is replayed only for the same tree, base and judge,
-and a failure is never cached. Trailing arguments are Nx's (`--skip-nx-cache`
-re-judges), and the recipe runs Nx with `NX_RUN_COMMANDS_DIRECTLY=false` until Nx
-stops losing a fast-failing task's output.
+**The judged tier is plain llmlint under Nx's cache, with no wrapper of ours.**
+A pass is replayed only for the tree, base commit and judge digest that produced
+it and a failure is always re-judged; a gap in that belongs in llmlint, Nx or the
+recipe's run configuration, never in a script here.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx
 fans one uniformly-named target across all of them.
