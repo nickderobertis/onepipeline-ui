@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 //   npm/<package>/<version>.tgz  every npm package published, with .json beside it
 //   crates/<name>-<vers>.crate   every crate published, with .json beside it
 //   uploads.log                  one line per accepted upload: registry and file
+//   served.log                   one line per file downloaded: registry and file
 //   control/fail/<file>          every upload of <file> answers 500 until the
 //                                marker is removed — persistent, because the
 //                                clients retry a 500 themselves
@@ -91,6 +92,8 @@ const served = (key, bytes) =>
   corrupted(key) ? Buffer.from(`not ${key}\n`) : bytes;
 const accepted = (registry, file) =>
   appendFileSync(join(state, "uploads.log"), `${registry} ${file}\n`);
+const downloaded = (registry, file) =>
+  appendFileSync(join(state, "served.log"), `${registry} ${file}\n`);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 // Every name a client hands over becomes a path under STATE_DIR, so each is
 // held to what a registry would accept before it is used as one.
@@ -202,13 +205,15 @@ async function pypi(request, response, path) {
     );
   }
   match = path.match(/^\/files\/([^/]+)$/);
-  if (match && wheels().includes(match[1]))
+  if (match && wheels().includes(match[1])) {
+    downloaded("pypi", match[1]);
     return reply(
       response,
       200,
       served(match[1], readFileSync(join(state, "pypi", match[1]))),
       "application/octet-stream",
     );
+  }
   return reply(response, 404, { message: "Not Found" });
 }
 
@@ -249,6 +254,7 @@ async function npm(request, response, path) {
     const file = join(state, "npm", pkg, `${version}.tgz`);
     if (!existsSync(file) || hidden(`${pkg}@${version}`))
       return reply(response, 404, { error: "Not found" });
+    downloaded("npm", `${pkg}-${version}.tgz`);
     return reply(
       response,
       200,

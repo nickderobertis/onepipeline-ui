@@ -131,7 +131,9 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
     assert.equal(rehearsal.status, 0, rehearsal.output);
     for (const target of linuxPlan.targets)
       assert.equal(
-        rehearsal.output.split(`built the ${target} wheel`).length - 1,
+        readFileSync(join(OUT, `build-${target}.log`), "utf8").split(
+          `built the ${target} wheel`,
+        ).length - 1,
         1,
         `${target} was compiled once`,
       );
@@ -160,25 +162,24 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
   });
 
   test("installs those exact files, runs each, and only then names what it would publish", () => {
-    const installed = rehearsal.stdout.indexOf(
-      "staged archive/wheel/npm install, server and embedded view passed",
-    );
-    assert.ok(installed > 0, rehearsal.output);
-    // One line reports the dry run, naming every publish command it skipped.
+    // One line reports the rehearsal: what it installed and ran, and every
+    // publish command it skipped. That the install comes first, and stops the
+    // rest when it fails, is the journey below.
     const summary = rehearsal.stdout
       .split("\n")
       .find((line) =>
-        line.includes(
-          "dry run — registry verification skipped, nothing was published",
-        ),
+        line.startsWith("release linux: built, installed and ran"),
       );
     assert.ok(summary, rehearsal.stdout);
+    assert.match(
+      summary,
+      /dry run — registry verification skipped, nothing was published/,
+    );
     for (const artifact of linuxPlan.artifacts)
       assert.ok(
         summary.includes(staged(artifact)),
         `${artifact.file} would be published: ${summary}`,
       );
-    assert.ok(rehearsal.stdout.indexOf(summary) > installed);
     assert.deepEqual(
       gh.calls(),
       [],
@@ -408,18 +409,25 @@ describe("publication against registry doubles", () => {
   });
 
   test("build-linux's verification installs the version from every registry and runs it", () => {
+    const served = registries.served().length;
+    const downloads = gh.calls().length;
     const run = linux("verify");
     assert.equal(run.status, 0, run.output);
-    assert.match(
-      run.stdout,
-      /x86_64-unknown-linux-gnu installed from every switched-on registry and ran/,
+    assert.equal(
+      run.stdout.trim(),
+      "release linux: x86_64-unknown-linux-gnu installed from every switched-on registry and ran",
     );
-    for (const label of [
-      `GitHub Release ${TAG}`,
-      `PyPI onepipeline-api-cli ${VERSION}`,
-      `npm ${fileOf("npm").package} ${VERSION}`,
-    ])
-      assert.match(run.output, new RegExp(label.replace(/[.]/g, "\\.")));
+    // What it installed came from each registry double.
+    assert.deepEqual(registries.served().slice(served).sort(), [
+      `npm ${fileOf("npm").file}`,
+      `pypi ${fileOf("wheel").file}`,
+    ]);
+    assert.ok(
+      gh
+        .calls()
+        .slice(downloads)
+        .some((c) => c[1] === "download" && c.includes(fileOf("archive").file)),
+    );
   });
 
   test("a registry that is switched off is neither verified nor required", () => {
@@ -428,6 +436,7 @@ describe("publication against registry doubles", () => {
       fileOf("wheel").file,
       `${fileOf("npm").package}@${VERSION}`,
     ]);
+    const served = registries.served().length;
     try {
       const run = recipe("linux", ["verify", "--out", OUT], {
         ...env,
@@ -435,11 +444,11 @@ describe("publication against registry doubles", () => {
         NPM_PUBLISH: "false",
       });
       assert.equal(run.status, 0, run.output);
-      assert.doesNotMatch(
-        run.output,
-        /PyPI onepipeline-api-cli|npm onepipeline/,
+      assert.equal(
+        registries.served().length,
+        served,
+        "nothing was installed from PyPI or npm",
       );
-      assert.match(run.output, new RegExp(`GitHub Release ${TAG}`));
     } finally {
       registries.clear();
     }
@@ -927,12 +936,20 @@ describe("publication against registry doubles", () => {
       assert.equal(publish(["upload", registry], extra).status, 0);
     assert.equal(registries.uploads().length, count);
 
+    const launcherServed = registries.served().length;
     const verify = publish(["verify"], extra);
     assert.equal(verify.status, 0, verify.output);
+    // The launcher it installed came from the npm double, and pulled this
+    // platform's package in beside it.
+    assert.deepEqual(registries.served().slice(launcherServed).sort(), [
+      `npm onepipeline-api-cli-${VERSION}.tgz`,
+      `npm ${fileOf("npm").file}`,
+    ]);
     // With every registry switched off, publish asks none of them for the
     // release: the crate and the frontend lost, it still verifies, by the
     // SBOM on the Release and what the probe answers.
     registries.hide([`onepipeline-ui@${VERSION}`]);
+    const offServed = registries.served().length;
     try {
       const off = publish(["verify"], {
         ...extra,
@@ -941,7 +958,11 @@ describe("publication against registry doubles", () => {
         CARGO_REGISTRY_TOKEN: "",
       });
       assert.equal(off.status, 0, off.output);
-      assert.doesNotMatch(off.output, /npm onepipeline-api-cli \d/);
+      assert.equal(
+        registries.served().length,
+        offServed,
+        "nothing was installed from npm",
+      );
     } finally {
       registries.clear();
     }
@@ -960,10 +981,6 @@ describe("publication against registry doubles", () => {
     } finally {
       renameSync(join(dir, "sbom-aside"), sbomAsset);
     }
-    assert.match(
-      verify.output,
-      new RegExp(`npm onepipeline-api-cli ${VERSION.replace(/\./g, "\\.")}`),
-    );
     assert.match(
       verify.stdout,
       new RegExp(`npm:onepipeline-api-cli -> ${VERSION.replace(/\./g, "\\.")}`),

@@ -1,5 +1,5 @@
 {
-  "//": "What release v0.37.0 published, read from the registries on 2026-10-17: the GitHub Release's asset names (gh release view v0.37.0 --json assets), PyPI's files for onepipeline-api-cli 0.37.0 (https://pypi.org/pypi/onepipeline-api-cli/0.37.0/json), npm's tarball for each package (npm view <package>@0.37.0 dist.tarball), the crate on crates.io, and the newest GLIBC_ symbol version each x86_64 Linux artifact's binary needs (objdump -T). .github/tests/release.test.mjs holds every release job's plan to it, and tests/release/linux.test.mjs holds what build-linux builds to it.",
+  "//": "What release v0.37.0 published, read from the registries on 2026-10-17: the GitHub Release's asset names (gh release view v0.37.0 --json assets), PyPI's files for onepipeline-api-cli 0.37.0 (https://pypi.org/pypi/onepipeline-api-cli/0.37.0/json), npm's tarball for each package (npm view <package>@0.37.0 dist.tarball), the crate on crates.io, and the newest GLIBC_ symbol version each x86_64 Linux artifact's binary needs (objdump -T). .github/tests/release.test.mjs holds every release job's plan to it, and tests/release/journeys.test.mjs holds what build-linux builds to it.",
   "version": "0.37.0",
   "github": [
     "onepipeline-api-v0.37.0-aarch64-apple-darwin.sha256",

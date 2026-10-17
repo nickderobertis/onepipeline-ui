@@ -232,13 +232,9 @@ build:
 wheel-linux target out="dist":
     @bash scripts/build-linux-wheel.sh --target "$1" --out "$2"
 
-# One recipe per release job in `.github/workflows/release.yml`, each a phase
-# of scripts/release.mjs, whose header says what every phase does: `plan` lists
-# what the job produces without building it; a platform job runs `build`,
-# `test-install`, `upload github|pypi|npm` and `verify`, and `all --dry-run`
-# rehearses the lot without publishing; `publish` runs `check`, `build`,
-# `upload crate|npm|github`, `verify` and `settle`. `build` needs `just build`
-# first; the Linux one needs Docker, the macOS and Windows ones maturin.
+# One recipe per release job in `.github/workflows/release.yml`; the phases
+# each takes are in scripts/release.mjs's header. `build` needs `just build`
+# first, and the Linux one Docker, the macOS and Windows ones maturin.
 # The build-linux release job: build, install, publish and verify Linux.
 [positional-arguments]
 release-linux *args:

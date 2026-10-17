@@ -105,6 +105,12 @@ export async function registryDoubles(dir) {
         : [],
     failUploads: (file) =>
       writeFileSync(join(state, "control", "fail", file), ""),
+    served: () =>
+      existsSync(join(state, "served.log"))
+        ? readFileSync(join(state, "served.log"), "utf8")
+            .split("\n")
+            .filter(Boolean)
+        : [],
     hide: (entries) => control("hide", entries),
     corrupt: (entries) => control("corrupt", entries),
     breakReads: (entries) => control("broken", entries),

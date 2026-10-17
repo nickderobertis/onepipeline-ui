@@ -185,9 +185,11 @@ async function main() {
         `missing staged wheel for ${target}`,
         "run release-package.py for this target and check its wheel platform tag",
       );
+    // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (the venv's Scripts directory and `python`, npm's .cmd shim) runs only on a Windows runner, which the release's build-windows job installs these files on before every publication; the Linux branch beside it is driven end to end by tests/release/journeys.test.mjs.
     const venv = join(scratch, "venv");
     const bin = join(venv, WINDOWS ? "Scripts" : "bin");
     run(WINDOWS ? "python" : "python3", ["-m", "venv", venv]);
+    // llmlint: ignore-end[changed_behavior_has_e2e]
     run(join(bin, "pip"), [
       "install",
       "--disable-pip-version-check",
@@ -355,6 +357,7 @@ async function main() {
         "npm installed different binary bytes",
         "inspect the platform package and launcher resolution; regenerate npm from the final wheel binary",
       );
+    // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (the venv's Scripts directory and `python`, npm's .cmd shim) runs only on a Windows runner, which the release's build-windows job installs these files on before every publication; the Linux branch beside it is driven end to end by tests/release/journeys.test.mjs.
     await smoke(
       join(
         npmRoot,
@@ -363,6 +366,7 @@ async function main() {
         WINDOWS ? "onepipeline-api.cmd" : "onepipeline-api",
       ),
     );
+    // llmlint: ignore-end[changed_behavior_has_e2e]
     console.log(
       `${target}: staged archive/wheel/npm install, server and embedded view passed`,
     );

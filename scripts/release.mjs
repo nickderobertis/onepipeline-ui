@@ -21,9 +21,9 @@
 //                 does not already serve, so a re-run finishes a partial upload.
 //   verify        install the version back from every registry this release
 //                 publishes to, on this OS, and run it.
-//   all           build, test-install, every switched-on upload, verify — the
-//                 rehearsal, normally with --dry-run, which prints each publish
-//                 command instead of running it and skips verify.
+//   all --dry-run the rehearsal: build, test-install, then every switched-on
+//                 upload reported rather than run. Only with --dry-run: a
+//                 release runs each phase as its own workflow step.
 //
 // The publish job, which `needs` all three:
 //
@@ -264,10 +264,14 @@ function stagedPath(out, artifact) {
   return join(out, dir, artifact.file);
 }
 
+// Every tool's output is captured, and shown only when it fails: a phase's own
+// summary is its success output. `inherit` lets one through as it runs, and
+// `log` keeps it in a file whatever happened.
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: REPO_ROOT,
-    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: options.inherit ? "inherit" : ["ignore", "pipe", "pipe"],
+    maxBuffer: 1024 * 1024 * 1024,
     encoding: "utf8",
     shell: WINDOWS && ["npm", "npx"].includes(command),
     ...options,
@@ -283,8 +287,10 @@ function run(command, args, options = {}) {
 
 function must(what, action, command, args, options) {
   const result = run(command, args, options);
+  if (options?.log)
+    writeFileSync(options.log, `${result.stdout ?? ""}${result.stderr ?? ""}`);
   if (result.status !== 0) {
-    if (options?.capture)
+    if (!options?.inherit)
       process.stderr.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
     throw new Fault(
       `${what} failed (${command} exited ${result.status})`,
@@ -548,6 +554,7 @@ function buildPlatform(job, out) {
         `fix the build error above; 'just wheel-linux ${target}' reproduces it`,
         "just",
         ["wheel-linux", target, inside],
+        { log: join(out, `build-${target}.log`) },
       );
     } else {
       must(
@@ -565,7 +572,10 @@ function buildPlatform(job, out) {
           "--features",
           "bundled-ui",
         ],
-        { env: { RUSTFLAGS: "-D warnings" } },
+        {
+          env: { RUSTFLAGS: "-D warnings" },
+          log: join(out, `build-${target}.log`),
+        },
       );
     }
     const built = readdirSync(wheels).filter((name) => name.endsWith(".whl"));
@@ -621,6 +631,9 @@ function testInstall(job, out) {
       "node",
       ["scripts/verify-staged-release.mjs", out, target, version],
     );
+  say(
+    `release ${job}: installed the staged archive, wheel and npm package of ${targets.join(", ")} and ran each, server and embedded view included`,
+  );
 }
 
 // What a dry run would have published with, reported once by the phase.
@@ -1012,7 +1025,10 @@ async function uploadPublish(out, registry, dryRun) {
         "fix the error above and re-run this job; a version already live is skipped",
         "cargo",
         ["publish", "--locked", ...flags],
-        { env: { RUSTFLAGS: "-D warnings" } },
+        {
+          env: { RUSTFLAGS: "-D warnings" },
+          log: join(out, `build-${target}.log`),
+        },
       );
       published.push(files[0].file);
     }
@@ -1202,6 +1218,7 @@ function settle() {
   const version = cargoVersion();
   const results = { ...pairs("BUILD_RESULTS"), ...pairs("STEP_RESULTS") };
   const status = run("bash", ["scripts/release-status.sh"], {
+    inherit: true,
     env: {
       RELEASE_TAG: releaseTag(version),
       JOB_RESULTS:
@@ -1241,8 +1258,11 @@ function stagingDirectory(path) {
     rest.unshift(basename(existing));
     existing = dirname(existing);
   }
+  const realTarget = realpathSync(target);
+  const own = relative(realpathSync(REPO_ROOT), realTarget);
+  if (own !== "target") throw refuse();
   const real = join(realpathSync(existing), ...rest);
-  const inside = relative(realpathSync(target), real);
+  const inside = relative(realTarget, real);
   if (!inside || inside.startsWith("..") || isAbsolute(inside)) throw refuse();
   if (existsSync(out) && lstatSync(out).isSymbolicLink()) throw refuse();
   return out;
@@ -1309,6 +1329,11 @@ async function main(argv) {
     case "platform:verify":
       return verifyPlatform(job, out);
     case "platform:all": {
+      if (!dryRun)
+        throw usage(
+          "all is the rehearsal, and needs --dry-run",
+          "pass --dry-run; a release runs each phase as its own workflow step",
+        );
       quiet = true;
       buildPlatform(job, out);
       testInstall(job, out);
@@ -1317,12 +1342,9 @@ async function main(argv) {
       if (switchedOn("NPM_PUBLISH")) registries.push("npm");
       for (const registry of registries)
         await uploadPlatform(job, out, registry, dryRun);
-      if (!dryRun) verifyPlatform(job, out);
       quiet = false;
       say(
-        dryRun
-          ? `release ${job}: built, installed and ran ${plan(job).targets.join(", ")}; dry run — registry verification skipped, nothing was published; it would run: ${wouldRun.join("; ")}`
-          : `release ${job}: built, installed, published to ${registries.join(", ")} and verified ${plan(job).targets.join(", ")}`,
+        `release ${job}: built, installed and ran ${plan(job).targets.join(", ")}; dry run — registry verification skipped, nothing was published; it would run: ${wouldRun.join("; ")}`,
       );
       return;
     }
