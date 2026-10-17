@@ -188,9 +188,11 @@ fn tasks_of<'a>(tasks: &'a BTreeSet<String>, project: &str) -> Vec<&'a String> {
 /// select at all on its platform.
 fn expectations(job: &str) -> (Vec<&'static str>, Vec<&'static str>) {
     match job {
+        // `dag-ui:build` is selected as the view the crate's lints embed; the
+        // package's own build is not lint's.
         "lint" => (
             vec!["format-check", "lint", "typecheck"],
-            vec![":test", ":check", ":build"],
+            vec![":test", ":check", "timeline-categories:build"],
         ),
         // Formatting, lints and type checks are `lint`'s, over the same set.
         "test-linux" => (
