@@ -35,9 +35,7 @@ use tempfile::TempDir;
 /// What the tier reads out of a checkout, copied verbatim. `llmlint.yml` is
 /// read too, and derived below rather than copied whole.
 const COPIED: &[&str] = &[
-    // The recipe under test.
     "justfile",
-    // The cached target: its inputs, and the project that owns it.
     "nx.json",
     "project.json",
     // The Nx this workspace pins, which the borrowed install must match.
@@ -46,9 +44,7 @@ const COPIED: &[&str] = &[
     // Without it `.nx/cache` would be part of the tree Nx hashes, and nothing
     // would ever replay.
     ".gitignore",
-    // The harness configuration llmlint judges with.
     "oneharness.toml",
-    // The repository's Nx launcher, and the install check it runs first.
     "scripts/nx.sh",
     "scripts/workspace-install.sh",
 ];
@@ -70,6 +66,12 @@ const RULES: &str = "rules:
 /// every rule holding (the default), `fail` for one violation on `CHANGED.md`,
 /// `none` for a reply answering no rule, `some` for one answering the first rule
 /// alone.
+// llmlint: ignore-block[e2e_not_mocked] the paid model call is the one thing these
+// journeys cannot make: it bills per roll and answers differently each time, so a
+// replay could not be told from a lucky reroll, which is what they assert. This is
+// the narrowest cut available: llmlint reaches the harness through
+// `LLMLINT_ONEHARNESS_BIN`, `--version` and `config` still go to the real
+// oneharness, and the recipe, Nx and the installed llmlint are all real.
 const STANDIN_ONEHARNESS: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 case "${1:-}" in
@@ -100,6 +102,7 @@ jq -c --arg verdict "${STANDIN_VERDICT:-pass}" '
      results: [{harness: "codex", status: "ok", exit_code: 0, structured: $structured,
                 schema_valid: true, schema_attempts: 1, schema_error: null, error: null}]}' "$schema"
 "#;
+// llmlint: ignore-end[e2e_not_mocked]
 
 /// Nx's own words for a replay; one of them is printed on every cache hit.
 const NX_REPLAYED: [&str; 2] = [
@@ -193,7 +196,6 @@ impl Fixture {
         Self::with_config("")
     }
 
-    /// The same, with `extra` appended to the scratch `llmlint.yml`.
     fn with_config(extra: &str) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let workspace = dir.path().join("workspace");
@@ -347,7 +349,6 @@ impl Fixture {
         calls
     }
 
-    /// Commit `contents` at `name` in the workspace.
     fn commit(&self, name: &str, contents: &str) {
         fs::write(self.workspace().join(name), contents).expect("write the change");
         git(&self.workspace(), &["add", "-A"]);

@@ -42,14 +42,7 @@ mod cli;
 mod cost;
 mod ensure_baseline;
 mod ensure_sibling;
-// llmlint: ignore-block[e2e_not_mocked] the paid model call is the one thing
-// these journeys cannot make: it bills per roll and answers differently each
-// time, so a replay could not be told from a lucky reroll. llmlint reaches it
-// through `LLMLINT_ONEHARNESS_BIN`, and the stand-in named there forwards
-// `--version` and `config` to the real oneharness; the recipe, Nx and the
-// installed llmlint are all real. The module header states the substitution.
 mod judged_tier;
-// llmlint: ignore-end[e2e_not_mocked]
 mod linked_report;
 // llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
 // image compiling the whole release binary, minutes per target, which ci.yml's
