@@ -70,6 +70,7 @@ esac
 #   test-windows  the platform-sensitive tiers (`check-cross`), the release's
 #                 browser build, and the documented install.
 #   test-macos    the platform-sensitive tiers and the documented install.
+exclude=()
 case "$job" in
   lint) targets="format-check,lint,typecheck,msrv,deps-check" ;;
   test-linux)
@@ -77,7 +78,14 @@ case "$job" in
       # `just check`'s tiers and its aggregate, then `just budgets`: the sweep.
       targets="format-check,lint,typecheck,build,test,test-baseline,test-cost,doc,check,budgets,budgets-host,install-smoke,wheel-smoke"
     else
-      targets="check,install-smoke,wheel-smoke"
+      # `check`'s own tiers, less the formatting, lint and type-check targets
+      # `lint` runs over the same affected set, so this job does not compile the
+      # crate a second time to lint it. Listed rather than reached through
+      # `check`, which would pull them back in; `tests/e2e/ci_jobs.rs` holds the
+      # list to `check`'s selection. `dag-ui-build-cache` declares a `check` that
+      # runs neither of its targets, which the exclusion below keeps.
+      targets="build,test,test-baseline,test-cost,test-isolation,doc,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke"
+      exclude=(--exclude=dag-ui-build-cache)
     fi
     ;;
   test-windows) targets="format-check,lint,test-quick,build,install-smoke" ;;
@@ -93,7 +101,7 @@ nx_run() {
   if [ "$tier" = "broader" ]; then
     bash scripts/nx.sh run-many -t "$targets" "$@"
   else
-    bash scripts/nx-affected.sh -t "$targets" "$@"
+    bash scripts/nx-affected.sh -t "$targets" ${exclude[@]+"${exclude[@]}"} "$@"
   fi
 }
 graph="$(nx_run --graph=stdout)" || {
@@ -132,11 +140,12 @@ count=0
 echo "ci-job: $job runs $count task(s): ${tasks:-none}"
 [ -z "$plan" ] || exit 0
 
-# Four at once: a hosted runner has four cores, and the packaging targets spend
-# most of their time on release-profile compiles that would otherwise queue
-# behind the tiers rather than run beside them.
+# Six at once on a hosted runner's four cores: the packaging targets are the
+# job's longest tasks and have no dependency to wait on, and at four slots the
+# hosted run (491f7d4) started them only once the tiers had drained, so the job
+# ended on their tail. Oversubscribing lets them start with the tiers.
 if [ "$count" -gt 0 ]; then
-  nx_run --parallel=4 --outputStyle=static || exit $?
+  nx_run --parallel=6 --outputStyle=static || exit $?
 fi
 
 # A committed lockfile the bootstrap or the gate had to change is a stale

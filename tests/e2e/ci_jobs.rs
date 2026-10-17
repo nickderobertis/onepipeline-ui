@@ -192,7 +192,11 @@ fn expectations(job: &str) -> (Vec<&'static str>, Vec<&'static str>) {
             vec!["format-check", "lint", "typecheck"],
             vec![":test", ":check", ":build"],
         ),
-        "test-linux" => (vec!["check", "test", "build"], vec![]),
+        // Formatting, lints and type checks are `lint`'s, over the same set.
+        "test-linux" => (
+            vec!["test", "build"],
+            vec![":format-check", ":lint", ":typecheck"],
+        ),
         "test-windows" => (
             vec!["format-check", "lint"],
             vec![
@@ -260,6 +264,48 @@ fn each_job_selects_the_changed_project_and_its_dependents_and_no_unreached_pack
     }
 }
 
+/// `test-linux` lists its targets rather than reaching them through `check`,
+/// so that it leaves formatting, lints and type checks to `lint`; this holds
+/// the list to `check`'s own selection, so a target a project's `check` gains
+/// is not silently dropped from the job.
+#[test]
+fn the_linux_job_runs_what_check_selects_less_what_lint_runs() {
+    let workspace = workspace(Some("src/lib.rs"));
+    let linux = recipe(&workspace, "ci-test-linux", &["--plan"], false);
+    assert!(linux.output.status.success(), "{}", linux.log);
+    let output = Command::new("bash")
+        .args(["scripts/nx-affected.sh", "-t", "check", "--graph=stdout"])
+        .current_dir(workspace.root())
+        .env_remove("GITHUB_BASE_REF")
+        .env("CI", "true")
+        .env(BASE_SHA, &workspace.base)
+        .env("NX_DAEMON", "false")
+        .output()
+        .expect("bash is on PATH");
+    assert!(output.status.success(), "{}", plain(&output.stderr));
+    let text = plain(&output.stdout);
+    let graph: serde_json::Value =
+        serde_json::from_str(&text[text.find('{').expect("a graph")..]).expect("a JSON graph");
+    let lint_owned = [":format-check", ":lint", ":typecheck", ":check"];
+    let owed: BTreeSet<String> = graph["tasks"]["tasks"]
+        .as_object()
+        .expect("a task map")
+        .keys()
+        .filter(|task| !lint_owned.iter().any(|suffix| task.ends_with(suffix)))
+        .cloned()
+        .collect();
+    let packaging = ["onepipeline-ui:install-smoke", "onepipeline-ui:wheel-smoke"];
+    let selected: BTreeSet<String> = linux
+        .selected("test-linux")
+        .into_iter()
+        .filter(|task| !packaging.contains(&task.as_str()))
+        .collect();
+    assert_eq!(
+        selected, owed,
+        "test-linux's targets and `check`'s selection less lint's have parted"
+    );
+}
+
 #[test]
 fn the_jobs_platform_split_is_what_each_selects_for_a_crate_change() {
     let workspace = workspace(Some("src/lib.rs"));
@@ -274,7 +320,6 @@ fn the_jobs_platform_split_is_what_each_selects_for_a_crate_change() {
     };
     let linux = plan("test-linux");
     for task in [
-        "onepipeline-ui:check",
         "onepipeline-ui:test",
         "onepipeline-ui:install-smoke",
         "onepipeline-ui:wheel-smoke",
@@ -342,6 +387,17 @@ fn a_change_to_nothing_runs_no_task_and_passes() {
     }
 }
 
+/// A TypeScript task each job selects for the run journey's change, which runs
+/// for real while the crate's toolchain refuses: `test-linux` builds the view,
+/// the other three lint it.
+fn real_task(job: &str) -> &'static str {
+    if job == "test-linux" {
+        "dag-ui:build"
+    } else {
+        "dag-ui:lint"
+    }
+}
+
 /// Every recipe runs what it selected, nothing of an unreached project, and
 /// exits non-zero when a selected target fails — here every crate target, whose
 /// toolchain refuses, while the TypeScript targets run for real.
@@ -367,8 +423,9 @@ fn a_job_runs_what_it_selects_and_a_failing_target_fails_it() {
             "ci-{job} ran a task it did not select: ran {ran:?}, selected {selected:?}"
         );
         assert!(
-            ran.contains("dag-ui:lint"),
-            "ci-{job} did not run dag-ui:lint:\n{}",
+            ran.contains(real_task(job)),
+            "ci-{job} did not run {}:\n{}",
+            real_task(job),
             run.log
         );
         for project in RUN_UNREACHED {

@@ -191,15 +191,17 @@ ci-test-macos *args:
 # is. Warnings denied for the reason release.yml denies them, which is also what
 # lets it share `target/release`'s dependencies with `release-staging` on Linux.
 # The bin directory is resolved by `cd`, so a root cargo did not write is named
-# rather than read as a command missing from PATH.
+# rather than read as a command missing from PATH, and the binary is handed to
+# the smoke test by its path: the Windows leg's PATH lookup did not find it there.
 # Install this revision the documented way and smoke-test the installed binary.
 _crate-install-smoke:
     @RUSTFLAGS="-D warnings" cargo install --path . --locked --quiet --root target/install-smoke
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
-      PATH="$bin:$PATH" bash scripts/smoke-published.sh \
+      PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
-      --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
+      --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}" \
+      || { echo "installed into $bin: $(ls -la "$bin" 2>&1)" >&2; exit 1; }
 
 # The release's x86_64 Linux wheel, built by the one definition release.yml's
 # `build-wheels` leg runs (`wheel-linux`), then installed into a fresh virtualenv

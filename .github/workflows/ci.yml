@@ -199,10 +199,11 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !cancelled()
         uses: nickderobertis/notignored@v0
 
-  # The deterministic gate on Linux: `check` over the affected projects (every
-  # tier, the Playwright browser tier, the coverage floor, docs), the documented
-  # install and the release's x86_64 wheel, in one Nx run so the packaging
-  # compiles beside the tiers. On the release pull request (`scripts/ci-tier.sh`)
+  # The deterministic gate on Linux: `check`'s tiers over the affected projects
+  # (every test tier, the Playwright browser tier, the coverage floor, docs —
+  # formatting, lints and type checks are `lint`'s), the documented install and
+  # the release's x86_64 wheel, in one Nx run so the packaging compiles beside
+  # the tiers. On the release pull request (`scripts/ci-tier.sh`)
   # it is the sweep: every project, with the host-labelled budgets.
   test-linux:
     runs-on: ubuntu-latest
