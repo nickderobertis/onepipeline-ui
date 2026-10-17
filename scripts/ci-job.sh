@@ -123,9 +123,9 @@ echo "ci-job: $job runs $count task(s): ${tasks:-none}"
 [ -z "$plan" ] || exit 0
 
 # Six at once on a hosted runner's four cores: the packaging targets are the
-# job's longest tasks and have no dependency to wait on, and at four slots the
-# hosted run (491f7d4) started them only once the tiers had drained, so the job
-# ended on their tail. Oversubscribing lets them start with the tiers.
+# job's longest tasks and have no dependency to wait on, so at four slots they
+# start only once the tiers have drained and the job ends on their tail.
+# Oversubscribing lets them start with the tiers.
 if [ "$count" -gt 0 ]; then
   nx_run --parallel=6 --outputStyle=static || exit $?
 fi

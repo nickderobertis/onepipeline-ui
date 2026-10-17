@@ -568,10 +568,10 @@ fn a_graph_without_a_task_map_is_refused_not_read_as_an_empty_selection() {
             Some(1),
             "{document:?} was read as a selection"
         );
+        let stderr = plain(&output.stderr);
         assert!(
-            plain(&output.stderr).contains(says),
-            "{document:?}: {}",
-            plain(&output.stderr)
+            stderr.contains(says) && stderr.contains("ACTION:"),
+            "{document:?} was refused without saying what to do: {stderr}"
         );
     }
     let output = decode("warming up\n{\"tasks\": {\"tasks\": {\"b:test\": {}, \"a:lint\": {}}}}");
