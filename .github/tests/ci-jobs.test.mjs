@@ -176,25 +176,25 @@ export function requiredContextProblems(workflows) {
 
 // What each restored cache was produced from, which its key must name: the
 // runner's OS and architecture always, every pinned file listed, and the value
-// read off the lockfile (or the commit) by the step that reads it there.
-const CACHES = {
-  ".tools/bin/onepipeline": {
-    files: ["rust-toolchain.toml", "scripts/ensure-sibling.sh"],
-    output: {
-      step: "pins",
-      name: "onepipeline",
-      reads: /just --evaluate onepipeline-version/,
-    },
+// read off the lockfile (or the commit) by the step that reads it there. A
+// cache's paths must be exactly one declared set — the baseline server travels
+// with the stamp naming its commit — so nothing rides along undeclared.
+const SIBLING = {
+  files: ["rust-toolchain.toml", "scripts/ensure-sibling.sh"],
+  output: {
+    step: "pins",
+    name: "onepipeline",
+    reads: /just --evaluate onepipeline-version/,
   },
-  ".tools/bin/onepipeline.exe": {
-    files: ["rust-toolchain.toml", "scripts/ensure-sibling.sh"],
-    output: {
-      step: "pins",
-      name: "onepipeline",
-      reads: /just --evaluate onepipeline-version/,
-    },
-  },
-  ".tools/bin/onepipeline-api-baseline": {
+};
+const CACHES = [
+  { paths: [".tools/bin/onepipeline"], ...SIBLING },
+  { paths: [".tools/bin/onepipeline.exe"], ...SIBLING },
+  {
+    paths: [
+      ".tools/bin/onepipeline-api-baseline",
+      ".tools/bin/onepipeline-api-baseline.commit",
+    ],
     files: ["rust-toolchain.toml", "scripts/ensure-baseline-api.sh"],
     output: {
       step: "pins",
@@ -202,7 +202,7 @@ const CACHES = {
       reads: /git merge-base HEAD origin\/main/,
     },
   },
-};
+];
 
 export function cacheProblems(workflows) {
   const problems = [];
@@ -215,14 +215,18 @@ export function cacheProblems(workflows) {
         const paths = String(step.with?.path ?? "")
           .split("\n")
           .map((path) => path.trim())
-          .filter(Boolean);
+          .filter(Boolean)
+          .sort();
         if (step.with?.["restore-keys"])
           problems.push(
             `${where}: restore-keys would serve a cache from other inputs`,
           );
         for (const part of ["runner.os", "runner.arch"])
           if (!key.includes(part)) problems.push(`${where}: key omits ${part}`);
-        const declared = paths.map((path) => CACHES[path]).find(Boolean);
+        const declared = CACHES.find(
+          (cache) =>
+            JSON.stringify([...cache.paths].sort()) === JSON.stringify(paths),
+        );
         if (!declared) {
           problems.push(
             `${where}: no declared inputs for cached ${paths.join(", ")}`,
@@ -448,6 +452,19 @@ test("a cache key that omits the lockfile pin or a pinned tool is refused", () =
       `${problem}: ${cacheProblems(workflows)}`,
     );
   }
+  const extra = clone(load());
+  const sibling = extra["ci.yml"].jobs["test-linux"].steps.find(
+    (s) => s.with?.path === ".tools/bin/onepipeline",
+  );
+  sibling.with.path = ".tools/bin/onepipeline\n.tools/bin/something-else";
+  assert.ok(
+    cacheProblems(extra).some((p) =>
+      p.endsWith(
+        "no declared inputs for cached .tools/bin/onepipeline, .tools/bin/something-else",
+      ),
+    ),
+    cacheProblems(extra),
+  );
   const undeclared = clone(load());
   undeclared["ci.yml"].jobs.lint.steps.push({
     uses: "actions/cache@v4",

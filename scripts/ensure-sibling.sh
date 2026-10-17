@@ -56,7 +56,9 @@ printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$
 # that line would spend as escapes, and a probe that cannot resolve reinstalls on
 # every run rather than failing — quietly, and only on that platform.
 probe() {
-  [ "$("$binary" --version 2>/dev/null)" = "onepipeline $version" ]
+  local reported
+  reported="$("$binary" --version 2>/dev/null)" || return 1
+  [ "$reported" = "onepipeline $version" ]
 }
 probe && exit 0
 

@@ -210,7 +210,9 @@ impl Fixture {
         stub_bin::install(
             &staging,
             "onepipeline",
-            &format!("#!/usr/bin/env bash\nprintf 'onepipeline {reports}\\n'\n"),
+            &format!(
+                "#!/usr/bin/env bash\nprintf 'onepipeline {reports}\\n'\nexit \"${{ARCHIVED_EXIT:-0}}\"\n"
+            ),
         );
         // llmlint: ignore-end[e2e_not_mocked]
         fs::create_dir_all(&release).expect("the mirror's release directory");
@@ -614,6 +616,38 @@ fn a_compiled_sibling_that_reports_another_release_is_refused() {
     assert!(
         stderr.contains(Release::linked().as_str()) && stderr.contains("ACTION:"),
         "the refusal does not name the pinned release and what to do:\n{stderr}"
+    );
+}
+
+/// A binary that prints the pinned version and then fails is not the pinned
+/// sibling: the probe reads the exit as well as the words.
+#[cfg(unix)]
+#[test]
+fn an_archived_binary_that_fails_its_version_probe_is_refused() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+
+    let output = fixture.run_with(&[("ARCHIVED_EXIT", "1")]);
+
+    assert!(
+        !output.status.success(),
+        "a binary whose --version failed was accepted:\n{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around the failing binary"
+    );
+    assert!(
+        !fixture
+            .dir
+            .path()
+            .join(".tools/bin")
+            .join(provisioned_sibling())
+            .exists(),
+        "the failing binary was left where the journeys look"
     );
 }
 
