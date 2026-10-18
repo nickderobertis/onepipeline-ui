@@ -6,9 +6,9 @@
 # and differ only in which of those binaries' tests they select, which is declared
 # here once and named by profile from every recipe that runs a tier.
 #
-# The seven filters partition the default collection: `unit` is every binary but the
+# The eight filters partition the default collection: `unit` is every binary but the
 # two the other tiers draw on, and inside `e2e` the `e2e` profile is the complement
-# of the other five. So a test added anywhere runs under exactly one tier, and one
+# of the other six. So a test added anywhere runs under exactly one tier, and one
 # added to a new module of the `e2e` binary lands in `e2e` rather than nowhere.
 # `tests/e2e/ensure_baseline.rs` holds the module lists below to each other, and to
 # the recipes that run them.
@@ -25,7 +25,7 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_tier|ensure_baseline|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/)"
+default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_jobs|ci_tier|ensure_baseline|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|report_workflow_failure|semver_check|workspace_install)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -47,6 +47,15 @@ final-status-level = "fail"
 # releases its embedded dependency record names. `onepipeline-ui-linked-report:test`.
 [profile.linked-report]
 default-filter = "binary(=e2e) and test(/^linked_report::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# The four CI jobs' recipes, driven through real Nx over a scratch copy of the
+# workspace: a tier of their own, keyed on the project graph's declarations and
+# the scripts, so a change to the API's or the browser view's sources does not
+# re-run them.
+[profile.ci-jobs]
+default-filter = "binary(=e2e) and test(/^ci_jobs::/)"
 status-level = "fail"
 final-status-level = "fail"
 

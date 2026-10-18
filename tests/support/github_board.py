@@ -200,5 +200,8 @@ class LoopbackServer(HTTPServer):
 
 server = LoopbackServer(("127.0.0.1", 0), Handler)
 save()
-(root / "endpoint").write_text(f"http://127.0.0.1:{server.server_port}")
+# Published by rename, so the reader that waits for `endpoint` to exist never
+# reads it before its URL is in it.
+(root / "endpoint.partial").write_text(f"http://127.0.0.1:{server.server_port}")
+os.replace(root / "endpoint.partial", root / "endpoint")
 server.serve_forever()

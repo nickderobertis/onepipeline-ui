@@ -216,7 +216,7 @@ test("the production budget gate accepts recorded workflow rows and rejects a du
       accepted.stdout,
       /onepipeline-ui-macos-runs-per-change: within/,
     );
-    const mutate = `import {readFileSync,writeFileSync} from "node:fs"; import {parse,stringify} from "yaml"; const file=".github/workflows/ci.yml";const workflow=parse(readFileSync(file,"utf8"));workflow.jobs["duplicate-macos"]=structuredClone(workflow.jobs.macos);writeFileSync(file,stringify(workflow));`;
+    const mutate = `import {readFileSync,writeFileSync} from "node:fs"; import {parse,stringify} from "yaml"; const file=".github/workflows/ci.yml";const workflow=parse(readFileSync(file,"utf8"));workflow.jobs["duplicate-macos"]=structuredClone(workflow.jobs["test-macos"]);writeFileSync(file,stringify(workflow));`;
     execFileSync("node", ["--input-type=module", "-e", mutate], {
       cwd: scratch,
     });

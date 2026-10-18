@@ -125,7 +125,16 @@ one clone, so `.tools/` is the one thing a fresh clone lacks — and a fresh clo
 is where the gate is asked to rule, because `onevcs publish-branch` cuts one.
 A new project whose tests start the read API joins that dependency. Reaching the
 recipe from more places must never soften it: falling back to a build on PATH is
-the failure the pin exists to prevent.
+the failure the pin exists to prevent. It is fetched as that release's own
+archive for the host, held to the `.sha256` published beside it and to its
+`--version`, and compiled only when the release ships no archive for the host
+(`scripts/ensure-sibling.sh`); an archive that fails either check is refused, never
+compiled around.
+
+**Pull-request CI is four jobs, each one recipe.** `lint`, `test-linux`,
+`test-windows` and `test-macos`, and their 30-minute cap, are an interface other
+work builds against (`.github/tests/ci-jobs.test.mjs`); speed a job up by
+cutting its work, never by splitting one suite across more jobs.
 
 **`.tools/` holds a second clone-local binary, and it is the server this branch
 forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
@@ -175,7 +184,7 @@ fans one uniformly-named target across all of them.
   may bypass in a break-glass.
 - **All gating checks are required**, including the `gate` job and the separate
   `llmlint` job. `gate` rules on `quality` (the deterministic affected tier) and
-  on both Linux `wheel` legs through `scripts/gate-verdict.sh`, so a job that must
+  on the x86_64 Linux `wheel` leg through `scripts/gate-verdict.sh`, so a job that must
   block a merge joins it there rather than as a context protection would also have to
   list — v0.16.0's wheels failed with every required check green. `published-smoke` is *not* required and cannot be: branch
   protection lists contexts a pull request reports, and it runs on a completed

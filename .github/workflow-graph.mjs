@@ -172,7 +172,19 @@ export function resolveWorkflow(
   const context = {
     github: {
       event_name: scenario.event,
-      event: { action: scenario.action, pull_request: { number: 1 } },
+      event: {
+        action: scenario.action,
+        pull_request: {
+          number: 1,
+          head: {
+            repo: {
+              full_name: scenario.fork
+                ? "fork/onepipeline-ui"
+                : "nickderobertis/onepipeline-ui",
+            },
+          },
+        },
+      },
       repository: "nickderobertis/onepipeline-ui",
       ref: scenario.ref,
       head_ref: scenario.headRef,
