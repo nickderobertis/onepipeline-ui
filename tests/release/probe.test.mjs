@@ -44,7 +44,11 @@ let env;
 
 // What each registry serves once `PRERELEASE` is published, in the files its
 // double reads: the probe reads only the version each answers.
-function serve({ wheelVersion }) {
+function serve({
+  wheelVersion,
+  npmVersion = PRERELEASE,
+  crateVersion = PRERELEASE,
+}) {
   const pypi = join(registries.state, "pypi");
   rmSync(pypi, { recursive: true, force: true });
   mkdirSync(pypi);
@@ -57,16 +61,20 @@ function serve({ wheelVersion }) {
   );
   for (const pkg of ["onepipeline-api-cli", "onepipeline-ui"]) {
     const packages = join(registries.state, "npm", pkg);
+    rmSync(packages, { recursive: true, force: true });
     mkdirSync(packages, { recursive: true });
     writeFileSync(
-      join(packages, `${PRERELEASE}.json`),
-      JSON.stringify({ name: pkg, version: PRERELEASE }),
+      join(packages, `${npmVersion}.json`),
+      JSON.stringify({ name: pkg, version: npmVersion }),
     );
-    writeFileSync(join(packages, `${PRERELEASE}.tgz`), "a package");
+    writeFileSync(join(packages, `${npmVersion}.tgz`), "a package");
   }
+  const crates = join(registries.state, "crates");
+  rmSync(crates, { recursive: true, force: true });
+  mkdirSync(crates);
   writeFileSync(
-    join(registries.state, "crates", `onepipeline-ui-${PRERELEASE}.json`),
-    JSON.stringify({ name: "onepipeline-ui", vers: PRERELEASE }),
+    join(crates, `onepipeline-ui-${crateVersion}.json`),
+    JSON.stringify({ name: "onepipeline-ui", vers: crateVersion }),
   );
 }
 
@@ -152,8 +160,26 @@ test("PyPI serving another prerelease of the same version fails the verification
   assert.notEqual(run.status, 0, run.output);
   assert.match(
     run.stderr,
-    /the release probe answers 0\.39\.0rc2 for pypi:onepipeline-api-cli, not 0\.39\.0-rc\.1/,
+    /the release probe answers 0\.39\.0rc2 for pypi:onepipeline-api-cli, not 0\.39\.0rc1/,
   );
+});
+
+test("npm or the crate registry answering PyPI's spelling of the prerelease fails the verification", () => {
+  for (const [registry, spelling, id] of [
+    ["npm", { npmVersion: "0.39.0rc1" }, "npm:onepipeline-api-cli"],
+    ["crates.io", { crateVersion: "0.39.0rc1" }, "crate:onepipeline-ui"],
+  ]) {
+    serve({ wheelVersion: "0.39.0rc1", ...spelling });
+    const run = verify(PRERELEASE);
+    assert.notEqual(run.status, 0, `${registry}: ${run.output}`);
+    assert.match(
+      run.stderr,
+      new RegExp(
+        `the release probe answers 0\\.39\\.0rc1 for ${id}, not 0\\.39\\.0-rc\\.1`,
+      ),
+      registry,
+    );
+  }
 });
 
 test("a name nobody released that a registry answers fails the verification", () => {

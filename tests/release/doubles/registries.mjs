@@ -25,6 +25,7 @@ import { execFileSync } from "node:child_process";
 //   control/corrupt              lines naming files served with other bytes
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
 //                                `crate-index=foreign` (JSON, not an entry),
+//                                `<read>=not-json` (a 200 that does not parse),
 //                                `<read>=empty` (a 200 with nothing, or null) or
 //                                `npm-packument=other-version` (each version's
 //                                manifest names another),
@@ -80,6 +81,8 @@ function broken(read, response) {
   if (answer === "foreign") reply(response, 200, "{}\n", "text/plain");
   else if (answer === "empty")
     reply(response, 200, read === "crate-index" ? "" : "null", "text/plain");
+  else if (answer === "not-json")
+    reply(response, 200, "{not json\n", "application/json");
   else if (answer === "malformed")
     reply(
       response,

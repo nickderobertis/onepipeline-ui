@@ -1132,16 +1132,16 @@ export function probeDeclaredTargets(version) {
       );
     }
     const served = answer.stdout.trim();
+    // Each registry in its own spelling of this version: PyPI's is PEP 440's
+    // (`1.2.3rc1`), and on npm or crates.io that is another version entirely.
+    const registry = id.split(":")[0];
+    const expected = registry === "pypi" ? pep440(version) : version;
     // A probe answers a registry's newest release, so a prerelease cut by hand
     // behind a newer stable one fails here too, and is demoted as unpublished:
     // that is what a consumer waiting on it would be told.
-    if (
-      live[id.split(":")[0]] &&
-      served !== version &&
-      served !== pep440(version)
-    )
+    if (live[registry] && served !== expected)
       throw new Fault(
-        `the release probe answers ${served || "nothing"} for ${id}, not ${version}`,
+        `the release probe answers ${served || "nothing"} for ${id}, not ${expected}`,
         "check that registry for the version this release published",
       );
     answers.push(`${id} -> ${served || "nothing yet"}`);
