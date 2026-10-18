@@ -339,10 +339,12 @@ export function cancelledCacheProblems(workflows) {
     const job = workflows["ci.yml"]?.jobs?.[id];
     if (!job) continue;
     const steps = job.steps ?? [];
-    const rust = steps.findIndex((s) =>
-      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
+    const rust = steps.findIndex(
+      (s) =>
+        (s.uses ?? "").startsWith("Swatinem/rust-cache@") &&
+        s.with?.["cache-on-failure"],
     );
-    if (rust < 0 || !steps[rust].with?.["cache-on-failure"]) continue;
+    if (rust < 0) continue;
     if (!/JOB_STARTED_AT=\$\(date \+%s\)/.test(steps[0]?.run ?? ""))
       problems.push(`job ${id} does not take its start time first`);
     const at = (pattern) =>
@@ -389,15 +391,15 @@ export function rustCacheSnapshot() {
 }
 export function rustCacheSwitchProblems(workflows, snapshot) {
   const problems = [];
-  for (const id of Object.keys(FOUR)) {
-    const step = (workflows["ci.yml"]?.jobs?.[id]?.steps ?? []).find((s) =>
-      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
-    );
-    if (step && step.uses !== snapshot.lock.uses)
-      problems.push(
-        `job ${id} uses ${step.uses}, not the snapshotted ${snapshot.lock.uses}`,
-      );
-  }
+  for (const id of Object.keys(FOUR))
+    for (const step of workflows["ci.yml"]?.jobs?.[id]?.steps ?? [])
+      if (
+        (step.uses ?? "").startsWith("Swatinem/rust-cache@") &&
+        step.uses !== snapshot.lock.uses
+      )
+        problems.push(
+          `job ${id} uses ${step.uses}, not the snapshotted ${snapshot.lock.uses}`,
+        );
   if (!snapshot.text.startsWith(SNAPSHOT_ANNOTATION)) {
     problems.push("the rust-cache snapshot lost its annotation");
     return problems;
@@ -423,39 +425,47 @@ export function rustCacheSwitchProblems(workflows, snapshot) {
   return problems;
 }
 
-// The four jobs restore main's builds and save only on main, so the cache limit
-// is spent on what every pull request restores. A job's Rust build is restored
-// under the key a main run of ci.yml saves for the same toolchain — named by the
-// job it borrows it from, which has no shared-key of its own and runs on the
-// same OS — or under its own id where no main run builds on that OS yet.
-// Spelled without a literal `${`, as `expression` below is.
-const MAIN_ONLY = `$${"{{"} github.ref == 'refs/heads/main' }}`;
+// Each of the four jobs restores main's build first, where a main run builds on
+// its OS: the key a main run of an old job saves for the same toolchain, named by
+// that job, which has no shared-key of its own and runs on the same OS, and never
+// saved from here. Then its own build, restored over it and saved, pull requests
+// included, until the main-branch warm job replacing the old jobs saves what
+// these build. Every other cache the four save, they save on main only.
 const SHARED = {
   lint: "msrv",
   "test-linux": "quality",
   "test-windows": "cross",
 };
-export function mainOnlySaveProblems(workflows) {
+export function cacheRestoreProblems(workflows) {
   const problems = [];
   const jobs = workflows["ci.yml"]?.jobs ?? {};
-  const rustCache = (job) =>
-    (job?.steps ?? []).find((s) =>
+  const rustCaches = (job) =>
+    (job?.steps ?? []).filter((s) =>
       (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
     );
+  const os = (runner) => String(runner).split("-")[0];
   for (const id of Object.keys(FOUR)) {
     const job = jobs[id];
     if (!job) continue;
-    const rust = rustCache(job);
-    if (rust && rust.with?.["save-if"] !== MAIN_ONLY)
-      problems.push(`job ${id} saves its Rust build off main`);
-    if (rust && rust.with?.["shared-key"] !== SHARED[id])
+    const caches = rustCaches(job);
+    const own = caches.at(-1);
+    if (!own || own.with?.["shared-key"] || own.with?.["save-if"] === false)
+      problems.push(`job ${id} does not restore and save its own build last`);
+    const borrowed = caches.slice(0, -1);
+    if (!SHARED[id]) {
+      if (borrowed.length)
+        problems.push(`job ${id} restores a build no main run of its OS saves`);
+    } else if (
+      borrowed.length !== 1 ||
+      borrowed[0].with?.["shared-key"] !== SHARED[id] ||
+      borrowed[0].with?.["save-if"] !== false
+    )
       problems.push(
-        `job ${id} restores ${rust.with?.["shared-key"] ?? "its own key"}, not ${SHARED[id] ?? "its own key"}`,
+        `job ${id} does not restore ${SHARED[id]}'s main build first, unsaved`,
       );
-    const lender = jobs[SHARED[id]];
-    if (SHARED[id]) {
-      const lent = rustCache(lender);
-      const os = (runner) => String(runner).split("-")[0];
+    else {
+      const lender = jobs[SHARED[id]];
+      const lent = rustCaches(lender)[0];
       const runners = [
         lender?.["runs-on"],
         ...(lender?.strategy?.matrix?.os ?? []),
@@ -906,33 +916,48 @@ test("a rust-cache pin or snapshot that parts from the switch is refused", () =>
   );
 });
 
-test("the four jobs restore main's builds and save only on main", () => {
-  assert.deepEqual(mainOnlySaveProblems(load()), []);
+test("the four jobs restore main's builds, then their own", () => {
+  assert.deepEqual(cacheRestoreProblems(load()), []);
 });
 
-test("a pull-request save, or a borrowed key no main job saves, is refused", () => {
+test("a borrowed build saved from here, or one no main job saves, is refused", () => {
   const rust = (w, id) =>
-    w["ci.yml"].jobs[id].steps.find((s) =>
+    w["ci.yml"].jobs[id].steps.filter((s) =>
       (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
     );
   const cases = [
     [
       (w) => {
-        delete rust(w, "test-linux").with["save-if"];
+        delete rust(w, "test-linux")[0].with["save-if"];
       },
-      "job test-linux saves its Rust build off main",
+      "job test-linux does not restore quality's main build first, unsaved",
     ],
     [
       (w) => {
-        rust(w, "test-windows").with["shared-key"] = "quality";
+        rust(w, "test-windows")[0].with["shared-key"] = "quality";
       },
-      "job test-windows restores quality, not cross",
+      "job test-windows does not restore cross's main build first, unsaved",
+    ],
+    [
+      (w) => {
+        rust(w, "lint")[1].with["save-if"] = false;
+      },
+      "job lint does not restore and save its own build last",
     ],
     [
       (w) => {
         delete w["ci.yml"].jobs.msrv;
       },
       "job lint restores msrv's key, which no ubuntu job of ci.yml saves",
+    ],
+    [
+      (w) => {
+        w["ci.yml"].jobs["test-macos"].steps.unshift({
+          uses: "Swatinem/rust-cache@v2.9.2",
+          with: { "shared-key": "quality", "save-if": false },
+        });
+      },
+      "job test-macos restores a build no main run of its OS saves",
     ],
     [
       (w) => {
@@ -947,8 +972,8 @@ test("a pull-request save, or a borrowed key no main job saves, is refused", () 
     const workflows = clone(load());
     mutate(workflows);
     assert.ok(
-      mainOnlySaveProblems(workflows).includes(problem),
-      `${problem}: ${mainOnlySaveProblems(workflows)}`,
+      cacheRestoreProblems(workflows).includes(problem),
+      `${problem}: ${cacheRestoreProblems(workflows)}`,
     );
   }
 });
