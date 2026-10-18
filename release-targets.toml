@@ -41,7 +41,7 @@ published_by = ".github/workflows/release.yml — the build-linux, build-macos a
 manifest = "pyproject.toml"
 
 # The npm launcher, and the only entry here with a `covers` list. arm64 Linux is
-# no longer among them: from the release after v0.38.0 nothing builds it, and
+# no longer among them: from the release after v0.38.1 nothing builds it, and
 # the launcher refuses that platform, naming `cargo install` instead. The per-platform
 # packages it covers exist for this launcher to resolve at its own exact version:
 # nothing depends on one by name, so none of them is a target of their own and a

@@ -73,8 +73,8 @@ and because nothing else recovers *why* the tooling is what it is.
   and the same script holds it to `engines.node`.
   npm stays where the registry is the subject rather than this workspace:
   `npm pack`/`npm publish` of what `scripts/npm-build.mjs` assembles, the
-  `verify-npm` and `published-smoke.yml` installs that prove what an npm user
-  gets, and global installs of harness CLIs and of bun itself in the
+  release jobs' `test-install` and `verify` installs that prove what an npm
+  user gets, and global installs of harness CLIs and of bun itself in the
   visual-docs container. Siblings are named `workspace:*`; none of those
   manifests is published.
 - **Excluded:** asdf/direnv — `rust-toolchain.toml` and the lockfiles already

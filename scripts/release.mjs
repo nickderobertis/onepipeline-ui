@@ -95,7 +95,7 @@ const PYTHON = WINDOWS ? "python" : "python3";
 // The one table of what is released. A target belongs to exactly one platform
 // job; its npm package name and wheel tag are what v0.37.0 published, which
 // .github/tests/release.test.mjs holds every platform's plan to.
-// aarch64-unknown-linux-gnu was released up to v0.38.0 and is no longer built
+// aarch64-unknown-linux-gnu was released up to v0.38.1 and is no longer built
 // (the npm launcher refuses linux-arm64 with the cargo install instead), and
 // x86_64-apple-darwin before it.
 export const TARGETS = {
