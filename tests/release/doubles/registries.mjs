@@ -257,6 +257,8 @@ async function npm(request, response, path) {
   const tarball = path.match(/^\/([^/]+)\/-\/(.+)-(\d[^/]*)\.tgz$/);
   if (tarball && request.method === "GET") {
     const [, pkg, , version] = tarball;
+    if (!valid(PACKAGE, pkg) || !valid(VERSION, version))
+      return reply(response, 404, { error: "Not found" });
     const file = join(state, "npm", pkg, `${version}.tgz`);
     if (!existsSync(file) || hidden(`${pkg}@${version}`))
       return reply(response, 404, { error: "Not found" });
@@ -505,8 +507,18 @@ const certificate = {
 const proxy = createServer((_request, response) =>
   reply(response, 405, "CONNECT only", "text/plain"),
 );
+// A CONNECT names its destination as `host:port`; anything else is refused
+// here, since `connect` throws outside any handler on a port it cannot use and
+// that would take the doubles down under every journey sharing them.
+const AUTHORITY = /^([A-Za-z0-9.-]+):(\d{1,5})$/;
 proxy.on("connect", (request, socket, head) => {
-  const [host, port] = request.url.split(":");
+  const authority = request.url.match(AUTHORITY);
+  const port = Number(authority?.[2]);
+  if (!authority || port < 1 || port > 65535) {
+    socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    return;
+  }
+  const host = authority[1];
   if (host === "api.github.com") {
     socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     const secure = new TLSSocket(socket, {
@@ -518,7 +530,7 @@ proxy.on("connect", (request, socket, head) => {
     if (head.length) secure.unshift(head);
     return;
   }
-  const upstream = connect(Number(port || 443), host, () => {
+  const upstream = connect(port, host, () => {
     socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     if (head.length) upstream.write(head);
     upstream.pipe(socket).pipe(upstream);
