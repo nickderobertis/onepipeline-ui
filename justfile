@@ -339,13 +339,21 @@ release-tools:
 
 # The release journeys' Python environment, rebuilt from nothing whenever any
 # pin differs from the ones its stamp records, so a changed pin never leaves an
-# old tool installed beside it.
+# old tool installed beside it. It installs with no index, from a wheelhouse in
+# `.tools` that is fetched from PyPI only when its own stamp names other pins:
+# rebuilding the environment is offline, which is what lets the journey in
+# tests/release/tools.test.mjs rebuild one inside the affected tier.
 _release-venv:
+    @[ "$(cat .tools/release-wheels/pins 2>/dev/null)" = "{{python-pins}}" ] \
+      || { { [ -x .tools/release-venv/bin/python ] || python3 -m venv .tools/release-venv; } \
+           && .tools/release-venv/bin/python -m pip download --quiet --disable-pip-version-check --dest .tools/release-wheels {{python-pins}} \
+           && echo "{{python-pins}}" > .tools/release-wheels/pins; } \
+      || { echo "cannot fetch {{python-pins}} into .tools/release-wheels — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
     @[ "$(cat .tools/release-venv/pins 2>/dev/null)" = "{{python-pins}}" ] \
       || { rm -rf .tools/release-venv && python3 -m venv .tools/release-venv \
-           && just python=.tools/release-venv/bin/python release-python-tools \
+           && .tools/release-venv/bin/python -m pip install --quiet --disable-pip-version-check --no-index --find-links .tools/release-wheels {{python-pins}} \
            && echo "{{python-pins}}" > .tools/release-venv/pins; } \
-      || { echo "cannot provision {{python-pins}} into .tools/release-venv — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
+      || { echo "cannot install {{python-pins}} into .tools/release-venv from .tools/release-wheels — delete .tools/release-wheels/pins and re-run to fetch them again" >&2; exit 1; }
 
 # Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
 # the frontend's components, and the browser journeys — and the coverage floor
