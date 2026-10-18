@@ -293,6 +293,33 @@ export function cacheProblems(workflows) {
   return problems;
 }
 
+// Linux arm64 is dropped: ci.yml builds, installs and smoke-tests no
+// aarch64-unknown-linux-gnu wheel and names no arm64 Linux runner, and `wheel`
+// keeps only its x86_64 leg until the old jobs are removed.
+const ARM_LINUX_RUNNER = /^ubuntu-[\w.]+-arm$/;
+export function linuxArm64Problems(workflows) {
+  const problems = [];
+  const ci = workflows["ci.yml"];
+  if (JSON.stringify(ci).includes("aarch64-unknown-linux-gnu"))
+    problems.push("ci.yml names aarch64-unknown-linux-gnu");
+  for (const [id, job] of Object.entries(ci?.jobs ?? {})) {
+    const runners = [
+      job["runs-on"],
+      ...(job.strategy?.matrix?.include ?? []).map((leg) => leg.os),
+      ...(job.strategy?.matrix?.os ?? []),
+    ];
+    for (const runner of runners)
+      if (typeof runner === "string" && ARM_LINUX_RUNNER.test(runner))
+        problems.push(`job ${id} runs on the arm64 Linux runner ${runner}`);
+  }
+  const legs = (ci?.jobs?.wheel?.strategy?.matrix?.include ?? []).map(
+    (leg) => leg.target,
+  );
+  if (JSON.stringify(legs) !== JSON.stringify(["x86_64-unknown-linux-gnu"]))
+    problems.push(`wheel's legs are ${JSON.stringify(legs)}, not x86_64 alone`);
+  return problems;
+}
+
 const clone = (workflows) => structuredClone(workflows);
 // A workflow expression, spelled without a literal `${` in this file.
 const expression = (inner) => `$${"{{"} ${inner} }}`;
@@ -553,4 +580,45 @@ test("a cache key that omits the lockfile pin or a pinned tool is refused", () =
       p.endsWith("step pins does not read onepipeline where the recipe does"),
     ),
   );
+});
+
+test("ci.yml builds no Linux arm64 wheel and names no arm64 Linux runner", () => {
+  assert.deepEqual(linuxArm64Problems(load()), []);
+});
+
+test("a Linux arm64 wheel leg or runner coming back is refused", () => {
+  const cases = [
+    [
+      (w) => {
+        w["ci.yml"].jobs.wheel.strategy.matrix.include.push({
+          target: "aarch64-unknown-linux-gnu",
+          os: "ubuntu-24.04-arm",
+        });
+      },
+      [
+        "ci.yml names aarch64-unknown-linux-gnu",
+        "job wheel runs on the arm64 Linux runner ubuntu-24.04-arm",
+        'wheel\'s legs are ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu"], not x86_64 alone',
+      ],
+    ],
+    [
+      (w) => {
+        w["ci.yml"].jobs["test-linux"]["runs-on"] = "ubuntu-24.04-arm";
+      },
+      ["job test-linux runs on the arm64 Linux runner ubuntu-24.04-arm"],
+    ],
+    [
+      (w) => {
+        w["ci.yml"].jobs.wheel.strategy.matrix.include = [];
+      },
+      ["wheel's legs are [], not x86_64 alone"],
+    ],
+  ];
+  for (const [mutate, expected] of cases) {
+    const workflows = clone(load());
+    mutate(workflows);
+    const problems = linuxArm64Problems(workflows);
+    for (const problem of expected)
+      assert.ok(problems.includes(problem), `${problem}: ${problems}`);
+  }
 });

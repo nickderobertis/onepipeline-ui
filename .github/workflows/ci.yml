@@ -768,10 +768,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux arm64 is no longer built here, by the user's decision.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
     name: wheel (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     steps:
@@ -802,8 +801,8 @@ jobs:
             --expect-version "$version" \
             --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
 
-  # The `gate` context branch protection requires: the quality gate and both
-  # Linux wheel legs plus the Windows browser build, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
+  # The `gate` context branch protection requires: the quality gate and the
+  # x86_64 Linux wheel plus the Windows browser build, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
   # wheels are in it — `wheel` was not a required context, so a wheel that could
   # not build in the release's image left every required check green. Aggregated
   # here rather than by making the quality gate wait on `wheel`, so the two still
@@ -817,7 +816,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: The quality gate, Linux wheels and Windows browser build passed
+      - name: The quality gate, Linux wheel and Windows browser build passed
         env:
           CHANGES: ${{ needs.changes.result }}
           QUALITY: ${{ needs.quality.result }}

@@ -188,7 +188,7 @@ fans one uniformly-named target across all of them.
   may bypass in a break-glass.
 - **All gating checks are required**, including the `gate` job and the separate
   `llmlint` job. `gate` rules on `quality` (the deterministic affected tier) and
-  on both Linux `wheel` legs through `scripts/gate-verdict.sh`, so a job that must
+  on the x86_64 Linux `wheel` leg through `scripts/gate-verdict.sh`, so a job that must
   block a merge joins it there rather than as a context protection would also have to
   list — v0.16.0's wheels failed with every required check green. `published-smoke` is *not* required and cannot be: branch
   protection lists contexts a pull request reports, and it runs on a completed
