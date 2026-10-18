@@ -326,6 +326,11 @@ export function linuxArm64Problems(workflows) {
 // when that run reached its cap: each job takes its start time first, and after
 // its recipe stops what a cancelled run left building and asks
 // scripts/ci-cache-verdict.sh, at the job's own cap, whether to keep the save.
+//
+// The verdict is executed as each job runs it in cache-verdict.test.mjs. The stop
+// step is held here by its shape alone, deliberately: it kills every build tool
+// and container on the machine it runs on, which on a job's own runner is the
+// job's work and on any machine a test could run it on is somebody else's.
 const VERDICT =
   'bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes ';
 export function cancelledCacheProblems(workflows) {

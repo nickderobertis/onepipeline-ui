@@ -77,7 +77,7 @@ jobs:
         id: msrv
         run: |
           version="$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)"
-          [ -n "$version" ] || { echo "::error::Cargo.toml declares no rust-version"; exit 1; }
+          [ -n "$version" ] || { echo "::error::Cargo.toml declares no rust-version" >&2; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -232,11 +232,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Saved even when the job fails or hits its cap: a first run cancelled at
-      # 30 minutes would otherwise save nothing, and every run after it would
-      # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save through the switch this release's
-      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      # Saved on failure and at the cap but not when superseded, as in `lint`.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           cache-on-failure: true
@@ -340,11 +336,7 @@ jobs:
           # The `ensure_baseline::` journeys resolve the commit this branch forked
           # from, which a shallow checkout does not have.
           fetch-depth: 0
-      # Saved even when the job fails or hits its cap: a first run cancelled at
-      # 30 minutes would otherwise save nothing, and every run after it would
-      # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save through the switch this release's
-      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      # Saved on failure and at the cap but not when superseded, as in `lint`.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           cache-on-failure: true
@@ -429,11 +421,7 @@ jobs:
             process.stdout.write(String(macosRequired));
           ' "$result")"
           echo "required=$required" >> "$GITHUB_OUTPUT"
-      # Saved even when the job fails or hits its cap: a first run cancelled at
-      # 30 minutes would otherwise save nothing, and every run after it would
-      # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save through the switch this release's
-      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      # Saved on failure and at the cap but not when superseded, as in `lint`.
       - uses: Swatinem/rust-cache@v2.9.2
         if: steps.macos.outputs.required == 'true'
         with:

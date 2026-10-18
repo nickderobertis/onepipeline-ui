@@ -6,7 +6,9 @@
   "targets": {
     "test": {
       "command": "just _tier-test ci-jobs",
+      "//view": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this tier's journeys never ask for the view, but they compile the same `e2e` test binary into the same target directory as every other tier, and `build.rs` embeds `apps/dag-ui/dist` into it: a run of this tier without the view would compile a bundle-less binary there that the next tier rebuilds, which is the thrash tests/e2e/ensure_sibling.rs holds every other tier to the same edge to prevent. `dag-ui:build` is cached by Nx, so a run that does not change the view pays nothing for it.",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "//view-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]",
       "inputs": ["ciJobSelection"]
     },
     "check": {
