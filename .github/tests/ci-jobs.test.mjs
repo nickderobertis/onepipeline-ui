@@ -479,6 +479,29 @@ export function mainOnlySaveProblems(workflows) {
   return problems;
 }
 
+// `lint` runs the judged tier as the `llmlint` job does, so the harnesses it
+// installs are that job's, pin for pin: each harness step of either job has the
+// same-named step in the other, running the same command.
+export function judgeHarnessProblems(workflows) {
+  const problems = [];
+  const harnesses = (id) =>
+    new Map(
+      (workflows["ci.yml"]?.jobs?.[id]?.steps ?? [])
+        .filter((s) => /^Install the .* harness/.test(s.name ?? ""))
+        .map((s) => [s.name, s.run]),
+    );
+  const lint = harnesses("lint");
+  const judge = harnesses("llmlint");
+  if (judge.size === 0) problems.push("the llmlint job installs no harness");
+  for (const [name, run] of judge)
+    if (lint.get(name) !== run)
+      problems.push(`lint's "${name}" is not the llmlint job's: ${run}`);
+  for (const name of lint.keys())
+    if (!judge.has(name))
+      problems.push(`lint installs "${name}", which the llmlint job does not`);
+  return problems;
+}
+
 const clone = (workflows) => structuredClone(workflows);
 // A workflow expression, spelled without a literal `${` in this file.
 const expression = (inner) => `$${"{{"} ${inner} }}`;
@@ -928,4 +951,34 @@ test("a pull-request save, or a borrowed key no main job saves, is refused", () 
       `${problem}: ${mainOnlySaveProblems(workflows)}`,
     );
   }
+});
+
+test("lint's judge harnesses are the llmlint job's, pin for pin", () => {
+  assert.deepEqual(judgeHarnessProblems(load()), []);
+});
+
+test("a judge harness pin that parts from the llmlint job's is refused", () => {
+  const workflows = clone(load());
+  const step = workflows["ci.yml"].jobs.lint.steps.find(
+    (s) => s.name === "Install the Codex harness",
+  );
+  step.run = "npm install -g @openai/codex@0.0.1";
+  assert.ok(
+    judgeHarnessProblems(workflows).some((p) =>
+      p.startsWith(
+        "lint's \"Install the Codex harness\" is not the llmlint job's",
+      ),
+    ),
+    `${judgeHarnessProblems(workflows)}`,
+  );
+  const extra = clone(load());
+  extra["ci.yml"].jobs.lint.steps.push({
+    name: "Install the Gemini harness",
+    run: "npm install -g gemini",
+  });
+  assert.ok(
+    judgeHarnessProblems(extra).includes(
+      'lint installs "Install the Gemini harness", which the llmlint job does not',
+    ),
+  );
 });
