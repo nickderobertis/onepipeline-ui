@@ -25,7 +25,7 @@
       "dependsOn": ["build"]
     },
     "lint": {
-      "command": "npx biome check apps/dag-ui && npx eslint --max-warnings 0 apps/dag-ui"
+      "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui && npx eslint --max-warnings 0 apps/dag-ui"
     },
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts"
@@ -34,10 +34,10 @@
       "command": "npx tsc -p apps/dag-ui/tsconfig.json --noEmit"
     },
     "format": {
-      "command": "npx biome check --write --linter-enabled=false apps/dag-ui"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false apps/dag-ui"
     },
     "format-check": {
-      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui"
     },
     "check": {
       "executor": "nx:noop"
