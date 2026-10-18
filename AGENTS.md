@@ -206,10 +206,8 @@ fans one uniformly-named target across all of them.
   publishes until every platform's files are served. So **a failed platform job
   leaves the other platforms published and the platform-independent artifacts
   unpublished** until it is re-run — and a re-run finishes the release, because
-  every upload publishes only what its registry does not already serve. Change a
-  target in `scripts/release.mjs`'s table, whose `plan` phase the workflow test
-  holds to the last release's artifacts; arm64 Linux and Intel macOS are no
-  longer released.
+  every upload publishes only what its registry does not already serve. A
+  target is changed in `scripts/release.mjs`'s table and nowhere else.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

@@ -44,7 +44,7 @@
       "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
     },
     "test": {
-      "command": "node --test --test-concurrency=1 tests/release/tools.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/journeys.test.mjs",
+      "command": "node --test --test-concurrency=1 tests/release/tools.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"]
     },

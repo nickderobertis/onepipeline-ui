@@ -1115,7 +1115,7 @@ function probe(id) {
 // registry can give: a name nobody released is answered empty, and an
 // identifier it cannot read is refused rather than answered.
 // Returns what each declared target answered, for the one success line.
-function probeDeclaredTargets(version) {
+export function probeDeclaredTargets(version) {
   const answers = [];
   const live = {
     crate: crateSwitchedOn(),
