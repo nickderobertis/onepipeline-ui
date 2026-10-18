@@ -379,8 +379,12 @@ export function cancelledCacheProblems(workflows) {
 // four jobs pin, through a verbatim snapshot of its action.yml whose bytes are
 // the Git blob the lock names, so a move to a release that reads anything else
 // fails here rather than saving every superseded run again.
-const SNAPSHOT_ANNOTATION =
-  "# llmlint: ignore-file[comments_earn_their_place] Verbatim upstream action snapshot: every upstream byte is verified against its pinned Git blob; its comments are not repository-authored prose.\n";
+// The snapshot's first line, which marks it as upstream bytes; split here so
+// this file does not carry the directive it spells.
+const SNAPSHOT_ANNOTATION = [
+  "# llmlint",
+  ": ignore-file[comments_earn_their_place] Verbatim upstream action snapshot: every upstream byte is verified against its pinned Git blob; its comments are not repository-authored prose.\n",
+].join("");
 export function rustCacheSnapshot() {
   return {
     text: readFileSync(".github/fixtures/rust-cache-v2.9.2-action.yml", "utf8"),
