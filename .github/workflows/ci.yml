@@ -85,8 +85,9 @@ jobs:
       # Saved even when the job fails or hits its cap: a first run cancelled at
       # 30 minutes would otherwise save nothing, and every run after it would
       # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save.
-      - uses: Swatinem/rust-cache@v2
+      # job's last steps withdraw that save through the switch this release's
+      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
           cache-on-failure: true
       - uses: actions/setup-node@v4
@@ -234,8 +235,9 @@ jobs:
       # Saved even when the job fails or hits its cap: a first run cancelled at
       # 30 minutes would otherwise save nothing, and every run after it would
       # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save.
-      - uses: Swatinem/rust-cache@v2
+      # job's last steps withdraw that save through the switch this release's
+      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
           cache-on-failure: true
       - uses: actions/setup-node@v4
@@ -341,8 +343,9 @@ jobs:
       # Saved even when the job fails or hits its cap: a first run cancelled at
       # 30 minutes would otherwise save nothing, and every run after it would
       # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save.
-      - uses: Swatinem/rust-cache@v2
+      # job's last steps withdraw that save through the switch this release's
+      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
           cache-on-failure: true
       - uses: actions/setup-node@v4
@@ -429,8 +432,9 @@ jobs:
       # Saved even when the job fails or hits its cap: a first run cancelled at
       # 30 minutes would otherwise save nothing, and every run after it would
       # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save.
-      - uses: Swatinem/rust-cache@v2
+      # job's last steps withdraw that save through the switch this release's
+      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      - uses: Swatinem/rust-cache@v2.9.2
         if: steps.macos.outputs.required == 'true'
         with:
           cache-on-failure: true

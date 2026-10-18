@@ -31,10 +31,19 @@ fail_usage() {
 started= cap=
 while [ $# -gt 0 ]; do
   case "$1" in
-    --started | --cap-minutes)
+    # Decimal with no leading zero, which bash arithmetic would read as octal,
+    # and short enough that nothing below can overflow: an epoch second has ten
+    # digits until 2286, and a job's cap is at most GitHub's 4320 minutes.
+    --started)
       [ $# -ge 2 ] || fail_usage "$1 needs a value"
-      [[ "$2" =~ ^[0-9]+$ ]] || fail_usage "$1 takes a whole number, not '$2'"
-      if [ "$1" = --started ]; then started="$2"; else cap="$2"; fi
+      [[ "$2" =~ ^[1-9][0-9]{0,10}$ ]] || fail_usage "$1 takes epoch seconds, not '$2'"
+      started="$2"
+      shift 2
+      ;;
+    --cap-minutes)
+      [ $# -ge 2 ] || fail_usage "$1 needs a value"
+      [[ "$2" =~ ^[1-9][0-9]{0,3}$ ]] || fail_usage "$1 takes whole minutes from 1 to 9999, not '$2'"
+      cap="$2"
       shift 2
       ;;
     *) fail_usage "unknown argument: $1" ;;

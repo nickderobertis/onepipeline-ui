@@ -8,10 +8,12 @@
 // the real workflows with exactly the defect it names, as well as passing on the
 // real ones.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parse } from "yaml";
 import { REQUIRED_CONTEXTS } from "../required-contexts.mjs";
+import { evaluate } from "../workflow-graph.mjs";
 
 function load() {
   return Object.fromEntries(
@@ -362,6 +364,57 @@ export function cancelledCacheProblems(workflows) {
         `job ${id} does not stop its builds and then decide, after its recipe`,
       );
   }
+  return problems;
+}
+
+// The switch the verdict sets is rust-cache's own: its post step runs when
+// `success() || env.CACHE_ON_FAILURE == 'true'`. That is held to the release the
+// four jobs pin, through a verbatim snapshot of its action.yml whose bytes are
+// the Git blob the lock names, so a move to a release that reads anything else
+// fails here rather than saving every superseded run again.
+const SNAPSHOT_ANNOTATION =
+  "# llmlint: ignore-file[comments_earn_their_place] Verbatim upstream action snapshot: every upstream byte is verified against its pinned Git blob; its comments are not repository-authored prose.\n";
+export function rustCacheSnapshot() {
+  return {
+    text: readFileSync(".github/fixtures/rust-cache-v2.9.2-action.yml", "utf8"),
+    lock: JSON.parse(
+      readFileSync(".github/fixtures/rust-cache-lock.json", "utf8"),
+    ),
+  };
+}
+export function rustCacheSwitchProblems(workflows, snapshot) {
+  const problems = [];
+  for (const id of Object.keys(FOUR)) {
+    const step = (workflows["ci.yml"]?.jobs?.[id]?.steps ?? []).find((s) =>
+      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
+    );
+    if (step && step.uses !== snapshot.lock.uses)
+      problems.push(
+        `job ${id} uses ${step.uses}, not the snapshotted ${snapshot.lock.uses}`,
+      );
+  }
+  if (!snapshot.text.startsWith(SNAPSHOT_ANNOTATION)) {
+    problems.push("the rust-cache snapshot lost its annotation");
+    return problems;
+  }
+  const source = Buffer.from(snapshot.text.slice(SNAPSHOT_ANNOTATION.length));
+  const blob = createHash("sha1")
+    .update(`blob ${source.length}\0`)
+    .update(source)
+    .digest("hex");
+  if (blob !== snapshot.lock.blob)
+    problems.push(`the rust-cache snapshot is not blob ${snapshot.lock.blob}`);
+  const postIf = parse(source.toString())?.runs?.["post-if"];
+  const saves = (value) =>
+    typeof postIf === "string" &&
+    evaluate(postIf, {
+      env: { CACHE_ON_FAILURE: value },
+      needs: { job: { result: "cancelled" } },
+    }).value;
+  if (saves("false") || !saves("true"))
+    problems.push(
+      "rust-cache's post step does not obey CACHE_ON_FAILURE on a cancelled job",
+    );
   return problems;
 }
 
@@ -718,4 +771,47 @@ test("a job that would save a superseded run's build is refused", () => {
       `${problem}: ${cancelledCacheProblems(workflows)}`,
     );
   }
+});
+
+test("the save switch the verdict sets is the one the pinned rust-cache reads", () => {
+  assert.deepEqual(rustCacheSwitchProblems(load(), rustCacheSnapshot()), []);
+});
+
+test("a rust-cache pin or snapshot that parts from the switch is refused", () => {
+  const snapshot = rustCacheSnapshot();
+  const moved = clone(load());
+  moved["ci.yml"].jobs["test-windows"].steps.find((s) =>
+    (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
+  ).uses = "Swatinem/rust-cache@v2";
+  assert.ok(
+    rustCacheSwitchProblems(moved, snapshot).includes(
+      "job test-windows uses Swatinem/rust-cache@v2, not the snapshotted Swatinem/rust-cache@v2.9.2",
+    ),
+  );
+  const edited = {
+    ...snapshot,
+    text: snapshot.text.replace("Defaults to false.", "Defaults to true."),
+  };
+  assert.ok(
+    rustCacheSwitchProblems(load(), edited).includes(
+      `the rust-cache snapshot is not blob ${snapshot.lock.blob}`,
+    ),
+  );
+  // A release whose post step ignored the switch, with a lock that vouches for
+  // it, is refused on what it says rather than on its digest.
+  const text = snapshot.text.replace(
+    "post-if: \"success() || env.CACHE_ON_FAILURE == 'true'\"",
+    'post-if: "always()"',
+  );
+  const source = Buffer.from(text.slice(SNAPSHOT_ANNOTATION.length));
+  const blob = createHash("sha1")
+    .update(`blob ${source.length}\0`)
+    .update(source)
+    .digest("hex");
+  assert.deepEqual(
+    rustCacheSwitchProblems(load(), { text, lock: { ...snapshot.lock, blob } }),
+    [
+      "rust-cache's post step does not obey CACHE_ON_FAILURE on a cancelled job",
+    ],
+  );
 });

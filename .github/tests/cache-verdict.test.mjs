@@ -73,10 +73,16 @@ test("a run stopped at its cap keeps the save of what it built", () => {
 test("a verdict with no start time or no $GITHUB_ENV is refused as usage, deciding nothing", () => {
   const { step } = verdictStep("test-linux");
   for (const [env, says] of [
-    [{ JOB_STARTED_AT: "" }, /--started needs a value|takes a whole number/],
+    [{ JOB_STARTED_AT: "" }, /--started takes epoch seconds, not ''/],
     [
       { JOB_STARTED_AT: "yesterday" },
-      /--started takes a whole number, not 'yesterday'/,
+      /--started takes epoch seconds, not 'yesterday'/,
+    ],
+    // Bash arithmetic would read these as octal, or overflow on them.
+    [{ JOB_STARTED_AT: "08" }, /--started takes epoch seconds, not '08'/],
+    [
+      { JOB_STARTED_AT: "99999999999999999999" },
+      /--started takes epoch seconds, not '99999999999999999999'/,
     ],
     [{ GITHUB_ENV: "" }, /\$GITHUB_ENV is not set/],
   ]) {
@@ -93,4 +99,14 @@ test("a verdict with no start time or no $GITHUB_ENV is refused as usage, decidi
   );
   assert.equal(missing.status, 2, missing.stderr);
   assert.match(missing.stderr, /--started is required/);
+  const cap = spawnSync(
+    "bash",
+    ["scripts/ci-cache-verdict.sh", "--started", "1", "--cap-minutes", "030"],
+    { encoding: "utf8", env: { ...process.env, GITHUB_ENV: "/dev/null" } },
+  );
+  assert.equal(cap.status, 2, cap.stderr);
+  assert.match(
+    cap.stderr,
+    /--cap-minutes takes whole minutes from 1 to 9999, not '030'/,
+  );
 });
