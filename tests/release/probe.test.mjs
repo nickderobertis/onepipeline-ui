@@ -6,9 +6,26 @@
 // where the two spellings coincide, so this is where the difference is driven:
 // the real scripts/release-probe.sh against the registry doubles, called the
 // way the phase calls it, with the doubles serving a prerelease nothing built.
+//
+// The same verification then asks the probe's other two answers: a name nobody
+// released is answered empty, and an identifier the probe cannot read is
+// refused. The registry double can make a never-released name answer a version,
+// which the real probe then reports. What it cannot make is the probe *fail* on
+// that name while answering the declared targets, or *accept* an identifier it
+// should refuse: those are regressions of scripts/release-probe.sh itself. For
+// those two the verification runs from a scratch copy of scripts/release.mjs
+// whose release-probe.sh hands every identifier to the real one except the one
+// the case names, so the verifier under test is the real code and the fault is
+// the one program it calls.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import {
@@ -54,8 +71,9 @@ function serve({ wheelVersion }) {
 }
 
 // The phase's own verification, in a process of its own as the phase runs it,
-// so the operator's switches are read from the environment it was handed.
-function verify(release) {
+// so the operator's switches are read from the environment it was handed. From
+// `root`, a checkout's copy of scripts/release.mjs and release-targets.toml.
+function verify(release, { root = ROOT, extra = {} } = {}) {
   const result = spawnSync(
     process.execPath,
     [
@@ -64,9 +82,43 @@ function verify(release) {
       'import { probeDeclaredTargets } from "./scripts/release.mjs";\nconsole.log(probeDeclaredTargets(process.argv[1]).join("\\n"));',
       release,
     ],
-    { cwd: ROOT, env, encoding: "utf8" },
+    { cwd: root, env: { ...env, ...extra }, encoding: "utf8" },
   );
   return { ...result, output: `${result.stdout}\n${result.stderr}` };
+}
+
+// A scratch checkout of the verifier whose release-probe.sh is the real one for
+// every identifier but $PROBE_FAULT_ID, which it answers as $PROBE_FAULT says:
+// `fail` exits non-zero as an unreachable registry does, `accept` exits zero
+// with nothing, as a probe that stopped refusing an identifier would.
+function faultyCheckout() {
+  const root = join(dir, "faulty-checkout");
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  copyFileSync(
+    join(ROOT, "scripts/release.mjs"),
+    join(root, "scripts/release.mjs"),
+  );
+  copyFileSync(
+    join(ROOT, "release-targets.toml"),
+    join(root, "release-targets.toml"),
+  );
+  const probe = join(root, "scripts/release-probe.sh");
+  writeFileSync(
+    probe,
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "\${PROBE_FAULT_ID:-}" ]; then
+  case "$PROBE_FAULT" in
+    fail) echo "release-probe: the injected fault for $1" >&2; exit 1 ;;
+    accept) exit 0 ;;
+  esac
+fi
+cd ${JSON.stringify(ROOT)}
+exec bash scripts/release-probe.sh "$1"
+`,
+  );
+  chmodSync(probe, 0o755);
+  return root;
 }
 
 before(async () => {
@@ -101,5 +153,67 @@ test("PyPI serving another prerelease of the same version fails the verification
   assert.match(
     run.stderr,
     /the release probe answers 0\.39\.0rc2 for pypi:onepipeline-api-cli, not 0\.39\.0-rc\.1/,
+  );
+});
+
+test("a name nobody released that a registry answers fails the verification", () => {
+  serve({ wheelVersion: "0.39.0rc1" });
+  const never = join(
+    registries.state,
+    "npm",
+    "onepipeline-ui-has-never-been-published",
+  );
+  mkdirSync(never, { recursive: true });
+  writeFileSync(
+    join(never, "1.0.0.json"),
+    JSON.stringify({
+      name: "onepipeline-ui-has-never-been-published",
+      version: "1.0.0",
+    }),
+  );
+  writeFileSync(join(never, "1.0.0.tgz"), "a package");
+  try {
+    const run = verify(PRERELEASE);
+    assert.notEqual(run.status, 0, run.output);
+    assert.match(
+      run.stderr,
+      /the release probe answered '1\.0\.0' \(exit 0\) for npm:onepipeline-ui-has-never-been-published/,
+    );
+  } finally {
+    rmSync(never, { recursive: true, force: true });
+  }
+});
+
+test("a probe that cannot answer for a name nobody released fails the verification", () => {
+  serve({ wheelVersion: "0.39.0rc1" });
+  const run = verify(PRERELEASE, {
+    root: faultyCheckout(),
+    extra: {
+      PROBE_FAULT_ID: "pypi:onepipeline-ui-has-never-been-published",
+      PROBE_FAULT: "fail",
+    },
+  });
+  assert.notEqual(run.status, 0, run.output);
+  assert.match(
+    run.stderr,
+    /the release probe answered '' \(exit 1\) for pypi:onepipeline-ui-has-never-been-published: release-probe: the injected fault/,
+  );
+});
+
+test("a probe that accepts an identifier it must refuse fails the verification", () => {
+  serve({ wheelVersion: "0.39.0rc1" });
+  const root = faultyCheckout();
+  // The same checkout without the fault verifies, so the refusal below is the
+  // injected one and nothing else the copy changed.
+  const sound = verify(PRERELEASE, { root });
+  assert.equal(sound.status, 0, sound.output);
+  const run = verify(PRERELEASE, {
+    root,
+    extra: { PROBE_FAULT_ID: "docker:onepipeline-ui", PROBE_FAULT: "accept" },
+  });
+  assert.notEqual(run.status, 0, run.output);
+  assert.match(
+    run.stderr,
+    /the release probe answered docker:onepipeline-ui instead of refusing it/,
   );
 });

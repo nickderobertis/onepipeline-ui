@@ -1003,9 +1003,10 @@ describe("publication against registry doubles", () => {
     } finally {
       writeFileSync(uiTarball, uiBytes);
     }
-    // With every registry switched off, publish asks none of them for the
-    // release: the crate and the frontend lost, it still verifies, by the
-    // SBOM on the Release and what the probe answers.
+    // With every registry switched off, publish requires nothing of them and
+    // installs nothing from npm: the crate and the frontend lost, it still
+    // verifies, by the SBOM on the Release. The probe still asks each registry,
+    // and what it answers is reported rather than held to this version.
     registries.hide([`onepipeline-ui@${VERSION}`]);
     const offServed = registries.served().length;
     try {
