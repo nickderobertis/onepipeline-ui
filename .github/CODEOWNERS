@@ -18,6 +18,7 @@
 /tests/tiers/cost/       @nickderobertis
 /tests/tiers/linked-report/ @nickderobertis
 /tests/tiers/ci-jobs/     @nickderobertis
+/tests/tiers/judged-tier/ @nickderobertis
 /tests/tiers/coverage/   @nickderobertis
 /docs/contract.md        @nickderobertis
 /Cargo.toml              @nickderobertis

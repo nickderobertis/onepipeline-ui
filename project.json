@@ -96,7 +96,7 @@
       "outputs": ["{workspaceRoot}/target/release-staging"]
     },
     "lint-llm-diff": {
-      "command": "bash scripts/llmlint-judge.sh",
+      "command": "llmlint --diff --diff-base \"$LLMLINT_DIFF_BASE_SHA\"",
       "options": { "cwd": "." }
     },
     "check": {

@@ -1,0 +1,31 @@
+{
+  "name": "onepipeline-ui-judged-tier",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:api", "type:test", "lang:rust"],
+  "targets": {
+    "test": {
+      "command": "just _tier-test judged-tier",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "inputs": [
+        "{workspaceRoot}/tests/e2e/main.rs",
+        "{workspaceRoot}/tests/e2e/judged_tier.rs",
+        "{workspaceRoot}/.config/nextest.toml",
+        "{projectRoot}/project.json",
+        "{workspaceRoot}/nx.json",
+        "{workspaceRoot}/project.json",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/scripts/workspace-install.sh",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/bun.lock",
+        "{workspaceRoot}/.gitignore",
+        "{workspaceRoot}/llmlint.yml",
+        "{workspaceRoot}/oneharness.toml"
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

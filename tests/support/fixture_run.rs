@@ -372,6 +372,35 @@ pub fn configure_local_md_store(dir: &Path) -> PathBuf {
     store
 }
 
+/// Configure the store [`PLAN_PROJECT`] names under `dir` — a `local-md`
+/// source of that name, through the `onetaskgraph.yaml` in `dir`, holding that
+/// project with no tasks — so a driver launched from `dir` reads its project's
+/// claim off a real store.
+///
+/// An adopted driver starts no dispatch until a read of the claim has found the
+/// project its own: one whose store cannot be read holds every agent node where
+/// it is. A run nothing is driving whose agent node a journey adopts is launched
+/// from a project that exists, as every run the engine launches is.
+fn configure_plan_project_store(dir: &Path) {
+    let (source, project) = PLAN_PROJECT
+        .split_once(':')
+        .expect("a qualified project id");
+    let store = dir.join("plan-project-store");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        format!(
+            "sources:\n  {source}:\n    plugin: local-md\n    config:\n      root: {:?}\n",
+            store.display().to_string()
+        ),
+    )
+    .expect("the store configuration");
+    write_store_item(
+        &store.join("projects").join(format!("{project}.md")),
+        &[("title", json!("Contract interface"))],
+        "",
+    );
+}
+
 /// The landed write-back baseline `onepipeline start` seeds from its read of
 /// the project [`launch_from_local_md_store`] writes, before the run's first
 /// projection: where the approval's item is, and what it said as read.
@@ -7277,6 +7306,7 @@ fn write_awaiting(
     plan: &Value,
     launch_sets: &[&str],
 ) -> PathBuf {
+    configure_plan_project_store(dir);
     let run_dir = root.join(run);
     fs::create_dir_all(run_dir.join("channel")).expect("the run directory");
     fs::create_dir_all(RunPaths::under(root, run).dispatches()).expect("the dispatch registry");

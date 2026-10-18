@@ -72,7 +72,7 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// packaging targets, the lints, the docs and the MSRV check compile the crate
 /// too, and one Nx run of a CI job runs them beside the view's build — a view
 /// rebuilt under a compile deletes a file `build.rs` is embedding.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 17] = [
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 18] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-quick",
     "onepipeline-ui-e2e:test",
@@ -82,6 +82,7 @@ const TASKS_THAT_COMPILE_THE_READ_API: [&str; 17] = [
     "onepipeline-ui-baseline:test-baseline",
     "onepipeline-ui-cost:test-cost",
     "onepipeline-ui-linked-report:test",
+    "onepipeline-ui-judged-tier:test",
     "dag-ui:build-api-server",
     "onepipeline-ui:install-smoke",
     "onepipeline-ui:wheel-smoke",

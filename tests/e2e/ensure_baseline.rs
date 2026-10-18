@@ -42,7 +42,7 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 7] = [
+const TIERS: [(&str, &str, &str); 8] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
@@ -50,6 +50,7 @@ const TIERS: [(&str, &str, &str); 7] = [
     ("onepipeline-ui-cost", "test-cost", "cost"),
     ("onepipeline-ui-linked-report", "test", "linked-report"),
     ("onepipeline-ui-ci-jobs", "test", "ci-jobs"),
+    ("onepipeline-ui-judged-tier", "test", "judged-tier"),
 ];
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
@@ -834,7 +835,7 @@ fn the_tier_profiles_partition_the_suite() {
         .collect();
     let profiles = tier_profiles();
 
-    // Inside the `e2e` binary: the three selections are disjoint, and the `e2e`
+    // Inside the `e2e` binary: the six selections are disjoint, and the `e2e`
     // profile excludes exactly their union.
     let mut drawn = std::collections::BTreeSet::new();
     for profile in [
@@ -843,6 +844,7 @@ fn the_tier_profiles_partition_the_suite() {
         "cost",
         "linked-report",
         "ci-jobs",
+        "judged-tier",
     ] {
         for module in &profiles[profile].modules {
             assert!(
@@ -869,6 +871,7 @@ fn the_tier_profiles_partition_the_suite() {
         "cost",
         "linked-report",
         "ci-jobs",
+        "judged-tier",
     ]
     .iter()
     .flat_map(|profile| profiles[*profile].binaries.iter().cloned())

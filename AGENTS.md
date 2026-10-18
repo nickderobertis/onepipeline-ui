@@ -116,6 +116,8 @@ build`, and `tests/packaging.rs` reads each of those jobs for both halves.
 cost journeys count what the server asks the kernel for, and fail rather than
 skip without it; a bare `just test` does not need it. `ci.yml`'s `quality` and
 `sweep` jobs install it.
+The judged tier's journeys likewise need the real `llmlint`, which `just
+setup-llmlint` installs; every CI job that can run them calls that recipe.
 
 **The tier that needs that CLI provisions it; `bootstrap` is not the only path to
 it.** Everything else a tier needs lands in a user-wide cache that outlives any
@@ -170,20 +172,10 @@ advisory database, and the gate stays offline and deterministic.
 CI owns verification. Existing `core.hooksPath` settings are left alone so unrelated
 hooks remain active. `just gate` remains a deliberate manual check.
 
-**The judged tier is memoized.** `just lint-llm-diff <base>` runs the cached Nx
-target `onepipeline-ui:lint-llm-diff` rather than llmlint directly, so one tree
-judged against one base with one judge configuration gets **one** verdict rather
-than a fresh sample. That is not a speed optimisation: the judge is
-non-deterministic across the gap between what it judges — every file in the
-base-to-head diff, because llmlint has no increment mode — and what changed, one
-hunk. One `just gate` invocation over one tree has returned two opposite
-verdicts. Only a green is replayed; findings and a toolchain that never reached a
-verdict are judged again next run, which is the trade for owning no verdict record
-to write, restore or race on. Force a fresh roll with
-`just lint-llm-diff <base> --skip-nx-cache`; an ambient `NX_SKIP_NX_CACHE` is
-reported and ignored by this tier alone, because it would re-roll the judge from
-every unrelated command. The recipe's trailing arguments are Nx's, not llmlint's.
-`scripts/llmlint-cached-diff.sh` holds what is in the key and why.
+**The judged tier is plain llmlint under Nx's cache, with no wrapper of ours.**
+A pass is replayed only for the tree, base commit and judge digest that produced
+it and a failure is always re-judged; a gap in that belongs in llmlint, Nx or the
+recipe's run configuration, never in a script here.
 
 Adding a project means adding its `project.json` and its `CODEOWNERS` line; Nx
 fans one uniformly-named target across all of them.

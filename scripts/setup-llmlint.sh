@@ -40,10 +40,12 @@ set -uo pipefail
 # branch's changes, treats a plain `--diff-base <ref>` as three-dot/merge-base
 # (0.3.15), and ships the deterministic `validate` gate — config structure +
 # `llmlint: ignore` directives + fragment version bumps — that `just
-# lint-llm-validate` runs with no model call (0.3.17), and bundles config_lint v1.2
-# so `line_localizable_rules_require_attribution` is enforced (0.3.23).
-# llmlint: ignore[changed_behavior_has_e2e] this dependency floor selects the validator release used by the existing real `just lint-llm-validate` gate; installer control flow and its user-visible contract are unchanged.
-readonly LLMLINT_MIN="0.3.23"
+# lint-llm-validate` runs with no model call (0.3.17), bundles config_lint v1.2
+# so `line_localizable_rules_require_attribution` is enforced (0.3.23), and ships
+# `llmlint fingerprint`, the judge digest `onepipeline-ui:lint-llm-diff` is cached
+# on, with `max_prompt_chars` splitting an oversized diff across judge calls (0.4.11).
+# llmlint: ignore[changed_behavior_has_e2e] this dependency floor selects the llmlint release the judged tier runs, and `tests/e2e/judged_tier.rs` drives that tier through the release this installs; installer control flow and its user-visible contract are unchanged.
+readonly LLMLINT_MIN="0.4.11"
 readonly BIN_DIR="$HOME/.local/bin"
 
 log() { printf 'setup-llmlint: %s\n' "$*" >&2; }

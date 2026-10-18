@@ -12,10 +12,10 @@
 //! every `project.json`, `nx.json`, the sources whose imports Nx reads edges from
 //! — copied into a scratch git repository so its commits are this suite's own;
 //! Nx is the one this workspace installed, borrowed rather than reinstalled, as
-//! `llmlint_cache` borrows it. `--graph=stdout` is Nx's own answer to "what would
+//! `judged_tier` borrows it. `--graph=stdout` is Nx's own answer to "what would
 //! you run", so the selection is read without running any of it.
 //!
-//! Unix only for the reason `llmlint_cache` is: the borrowed install is a
+//! Unix only for the reason `judged_tier` is: the borrowed install is a
 //! symlink, and the script is bash. The macOS leg runs it.
 #![cfg(unix)]
 
@@ -278,6 +278,27 @@ fn a_change_to_the_repository_machinery_selects_its_tier_and_not_the_journeys() 
 }
 
 #[test]
+fn a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does() {
+    for path in ["llmlint.yml", "oneharness.toml", "scripts/nx.sh"] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        assert!(
+            selected(&tasks, "onepipeline-ui-judged-tier"),
+            "a change to {path} does not run the judged tier's journeys: {tasks:?}"
+        );
+    }
+    for path in [".github/workflows/ci.yml", "src/lib.rs"] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        assert!(
+            !selected(&tasks, "onepipeline-ui-judged-tier"),
+            "a change to {path} runs the judged tier's journeys, which read nothing it changed: \
+             {tasks:?}"
+        );
+    }
+}
+
+#[test]
 fn a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery() {
     let workspace = Workspace::new();
     let tasks = workspace.change("tests/e2e/server.rs").on_push();
@@ -294,6 +315,7 @@ fn a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery() {
         "onepipeline-ui-baseline",
         "onepipeline-ui-cost",
         "onepipeline-ui-linked-report",
+        "onepipeline-ui-judged-tier",
     ] {
         assert!(
             !selected(&tasks, tier),
