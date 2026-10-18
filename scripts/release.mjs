@@ -753,13 +753,21 @@ async function uploadPlatform(job, out, registry, dryRun) {
 function verifyPlatform(job, out) {
   const { version, targets, artifacts } = plan(job);
   const tag = releaseTag(version);
+  // What every installed binary is held to, so it has to have been staged:
+  // without it there is nothing to say a registry served this job's build.
+  requireStaged(out, artifacts);
+  const missingBinaries = targets
+    .map((target) => `${target}/onepipeline-api${TARGETS[target].exe}`)
+    .filter((binary) => !existsSync(join(out, binary)));
+  if (missingBinaries.length)
+    throw new Fault(
+      `nothing staged under ${out} for: ${missingBinaries.join(", ")}`,
+      "run the build phase of this recipe first, with the same --out",
+    );
   const exeBytes = (target) =>
     readFileSync(join(out, target, `onepipeline-api${TARGETS[target].exe}`));
   const sameBytes = (installed, target, where) => {
-    if (
-      existsSync(join(out, target)) &&
-      !readFileSync(installed).equals(exeBytes(target))
-    )
+    if (!readFileSync(installed).equals(exeBytes(target)))
       throw new Fault(
         `${where} installed a different binary than this job built`,
         "check which build the registry serves for this version",
@@ -1270,6 +1278,14 @@ function settle() {
       EXPECT_NPM: switchedOn("NPM_PUBLISH") ? "true" : "false",
     },
   });
+  // A status script stopped by a signal has no exit status and printed no
+  // verdict, so it is a failure of its own rather than an exit code of null,
+  // which would end this phase as a success.
+  if (status.signal)
+    throw new Fault(
+      `scripts/release-status.sh was stopped by ${status.signal} before it decided the release`,
+      "re-run the publish job; settle decides again from the same results",
+    );
   if (status.status !== 0)
     throw new Fault(
       "the release did not publish",

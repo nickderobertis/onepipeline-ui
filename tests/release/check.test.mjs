@@ -5,11 +5,22 @@
 // registry doubles with nothing staged: whatever it lets through would show up
 // as an upload.
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { PLATFORMS, plan } from "../../scripts/release.mjs";
 import {
   githubDouble,
+  ROOT,
   recipe,
   registryDoubles,
   releaseEnv,
@@ -145,4 +156,119 @@ test("results the workflow hands over in another shape are refused before anythi
   assert.equal(gh.calls().length, calls, "the Release was not read or edited");
   assert.ok(!gh.prerelease());
   assert.deepEqual(registries.uploads(), []);
+});
+
+test("with npm and PyPI switched off, every platform's Release assets are all it requires, and neither registry is asked", () => {
+  for (const job of Object.keys(PLATFORMS))
+    for (const artifact of plan(job).artifacts)
+      if (artifact.registry === "github")
+        writeFileSync(join(gh.assets, artifact.file), artifact.file);
+  // Both registries' reads are broken, so asking either would fail the check.
+  registries.breakReads(["pypi-json=503", "npm-packument=503"]);
+  try {
+    const off = {
+      BUILD_RESULTS: allBuilt,
+      PYPI_PUBLISH: "false",
+      NPM_PUBLISH: "false",
+    };
+    const check = publish(["check"], off);
+    assert.equal(check.status, 0, check.output);
+    assert.match(check.stdout, /every platform's v\S+ files are served/);
+    // One platform's archive gone, and the same check refuses again.
+    const [archive] = plan("windows").artifacts.filter(
+      (a) => a.kind === "archive",
+    );
+    rmSync(join(gh.assets, archive.file));
+    const missing = publish(["check"], off);
+    assert.notEqual(missing.status, 0, missing.output);
+    assert.match(
+      missing.stderr,
+      new RegExp(`GitHub Release ${escapeRegExp(archive.file)}`),
+    );
+    assert.doesNotMatch(missing.stderr, /PyPI|npm /);
+  } finally {
+    registries.clear();
+    for (const file of readdirSync(gh.assets)) rmSync(join(gh.assets, file));
+  }
+  assert.deepEqual(registries.uploads(), []);
+});
+
+// Every process descended from `pid`, read from /proc: the one a signal goes to
+// is found under the recipe this journey started, never by name.
+function descendants(pid) {
+  const parents = new Map();
+  for (const entry of readdirSync("/proc").filter((e) => /^\d+$/.test(e))) {
+    try {
+      const stat = readFileSync(`/proc/${entry}/stat`, "utf8");
+      parents.set(
+        Number(entry),
+        Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]),
+      );
+    } catch {
+      // Gone between the listing and the read.
+    }
+  }
+  const found = [];
+  const pending = [pid];
+  while (pending.length) {
+    const parent = pending.pop();
+    for (const [child, of] of parents)
+      if (of === parent) {
+        found.push(child);
+        pending.push(child);
+      }
+  }
+  return found;
+}
+
+test("a release-status.sh stopped by a signal fails settle rather than ending it as a success", async () => {
+  const hold = join(gh.state, "hold");
+  writeFileSync(hold, "");
+  const child = spawn("just", ["release-publish", "settle"], {
+    cwd: ROOT,
+    env: {
+      ...env,
+      BUILD_RESULTS: allBuilt,
+      STEP_RESULTS:
+        "check=success build=success upload-crate=success upload-npm=success upload-github=success verify=success",
+    },
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  child.stdout.resume();
+  const exited = new Promise((done) =>
+    child.once("exit", (code) => done(code)),
+  );
+  try {
+    let status;
+    for (let i = 0; i < 400 && !status; i++) {
+      status = descendants(child.pid).find((pid) => {
+        try {
+          return readFileSync(`/proc/${pid}/cmdline`, "utf8")
+            .split("\0")
+            .includes("scripts/release-status.sh");
+        } catch {
+          return false;
+        }
+      });
+      if (!status) await sleep(50);
+    }
+    assert.ok(status, "release-status.sh started under the recipe");
+    // Waiting on the held `gh`, so it has decided nothing yet.
+    for (let i = 0; i < 400 && !gh.calls().length; i++) await sleep(50);
+    process.kill(status, "SIGTERM");
+  } finally {
+    rmSync(hold, { force: true });
+  }
+  const code = await exited;
+  assert.notEqual(code, 0, stderr);
+  assert.match(
+    stderr,
+    /scripts\/release-status\.sh was stopped by SIGTERM before it decided the release/,
+  );
+  assert.match(stderr, /ACTION: re-run the publish job/);
+  assert.ok(!gh.prerelease(), "nothing edited the Release");
+  assert.ok(!existsSync(hold));
 });

@@ -13,6 +13,8 @@
 //   calls.log                     every invocation, one JSON argv per line
 //   fail/<file>                   every upload of <file> fails until removed
 //   prs                           what `gh pr list --jq ...` prints
+//   hold                          while it exists, every call waits for it to
+//                                 be removed before answering
 import {
   appendFileSync,
   copyFileSync,
@@ -31,6 +33,8 @@ if (!state) {
   process.exit(4);
 }
 appendFileSync(join(state, "calls.log"), `${JSON.stringify(args)}\n`);
+while (existsSync(join(state, "hold")))
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 
 const fail = (message) => {
   console.error(message);

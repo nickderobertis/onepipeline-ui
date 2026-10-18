@@ -45,6 +45,7 @@ for (const phase of [
   ["upload", "github"],
   ["upload", "pypi"],
   ["upload", "npm"],
+  ["verify"],
 ])
   test(`build-linux's ${phase.join(" ")} refuses an --out nothing was staged in, and publishes nothing`, () => {
     const run = recipe("linux", [...phase, "--out", out], env);
