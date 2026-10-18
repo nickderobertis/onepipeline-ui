@@ -2026,7 +2026,7 @@ fn stage_with_a_dry_run_exiting(status: i32) -> (tempfile::TempDir, std::process
     // llmlint: ignore[e2e_not_mocked] the subject is the recipe's handling of its producer's exit, and the real producer compiles a release build; standing in for that script is what lets a journey choose the exit the recipe must carry.
     fs::write(
         tree.path().join("scripts/release-native-dry-run.sh"),
-        format!("printf 'staged into %s\\n' \"$1\"\nnice > niceness\nexit {status}\n"),
+        format!("printf 'staged into %s\\n' \"$1\"\nps -o nice= -p $$ > niceness\nexit {status}\n"),
     )
     .expect("write the stand-in dry run");
     let output = std::process::Command::new("just")
@@ -2067,10 +2067,13 @@ fn the_release_staging_dry_run_runs_below_its_callers_priority() {
         String::from_utf8_lossy(&output.stderr)
     );
     let niceness = |text: &str| text.trim().parse::<i32>().expect("a niceness");
+    // Read with `ps`, which Linux and macOS both answer; macOS's `nice` prints
+    // nothing when given no command.
     let ours = niceness(&String::from_utf8_lossy(
-        &std::process::Command::new("nice")
+        &std::process::Command::new("ps")
+            .args(["-o", "nice=", "-p", &std::process::id().to_string()])
             .output()
-            .expect("nice is on PATH")
+            .expect("ps is on PATH")
             .stdout,
     ));
     let staged = niceness(
