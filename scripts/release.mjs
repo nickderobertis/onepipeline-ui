@@ -267,6 +267,7 @@ function stagedPath(out, artifact) {
 // Every tool's output is captured, and shown only when it fails: a phase's own
 // summary is its success output. `inherit` lets one through as it runs, and
 // `log` keeps it in a file whatever happened.
+// llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (`shell` for npm, npx and the .cmd launcher, which Node cannot spawn without one, and Windows' own bsdtar) is taken only on a Windows runner, where the release's build-windows job runs it on every release before anything publishes; on every other host the option is false and the same call is driven end to end by tests/release/journeys.test.mjs.
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: REPO_ROOT,
@@ -284,6 +285,7 @@ function run(command, args, options = {}) {
     );
   return result;
 }
+// llmlint: ignore-end[changed_behavior_has_e2e]
 
 function must(what, action, command, args, options) {
   const result = run(command, args, options);
@@ -1444,7 +1446,9 @@ if (
         ? error
         : new Fault(
             `${error.message}\n${error.stack}`,
-            "an unexpected failure, named above; fix its cause and re-run this phase",
+            error.path
+              ? `${error.code ?? "a filesystem error"} on ${error.path}: repair that path (every parent a directory, the file present, writable by this user; it is under the --out directory or target/), then re-run \`node scripts/release.mjs ${process.argv.slice(2).join(" ")}\``
+              : `this is a defect in scripts/release.mjs, not in the release's inputs: the stack above names the line; re-run \`node scripts/release.mjs ${process.argv.slice(2).join(" ")}\` once it is fixed`,
           );
     console.error(`release: ${fault.message}`);
     console.error(`ACTION: ${fault.action}`);

@@ -60,6 +60,7 @@ async function main() {
   );
   const facts = TARGETS[target];
   const exe = `onepipeline-api${facts.exe}`;
+  // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (`shell` for npm, npx and the .cmd launcher, which Node cannot spawn without one, and Windows' own bsdtar) is taken only on a Windows runner, where the release's build-windows job runs it on every release before anything publishes; on every other host the option is false and the same call is driven end to end by tests/release/journeys.test.mjs.
   const run = (cmd, args, options = {}) =>
     execFileSync(cmd, args, {
       stdio: "pipe",
@@ -84,6 +85,7 @@ async function main() {
       ["serve", "--ui", "--runs-root", runs, "--bind", "127.0.0.1:0"],
       { shell: WINDOWS && command.endsWith(".cmd") },
     );
+    // llmlint: ignore-end[changed_behavior_has_e2e]
     let log = "";
     server.stdout.on("data", (data) => {
       log += data;
@@ -168,10 +170,12 @@ async function main() {
       );
     const dl = join(scratch, "archive");
     mkdirSync(dl);
+    // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (`shell` for npm, npx and the .cmd launcher, which Node cannot spawn without one, and Windows' own bsdtar) is taken only on a Windows runner, where the release's build-windows job runs it on every release before anything publishes; on every other host the option is false and the same call is driven end to end by tests/release/journeys.test.mjs.
     // Windows' own tar is bsdtar, which reads the .zip; Git's GNU tar does not.
     const tar = WINDOWS
       ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
       : "tar";
+    // llmlint: ignore-end[changed_behavior_has_e2e]
     run(tar, ["-xf", archive, "-C", dl]);
     await smoke(join(dl, exe));
     const wheelArch = { linux: "x86_64", macos: "arm64", windows: "amd64" }[
@@ -322,6 +326,7 @@ async function main() {
             "--no-fund",
             join(scratch, launcherTarball),
           ],
+          // llmlint: ignore[changed_behavior_has_e2e] the Windows branch here (`shell` for npm, npx and the .cmd launcher, which Node cannot spawn without one, and Windows' own bsdtar) is taken only on a Windows runner, where the release's build-windows job runs it on every release before anything publishes; on every other host the option is false and the same call is driven end to end by tests/release/journeys.test.mjs.
           { env: { ...process.env, TMPDIR: scratch }, shell: WINDOWS },
         );
         let output = "";

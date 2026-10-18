@@ -99,3 +99,26 @@ test("build-linux's verify refuses carriers staged without the binary they were 
     rmSync(carriers, { recursive: true, force: true });
   }
 });
+
+test("publish's build names the path and the re-run when the filesystem refuses its --out", () => {
+  // A regular file where the staging tree needs a directory: the refusal comes
+  // from the filesystem rather than from a check of the recipe's own, and the
+  // operator still has to be told which path to repair and what to run next.
+  const blocker = join(out, "not-a-directory");
+  writeFileSync(blocker, "a file\n");
+  const staging = join(blocker, "publish");
+  const run = recipe("publish", ["build", "--out", staging], env);
+  assert.notEqual(run.status, 0, run.output);
+  assert.match(
+    run.stderr,
+    new RegExp(
+      `ACTION: ENOTDIR on ${blocker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\S+: repair that path`,
+    ),
+  );
+  assert.match(
+    run.stderr,
+    /then re-run `node scripts\/release\.mjs publish build --out \S+`/,
+  );
+  assert.deepEqual(registries.uploads(), []);
+  assert.deepEqual(gh.uploads(), []);
+});
