@@ -327,12 +327,21 @@ release-python-tools:
 # release workflows install, into `.tools`: release-plz and cargo-cyclonedx, and
 # a Python environment with `release-python-tools`. The release journeys
 # (tests/release) put `.tools/bin` and `.tools/release-venv/bin` first on PATH.
+# One already on PATH that reports exactly the pin — what ci.yml's
+# taiki-e/install-action step unpacks from the tool's checksummed release
+# archive — is copied in rather than compiled again: compiling release-plz was
+# most of what test-linux waited on before these journeys could start. Any
+# other version on PATH is passed over and the pin compiled.
 # Provision the release recipes' tools into .tools.
 release-tools:
     @[ "$(.tools/bin/release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
+      || { [ "$(release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
+           && mkdir -p .tools/bin && cp "$(command -v release-plz)" .tools/bin/release-plz; } \
       || cargo install release-plz --version {{release-plz-version}} --locked --root .tools --quiet \
       || { echo "cannot install release-plz {{release-plz-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
     @[ "$(.tools/bin/cargo-cyclonedx cyclonedx --version 2>/dev/null | cut -d' ' -f2)" = "{{cyclonedx-version}}" ] \
+      || { [ "$(cargo-cyclonedx cyclonedx --version 2>/dev/null | cut -d' ' -f2)" = "{{cyclonedx-version}}" ] \
+           && mkdir -p .tools/bin && cp "$(command -v cargo-cyclonedx)" .tools/bin/cargo-cyclonedx; } \
       || cargo install cargo-cyclonedx --version {{cyclonedx-version}} --locked --root .tools --quiet \
       || { echo "cannot install cargo-cyclonedx {{cyclonedx-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
     @just _release-venv

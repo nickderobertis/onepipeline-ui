@@ -427,6 +427,22 @@ test("the tools the release recipes reach are pinned once for the workflows and 
     pin("maturin-version"),
   );
   assert.doesNotMatch(rel, /pip install/);
+  // The CI jobs that run the release journeys install both prebuilt, at these
+  // pins, for `just release-tools` to copy rather than compile: a version that
+  // drifted from the justfile's would be passed over and compiled again.
+  for (const job of ["test-linux", "quality", "sweep"]) {
+    const tools = workflow("ci.yml")
+      .jobs[job].steps.filter((s) => s.uses === "taiki-e/install-action@v2")
+      .flatMap((s) => s.with.tool.split(/[,\s]+/));
+    assert.ok(
+      tools.includes(`release-plz@${pin("release-plz-version")}`),
+      `${job} installs release-plz ${pin("release-plz-version")}: ${tools}`,
+    );
+    assert.ok(
+      tools.includes(`cargo-cyclonedx@${pin("cyclonedx-version")}`),
+      `${job} installs cargo-cyclonedx ${pin("cyclonedx-version")}: ${tools}`,
+    );
+  }
   for (const job of BUILD_JOBS)
     assert.ok(
       release().jobs[job].steps.some(

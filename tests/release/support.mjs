@@ -176,6 +176,12 @@ export function releaseEnv({ gh, registries, home, extra = {} }) {
     NPM_CONFIG_USERCONFIG: npmrc,
     NPM_CONFIG_CACHE: join(home, "npm-cache"),
     PIP_CONFIG_FILE: "/dev/null",
+    // npm retries a failed fetch twice, at 10 s and then 60 s, and pacote
+    // repeats that over its own retries: a journey that serves a corrupt
+    // tarball or answers a publish with a 500 waited minutes on that backoff.
+    // The same retries, at a local double's pace.
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "100",
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "500",
     RELEASE_VERIFY_BUDGET: "6",
     ...extra,
   };

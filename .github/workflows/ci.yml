@@ -257,9 +257,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
+      # pins, from their checksummed release archives: `just release-tools`
+      # copies these into `.tools` rather than compiling them on every run.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
       # What `tests/e2e/cost.rs` counts with, as in `quality` below.
       - name: Install the syscall tracer the cost journeys count with
         run: sudo apt-get update && sudo apt-get install -y strace
@@ -557,9 +560,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
+      # pins, from their checksummed release archives: `just release-tools`
+      # copies these into `.tools` rather than compiling them on every run.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
       # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
       # what a read may do to a runs root — the bug that made one open subscriber
       # cost a core — and they count operations from the kernel's own record of
@@ -615,9 +621,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
+      # pins, from their checksummed release archives: `just release-tools`
+      # copies these into `.tools` rather than compiling them on every run.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
       # The cost journeys count with it, as in `quality` above.
       - name: Install the syscall tracer the cost journeys count with
         run: sudo apt-get update && sudo apt-get install -y strace
