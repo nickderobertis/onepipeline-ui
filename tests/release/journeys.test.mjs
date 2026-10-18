@@ -383,6 +383,15 @@ describe("publication against registry doubles", () => {
     assert.notEqual(refused.status, 0, refused.output);
     assert.match(refused.stderr, /uploading .*\.whl to PyPI failed/);
     assert.deepEqual(registries.uploads(), []);
+    // The npm platform package, likewise, until the registry takes it again.
+    registries.failUploads(`${fileOf("npm").package}-${VERSION}.tgz`);
+    const unpublished = recipe("linux", ["upload", "npm", "--out", OUT], {
+      ...env,
+      NPM_CONFIG_FETCH_RETRIES: "0",
+    });
+    assert.notEqual(unpublished.status, 0, unpublished.output);
+    assert.match(unpublished.stderr, /publishing .*\.tgz to npm failed/);
+    assert.deepEqual(registries.uploads(), []);
     registries.clear();
     for (const registry of ["pypi", "npm"]) {
       const run = linux("upload", registry);
@@ -783,6 +792,12 @@ describe("publication against registry doubles", () => {
         /the crate index answered with no records/,
       ],
       [
+        "the crate index answers 503",
+        ["crate-index=503"],
+        ["upload", "crate"],
+        /the crates\.io index answered 503/,
+      ],
+      [
         "the crate index serves JSON that is no index entry",
         ["crate-index=foreign"],
         ["upload", "crate"],
@@ -804,6 +819,12 @@ describe("publication against registry doubles", () => {
     });
     assert.notEqual(unreachable.status, 0);
     assert.match(unreachable.stderr, /cannot reach PyPI/);
+    const noIndex = publish(["upload", "crate"], {
+      ...extra,
+      RELEASE_CRATES_INDEX: "http://127.0.0.1:9",
+    });
+    assert.notEqual(noIndex.status, 0);
+    assert.match(noIndex.stderr, /cannot reach the crates\.io index/);
     assert.deepEqual(independent(), [], "nothing was published");
   });
 

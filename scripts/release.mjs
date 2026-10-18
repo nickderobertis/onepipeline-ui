@@ -455,18 +455,13 @@ function npmServes(pkg, version) {
   );
   if (/E404|404 Not Found/.test(result.stderr)) return false;
   if (result.status === 0) {
-    // `npm view` prints nothing for a version the package does not have, and
-    // the version as JSON for one it does.
-    if (!result.stdout.trim()) return false;
-    let served;
-    try {
-      served = JSON.parse(result.stdout);
-    } catch {
-      served = undefined;
-    }
-    if (served === version) return true;
+    // A version the package does not have is the E404 above; one it has is
+    // printed as a JSON string. Anything else, nothing included (a manifest
+    // with no version in it), is refused rather than read as not served, which
+    // would publish over a version npm already has.
+    if (result.stdout.trim() === JSON.stringify(version)) return true;
     throw new Fault(
-      `npm answered ${pkg}@${version} with ${result.stdout.trim()}`,
+      `npm answered ${pkg}@${version} with ${result.stdout.trim() || "nothing"}`,
       "re-run when the npm registry answers; it named no such version",
     );
   }
