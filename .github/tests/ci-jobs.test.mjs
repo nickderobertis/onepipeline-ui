@@ -320,6 +320,51 @@ export function linuxArm64Problems(workflows) {
   return problems;
 }
 
+// A Rust build the four jobs save on failure is saved from a cancelled run only
+// when that run reached its cap: each job takes its start time first, and after
+// its recipe stops what a cancelled run left building and asks
+// scripts/ci-cache-verdict.sh, at the job's own cap, whether to keep the save.
+const VERDICT =
+  'bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes ';
+export function cancelledCacheProblems(workflows) {
+  const problems = [];
+  for (const id of Object.keys(FOUR)) {
+    const job = workflows["ci.yml"]?.jobs?.[id];
+    if (!job) continue;
+    const steps = job.steps ?? [];
+    const rust = steps.findIndex((s) =>
+      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
+    );
+    if (rust < 0 || !steps[rust].with?.["cache-on-failure"]) continue;
+    if (!/JOB_STARTED_AT=\$\(date \+%s\)/.test(steps[0]?.run ?? ""))
+      problems.push(`job ${id} does not take its start time first`);
+    const at = (pattern) =>
+      steps.findIndex(
+        (s) => s.if === "cancelled()" && pattern.test(s.run ?? ""),
+      );
+    const stop = at(/pkill -KILL|taskkill \/\/F/);
+    const verdict = steps.findIndex(
+      (s) => s.if === "cancelled()" && (s.run ?? "").startsWith(VERDICT),
+    );
+    const recipe = steps.findIndex((s) =>
+      (s.run ?? "").startsWith(`just ci-${id}`),
+    );
+    if (stop < 0)
+      problems.push(`job ${id} leaves a cancelled run's builds running`);
+    if (verdict < 0) {
+      problems.push(`job ${id} saves a superseded run's build`);
+      continue;
+    }
+    if (steps[verdict].run !== `${VERDICT}${job["timeout-minutes"]}`)
+      problems.push(`job ${id} reads its cap as other than its timeout`);
+    if (!(recipe < stop && stop < verdict))
+      problems.push(
+        `job ${id} does not stop its builds and then decide, after its recipe`,
+      );
+  }
+  return problems;
+}
+
 const clone = (workflows) => structuredClone(workflows);
 // A workflow expression, spelled without a literal `${` in this file.
 const expression = (inner) => `$${"{{"} ${inner} }}`;
@@ -620,5 +665,57 @@ test("a Linux arm64 wheel leg or runner coming back is refused", () => {
     const problems = linuxArm64Problems(workflows);
     for (const problem of expected)
       assert.ok(problems.includes(problem), `${problem}: ${problems}`);
+  }
+});
+
+test("a cancelled run's build is saved only when it reached the cap", () => {
+  assert.deepEqual(cancelledCacheProblems(load()), []);
+});
+
+test("a job that would save a superseded run's build is refused", () => {
+  const steps = (w, id) => w["ci.yml"].jobs[id].steps;
+  const without = (w, id, pattern) => {
+    w["ci.yml"].jobs[id].steps = steps(w, id).filter(
+      (s) => !pattern.test(s.run ?? ""),
+    );
+  };
+  const cases = [
+    [
+      (w) => without(w, "test-linux", /JOB_STARTED_AT=/),
+      "job test-linux does not take its start time first",
+    ],
+    [
+      (w) => without(w, "test-windows", /taskkill/),
+      "job test-windows leaves a cancelled run's builds running",
+    ],
+    [
+      (w) => without(w, "lint", /ci-cache-verdict/),
+      "job lint saves a superseded run's build",
+    ],
+    [
+      (w) => {
+        steps(w, "test-macos").find((s) =>
+          (s.run ?? "").includes("ci-cache-verdict"),
+        ).run = `${VERDICT}45`;
+      },
+      "job test-macos reads its cap as other than its timeout",
+    ],
+    [
+      (w) => {
+        const list = steps(w, "test-linux");
+        const stop = list.findIndex((s) => /pkill/.test(s.run ?? ""));
+        const [moved] = list.splice(stop, 1);
+        list.push(moved);
+      },
+      "job test-linux does not stop its builds and then decide, after its recipe",
+    ],
+  ];
+  for (const [mutate, problem] of cases) {
+    const workflows = clone(load());
+    mutate(workflows);
+    assert.ok(
+      cancelledCacheProblems(workflows).includes(problem),
+      `${problem}: ${cancelledCacheProblems(workflows)}`,
+    );
   }
 });

@@ -15,6 +15,7 @@
       "{workspaceRoot}/scripts/verify-staged-release.mjs",
       "{workspaceRoot}/scripts/npm-build.mjs",
       "{workspaceRoot}/scripts/ci-job.sh",
+      "{workspaceRoot}/scripts/ci-cache-verdict.sh",
       "{workspaceRoot}/justfile"
     ]
   },
