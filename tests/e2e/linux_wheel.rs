@@ -402,7 +402,7 @@ fn a_hand_back_that_fails_fails_a_build_that_compiled() {
 /// The acceptance this module exists for: a pull request builds the release's
 /// Linux wheels through the one definition the release uses, on its runners.
 #[test]
-fn the_pull_request_check_builds_the_release_linux_legs_through_the_recipe() {
+fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe() {
     let block = job_block("ci.yml", "wheel");
     // Linux arm64 is dropped from pull-request CI by the user's decision, so the
     // pull request builds the release's x86_64 Linux leg alone; release.yml's
