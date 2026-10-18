@@ -82,13 +82,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-      # Saved even when the job fails or hits its cap: a first run cancelled at
-      # 30 minutes would otherwise save nothing, and every run after it would
-      # start from the same cold build. Not when a newer push supersedes it: the
-      # job's last steps withdraw that save through the switch this release's
-      # post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
+      # Restored from main's build and saved only on main, so the cache limit is
+      # spent on the builds every pull request restores. `shared-key` names the
+      # key main's runs save for this toolchain — the `msrv` job's here — which a
+      # main-branch warm job saves under once the old jobs are removed. On main a
+      # run saves even when it fails or hits its cap, so a first run cancelled at
+      # 30 minutes does not leave the next one cold; never one a newer push
+      # superseded, whose save the job's last steps withdraw through the switch
+      # this release's post step reads (.github/fixtures/rust-cache-v2.9.2-action.yml).
       - uses: Swatinem/rust-cache@v2.9.2
         with:
+          shared-key: msrv
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
@@ -232,9 +237,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Saved on failure and at the cap but not when superseded, as in `lint`.
+      # Restored from main's build of `quality`'s key and saved only on main, as in
+      # `lint`.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
+          shared-key: quality
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
@@ -278,10 +286,10 @@ jobs:
           key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
       - name: Bootstrap
         run: just bootstrap
-      # Saved as soon as bootstrap has provisioned them, not at the end of the
-      # job, so a run that fails or hits its cap still leaves them for the next.
+      # Saved on main only, as the build is, and as soon as bootstrap has
+      # provisioned it, so a run that fails or hits its cap still leaves it.
       - name: Save the sibling CLI
-        if: steps.sibling.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/main' && steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .tools/bin/onepipeline
@@ -308,9 +316,10 @@ jobs:
         run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 30
       # The gate provisions the base commit's server itself, when a tier needs
       # it, so it is saved after the gate — whatever the gate's verdict — and
-      # only when one was built.
+      # only when one was built; on main only, where the commit it was built from
+      # is the one the next pull requests fork from.
       - name: Save the base commit's server
-        if: always() && steps.baseline.outputs.cache-hit != 'true' && hashFiles('.tools/bin/onepipeline-api-baseline.commit') != ''
+        if: always() && github.ref == 'refs/heads/main' && steps.baseline.outputs.cache-hit != 'true' && hashFiles('.tools/bin/onepipeline-api-baseline.commit') != ''
         uses: actions/cache/save@v4
         with:
           path: |
@@ -336,9 +345,12 @@ jobs:
           # The `ensure_baseline::` journeys resolve the commit this branch forked
           # from, which a shallow checkout does not have.
           fetch-depth: 0
-      # Saved on failure and at the cap but not when superseded, as in `lint`.
+      # Restored from main's build of `cross`'s key and saved only on main, as in
+      # `lint`.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
+          shared-key: cross
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
@@ -361,7 +373,7 @@ jobs:
       - name: Bootstrap
         run: just bootstrap
       - name: Save the sibling CLI
-        if: steps.sibling.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/main' && steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .tools/bin/onepipeline.exe
@@ -421,10 +433,12 @@ jobs:
             process.stdout.write(String(macosRequired));
           ' "$result")"
           echo "required=$required" >> "$GITHUB_OUTPUT"
-      # Saved on failure and at the cap but not when superseded, as in `lint`.
+      # Saved only on main, as in `lint`; no main run builds on macOS until the
+      # warm job does, so this restores nothing before then.
       - uses: Swatinem/rust-cache@v2.9.2
         if: steps.macos.outputs.required == 'true'
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - uses: oven-sh/setup-bun@v2
         if: steps.macos.outputs.required == 'true'
@@ -448,12 +462,6 @@ jobs:
       - name: Bootstrap
         if: steps.macos.outputs.required == 'true'
         run: just bootstrap
-      - name: Save the sibling CLI
-        if: steps.macos.outputs.required == 'true' && steps.sibling.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .tools/bin/onepipeline
-          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Platform tiers and install (affected projects)
         if: steps.macos.outputs.required == 'true'
         run: just ci-test-macos

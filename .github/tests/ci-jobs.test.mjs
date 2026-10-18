@@ -423,6 +423,62 @@ export function rustCacheSwitchProblems(workflows, snapshot) {
   return problems;
 }
 
+// The four jobs restore main's builds and save only on main, so the cache limit
+// is spent on what every pull request restores. A job's Rust build is restored
+// under the key a main run of ci.yml saves for the same toolchain — named by the
+// job it borrows it from, which has no shared-key of its own and runs on the
+// same OS — or under its own id where no main run builds on that OS yet.
+// Spelled without a literal `${`, as `expression` below is.
+const MAIN_ONLY = `$${"{{"} github.ref == 'refs/heads/main' }}`;
+const SHARED = {
+  lint: "msrv",
+  "test-linux": "quality",
+  "test-windows": "cross",
+};
+export function mainOnlySaveProblems(workflows) {
+  const problems = [];
+  const jobs = workflows["ci.yml"]?.jobs ?? {};
+  const rustCache = (job) =>
+    (job?.steps ?? []).find((s) =>
+      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
+    );
+  for (const id of Object.keys(FOUR)) {
+    const job = jobs[id];
+    if (!job) continue;
+    const rust = rustCache(job);
+    if (rust && rust.with?.["save-if"] !== MAIN_ONLY)
+      problems.push(`job ${id} saves its Rust build off main`);
+    if (rust && rust.with?.["shared-key"] !== SHARED[id])
+      problems.push(
+        `job ${id} restores ${rust.with?.["shared-key"] ?? "its own key"}, not ${SHARED[id] ?? "its own key"}`,
+      );
+    const lender = jobs[SHARED[id]];
+    if (SHARED[id]) {
+      const lent = rustCache(lender);
+      const os = (runner) => String(runner).split("-")[0];
+      const runners = [
+        lender?.["runs-on"],
+        ...(lender?.strategy?.matrix?.os ?? []),
+      ];
+      if (
+        !lent ||
+        lent.with?.["shared-key"] ||
+        !runners.some((r) => os(r) === os(job["runs-on"]))
+      )
+        problems.push(
+          `job ${id} restores ${SHARED[id]}'s key, which no ${os(job["runs-on"])} job of ci.yml saves`,
+        );
+    }
+    for (const step of job.steps ?? [])
+      if (
+        (step.uses ?? "").startsWith("actions/cache/save@") &&
+        !/(^|&& )github\.ref == 'refs\/heads\/main' &&/.test(step.if ?? "")
+      )
+        problems.push(`job ${id} saves ${step.with?.path} off main`);
+  }
+  return problems;
+}
+
 const clone = (workflows) => structuredClone(workflows);
 // A workflow expression, spelled without a literal `${` in this file.
 const expression = (inner) => `$${"{{"} ${inner} }}`;
@@ -583,21 +639,27 @@ test("every job behind today's required contexts is still in place", () => {
 test("every restored cache is keyed on what produced it", () => {
   const workflows = load();
   assert.deepEqual(cacheProblems(workflows), []);
-  const steps = Object.values(workflows["ci.yml"].jobs).flatMap(
-    (job) => job.steps ?? [],
-  );
-  const restores = steps.filter((s) =>
-    (s.uses ?? "").startsWith("actions/cache/restore@"),
-  );
-  const saves = steps.filter((s) =>
-    (s.uses ?? "").startsWith("actions/cache/save@"),
-  );
+  const steps = (pick) =>
+    Object.entries(workflows["ci.yml"].jobs)
+      .filter(([id]) => pick(id))
+      .flatMap(([, job]) => job.steps ?? []);
+  const of = (prefix, pick) =>
+    steps(pick)
+      .filter((s) => (s.uses ?? "").startsWith(prefix))
+      .map((s) => [s.with.path, s.with.key])
+      .sort();
   // The sibling on all three platforms and the baseline server on Linux, each
-  // saved under exactly the key and paths it is restored by.
-  assert.equal(restores.length, 4);
+  // saved under exactly the key and paths it is restored by — by a job a main
+  // run reaches. test-macos runs on pull requests only, so it restores what a
+  // main-branch warm job saves and saves nothing itself.
+  assert.equal(of("actions/cache/restore@", () => true).length, 4);
   assert.deepEqual(
-    saves.map((s) => [s.with.path, s.with.key]).sort(),
-    restores.map((s) => [s.with.path, s.with.key]).sort(),
+    of("actions/cache/save@", (id) => id === "test-macos"),
+    [],
+  );
+  assert.deepEqual(
+    of("actions/cache/save@", () => true),
+    of("actions/cache/restore@", (id) => id !== "test-macos"),
   );
 });
 
@@ -819,4 +881,51 @@ test("a rust-cache pin or snapshot that parts from the switch is refused", () =>
       "rust-cache's post step does not obey CACHE_ON_FAILURE on a cancelled job",
     ],
   );
+});
+
+test("the four jobs restore main's builds and save only on main", () => {
+  assert.deepEqual(mainOnlySaveProblems(load()), []);
+});
+
+test("a pull-request save, or a borrowed key no main job saves, is refused", () => {
+  const rust = (w, id) =>
+    w["ci.yml"].jobs[id].steps.find((s) =>
+      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
+    );
+  const cases = [
+    [
+      (w) => {
+        delete rust(w, "test-linux").with["save-if"];
+      },
+      "job test-linux saves its Rust build off main",
+    ],
+    [
+      (w) => {
+        rust(w, "test-windows").with["shared-key"] = "quality";
+      },
+      "job test-windows restores quality, not cross",
+    ],
+    [
+      (w) => {
+        delete w["ci.yml"].jobs.msrv;
+      },
+      "job lint restores msrv's key, which no ubuntu job of ci.yml saves",
+    ],
+    [
+      (w) => {
+        w["ci.yml"].jobs["test-linux"].steps.find(
+          (s) => s.name === "Save the sibling CLI",
+        ).if = "steps.sibling.outputs.cache-hit != 'true'";
+      },
+      "job test-linux saves .tools/bin/onepipeline off main",
+    ],
+  ];
+  for (const [mutate, problem] of cases) {
+    const workflows = clone(load());
+    mutate(workflows);
+    assert.ok(
+      mainOnlySaveProblems(workflows).includes(problem),
+      `${problem}: ${mainOnlySaveProblems(workflows)}`,
+    );
+  }
 });
