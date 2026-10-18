@@ -2007,6 +2007,70 @@ fn staged_release(scratch: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+/// A scratch tree carrying the real justfile, with the release dry run the
+/// `release-staging` recipe drives standing in as a script that prints a line
+/// and exits with `status`. Answers the tree and what `just _crate-release-staging`
+/// did there.
+#[cfg(unix)]
+fn stage_with_a_dry_run_exiting(status: i32) -> (tempfile::TempDir, std::process::Output) {
+    let tree = tempfile::tempdir().expect("temp dir");
+    fs::create_dir_all(tree.path().join("scripts")).expect("the copy's scripts directory");
+    // The justfile's variables read the manifests and the lock when it loads.
+    for name in ["justfile", "Cargo.toml", "Cargo.lock"] {
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(name),
+            tree.path().join(name),
+        )
+        .unwrap_or_else(|error| panic!("copy {name} into the scratch tree: {error}"));
+    }
+    // llmlint: ignore[e2e_not_mocked] the subject is the recipe's handling of its producer's exit, and the real producer compiles a release build; standing in for that script is what lets a journey choose the exit the recipe must carry.
+    fs::write(
+        tree.path().join("scripts/release-native-dry-run.sh"),
+        format!("printf 'staged into %s\\n' \"$1\"\nexit {status}\n"),
+    )
+    .expect("write the stand-in dry run");
+    let output = std::process::Command::new("just")
+        .arg("_crate-release-staging")
+        .current_dir(tree.path())
+        .output()
+        .expect("just is on PATH");
+    (tree, output)
+}
+
+/// The cached Nx target's output is what the release-staging journey reads, so
+/// a dry run that succeeded leaves its stdout there and on the log.
+#[cfg(unix)]
+#[test]
+fn the_release_staging_recipe_keeps_the_dry_runs_stdout() {
+    let (tree, output) = stage_with_a_dry_run_exiting(0);
+    let log = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "the recipe failed over a dry run that succeeded:\n{log}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let kept = fs::read_to_string(tree.path().join("target/release-staging/dry-run.stdout"))
+        .expect("the recipe left the dry run's stdout");
+    assert_eq!(kept, "staged into target/release-staging\n");
+    assert!(log.contains("staged into target/release-staging"), "{log}");
+}
+
+/// A dry run that failed fails the recipe with its own status, through the `tee`
+/// that copies its output: a target that exited 0 here would be cached by Nx as
+/// a staged release, and the journey would read a directory nothing staged.
+#[cfg(unix)]
+#[test]
+fn a_release_staging_dry_run_that_fails_fails_the_recipe() {
+    let (_tree, output) = stage_with_a_dry_run_exiting(3);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "the recipe did not carry the dry run's exit:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// Linux can rehearse the real producer and installers without pretending to
 /// execute Darwin bytes. The release job drives these same staging commands
 /// with maturin's native/cross-built Darwin wheels.

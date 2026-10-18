@@ -221,6 +221,9 @@ _crate-wheel-smoke:
 # Warnings denied, as on every other release-profile compile here.
 # `ONEPIPELINE_UI_RELEASE_STAGING` hands the journey the directory; without it the
 # journey stages its own, so a bare `cargo nextest` still proves the path.
+# The `tee` keeps the dry run's output on the log as well as in the file; the
+# recipe shell's `pipefail` (`set shell` above) is what fails the recipe with the
+# dry run's own status, which `tests/packaging.rs` holds.
 # Rehearse the native release staging into target/release-staging.
 _crate-release-staging:
     @rm -rf target/release-staging && mkdir -p target/release-staging
