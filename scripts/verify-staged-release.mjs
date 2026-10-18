@@ -178,11 +178,10 @@ async function main() {
     // llmlint: ignore-end[changed_behavior_has_e2e]
     run(tar, ["-xf", archive, "-C", dl]);
     await smoke(join(dl, exe));
-    const wheelArch = { linux: "x86_64", macos: "arm64", windows: "amd64" }[
-      facts.platform
-    ];
-    const wheel = readdirSync(join(root, "wheels")).find(
-      (name) => name.endsWith(".whl") && name.includes(wheelArch),
+    // The wheel's tag is the one TARGETS declares, which plan() names the
+    // published wheel by, so the staged wheel is found by the same fact.
+    const wheel = readdirSync(join(root, "wheels")).find((name) =>
+      name.endsWith(`-py3-none-${facts.wheelTag}.whl`),
     );
     if (!wheel)
       throw fault(
