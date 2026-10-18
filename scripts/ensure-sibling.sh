@@ -67,8 +67,12 @@ install_from_source() {
   cargo install onepipeline --version "$version" --locked --root .tools --quiet ||
     fail "cannot provision onepipeline $version — the journeys that compare the read API against it cannot run without it" \
       "fix the cargo error above (crates.io reachable, toolchain installed), then re-run 'just bootstrap'"
-  probe || fail "cargo installed onepipeline $version, but $binary does not report 'onepipeline $version'" \
-    "remove .tools and re-run 'just bootstrap'; if it recurs, the crate's binary name or version output changed upstream"
+  probe || {
+    local reported
+    reported="$("$binary" --version 2>&1)" || reported="$reported (exit $?)"
+    fail "cargo installed onepipeline $version, but $binary answers '$reported', not 'onepipeline $version'" \
+      "remove .tools and re-run 'just bootstrap'; if it recurs, the crate's binary name or version output changed upstream"
+  }
 }
 
 host="$(rustc -vV 2>&1)" || fail "rustc -vV failed: $host" \
@@ -134,10 +138,13 @@ fetch() {
 
 # GNU's tool where it runs, else the one macOS ships.
 sha256_of() {
-  local sum
-  sum="$(sha256sum "$1" 2>/dev/null)" || sum="$(shasum -a 256 "$1" 2>/dev/null)" ||
-    fail "neither sha256sum nor shasum could hash $1" \
-      "install coreutils (sha256sum) or perl's shasum, then retry"
+  local sum gnu
+  if ! sum="$(sha256sum "$1" 2>&1)"; then
+    gnu="$sum"
+    sum="$(shasum -a 256 "$1" 2>&1)" ||
+      fail "neither sha256sum nor shasum could hash $1 (sha256sum: $gnu; shasum: $sum)" \
+        "if either says $1 is unreadable, free disk space and retry; otherwise install coreutils (sha256sum) or perl's shasum, then retry"
+  fi
   printf '%s' "${sum%% *}"
 }
 

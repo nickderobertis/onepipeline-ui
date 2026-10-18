@@ -110,3 +110,24 @@ test("a verdict with no start time or no $GITHUB_ENV is refused as usage, decidi
     /--cap-minutes takes whole minutes from 1 to 9999, not '030'/,
   );
 });
+
+test("a superseded run whose $GITHUB_ENV cannot be written fails, saying so", () => {
+  const { step } = verdictStep("test-linux");
+  const dir = mkdtempSync(join(tmpdir(), "cache-verdict-"));
+  try {
+    // A directory where the file should be: nothing can append to it.
+    const run = spawnSync("bash", ["-e", "-c", step.run], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_ENV: dir,
+        JOB_STARTED_AT: String(Math.floor(Date.now() / 1000) - 300),
+      },
+    });
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stderr, /cannot append to \$GITHUB_ENV/);
+    assert.match(run.stderr, /ACTION: run this from a workflow step/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

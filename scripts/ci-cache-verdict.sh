@@ -17,7 +17,8 @@
 # Usage:
 #   ci-cache-verdict.sh --started EPOCH_SECONDS --cap-minutes N
 #
-# Exit 0 with a verdict printed, 2 when the arguments or $GITHUB_ENV are refused.
+# Exit 0 with a verdict printed, 1 when $GITHUB_ENV cannot be written, 2 when the
+# arguments or $GITHUB_ENV are refused.
 set -euo pipefail
 
 usage="run 'ci-cache-verdict.sh --started EPOCH_SECONDS --cap-minutes N' from a step that has \$GITHUB_ENV"
@@ -57,6 +58,10 @@ elapsed=$(($(date +%s) - started))
 if [ "$elapsed" -ge $((cap * 60 - 60)) ]; then
   echo "ci-cache-verdict: cancelled ${elapsed}s into a ${cap}-minute cap, so at the cap: saving what this run built"
 else
-  echo "CACHE_ON_FAILURE=false" >>"$GITHUB_ENV"
+  { echo "CACHE_ON_FAILURE=false" >>"$GITHUB_ENV"; } 2>/dev/null || {
+    echo "ci-cache-verdict: cannot append to \$GITHUB_ENV ($GITHUB_ENV), so a superseded run's build would be saved" >&2
+    echo "ACTION: run this from a workflow step, whose \$GITHUB_ENV the runner provides writable; if it is one, re-run the job" >&2
+    exit 1
+  }
   echo "ci-cache-verdict: cancelled ${elapsed}s into a ${cap}-minute cap, so superseded: saving nothing, which leaves the key to a run that finishes"
 fi

@@ -640,6 +640,10 @@ fn a_compiled_sibling_that_reports_another_release_is_refused() {
         stderr.contains(Release::linked().as_str()) && stderr.contains("ACTION:"),
         "the refusal does not name the pinned release and what to do:\n{stderr}"
     );
+    assert!(
+        stderr.contains("answers 'onepipeline 0.0.1-stray'"),
+        "the refusal does not say what the compiled binary answered:\n{stderr}"
+    );
 }
 
 /// A binary that prints the pinned version and then fails is not the pinned
@@ -790,13 +794,20 @@ fn every_refusal_names_what_to_do_and_compiles_nothing() {
                 let path = f.path_with(
                     "no-hashers",
                     &[
-                        ("sha256sum", "#!/usr/bin/env bash\nexit 127\n"),
-                        ("shasum", "#!/usr/bin/env bash\nexit 127\n"),
+                        (
+                            "sha256sum",
+                            "#!/usr/bin/env bash\necho 'no GNU hasher here' >&2\nexit 127\n",
+                        ),
+                        (
+                            "shasum",
+                            "#!/usr/bin/env bash\necho 'no perl hasher here' >&2\nexit 127\n",
+                        ),
                     ],
                 );
                 vec![("PATH".into(), path)]
             },
-            "neither sha256sum nor shasum",
+            // What each hasher said, not only that both failed.
+            "(sha256sum: no GNU hasher here; shasum: no perl hasher here)",
         ),
         (
             "a destination that cannot be written",
