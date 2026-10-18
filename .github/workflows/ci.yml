@@ -113,6 +113,11 @@ jobs:
       # skipping, because a cost bound nothing measured is a bound nobody has.
       - name: Install the syscall tracer the cost journeys count with
         run: sudo apt-get update && sudo apt-get install -y strace
+      # The judged tier's journeys drive the real installed llmlint, with only
+      # the paid model call stood in for, and fail rather than skip without it.
+      - uses: astral-sh/setup-uv@v6
+      - name: Install llmlint for the judged tier's journeys
+        run: just setup-llmlint
       - name: Bootstrap
         run: just bootstrap
       # The browser tier is in this sweep, and has to be: it is the only proof the
@@ -160,6 +165,10 @@ jobs:
       # The cost journeys count with it, as in `quality` above.
       - name: Install the syscall tracer the cost journeys count with
         run: sudo apt-get update && sudo apt-get install -y strace
+      # The judged tier's journeys need it, as in `quality` above.
+      - uses: astral-sh/setup-uv@v6
+      - name: Install llmlint for the judged tier's journeys
+        run: just setup-llmlint
       - name: Bootstrap
         run: just bootstrap
       - name: Quality gate (every project)

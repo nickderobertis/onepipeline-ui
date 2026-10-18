@@ -211,7 +211,7 @@ Prebuilt archives and their `.sha256` checksums are also attached to every
 ```bash
 just bootstrap        # from a clean clone; also activates the visual pre-push guard
 just check            # the deterministic gate, every project
-just gate             # `check` plus the llmlint LLM-judge tier — the pre-push bar
+just gate             # `check` plus `just lint-llm-diff`, llmlint under Nx's cache — the pre-push bar
 just dag-ui-screens   # re-photograph every screen above, in the pinned browser container
 ```
 
