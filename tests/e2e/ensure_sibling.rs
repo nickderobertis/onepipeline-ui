@@ -866,6 +866,8 @@ fn a_malformed_call_is_refused_as_usage() {
         (&["not-a-version"][..], ".tools/bin/onepipeline"),
         // One good line is not a good version: the rest would reach the URL.
         (&["1.2.3\n../../elsewhere"][..], ".tools/bin/onepipeline"),
+        // A second argument is refused as usage rather than ignored.
+        (&["1.2.3", "--unknown"][..], ".tools/bin/onepipeline"),
         (&["1.2.3"][..], ""),
     ] {
         let output = Command::new("bash")

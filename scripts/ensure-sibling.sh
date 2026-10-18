@@ -38,8 +38,8 @@ fail() {
 
 version="${1:-}"
 binary="${ONEPIPELINE_UI_ONEPIPELINE_BIN:-}"
-if [ -z "$version" ] || [ -z "$binary" ]; then
-  echo "ensure-sibling: needs the pinned version and ONEPIPELINE_UI_ONEPIPELINE_BIN" >&2
+if [ $# -ne 1 ] || [ -z "$version" ] || [ -z "$binary" ]; then
+  echo "ensure-sibling: needs exactly the pinned version, and ONEPIPELINE_UI_ONEPIPELINE_BIN" >&2
   echo "ACTION: run 'just _ensure-sibling', which passes both" >&2
   exit 2
 fi
