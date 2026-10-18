@@ -1,0 +1,5 @@
+{
+  "blob": "1481945d779f128e201b6aa5498c53fe4ae9632c",
+  "uses": "Swatinem/rust-cache@v2.9.2",
+  "source": "https://github.com/Swatinem/rust-cache/blob/v2.9.2/action.yml"
+}

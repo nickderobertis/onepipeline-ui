@@ -26,7 +26,8 @@
       "command": "just _crate-fmt-check"
     },
     "lint": {
-      "command": "just _crate-lint"
+      "command": "just _crate-lint",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }]
     },
     "test": {
       "command": "just _tier-test-covered unit",
@@ -52,13 +53,27 @@
       ]
     },
     "doc": {
-      "command": "just _crate-doc"
+      "command": "just _crate-doc",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }]
     },
     "msrv": {
-      "command": "just _crate-msrv"
+      "command": "just _crate-msrv",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }]
     },
     "deps-check": {
       "command": "just _crate-deps-check"
+    },
+    "install-smoke": {
+      "//packaging": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these two carry ci.yml's `install (ubuntu-latest)` and `wheel` jobs, which ran whenever `just affected-crate` found any `lang:rust` project affected; this project carries that tag, so its own edge is no wider than theirs was and no change pays for them that did not before. The files they package are the crate's own (Cargo.toml, src, build.rs, README.md, pyproject.toml, npm/), which is exactly this project's ownership, and Nx selects by ownership rather than by a target's inputs, so a narrower edge would need a project owning a subset of the crate's files. They stay uncached because each verdict is about the host as much as the tree: `cargo install` resolving the registry and the manylinux image the wheel builds in.",
+      "command": "just _crate-install-smoke",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "cache": false
+    },
+    "wheel-smoke": {
+      "command": "just _crate-wheel-smoke",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "cache": false,
+      "//packaging-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },
     "lint-llm-diff": {
       "command": "llmlint --diff --diff-base \"$LLMLINT_DIFF_BASE_SHA\"",

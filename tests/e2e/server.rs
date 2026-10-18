@@ -15504,7 +15504,7 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
     .parent()
     .expect("the member's directory")
     .to_path_buf();
-    let handed: Value = serde_norway::from_str(
+    let handed: Value = serde_saphyr::from_str(
         &fs::read_to_string(member.join(oneagentgraph::invoke::ONEJUDGE_CONFIG_FILE))
             .expect("the config the member handed onejudge"),
     )

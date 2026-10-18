@@ -97,15 +97,11 @@ _crate-bootstrap:
 # through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
 # need is clone-local (`AGENTS.md`).
 #
-# The probe reads the exported variable instead of interpolating it: an
-# interpolation is pasted into the shell line, and `justfile_directory()` is
-# separated by backslashes on Windows, which that line would spend as escapes.
-# Either way the path never resolves, and a probe that cannot resolve reinstalls
-# on every run rather than failing — quietly, and only on that platform.
+# Fetched as the release's own archive for this host when that release publishes
+# one, checked against its published checksum and version, and compiled only when
+# it does not; `scripts/ensure-sibling.sh` holds the order and its refusals.
 _ensure-sibling:
-    @[ "$("$ONEPIPELINE_UI_ONEPIPELINE_BIN" --version 2>/dev/null)" = "onepipeline {{onepipeline-version}}" ] \
-      || cargo install onepipeline --version {{onepipeline-version}} --locked --root .tools --quiet \
-      || { echo "cannot provision onepipeline {{onepipeline-version}} — the journeys that compare the read API against it cannot run without it" >&2; exit 1; }
+    @bash scripts/ensure-sibling.sh "{{onepipeline-version}}"
 
 # The base commit's own server, for the journeys that compare what this build
 # serves against what it served. Behind its own Nx target rather than inside the
@@ -175,6 +171,70 @@ check-affected:
 # The gate's platform-sensitive tiers, without the Linux-only coverage floor.
 check-cross: fmt-check lint test-quick
     @echo "check-cross: ok"
+
+# ci.yml's four jobs, each one recipe the job's step calls and a developer can run:
+# `scripts/ci-job.sh` holds which Nx targets each runs and why it is one Nx
+# invocation. All four are scoped to the projects this branch's diff can reach,
+# failing closed as `check-affected` does; `--plan` prints the selection and runs
+# nothing, which is how a Linux host reads what the Windows and macOS jobs select.
+# The platform-independent checks: formatting, lints, type checks, MSRV, audit.
+[positional-arguments]
+ci-lint *args:
+    @bash scripts/ci-job.sh lint "$@"
+
+# `--tier broader`, `scripts/ci-tier.sh`'s answer on the release pull request,
+# sweeps every project with the host-labelled budgets instead.
+# The Linux gate with its packaging alongside: `check`, install, the x86_64 wheel.
+[positional-arguments]
+ci-test-linux *args:
+    @bash scripts/ci-job.sh test-linux "$@"
+
+# The Windows job: the platform-sensitive tiers, the browser build, the install.
+[positional-arguments]
+ci-test-windows *args:
+    @bash scripts/ci-job.sh test-windows "$@"
+
+# The macOS job: the platform-sensitive tiers and the install.
+[positional-arguments]
+ci-test-macos *args:
+    @bash scripts/ci-job.sh test-macos "$@"
+
+# The documented install path, `cargo install --path .`, into a root under
+# `target/` rather than the user's own, smoke-tested as every published artifact
+# is. Warnings denied for the reason release.yml denies them.
+# The bin directory is resolved by `cd`, so a root cargo did not write is named
+# rather than read as a command missing from PATH, and the binary is handed to
+# the smoke test by its path: the Windows leg's PATH lookup did not find it there.
+# Compiled at low priority: see `packaging-priority`.
+# Install this revision the documented way and smoke-test the installed binary.
+_crate-install-smoke:
+    @RUSTFLAGS="-D warnings" {{packaging-priority}} cargo install --path . --locked --quiet --root target/install-smoke
+    @bin="$(cd target/install-smoke/bin && pwd)" \
+      || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
+      PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \
+      --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
+      --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}" \
+      || { echo "installed into $bin: $(ls -la "$bin" 2>&1)" >&2; exit 1; }
+
+# The release's x86_64 Linux wheel, built by the one definition release.yml's
+# `build-linux` job runs (`wheel-linux`), then installed into a fresh virtualenv
+# and smoke-tested. Needs Docker and the browser view `dag-ui:build` writes.
+# Build the x86_64 Linux wheel as the release does, install it, smoke-test it.
+_crate-wheel-smoke:
+    @rm -rf target/wheel-smoke
+    @just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke
+    @python3 -m venv target/wheel-smoke/venv
+    @target/wheel-smoke/venv/bin/pip install --quiet --no-index target/wheel-smoke/*.whl
+    @PATH="$PWD/target/wheel-smoke/venv/bin:$PATH" bash scripts/smoke-published.sh \
+      --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
+      --label "onepipeline-api-cli wheel on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
+
+# The packaging targets' release builds are long batch compiles that `ci-test-linux`
+# runs beside the test tiers, and the cost journeys count a subscriber's poll
+# ticks, which a starved server misses: at a lower priority those compiles take
+# only the CPU the tiers leave, and every core once the tiers are done. `nice`
+# where the host has it; where it does not, the command runs as it is.
+packaging-priority := `command -v nice >/dev/null 2>&1 && echo "nice -n 10" || true`
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
@@ -337,12 +397,13 @@ _crate-lint:
 
 # The crate's suite runs as seven Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the seven filters are written and partition the suite. Three
+# which is where the eight filters are written and partition the suite. Three
 # tiers are instrumented and run here; the baseline comparison, the cost
-# journeys, the linked-report journeys and the judged tier's journeys run
-# through `_tier-test` below, for what each needs that the rest do not — another
-# commit of this repository compiled, a syscall tracer, a second build of this
-# one with `cargo auditable`, and an installed llmlint.
+# journeys, the linked-report journeys, the judged tier's journeys and the CI
+# jobs' recipes run through `_tier-test` below, for what each needs that the rest
+# do not — another commit of this repository compiled, a syscall tracer, a second
+# build of this one with `cargo auditable`, an installed llmlint, and inputs that
+# are the project graph rather than the crate.
 #
 # Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
 # named for the tier, and reports nothing: `_crate-coverage` merges every tier's

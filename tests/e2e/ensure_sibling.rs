@@ -9,8 +9,11 @@
 //! the pinned one, and whether the suites that start the read API reach the recipe
 //! at all.
 //!
-//! One thing is stood in for: `cargo` on PATH, because the real provisioning
-//! downloads and compiles the sibling CLI, which is neither offline nor quick.
+//! Two things are stood in for: `cargo` on PATH, because the real provisioning
+//! downloads and compiles the sibling CLI, which is neither offline nor quick;
+//! and the Releases the recipe fetches the CLI's own archive from, which are a
+//! local mirror directory laid out as a Release is — empty unless a journey puts
+//! an archive in it, so a Release with no archive for this host is the default.
 //! The recipe under test is the real one, run out of a copy of the real justfile
 //! over the real `Cargo.lock`, so the version it pins to is the version this
 //! tree resolves — and what it asked cargo for is readable here. The copy is the
@@ -65,8 +68,11 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// them beside each other. A tier that compiled a bundle-less binary there would
 /// leave the next one to rebuild it, which is minutes of the gate spent producing
 /// a binary that was already correct the run before. `test-quick` is each tier as
-/// the cross-platform legs run it, where nothing else builds the view first.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 11] = [
+/// the cross-platform legs run it, where nothing else builds the view first. The
+/// packaging targets, the lints, the docs and the MSRV check compile the crate
+/// too, and one Nx run of a CI job runs them beside the view's build — a view
+/// rebuilt under a compile deletes a file `build.rs` is embedding.
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 17] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-quick",
     "onepipeline-ui-e2e:test",
@@ -78,10 +84,17 @@ const TASKS_THAT_COMPILE_THE_READ_API: [&str; 11] = [
     "onepipeline-ui-linked-report:test",
     "onepipeline-ui-judged-tier:test",
     "dag-ui:build-api-server",
+    "onepipeline-ui:install-smoke",
+    "onepipeline-ui:wheel-smoke",
+    "onepipeline-ui:lint",
+    "onepipeline-ui:doc",
+    "onepipeline-ui:msrv",
+    "dag-ui-build-cache:lint",
 ];
 
 /// The targets those tasks are reached through.
-const COMPILING_TIERS: &str = "test,test-quick,test-baseline,test-cost";
+const COMPILING_TIERS: &str =
+    "test,test-quick,test-baseline,test-cost,install-smoke,wheel-smoke,lint,doc,msrv";
 
 /// What builds the view the binary embeds.
 const VIEW_BUILD: &str = "dag-ui:build";
@@ -101,13 +114,22 @@ impl Fixture {
     /// A tree with no `.tools/` at all — a clone nobody has bootstrapped.
     fn new() -> Self {
         let dir = TempDir::new().expect("temp dir");
-        for name in ["justfile", "Cargo.lock", "Cargo.toml"] {
+        fs::create_dir_all(dir.path().join("scripts")).expect("the copy's scripts directory");
+        for name in [
+            "justfile",
+            "Cargo.lock",
+            "Cargo.toml",
+            "scripts/ensure-sibling.sh",
+        ] {
             fs::copy(repo_root().join(name), dir.path().join(name))
                 .unwrap_or_else(|error| panic!("copy {name} into the scratch tree: {error}"));
         }
+        fs::create_dir_all(dir.path().join("releases")).expect("the empty release mirror");
 
         // Records what the recipe asked for, and answers with the status the case
-        // under test is about.
+        // under test is about. A successful install leaves a program in
+        // `<root>/bin` reporting the version it was asked for — or
+        // INSTALL_REPORTS — as `cargo install` leaves the CLI there.
         //
         // llmlint: ignore-block[e2e_not_mocked] the real call downloads and
         // compiles the sibling CLI, which is the one thing an offline,
@@ -123,7 +145,12 @@ impl Fixture {
             "#!/usr/bin/env bash\n\
              set -eu\n\
              printf '%s\\n' \"$*\" >> \"$CARGO_CALLS\"\n\
-             exit \"${INSTALL_STATUS:-0}\"\n",
+             [ \"${INSTALL_STATUS:-0}\" = 0 ] || exit \"$INSTALL_STATUS\"\n\
+             version=; root=\n\
+             while [ $# -gt 0 ]; do case \"$1\" in --version) version=\"$2\"; shift 2 ;; --root) root=\"$2\"; shift 2 ;; *) shift ;; esac; done\n\
+             mkdir -p \"$root/bin\"\n\
+             printf '#!/usr/bin/env bash\\nprintf \"onepipeline %s\\\\n\"\\n' \"${INSTALL_REPORTS:-$version}\" > \"$root/bin/onepipeline$SIBLING_EXE\"\n\
+             chmod +x \"$root/bin/onepipeline$SIBLING_EXE\"\n",
         );
         // llmlint: ignore-end[e2e_not_mocked]
 
@@ -164,11 +191,119 @@ impl Fixture {
             .arg("_ensure-sibling")
             .current_dir(self.dir.path())
             .env("PATH", &self.search_path)
-            .env("CARGO_CALLS", self.dir.path().join("cargo-calls"));
+            .env("CARGO_CALLS", self.dir.path().join("cargo-calls"))
+            .env("SIBLING_EXE", std::env::consts::EXE_SUFFIX)
+            .env(
+                "ONEPIPELINE_UI_SIBLING_RELEASES",
+                self.dir.path().join("releases"),
+            );
         for (name, value) in environment {
             command.env(name, value);
         }
         command.output().expect("just is on PATH")
+    }
+
+    /// Publish an archive of a CLI reporting `reports` in the mirror's Release
+    /// for the pinned version, under the name the recipe asks for on this host,
+    /// with a checksum file beside it: the archive's own digest for `None`,
+    /// `Some(Some(digest))` for another, and none at all for `Some(None)`.
+    #[cfg(unix)]
+    fn publish_archive(&self, reports: &str, checksum: Option<Option<&str>>) {
+        let pin = Release::linked().as_str().to_owned();
+        let triple = host_triple();
+        let release = self.dir.path().join("releases").join(format!("v{pin}"));
+        let staging = self.dir.path().join("archive-staging");
+        // llmlint: ignore-block[e2e_not_mocked] the archived program stands in
+        // for the released CLI the way `write_stub_sibling` does: what the recipe
+        // is asked to prove is that it installs the archive it verified and asks
+        // it its version, which a program answering `--version` is enough to
+        // observe, and downloading the real one is what this suite runs without.
+        stub_bin::install(
+            &staging,
+            "onepipeline",
+            &format!(
+                "#!/usr/bin/env bash\nprintf 'onepipeline {reports}\\n'\nexit \"${{ARCHIVED_EXIT:-0}}\"\n"
+            ),
+        );
+        // llmlint: ignore-end[e2e_not_mocked]
+        fs::create_dir_all(&release).expect("the mirror's release directory");
+        let archive = release.join(format!("onepipeline-v{pin}-{triple}.tar.gz"));
+        let packed = Command::new("tar")
+            .arg("-czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&staging)
+            .arg("onepipeline")
+            .output()
+            .expect("tar is on PATH");
+        assert!(packed.status.success(), "tar: {}", stderr(&packed));
+        let digest = match checksum {
+            Some(Some(checksum)) => checksum.to_owned(),
+            Some(None) => return,
+            None => {
+                use sha2::Digest;
+                let bytes = fs::read(&archive).expect("read the archive");
+                sha2::Sha256::digest(&bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect()
+            }
+        };
+        fs::write(
+            release.join(format!("onepipeline-v{pin}-{triple}.sha256")),
+            format!("{digest}  onepipeline-v{pin}-{triple}.tar.gz\n"),
+        )
+        .expect("write the published checksum");
+    }
+
+    /// Publish `bytes` as this host's archive in the mirror's Release for the
+    /// pinned version, with their own digest beside them — a release whose
+    /// checksum vouches for whatever it ships.
+    #[cfg(unix)]
+    fn publish_bytes(&self, bytes: &[u8]) {
+        use sha2::Digest;
+        let pin = Release::linked().as_str().to_owned();
+        let triple = host_triple();
+        let release = self.dir.path().join("releases").join(format!("v{pin}"));
+        fs::create_dir_all(&release).expect("the mirror's release directory");
+        let name = format!("onepipeline-v{pin}-{triple}.tar.gz");
+        fs::write(release.join(&name), bytes).expect("write the archive");
+        let digest: String = sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        fs::write(
+            release.join(format!("onepipeline-v{pin}-{triple}.sha256")),
+            format!("{digest}  {name}\n"),
+        )
+        .expect("write the published checksum");
+    }
+
+    /// This fixture's PATH with `programs` — name and script — in front of it.
+    #[cfg(unix)]
+    fn path_with(&self, label: &str, programs: &[(&str, &str)]) -> String {
+        let dir = self.dir.path().join(label);
+        for (name, script) in programs {
+            // llmlint: ignore[e2e_not_mocked] each stand-in is the host condition its journey is about — a toolchain that fails, a hasher that cannot run — and PATH is the only place to arrange one on a host that has the real program.
+            stub_bin::install(&dir, name, script);
+        }
+        std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&self.search_path)))
+            .expect("join PATH")
+            .into_string()
+            .expect("a UTF-8 PATH")
+    }
+
+    /// What the provisioned path answers to `--version`, or nothing when the
+    /// recipe left no program there.
+    #[cfg(unix)]
+    fn provisioned_version(&self) -> Option<String> {
+        let binary = self
+            .dir
+            .path()
+            .join(".tools/bin")
+            .join(provisioned_sibling());
+        let output = Command::new(&binary).arg("--version").output().ok()?;
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
     /// Everything the recipe asked `cargo` for, in order.
@@ -191,6 +326,31 @@ fn provisioned_sibling() -> String {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// Whether this suite runs as root, for whom no file mode refuses a read.
+#[cfg(unix)]
+fn running_as_root() -> bool {
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "0")
+        .unwrap_or(false)
+}
+
+/// This host's target triple as rustc reports it — what the recipe names the
+/// archive it fetches by.
+#[cfg(unix)]
+fn host_triple() -> String {
+    let output = Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .expect("rustc is on PATH");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .expect("rustc names its host")
+        .to_owned()
 }
 
 /// The install the recipe must ask for, spelled out: the release this build
@@ -307,6 +467,437 @@ fn provisioning_that_fails_says_which_release_could_not_be_installed() {
         stderr.contains(Release::linked().as_str()) && stderr.contains("onepipeline"),
         "the failure does not name the release that could not be provisioned:\n{stderr}"
     );
+}
+
+/// A Release that publishes this host's archive is installed from it, checked
+/// against its published checksum, and nothing is compiled: the archive is the
+/// same release the lock pins, and compiling it is the largest single cost of a
+/// clean bootstrap.
+#[cfg(unix)]
+#[test]
+fn a_release_archive_for_this_host_is_installed_without_compiling() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+
+    let output = fixture.run();
+
+    assert!(
+        output.status.success(),
+        "installing the published archive failed:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled the CLI although its release publishes an archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str()),
+        "the archive's binary is not the provisioned sibling"
+    );
+}
+
+/// An archive that does not match the checksum published beside it is refused,
+/// and the recipe neither installs it nor compiles around it: a release that is
+/// not what it says it is has to be looked at, not papered over.
+#[cfg(unix)]
+#[test]
+fn an_archive_that_fails_its_checksum_is_refused_and_not_compiled_around() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), Some(Some(&"0".repeat(64))));
+
+    let output = fixture.run();
+
+    assert!(
+        !output.status.success(),
+        "an archive failing its checksum was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("checksum") && stderr.contains("ACTION:"),
+        "the refusal does not say the checksum failed and what to do:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around a bad archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "an unverified archive was installed"
+    );
+}
+
+/// An archive whose binary reports another release is refused and removed:
+/// whatever the file is named, the journeys need the release the lock pins.
+#[cfg(unix)]
+#[test]
+fn an_archive_whose_binary_reports_another_release_is_refused() {
+    let fixture = Fixture::new();
+    fixture.publish_archive("0.0.1-stray", None);
+
+    let output = fixture.run();
+
+    assert!(
+        !output.status.success(),
+        "an archive of another release was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("0.0.1-stray") && stderr.contains(Release::linked().as_str()),
+        "the refusal does not name both releases:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around a mislabelled archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "the mislabelled binary was left where the journeys look"
+    );
+}
+
+/// A release that publishes this host's archive with no checksum beside it is
+/// refused: nothing unverified is installed, and nothing is compiled around it.
+#[cfg(unix)]
+#[test]
+fn an_archive_published_without_its_checksum_is_refused_and_not_compiled_around() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), Some(None));
+
+    let output = fixture.run();
+
+    assert!(
+        !output.status.success(),
+        "an archive with no checksum was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains(".sha256") && stderr.contains("ACTION:"),
+        "the refusal does not name the missing checksum and what to do:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around an unverifiable archive"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "an unverified archive was installed"
+    );
+}
+
+/// Where GNU's `sha256sum` cannot run — macOS ships `shasum` instead — the
+/// archive is checked with `shasum`, and still installed only when it matches.
+#[cfg(unix)]
+#[test]
+fn the_checksum_is_read_with_shasum_where_sha256sum_cannot_run() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+    let path = fixture.path_with(
+        "no-sha256sum",
+        &[("sha256sum", "#!/usr/bin/env bash\nexit 127\n")],
+    );
+
+    let output = fixture.run_with(&[("PATH", &path)]);
+
+    assert!(
+        output.status.success(),
+        "the archive was not installed with shasum:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled although the archive verified"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str())
+    );
+}
+
+/// A compiled sibling is held to the same version probe an archive is: a
+/// `cargo install` that leaves something reporting another release fails the
+/// recipe instead of reporting success.
+#[test]
+fn a_compiled_sibling_that_reports_another_release_is_refused() {
+    let fixture = Fixture::new();
+    let output = fixture.run_with(&[("INSTALL_REPORTS", "0.0.1-stray")]);
+
+    assert!(
+        !output.status.success(),
+        "a compiled stray release was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains(Release::linked().as_str()) && stderr.contains("ACTION:"),
+        "the refusal does not name the pinned release and what to do:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("answers 'onepipeline 0.0.1-stray'"),
+        "the refusal does not say what the compiled binary answered:\n{stderr}"
+    );
+}
+
+/// A binary that prints the pinned version and then fails is not the pinned
+/// sibling: the probe reads the exit as well as the words.
+#[cfg(unix)]
+#[test]
+fn an_archived_binary_that_fails_its_version_probe_is_refused() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+
+    let output = fixture.run_with(&[("ARCHIVED_EXIT", "1")]);
+
+    assert!(
+        !output.status.success(),
+        "a binary whose --version failed was accepted:\n{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("ACTION:"), "{}", stderr(&output));
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the recipe compiled around the failing binary"
+    );
+    assert!(
+        !fixture
+            .dir
+            .path()
+            .join(".tools/bin")
+            .join(provisioned_sibling())
+            .exists(),
+        "the failing binary was left where the journeys look"
+    );
+}
+
+/// Every way the recipe can be unable to provision fails it with a sentence and
+/// an `ACTION:`, installs nothing, and compiles nothing around the refusal.
+#[cfg(unix)]
+#[test]
+fn every_refusal_names_what_to_do_and_compiles_nothing() {
+    type Arrange = fn(&Fixture) -> Vec<(String, String)>;
+    let cases: [(&str, Arrange, &str); 10] = [
+        (
+            "a mirror whose archive cannot be read",
+            |f| {
+                use std::os::unix::fs::PermissionsExt;
+                f.publish_archive(Release::linked().as_str(), None);
+                let pin = Release::linked().as_str().to_owned();
+                let archive = f
+                    .dir
+                    .path()
+                    .join("releases")
+                    .join(format!("v{pin}"))
+                    .join(format!("onepipeline-v{pin}-{}.tar.gz", host_triple()));
+                fs::set_permissions(&archive, fs::Permissions::from_mode(0o000))
+                    .expect("make the archive unreadable");
+                Vec::new()
+            },
+            "could not copy",
+        ),
+        (
+            "a mirror directory that is not there",
+            |f| {
+                vec![(
+                    "ONEPIPELINE_UI_SIBLING_RELEASES".into(),
+                    f.dir.path().join("no-mirror").display().to_string(),
+                )]
+            },
+            "is not a readable directory",
+        ),
+        (
+            "a release source that is neither https nor a directory",
+            |_| {
+                vec![(
+                    "ONEPIPELINE_UI_SIBLING_RELEASES".into(),
+                    "ftp://example.invalid".into(),
+                )]
+            },
+            "neither an https URL nor a directory",
+        ),
+        (
+            "rustc that cannot run",
+            |f| {
+                vec![(
+                    "PATH".into(),
+                    f.path_with(
+                        "rustc-fails",
+                        &[("rustc", "#!/usr/bin/env bash\necho broken >&2\nexit 1\n")],
+                    ),
+                )]
+            },
+            "rustc -vV failed",
+        ),
+        (
+            "rustc that names no host",
+            |f| {
+                vec![(
+                    "PATH".into(),
+                    f.path_with(
+                        "rustc-hostless",
+                        &[("rustc", "#!/usr/bin/env bash\necho 'rustc 1.0.0'\n")],
+                    ),
+                )]
+            },
+            "named no host triple",
+        ),
+        (
+            "no temporary storage",
+            |f| {
+                vec![(
+                    "TMPDIR".into(),
+                    f.dir.path().join("no-such-dir").display().to_string(),
+                )]
+            },
+            "temporary storage",
+        ),
+        (
+            "an archive that is not one, though its checksum matches",
+            |f| {
+                f.publish_bytes(b"not a gzip stream");
+                Vec::new()
+            },
+            "could not unpack",
+        ),
+        (
+            "an archive without the CLI in it",
+            |f| {
+                let staging = f.dir.path().join("wrong-member");
+                fs::create_dir_all(&staging).expect("staging");
+                fs::write(staging.join("README.md"), "no binary here").expect("member");
+                let packed = Command::new("tar")
+                    .arg("-czf")
+                    .arg(f.dir.path().join("wrong.tar.gz"))
+                    .arg("-C")
+                    .arg(&staging)
+                    .arg("README.md")
+                    .output()
+                    .expect("tar is on PATH");
+                assert!(packed.status.success(), "tar: {}", stderr(&packed));
+                f.publish_bytes(&fs::read(f.dir.path().join("wrong.tar.gz")).expect("archive"));
+                Vec::new()
+            },
+            "lacks onepipeline",
+        ),
+        (
+            "no hasher that runs",
+            |f| {
+                f.publish_archive(Release::linked().as_str(), None);
+                let path = f.path_with(
+                    "no-hashers",
+                    &[
+                        (
+                            "sha256sum",
+                            "#!/usr/bin/env bash\necho 'no GNU hasher here' >&2\nexit 127\n",
+                        ),
+                        (
+                            "shasum",
+                            "#!/usr/bin/env bash\necho 'no perl hasher here' >&2\nexit 127\n",
+                        ),
+                    ],
+                );
+                vec![("PATH".into(), path)]
+            },
+            // What each hasher said, not only that both failed.
+            "(sha256sum: no GNU hasher here; shasum: no perl hasher here)",
+        ),
+        (
+            "a destination that cannot be written",
+            |f| {
+                f.publish_archive(Release::linked().as_str(), None);
+                fs::create_dir_all(f.dir.path().join(".tools")).expect(".tools");
+                fs::write(
+                    f.dir.path().join(".tools/bin"),
+                    "a file where the directory goes",
+                )
+                .expect("block the destination");
+                Vec::new()
+            },
+            "could not install",
+        ),
+    ];
+    for (what, arrange, says) in cases {
+        // macOS's `mktemp` falls back to /tmp when TMPDIR names nothing, so
+        // that refusal is only reachable on Linux.
+        if what == "no temporary storage" && !cfg!(target_os = "linux") {
+            continue;
+        }
+        // Root reads a file whatever its mode, so an unreadable mirror cannot
+        // be arranged for it.
+        if what == "a mirror whose archive cannot be read" && running_as_root() {
+            continue;
+        }
+        let fixture = Fixture::new();
+        let environment = arrange(&fixture);
+        let pairs: Vec<(&str, &str)> = environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let output = fixture.run_with(&pairs);
+        let stderr = stderr(&output);
+        assert!(
+            !output.status.success(),
+            "{what}: the recipe succeeded:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(says) && stderr.contains("ACTION:"),
+            "{what}: the refusal does not say `{says}` and what to do:\n{stderr}"
+        );
+        assert_eq!(
+            fixture.calls(),
+            "",
+            "{what}: the recipe compiled around the refusal"
+        );
+        assert_eq!(
+            fixture.provisioned_version(),
+            None,
+            "{what}: something was installed"
+        );
+    }
+}
+
+/// A call the recipe would never make is refused as a usage error, before
+/// anything is fetched. Unix only, as the archive journeys are: the script is
+/// called by its own `bash` here, which on Windows is not the shell the recipe
+/// runs under.
+#[cfg(unix)]
+#[test]
+fn a_malformed_call_is_refused_as_usage() {
+    let fixture = Fixture::new();
+    for (arguments, binary) in [
+        (&[][..], ".tools/bin/onepipeline"),
+        (&["not-a-version"][..], ".tools/bin/onepipeline"),
+        // One good line is not a good version: the rest would reach the URL.
+        (&["1.2.3\n../../elsewhere"][..], ".tools/bin/onepipeline"),
+        // A second argument is refused as usage rather than ignored.
+        (&["1.2.3", "--unknown"][..], ".tools/bin/onepipeline"),
+        (&["1.2.3"][..], ""),
+    ] {
+        let output = Command::new("bash")
+            .arg("scripts/ensure-sibling.sh")
+            .args(arguments)
+            .current_dir(fixture.dir.path())
+            .env("ONEPIPELINE_UI_ONEPIPELINE_BIN", binary)
+            .output()
+            .expect("bash is on PATH");
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{arguments:?} was not refused as usage"
+        );
+        assert!(
+            stderr(&output).contains("ACTION:"),
+            "{arguments:?}: {}",
+            stderr(&output)
+        );
+    }
 }
 
 /// Every suite that starts the read API reaches the provisioning through Nx's

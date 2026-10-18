@@ -16,7 +16,10 @@
       "{workspaceRoot}/scripts/build-linux-wheel.sh",
       "{workspaceRoot}/scripts/release-package.py",
       "{workspaceRoot}/scripts/verify-staged-release.mjs",
-      "{workspaceRoot}/scripts/npm-build.mjs"
+      "{workspaceRoot}/scripts/npm-build.mjs",
+      "{workspaceRoot}/scripts/ci-job.sh",
+      "{workspaceRoot}/scripts/ci-cache-verdict.sh",
+      "{workspaceRoot}/justfile"
     ]
   },
   "targets": {
@@ -28,6 +31,11 @@
       "dependsOn": ["bootstrap"],
       "inputs": ["workflowPolicy"],
       "cache": false
+    },
+    "test-ci-jobs": {
+      "command": "node --test .github/tests/ci-jobs.test.mjs",
+      "dependsOn": ["bootstrap"],
+      "inputs": ["{projectRoot}/**/*"]
     },
     "lint": {
       "command": "node .github/lint.mjs",
@@ -41,7 +49,7 @@
     },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": ["lint", "budgets"]
+      "dependsOn": ["lint", "budgets", "test-ci-jobs"]
     }
   }
 }

@@ -82,7 +82,7 @@ hold nothing but their `project.json`, and these rules are theirs.
 
 - **A new module of the e2e binary lands in `e2e`** unless its name joins
   another profile's list — the `e2e` filter is the complement of the other
-  five, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
+  six, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
   `tests/e2e/ensure_baseline.rs` holds the profiles to one partition and every
   tier project to the profile it names.
 - **A tier is reached only through its inputs.** No tier has a project-graph
@@ -103,7 +103,7 @@ hold nothing but their `project.json`, and these rules are theirs.
   and the suite's own files, so a change that cannot move coverage does not
   re-measure it.
 - **`test-quick`** is a tier without instrumentation, for the cross-platform
-  legs; the baseline, cost and linked-report tiers have none, for the reasons the justfile's
+  legs; the baseline, cost, linked-report and ci-jobs tiers have none, for the reasons the justfile's
   `test-quick` recipe gives.
 
 ## Which tier a test belongs to

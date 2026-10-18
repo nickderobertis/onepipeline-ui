@@ -36,6 +36,7 @@
 //! directive that permits it and the reason it is the narrowest cut available.
 
 mod baseline;
+mod ci_jobs;
 mod ci_tier;
 mod cli;
 mod cost;
@@ -90,6 +91,9 @@ mod stub_bin;
 mod timeline_schema;
 #[path = "../support/workflow.rs"]
 mod workflow;
+#[cfg(unix)]
+#[path = "../support/workspace_copy.rs"]
+mod workspace_copy;
 
 #[cfg(unix)]
 #[path = "../support/github_board.rs"]

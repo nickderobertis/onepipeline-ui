@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.38.1...v0.39.0) - 2026-10-18
+
+### Added
+
+- *(deps)* [**breaking**] link the engine and sibling releases that read YAML with serde-saphyr ([#360](https://github.com/nickderobertis/onepipeline-ui/pull/360))
+
 ## [0.38.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.37.0...v0.38.0) - 2026-10-16
 
 ### Added

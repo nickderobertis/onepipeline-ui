@@ -69,7 +69,8 @@
       "{workspaceRoot}/tests/support/sibling.rs",
       "{workspaceRoot}/tests/support/stub_bin.rs",
       "{workspaceRoot}/tests/support/timeline_schema.rs",
-      "{workspaceRoot}/tests/support/workflow.rs"
+      "{workspaceRoot}/tests/support/workflow.rs",
+      "{workspaceRoot}/tests/support/workspace_copy.rs"
     ]
   },
   "//end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
