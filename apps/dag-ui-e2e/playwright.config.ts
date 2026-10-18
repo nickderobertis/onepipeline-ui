@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import { defineConfig } from "@playwright/test";
 import { z } from "zod";
 
@@ -176,6 +176,20 @@ export const STALLED_UI_URL = `http://${LOOPBACK}:${session.stalledUi}`;
  * it. `e2e/global-teardown.ts` removes it when the run ends.
  */
 export const FIXTURE_WORKSPACE = session.workspace;
+/**
+ * Where this run writes its artifacts: a directory of its own under `test-results/`,
+ * named after its fixture workspace. Playwright empties its output directory as a run
+ * starts, so one directory shared between runs is a concurrent run's deleted out from
+ * under it — `dag-ui-e2e:test` and `test-isolation` run side by side in ci.yml's
+ * `test-linux`, and the isolation spec launches runs of this config besides, and a run
+ * failed there with `ENOENT … scandir test-results`. It stays in the checkout rather
+ * than in the fixture workspace so a failed run's traces outlive the teardown.
+ */
+export const OUTPUT_DIR = join(
+  import.meta.dirname,
+  "test-results",
+  basename(session.workspace),
+);
 
 export default defineConfig({
   testDir: ".",
@@ -187,6 +201,7 @@ export default defineConfig({
   // they now share a directory.
   testIgnore: ["**/*.screens.spec.ts", "isolation/**"],
   globalTeardown: "./global-teardown.ts",
+  outputDir: OUTPUT_DIR,
   /**
    * Budgeted for this host rather than inherited. Every wait here crosses the browser,
    * the dev server, the axum server and a disk read, and this host runs live agent dispatches

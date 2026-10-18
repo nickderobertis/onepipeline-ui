@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 
 import { expect, test } from "@playwright/test";
 
@@ -11,7 +11,8 @@ import { expect, test } from "@playwright/test";
  * rather than against the working directory, so a bare `playwright.config.ts`
  * here is looked for one directory above this project and found nowhere.
  */
-const TIER_CONFIG = join(import.meta.dirname, "..", "playwright.config.ts");
+const TIER_DIR = join(import.meta.dirname, "..");
+const TIER_CONFIG = join(TIER_DIR, "playwright.config.ts");
 
 /**
  * What one run of the browser tier owes another, proven by running the tier itself.
@@ -85,6 +86,21 @@ test("two runs of the browser tier at once stay out of each other's way", async 
   for (const found of directories.flat()) {
     expect(existsSync(found)).toBe(false);
   }
+  // And each wrote its artifacts to a directory of its own, which the other's start
+  // left standing: Playwright empties a run's output directory as the run begins, so
+  // a shared one is deleted under whichever run started first.
+  const outputs = directories
+    .flat()
+    .map((found) => join(TIER_DIR, "test-results", basename(found)));
+  try {
+    for (const output of outputs) {
+      expect(existsSync(join(output, ".last-run.json")), output).toBe(true);
+    }
+  } finally {
+    for (const output of outputs) {
+      rmSync(output, { recursive: true, force: true });
+    }
+  }
 });
 
 test("a run that fails still gives its fixture directory back", async () => {
@@ -99,4 +115,8 @@ test("a run that fails still gives its fixture directory back", async () => {
   expect(extra).toEqual([]);
   expect(directory).toBeDefined();
   expect(existsSync(String(directory))).toBe(false);
+  rmSync(join(TIER_DIR, "test-results", basename(String(directory))), {
+    recursive: true,
+    force: true,
+  });
 });
