@@ -2026,7 +2026,7 @@ fn stage_with_a_dry_run_exiting(status: i32) -> (tempfile::TempDir, std::process
     // llmlint: ignore[e2e_not_mocked] the subject is the recipe's handling of its producer's exit, and the real producer compiles a release build; standing in for that script is what lets a journey choose the exit the recipe must carry.
     fs::write(
         tree.path().join("scripts/release-native-dry-run.sh"),
-        format!("printf 'staged into %s\\n' \"$1\"\nexit {status}\n"),
+        format!("printf 'staged into %s\\n' \"$1\"\nnice > niceness\nexit {status}\n"),
     )
     .expect("write the stand-in dry run");
     let output = std::process::Command::new("just")
@@ -2053,6 +2053,34 @@ fn the_release_staging_recipe_keeps_the_dry_runs_stdout() {
         .expect("the recipe left the dry run's stdout");
     assert_eq!(kept, "staged into target/release-staging\n");
     assert!(log.contains("staged into target/release-staging"), "{log}");
+}
+
+/// The dry run compiles a release build, which `ci-test-linux` runs beside the
+/// test tiers; it runs below the caller's priority so the tiers keep their CPU.
+#[cfg(unix)]
+#[test]
+fn the_release_staging_dry_run_runs_below_its_callers_priority() {
+    let (tree, output) = stage_with_a_dry_run_exiting(0);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let niceness = |text: &str| text.trim().parse::<i32>().expect("a niceness");
+    let ours = niceness(&String::from_utf8_lossy(
+        &std::process::Command::new("nice")
+            .output()
+            .expect("nice is on PATH")
+            .stdout,
+    ));
+    let staged = niceness(
+        &fs::read_to_string(tree.path().join("niceness")).expect("the dry run's niceness"),
+    );
+    assert_eq!(
+        staged,
+        (ours + 10).min(19),
+        "the dry run ran at niceness {staged}"
+    );
 }
 
 /// A dry run that failed fails the recipe with its own status, through the `tee`

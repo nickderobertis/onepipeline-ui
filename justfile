@@ -193,9 +193,10 @@ ci-test-macos *args:
 # The bin directory is resolved by `cd`, so a root cargo did not write is named
 # rather than read as a command missing from PATH, and the binary is handed to
 # the smoke test by its path: the Windows leg's PATH lookup did not find it there.
+# Compiled at low priority, as `release-staging` is: see `packaging-priority`.
 # Install this revision the documented way and smoke-test the installed binary.
 _crate-install-smoke:
-    @RUSTFLAGS="-D warnings" cargo install --path . --locked --quiet --root target/install-smoke
+    @RUSTFLAGS="-D warnings" {{packaging-priority}} cargo install --path . --locked --quiet --root target/install-smoke
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
       PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \
@@ -227,7 +228,14 @@ _crate-wheel-smoke:
 # Rehearse the native release staging into target/release-staging.
 _crate-release-staging:
     @rm -rf target/release-staging && mkdir -p target/release-staging
-    @RUSTFLAGS="-D warnings" bash scripts/release-native-dry-run.sh target/release-staging | tee target/release-staging/dry-run.stdout
+    @RUSTFLAGS="-D warnings" {{packaging-priority}} bash scripts/release-native-dry-run.sh target/release-staging | tee target/release-staging/dry-run.stdout
+
+# The packaging targets' release builds are long batch compiles that `ci-test-linux`
+# runs beside the test tiers, and the cost journeys count a subscriber's poll
+# ticks, which a starved server misses: at a lower priority those compiles take
+# only the CPU the tiers leave, and every core once the tiers are done. `nice`
+# where the host has it; where it does not, the command runs as it is.
+packaging-priority := `command -v nice >/dev/null 2>&1 && echo "nice -n 10" || true`
 
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
