@@ -864,6 +864,8 @@ fn a_malformed_call_is_refused_as_usage() {
     for (arguments, binary) in [
         (&[][..], ".tools/bin/onepipeline"),
         (&["not-a-version"][..], ".tools/bin/onepipeline"),
+        // One good line is not a good version: the rest would reach the URL.
+        (&["1.2.3\n../../elsewhere"][..], ".tools/bin/onepipeline"),
         (&["1.2.3"][..], ""),
     ] {
         let output = Command::new("bash")

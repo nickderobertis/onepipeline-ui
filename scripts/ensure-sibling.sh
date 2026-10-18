@@ -44,8 +44,9 @@ if [ -z "$version" ] || [ -z "$binary" ]; then
   exit 2
 fi
 # The version reaches a URL and a file name, so it is held to what a release
-# version looks like rather than trusted.
-printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || {
+# version looks like rather than trusted — the whole argument, which a line-wise
+# `grep` would pass when any one of its lines matched.
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || {
   echo "ensure-sibling: '$version' is not a release version" >&2
   echo "ACTION: run 'just _ensure-sibling', which reads it from Cargo.lock" >&2
   exit 2

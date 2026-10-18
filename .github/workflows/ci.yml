@@ -820,7 +820,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux arm64 is no longer built here, by the user's decision.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
     name: wheel (${{ matrix.target }})
