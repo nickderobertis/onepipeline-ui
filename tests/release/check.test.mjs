@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -271,4 +272,58 @@ test("a release-status.sh stopped by a signal fails settle rather than ending it
   assert.match(stderr, /ACTION: re-run the publish job/);
   assert.ok(!gh.prerelease(), "nothing edited the Release");
   assert.ok(!existsSync(hold));
+});
+
+test("once every platform is served, publish's uploads still refuse an --out its build never staged", () => {
+  const V = version();
+  for (const job of Object.keys(PLATFORMS))
+    for (const artifact of plan(job).artifacts) {
+      if (artifact.registry === "github")
+        writeFileSync(join(gh.assets, artifact.file), artifact.file);
+      if (artifact.registry === "pypi")
+        writeFileSync(
+          join(registries.state, "pypi", artifact.file),
+          artifact.file,
+        );
+      if (artifact.registry === "npm") {
+        const pkg = join(registries.state, "npm", artifact.package);
+        mkdirSync(pkg, { recursive: true });
+        writeFileSync(
+          join(pkg, `${V}.json`),
+          JSON.stringify({ name: artifact.package, version: V }),
+        );
+        writeFileSync(join(pkg, `${V}.tgz`), artifact.file);
+      }
+    }
+  mkdirSync(join(ROOT, "target"), { recursive: true });
+  const out = mkdtempSync(join(ROOT, "target", "release-journey-unbuilt-"));
+  try {
+    const extra = { BUILD_RESULTS: allBuilt };
+    const check = publish(["check"], extra);
+    assert.equal(check.status, 0, check.output);
+    const uploads = gh.uploads().length;
+    for (const registry of ["crate", "npm", "github"]) {
+      const run = publish(["upload", registry, "--out", out], extra);
+      assert.notEqual(run.status, 0, `${registry}: ${run.output}`);
+      assert.match(
+        run.stderr,
+        new RegExp(`nothing staged under ${escapeRegExp(out)} for: \\S`),
+        registry,
+      );
+      assert.match(
+        run.stderr,
+        /ACTION: run the build phase of this recipe first/,
+        registry,
+      );
+    }
+    assert.equal(gh.uploads().length, uploads);
+    assert.deepEqual(registries.uploads(), []);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+    for (const file of readdirSync(gh.assets)) rmSync(join(gh.assets, file));
+    for (const dir of ["pypi", "npm"]) {
+      rmSync(join(registries.state, dir), { recursive: true, force: true });
+      mkdirSync(join(registries.state, dir));
+    }
+  }
 });

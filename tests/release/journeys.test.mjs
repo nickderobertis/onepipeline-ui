@@ -1024,6 +1024,25 @@ describe("publication against registry doubles", () => {
     } finally {
       writeFileSync(uiTarball, uiBytes);
     }
+    // So does one whose bundle is there but is not the one this release built.
+    rmSync(bare, { recursive: true, force: true });
+    mkdirSync(bare, { recursive: true });
+    execFileSync("tar", ["-xzf", uiTarball, "-C", bare]);
+    writeFileSync(
+      join(bare, "package/dist/index.html"),
+      "<!doctype html><title>another build</title>\n",
+    );
+    execFileSync("tar", ["-czf", uiTarball, "-C", bare, "package"]);
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /does not carry the frontend this release built/,
+      );
+    } finally {
+      writeFileSync(uiTarball, uiBytes);
+    }
     // With every registry switched off, publish requires nothing of them and
     // installs nothing from npm: the crate and the frontend lost, it still
     // verifies, by the SBOM on the Release. The probe still asks each registry,

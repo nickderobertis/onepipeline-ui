@@ -5,9 +5,10 @@
 // registry and `gh` doubles, so a refusal that let anything through would show
 // up as an upload.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { plan } from "../../scripts/release.mjs";
 import {
   githubDouble,
   ROOT,
@@ -63,3 +64,38 @@ for (const phase of [
     assert.deepEqual(registries.uploads(), []);
     assert.deepEqual(gh.uploads(), []);
   });
+
+test("build-linux's verify refuses carriers staged without the binary they were packed from", () => {
+  // Every planned file is there, so what is missing is only the reference the
+  // installed binaries are held to.
+  const carriers = mkdtempSync(
+    join(ROOT, "target", "release-journey-carriers-"),
+  );
+  const dirs = {
+    archive: "assets",
+    checksum: "assets",
+    wheel: "wheels",
+    npm: "npm-artifacts",
+  };
+  try {
+    const { artifacts, targets } = plan("linux");
+    for (const artifact of artifacts) {
+      mkdirSync(join(carriers, dirs[artifact.kind]), { recursive: true });
+      writeFileSync(
+        join(carriers, dirs[artifact.kind], artifact.file),
+        artifact.file,
+      );
+    }
+    const run = recipe("linux", ["verify", "--out", carriers], env);
+    assert.notEqual(run.status, 0, run.output);
+    assert.match(
+      run.stderr,
+      new RegExp(
+        `nothing staged under \\S+ for: ${targets[0]}/onepipeline-api`,
+      ),
+    );
+    assert.deepEqual(gh.calls(), [], "nothing was downloaded to compare");
+  } finally {
+    rmSync(carriers, { recursive: true, force: true });
+  }
+});
