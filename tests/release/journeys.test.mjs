@@ -322,11 +322,8 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
 
 // npm writes three launchers into node_modules/.bin on Windows — an
 // extensionless sh script, a .cmd and a .ps1 — through its own cmd-shim, which
-// this host can run too. v0.40.0's build-windows handed the .cmd to
-// scripts/smoke-published.sh, and Git Bash, which counts no .cmd as
-// executable, refused an install that had worked. This lays the staged npm
-// install out as Windows does and drives the smoke the way the staged
-// verification now does on every runner, through npmLauncher.
+// this host can run too, so the staged install is laid out that way here and
+// the smoke is handed what npmLauncher picks for Windows.
 describe("the npm install's launcher as Windows lays it out", () => {
   let dir;
   let registries;

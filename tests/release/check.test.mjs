@@ -361,6 +361,83 @@ test("a platform package npm lists before it serves is waited for, and check pas
   }
 });
 
+test("a platform package npm does not list yet is waited for beside one it lists and does not serve, and check passes once npm serves both", async () => {
+  const V = version();
+  seedPlatforms();
+  // A successful build's package npm has not even listed, and another it lists
+  // with no tarball behind it.
+  registries.hide([`onepipeline-api-cli-linux-x64@${V}`]);
+  registries.unserve([`onepipeline-api-cli-win32-x64@${V}`]);
+  const served = registries.served().length;
+  try {
+    const running = recipeRunning("publish", ["check"], {
+      ...env,
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "120",
+    });
+    await sleep(4000);
+    registries.clear();
+    const check = await running;
+    assert.equal(check.status, 0, check.output);
+    assert.deepEqual(
+      registries
+        .served()
+        .slice(served)
+        .map((line) => line.split(" ")[1])
+        .sort(),
+      platformPackages()
+        .map((pkg) => `${pkg}-${V}.tgz`)
+        .sort(),
+    );
+  } finally {
+    unseed();
+  }
+});
+
+test("the wait is one deadline for every platform package, not one per package", () => {
+  const V = version();
+  seedPlatforms();
+  // Two packages npm never serves: the second gets what the first left.
+  registries.unserve([
+    `onepipeline-api-cli-linux-x64@${V}`,
+    `onepipeline-api-cli-win32-x64@${V}`,
+  ]);
+  try {
+    const started = Date.now();
+    const check = publish(["check"], {
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "20",
+    });
+    const elapsed = (Date.now() - started) / 1000;
+    assert.notEqual(check.status, 0, check.output);
+    for (const pkg of ["linux-x64", "win32-x64"])
+      assert.match(
+        check.stderr,
+        new RegExp(
+          `not every platform published .*npm onepipeline-api-cli-${pkg}@`,
+        ),
+      );
+    // retry-install backs off 1, 2, 4 and 8 s, so one 20 s budget runs out
+    // after about 15 s of waiting, and two of them after about 30.
+    assert.ok(elapsed >= 14, `it waited the budget: ${elapsed} s`);
+    assert.ok(elapsed < 26, `not a budget per package: ${elapsed} s`);
+  } finally {
+    unseed();
+  }
+});
+
+test("a budget that is not whole seconds is refused before anything is asked", () => {
+  const check = publish(["check"], {
+    BUILD_RESULTS: allBuilt,
+    RELEASE_CHECK_BUDGET: "-5",
+  });
+  assert.equal(check.status, 2, check.output);
+  assert.match(
+    check.stderr,
+    /RELEASE_CHECK_BUDGET must be a whole number of seconds, not '-5'/,
+  );
+});
+
 test("a platform package npm never serves within the wait fails check, and no upload publishes the launcher past it", () => {
   const V = version();
   seedPlatforms();

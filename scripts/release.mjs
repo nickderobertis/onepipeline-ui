@@ -20,11 +20,9 @@
 //                 or npm). Each asks the registry first and uploads only what it
 //                 does not already serve, so a re-run finishes a partial upload.
 //   verify        install the version back from the Release and PyPI, on this
-//                 OS, and run it. npm is left to publish's `check`: npm takes a
-//                 publish and serves it minutes later — v0.40.0's linux-x64
-//                 tarball still answered 404 nine minutes after `npm publish`
-//                 returned — and a wait that long does not fit in a job that
-//                 spent twenty of its thirty minutes compiling.
+//                 OS, and run it. npm is left to publish's `check`: npm serves
+//                 a publish minutes after taking it, longer than a job that
+//                 compiled for most of its timeout has left.
 //   all --dry-run the rehearsal: build, test-install, then every switched-on
 //                 upload reported rather than run. Only with --dry-run: a
 //                 release runs each phase as its own workflow step.
@@ -345,9 +343,7 @@ const cratesIndex = () =>
 // Retried the way every registry install here is: the install is the probe,
 // because a registry's API answers before the CDN a user installs through does.
 // `require` is a file the install has to have written for an attempt to count:
-// npm skips an optional dependency it cannot fetch and still exits 0, which is
-// how v0.39.0's verification installed a launcher whose platform package npm
-// did not serve yet and read that as installed.
+// npm skips an optional dependency it cannot fetch and still exits 0.
 function retried(label, action, command, args, options = {}) {
   const { budget = process.env.RELEASE_VERIFY_BUDGET || "600", require } =
     options;
@@ -399,9 +395,8 @@ function smoke(command, version, label) {
 // can run it. On Windows npm writes three launchers into node_modules/.bin: an
 // extensionless sh script, a .cmd and a .ps1. Git Bash, which runs
 // scripts/smoke-published.sh, counts an .exe, or a script starting with `#!`,
-// as executable and a .cmd as neither, so to it the .cmd is no command at all —
-// which is how v0.40.0's build-windows refused an install that had worked — while
-// node can spawn nothing but the .cmd, and only through a shell. Everywhere
+// as executable and a .cmd as neither, so to it the .cmd is no command at all,
+// while node can spawn nothing but the .cmd, and only through a shell. Everywhere
 // else the one name is a symlink both can run.
 export function npmLauncher(prefix, windows = WINDOWS) {
   const bin = join(prefix, "node_modules", ".bin");
@@ -943,15 +938,24 @@ function pairs(name) {
 //
 // npm's platform packages are then fetched by version, as an install fetches
 // them, because npm takes a publish and serves it minutes later, and lists a
-// version before it serves its tarball: v0.39.0's were listed up to six and a
-// half minutes after their `npm publish` returned, by which time its launcher,
-// published after them, was installable already and installed without them.
+// version before it serves its tarball.
 // With `wait`, which the phase passes, each is waited for; the uploads' repeat
 // of the check fetches each once. Only a package a job that succeeded
 // published is waited for: one whose job did not succeed, or which anything
 // else here is missing beside, may never have reached npm, and is reported now
 // rather than read as a registry that has not caught up.
+function checkBudget() {
+  const budget = process.env.RELEASE_CHECK_BUDGET || "900";
+  if (!/^\d+$/.test(budget))
+    throw usage(
+      `RELEASE_CHECK_BUDGET must be a whole number of seconds, not '${budget}'`,
+      "set RELEASE_CHECK_BUDGET to whole seconds, or unset it for 900",
+    );
+  return Number(budget);
+}
+
 async function check({ wait = false } = {}) {
+  const budget = wait ? checkBudget() : 0;
   const version = cargoVersion();
   const tag = releaseTag(version);
   const pypi = switchedOn("PYPI_PUBLISH");
@@ -983,9 +987,7 @@ async function check({ wait = false } = {}) {
   else if (npm) {
     // One deadline for every package, so three slow ones cannot take three
     // budgets.
-    const deadline = wait
-      ? Date.now() + Number(process.env.RELEASE_CHECK_BUDGET || "900") * 1000
-      : 0;
+    const deadline = Date.now() + budget * 1000;
     const work = scratch("check-npm");
     try {
       for (const job of Object.keys(PLATFORMS))

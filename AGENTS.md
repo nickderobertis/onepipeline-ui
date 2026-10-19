@@ -218,13 +218,12 @@ fans one uniformly-named target across all of them.
   every upload publishes only what its registry does not already serve. A
   target is changed in `scripts/release.mjs`'s table and nowhere else.
 - **npm serves a publish minutes after `npm publish` returns, and names a
-  version before it serves the tarball** — up to eight minutes to list one,
-  and over nine to serve it, in v0.39.0 and v0.40.0. So no platform job waits for npm (Windows has spent
-  twenty of its thirty minutes compiling); `publish`'s `check` fetches every
-  platform package by version, waiting only on what a successful job
-  published, before the launcher that pins them goes out. npm also installs a
-  launcher whose platform package it cannot fetch and exits 0, so an install
-  that lacks the platform package is retried, never counted.
+  version before it serves the tarball** — longer than a platform job has
+  left after compiling. So no platform job waits for npm; `publish`'s `check`
+  fetches every platform package by version, waiting only on what a
+  successful job published, before the launcher that pins them goes out. npm
+  also installs a launcher whose platform package it cannot fetch and exits
+  0, so an install that lacks the platform package is retried, never counted.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

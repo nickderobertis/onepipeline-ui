@@ -19,9 +19,8 @@
 #
 # `--require PATH` is a file the install must have written for an attempt to
 # count. npm skips an optional dependency it cannot fetch and still exits 0, so
-# a launcher published after its platform packages, but served before them, is
-# "installed" without the one thing it runs: v0.39.0's verification read
-# exactly that as success, and its smoke test then found no binary.
+# a launcher served before its platform package is "installed" without the one
+# thing it runs.
 #
 # Quiet on success: one line naming the attempt it took. On exhaustion: the last
 # attempt's own output, then the error and what to do about it.
