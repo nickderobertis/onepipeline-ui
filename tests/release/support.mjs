@@ -113,9 +113,10 @@ export async function registryDoubles(dir) {
         : [],
     hide: (entries) => control("hide", entries),
     corrupt: (entries) => control("corrupt", entries),
+    delay: (entries) => control("delay", entries),
     breakReads: (entries) => control("broken", entries),
     clear: () => {
-      for (const name of ["hide", "corrupt", "broken", "fail"])
+      for (const name of ["hide", "corrupt", "delay", "broken", "fail"])
         rmSync(join(state, "control", name), { recursive: true, force: true });
       mkdirSync(join(state, "control", "fail"));
     },

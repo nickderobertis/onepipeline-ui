@@ -23,6 +23,10 @@ import { execFileSync } from "node:child_process";
 //   control/hide                 lines naming files or package@version this
 //                                registry pretends not to serve
 //   control/corrupt              lines naming files served with other bytes
+//   control/delay                lines `<package>@<version>=<seconds>`: npm
+//                                serves that version only once <seconds> have
+//                                passed since this file was written, as npm
+//                                lists a new version minutes after taking it
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
 //                                `crate-index=foreign` (JSON, not an entry),
 //                                `<read>=not-json` (a 200 that does not parse),
@@ -51,6 +55,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -73,6 +78,14 @@ const lines = (name) =>
         .filter(Boolean)
     : [];
 const hidden = (key) => lines("hide").includes(key);
+// An npm version not served yet: its delay has not run out since the delay was
+// set.
+function delayed(key) {
+  const entry = lines("delay").find((line) => line.startsWith(`${key}=`));
+  if (!entry) return false;
+  const since = statSync(join(state, "control", "delay")).mtimeMs;
+  return Date.now() < since + Number(entry.slice(key.length + 1)) * 1000;
+}
 // What a broken read answers instead, or nothing when it is not broken.
 function broken(read, response) {
   const entry = lines("broken").find((line) => line.startsWith(`${read}=`));
@@ -230,7 +243,7 @@ function npmVersions(pkg) {
   return readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
     .map((f) => f.slice(0, -5))
-    .filter((v) => !hidden(`${pkg}@${v}`))
+    .filter((v) => !hidden(`${pkg}@${v}`) && !delayed(`${pkg}@${v}`))
     .sort();
 }
 
@@ -260,7 +273,11 @@ async function npm(request, response, path) {
     if (!valid(PACKAGE, pkg) || !valid(VERSION, version))
       return reply(response, 404, { error: "Not found" });
     const file = join(state, "npm", pkg, `${version}.tgz`);
-    if (!existsSync(file) || hidden(`${pkg}@${version}`))
+    if (
+      !existsSync(file) ||
+      hidden(`${pkg}@${version}`) ||
+      delayed(`${pkg}@${version}`)
+    )
       return reply(response, 404, { error: "Not found" });
     downloaded("npm", `${pkg}-${version}.tgz`);
     return reply(

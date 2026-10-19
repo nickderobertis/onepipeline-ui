@@ -79,9 +79,13 @@ env:
   NPM_PUBLISH: ${{ vars.NPM_PUBLISH }}
 
 jobs:
+  # Every release job has 45 minutes, not the 30 a pull request's jobs keep:
+  # each one's verify waits up to scripts/release.mjs's NPM_VERIFY_BUDGET, 20
+  # minutes, for npm to serve what it published, and build-windows has spent 20
+  # minutes compiling before that wait begins.
   build-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       # Attaching the archives to the Release is a write to it.
       contents: write
@@ -134,7 +138,7 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -180,7 +184,7 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
     defaults:
@@ -235,7 +239,7 @@ jobs:
     needs: [build-linux, build-macos, build-windows]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       # The SBOM is a Release asset, and the demotion rewrites the Release.
       contents: write

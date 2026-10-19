@@ -16,7 +16,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { TARGETS } from "./release.mjs";
+import { launcherShims, TARGETS } from "./release.mjs";
 
 // Native runners only: each platform job installs its own targets.
 const WINDOWS = process.platform === "win32";
@@ -68,7 +68,9 @@ async function main() {
       shell: WINDOWS && cmd === "npm",
       ...options,
     });
-  async function smoke(command) {
+  // `command` is what bash runs and `spawned` what Node does, which differ only
+  // for the npm launcher's shims on Windows.
+  async function smoke(command, spawned = command) {
     run("bash", [
       "scripts/smoke-published.sh",
       "--expect-version",
@@ -81,9 +83,9 @@ async function main() {
     const runs = join(scratch, "runs");
     mkdirSync(runs, { recursive: true });
     const server = spawn(
-      command,
+      spawned,
       ["serve", "--ui", "--runs-root", runs, "--bind", "127.0.0.1:0"],
-      { shell: WINDOWS && command.endsWith(".cmd") },
+      { shell: WINDOWS && spawned.endsWith(".cmd") },
     );
     // llmlint: ignore-end[changed_behavior_has_e2e]
     let log = "";
@@ -361,16 +363,8 @@ async function main() {
         "npm installed different binary bytes",
         "inspect the platform package and launcher resolution; regenerate npm from the final wheel binary",
       );
-    // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (the venv's Scripts directory and `python`, npm's .cmd shim) runs only on a Windows runner, which the release's build-windows job installs these files on before every publication; the Linux branch beside it is driven end to end by tests/release/journeys.test.mjs.
-    await smoke(
-      join(
-        npmRoot,
-        "node_modules",
-        ".bin",
-        WINDOWS ? "onepipeline-api.cmd" : "onepipeline-api",
-      ),
-    );
-    // llmlint: ignore-end[changed_behavior_has_e2e]
+    const shims = launcherShims(join(npmRoot, "node_modules", ".bin"));
+    await smoke(shims.bash, shims.spawn);
     console.log(
       `${target}: staged archive/wheel/npm install, server and embedded view passed`,
     );

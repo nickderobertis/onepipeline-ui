@@ -58,7 +58,8 @@
 //   RELEASE_CRATES_API       the crate registry's API, which the release probe
 //                            reads (https://crates.io)
 //   RELEASE_CARGO_PUBLISH_FLAGS extra `cargo publish` flags, as words
-//   RELEASE_VERIFY_BUDGET    seconds a registry install is retried (600)
+//   RELEASE_VERIFY_BUDGET    seconds a registry install is retried (600, and
+//                            NPM_VERIFY_BUDGET's 1200 for npm, when unset)
 //   BUILD_RESULTS            `build-<os>=<result>` pairs the publish job was handed
 //   STEP_RESULTS             `<step>=<outcome>` pairs of the publish job's own steps
 //
@@ -333,31 +334,48 @@ const cratesIndex = () =>
 
 // Retried the way every registry install here is: the install is the probe,
 // because a registry's API answers before the CDN a user installs through does.
-function retried(label, action, command, args, options = {}) {
-  const budget = process.env.RELEASE_VERIFY_BUDGET || "600";
+// RELEASE_VERIFY_BUDGET, when set, is every registry's budget.
+function retried(label, action, command, args, budget = 600) {
+  budget = process.env.RELEASE_VERIFY_BUDGET || String(budget);
   const first = Number(budget) < 30 ? "1" : "5";
-  must(
+  must(label, action, "bash", [
+    "scripts/retry-install.sh",
+    "--budget",
+    budget,
+    "--first-delay",
+    first,
+    "--max-delay",
+    String(Math.max(Number(first), Math.min(60, Number(budget)))),
+    "--label",
     label,
+    "--action",
     action,
-    "bash",
-    [
-      "scripts/retry-install.sh",
-      "--budget",
-      budget,
-      "--first-delay",
-      first,
-      "--max-delay",
-      String(Math.max(Number(first), Math.min(60, Number(budget)))),
-      "--label",
-      label,
-      "--action",
-      action,
-      "--",
-      command,
-      ...args,
-    ],
-    options,
-  );
+    "--",
+    command,
+    ...args,
+  ]);
+}
+
+// npm is slower to serve a version than PyPI or the Release, and an install
+// that asks too early is answered by a 404 npm's CDN then keeps: it serves a
+// tarball's 404 with `cache-control: public, max-age=300`. v0.40.0's
+// darwin-arm64 package was not listed until 8m15s after `npm publish` returned,
+// and linux-x64 was listed after 5m14s, but its tarball was then served as a 404
+// for exactly 300 s more: 10m17s in all, past the 600 s budget by seconds.
+// Twenty minutes covers that slowest listing, a full 300 s of cached 404, and
+// the same again in reserve.
+export const NPM_VERIFY_BUDGET = 1200;
+
+// What `npm install` puts in node_modules/.bin for the launcher, and which of
+// its shims each caller can run. npm writes an extensionless sh script on every
+// OS — the symlink on POSIX, cmd-shim's `#!/bin/sh` script on Windows — and that
+// one is what bash runs: Git Bash treats only .exe, .com and .bat files, and
+// scripts that open with `#!`, as executable, so `command -v` refuses the .cmd
+// batch shim beside it, as it did on v0.40.0's build-windows. Node spawns the
+// .cmd on Windows, through a shell, which is what cmd and PowerShell users run.
+export function launcherShims(bin, windows = WINDOWS) {
+  const sh = join(bin, "onepipeline-api");
+  return { bash: sh, spawn: windows ? `${sh}.cmd` : sh };
 }
 
 function sha256(path) {
@@ -871,6 +889,7 @@ function verifyPlatform(job, out) {
             portable(join(work, "npm-cache")),
             `${pkg}@${version}`,
           ],
+          NPM_VERIFY_BUDGET,
         );
         const installed = join(prefix, "node_modules", pkg, "bin", exe);
         if (!existsSync(installed))
@@ -1212,6 +1231,7 @@ async function verifyPublish(out) {
           portable(join(frontend, ".cache")),
           `onepipeline-ui@${version}`,
         ],
+        NPM_VERIFY_BUDGET,
       );
       const index = (root) =>
         join(root, "onepipeline-ui", "dist", "index.html");
@@ -1244,14 +1264,10 @@ async function verifyPublish(out) {
           portable(join(work, ".cache")),
           `${WHEEL_PACKAGE}@${version}`,
         ],
+        NPM_VERIFY_BUDGET,
       );
       smoke(
-        join(
-          work,
-          "node_modules",
-          ".bin",
-          WINDOWS ? "onepipeline-api.cmd" : "onepipeline-api",
-        ),
+        launcherShims(join(work, "node_modules", ".bin")).bash,
         version,
         `npm ${WHEEL_PACKAGE} ${version}`,
       );
