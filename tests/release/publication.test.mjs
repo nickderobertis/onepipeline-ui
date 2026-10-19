@@ -148,53 +148,6 @@ describe("native publication regressions", () => {
       rmSync(work, { recursive: true, force: true });
     }
   });
-
-  test("build-linux's npm check waits for npm to serve what it published, and names the package and version when npm never does", async () => {
-    const pkg = fileOf("npm").package;
-    // Metadata can be visible while the tarball still returns 404, as in
-    // v0.40.0. Prove we tried that unavailable tarball before recovering.
-    registries.delay([`tarball:${pkg}@${VERSION}=4`]);
-    const metadata = await fetch(`${registries.npm}${pkg}`);
-    assert.equal(metadata.status, 200);
-    assert.ok((await metadata.json()).versions[VERSION]);
-    const served = registries.served().length;
-    try {
-      const run = recipe("linux", ["verify", "--out", OUT], {
-        ...env,
-        PYPI_PUBLISH: "false",
-        RELEASE_VERIFY_BUDGET: "12",
-      });
-      assert.equal(run.status, 0, run.output);
-      const reads = registries.served().slice(served);
-      assert.ok(
-        reads.includes(`npm-unavailable ${pkg}-${VERSION}.tgz`),
-        reads.join("\n"),
-      );
-      assert.ok(reads.includes(`npm ${pkg}-${VERSION}.tgz`), reads.join("\n"));
-    } finally {
-      registries.clear();
-    }
-    registries.hide([`tarball:${pkg}@${VERSION}`]);
-    try {
-      const run = recipe("linux", ["verify", "--out", OUT], {
-        ...env,
-        PYPI_PUBLISH: "false",
-      });
-      assert.notEqual(run.status, 0, run.output);
-      assert.match(
-        run.stderr,
-        new RegExp(
-          `npm ${pkg} ${VERSION.replace(/\./g, "\\.")}: still not installable after \\d+ attempts`,
-        ),
-      );
-      assert.ok(
-        run.stderr.includes(`ACTION: check that npm serves ${pkg}@${VERSION}`),
-        run.stderr,
-      );
-    } finally {
-      registries.clear();
-    }
-  });
 });
 
 // A whole release's publication phases, in release.yml's order, against doubles

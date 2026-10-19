@@ -21,12 +21,15 @@ name: Release
 #     targets once, packs the archive, the wheel and the npm platform package
 #     from that one binary, installs and runs those exact files, publishes them
 #     (Release assets always; PyPI and npm when their switches are on), and then
-#     installs the version back from every registry on its own OS and runs it.
+#     installs the version back from the Release and PyPI on its own OS and
+#     runs it. npm serves a publish minutes after taking it, longer than these
+#     jobs have left, so its copy is waited for once, in publish's check.
 #     The three run side by side and need nothing from one another.
 #   * publish — once all three have run, whatever they did: refuses to publish
-#     anything unless every platform's files are served, then publishes what
-#     belongs to no platform (the crate, the npm launcher and frontend, the
-#     SBOM), installs the launcher back, and holds the GitHub Release to the
+#     anything unless every platform's files are served, waiting for npm to
+#     serve each platform package a successful job published, then publishes
+#     what belongs to no platform (the crate, the npm launcher and frontend,
+#     the SBOM), installs the launcher back, and holds the GitHub Release to the
 #     outcome — a release that did not publish is demoted to a prerelease.
 #
 # A failed platform job therefore leaves the other platforms' files published
@@ -79,13 +82,9 @@ env:
   NPM_PUBLISH: ${{ vars.NPM_PUBLISH }}
 
 jobs:
-  # Every release job has 45 minutes, not the 30 a pull request's jobs keep:
-  # each one's verify waits up to scripts/release.mjs's NPM_VERIFY_BUDGET, 20
-  # minutes, for npm to serve what it published, and build-windows has spent 20
-  # minutes compiling before that wait begins.
   build-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       # Attaching the archives to the Release is a write to it.
       contents: write
@@ -133,12 +132,12 @@ jobs:
         run: just release-linux upload pypi
       - name: Publish the archives and checksums to the Release
         run: just release-linux upload github
-      - name: Install the version from every registry on Linux and run it
+      - name: Install the version from the Release and PyPI on Linux and run it
         run: just release-linux verify
 
   build-macos:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: write
     env:
@@ -179,12 +178,12 @@ jobs:
         run: just release-macos upload pypi
       - name: Publish the archives and checksums to the Release
         run: just release-macos upload github
-      - name: Install the version from every registry on macOS and run it
+      - name: Install the version from the Release and PyPI on macOS and run it
         run: just release-macos verify
 
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: write
     defaults:
@@ -227,7 +226,7 @@ jobs:
         run: just release-windows upload pypi
       - name: Publish the archives and checksums to the Release
         run: just release-windows upload github
-      - name: Install the version from every registry on Windows and run it
+      - name: Install the version from the Release and PyPI on Windows and run it
         run: just release-windows verify
 
   # `always()` because a platform job that failed would otherwise skip this
@@ -239,7 +238,7 @@ jobs:
     needs: [build-linux, build-macos, build-windows]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       # The SBOM is a Release asset, and the demotion rewrites the Release.
       contents: write
@@ -264,7 +263,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just,cargo-cyclonedx@0.5.7
-      - name: Every platform served its files
+      - name: Every platform served its files, npm's waited for
         id: check
         run: just release-publish check
       - name: Assemble the crate, the npm launcher and frontend, and the SBOM

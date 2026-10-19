@@ -67,11 +67,11 @@ test("the release is exactly four jobs, three platform builds side by side and a
   for (const [os, runner] of Object.entries(PLATFORMS)) {
     const job = jobs[`build-${os}`];
     assert.equal(job["runs-on"], runner, `build-${os} runs on ${runner}`);
-    assert.equal(job["timeout-minutes"], 45, `build-${os}`);
+    assert.equal(job["timeout-minutes"], 30, `build-${os}`);
     assert.equal(job.needs, undefined, `build-${os} needs nothing`);
   }
   assert.equal(jobs.publish["runs-on"], "ubuntu-latest");
-  assert.equal(jobs.publish["timeout-minutes"], 45);
+  assert.equal(jobs.publish["timeout-minutes"], 30);
   assert.deepEqual([...jobs.publish.needs].sort(), [...BUILD_JOBS].sort());
 
   const plz = workflow("release-plz.yml").jobs;

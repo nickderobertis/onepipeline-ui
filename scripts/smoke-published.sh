@@ -56,9 +56,20 @@ fail() {
   exit 1
 }
 
+# A name is looked up on PATH; a path is a file this shell must be able to run.
+# Under Git Bash an .exe or a script starting with `#!` is one, and an npm .cmd
+# shim is not (scripts/release.mjs's npmLauncher says which file to hand it).
 if ! command -v "$command_name" >/dev/null 2>&1; then
-  fail "'$command_name' is not on PATH after the install" \
-    "check the install step above — the package may not put its console command on PATH"
+  case "$command_name" in
+    */*)
+      fail "'$command_name' is not a file this shell can run after the install" \
+        "check that the install wrote it; on Windows hand this script npm's extensionless shim, not the .cmd beside it"
+      ;;
+    *)
+      fail "'$command_name' is not on PATH after the install" \
+        "check the install step above — the package may not put its console command on PATH"
+      ;;
+  esac
 fi
 
 # `--version` prints `<name> <version>`; take the last field so the assertion is
@@ -138,14 +149,33 @@ fi
 # status the server never chose, so an exit code there would be the shell's and
 # not the artifact's. Every other leg above — the version, `--help`, the
 # documented `2`, and serving `/healthz` — runs on every platform.
-# A kill that fails means the server is already gone, which under `set -e` would
+# And TerminateProcess ends that one process alone: in front of an npm install's
+# binary stand npm's shim and node, and ending them leaves the binary serving,
+# its own file held open, so on Windows the stop takes the whole tree, by the
+# Windows process id MSYS keeps for the one this script started.
+# A stop that fails means the server is already gone, which under `set -e` would
 # end the run here with the shell's silence in place of the reason: the process
 # this leg exists to stop died on its own, and the log is what says why.
-if ! kill_error="$(kill "$serve_pid" 2>&1)"; then
-  fail "'serve' could not be asked to stop: ${kill_error}" \
-    "the server exited before this leg asked it to; read the line below for what ended it" \
-    "$(tr '\n' ' ' <"$serve_log")"
-fi
+case "$(uname -s)" in
+  # llmlint: ignore-block[changed_behavior_has_e2e] this branch runs only under Git Bash on Windows, which the release's build-windows job runs this script under for every staged and installed carrier before anything publishes; every other host takes the `kill` below, driven end to end by tests/release/journeys.test.mjs.
+  MINGW* | MSYS* | CYGWIN*)
+    winpid="$(cat "/proc/$serve_pid/winpid" 2>/dev/null || true)"
+    if [ -z "$winpid" ] ||
+      ! kill_error="$(MSYS_NO_PATHCONV=1 taskkill /F /T /PID "$winpid" 2>&1)"; then
+      fail "'serve' could not be asked to stop: ${kill_error:-no Windows process is left behind $serve_pid}" \
+        "the server exited before this leg asked it to; read the line below for what ended it" \
+        "$(tr '\n' ' ' <"$serve_log")"
+    fi
+    ;;
+  # llmlint: ignore-end[changed_behavior_has_e2e]
+  *)
+    if ! kill_error="$(kill "$serve_pid" 2>&1)"; then
+      fail "'serve' could not be asked to stop: ${kill_error}" \
+        "the server exited before this leg asked it to; read the line below for what ended it" \
+        "$(tr '\n' ' ' <"$serve_log")"
+    fi
+    ;;
+esac
 stopped=0
 wait "$serve_pid" || stopped=$?
 serve_pid=""

@@ -19,8 +19,10 @@
 //   upload R      publish this platform's files to one registry R (github, pypi
 //                 or npm). Each asks the registry first and uploads only what it
 //                 does not already serve, so a re-run finishes a partial upload.
-//   verify        install the version back from every registry this release
-//                 publishes to, on this OS, and run it.
+//   verify        install the version back from the Release and PyPI, on this
+//                 OS, and run it. npm is left to publish's `check`: npm serves
+//                 a publish minutes after taking it, longer than a job that
+//                 compiled for most of its timeout has left.
 //   all --dry-run the rehearsal: build, test-install, then every switched-on
 //                 upload reported rather than run. Only with --dry-run: a
 //                 release runs each phase as its own workflow step.
@@ -30,11 +32,16 @@
 //   check         every platform's files are on every switched-on registry and
 //                 every platform job succeeded. Each upload repeats it first, so
 //                 a missing platform publishes nothing platform-independent.
+//                 The phase itself, and only it, waits for npm to serve each
+//                 platform package that a job which succeeded published —
+//                 fetching it by version as an install does — so the launcher
+//                 that pins them never goes out ahead of them.
 //   build         assemble the platform-independent files: the npm launcher,
 //                 the npm frontend package, the crate and the CycloneDX SBOM.
 //   upload R      crate, npm or github, idempotent as above.
-//   verify        install the launcher from npm and run it; read the crate and
-//                 the SBOM back.
+//   verify        install the launcher from npm, as a user does, and run it —
+//                 an install that skipped this platform's package is not one;
+//                 read the crate and the SBOM back.
 //   settle        hold the GitHub Release to what published, through
 //                 scripts/release-status.sh: a release that did not publish is
 //                 demoted to a prerelease.
@@ -58,8 +65,9 @@
 //   RELEASE_CRATES_API       the crate registry's API, which the release probe
 //                            reads (https://crates.io)
 //   RELEASE_CARGO_PUBLISH_FLAGS extra `cargo publish` flags, as words
-//   RELEASE_VERIFY_BUDGET    seconds a registry install is retried (600, and
-//                            NPM_VERIFY_BUDGET's 1200 for npm, when unset)
+//   RELEASE_VERIFY_BUDGET    seconds a registry install is retried (600)
+//   RELEASE_CHECK_BUDGET     seconds `check` waits, in all, for npm to serve the
+//                            platform packages (900)
 //   BUILD_RESULTS            `build-<os>=<result>` pairs the publish job was handed
 //   STEP_RESULTS             `<step>=<outcome>` pairs of the publish job's own steps
 //
@@ -334,14 +342,16 @@ const cratesIndex = () =>
 
 // Retried the way every registry install here is: the install is the probe,
 // because a registry's API answers before the CDN a user installs through does.
-// RELEASE_VERIFY_BUDGET, when set, is every registry's budget.
-function retried(label, action, command, args, budget = 600) {
-  budget = process.env.RELEASE_VERIFY_BUDGET || String(budget);
+// `require` is a file the install has to have written for an attempt to count:
+// npm skips an optional dependency it cannot fetch and still exits 0.
+function retried(label, action, command, args, options = {}) {
+  const { budget = process.env.RELEASE_VERIFY_BUDGET || "600", require } =
+    options;
   const first = Number(budget) < 30 ? "1" : "5";
   must(label, action, "bash", [
     "scripts/retry-install.sh",
     "--budget",
-    budget,
+    String(budget),
     "--first-delay",
     first,
     "--max-delay",
@@ -350,32 +360,11 @@ function retried(label, action, command, args, budget = 600) {
     label,
     "--action",
     action,
+    ...(require ? ["--require", portable(require)] : []),
     "--",
     command,
     ...args,
   ]);
-}
-
-// npm is slower to serve a version than PyPI or the Release, and an install
-// that asks too early is answered by a 404 npm's CDN then keeps: it serves a
-// tarball's 404 with `cache-control: public, max-age=300`. v0.40.0's
-// darwin-arm64 package was not listed until 8m15s after `npm publish` returned,
-// and linux-x64 was listed after 5m14s, but its tarball was then served as a 404
-// for exactly 300 s more: 10m17s in all, past the 600 s budget by seconds.
-// Twenty minutes covers that slowest listing, a full 300 s of cached 404, and
-// the same again in reserve.
-export const NPM_VERIFY_BUDGET = 1200;
-
-// What `npm install` puts in node_modules/.bin for the launcher, and which of
-// its shims each caller can run. npm writes an extensionless sh script on every
-// OS — the symlink on POSIX, cmd-shim's `#!/bin/sh` script on Windows — and that
-// one is what bash runs: Git Bash treats only .exe, .com and .bat files, and
-// scripts that open with `#!`, as executable, so `command -v` refuses the .cmd
-// batch shim beside it, as it did on v0.40.0's build-windows. Node spawns the
-// .cmd on Windows, through a shell, which is what cmd and PowerShell users run.
-export function launcherShims(bin, windows = WINDOWS) {
-  const sh = join(bin, "onepipeline-api");
-  return { bash: sh, spawn: windows ? `${sh}.cmd` : sh };
 }
 
 function sha256(path) {
@@ -400,6 +389,21 @@ function smoke(command, version, label) {
       label,
     ],
   );
+}
+
+// The `onepipeline-api` an npm install under `prefix` provides, as each caller
+// can run it. On Windows npm writes three launchers into node_modules/.bin: an
+// extensionless sh script, a .cmd and a .ps1. Git Bash, which runs
+// scripts/smoke-published.sh, counts an .exe, or a script starting with `#!`,
+// as executable and a .cmd as neither, so to it the .cmd is no command at all,
+// while node can spawn nothing but the .cmd, and only through a shell. Everywhere
+// else the one name is a symlink both can run.
+export function npmLauncher(prefix, windows = WINDOWS) {
+  const bin = join(prefix, "node_modules", ".bin");
+  return {
+    bash: join(bin, "onepipeline-api"),
+    spawn: join(bin, windows ? "onepipeline-api.cmd" : "onepipeline-api"),
+  };
 }
 
 function scratch(name) {
@@ -490,6 +494,29 @@ function npmServes(pkg, version) {
     `cannot ask npm about ${pkg}@${version}`,
     "re-run when the npm registry is reachable",
   );
+}
+
+// npm's record of the tarball it serves for pkg@version is this staged one's.
+function servesStaged(artifact, version, staged) {
+  const result = must(
+    `asking npm which ${artifact.file} it serves`,
+    "re-run when the npm registry answers",
+    "npm",
+    [
+      "view",
+      `${artifact.package}@${version}`,
+      "dist.integrity",
+      "--json",
+      "--prefer-online",
+    ],
+    { capture: true },
+  );
+  const staging = `sha512-${createHash("sha512").update(readFileSync(staged)).digest("base64")}`;
+  if (result.stdout.trim() !== JSON.stringify(staging))
+    throw new Fault(
+      `npm already serves ${artifact.package}@${version}, and not the ${artifact.file} this job built (npm records ${result.stdout.trim() || "no hash"})`,
+      "check which build npm serves for this version; an npm version cannot be replaced, so another build ships as the next patch version",
+    );
 }
 
 async function crateServes(version) {
@@ -739,8 +766,14 @@ async function uploadPlatform(job, out, registry, dryRun) {
     }
   } else {
     for (const a of files) {
-      if (!dryRun && npmServes(a.package, version)) present.push(a.file);
-      else if (
+      if (!dryRun && npmServes(a.package, version)) {
+        // Nothing installs this package back in this job any more (see
+        // `verify`), so a version npm already has is held to this build here:
+        // npm records the hash of every tarball it took, and an install checks
+        // what it fetches against that hash.
+        servesStaged(a, version, stagedPath(out, a));
+        present.push(a.file);
+      } else if (
         announce(dryRun, "bash", ["scripts/publish-npm.sh", stagedPath(out, a)])
       ) {
         if (!process.env.NODE_AUTH_TOKEN)
@@ -765,11 +798,14 @@ async function uploadPlatform(job, out, registry, dryRun) {
   );
 }
 
-// Install this platform's files back from each registry, on this OS, and run
-// them. The bytes are held to what this job staged, so a registry (or an edge
-// of one) serving some other build fails here rather than for a user.
+// Install this platform's files back from the Release and PyPI, on this OS,
+// and run them. The bytes are held to what this job staged, so a registry (or
+// an edge of one) serving some other build fails here rather than for a user.
+// npm is not waited for here: it serves a publish minutes after taking it,
+// longer than this job has left (see the header), so publish's `check` waits
+// for it, and `upload npm` holds a version npm already had to this build.
 //
-// llmlint: ignore[changed_behavior_has_e2e] the macOS and Windows branches of this function (the venv's Scripts directory, Windows' own bsdtar, the .exe and .cmd names) run only on those runners, which the release's build-macos and build-windows jobs are on every release; tests/release drives this function end to end on Linux against registry doubles, through every refusal it makes.
+// llmlint: ignore[changed_behavior_has_e2e] the macOS and Windows branches of this function (the venv's Scripts directory, Windows' own bsdtar, the .exe name) run only on those runners, which the release's build-macos and build-windows jobs are on every release; tests/release drives this function end to end on Linux against registry doubles, through every refusal it makes.
 function verifyPlatform(job, out) {
   const { version, targets, artifacts } = plan(job);
   const tag = releaseTag(version);
@@ -869,43 +905,12 @@ function verifyPlatform(job, out) {
           `PyPI ${WHEEL_PACKAGE} ${version} on ${target}`,
         );
       }
-
-      if (switchedOn("NPM_PUBLISH")) {
-        const pkg = files.find((a) => a.kind === "npm").package;
-        const prefix = join(work, "npm");
-        mkdirSync(prefix);
-        retried(
-          `npm ${pkg} ${version}`,
-          `check that npm serves ${pkg}@${version}; \`upload npm\` may not have published it`,
-          "npm",
-          [
-            "install",
-            "--prefix",
-            portable(prefix),
-            "--prefer-online",
-            "--no-audit",
-            "--no-fund",
-            "--cache",
-            portable(join(work, "npm-cache")),
-            `${pkg}@${version}`,
-          ],
-          NPM_VERIFY_BUDGET,
-        );
-        const installed = join(prefix, "node_modules", pkg, "bin", exe);
-        if (!existsSync(installed))
-          throw new Fault(
-            `npm installed ${pkg} without its binary`,
-            "republish the platform package from this build",
-          );
-        sameBytes(installed, target, "npm");
-        smoke(installed, version, `npm ${pkg} ${version}`);
-      }
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
   }
   say(
-    `release ${job}: ${targets.join(", ")} installed from every switched-on registry and ran`,
+    `release ${job}: ${targets.join(", ")} installed from the Release${switchedOn("PYPI_PUBLISH") ? " and PyPI" : ""} and ran${switchedOn("NPM_PUBLISH") ? "; npm's copy is publish's check to wait for" : ""}`,
   );
 }
 
@@ -930,7 +935,27 @@ function pairs(name) {
 // platform-independent publishes: the launcher pins every platform package and
 // the crate claims the release, so neither goes out while one platform is
 // missing. A platform job that did not succeed is missing whatever it left.
-async function check() {
+//
+// npm's platform packages are then fetched by version, as an install fetches
+// them, because npm takes a publish and serves it minutes later, and lists a
+// version before it serves its tarball.
+// With `wait`, which the phase passes, each is waited for; the uploads' repeat
+// of the check fetches each once. Only a package a job that succeeded
+// published is waited for: one whose job did not succeed, or which anything
+// else here is missing beside, may never have reached npm, and is reported now
+// rather than read as a registry that has not caught up.
+function checkBudget() {
+  const budget = process.env.RELEASE_CHECK_BUDGET || "900";
+  if (!/^\d+$/.test(budget))
+    throw usage(
+      `RELEASE_CHECK_BUDGET must be a whole number of seconds, not '${budget}'`,
+      "set RELEASE_CHECK_BUDGET to whole seconds, or unset it for 900",
+    );
+  return Number(budget);
+}
+
+async function check({ wait = false } = {}) {
+  const budget = wait ? checkBudget() : 0;
   const version = cargoVersion();
   const tag = releaseTag(version);
   const pypi = switchedOn("PYPI_PUBLISH");
@@ -947,6 +972,7 @@ async function check() {
   }
   const assets = githubAssets(tag);
   const wheels = pypi ? await pypiFiles(version) : null;
+  const unlisted = [];
   for (const job of Object.keys(PLATFORMS))
     for (const a of plan(job, version).artifacts) {
       if (a.registry === "github" && !assets.has(a.file))
@@ -954,8 +980,46 @@ async function check() {
       if (a.registry === "pypi" && wheels && !wheels.has(a.file))
         missing.push(`PyPI ${a.file}`);
       if (a.registry === "npm" && npm && !npmServes(a.package, version))
-        missing.push(`npm ${a.package}@${version}`);
+        unlisted.push(a);
     }
+  if (missing.length || (!wait && unlisted.length))
+    missing.push(...unlisted.map((a) => `npm ${a.package}@${version}`));
+  else if (npm) {
+    // One deadline for every package, so three slow ones cannot take three
+    // budgets.
+    const deadline = Date.now() + budget * 1000;
+    const work = scratch("check-npm");
+    try {
+      for (const job of Object.keys(PLATFORMS))
+        for (const a of plan(job, version).artifacts.filter(
+          (artifact) => artifact.registry === "npm",
+        )) {
+          try {
+            retried(
+              `npm ${a.package} ${version}`,
+              `check that npm serves ${a.package}@${version}: build-${job} published it, so npm took it, but has not served it within the wait`,
+              "npm",
+              [
+                "cache",
+                "add",
+                "--prefer-online",
+                "--cache",
+                portable(join(work, a.package)),
+                `${a.package}@${version}`,
+              ],
+              {
+                budget: Math.max(1, Math.ceil((deadline - Date.now()) / 1000)),
+              },
+            );
+          } catch (error) {
+            if (!(error instanceof Fault)) throw error;
+            missing.push(`npm ${a.package}@${version}`);
+          }
+        }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
   if (missing.length)
     throw new Fault(
       `not every platform published ${tag}, so nothing platform-independent will: ${missing.join(", ")}`,
@@ -1231,7 +1295,6 @@ async function verifyPublish(out) {
           portable(join(frontend, ".cache")),
           `onepipeline-ui@${version}`,
         ],
-        NPM_VERIFY_BUDGET,
       );
       const index = (root) =>
         join(root, "onepipeline-ui", "dist", "index.html");
@@ -1248,6 +1311,11 @@ async function verifyPublish(out) {
       rmSync(frontend, { recursive: true, force: true });
     }
     const work = scratch("verify-launcher");
+    // The platform package this host's install pulls in beside the launcher;
+    // an install that skipped it has not installed anything that runs.
+    const own = Object.values(TARGETS).find(
+      (facts) => facts.npm === `${process.platform}-${process.arch}`,
+    );
     try {
       retried(
         `npm ${WHEEL_PACKAGE} ${version}`,
@@ -1264,13 +1332,16 @@ async function verifyPublish(out) {
           portable(join(work, ".cache")),
           `${WHEEL_PACKAGE}@${version}`,
         ],
-        NPM_VERIFY_BUDGET,
+        own && {
+          require: join(
+            work,
+            "node_modules",
+            `${WHEEL_PACKAGE}-${own.npm}`,
+            "package.json",
+          ),
+        },
       );
-      smoke(
-        launcherShims(join(work, "node_modules", ".bin")).bash,
-        version,
-        `npm ${WHEEL_PACKAGE} ${version}`,
-      );
+      smoke(npmLauncher(work).bash, version, `npm ${WHEEL_PACKAGE} ${version}`);
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
@@ -1431,7 +1502,7 @@ async function main(argv) {
       return;
     }
     case "publish:check":
-      return check();
+      return check({ wait: true });
     case "publish:build":
       return buildPublish(out);
     case "publish:upload":

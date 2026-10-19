@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 // Install staged products through real pip/npm, then exercise the installed
 // server and embedded view. No registry publication is needed for this proof.
 import { createHash } from "node:crypto";
@@ -16,11 +16,28 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { launcherShims, TARGETS } from "./release.mjs";
+import { npmLauncher, TARGETS } from "./release.mjs";
 
 // Native runners only: each platform job installs its own targets.
 const WINDOWS = process.platform === "win32";
 const portable = (path) => (WINDOWS ? path.replace(/\\/g, "/") : path);
+
+// On Windows the process a smoke starts may be a shell in front of npm's .cmd
+// and node, and ending it alone leaves the binary serving with its own file
+// open, which the scratch directory then cannot be removed past: the tree goes.
+// llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here runs only on a Windows runner, where the release's build-windows job stages and installs every carrier through it before anything publishes; every other host takes the signal, driven end to end by tests/release/journeys.test.mjs.
+function stop(child) {
+  if (!WINDOWS) return child.kill("SIGTERM");
+  const ended = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+    encoding: "utf8",
+  });
+  if (ended.status !== 0 && child.exitCode === null)
+    throw fault(
+      `taskkill could not end the staged server's process tree (exit ${ended.status}): ${ended.error?.message ?? `${ended.stdout}${ended.stderr}`}`,
+      `end process ${child.pid} and its children with 'taskkill /pid ${child.pid} /T /F', then re-run this job`,
+    );
+}
+// llmlint: ignore-end[changed_behavior_has_e2e]
 
 function fault(message, action) {
   return Object.assign(new Error(message), { action });
@@ -68,8 +85,8 @@ async function main() {
       shell: WINDOWS && cmd === "npm",
       ...options,
     });
-  // `command` is what bash runs and `spawned` what Node does, which differ only
-  // for the npm launcher's shims on Windows.
+  // `spawned` is the same command as node can start it, which for npm on
+  // Windows is another file (see npmLauncher).
   async function smoke(command, spawned = command) {
     run("bash", [
       "scripts/smoke-published.sh",
@@ -145,7 +162,7 @@ async function main() {
           );
       }
     } finally {
-      if (server.exitCode === null) server.kill("SIGTERM");
+      if (server.exitCode === null) stop(server);
       await stopped;
     }
   }
@@ -363,8 +380,8 @@ async function main() {
         "npm installed different binary bytes",
         "inspect the platform package and launcher resolution; regenerate npm from the final wheel binary",
       );
-    const shims = launcherShims(join(npmRoot, "node_modules", ".bin"));
-    await smoke(shims.bash, shims.spawn);
+    const shim = npmLauncher(npmRoot);
+    await smoke(shim.bash, shim.spawn);
     console.log(
       `${target}: staged archive/wheel/npm install, server and embedded view passed`,
     );
