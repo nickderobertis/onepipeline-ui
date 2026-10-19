@@ -43,13 +43,21 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings tests/release",
       "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
     },
-    "test": {
-      "command": "node --test --test-concurrency=1 tests/release/tools.test.mjs tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/check.test.mjs tests/release/staging.test.mjs tests/release/journeys.test.mjs",
+    "rehearse": {
+      "//": "The release journeys: the build-linux recipe for real and every publication phase against the doubles. A target of its own because it is the longest chain of any run that reaches it — its manylinux release compile alone is ten minutes on a hosted runner — and Nx starts queued tasks in order of how many tasks depend on each: with `tools` and this each depended on twice (here and by `test`, and by `test` and `check`), the rehearsal heads the queue instead of trailing every tier, which in CI run 39247750671 started it 534 s into the sweep. `test` follows it rather than running beside it because tools.test.mjs rebuilds the `.tools` environment these journeys install and publish with.",
+      "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
+      "inputs": ["releaseMachinery"],
+      "cache": true
+    },
+    "test": {
+      "command": "node --test --test-concurrency=1 tests/release/tools.test.mjs tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/check.test.mjs tests/release/staging.test.mjs",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools", "rehearse"],
       "inputs": ["releaseMachinery"]
     },
     "check": {
-      "executor": "nx:noop"
+      "executor": "nx:noop",
+      "dependsOn": ["lint", "test", "rehearse"]
     }
   }
 }
