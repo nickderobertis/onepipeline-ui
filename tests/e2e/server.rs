@@ -18734,7 +18734,8 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The engine's stacking, rework, continuation, review-loop and readjustment
-/// records, each served through every read route rather than refused or dropped.
+/// records, served through the run, results, events and timeline routes rather
+/// than refused or dropped.
 ///
 /// The corpus is the run `onepipeline` 0.78 journals for a stacked change set
 /// taken over from another host: two nodes continued from the store, a stack
@@ -18747,7 +18748,8 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
 /// in it is held to the schema the engine publishes for its kind once the server
 /// stops, so none of it is a shape the engine never writes.
 #[test]
-fn a_reworked_and_readjusted_stack_is_served_whole_through_every_read_route() {
+fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_events_and_timeline_routes(
+) {
     let corpus = fixture_run::review_loop();
     let run_id = corpus["run_id"].as_str().expect("the corpus's run");
     let serving = Serving::start(|root| {

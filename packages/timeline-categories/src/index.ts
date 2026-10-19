@@ -220,8 +220,10 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // conversation on the publication under review, as `body-not-drafted` is its
   // description, and `review` and `reply` name no rule.
   // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these two kinds when the pin moved to 0.78.
+  // llmlint: ignore-block[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary. What the browser tier proves is the drawing, which filing these two kinds does not change; `dag-ui-review-loop.spec.ts` opens the node whose timeline carries both.
   "review-reply-posted": "publication",
   "review-reply-not-drafted": "publication",
+  // llmlint: ignore-end[changed_behavior_has_e2e]
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A draft merged into another node's branch lands with that node: it is the
   // publication reaching a base, like a merge, though no word of it says so.

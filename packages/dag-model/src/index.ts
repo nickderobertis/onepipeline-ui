@@ -2287,6 +2287,7 @@ export const AGENT_LABEL_PREFIX = "onepipeline.";
  * a change request's body comes from, or the one a review comment's reply comes
  * from — in the order a reader scans them.
  */
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this vocabulary and this is the browser's one copy of it, which `tests/contract.rs::the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines` reads from this file beside `AGENT_LABELS` and holds to `onepipeline::agents::Scope::ALL`; `review-reply` joins it because that gate failed naming it when the pin moved to 0.78, and moving the copy would leave the gate reading nothing.
 export const AGENT_SCOPES = [
   "node",
   "observer",

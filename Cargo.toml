@@ -572,11 +572,9 @@ onemessagebus = "0.9.1"
 # translation is left in this graph or in a browser-adopted run's driver. Its
 # adopted driver dispatches nothing until it has read its project's claim off
 # the store, so a run adopted from a project no store holds stays put.
-# 0.78.0 stacks a run's drafts, reworks and restacks a node from its review
-# comments, replies to and declines them, continues a run from any host, and
-# readjusts the stack as its parents land, linking onevcs 0.52.1 and
-# onetaskgraph 0.7.3. Its records and surfaces are served through every route;
-# no route or response field is added. The dev-only `onevcs` and
+# 0.78.0 stacks, reworks, continues and readjusts drafts from review, so a
+# browser-adopted run's driver does what the CLI's does once this moves, and its
+# records render here rather than being refused. The dev-only `onevcs` and
 # `onetaskgraph-*` requirements below move with it to the releases its lock
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items.

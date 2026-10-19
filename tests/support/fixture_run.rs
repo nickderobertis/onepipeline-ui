@@ -7366,7 +7366,6 @@ fn write_awaiting(
 pub const REVIEW_LOOP_CORPUS: &str =
     include_str!("../../apps/dag-ui-e2e/fixtures/review-loop.json");
 
-/// The review-loop corpus, parsed.
 pub fn review_loop() -> Value {
     serde_json::from_str(REVIEW_LOOP_CORPUS).expect("the review-loop corpus is JSON")
 }

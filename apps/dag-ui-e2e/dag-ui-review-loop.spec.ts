@@ -21,7 +21,10 @@ import { graphNodes } from "./observatory-locators";
  * listing journey and photographed by the gallery.
  */
 
-const factsSchema = z.object({ run: z.string().min(1) });
+const factsSchema = z.object({
+  run: z.string().min(1),
+  replied_node: z.string().min(1),
+});
 
 const detailSchema = z.object({
   graph: z.object({
@@ -42,7 +45,7 @@ test("renders a reworked, continued and readjusted stack and every node in it wi
 }) => {
   server = await startFixtureServer("review-loop", ["--review-loop-corpus"]);
   const { origin } = server;
-  const { run } = factsSchema.parse(server.facts);
+  const { run, replied_node: replied } = factsSchema.parse(server.facts);
 
   // Everything the page throws, and every request it makes that does not come
   // back answered, from the first navigation on.
@@ -91,6 +94,19 @@ test("renders a reworked, continued and readjusted stack and every node in it wi
       page.getByRole("region", { name: `Timeline for ${node}` }),
     ).toBeVisible();
   }
+
+  // The agents: the reply drafter a review pass launched for a node's comments
+  // is grouped under a scope of its own, after the node's dispatch.
+  await page.goto(`${origin}/?run=${run}&view=agents`);
+  const panel = page.getByRole("region", { name: "Agents" });
+  await expect(panel).toContainText("2 agents");
+  const drafting = panel.getByRole("list", {
+    name: "Review comment reply · attempt 1",
+  });
+  await expect(drafting).toContainText(`node ${replied}`);
+  expect(
+    await panel.getByRole("heading", { level: 4 }).allTextContents(),
+  ).toEqual(["Node dispatch · attempt 1", "Review comment reply · attempt 1"]);
 
   expect(thrown).toEqual([]);
   expect(unanswered).toEqual([]);
