@@ -112,9 +112,35 @@ fn container_double(dir: &Path, fail_at: Option<&str>) {
              [[ \"$call\" != '{fail_at}'* ]] || exit 1\n"
         )
     };
-    for tool in ["sed", "yum", "chmod", "rustup", "python3.12", "chown"] {
+    for tool in ["yum", "chmod", "rustup", "python3.12", "chown"] {
         executable(&dir.join("container-bin").join(tool), record(tool));
     }
+    // `sed` is the host's own, run over a copy of the image's repository files:
+    // the script's `/etc/yum.repos.d/*.repo` is read as that copy, so what the
+    // build leaves yum to read is there afterwards to be read back
+    // ([`configured_repositories`]). The glob is expanded here rather than taken
+    // as given, because the host's bash expands it against the host's own
+    // `/etc`, which is not the image's.
+    let repos = dir.join("image/etc/yum.repos.d");
+    fs::create_dir_all(&repos).expect("the image's repository directory");
+    for entry in fs::read_dir(repo_root().join("tests/fixtures/manylinux2014-yum.repos.d"))
+        .expect("the image's repository files are checked in")
+    {
+        let entry = entry.expect("a repository file");
+        fs::copy(entry.path(), repos.join(entry.file_name()))
+            .expect("the repository file is copied");
+    }
+    executable(
+        &dir.join("container-bin/sed"),
+        format!(
+            "{}args=()\nrepos=0\nfor arg in \"$@\"; do\n  case \"$arg\" in\n\
+             /etc/yum.repos.d/*) repos=1 ;;\n  *) args+=(\"$arg\") ;;\n  esac\ndone\n\
+             [ \"$repos\" = 0 ] || args+=('{}'/*.repo)\nexec '{}' \"${{args[@]}}\"\n",
+            record("sed"),
+            repos.display(),
+            which("sed").display()
+        ),
+    );
     // The script pipes the pinned checksum into `sha256sum -c -` under
     // pipefail, so a stand-in that exits without reading it can kill the `echo`
     // with SIGPIPE and fail a step no test asked to fail. This one drains its
@@ -161,6 +187,49 @@ fn which(tool: &str) -> PathBuf {
         .map(|candidate| candidate.join(tool))
         .find(|candidate| candidate.is_file())
         .unwrap_or_else(|| panic!("{tool} is on this host's PATH"))
+}
+
+/// Each repository yum would read after the build — every section of the
+/// image's repository files that is enabled, which yum takes a section to be
+/// unless it says `enabled=0` — as its id, its `baseurl`, and whether it still
+/// says `gpgcheck=1`.
+fn configured_repositories(dir: &Path) -> Vec<(String, String, bool)> {
+    let mut repositories = Vec::new();
+    let mut files: Vec<PathBuf> = fs::read_dir(dir.join("image/etc/yum.repos.d"))
+        .expect("the image's repository directory")
+        .map(|entry| entry.expect("a repository file").path())
+        .collect();
+    files.sort();
+    for file in files {
+        let text = fs::read_to_string(&file).expect("a repository file reads");
+        let mut section: Option<(String, Option<String>, bool, bool)> = None;
+        let mut close = |section: Option<(String, Option<String>, bool, bool)>| {
+            if let Some((id, baseurl, enabled, gpgcheck)) = section {
+                if enabled {
+                    repositories.push((
+                        id.clone(),
+                        baseurl.unwrap_or_else(|| panic!("{id} names a baseurl")),
+                        gpgcheck,
+                    ));
+                }
+            }
+        };
+        for line in text.lines().map(str::trim) {
+            if let Some(id) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                close(section.take());
+                section = Some((id.to_string(), None, true, false));
+            } else if let Some((_, baseurl, enabled, gpgcheck)) = section.as_mut() {
+                match line.split_once('=') {
+                    Some(("baseurl", value)) => *baseurl = Some(value.to_string()),
+                    Some(("enabled", value)) => *enabled = value != "0",
+                    Some(("gpgcheck", value)) => *gpgcheck = value == "1",
+                    _ => {}
+                }
+            }
+        }
+        close(section.take());
+    }
+    repositories
 }
 
 fn container_calls(dir: &Path) -> Vec<String> {
@@ -331,23 +400,33 @@ fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() 
                 "{target}: the container ran `{expected}`; it ran {calls:?}"
             );
         }
-        // vault.centos.org refuses the repositories' metadata, so yum is
-        // pointed at kernel.org's copy of the same 7.9.2009 tree first.
-        let mirror = calls
+        // vault.centos.org refused the repositories' metadata, so every
+        // repository yum reads — the SCLo one the image installs its compilers
+        // from included — is kernel.org's copy of the same 7.9.2009 tree,
+        // still signature-checked, and set before yum installs anything.
+        let mirror = "https://archive.kernel.org/centos-vault/7.9.2009/";
+        assert_eq!(
+            configured_repositories(&dir),
+            [
+                ("base", "os/$basearch/"),
+                ("updates", "updates/$basearch/"),
+                ("extras", "extras/$basearch/"),
+                ("centos-sclo-rh", "sclo/$basearch/rh/"),
+            ]
+            .map(|(id, path)| (id.to_string(), format!("{mirror}{path}"), true)),
+            "{target}: the repositories yum reads"
+        );
+        let sed = calls
             .iter()
-            .position(|call| {
-                call.starts_with("sed -i -E s#https://vault\\.centos\\.org/centos/")
-                    && call.contains("#https://archive.kernel.org/centos-vault/7.9.2009/#")
-            })
-            .unwrap_or_else(|| panic!("{target}: yum was pointed at the mirror; it ran {calls:?}"));
+            .position(|call| call.starts_with("sed "))
+            .unwrap_or_else(|| {
+                panic!("{target}: the repositories were rewritten; it ran {calls:?}")
+            });
         let yum = calls
             .iter()
             .position(|call| call.starts_with("yum install"))
             .expect("yum ran");
-        assert!(
-            mirror < yum,
-            "{target}: the mirror is set before yum installs"
-        );
+        assert!(sed < yum, "{target}: the mirror is set before yum installs");
         assert!(
             String::from_utf8_lossy(&output.stdout).contains(&format!("built the {target} wheel")),
             "{target}: success names the wheel it built"
