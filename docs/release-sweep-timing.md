@@ -81,7 +81,7 @@ scaling hosted runner times directly.
 The Linux schedule uses both observed tier envelopes, retaining the full
 407–615 s linked-report duration even though its duplicate compile was cut.
 It budgets 120–180 s for baseline provisioning, 47–240 s for the browser server
-now inside the sweep, 30 s for dev install, and 1018 s for the unchanged rehearsal
+now inside the sweep, 60 s for dev install, and 1018 s for the unchanged rehearsal
 plus 75 s for its other release tests. Six workers overlap these intervals;
 adding every tier would double-count most of the job. The resulting Nx critical
 path is 1146 s for the warmer envelope and 1220 s for the colder envelope.
@@ -117,3 +117,29 @@ A later complete Linux job over 29.5 min or Windows job over 25 min falsifies
 this forecast. Inspect per-target durations and queue delay first; include setup
 and cache-save time, and distinguish cache hits from compilation. Registry
 unavailability has no finite completion-time estimate.
+
+## Local verification on this branch
+
+The forced real `onepipeline-ui:ensure-baseline` rebuild (stamp removed first)
+passed in 20.1 s. `onepipeline-ui:install-smoke` passed in 50.4 s including the
+smoke journey; raising its model allowance from 30 to 60 s leaves both critical
+paths unchanged. The linked-report target passed both real server journeys
+(58.887 s of tests). These warm measurements support sharing intermediates;
+the forecast retains much larger hosted-runner allowances.
+
+The repo-tooling target passed all 185 tests, the CI-jobs target all ten, and
+the smaller release target all 30. The smaller release target was run with
+`--excludeTaskDependencies` after provisioning its tools, because the full
+`onepipeline-ui-release:test` invocation failed in its rehearsal dependency:
+CentOS vault returned HTTP 403 for yum metadata before compilation. This is
+an unresolved environment blocker, not a passing end-to-end rehearsal. The two
+manager questions about that blocker received no reply within their windows.
+
+To verify the added baseline test, the shared-build config argument was removed
+temporarily: the repo-tooling target failed specifically at
+`the_base_is_built_from_the_units_this_clone_already_compiled`, reporting the
+missing shared build directory. The script was restored immediately afterward.
+The local scratch logs are `/tmp/sweepcap/baseline-mutation.log` and
+`/tmp/sweepcap/baseline-restored.log`. All new local measurements used the real
+Nx targets, without Nx result-cache reuse; no hosted Windows execution is
+claimed here.
