@@ -5,15 +5,14 @@
 // uploaded to them, so the real clients — gh, twine, pip, npm, cargo and the
 // release probe — are what publish and install.
 //
-// The journeys below share one manylinux build; the imported publication
-// regressions build a native wheel independently, so local registry checks
-// remain runnable without a manylinux image or its external package mirrors.
+// The journeys below share one manylinux build. ./publication.test.mjs, beside
+// this file in the project's test target, builds a native wheel instead, so its
+// registry journeys run without a manylinux image or its external mirrors.
 //
 // What a Linux host cannot do is build the macOS and Windows targets; their
 // files are the hosted jobs' to produce, so where a journey needs them on a
 // registry (publish's availability check, the launcher's optional dependencies)
 // they are seeded under their planned names, as those jobs would leave them.
-import "./publication.test.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
