@@ -197,7 +197,9 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   // An edit by shortcut: a blocking finding, which the engine raises as a
   // surface holding the node it names — and claims into the pending slot.
   const composer = page.getByRole("region", { name: "Reply" });
-  // Every engine reply command is available through the shortcut composer.
+  // The engine's graph edits are available through the shortcut composer; the
+  // commands that edit no graph — a review pass, a readjustment, a decline of
+  // review comments — are spelled by the grammar and offered no shortcut.
   const shortcut = composer.getByLabel("Shortcut");
   await expect(
     shortcut.getByRole("option", { name: "rework", exact: true }),

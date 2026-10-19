@@ -7353,3 +7353,76 @@ fn write_awaiting(
     .expect("the journal");
     run_dir
 }
+
+/// The run the review-loop corpus records: a stacked change set taken over from
+/// another host, reworked, retitled, restacked and declined from its review
+/// comments, and readjusted as its parents landed, until a later host
+/// superseded its driver.
+///
+/// The corpus is one document, `apps/dag-ui-e2e/fixtures/review-loop.json`,
+/// which the browser tier writes into its own runs root as well, so the run a
+/// journey here serves and the run the view renders are the same records rather
+/// than two readings of one engine release.
+pub const REVIEW_LOOP_CORPUS: &str =
+    include_str!("../../apps/dag-ui-e2e/fixtures/review-loop.json");
+
+pub fn review_loop() -> Value {
+    serde_json::from_str(REVIEW_LOOP_CORPUS).expect("the review-loop corpus is JSON")
+}
+
+/// Write the review-loop corpus under `root` as the engine records a run: its
+/// launch record, the plan its `run-started` carried, and its journal.
+pub fn write_review_loop(root: &Path) -> PathBuf {
+    let dir = write_review_loop_unjournaled(root);
+    fs::write(
+        dir.join("events.jsonl"),
+        format!("{}\n", review_loop_lines().join("\n")),
+    )
+    .expect("the journal");
+    dir
+}
+
+/// The review-loop run before its first record: the launch record, the plan,
+/// and a journal that is still empty, for a journey that appends the records
+/// one at a time as the driver wrote them.
+pub fn write_review_loop_unjournaled(root: &Path) -> PathBuf {
+    let corpus = review_loop();
+    let run = corpus["run_id"].as_str().expect("the corpus names its run");
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(dir.join("launch.json"), pretty(&corpus["launch"])).expect("the launch record");
+    let plan = &corpus["records"][0]["payload"]["plan"];
+    fs::write(dir.join("plan.json"), pretty(plan)).expect("the plan");
+    fs::write(dir.join("events.jsonl"), "").expect("the empty journal");
+    dir
+}
+
+/// The review-loop corpus's journal, one envelope a line in the order it was
+/// written: one record a second from [`START`] on the corpus's one stream.
+pub fn review_loop_lines() -> Vec<String> {
+    let corpus = review_loop();
+    let run = corpus["run_id"].as_str().expect("the corpus names its run");
+    let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
+        .expect("the fixture's start");
+    let mut journal = Journal::new(corpus["stream"].as_str().expect("the corpus's stream"));
+    let records = corpus["records"].as_array().expect("the corpus's records");
+    for (offset, record) in (0_i64..).zip(records) {
+        let at = (start + time::Duration::seconds(offset))
+            .format(&time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+            ))
+            .expect("a stamp");
+        let mut labels = json!({ "run_id": run });
+        if let Some(node) = record.get("node") {
+            labels["node"] = node.clone();
+        }
+        journal.emit(
+            &at,
+            record["source"].as_str().expect("a record's source"),
+            record["kind"].as_str().expect("a record's kind"),
+            labels,
+            record["payload"].clone(),
+        );
+    }
+    journal.lines
+}

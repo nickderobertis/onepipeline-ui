@@ -1047,6 +1047,12 @@ test("review replies preserve rework comments and retitles and refuse incomplete
       title: "fix: correct the regression",
       reason: "Match the change",
     },
+    {
+      op: "decline",
+      id: "build",
+      comments: [{ id: "review-2", url: "https://example.com/review/2" }],
+      reason: "Out of scope for this change",
+    },
   ];
   const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
   expect(replyEnvelopeSchema.parse(envelope)).toEqual(envelope);

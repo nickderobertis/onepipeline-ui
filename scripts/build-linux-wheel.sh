@@ -123,6 +123,25 @@ mkdir -p -- "$out_abs" "$root/$cargo_target" \
   || fail "could not create $out_abs and $root/$cargo_target (mkdir's reason is above)" \
     "remove whatever file stands on either path, or make its parent writable by $(id -un)"
 
+# One build of a target at a time. `ci-test-linux` runs `wheel-smoke` beside the
+# release journeys, which build the same target through this script, and two
+# containers compiling into one target directory replace each other's binary
+# while maturin reads it: `test-linux` failed on main and every pull request
+# with maturin unable to open the `onepipeline-api` cargo had just finished.
+# Held on a file beside the directory rather than in it, which the container
+# chowns, and by the descriptor `docker` inherits, so it is released when the
+# build exits.
+command -v flock >/dev/null \
+  || fail "flock not found: concurrent builds of $target share $cargo_target and are serialized by it" \
+    "install util-linux's flock, then re-run"
+lock="$root/$cargo_target.lock"
+exec {lock_fd}>"$lock" \
+  || fail "could not open $lock to serialize builds of $target" \
+    "remove whatever stands on $lock, or make $root/target writable by $(id -un)"
+flock "$lock_fd" \
+  || fail "could not lock $lock (flock's reason is above)" \
+    "check that $root/target is on a filesystem that supports flock, then re-run"
+
 # Runs in the container, from the checkout's root, and names nothing outside
 # the image's PATH and the checkout. The EXIT trap hands the build's files back
 # whatever the build did, and a hand-back that fails fails the run: a checkout

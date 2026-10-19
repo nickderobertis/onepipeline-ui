@@ -1823,9 +1823,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.52.0"
+version = "0.52.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acc52bfc543261305ff17acedc3f867f51a8fe2d19c52634833de74ac97657a3"
+checksum = "f974b2127926f70739fb60d97ad02835f91c9d04ad08b75b0e1c0e6b90096739"
 dependencies = [
  "aho-corasick",
  "clap",
