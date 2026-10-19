@@ -75,7 +75,6 @@ test("renders a reworked, continued and readjusted stack and every node in it wi
     "ui-rework-1",
   ]);
 
-  // The run: one card per node, each in the state its record left it in.
   await page.goto(`${origin}/?run=${run}&view=graph`);
   await expect(page.getByText("DAG Observatory")).toBeVisible();
   await expect(graphNodes(page)).toHaveCount(nodes.length);
@@ -87,7 +86,6 @@ test("renders a reworked, continued and readjusted stack and every node in it wi
     ).toBeVisible();
   }
 
-  // Each node, opened on its own: its timeline, drawn from the records about it.
   for (const node of nodes) {
     await page.goto(`${origin}/?run=${run}&node=${node}`);
     await expect(

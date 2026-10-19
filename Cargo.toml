@@ -572,12 +572,14 @@ onemessagebus = "0.9.1"
 # translation is left in this graph or in a browser-adopted run's driver. Its
 # adopted driver dispatches nothing until it has read its project's claim off
 # the store, so a run adopted from a project no store holds stays put.
+# llmlint: ignore-block[comments_earn_their_place] this block is the pin's record of what each engine release it moved to changed for a browser-adopted run's driver and for this crate's public engine types — the reason the requirement is exact and why each move announced a break — and the relink's task requires its line in this block's style; `CHANGELOG.md` is release-plz's to write and records this crate's releases, not the engine's.
 # 0.78.0 stacks, reworks, continues and readjusts drafts from review, so a
 # browser-adopted run's driver does what the CLI's does once this moves, and its
 # records render here rather than being refused. The dev-only `onevcs` and
 # `onetaskgraph-*` requirements below move with it to the releases its lock
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items.
+# llmlint: ignore-end[comments_earn_their_place]
 onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
