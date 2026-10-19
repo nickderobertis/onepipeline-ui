@@ -130,7 +130,7 @@ describe("native publication regressions", () => {
           TARGET,
           VERSION,
         ],
-        { cwd: ROOT, env: host.env, encoding: "utf8" },
+        { cwd: ROOT, env: host.env, encoding: "utf8", timeout: 600_000 },
       );
       assert.equal(verify.status, 0, `${verify.stdout}${verify.stderr}`);
       assert.match(

@@ -16,6 +16,8 @@ import { execFileSync } from "node:child_process";
 //   cmd.exe (comspec)            what Node runs a `shell: true` spawn with on
 //                                Windows: it runs cmd-shim's .cmd by reading the
 //                                script it points at, and anything else with sh
+//   taskkill                     `/pid <pid> /T /F`: that process and every
+//                                process under it, killed
 //
 // Every .cmd cmd.exe ran is appended to CMD_LOG, so a journey can tell the
 // launcher's .cmd was what Node spawned.
@@ -89,6 +91,33 @@ const binDir = prefix && join(prefix, "node_modules", ".bin");
     (await import(${self})).gitBashModes(binDir);
   process.exit(run.status ?? 1);
 })();
+`,
+  );
+  script(
+    join(bin, "taskkill"),
+    `const { execFileSync } = require("node:child_process");
+// taskkill /pid <pid> /T /F: the process and every process under it, killed.
+const args = process.argv.slice(2);
+const root = Number(args[args.indexOf("/pid") + 1]);
+const children = new Map();
+for (const line of execFileSync("ps", ["-e", "-o", "pid=,ppid="], { encoding: "utf8" }).split("\\n")) {
+  const [pid, ppid] = line.trim().split(/\\s+/).map(Number);
+  if (pid) children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+}
+const tree = [root];
+for (let i = 0; i < tree.length; i++) tree.push(...(children.get(tree[i]) ?? []));
+let missing = false;
+for (const pid of tree.reverse())
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    missing ||= pid === root;
+  }
+if (missing) {
+  console.error(\`ERROR: The process "\${root}" not found.\`);
+  process.exit(128);
+}
+console.log(\`SUCCESS: The process with PID \${root} has been terminated.\`);
 `,
   );
   const comspec = join(bin, "cmd.exe");
