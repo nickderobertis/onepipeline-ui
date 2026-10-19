@@ -137,6 +137,14 @@
         "title"
       ],
       "optional": []
+    },
+    "decline": {
+      "required": [
+        "comments",
+        "id",
+        "reason"
+      ],
+      "optional": []
     }
   },
   "node_list_fields": [

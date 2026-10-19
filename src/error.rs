@@ -160,9 +160,12 @@ impl ApiError {
     #[must_use]
     pub fn from_engine_unscoped(error: onepipeline::Error) -> Self {
         match error {
-            refused @ (onepipeline::Error::Refused(_) | onepipeline::Error::Invalid(_)) => {
-                Self::Refused(refused.to_string())
-            }
+            // `Rejected` is a refusal the reconciler names by kind — a `decline`
+            // naming a comment no read found, say — and prints and exits as
+            // `Refused` does, so it is the same ruling on the request.
+            refused @ (onepipeline::Error::Refused(_)
+            | onepipeline::Error::Rejected(_)
+            | onepipeline::Error::Invalid(_)) => Self::Refused(refused.to_string()),
             locked @ onepipeline::Error::Locked { .. } => Self::Locked(locked.to_string()),
             // `Queued`, `Sibling`, `Ledger`, and whatever a later engine adds
             // to its non-exhaustive enum: a failure underneath the verb rather

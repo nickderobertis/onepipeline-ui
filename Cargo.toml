@@ -572,7 +572,17 @@ onemessagebus = "0.9.1"
 # translation is left in this graph or in a browser-adopted run's driver. Its
 # adopted driver dispatches nothing until it has read its project's claim off
 # the store, so a run adopted from a project no store holds stays put.
-onepipeline = "=0.75.0"
+# llmlint: ignore-block[comments_earn_their_place] this block records why each engine release was taken, and every raise above extends it in the same voice: whoever moves the pin next reads here which engine behaviour this reader and a browser-adopted run depend on, which `CHANGELOG.md` — this crate's releases, not the engine's — does not say.
+# 0.78.0 is the engine whose harness core launches Codex with plugins off; a
+# host holds this reader to the engine it pins, so it adopts that only once this
+# moves. Its reply grammar gains `decline` and its agent scopes `review-reply`,
+# which the browser's gated copies follow, and its reconciler refuses by kind
+# as `Error::Rejected`, which `ApiError::from_engine` serves as `422 refused`.
+# The test-only `onetaskgraph-*` requirements below move with it to the release
+# its lock resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
+# llmlint: ignore-end[comments_earn_their_place]
+onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -631,8 +641,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.7.1"
-onetaskgraph-plugin-api = "=0.7.1"
+onetaskgraph-core = "=0.7.3"
+onetaskgraph-plugin-api = "=0.7.3"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was
