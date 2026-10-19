@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.40.0...v0.40.1) - 2026-10-19
+
+### Fixed
+
+- *(release)* publish and verify the npm package on every platform ([#379](https://github.com/nickderobertis/onepipeline-ui/pull/379))
+
 ## [0.40.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.39.0...v0.40.0) - 2026-10-19
 
 ### Added
