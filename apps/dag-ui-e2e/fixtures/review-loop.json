@@ -1,0 +1,1265 @@
+{
+  "run_id": "dag-ui-review-loop",
+  "stream": "a-recording-host-dag-ui-review-loop",
+  "launch": {
+    "run_id": "dag-ui-review-loop",
+    "plan": "plan.json",
+    "graph": "graphs/dag-scope.yaml",
+    "launcher": "claude-code",
+    "session": "claude-code-top-session",
+    "pid": 4262,
+    "host": "a-recording-host",
+    "started_at": "2026-08-07T12:00:00.000Z",
+    "heartbeat_interval": 1800,
+    "adoptions": 0
+  },
+  "records": [
+    {
+      "source": "pipeline",
+      "kind": "run-started",
+      "payload": {
+        "plan": {
+          "schema_version": 3,
+          "goal": {
+            "text": "Ship a stacked change set through review"
+          },
+          "name": "dag-ui-review-loop",
+          "concurrency": 3,
+          "tasks": [
+            {
+              "id": "api",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "feat: api",
+              "task": "## What\nShip the api change.\n\n## Acceptance criteria\nThe api change is in review"
+            },
+            {
+              "id": "ui",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "feat: ui",
+              "task": "## What\nShip the ui change.\n\n## Acceptance criteria\nThe ui change is in review",
+              "deps": ["api"]
+            },
+            {
+              "id": "docs",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "feat: docs",
+              "task": "## What\nShip the docs change.\n\n## Acceptance criteria\nThe docs change is in review",
+              "deps": ["ui"]
+            },
+            {
+              "id": "schema",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "feat: schema",
+              "task": "## What\nShip the schema change.\n\n## Acceptance criteria\nThe schema change is in review",
+              "deps": ["api"]
+            },
+            {
+              "id": "cli",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "feat: cli",
+              "task": "## What\nShip the cli change.\n\n## Acceptance criteria\nThe cli change is in review"
+            },
+            {
+              "id": "helper",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "feat: helper",
+              "task": "## What\nShip the helper change.\n\n## Acceptance criteria\nThe helper change is in review",
+              "deps": ["api"]
+            }
+          ]
+        },
+        "graph": null,
+        "dir": "/a-recording-host/workspace",
+        "heartbeat_interval": 1800
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "driver-taken-over",
+      "payload": {
+        "previous": {
+          "run": "dag-ui-review-loop-earlier",
+          "host": "an-earlier-host",
+          "session": null,
+          "pid": 4100,
+          "claimed_at": "2026-08-07T11:00:00.000Z",
+          "lease": {
+            "interval_seconds": 60,
+            "cancel_grace_seconds": 30
+          }
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "cli",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/cli",
+        "change_url": "https://example.invalid/changes/30",
+        "head": "cccccccccccccccccccccccccccccccccccccccc",
+        "continued": {
+          "source": "store",
+          "run": "dag-ui-review-loop-earlier"
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "helper",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/helper",
+        "change_url": "https://example.invalid/changes/31",
+        "head": "dddddddddddddddddddddddddddddddddddddddd",
+        "continued": {
+          "source": "store",
+          "run": "dag-ui-review-loop-earlier"
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-ready",
+      "node": "api",
+      "payload": {}
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "node": "api",
+      "payload": {
+        "attempt": 1,
+        "persona": "worker"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "session-opened",
+      "node": "api",
+      "payload": {
+        "token": "a-vcs-session-token-api",
+        "identity": "github.com/example/repo",
+        "branch": "feature/api",
+        "base": "main",
+        "worktree": "/a/recorded/worktree/api"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-ready",
+      "node": "ui",
+      "payload": {}
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "node": "ui",
+      "payload": {
+        "attempt": 1,
+        "persona": "worker"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "session-opened",
+      "node": "ui",
+      "payload": {
+        "token": "a-vcs-session-token-ui",
+        "identity": "github.com/example/repo",
+        "branch": "feature/ui",
+        "base": "main",
+        "worktree": "/a/recorded/worktree/ui"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-ready",
+      "node": "docs",
+      "payload": {}
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "node": "docs",
+      "payload": {
+        "attempt": 1,
+        "persona": "worker"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "session-opened",
+      "node": "docs",
+      "payload": {
+        "token": "a-vcs-session-token-docs",
+        "identity": "github.com/example/repo",
+        "branch": "feature/docs",
+        "base": "main",
+        "worktree": "/a/recorded/worktree/docs"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-ready",
+      "node": "schema",
+      "payload": {}
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "node": "schema",
+      "payload": {
+        "attempt": 1,
+        "persona": "worker"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "session-opened",
+      "node": "schema",
+      "payload": {
+        "token": "a-vcs-session-token-schema",
+        "identity": "github.com/example/repo",
+        "branch": "feature/schema",
+        "base": "main",
+        "worktree": "/a/recorded/worktree/schema"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "push",
+      "node": "api",
+      "payload": {
+        "branch": "feature/api",
+        "remote": "origin",
+        "accepted": true
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-opened",
+      "node": "api",
+      "payload": {
+        "url": "https://example.invalid/changes/21",
+        "host": "github",
+        "id": "21",
+        "base": "main",
+        "author": "a-recording-host"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-drafted",
+      "node": "api",
+      "payload": {
+        "url": "https://example.invalid/changes/21",
+        "id": "21",
+        "base": "main",
+        "kind": "awaiting-checks"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "api",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/api",
+        "change_url": "https://example.invalid/changes/21",
+        "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "base": "main",
+        "landing": "unlanded"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "stack-base-assembled",
+      "node": "ui",
+      "payload": {
+        "branch": "stack/ui",
+        "root": "main",
+        "parents": [
+          {
+            "branch": "feature/api",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "head": "1111111111111111111111111111111111111111",
+        "outcome": "created"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "push",
+      "node": "ui",
+      "payload": {
+        "branch": "feature/ui",
+        "remote": "origin",
+        "accepted": true
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-opened",
+      "node": "ui",
+      "payload": {
+        "url": "https://example.invalid/changes/22",
+        "host": "github",
+        "id": "22",
+        "base": "stack/ui",
+        "author": "a-recording-host"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-drafted",
+      "node": "ui",
+      "payload": {
+        "url": "https://example.invalid/changes/22",
+        "id": "22",
+        "base": "stack/ui",
+        "kind": "awaiting-checks"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "ui",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/ui",
+        "change_url": "https://example.invalid/changes/22",
+        "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "base": "stack/ui",
+        "landing": "unlanded",
+        "stack": {
+          "parents": [
+            {
+              "node": "api",
+              "branch": "feature/api",
+              "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "stack_base": "stack/ui"
+        }
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "push",
+      "node": "docs",
+      "payload": {
+        "branch": "feature/docs",
+        "remote": "origin",
+        "accepted": true
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-opened",
+      "node": "docs",
+      "payload": {
+        "url": "https://example.invalid/changes/23",
+        "host": "github",
+        "id": "23",
+        "base": "feature/ui",
+        "author": "a-recording-host"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-drafted",
+      "node": "docs",
+      "payload": {
+        "url": "https://example.invalid/changes/23",
+        "id": "23",
+        "base": "feature/ui",
+        "kind": "awaiting-checks"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "docs",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/docs",
+        "change_url": "https://example.invalid/changes/23",
+        "head": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "base": "feature/ui",
+        "landing": "unlanded",
+        "stack": {
+          "parents": [
+            {
+              "node": "ui",
+              "branch": "feature/ui",
+              "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "push",
+      "node": "schema",
+      "payload": {
+        "branch": "feature/schema",
+        "remote": "origin",
+        "accepted": true
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-opened",
+      "node": "schema",
+      "payload": {
+        "url": "https://example.invalid/changes/24",
+        "host": "github",
+        "id": "24",
+        "base": "feature/api",
+        "author": "a-recording-host"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-drafted",
+      "node": "schema",
+      "payload": {
+        "url": "https://example.invalid/changes/24",
+        "id": "24",
+        "base": "feature/api",
+        "kind": "awaiting-checks"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "schema",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/schema",
+        "change_url": "https://example.invalid/changes/24",
+        "head": "ffffffffffffffffffffffffffffffffffffffff",
+        "base": "feature/api",
+        "landing": "unlanded",
+        "stack": {
+          "parents": [
+            {
+              "node": "api",
+              "branch": "feature/api",
+              "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "review-comments-read",
+      "node": "ui",
+      "payload": {
+        "change_url": "https://example.invalid/changes/22",
+        "count": 1,
+        "unchanged": false,
+        "marker_digest": "sha256:99999999999999999999999999999999",
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 2
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-comments-read",
+      "node": "ui",
+      "payload": {
+        "node": "ui",
+        "change_url": "https://example.invalid/changes/22",
+        "marker": "marker-ui-1",
+        "unchanged": false,
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 2
+        },
+        "comments": [
+          {
+            "id": "c-101",
+            "kind": {
+              "type": "review-thread",
+              "thread": "t-c-101",
+              "path": "src/view.ts",
+              "line": 12,
+              "outdated": false,
+              "resolved": false
+            },
+            "author": "a-reviewer",
+            "url": "https://example.invalid/changes/22#discussion_c-101",
+            "updated_at": "2026-08-07T11:30:00Z",
+            "path": "src/view.ts",
+            "line": 12,
+            "thread": "t-c-101"
+          }
+        ]
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "node": "ui",
+      "payload": {
+        "correlation": "review-comment:ui:c-101",
+        "kind": "review-comment",
+        "message": "Node ui, change request https://example.invalid/changes/22: a-reviewer at src/view.ts:12\nhttps://example.invalid/changes/22#discussion_c-101\n\nPlease handle the empty case.\n\nAnswer with rework on ui, naming c-101 in comments, or decline this comment.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "ui",
+      "payload": {
+        "kind": "review-comment",
+        "message": "Node ui, change request https://example.invalid/changes/22: a-reviewer at src/view.ts:12\nhttps://example.invalid/changes/22#discussion_c-101\n\nPlease handle the empty case.\n\nAnswer with rework on ui, naming c-101 in comments, or decline this comment.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "review-comments-read",
+      "node": "docs",
+      "payload": {
+        "change_url": "https://example.invalid/changes/23",
+        "count": 2,
+        "unchanged": false,
+        "marker_digest": "sha256:99999999999999999999999999999999",
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 2
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-comments-read",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "change_url": "https://example.invalid/changes/23",
+        "marker": "marker-docs-1",
+        "unchanged": false,
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 2
+        },
+        "comments": [
+          {
+            "id": "c-201",
+            "kind": {
+              "type": "review-thread",
+              "thread": "t-c-201",
+              "path": "README.md",
+              "line": 3,
+              "outdated": false,
+              "resolved": false
+            },
+            "author": "a-reviewer",
+            "url": "https://example.invalid/changes/23#discussion_c-201",
+            "updated_at": "2026-08-07T11:30:00Z",
+            "path": "README.md",
+            "line": 3,
+            "thread": "t-c-201"
+          },
+          {
+            "id": "c-202",
+            "kind": {
+              "type": "review-thread",
+              "thread": "t-c-202",
+              "path": "README.md",
+              "line": 9,
+              "outdated": false,
+              "resolved": false
+            },
+            "author": "a-reviewer",
+            "url": "https://example.invalid/changes/23#discussion_c-202",
+            "updated_at": "2026-08-07T11:30:00Z",
+            "path": "README.md",
+            "line": 9,
+            "thread": "t-c-202"
+          }
+        ]
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "node": "docs",
+      "payload": {
+        "correlation": "review-comment:docs:c-201",
+        "kind": "review-comment",
+        "message": "Node docs, change request https://example.invalid/changes/23: a-reviewer at README.md:3\nhttps://example.invalid/changes/23#discussion_c-201\n\nPlease handle the empty case.\n\nAnswer with rework on docs, naming c-201 in comments, or decline this comment.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "docs",
+      "payload": {
+        "kind": "review-comment",
+        "message": "Node docs, change request https://example.invalid/changes/23: a-reviewer at README.md:3\nhttps://example.invalid/changes/23#discussion_c-201\n\nPlease handle the empty case.\n\nAnswer with rework on docs, naming c-201 in comments, or decline this comment.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "node": "docs",
+      "payload": {
+        "correlation": "review-comment:docs:c-202",
+        "kind": "review-comment",
+        "message": "Node docs, change request https://example.invalid/changes/23: a-reviewer at README.md:9\nhttps://example.invalid/changes/23#discussion_c-202\n\nPlease handle the empty case.\n\nAnswer with rework on docs, naming c-202 in comments, or decline this comment.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "docs",
+      "payload": {
+        "kind": "review-comment",
+        "message": "Node docs, change request https://example.invalid/changes/23: a-reviewer at README.md:9\nhttps://example.invalid/changes/23#discussion_c-202\n\nPlease handle the empty case.\n\nAnswer with rework on docs, naming c-202 in comments, or decline this comment.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-committed",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "rework",
+          "id": "ui",
+          "reason": "review asked for the empty case",
+          "instruction": "render an empty state",
+          "comments": [
+            {
+              "id": "c-101",
+              "url": "https://example.invalid/changes/22#discussion_c-101"
+            }
+          ],
+          "title": "fix: handle the empty view"
+        },
+        "operations": [
+          {
+            "kind": "rework-requested",
+            "node": "ui",
+            "replacement": "ui-rework-1",
+            "reason": "review asked for the empty case",
+            "instruction": "render an empty state",
+            "comments": [
+              {
+                "id": "c-101",
+                "url": "https://example.invalid/changes/22#discussion_c-101"
+              }
+            ],
+            "title": "fix: handle the empty view"
+          },
+          {
+            "kind": "node-added",
+            "node": {
+              "id": "ui-rework-1",
+              "persona": "worker",
+              "repo": "github.com/example/repo",
+              "title": "fix: handle the empty view",
+              "task": "## What\nShip the ui-rework-1 change.\n\n## Acceptance criteria\nThe ui-rework-1 change is in review\n\n## Rework\n\nReason: review asked for the empty case\n\nInstruction: render an empty state\n",
+              "deps": ["api"],
+              "branch": "feature/ui"
+            },
+            "retry_of": "ui"
+          },
+          {
+            "kind": "edge-added",
+            "from": "api",
+            "to": "ui-rework-1"
+          },
+          {
+            "kind": "edge-removed",
+            "from": "ui",
+            "to": "docs"
+          },
+          {
+            "kind": "edge-added",
+            "from": "ui-rework-1",
+            "to": "docs"
+          },
+          {
+            "kind": "node-dropped",
+            "node": "ui",
+            "dependents": "detach"
+          }
+        ],
+        "operation_kinds": [
+          "rework-requested",
+          "node-added",
+          "edge-added",
+          "edge-removed",
+          "edge-added",
+          "node-dropped"
+        ]
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-ready",
+      "node": "ui-rework-1",
+      "payload": {}
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "node": "ui-rework-1",
+      "payload": {
+        "attempt": 1,
+        "persona": "worker"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "session-opened",
+      "node": "ui-rework-1",
+      "payload": {
+        "token": "a-vcs-session-token-ui-rework-1",
+        "identity": "github.com/example/repo",
+        "branch": "feature/ui",
+        "base": "stack/ui",
+        "worktree": "/a/recorded/worktree/ui-rework-1"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "push",
+      "node": "ui-rework-1",
+      "payload": {
+        "branch": "feature/ui",
+        "remote": "origin",
+        "accepted": true
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-retitled",
+      "node": "ui-rework-1",
+      "payload": {
+        "node": "ui-rework-1",
+        "from": "feat: ui",
+        "to": "fix: handle the empty view",
+        "by": "op"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "review-reply-posted",
+      "node": "ui-rework-1",
+      "payload": {
+        "change_url": "https://example.invalid/changes/22",
+        "comment": "c-101",
+        "reply": "r-101",
+        "url": "https://example.invalid/changes/22#discussion_r-101",
+        "threaded": true,
+        "key": "onepipeline:ui-rework-1:c-101",
+        "existing": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-reply-posted",
+      "node": "ui-rework-1",
+      "payload": {
+        "node": "ui-rework-1",
+        "comment": "c-101",
+        "disposition": "answered",
+        "url": "https://example.invalid/changes/22#discussion_r-101",
+        "commits": ["2222222222222222222222222222222222222222"]
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "ui-rework-1",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/ui",
+        "change_url": "https://example.invalid/changes/22",
+        "head": "2222222222222222222222222222222222222222",
+        "base": "stack/ui",
+        "landing": "unlanded"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-restack-started",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "onto": [
+          {
+            "branch": "feature/ui",
+            "head": "2222222222222222222222222222222222222222"
+          }
+        ],
+        "cause": "rework"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-restacked",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "head": "3333333333333333333333333333333333333333",
+        "agent_dispatched": false,
+        "outcome": "change-review-draft"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "docs",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft",
+        "branch": "feature/docs",
+        "change_url": "https://example.invalid/changes/23",
+        "head": "3333333333333333333333333333333333333333",
+        "base": "feature/ui",
+        "landing": "unlanded",
+        "stack": {
+          "parents": [
+            {
+              "node": "ui-rework-1",
+              "branch": "feature/ui",
+              "head": "2222222222222222222222222222222222222222"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "title-unverified",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "title": "docs: describe the empty view",
+        "reason": "the host still reports the old title"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-committed",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "retitle",
+          "id": "docs",
+          "title": "docs: describe the empty view",
+          "reason": "the rework's title was not confirmed"
+        },
+        "operations": [
+          {
+            "kind": "retitled",
+            "node": "docs",
+            "from": "feat: docs",
+            "to": "docs: describe the empty view",
+            "reason": "the rework's title was not confirmed"
+          }
+        ],
+        "operation_kinds": ["retitled"]
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-retitled",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "from": "feat: docs",
+        "to": "docs: describe the empty view",
+        "by": "retitle"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-committed",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "decline",
+          "id": "docs",
+          "comments": [
+            {
+              "id": "c-201",
+              "url": "https://example.invalid/changes/23#discussion_c-201"
+            },
+            {
+              "id": "c-202",
+              "url": "https://example.invalid/changes/23#discussion_c-202"
+            }
+          ],
+          "reason": "out of scope for this change"
+        },
+        "operations": [
+          {
+            "kind": "decline-applied",
+            "node": "docs",
+            "comments": [
+              {
+                "id": "c-201",
+                "url": "https://example.invalid/changes/23#discussion_c-201"
+              },
+              {
+                "id": "c-202",
+                "url": "https://example.invalid/changes/23#discussion_c-202"
+              }
+            ],
+            "reason": "out of scope for this change",
+            "replies": ["https://example.invalid/changes/23#discussion_r-201"]
+          }
+        ],
+        "operation_kinds": ["decline-applied"]
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "review-reply-posted",
+      "node": "docs",
+      "payload": {
+        "change_url": "https://example.invalid/changes/23",
+        "comment": "c-201",
+        "reply": "r-201",
+        "url": "https://example.invalid/changes/23#discussion_r-201",
+        "threaded": true,
+        "key": "onepipeline:docs:c-201",
+        "existing": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-reply-posted",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "comment": "c-201",
+        "disposition": "declined",
+        "url": "https://example.invalid/changes/23#discussion_r-201",
+        "commits": []
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-reply-not-drafted",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "comments": ["c-202"],
+        "ending": "failed",
+        "detail": "the reply drafter ended without a reply"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "node": "docs",
+      "payload": {
+        "correlation": "review-reply-pending:docs:c-202",
+        "kind": "review-reply-pending",
+        "message": "Node docs, change request https://example.invalid/changes/23: the reply to c-202 could not be drafted (failed: the reply drafter ended without a reply); it is drafted again on the next review pass.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "docs",
+      "payload": {
+        "kind": "review-reply-pending",
+        "message": "Node docs, change request https://example.invalid/changes/23: the reply to c-202 could not be drafted (failed: the reply drafter ended without a reply); it is drafted again on the next review pass.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "schema",
+      "payload": {
+        "status": "failed",
+        "outcome": "merged-during-rework",
+        "branch": "feature/schema",
+        "change_url": "https://example.invalid/changes/24",
+        "head": "4444444444444444444444444444444444444444",
+        "detail": "not published: its change request https://example.invalid/changes/24 was merged while this rework ran, so nothing was published and no change request was opened; build on the landed work with an `add`. Its work is kept on feature/schema (pushed)"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-standings-read",
+      "payload": {
+        "repo": "github.com/example/repo",
+        "count": 6,
+        "landed": ["https://example.invalid/changes/21"],
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 0
+        }
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-landed",
+      "node": "api",
+      "payload": {
+        "node": "api",
+        "change_url": "https://example.invalid/changes/21",
+        "commit": "5555555555555555555555555555555555555555",
+        "detected_by": "readjust",
+        "trigger": "readjust"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-absorbed",
+      "node": "helper",
+      "payload": {
+        "node": "helper",
+        "into": "api",
+        "change_url": "https://example.invalid/changes/31",
+        "commit": "5555555555555555555555555555555555555555"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-retargeted",
+      "node": "ui-rework-1",
+      "payload": {
+        "change_url": "https://example.invalid/changes/22",
+        "from": "stack/ui",
+        "to": "main",
+        "outcome": "retargeted",
+        "body_written": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-restack-started",
+      "node": "ui-rework-1",
+      "payload": {
+        "node": "ui-rework-1",
+        "onto": [
+          {
+            "branch": "main",
+            "head": "5555555555555555555555555555555555555555"
+          }
+        ],
+        "cause": "readjust"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-readjusted",
+      "node": "ui-rework-1",
+      "payload": {
+        "node": "ui-rework-1",
+        "from": {
+          "base": "stack/ui",
+          "stack_parents": ["api"]
+        },
+        "to": {
+          "base": "main",
+          "stack_parents": []
+        },
+        "cause": ["api"],
+        "head": "6666666666666666666666666666666666666666",
+        "agent_dispatched": false,
+        "retarget": "retargeted",
+        "content": "merged"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-restacked",
+      "node": "ui-rework-1",
+      "payload": {
+        "node": "ui-rework-1",
+        "head": "6666666666666666666666666666666666666666",
+        "agent_dispatched": false,
+        "outcome": "change-review-draft-unchecked"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "ui-rework-1",
+      "payload": {
+        "status": "done",
+        "outcome": "change-review-draft-unchecked",
+        "branch": "feature/ui",
+        "change_url": "https://example.invalid/changes/22",
+        "head": "6666666666666666666666666666666666666666",
+        "base": "main",
+        "landing": "unlanded",
+        "detail": "review draft https://example.invalid/changes/22 was pushed at its merge head (pushed); its check verdict is outstanding until the next trigger"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-checks-read",
+      "node": "ui-rework-1",
+      "payload": {
+        "node": "ui-rework-1",
+        "head": "6666666666666666666666666666666666666666",
+        "verdict": "pending"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-checks-read",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "head": "3333333333333333333333333333333333333333",
+        "verdict": "passed"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "stack-landed-out-of-order",
+      "node": "docs",
+      "payload": {
+        "node": "docs",
+        "carried": ["ui-rework-1"]
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "docs",
+      "payload": {
+        "kind": "stack-merged-out-of-order",
+        "message": "Node docs merged before ui-rework-1, which it carried onto main; review ui-rework-1's change request against what landed.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-closed",
+      "node": "cli",
+      "payload": {
+        "node": "cli",
+        "change_url": "https://example.invalid/changes/30"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "cli",
+      "payload": {
+        "kind": "change-closed",
+        "message": "Node cli's change request https://example.invalid/changes/30 was closed without merging; rework it, add a replacement, or leave it closed.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-reopened",
+      "node": "cli",
+      "payload": {
+        "change_url": "https://example.invalid/changes/30",
+        "restored_base": "main",
+        "at": "7777777777777777777777777777777777777777"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-reopened",
+      "node": "cli",
+      "payload": {
+        "node": "cli",
+        "change_url": "https://example.invalid/changes/30",
+        "restored_base": "main"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "node": "schema",
+      "payload": {
+        "kind": "change-base-overridden",
+        "message": "Node schema's change request https://example.invalid/changes/24 targets release/1 rather than the base the run placed it on; it is left where its author put it.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "readjust-read-failed",
+      "payload": {
+        "repo": "github.com/example/other",
+        "detail": "the host answered 502 for the standings read"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "kind": "readjust-pending",
+        "message": "The standings of github.com/example/other could not be read, so its drafts are readjusted on the next pass.",
+        "source": "reconciler",
+        "blocking": false
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "driver-superseded",
+      "payload": {
+        "by": {
+          "run": "dag-ui-review-loop-later",
+          "host": "a-later-host",
+          "session": null,
+          "pid": 4300,
+          "claimed_at": "2026-08-07T12:30:00.000Z",
+          "lease": {
+            "interval_seconds": 60,
+            "cancel_grace_seconds": 30
+          }
+        }
+      }
+    }
+  ]
+}

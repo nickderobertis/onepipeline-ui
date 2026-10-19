@@ -3660,3 +3660,76 @@ export function preservedFacts() {
     landed_version: PRESERVE_LANDED_VERSION,
   };
 }
+
+/**
+ * The review-loop corpus: one run `onepipeline` 0.78 journals for a stacked change
+ * set taken over from another host and taken through review — continued from the
+ * store, reworked, restacked, retitled, answered and declined, and readjusted as its
+ * root landed, until a later host superseded its driver.
+ *
+ * The records are one document, `review-loop.json`, which `tests/e2e/server.rs`
+ * serves through every read route from the same file, so the run the view renders
+ * here is the run that journey holds each record of to being served.
+ */
+const REVIEW_LOOP = JSON.parse(
+  readFileSync(join(import.meta.dirname, "review-loop.json"), "utf8"),
+);
+
+/**
+ * Write the review-loop corpus under `root`: its launch record, the plan its
+ * `run-started` carried, and its records a second apart on the corpus's stream,
+ * stamped from the historic clock as every settled run here is.
+ */
+export function buildReviewLoopRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const runId = REVIEW_LOOP.run_id;
+  const dir = runDir(root, runId);
+  const [started] = REVIEW_LOOP.records;
+  writeJson(join(dir, "plan.json"), started.payload.plan);
+  writeJson(join(dir, "launch.json"), {
+    ...REVIEW_LOOP.launch,
+    started_at: stamp(HISTORIC),
+  });
+  const journal = new Journal(dir, REVIEW_LOOP.stream, HISTORIC);
+  for (const [index, record] of REVIEW_LOOP.records.entries()) {
+    const labels = {
+      run_id: runId,
+      ...(record.node === undefined ? {} : { node: record.node }),
+    };
+    journal
+      .advance(index === 0 ? 0 : 1)
+      .emit(record.source, record.kind, labels, record.payload);
+  }
+  journal.write();
+  // The two launches `docs` was given: its dispatch, and the reply drafter the
+  // review pass launched for its comments — the scope a reader is shown the
+  // drafting of a review reply under.
+  const store = join(root, "..", "oneharness-history");
+  mkdirSync(join(store, HARNESS_PROJECT), { recursive: true });
+  writePointerFile(dir, [
+    pointerLine(
+      store,
+      "worker-docs-20260817T000100Z-3163900",
+      "01a00d0f-c094-7660-b26c-8a53baaf9d00",
+      "claude-code",
+      stamp(HISTORIC + 10_000),
+      agentLabels(runId, "node", REVIEW_LOOP_NODE, 1),
+    ),
+    pointerLine(
+      store,
+      "review-reply-docs-20260817T000200Z-3163901",
+      "01a00d0f-c094-7660-b26c-8a53baaf9d01",
+      "claude-code",
+      stamp(HISTORIC + 70_000),
+      agentLabels(runId, "review-reply", REVIEW_LOOP_NODE, 1),
+    ),
+  ]);
+}
+
+/** The review-loop node whose comments a reply drafter was launched for. */
+const REVIEW_LOOP_NODE = "docs";
+
+/** What the review-loop corpus wrote, published beside it as `facts()` is beside the main one. */
+export function reviewLoopFacts() {
+  return { run: REVIEW_LOOP.run_id, replied_node: REVIEW_LOOP_NODE };
+}

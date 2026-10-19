@@ -2470,6 +2470,24 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
             vcs::DRAFT_KEPT_FOR_REVIEW,
         ),
         (onevcs::EventKind::ChecksSettled, vcs::CHECKS_SETTLED),
+        (
+            onevcs::EventKind::StackBaseAssembled,
+            vcs::STACK_BASE_ASSEMBLED,
+        ),
+        (
+            onevcs::EventKind::ReviewCommentsRead,
+            vcs::REVIEW_COMMENTS_READ,
+        ),
+        (
+            onevcs::EventKind::ReviewReplyPosted,
+            vcs::REVIEW_REPLY_POSTED,
+        ),
+        (
+            onevcs::EventKind::ChangeStandingsRead,
+            vcs::CHANGE_STANDINGS_READ,
+        ),
+        (onevcs::EventKind::ChangeRetargeted, vcs::CHANGE_RETARGETED),
+        (onevcs::EventKind::ChangeReopened, vcs::CHANGE_REOPENED),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }

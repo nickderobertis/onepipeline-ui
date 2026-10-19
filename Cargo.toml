@@ -578,9 +578,12 @@ onemessagebus = "0.9.1"
 # moves. Its reply grammar gains `decline` and its agent scopes `review-reply`,
 # which the browser's gated copies follow, and its reconciler refuses by kind
 # as `Error::Rejected`, which `ApiError::from_engine` serves as `422 refused`.
-# The test-only `onetaskgraph-*` requirements below move with it to the release
-# its lock resolves. This changes the engine types carried by
-# ApiError::from_engine and the other engine-typed public items.
+# It also stacks, reworks, continues and readjusts drafts from review, so a
+# browser-adopted run's driver does what the CLI's does, and those records
+# render here rather than being refused. The dev-only `onevcs` and
+# `onetaskgraph-*` requirements below move with it to the releases its lock
+# resolves. This changes the engine types carried by ApiError::from_engine and
+# the other engine-typed public items.
 # llmlint: ignore-end[comments_earn_their_place]
 onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
@@ -621,8 +624,9 @@ libc = "0.2"
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. 0.52.0 is the
 # release engine 0.75.0 requires (^0.52.0), so the lock moves both to it and
-# keeps one copy.
-onevcs = "=0.52.0"
+# keeps one copy. 0.52.1 is the release engine 0.78.0 resolves (^0.52.0), and
+# declares the stacking, review and landing kinds that engine relays.
+onevcs = "=0.52.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
