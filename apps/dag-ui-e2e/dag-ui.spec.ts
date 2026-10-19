@@ -1048,6 +1048,8 @@ const EXPECTED_GLYPH: Readonly<Record<string, string>> = {
   "node-unheld": "lucide-hourglass",
   "release-arrived": "lucide-git-pull-request", // publication
   "release-adopted": "lucide-git-pull-request",
+  "review-reply-posted": "lucide-git-pull-request",
+  "review-reply-not-drafted": "lucide-git-pull-request",
   "Redirected into the running turn": "lucide-rotate-ccw", // recovery
   "member-died": "lucide-triangle-alert", // failure
   "decision-pending": "lucide-clipboard-list", // planning
@@ -1237,6 +1239,36 @@ test("draws every category a record can be as a glyph of its own", async ({
   await expect(page.getByTestId("timeline-popover")).toContainText(
     "Verification",
   );
+});
+
+test("draws a review reply posted, and one not drafted, as the publication they answer", async ({
+  page,
+}) => {
+  // Two kinds no word of the scheme names: only their filing puts them with the
+  // change request whose review they answer, rather than under the default a
+  // record this build has never seen is drawn as.
+  await openObservatory(page, `/?run=${runs().live}&node=foundation`);
+  const marker = (kind: string): Locator =>
+    timeline(page).getByRole("button", {
+      name: `${kind}, marker`,
+      exact: true,
+    });
+  const opened = await glyphName(marker("change-opened"));
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const reading = page.getByTestId("timeline-popover");
+  for (const kind of ["review-reply-posted", "review-reply-not-drafted"]) {
+    const drawn = marker(kind);
+    await expect(drawn).toBeVisible();
+    expect(await glyphName(drawn)).toBe(expectedGlyph(kind));
+    expect(await glyphName(drawn)).toBe(opened);
+    // Said in words for the reader who does not read glyphs.
+    await drawn.hover();
+    await expect(reading).toContainText("Publication");
+    await expect(reading).not.toContainText("Activity");
+    const row = transcript.getByRole("button", { name: `Open ${kind}` });
+    await expect(row).toHaveCount(1);
+    expect(await glyphName(row)).toBe(opened);
+  }
 });
 
 test("scrolls the transcript to the journal record a marker names", async ({

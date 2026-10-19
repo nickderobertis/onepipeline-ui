@@ -1261,6 +1261,30 @@ function writeLiveRun(root) {
       author: "a-recording-host",
     },
   );
+  // A review of that change request answered in its threads before it merged:
+  // one comment declined with a posted reply, and a drafting of the replies a
+  // second comment was owed that posted nothing.
+  journal.advance(1).emit(
+    "pipeline",
+    "review-reply-posted",
+    { ...run, node: "foundation" },
+    {
+      comment: "review-7",
+      disposition: "declined",
+      url: `${FOUNDATION_PR}#discussion_r7`,
+      commits: [],
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "review-reply-not-drafted",
+    { ...run, node: "foundation" },
+    {
+      comments: ["review-8"],
+      ending: "failed",
+      detail: "the reply drafter exited non-zero",
+    },
+  );
   journal
     .advance(1)
     .emit(

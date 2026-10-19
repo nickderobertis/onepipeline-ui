@@ -207,7 +207,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await expect(
     shortcut.getByRole("option", { name: "retitle", exact: true }),
   ).toHaveCount(1);
-  for (const unoffered of ["review", "readjust", "decline"]) {
+  for (const unoffered of ["decline", "review", "readjust"]) {
     await expect(
       shortcut.getByRole("option", { name: unoffered, exact: true }),
     ).toHaveCount(0);

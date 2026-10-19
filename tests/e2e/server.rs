@@ -15877,6 +15877,137 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// An adoption through the built binary drives a run whose only plan-store
+/// configuration is the host's user layer, where two sources are refined with
+/// nothing but `routes` and a third is fully defined — the layer a host keeps
+/// when the full definitions of the routed sources live in one repository's
+/// tracked `onetaskgraph.yaml` and the store is used from everywhere else.
+///
+/// Neither the run's launch directory nor the server's own working directory
+/// has a project document above it, so no layer gives the two refined sources a
+/// `plugin`. A store that refuses such a source refuses the whole configuration
+/// — `sources.followups: missing field plugin` — and every write-back the
+/// driver attempts with it, including the ones onto the third source, which
+/// neither refined source names. The read routes serving the run under that
+/// source's project, the driver settling the run's human action as waiting,
+/// and every projection it attempted landing on that project are the proof
+/// that this binary's store leaves the refined sources unconfigured instead.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
+// above: one retained driver over a one-node human graph, in a few seconds; the sixty
+// seconds beside it is the ceiling a failing wait reaches. It needs nothing a checkout
+// may lack: the compiled binary, and files it writes itself.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_reads_a_user_layer_that_refines_sources_it_does_not_define() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let (project, task) = fixture_run::launch_from_local_md_store(&root, run, &dir);
+    let before = fs::read_to_string(&task).expect("the task document");
+
+    // The `local-md` source moves out of the launch directory's project document
+    // into the user layer, beside two sources that layer only routes.
+    let project_document = dir.join("onetaskgraph.yaml");
+    let local_md = fs::read_to_string(&project_document).expect("the store configuration");
+    fs::remove_file(&project_document).expect("the project document is removed");
+    let routed = |source: &str| {
+        format!(
+            "  {source}:\n    routes:\n      - repositories: [\"example-org/*\"]\n        \
+             to: example-org-tracker\n"
+        )
+    };
+    let home = dir.join("configuration-home");
+    let user_layer = home.join("onetaskgraph").join("config.yaml");
+    fs::create_dir_all(user_layer.parent().expect("a directory")).expect("the layer's directory");
+    fs::write(
+        &user_layer,
+        format!("{local_md}{}{}", routed("followups"), routed("plans")),
+    )
+    .expect("the user layer");
+    let working = std::env::current_dir().expect("the server's working directory");
+    for start in [dir.as_path(), working.as_path()] {
+        assert!(
+            start
+                .ancestors()
+                .all(|directory| !directory.join("onetaskgraph.yaml").exists()),
+            "a project document is discoverable from {}",
+            start.display()
+        );
+    }
+
+    // A source this suite's own host configures through `ONETASKGRAPH_SOURCES__*`
+    // would be merged into the layers the driver reads, so it meets none of them.
+    let inherited: Vec<String> = std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("ONETASKGRAPH_"))
+        .collect();
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[("XDG_CONFIG_HOME", &home.display().to_string())],
+        &inherited,
+    );
+
+    let listed = http::get(serving.address, "/api/v2/runs");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    let row = listed.json()["runs"]
+        .as_array()
+        .expect("the listed runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .cloned()
+        .expect("the run is listed");
+    assert_eq!(row["project"], json!(project), "{row}");
+    let group = http::get(
+        serving.address,
+        &format!("/api/v2/projects/{}", project.replace(':', "%3A")),
+    );
+    assert_eq!(group.status, 200, "{}", group.body);
+    assert_eq!(group.json()["project"], json!(project), "{}", group.body);
+
+    // The one route that loads the plan-store configuration: an adoption, whose
+    // driver reads the run's project off the store and writes back onto it.
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually("the driver settled the human action as waiting", || {
+        http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"]["node_status"]
+            [fixture_run::APPROVAL_NODE_ID]
+            == json!("waiting")
+    });
+    eventually("the driver let go and was reaped", || !process_is_live(pid));
+    drop(driver);
+
+    let records: Vec<Value> = fs::read_to_string(
+        root.join(run)
+            .join(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE),
+    )
+    .expect("the projection record")
+    .lines()
+    .map(|line| serde_json::from_str(line).expect("a projection record line"))
+    .collect();
+    assert!(!records.is_empty(), "no projection was attempted");
+    for record in &records {
+        assert_eq!(record["project"], json!(project), "{record}");
+        assert_eq!(record["outcome"], json!("projected"), "{record}");
+    }
+    assert!(
+        records.iter().any(|record| record["actions"]["updated"]
+            .as_u64()
+            .is_some_and(|updated| updated > 0)),
+        "no projection wrote the settlement through the store: {records:?}"
+    );
+    let after = fs::read_to_string(&task).expect("the task document");
+    assert_ne!(after, before, "the task document was not written back");
+    assert!(after.contains("onepipeline.settlement"), "{after}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// A flow the provisioned CLI holds live under a runs root: `onepipeline flow
 /// run --name NAME --session SESSION`, over a program that waits for a file this
 /// journey writes. Ended by writing that file — never by a signal — and waited

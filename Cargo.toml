@@ -580,10 +580,14 @@ onemessagebus = "0.9.1"
 # as `Error::Rejected`, which `ApiError::from_engine` serves as `422 refused`.
 # It also stacks, reworks, continues and readjusts drafts from review, so a
 # browser-adopted run's driver does what the CLI's does, and those records
-# render here rather than being refused. The dev-only `onevcs` and
-# `onetaskgraph-*` requirements below move with it to the releases its lock
-# resolves. This changes the engine types carried by ApiError::from_engine and
-# the other engine-typed public items.
+# render here rather than being refused. It links onetaskgraph 0.7.3, whose
+# loader leaves a source no layer gives a `plugin` unconfigured rather than
+# refusing the whole configuration, so a browser-adopted run's driver reads its
+# store on a host whose user layer only routes sources a repository's own
+# `onetaskgraph.yaml` defines. The dev-only `onevcs` and `onetaskgraph-*`
+# requirements below move with it to the releases its lock resolves. This
+# changes the engine types carried by ApiError::from_engine and the other
+# engine-typed public items.
 # llmlint: ignore-end[comments_earn_their_place]
 onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
