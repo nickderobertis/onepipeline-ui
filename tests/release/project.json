@@ -45,7 +45,7 @@
     },
     "rehearse": {
       "//": "A separate target gives the longest chain priority in Nx’s dependency-count queue. Keep test after rehearse: tools.test.mjs recreates the Python environment the journeys use.",
-      "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
+      "command": "node --test --test-concurrency=1 tests/release/publication.test.mjs tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"],
       "cache": true

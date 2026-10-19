@@ -5,9 +5,9 @@
 // uploaded to them, so the real clients — gh, twine, pip, npm, cargo and the
 // release probe — are what publish and install.
 //
-// One real build is shared by every journey: it is the manylinux image compiling
-// the release binary, and every journey after the first is about what happens
-// to the files it produced.
+// The journeys below share one manylinux build. ./publication.test.mjs, beside
+// this file in the project's test target, builds a native wheel instead, so its
+// registry journeys run without a manylinux image or its external mirrors.
 //
 // What a Linux host cannot do is build the macOS and Windows targets; their
 // files are the hosted jobs' to produce, so where a journey needs them on a
