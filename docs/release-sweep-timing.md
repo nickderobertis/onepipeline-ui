@@ -62,8 +62,11 @@ Changes preserve all assertions in the release journeys:
   dependency still builds that server; compilation overlaps the tiers instead
   of delaying every tier. No browser journey or assertion was removed.
 - Baseline provisioning shares intermediate debug units with the current tree,
-  while keeping the base binary in its separate scratch target. It still builds
-  the base manifest under its own lock and verifies the stamped commit.
+  while keeping the base binary in its separate scratch target. A fresh native
+  compiler forwarder gives each archived workspace a distinct Cargo artifact
+  namespace without changing dependency units or compiler options. It still
+  builds the base manifest under its own lock and verifies the stamped commit.
+  This uses Cargo's documented [workspace-wrapper filename hashing](https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-reads).
 - The auditable build likewise shares intermediate dependency units, keeps its
   own executable, and clears Cargo's test-process package environment. The same
   linked-report requests and dependency-report assertions still run.
@@ -83,16 +86,21 @@ The Linux schedule uses both observed tier envelopes, retaining the full
 It budgets 120–180 s for baseline provisioning, 47–240 s for the browser server
 now inside the sweep, 60 s for dev install, and 1018 s for the unchanged rehearsal
 plus 75 s for its other release tests. Six workers overlap these intervals;
-adding every tier would double-count most of the job. The resulting Nx critical
-path is 1146 s for the warmer envelope and 1220 s for the colder envelope.
+adding every tier would double-count most of the job. Budget another 30 s in
+repo-tooling for native-forwarder setup in its guard journeys, plus 60 s for
+the separate baseline-reuse target (its measured test times were 34.9–58.7 s).
+The resulting Nx critical path is 1146 s for the warmer envelope and 1234 s
+for the colder one.
+Conservatively add 5 s to both critical paths for a cold frontend build, without
+crediting its overlap: 1151 s and 1239 s.
 
 For the complete Linux job, the warm case adds 90 s provisioning and 60 s
-post steps: 1296 s, or 21.6 min. The cold case reserves 180 s provisioning and
-120 s post steps: 1520 s, or 25.3 min. Provisioning was 125 s in the later log;
+post steps: 1301 s, or 21.7 min. The cold case reserves 180 s provisioning and
+120 s post steps: 1539 s, or 25.7 min. Provisioning was 125 s in the later log;
 the earlier log included a serial 178 s API compile now moved into Nx. Reserve
 another 16% over the cold envelope for runner speed, earlier rehearsal CPU
-contention, Docker setup and overlap uncertainty: 1763 s, rounded to **29.5 min**.
-The resulting forecast is **21.6–29.5 min**. The large observed instrumented-tier
+contention, Docker setup and overlap uncertainty: 1785.3 s, rounded up to
+**29.8 min**. The resulting forecast is **21.7–29.8 min**. The large observed instrumented-tier
 variance is included by using both envelopes before this residual margin.
 
 Windows keeps the affected cross-platform selection even on a release PR.
@@ -103,43 +111,120 @@ compile. Budgeting a dev install without credit for bootstrap overlap, another
 120 s for cache saves, and 14% residual runner/build-lock variance gives
 (19.8 + 2) × 1.14 = **24.9 min**. The forecast is **16–25 min**; it conservatively
 credits no saving from moving bootstrap's compile and assumes no Nx test-cache
-hits. Local debug/release measurements support eliminating the long release
-install tail, but do not measure Windows compilation speed.
+hits. Reserve 30 s of extra native-forwarder work in repo-tooling. Its observed
+106–200 s lead over the last Windows test tier also accommodates the separate
+60 s reuse journey when baseline-specific inputs select it; the 14% residual
+covers overlap and CPU-contention uncertainty. That new edge is not selected
+for a version-only release diff (Cargo.toml, Cargo.lock and CHANGELOG.md), as
+`/tmp/sweepcap/scoped-release-version-graph.json` verifies through real Nx.
+Local debug/release measurements support eliminating the release install tail,
+but do not measure Windows compilation speed.
 
 Linux's upper end exceeds 25.5 min (85% of 30), so only its cap changes:
-`ceil(29.5 / 0.85) = 35` minutes. Its upper estimate leaves 15.7% of that cap.
+`ceil(29.8 / 0.85) = 36` minutes. Its upper estimate leaves 17.2% of that cap.
 Windows stays at 30 minutes; 25 min leaves 16.7%. Lint and macOS stay at 30.
 The workflow, cancelled-cache verdict, CI job tests and AGENTS.md agree on these
 caps. This is a timeout allowance for the measured remaining work, not a new
 performance threshold or permission to skip checks.
 
-A later complete Linux job over 29.5 min or Windows job over 25 min falsifies
+A later complete Linux job over 29.8 min or Windows job over 25 min falsifies
 this forecast. Inspect per-target durations and queue delay first; include setup
 and cache-save time, and distinguish cache hits from compilation. Registry
 unavailability has no finite completion-time estimate.
 
-## Local verification on this branch
+## Local verification on the finished tree
 
-The forced real `onepipeline-ui:ensure-baseline` rebuild (stamp removed first)
-passed in 20.1 s. `onepipeline-ui:install-smoke` passed in 50.4 s including the
-smoke journey; raising its model allowance from 30 to 60 s leaves both critical
-paths unchanged. The linked-report target passed both real server journeys
-(58.887 s of tests). These warm measurements support sharing intermediates;
-the forecast retains much larger hosted-runner allowances.
+| Real interface | Result |
+| --- | --- |
+| `onepipeline-ui-release:test`, including its dependencies | All 15 rehearsal and 30 smaller tests passed; 13m36s, zero Nx cache hits |
+| `dag-ui-e2e:test` | All 139 passed; 8m52s including prerequisites |
+| `dag-ui-e2e:test-isolation` | Both passed; 51.6 s of tests |
+| `dag-ui-e2e:bootstrap` and `dag-ui:build-api-server` | Passed |
+| `onepipeline-ui-repo-tooling:test` | All 184 guard, graph and packaging tests passed |
+| `onepipeline-ui-baseline-reuse:test` and `test-quick` | The real Cargo reuse/source-identity/failure/recovery journey passed through both targets |
+| `onepipeline-ui-linked-report:test` and `onepipeline-ui-baseline:test-baseline` | Real server journeys and base/head API comparisons passed after the cache correction |
+| `onepipeline-ui-ci-jobs:test` | All ten recipe-selection journeys passed |
+| `github-workflows:test`, `test-ci-jobs` and `budgets` | Passed; full workflow suite has 56 tests |
+| `onepipeline-ui:ensure-baseline` | Forced real SDK-backed rebuild, stamp removed first: passed in 68.3 s including Nx startup |
+| `onepipeline-ui:install-smoke` | Passed in 50.4 s including its smoke journey |
+| `just lint`, `just fmt-check`, static and judged diff lint | Passed |
 
-The repo-tooling target passed all 185 tests, the CI-jobs target all ten, and
-the smaller release target all 30. The smaller release target was run with
-`--excludeTaskDependencies` after provisioning its tools, because the full
-`onepipeline-ui-release:test` invocation failed in its rehearsal dependency:
-CentOS vault returned HTTP 403 for yum metadata before compilation. This is
-an unresolved environment blocker, not a passing end-to-end rehearsal. The two
-manager questions about that blocker received no reply within their windows.
+The final release run used warm Cargo artifacts, not replayed Nx results.
+Its dry-run command took 470 s, build/install suite 563.270 s, and rehearsal
+about 12m53s. A preceding build/install suite passed in 799.736 s (dry-run
+712 s); that entire invocation failed later and is not a passing full-target
+proof. These measurements retain the CI-based forecast above rather than
+scaling hosted-runner times from the warm local run. Raising the dev install
+model allowance from 30 to 60 s leaves both predicted critical paths unchanged.
 
-To verify the added baseline test, the shared-build config argument was removed
-temporarily: the repo-tooling target failed specifically at
-`the_base_is_built_from_the_units_this_clone_already_compiled`, reporting the
-missing shared build directory. The script was restored immediately afterward.
-The local scratch logs are `/tmp/sweepcap/baseline-mutation.log` and
-`/tmp/sweepcap/baseline-restored.log`. All new local measurements used the real
-Nx targets, without Nx result-cache reuse; no hosted Windows execution is
-claimed here.
+The first browser attempt passed 137 tests and timed out in two. The separate
+full-target rerun passed all 139, including both previously failing journeys.
+No browser implementation or assertion was changed to obtain that pass. That
+rerun overlapped some release compilation, so it is not an isolated host timing.
+The initial repo-tooling run failed on Node's conflicting `NO_COLOR` and
+`FORCE_COLOR` warning; unsetting the worker's `NO_COLOR` returned all 185 tests
+to green. Judged lint ran with `LLMLINT_ONEHARNESS_BIN` unset against the installed
+oneharness: the inherited value named an absent orchestrator wrapper. Neither
+worker environment override changed repository enforcement.
+
+The baseline test now compiles a real local dependency and this crate's
+library-plus-binary shape, runs both executables, and breaks and repairs the
+dependency. This replaces the internal Cargo-argument assertion with observed
+reuse, source identity and recovery. It lives behind its own narrowly keyed
+`onepipeline-ui-baseline-reuse:test` / `test-quick` edge, not in repo-tooling's
+broad input set. The nextest partition moved this one journey into its own
+profile; every existing assertion and the default test collection remain.
+Linux `check` and the cross-platform `test-quick` selection reach that edge.
+Actual Nx graphs select it for the provisioning script but not for Cargo.toml
+(`/tmp/sweepcap/scoped-provisioning-graph.json` and `scoped-version-graph.json`).
+Removing the shared build directory made
+its dependency compile twice (`/tmp/sweepcap/real-baseline-dependency-reuse-mutation.log`).
+Reverting the namespace correction installed the branch executable as the base
+(`/tmp/sweepcap/real-reuse-original.log`). Restoring both returned the suite
+to green, including the subsequent tier extraction: 184 repo-tooling tests and
+ten CI-selection journeys in `/tmp/sweepcap/scoped-partition.log`, and the new
+tier's real journey through both targets in `/tmp/sweepcap/scoped-reuse2.log`.
+Real SDK-backed baseline and linked-report journeys also passed
+(`/tmp/sweepcap/final-baseline-api.log`).
+The corrected real baseline rebuilds measured 45.2–68.3 s, within the forecast's
+120–180 s allowance. The earlier 20.1 s measurement is not used as proof of
+correct cache isolation.
+No hosted Windows execution is claimed; the next release-PR CI run validates
+that platform's forecast.
+
+### Temporary mirror setup for the real release run
+
+CentOS vault returned HTTP 403 for yum metadata on this host. The manager
+approved an untracked helper, `/tmp/sweepcap/mirror-forwarder/docker`, for this
+run only. It executed `/usr/bin/docker` with every original argument intact
+except inserting the following setup immediately before the existing
+`yum install -y -q perl-IPC-Cmd perl-Time-Piece` in the manylinux shell command:
+
+```sh
+sed -i \
+  -e 's|https://vault.centos.org/centos/\$releasever/|https://archive.kernel.org/centos-vault/7.9.2009/|g' \
+  -e 's|https://vault.centos.org/centos/7/|https://archive.kernel.org/centos-vault/7.9.2009/|g' \
+  /etc/yum.repos.d/*.repo
+```
+
+Both the base repositories and SCLo therefore fetched the same signed CentOS
+packages through kernel.org. The helper forwarded both real Linux builds;
+it synthesized no output or exit status. The repository stayed clean for
+Cargo packaging, and no `--allow-dirty` flag or test assertion was changed.
+The helper and its duplicate were removed after success. The committed
+`scripts/build-linux-wheel.sh` remains identical to the merge base; another
+dispatch owns the permanent fetch repair.
+
+The first real Docker client's exact PATH was captured from its process
+environment (the Nx invocation itself began with the helper directory):
+
+```text
+PATH=/home/nick/projects/ai-orchestrator/runs/Share-one-Codex-app-server-across-dispatches-and-budget-network-data-per-launch/scratch/739294-34/release-journey-rehearsal-xIYp1S/gh-bin:/home/nick/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/1/worktree/.tools/release-venv/bin:/home/nick/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/1/worktree/.tools/bin:/home/nick/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/1/worktree/node_modules/.bin:/home/nick/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/1/node_modules/.bin:/home/nick/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/node_modules/.bin:/home/nick/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/node_modules/.bin:/home/nick/.onevcs/workspaces/node_modules/.bin:/home/nick/.onevcs/node_modules/.bin:/home/nick/node_modules/.bin:/home/node_modules/.bin:/node_modules/.bin:/home/nick/.asdf/installs/nodejs/26.5.0/bin:/tmp/sweepcap/mirror-forwarder:/home/nick/.asdf/installs/nodejs/26.5.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/nick/.local/bin:/home/nick/.codex/tmp/arg0/codex-arg0AP4B4T:/home/nick/.asdf/installs/nodejs/26.5.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:.venv/bin:/home/nick/projects/ai-orchestrator/.venv/bin:/home/nick/projects/ai-orchestrator/.venv/bin:/home/nick/.local/bin:/home/nick/.cargo/bin:/home/nick/.local/node/bin:/home/nick/.asdf/plugins/nodejs/shims:/home/nick/.asdf/installs/nodejs/26.5.0/bin:/home/nick/.asdf/shims:/home/nick/.asdf/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+```
+
+The negative install journey additionally prepended `/home/nick/projects/ai-orchestrator/runs/Share-one-Codex-app-server-across-dispatches-and-budget-network-data-per-launch/scratch/739294-34/release-journey-rehearsal-xIYp1S/broken-venv`, as its
+unchanged fixture specifies. The forwarding audit records two builds in
+`/tmp/sweepcap/mirror-forwarder-used.log`. The successful full-target log is
+`/tmp/sweepcap/release-forwarded.log`; the successful browser rerun is
+`/tmp/sweepcap/browser-alone.log`. These are local verification records, not
+claims that a complete local sweep or a hosted CI job was run successfully.

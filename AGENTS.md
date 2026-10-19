@@ -132,7 +132,7 @@ archive for the host, held to the `.sha256` published beside it and to its
 compiled around.
 
 **Pull-request CI is four jobs, each one recipe.** `lint`, `test-linux`,
-`test-windows` and `test-macos`, and their caps (35 minutes for Linux, 30 for the others), are an interface other
+`test-windows` and `test-macos`, and their caps (36 minutes for Linux, 30 for the others), are an interface other
 work builds against (`.github/tests/ci-jobs.test.mjs`); speed a job up by
 cutting its work, never by splitting one suite across more jobs. `docs/release-sweep-timing.md` records the measurements and margin behind
 Linux’s cap.

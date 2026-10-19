@@ -10,7 +10,7 @@
 //! failure that is silent: a stale server answers every request, and a comparison
 //! against the wrong commit says nothing while looking exactly like one that did.
 //!
-//! One thing is stood in for: `cargo` on PATH. The real provisioning compiles a
+//! The guard journeys substitute `cargo` on PATH. Real provisioning compiles a
 //! whole dependency graph a generation old, which is neither quick nor offline.
 //! The recipe under test is the real one, run out of a copy of the real justfile
 //! over the real script, against a real git repository with a real base commit —
@@ -18,7 +18,7 @@
 //! from, are both readable here. The copy is the point rather than a shortcut:
 //! the recipe writes into `justfile_directory()`, and a journey that let it write
 //! into the repository would provision over the binary the rest of the suite
-//! reads.
+//! reads. `baseline_reuse` separately exercises real Cargo reuse and source identity.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,11 +42,12 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 8] = [
+const TIERS: [(&str, &str, &str); 9] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
     ("onepipeline-ui-baseline", "test-baseline", "baseline"),
+    ("onepipeline-ui-baseline-reuse", "test", "baseline-reuse"),
     ("onepipeline-ui-cost", "test-cost", "cost"),
     ("onepipeline-ui-linked-report", "test", "linked-report"),
     ("onepipeline-ui-ci-jobs", "test", "ci-jobs"),
@@ -316,31 +317,6 @@ fn a_tree_with_no_baseline_gets_one_built_from_this_branchs_base() {
         fixture.calls().contains("--locked"),
         "the base commit's own lockfile decides its graph: {}",
         fixture.calls()
-    );
-}
-
-/// The base commit is compiled against this clone's own build directory, where
-/// the branch's debug build has already compiled every dependency the two lock
-/// alike, so provisioning costs the base's one crate rather than its whole graph.
-/// Only the binary lands in the scratch tree, which is why the binary installed is
-/// still the base's own.
-#[test]
-fn the_base_is_built_from_the_units_this_clone_already_compiled() {
-    let fixture = Fixture::new();
-
-    let provisioning = fixture.run();
-    assert!(provisioning.status.success(), "{}", stderr(&provisioning));
-    assert!(
-        fixture
-            .calls()
-            .contains("--config build.build-dir=\"target\""),
-        "the base commit's build does not share this clone's build directory: {}",
-        fixture.calls()
-    );
-    assert_eq!(
-        fs::read_to_string(fixture.binary()).expect("the provisioned server"),
-        AT_THE_BASE,
-        "the binary installed is not the one built from the base commit's tree"
     );
 }
 
@@ -860,12 +836,13 @@ fn the_tier_profiles_partition_the_suite() {
         .collect();
     let profiles = tier_profiles();
 
-    // Inside the `e2e` binary: the six selections are disjoint, and the `e2e`
+    // Inside the `e2e` binary: the seven selections are disjoint, and the `e2e`
     // profile excludes exactly their union.
     let mut drawn = std::collections::BTreeSet::new();
     for profile in [
         "repo-tooling",
         "baseline",
+        "baseline-reuse",
         "cost",
         "linked-report",
         "ci-jobs",
@@ -893,6 +870,7 @@ fn the_tier_profiles_partition_the_suite() {
         "e2e",
         "repo-tooling",
         "baseline",
+        "baseline-reuse",
         "cost",
         "linked-report",
         "ci-jobs",

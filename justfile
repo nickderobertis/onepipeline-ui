@@ -417,9 +417,9 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as seven Nx projects, one per tier, each selecting its
+# The crate's suite runs as nine Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the eight filters are written and partition the suite. Three
+# which is where the nine filters are written and partition the suite. Three
 # tiers are instrumented and run here; the baseline comparison, the cost
 # journeys, the linked-report journeys, the judged tier's journeys and the CI
 # jobs' recipes run through `_tier-test` below, for what each needs that the rest

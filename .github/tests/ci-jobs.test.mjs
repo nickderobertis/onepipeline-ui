@@ -26,7 +26,7 @@ function load() {
   );
 }
 
-// Linux gets 35 minutes from docs/release-sweep-timing.md; the other caps stay 30.
+// Linux gets 36 minutes from docs/release-sweep-timing.md; the other caps stay 30.
 const FOUR = {
   lint: "ubuntu-latest",
   "test-linux": "ubuntu-latest",
@@ -69,7 +69,7 @@ export function jobProblems(workflows) {
     }
     if ("name" in job) problems.push(`job ${id} overrides its name`);
     if ("needs" in job) problems.push(`job ${id} has a needs edge`);
-    const cap = id === "test-linux" ? 35 : 30;
+    const cap = id === "test-linux" ? 36 : 30;
     if (job["timeout-minutes"] !== cap)
       problems.push(
         `job ${id} has timeout-minutes ${job["timeout-minutes"]}, not ${cap}`,
