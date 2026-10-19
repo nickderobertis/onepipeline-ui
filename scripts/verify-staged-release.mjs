@@ -26,12 +26,17 @@ const portable = (path) => (WINDOWS ? path.replace(/\\/g, "/") : path);
 // and node, and ending it alone leaves the binary serving with its own file
 // open, which the scratch directory then cannot be removed past: the tree goes.
 // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here runs only on a Windows runner, where the release's build-windows job stages and installs every carrier through it before anything publishes; every other host takes the signal, driven end to end by tests/release/journeys.test.mjs.
-const stop = (child) =>
-  WINDOWS
-    ? spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-      })
-    : child.kill("SIGTERM");
+function stop(child) {
+  if (!WINDOWS) return child.kill("SIGTERM");
+  const ended = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+    encoding: "utf8",
+  });
+  if (ended.status !== 0 && child.exitCode === null)
+    throw fault(
+      `taskkill could not end the staged server's process tree (exit ${ended.status}): ${ended.error?.message ?? `${ended.stdout}${ended.stderr}`}`,
+      `end process ${child.pid} and its children with 'taskkill /pid ${child.pid} /T /F', then re-run this job`,
+    );
+}
 // llmlint: ignore-end[changed_behavior_has_e2e]
 
 function fault(message, action) {
