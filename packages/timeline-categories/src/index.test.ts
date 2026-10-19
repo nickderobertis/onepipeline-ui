@@ -85,8 +85,8 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // A host read of a draft's review comments, about the publication under review.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.71.
   "review-comments-read": "publication",
-  // A reply posted to a review comment, or a drafting of replies that posted none.
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift.
+  // A reply to a review comment posted on the draft, or a drafting that posted none.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these two kinds when the pin moved to 0.78.0.
   "review-reply-posted": "publication",
   "review-reply-not-drafted": "publication",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]

@@ -985,6 +985,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "decline",
     "review",
     "readjust",
+    "decline",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,

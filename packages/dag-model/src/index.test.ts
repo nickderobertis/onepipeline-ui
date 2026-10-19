@@ -1319,9 +1319,9 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "settle",
     "rework",
     "retitle",
-    "decline",
     "review",
     "readjust",
+    "decline",
   ]);
   const edit = replyEnvelopeSchema.parse({
     version: REPLY_ENVELOPE_VERSION,
@@ -1418,31 +1418,23 @@ test("rework and retitle envelopes round-trip and refuse incomplete commands", (
   }
 });
 
-test("a decline envelope round-trips and refuses one naming no comment", () => {
+test("a decline envelope round-trips and refuses a blank reason or a comment without its url", () => {
   const decline = {
     op: "decline",
-    id: "docs",
-    comments: [{ id: "42", url: "https://example.com/review/42" }],
-    reason: "out of scope for this change",
+    id: "build",
+    comments: [{ id: "review-1", url: "https://example.com/review/1" }],
+    reason: "Out of scope for this change",
   };
   const envelope = { version: REPLY_ENVELOPE_VERSION, commands: [decline] };
   expect(
     replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
   ).toEqual(envelope);
-  for (const field of ["id", "comments", "reason"]) {
-    const incomplete = Object.fromEntries(
-      Object.entries(decline).filter(([key]) => key !== field),
-    );
-    expect(
-      replyEnvelopeSchema.safeParse({ ...envelope, commands: [incomplete] })
-        .success,
-    ).toBe(false);
-  }
+  // The engine refuses a blank reason rather than recording it, and reads a
+  // comment by its id and url, so neither half reaches the wire alone.
   for (const refused of [
-    { ...decline, comments: [] },
-    { ...decline, comments: [{ id: "42" }] },
     { ...decline, reason: "" },
-    { ...decline, unknown: true },
+    { ...decline, comments: [{ id: "review-1" }] },
+    { op: "decline", id: "build", reason: "Out of scope" },
   ]) {
     expect(
       replyEnvelopeSchema.safeParse({ ...envelope, commands: [refused] })

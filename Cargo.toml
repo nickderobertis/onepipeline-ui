@@ -572,10 +572,20 @@ onemessagebus = "0.9.1"
 # translation is left in this graph or in a browser-adopted run's driver. Its
 # adopted driver dispatches nothing until it has read its project's claim off
 # the store, so a run adopted from a project no store holds stays put.
-# 0.78.0 links onetaskgraph 0.7.3, whose loader leaves a source no layer gives a
+# llmlint: ignore-block[comments_earn_their_place] this block records why each engine release was taken, and every raise above extends it in the same voice: whoever moves the pin next reads here which engine behaviour this reader and a browser-adopted run depend on, which `CHANGELOG.md` — this crate's releases, not the engine's — does not say.
+# 0.78.0 is the engine whose harness core launches Codex with plugins off; a
+# host holds this reader to the engine it pins, so it adopts that only once this
+# moves. Its reply grammar gains `decline` and its agent scopes `review-reply`,
+# which the browser's gated copies follow, and its reconciler refuses by kind
+# as `Error::Rejected`, which `ApiError::from_engine` serves as `422 refused`.
+# The test-only `onetaskgraph-*` requirements below move with it to the release
+# its lock resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
+# It links onetaskgraph 0.7.3, whose loader leaves a source no layer gives a
 # `plugin` unconfigured rather than refusing the whole configuration, so a
 # browser-adopted run's driver reads its store on a host whose user layer only
 # routes sources a repository's own `onetaskgraph.yaml` defines.
+# llmlint: ignore-end[comments_earn_their_place]
 onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }

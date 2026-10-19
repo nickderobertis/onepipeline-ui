@@ -27,7 +27,7 @@ const SCOPE_LABELS: Readonly<Record<AgentScope, string>> = {
   node: "Node dispatch",
   observer: "Observer",
   "pr-author": "Change request author",
-  "review-reply": "Review reply drafter",
+  "review-reply": "Review reply author",
 };
 
 /** Whether a stamped scope word is one the engine declares. */

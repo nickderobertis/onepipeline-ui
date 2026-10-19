@@ -1,58 +1,55 @@
-import {
-  AGENT_LABELS,
-  type AgentSession,
-  agentSessionSchema,
-} from "@onepipeline-ui/dag-model";
+import type { AgentSession } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
-
 import { groupAgentSessions, groupLabel } from "./agents-model";
 
-/** A session as the SDK serves one, stamped under `scope` and `attempt`. */
-const stamped = (
-  scope: string,
-  attempt: string | undefined,
-  historyId: string,
-): AgentSession =>
-  agentSessionSchema.parse({
-    history_session: `session-${historyId}`,
-    name: `session-${historyId}`,
-    history_dir: "/a-scratch/oneharness-history",
-    history_project: "a-recording-host-workspace",
-    history_file: `/a-scratch/oneharness-history/a-recording-host-workspace/session-${historyId}.jsonl`,
-    project: "/a-recording-host/workspace",
-    started: "2026-10-19T12:00:00Z",
-    labels: {
-      [AGENT_LABELS.runId]: "run-20261019-a1b2c3",
-      [AGENT_LABELS.scope]: scope,
-      [AGENT_LABELS.node]: "contract-interface",
-      ...(attempt === undefined ? {} : { [AGENT_LABELS.attempt]: attempt }),
-    },
-    runs: [
-      {
-        history_id: historyId,
-        harness: "claude-code",
-        harness_id: "claude-code",
-        started: "2026-10-19T12:00:00Z",
-      },
-    ],
-    run_id: "run-20261019-a1b2c3",
-  });
+/** One session as the agents listing serves it, stamped with `labels`. */
+function session(name: string, labels: Record<string, string>): AgentSession {
+  return {
+    history_session: `${name}-session`,
+    name,
+    history_dir: "/home/operator/.oneharness/history",
+    history_project: "a-project",
+    history_file: `${name}.jsonl`,
+    project: "a-project",
+    started: "2026-07-26T11:57:00Z",
+    labels,
+    runs: [],
+  };
+}
 
-describe("grouping a run's sessions by the launch that wrote them", () => {
-  test("files the review reply drafter after the change request author, by attempt", () => {
+describe("agent groups", () => {
+  test("a review reply's drafting is read under its own heading, after the change request's author", () => {
     const groups = groupAgentSessions([
-      stamped("review-reply", "2", "a"),
-      stamped("unknown-launch", undefined, "b"),
-      stamped("pr-author", "1", "c"),
-      stamped("review-reply", "1", "d"),
-      stamped("node", "1", "e"),
+      session("replier", {
+        "onepipeline.scope": "review-reply",
+        "onepipeline.node": "dashboard",
+        "onepipeline.attempt": "1",
+      }),
+      session("author", {
+        "onepipeline.scope": "pr-author",
+        "onepipeline.node": "dashboard",
+        "onepipeline.attempt": "1",
+      }),
+      session("monitor", { "onepipeline.scope": "observer" }),
     ]);
     expect(groups.map(groupLabel)).toEqual([
-      "Node dispatch · attempt 1",
+      "Observer",
       "Change request author · attempt 1",
-      "Review reply drafter · attempt 1",
-      "Review reply drafter · attempt 2",
-      "unknown-launch",
+      "Review reply author · attempt 1",
+    ]);
+  });
+
+  test("a scope word the engine never declared is grouped under that word, after every declared one", () => {
+    const groups = groupAgentSessions([
+      session("stranger", { "onepipeline.scope": "a-later-scope" }),
+      session("replier", {
+        "onepipeline.scope": "review-reply",
+        "onepipeline.attempt": "2",
+      }),
+    ]);
+    expect(groups.map(groupLabel)).toEqual([
+      "Review reply author · attempt 2",
+      "a-later-scope",
     ]);
   });
 });
