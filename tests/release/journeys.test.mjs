@@ -323,7 +323,12 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
 // npm writes three launchers into node_modules/.bin on Windows — an
 // extensionless sh script, a .cmd and a .ps1 — through its own cmd-shim, which
 // this host can run too, so the staged install is laid out that way here and
-// the smoke is handed what npmLauncher picks for Windows.
+// the smoke is handed what npmLauncher picks for Windows. It is handed them by
+// the path v0.40.0's build-windows job handed it, drive letter and 8.3 short
+// name included: that run's scratch root, laid out under this one, which the
+// smoke runs from, so the path reads as Git Bash read it.
+const WINDOWS_STAGED =
+  "C:/Users/RUNNER~1/AppData/Local/Temp/staged-release-S94UW0";
 describe("the npm install's launcher as Windows lays it out", () => {
   let dir;
   let registries;
@@ -343,7 +348,7 @@ describe("the npm install's launcher as Windows lays it out", () => {
     spawnSync(
       "bash",
       [
-        "scripts/smoke-published.sh",
+        join(ROOT, "scripts/smoke-published.sh"),
         "--expect-version",
         VERSION,
         "--command",
@@ -351,7 +356,7 @@ describe("the npm install's launcher as Windows lays it out", () => {
         "--label",
         "staged x86_64-pc-windows-msvc shape",
       ],
-      { cwd: ROOT, encoding: "utf8" },
+      { cwd: dir, encoding: "utf8" },
     );
 
   test("the smoke runs the shim Git Bash can run, and refuses the .cmd and an install that provides none", async () => {
@@ -375,8 +380,9 @@ describe("the npm install's launcher as Windows lays it out", () => {
       cwd: launcher,
       stdio: "pipe",
     });
-    const prefix = join(dir, "install");
-    mkdirSync(prefix);
+    const npmRoot = `${WINDOWS_STAGED}/npm`;
+    const prefix = join(dir, npmRoot);
+    mkdirSync(prefix, { recursive: true });
     execFileSync(
       "npm",
       [
@@ -416,30 +422,43 @@ describe("the npm install's launcher as Windows lays it out", () => {
       "onepipeline-api.ps1",
     ]);
 
-    const shim = npmLauncher(prefix, true);
-    assert.equal(shim.spawn, join(bin, "onepipeline-api.cmd"));
-    assert.match(readFileSync(shim.bash, "utf8"), /^#!\/bin\/sh\n/);
+    const shim = npmLauncher(npmRoot, true);
+    assert.equal(
+      shim.spawn,
+      `${WINDOWS_STAGED}/npm/node_modules/.bin/onepipeline-api.cmd`,
+      "the .cmd is the file v0.40.0's smoke was handed",
+    );
+    assert.equal(
+      shim.bash,
+      `${WINDOWS_STAGED}/npm/node_modules/.bin/onepipeline-api`,
+    );
+    assert.match(readFileSync(join(dir, shim.bash), "utf8"), /^#!\/bin\/sh\n/);
     const passed = smoke(shim.bash);
     assert.equal(passed.status, 0, `${passed.stdout}\n${passed.stderr}`);
     assert.match(passed.stdout, /shape: smoke test passed/);
 
     // The .cmd as Git Bash sees it — a file it cannot execute — is refused
     // the way v0.40.0's run refused it.
-    chmodSync(shim.spawn, 0o644);
+    chmodSync(join(dir, shim.spawn), 0o644);
     const cmd = smoke(shim.spawn);
     assert.equal(cmd.status, 1, cmd.stderr);
-    assert.match(
+    assert.ok(
+      cmd.stderr.includes(
+        `'${WINDOWS_STAGED}/npm/node_modules/.bin/onepipeline-api.cmd' is not a file this shell can run after the install`,
+      ),
       cmd.stderr,
-      /onepipeline-api\.cmd' is not a file this shell can run after the install/,
     );
-    // So is the shim of an install that provided no launcher at all.
-    const empty = join(dir, "empty");
-    mkdirSync(empty);
-    const none = smoke(npmLauncher(empty, true).bash);
+    // So is the shim of an install, at the same shape of path, that provided
+    // no launcher at all.
+    const emptyRoot = `${WINDOWS_STAGED}/npm-empty`;
+    mkdirSync(join(dir, emptyRoot), { recursive: true });
+    const none = smoke(npmLauncher(emptyRoot, true).bash);
     assert.equal(none.status, 1, none.stderr);
-    assert.match(
+    assert.ok(
+      none.stderr.includes(
+        `'${WINDOWS_STAGED}/npm-empty/node_modules/.bin/onepipeline-api' is not a file this shell can run after the install`,
+      ),
       none.stderr,
-      /is not a file this shell can run after the install/,
     );
     assert.match(none.stderr, /ACTION: check that the install wrote it/);
   });
