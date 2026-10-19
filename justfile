@@ -201,23 +201,15 @@ ci-test-macos *args:
 
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
-# is. Built with the dev profile and no flags of its own, so it shares the
-# `target/debug` units `dag-ui:build-api-server` compiles — where that target has
-# run, the install compiles nothing — instead of compiling the whole graph again
-# under the release profile: that compile alone was 17 minutes cold on Windows,
-# and it is what held the test jobs past their 30-minute cap. The release
-# profile is proven where a release is built — on Linux by `wheel-smoke` and the
-# release rehearsal in `tests/release`, and on every platform by release.yml's
-# build jobs, which install and run their files before anything publishes.
-# Warnings in this compile are `_crate-lint`'s to deny: its
-# `clippy --all-targets -D warnings` is this same dev-profile compile, run over
-# the same projects, and a `RUSTFLAGS` here would re-key every unit in
-# `target/debug` the tiers share.
+# is. The dev profile shares the units `dag-ui:build-api-server` compiles. The
+# release rehearsal and release jobs prove the release-profile binaries; see
+# docs/release-sweep-timing.md for the measured cost of compiling both here.
 # The bin directory is resolved by `cd`, so a root cargo did not write is named
 # rather than read as a command missing from PATH, and the binary is handed to
 # the smoke test by its path: the Windows leg's PATH lookup did not find it there.
 # Compiled, when it has to be, at low priority: see `packaging-priority`.
 # Install this revision the documented way and smoke-test the installed binary.
+# llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same dev build with `clippy --all-targets -- -D warnings` in every CI selection that runs this install. RUSTFLAGS here would rebuild its shared units under another flag set; the install adds no source or feature clippy did not check.
 _crate-install-smoke:
     @{{packaging-priority}} cargo install --path . --locked --debug --quiet --root target/install-smoke
     @bin="$(cd target/install-smoke/bin && pwd)" \
@@ -226,6 +218,8 @@ _crate-install-smoke:
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}" \
       || { echo "installed into $bin: $(ls -la "$bin" 2>&1)" >&2; exit 1; }
+
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # The release's x86_64 Linux wheel, built by the one definition release.yml's
 # `build-linux` job runs (`wheel-linux`), then installed into a fresh virtualenv

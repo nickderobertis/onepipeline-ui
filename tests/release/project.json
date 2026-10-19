@@ -44,7 +44,7 @@
       "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
     },
     "rehearse": {
-      "//": "The release journeys: the build-linux recipe for real and every publication phase against the doubles. A target of its own because it is the longest chain of any run that reaches it — its manylinux release compile alone is ten minutes on a hosted runner — and Nx starts queued tasks in order of how many tasks depend on each: with `tools` and this each depended on twice (here and by `test`, and by `test` and `check`), the rehearsal heads the queue instead of trailing every tier, which in CI run 39247750671 started it 534 s into the sweep. `test` follows it rather than running beside it because tools.test.mjs rebuilds the `.tools` environment these journeys install and publish with.",
+      "//": "A separate target gives the longest chain priority in Nx’s dependency-count queue. Keep test after rehearse: tools.test.mjs recreates the Python environment the journeys use.",
       "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"],
