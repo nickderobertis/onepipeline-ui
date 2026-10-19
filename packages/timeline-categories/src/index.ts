@@ -216,6 +216,13 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // publication under review, like its retitling, and none of its words names a rule.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.71.
   "review-comments-read": "publication",
+  // A reply posted to a review comment, or one whose drafting posted nothing: the
+  // conversation on the publication under review, as `body-not-drafted` is its
+  // description, and `review` and `reply` name no rule.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these two kinds when the pin moved to 0.78.
+  "review-reply-posted": "publication",
+  "review-reply-not-drafted": "publication",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A draft merged into another node's branch lands with that node: it is the
   // publication reaching a base, like a merge, though no word of it says so.
   // A draft brought onto its placement after a neighbour landed is a branch

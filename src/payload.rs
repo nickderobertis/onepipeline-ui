@@ -413,6 +413,27 @@ pub mod vcs {
     /// module's parent, is that join.
     pub const RELEASE_OBSERVED: &str = "release-observed";
 
+    /// `{branch, root, parents, head, outcome}` — a stack base was assembled: a
+    /// branch cut from `root` carrying a merge of each parent, put on its origin
+    /// with no change request. `outcome` is `created`, `advanced`, `unchanged` or
+    /// `conflicted`. Not a [`PUSH`], because a stack base publishes nothing.
+    pub const STACK_BASE_ASSEMBLED: &str = "stack-base-assembled";
+    /// `{change_url, count, unchanged, marker_digest, cost}` — a change request's
+    /// review feedback was read, with `cost` as `{graphql_points, rest_requests}`.
+    pub const REVIEW_COMMENTS_READ: &str = "review-comments-read";
+    /// `{change_url, comment, reply, url, threaded, key, existing}` — a reply to
+    /// one review comment was posted, or found already posted under `key`.
+    pub const REVIEW_REPLY_POSTED: &str = "review-reply-posted";
+    /// `{repo, count, landed, cost}` — where a batch of one repository's change
+    /// requests stand was read, with `landed` the ones whose landing it recorded.
+    pub const CHANGE_STANDINGS_READ: &str = "change-standings-read";
+    /// `{change_url, from, to, outcome, body_written}` — a change request moved
+    /// onto another base (`retargeted`) or was found on it already (`unchanged`).
+    pub const CHANGE_RETARGETED: &str = "change-retargeted";
+    /// `{change_url, restored_base, at}` — a closed change request was reopened
+    /// over the base branch restored on the origin at commit `at`.
+    pub const CHANGE_REOPENED: &str = "change-reopened";
+
     /// The relayed kinds that do not, on their own, say a publication began.
     ///
     /// A node that relayed nothing but these published nothing. Why the list is

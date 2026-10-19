@@ -1319,6 +1319,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "settle",
     "rework",
     "retitle",
+    "decline",
     "review",
     "readjust",
   ]);
@@ -1389,6 +1390,12 @@ test("rework and retitle envelopes round-trip and refuse incomplete commands", (
       reason: "review",
       title: "fix: address review",
     },
+    {
+      op: "decline",
+      id: "docs",
+      comments: [{ id: "43", url: "https://example.com/review/43" }],
+      reason: "out of scope",
+    },
   ];
   const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
   expect(
@@ -1398,7 +1405,9 @@ test("rework and retitle envelopes round-trip and refuse incomplete commands", (
     for (const field of [
       "id",
       "reason",
-      command.op === "rework" ? "instruction" : "title",
+      { rework: "instruction", retitle: "title", decline: "comments" }[
+        command.op
+      ],
     ]) {
       const incomplete = Object.fromEntries(
         Object.entries(command).filter(([key]) => key !== field),

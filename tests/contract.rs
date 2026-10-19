@@ -1503,9 +1503,19 @@ fn the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines() 
             .collect::<Vec<_>>()
             .join(", ")
     );
+    // Compared as tokens rather than as a layout: the formatter wraps a
+    // declaration once it outgrows a line and adds a trailing comma, which says
+    // nothing about the vocabulary it declares.
+    let tokens = |text: &str| {
+        text.split_whitespace()
+            .collect::<String>()
+            .replace(",]", "]")
+            .replace(",}", "}")
+    };
+    let compact = tokens(&source);
     for declaration in [labels, prefix, scopes] {
         assert!(
-            source.contains(&declaration),
+            compact.contains(&tokens(&declaration)),
             "{} does not declare `{declaration}`; the client's copy of the engine's agent \
              label vocabulary has drifted",
             path.display()
@@ -2460,6 +2470,27 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
             vcs::DRAFT_KEPT_FOR_REVIEW,
         ),
         (onevcs::EventKind::ChecksSettled, vcs::CHECKS_SETTLED),
+        // Stacking, the review loop and landings: a stack base assembled over
+        // its parents, review feedback read and answered, and the standings,
+        // retargets and reopenings a stack's readjustment records.
+        (
+            onevcs::EventKind::StackBaseAssembled,
+            vcs::STACK_BASE_ASSEMBLED,
+        ),
+        (
+            onevcs::EventKind::ReviewCommentsRead,
+            vcs::REVIEW_COMMENTS_READ,
+        ),
+        (
+            onevcs::EventKind::ReviewReplyPosted,
+            vcs::REVIEW_REPLY_POSTED,
+        ),
+        (
+            onevcs::EventKind::ChangeStandingsRead,
+            vcs::CHANGE_STANDINGS_READ,
+        ),
+        (onevcs::EventKind::ChangeRetargeted, vcs::CHANGE_RETARGETED),
+        (onevcs::EventKind::ChangeReopened, vcs::CHANGE_REOPENED),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }

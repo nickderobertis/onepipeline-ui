@@ -1863,6 +1863,16 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       reason: z.string().min(1),
     })
     .strict(),
+  // Decline review comments on a node's draft: applying it posts one reply per
+  // named comment saying why it was left, and changes nothing else.
+  z
+    .object({
+      op: z.literal("decline"),
+      id: z.string().min(1),
+      comments: z.array(z.object({ id: z.string(), url: z.string() }).strict()),
+      reason: z.string().min(1),
+    })
+    .strict(),
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // An explicit discovery pass: the engine reads the run's review comments and
   // changes nothing in the graph, so the command carries no field at all.
@@ -2273,10 +2283,16 @@ export const AGENT_LABELS = {
 export const AGENT_LABEL_PREFIX = "onepipeline.";
 /**
  * Which launch of a run a session was written under: a node-scope dispatch (a
- * lifecycle step included), the dag-scope observer graph, or the drafting graph
- * a change request's body comes from — in the order a reader scans them.
+ * lifecycle step included), the dag-scope observer graph, the drafting graph
+ * a change request's body comes from, or the one a review comment's reply comes
+ * from — in the order a reader scans them.
  */
-export const AGENT_SCOPES = ["node", "observer", "pr-author"] as const;
+export const AGENT_SCOPES = [
+  "node",
+  "observer",
+  "pr-author",
+  "review-reply",
+] as const;
 export type AgentScope = (typeof AGENT_SCOPES)[number];
 
 /**

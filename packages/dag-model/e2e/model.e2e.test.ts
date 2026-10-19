@@ -982,6 +982,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "settle",
     "rework",
     "retitle",
+    "decline",
     "review",
     "readjust",
   ]);
@@ -1045,6 +1046,12 @@ test("review replies preserve rework comments and retitles and refuse incomplete
       id: "build",
       title: "fix: correct the regression",
       reason: "Match the change",
+    },
+    {
+      op: "decline",
+      id: "build",
+      comments: [{ id: "review-2", url: "https://example.com/review/2" }],
+      reason: "Out of scope for this change",
     },
   ];
   const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
