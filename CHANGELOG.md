@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.39.0...v0.40.0) - 2026-10-19
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that stacks, reworks and continues review drafts ([#371](https://github.com/nickderobertis/onepipeline-ui/pull/371))
+
+### Fixed
+
+- *(deps)* link the engine whose harness core launches Codex with plugins off ([#369](https://github.com/nickderobertis/onepipeline-ui/pull/369))
+
 ## [0.39.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.38.1...v0.39.0) - 2026-10-18
 
 ### Added
