@@ -14,9 +14,10 @@
 // registry (publish's availability check, the launcher's optional dependencies)
 // they are seeded under their planned names, as those jobs would leave them.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -25,13 +26,16 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { plan } from "../../scripts/release.mjs";
+import { setTimeout as sleep } from "node:timers/promises";
+import { npmLauncher, plan } from "../../scripts/release.mjs";
 import {
   githubDouble,
   ROOT,
   recipe,
+  recipeRunning,
   registryDoubles,
   releaseEnv,
   scratch,
@@ -316,6 +320,134 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
   });
 });
 
+// npm writes three launchers into node_modules/.bin on Windows — an
+// extensionless sh script, a .cmd and a .ps1 — through its own cmd-shim, which
+// this host can run too. v0.40.0's build-windows handed the .cmd to
+// scripts/smoke-published.sh, and Git Bash, which counts no .cmd as
+// executable, refused an install that had worked. This lays the staged npm
+// install out as Windows does and drives the smoke the way the staged
+// verification now does on every runner, through npmLauncher.
+describe("the npm install's launcher as Windows lays it out", () => {
+  let dir;
+  let registries;
+  before(async () => {
+    assert.ok(
+      existsSync(join(OUT, "npm-artifacts")),
+      "the rehearsal above staged the Linux build",
+    );
+    dir = scratch("windows-shims");
+    registries = await registryDoubles(dir);
+  });
+  after(async () => {
+    await registries?.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const smoke = (command) =>
+    spawnSync(
+      "bash",
+      [
+        "scripts/smoke-published.sh",
+        "--expect-version",
+        VERSION,
+        "--command",
+        command,
+        "--label",
+        "staged x86_64-pc-windows-msvc shape",
+      ],
+      { cwd: ROOT, encoding: "utf8" },
+    );
+
+  test("the smoke runs the shim Git Bash can run, and refuses the .cmd and an install that provides none", async () => {
+    // The staged platform package on the npm double, as `upload npm` leaves it.
+    const pkg = fileOf("npm").package;
+    mkdirSync(join(registries.state, "npm", pkg), { recursive: true });
+    writeFileSync(
+      join(registries.state, "npm", pkg, `${VERSION}.tgz`),
+      readFileSync(staged(fileOf("npm"))),
+    );
+    writeFileSync(
+      join(registries.state, "npm", pkg, `${VERSION}.json`),
+      readFileSync(join(OUT, "npm", pkg, "package.json")),
+    );
+    const launcher = execFileSync(
+      "node",
+      ["scripts/npm-build.mjs", "launcher", "--out", join(dir, "launcher")],
+      { cwd: ROOT, encoding: "utf8" },
+    ).trim();
+    execFileSync("npm", ["pack", "--pack-destination", dir], {
+      cwd: launcher,
+      stdio: "pipe",
+    });
+    const prefix = join(dir, "install");
+    mkdirSync(prefix);
+    execFileSync(
+      "npm",
+      [
+        "install",
+        "--prefix",
+        prefix,
+        "--registry",
+        registries.npm,
+        "--cache",
+        join(dir, "npm-cache"),
+        "--no-audit",
+        "--no-fund",
+        join(dir, `onepipeline-api-cli-${VERSION}.tgz`),
+      ],
+      {
+        stdio: "pipe",
+        env: { ...process.env, NPM_CONFIG_USERCONFIG: "/dev/null" },
+      },
+    );
+    // What npm's bin-links writes on Windows, in place of the symlink it
+    // writes here.
+    const cmdShim = createRequire(import.meta.url)(
+      join(
+        execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(),
+        "npm/node_modules/cmd-shim",
+      ),
+    );
+    const bin = join(prefix, "node_modules", ".bin");
+    rmSync(join(bin, "onepipeline-api"));
+    await cmdShim(
+      join(prefix, "node_modules/onepipeline-api-cli/bin/onepipeline-api.js"),
+      join(bin, "onepipeline-api"),
+    );
+    assert.deepEqual(readdirSync(bin).sort(), [
+      "onepipeline-api",
+      "onepipeline-api.cmd",
+      "onepipeline-api.ps1",
+    ]);
+
+    const shim = npmLauncher(prefix, true);
+    assert.equal(shim.spawn, join(bin, "onepipeline-api.cmd"));
+    assert.match(readFileSync(shim.bash, "utf8"), /^#!\/bin\/sh\n/);
+    const passed = smoke(shim.bash);
+    assert.equal(passed.status, 0, `${passed.stdout}\n${passed.stderr}`);
+    assert.match(passed.stdout, /shape: smoke test passed/);
+
+    // The .cmd as Git Bash sees it — a file it cannot execute — is refused
+    // the way v0.40.0's run refused it.
+    chmodSync(shim.spawn, 0o644);
+    const cmd = smoke(shim.spawn);
+    assert.equal(cmd.status, 1, cmd.stderr);
+    assert.match(
+      cmd.stderr,
+      /onepipeline-api\.cmd' is not a file this shell can run after the install/,
+    );
+    // So is the shim of an install that provided no launcher at all.
+    const empty = join(dir, "empty");
+    mkdirSync(empty);
+    const none = smoke(npmLauncher(empty, true).bash);
+    assert.equal(none.status, 1, none.stderr);
+    assert.match(
+      none.stderr,
+      /is not a file this shell can run after the install/,
+    );
+    assert.match(none.stderr, /ACTION: check that the install wrote it/);
+  });
+});
+
 describe("publication against registry doubles", () => {
   let dir;
   let gh;
@@ -433,20 +565,42 @@ describe("publication against registry doubles", () => {
       ),
       sha(readFileSync(staged(fileOf("npm")))),
     );
+    // A version npm already serves from some other build is refused rather
+    // than counted as published: nothing in this job installs it back, and npm
+    // will not take this build over it.
+    const tarball = join(registries.state, "npm", npmPackage, `${VERSION}.tgz`);
+    const ours = readFileSync(tarball);
+    writeFileSync(tarball, "another build's tarball");
+    try {
+      const count = registries.uploads().length;
+      const other = linux("upload", "npm");
+      assert.notEqual(other.status, 0, other.output);
+      assert.match(
+        other.stderr,
+        new RegExp(
+          `npm already serves ${npmPackage}@${VERSION.replace(/\./g, "\\.")}, and not the ${fileOf("npm").file.replace(/\./g, "\\.")} this job built`,
+        ),
+      );
+      assert.equal(registries.uploads().length, count, "it published nothing");
+    } finally {
+      writeFileSync(tarball, ours);
+    }
+    assert.equal(linux("upload", "npm").status, 0, "restored, it is served");
   });
 
-  test("build-linux's verification installs the version from every registry and runs it", () => {
+  test("build-linux's verification installs the version from the Release and PyPI and runs it, and leaves npm to publish's check", () => {
     const served = registries.served().length;
     const downloads = gh.calls().length;
     const run = linux("verify");
     assert.equal(run.status, 0, run.output);
     assert.equal(
       run.stdout.trim(),
-      "release linux: x86_64-unknown-linux-gnu installed from every switched-on registry and ran",
+      "release linux: x86_64-unknown-linux-gnu installed from the Release and PyPI and ran; npm's copy is publish's check to wait for",
     );
-    // What it installed came from each registry double.
-    assert.deepEqual(registries.served().slice(served).sort(), [
-      `npm ${fileOf("npm").file}`,
+    // What it installed came from each registry double, and nothing from npm:
+    // npm serves a publish minutes after taking it, which publish's check
+    // waits out once rather than each platform job inside its own timeout.
+    assert.deepEqual(registries.served().slice(served), [
       `pypi ${fileOf("wheel").file}`,
     ]);
     assert.ok(
@@ -481,22 +635,12 @@ describe("publication against registry doubles", () => {
     }
   });
 
-  test("verification fails when a registry serves another version, an unusable package, or none for this platform", () => {
+  test("verification fails when a registry serves an unusable package, another build, or none for this platform", () => {
     const cases = [
-      [
-        "npm serves another version",
-        () => registries.hide([`${fileOf("npm").package}@${VERSION}`]),
-        /npm onepipeline-api-cli-linux-x64/,
-      ],
       [
         "PyPI has no wheel for this platform",
         () => registries.hide([fileOf("wheel").file]),
         /PyPI onepipeline-api-cli/,
-      ],
-      [
-        "npm serves an unusable package",
-        () => registries.corrupt([`${fileOf("npm").package}-${VERSION}.tgz`]),
-        /npm onepipeline-api-cli-linux-x64/,
       ],
       [
         "PyPI serves an unusable wheel",
@@ -514,35 +658,6 @@ describe("publication against registry doubles", () => {
       } finally {
         registries.clear();
       }
-    }
-    // npm serving an installable package that carries some other binary: it
-    // installs, and is refused before anything runs it.
-    const tarball = join(
-      registries.state,
-      "npm",
-      fileOf("npm").package,
-      `${VERSION}.tgz`,
-    );
-    const published = readFileSync(tarball);
-    const other = join(dir, "other-build");
-    rmSync(other, { recursive: true, force: true });
-    mkdirSync(other, { recursive: true });
-    execFileSync("tar", ["-xzf", tarball, "-C", other]);
-    writeFileSync(
-      join(other, "package/bin/onepipeline-api"),
-      "#!/bin/sh\necho another build\n",
-      { mode: 0o755 },
-    );
-    execFileSync("tar", ["-czf", tarball, "-C", other, "package"]);
-    try {
-      const run = linux("verify");
-      assert.notEqual(run.status, 0, run.output);
-      assert.match(
-        run.stderr,
-        /npm installed a different binary than this job built/,
-      );
-    } finally {
-      writeFileSync(tarball, published);
     }
     // PyPI serving an installable wheel, and the Release an archive with a
     // checksum that matches it, each carrying some other binary.
@@ -591,23 +706,6 @@ describe("publication against registry doubles", () => {
       );
     } finally {
       writeFileSync(wheel, wheelBytes);
-    }
-    // npm serving the platform package without its binary.
-    const hollow = join(dir, "hollow");
-    rmSync(hollow, { recursive: true, force: true });
-    mkdirSync(hollow, { recursive: true });
-    execFileSync("tar", ["-xzf", tarball, "-C", hollow]);
-    rmSync(join(hollow, "package/bin"), { recursive: true });
-    execFileSync("tar", ["-czf", tarball, "-C", hollow, "package"]);
-    try {
-      const run = linux("verify");
-      assert.notEqual(run.status, 0, run.output);
-      assert.match(
-        run.stderr,
-        /npm installed onepipeline-api-cli-linux-x64 without its binary/,
-      );
-    } finally {
-      writeFileSync(tarball, published);
     }
     // The Release serving an archive its checksum does not describe.
     const original = readFileSync(archive);
@@ -1000,6 +1098,26 @@ describe("publication against registry doubles", () => {
         `npm onepipeline-ui-${VERSION}.tgz`,
       ].sort(),
     );
+    // The launcher served while this platform's package is not, the order
+    // v0.39.0's verification met them in: npm installs the launcher alone and
+    // exits 0, which is no install of anything that runs, so it is retried as
+    // one the registry has not caught up with, and refused once the wait ends.
+    registries.unserve([`${fileOf("npm").package}@${VERSION}`]);
+    try {
+      const run = publish(["verify"], extra);
+      assert.notEqual(run.status, 0, run.output);
+      assert.match(
+        run.stderr,
+        /the install exited 0 without writing \S+\/node_modules\/onepipeline-api-cli-linux-x64\/package\.json/,
+      );
+      assert.match(
+        run.stderr,
+        /npm onepipeline-api-cli \S+: still not installable after \d+ attempts/,
+      );
+      assert.doesNotMatch(run.stderr, /smoke test/, "nothing ran it");
+    } finally {
+      registries.clear();
+    }
     // A frontend package published without its bundle fails the read-back.
     const uiTarball = join(
       registries.state,
@@ -1155,8 +1273,42 @@ describe("publication against registry doubles", () => {
     assert.doesNotMatch(gh.body(), /did not publish/);
   });
 
+  test("a launcher npm serves before its platform package is installed again until npm serves both, and then runs", async () => {
+    registries.unserve([`${fileOf("npm").package}@${VERSION}`]);
+    const served = registries.served().length;
+    const running = recipeRunning("publish", ["verify", "--out", publishOut], {
+      ...env,
+      BUILD_RESULTS: allBuilt,
+      RELEASE_VERIFY_BUDGET: "120",
+    });
+    // npm begins serving the platform package only once an install has
+    // fetched the launcher without it.
+    const launcher = `npm onepipeline-api-cli-${VERSION}.tgz`;
+    for (
+      let i = 0;
+      i < 600 && !registries.served().slice(served).includes(launcher);
+      i++
+    )
+      await sleep(100);
+    assert.ok(
+      registries.served().slice(served).includes(launcher),
+      "the launcher was installed while its platform package was not served",
+    );
+    await sleep(500);
+    registries.clear();
+    const run = await running;
+    assert.equal(run.status, 0, run.output);
+    assert.match(run.stdout, /platform-independent artifacts are served/);
+    // Its platform package came on a later attempt, the one that counted.
+    const fetched = registries.served().slice(served);
+    assert.ok(
+      fetched.indexOf(`npm ${fileOf("npm").file}`) > fetched.indexOf(launcher),
+      fetched.join(", "),
+    );
+  });
+
   test("a failed verification demotes the release", () => {
-    registries.corrupt([`${fileOf("npm").package}-${VERSION}.tgz`]);
+    registries.corrupt([`onepipeline-ui-${VERSION}.tgz`]);
     try {
       const { results, settle } = publishJob(allBuilt);
       assert.equal(results.check, "success");

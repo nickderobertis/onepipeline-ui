@@ -112,10 +112,11 @@ export async function registryDoubles(dir) {
             .filter(Boolean)
         : [],
     hide: (entries) => control("hide", entries),
+    unserve: (entries) => control("unserved", entries),
     corrupt: (entries) => control("corrupt", entries),
     breakReads: (entries) => control("broken", entries),
     clear: () => {
-      for (const name of ["hide", "corrupt", "broken", "fail"])
+      for (const name of ["hide", "unserved", "corrupt", "broken", "fail"])
         rmSync(join(state, "control", name), { recursive: true, force: true });
       mkdirSync(join(state, "control", "fail"));
     },
@@ -183,8 +184,28 @@ export function releaseEnv({ gh, registries, home, extra = {} }) {
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "100",
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "500",
     RELEASE_VERIFY_BUDGET: "6",
+    RELEASE_CHECK_BUDGET: "6",
     ...extra,
   };
+}
+
+// The same recipe left running, for a journey that changes what a registry
+// serves while the recipe waits on it: resolves once it exits.
+export function recipeRunning(job, args, env) {
+  const child = spawn("just", [`release-${job}`, ...args], { cwd: ROOT, env });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  return new Promise((done) =>
+    child.once("exit", (status) =>
+      done({ status, stdout, stderr, output: `${stdout}\n${stderr}` }),
+    ),
+  );
 }
 
 export function recipe(job, args, env) {

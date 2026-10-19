@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 // Install staged products through real pip/npm, then exercise the installed
 // server and embedded view. No registry publication is needed for this proof.
 import { createHash } from "node:crypto";
@@ -16,11 +16,23 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { TARGETS } from "./release.mjs";
+import { npmLauncher, TARGETS } from "./release.mjs";
 
 // Native runners only: each platform job installs its own targets.
 const WINDOWS = process.platform === "win32";
 const portable = (path) => (WINDOWS ? path.replace(/\\/g, "/") : path);
+
+// On Windows the process a smoke starts may be a shell in front of npm's .cmd
+// and node, and ending it alone leaves the binary serving with its own file
+// open, which the scratch directory then cannot be removed past: the tree goes.
+// llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here runs only on a Windows runner, where the release's build-windows job stages and installs every carrier through it before anything publishes; every other host takes the signal, driven end to end by tests/release/journeys.test.mjs.
+const stop = (child) =>
+  WINDOWS
+    ? spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+      })
+    : child.kill("SIGTERM");
+// llmlint: ignore-end[changed_behavior_has_e2e]
 
 function fault(message, action) {
   return Object.assign(new Error(message), { action });
@@ -68,7 +80,9 @@ async function main() {
       shell: WINDOWS && cmd === "npm",
       ...options,
     });
-  async function smoke(command) {
+  // `spawned` is the same command as node can start it, which for npm on
+  // Windows is another file (see npmLauncher).
+  async function smoke(command, spawned = command) {
     run("bash", [
       "scripts/smoke-published.sh",
       "--expect-version",
@@ -81,9 +95,9 @@ async function main() {
     const runs = join(scratch, "runs");
     mkdirSync(runs, { recursive: true });
     const server = spawn(
-      command,
+      spawned,
       ["serve", "--ui", "--runs-root", runs, "--bind", "127.0.0.1:0"],
-      { shell: WINDOWS && command.endsWith(".cmd") },
+      { shell: WINDOWS && spawned.endsWith(".cmd") },
     );
     // llmlint: ignore-end[changed_behavior_has_e2e]
     let log = "";
@@ -143,7 +157,7 @@ async function main() {
           );
       }
     } finally {
-      if (server.exitCode === null) server.kill("SIGTERM");
+      if (server.exitCode === null) stop(server);
       await stopped;
     }
   }
@@ -361,16 +375,8 @@ async function main() {
         "npm installed different binary bytes",
         "inspect the platform package and launcher resolution; regenerate npm from the final wheel binary",
       );
-    // llmlint: ignore-block[changed_behavior_has_e2e] the Windows branch here (the venv's Scripts directory and `python`, npm's .cmd shim) runs only on a Windows runner, which the release's build-windows job installs these files on before every publication; the Linux branch beside it is driven end to end by tests/release/journeys.test.mjs.
-    await smoke(
-      join(
-        npmRoot,
-        "node_modules",
-        ".bin",
-        WINDOWS ? "onepipeline-api.cmd" : "onepipeline-api",
-      ),
-    );
-    // llmlint: ignore-end[changed_behavior_has_e2e]
+    const shim = npmLauncher(npmRoot);
+    await smoke(shim.bash, shim.spawn);
     console.log(
       `${target}: staged archive/wheel/npm install, server and embedded view passed`,
     );

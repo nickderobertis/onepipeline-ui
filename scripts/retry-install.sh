@@ -17,6 +17,12 @@
 # assertion that follows stays single-shot on purpose, so a wrong version or a
 # broken binary fails immediately rather than being retried for ten minutes.
 #
+# `--require PATH` is a file the install must have written for an attempt to
+# count. npm skips an optional dependency it cannot fetch and still exits 0, so
+# a launcher published after its platform packages, but served before them, is
+# "installed" without the one thing it runs: v0.39.0's verification read
+# exactly that as success, and its smoke test then found no binary.
+#
 # Quiet on success: one line naming the attempt it took. On exhaustion: the last
 # attempt's own output, then the error and what to do about it.
 #
@@ -26,7 +32,8 @@
 #
 # Usage:
 #   retry-install.sh [--budget S] [--first-delay S] [--max-delay S]
-#                    [--label TEXT] [--action TEXT] -- COMMAND [ARG...]
+#                    [--label TEXT] [--action TEXT] [--require PATH]
+#                    -- COMMAND [ARG...]
 set -euo pipefail
 
 # The whole loop, wall clock, including the command's own runtime. Ten minutes is
@@ -37,8 +44,9 @@ first_delay=5
 max_delay=60
 label=""
 action=""
+require=""
 
-usage="run 'retry-install.sh [--budget S] [--first-delay S] [--max-delay S] [--label TEXT] [--action TEXT] -- COMMAND [ARG...]'"
+usage="run 'retry-install.sh [--budget S] [--first-delay S] [--max-delay S] [--label TEXT] [--action TEXT] [--require PATH] -- COMMAND [ARG...]'"
 
 fail_usage() {
   echo "$1" >&2
@@ -72,6 +80,7 @@ while [ "$#" -gt 0 ]; do
     --label) need_value "$@"; label="$2"; shift 2 ;;
     # The concrete next step for the human reading the red run.
     --action) need_value "$@"; action="$2"; shift 2 ;;
+    --require) need_value "$@"; require="$2"; shift 2 ;;
     --) shift; break ;;
     *) fail_usage "unknown option $1" ;;
   esac
@@ -102,8 +111,12 @@ status=1
 while :; do
   attempt=$((attempt + 1))
   if "$@" >"$out" 2>&1; then
-    echo "$label: installed on attempt $attempt after ${SECONDS}s"
-    exit 0
+    if [ -z "$require" ] || [ -e "$require" ]; then
+      echo "$label: installed on attempt $attempt after ${SECONDS}s"
+      exit 0
+    fi
+    echo "the install exited 0 without writing $require" >>"$out"
+    status=1
   else
     # Captured in the `else` branch, not after `fi`: an `if` whose condition
     # failed and that has no branch to run exits 0, so `$?` there is the status
