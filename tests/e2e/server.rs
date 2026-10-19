@@ -18737,16 +18737,11 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
 /// records, served through the run, results, events and timeline routes rather
 /// than refused or dropped.
 ///
-/// The corpus is the run `onepipeline` 0.78 journals for a stacked change set
-/// taken over from another host: two nodes continued from the store, a stack
-/// base assembled, review comments read and surfaced, one node reworked into a
-/// replacement and its dependent restacked, a retitle the host would not confirm
-/// and its remedy, comments answered, declined and left undrafted, and the
-/// readjustment once the root landed — a node absorbed, a draft retargeted and
-/// reopened, a stack landed out of order, a change closed, checks read, a read
-/// that failed — until a later host superseded the driver. Every pipeline record
-/// in it is held to the schema the engine publishes for its kind once the server
-/// stops, so none of it is a shape the engine never writes.
+/// The timeline is the route that lists records, so it is held to every one;
+/// the run, results and events routes are held to serving the run whole on
+/// their own terms. Every pipeline record in the corpus is held to the schema
+/// the engine publishes for its kind once the server stops, so none of it is a
+/// shape the engine never writes.
 #[test]
 fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_events_and_timeline_routes(
 ) {

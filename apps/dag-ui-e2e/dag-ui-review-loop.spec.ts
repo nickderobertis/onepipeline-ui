@@ -6,17 +6,12 @@ import { graphNodes } from "./observatory-locators";
 /**
  * A stacked change set taken through review, read in the browser.
  *
- * The run is the one `onepipeline` 0.78 journals for a stack taken over from
- * another host: nodes continued from the store, a stack base assembled, review
- * comments surfaced, a node reworked into a replacement and its dependent
- * restacked, a retitle and its remedy, replies answered, declined and left
- * undrafted, and the readjustment once the root landed, until a later host
- * superseded the driver. The view knows none of those records by name, and a
- * reader still has to be shown the run and every node in it, with nothing the
- * page asked for refused and nothing thrown on the way.
+ * The view knows none of the engine's stacking, rework and readjustment records
+ * by name, and a reader still has to be shown the run and every node in it,
+ * with nothing the page asked for refused and nothing thrown on the way.
  *
  * Its corpus is its own (`runs.mjs`'s review-loop corpus, the same records
- * `tests/e2e/server.rs` serves through every route), served by a server this
+ * `tests/e2e/server.rs` serves), served by a server this
  * file starts, because a run added to the shared one is counted by every
  * listing journey and photographed by the gallery.
  */
