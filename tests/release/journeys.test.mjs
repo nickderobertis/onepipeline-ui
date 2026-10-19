@@ -237,6 +237,70 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
     assert.ok(below(floor, was.npm), `npm floor ${floor} <= ${was.npm}`);
   });
 
+  // tests/e2e/linux_wheel.rs runs the script's yum repository rewrite over
+  // copies of the image's repository files, offline. This rehearsal has just
+  // built in that image, so it holds the copies to it: each is the image's
+  // file (bar the trailing whitespace the checkout trims), and every image file
+  // with a section yum reads is among them.
+  test("the image's yum repository files are the ones the offline build journey rewrites", () => {
+    assert.equal(rehearsal.status, 0, rehearsal.output);
+    const arch = TARGET.split("-")[0];
+    const image = readFileSync(
+      join(ROOT, "scripts/build-linux-wheel.sh"),
+      "utf8",
+    )
+      .match(/^image="([^"]+)"$/m)[1]
+      .replace("$arch", arch);
+    const listing = execFileSync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        image,
+        "sh",
+        "-c",
+        'for f in /etc/yum.repos.d/*.repo; do printf "\\n==> %s\\n" "$(basename "$f")"; cat "$f"; done',
+      ],
+      { encoding: "utf8" },
+    );
+    const files = new Map(
+      listing
+        .split("\n==> ")
+        .slice(1)
+        .map((part) => {
+          const [name, ...body] = part.split("\n");
+          return [name, body.join("\n")];
+        }),
+    );
+    const trimmed = (text) => text.replace(/[ \t]+$/gm, "").trimEnd();
+    // Whether a file names a baseurl in a section yum reads: one that does
+    // not say `enabled=0`.
+    const read = (text) =>
+      text
+        .split(/^\[/m)
+        .slice(1)
+        .some(
+          (section) =>
+            /^baseurl=/m.test(section) && !/^enabled=0[ \t]*$/m.test(section),
+        );
+    const fixtures = join(ROOT, "tests/fixtures/manylinux2014-yum.repos.d");
+    const copies = readdirSync(fixtures).sort();
+    for (const name of copies)
+      assert.equal(
+        trimmed(readFileSync(join(fixtures, name), "utf8")),
+        trimmed(files.get(name) ?? ""),
+        `${image} has changed /etc/yum.repos.d/${name}; copy it to tests/fixtures/manylinux2014-yum.repos.d/ and check tests/e2e/linux_wheel.rs's expected repositories`,
+      );
+    const unread = [...files]
+      .filter(([name, text]) => read(text) && !copies.includes(name))
+      .map(([name]) => name);
+    assert.deepEqual(
+      unread,
+      [],
+      `${image} has repository files with an enabled baseurl the offline journey does not copy; add them to tests/fixtures/manylinux2014-yum.repos.d/`,
+    );
+  });
+
   test("a test-install that fails stops the recipe before any publish command", () => {
     const shim = join(dir, "broken-venv");
     mkdirSync(shim, { recursive: true });

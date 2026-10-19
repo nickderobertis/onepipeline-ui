@@ -120,7 +120,8 @@ fn container_double(dir: &Path, fail_at: Option<&str>) {
     // build leaves yum to read is there afterwards to be read back
     // ([`configured_repositories`]). The glob is expanded here rather than taken
     // as given, because the host's bash expands it against the host's own
-    // `/etc`, which is not the image's.
+    // `/etc`, which is not the image's. The copies are held to the image itself
+    // by tests/release/journeys.test.mjs, whose rehearsal builds in it.
     let repos = dir.join("image/etc/yum.repos.d");
     fs::create_dir_all(&repos).expect("the image's repository directory");
     for entry in fs::read_dir(repo_root().join("tests/fixtures/manylinux2014-yum.repos.d"))
