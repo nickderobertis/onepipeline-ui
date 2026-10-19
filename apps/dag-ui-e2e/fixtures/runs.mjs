@@ -422,6 +422,12 @@ const SIBLING_SESSION_FILE = "worker-sibling-20260817T000500Z-3163700";
 export const SIBLING_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c01";
 /** What the sibling's worker said, which opening its entry on the project page reads. */
 export const SIBLING_SESSION_TEXT = "ran beside the dashboard work and settled";
+/**
+ * The live run's review-reply drafting of the dashboard's first attempt: a
+ * session the pointer names and the agents listing groups under its own scope.
+ */
+const REPLIER_SESSION_FILE = "replier-dashboard-20260817T001200Z-3163810";
+const REPLIER_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c02";
 
 /**
  * One oneharness history record, in the line format that library writes.
@@ -1866,9 +1872,10 @@ function writeLiveRun(root) {
   );
 
   // What the engine's overlay had every oneharness under this run's launches
-  // append to the run's own pointer file: the observer's session, and the
-  // dashboard worker's — the latter also relayed as the artifact below, so one
-  // session opens from the timeline and from the agents listing to one record.
+  // append to the run's own pointer file: the observer's session, the
+  // dashboard worker's — also relayed as the artifact below, so one session
+  // opens from the timeline and from the agents listing to one record — and
+  // the drafting of a reply to a review comment on that worker's draft.
   writePointerFile(dir, [
     pointerLine(
       harnessHistory.dir,
@@ -1885,6 +1892,14 @@ function writeLiveRun(root) {
       "claude-code:alternate",
       "2026-08-17T00:11:58Z",
       agentLabels(LIVE_RUN, "node", "dashboard", 1),
+    ),
+    pointerLine(
+      harnessHistory.dir,
+      REPLIER_SESSION_FILE,
+      REPLIER_HISTORY_ID,
+      "claude-code",
+      "2026-08-17T00:12:00Z",
+      agentLabels(LIVE_RUN, "review-reply", "dashboard", 1),
     ),
   ]);
 
@@ -3025,10 +3040,10 @@ export function facts(workspace) {
      * the sibling's, on the project page.
      */
     agents: {
-      live: 2,
+      live: 3,
       sibling: 1,
       history: 0,
-      observatory: 3,
+      observatory: 4,
       worker: {
         history_id: HARNESS_SESSION_ARTIFACT,
         node: "dashboard",

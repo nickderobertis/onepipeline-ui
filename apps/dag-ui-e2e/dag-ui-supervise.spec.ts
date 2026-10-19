@@ -401,6 +401,41 @@ test("composes review replies, applies rework and reports retitle delivery refus
       },
       "refused: retitle: node 'review-draft' has no session on the run's record to address its change request through",
     );
+    // Declining is answered by replies the run drafts rather than composed from
+    // a form, so no shortcut names it; typed into the editor, it reaches the
+    // engine as a decline, which refuses it past its schema — the comment was
+    // never read on this run — rather than as an unknown op.
+    await expect(
+      composer.getByLabel("Shortcut").locator("option[value=decline]"),
+    ).toHaveCount(0);
+    const declineRefusal =
+      "refused: decline: node 'review-draft': comment review-1 was not read for it — run `onepipeline review` and decline a comment it surfaced";
+    const decline = {
+      version: 3,
+      commands: [
+        {
+          op: "decline",
+          id: "review-draft",
+          comments,
+          reason: "Out of scope for this change",
+        },
+      ],
+    };
+    await composer
+      .getByLabel("Envelope (sent as typed)")
+      .fill(JSON.stringify(decline));
+    const declined = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes(`/runs/${run}/channel/reply`),
+    );
+    await composer.getByRole("button", { name: "Send reply" }).click();
+    const declineResponse = await declined;
+    expect(declineResponse.request().postDataJSON()).toEqual(decline);
+    const declineError = await refusedBy(declineResponse, 422);
+    expect(declineError.code).toBe("refused");
+    expect(declineError.message).toBe(declineRefusal);
+    await expect(refusal(page, "Reply")).toContainText(declineRefusal);
     await composer.getByLabel("Shortcut").selectOption("rework");
     await composer
       .getByLabel("Title", { exact: true })
@@ -897,10 +932,21 @@ test("lists every agent the run launched, grouped by scope and attempt, and open
   await expect(dispatch).toContainText("started");
   const observer = panel.getByRole("list", { name: "Observer" });
   await expect(observer).toContainText("monitor");
+  // The drafting of a reply to a review comment on that node's draft, read
+  // under its own scope after the observer, in the engine's scope order.
+  const replier = panel.getByRole("list", {
+    name: "Review reply author · attempt 1",
+  });
+  await expect(replier).toContainText("replier-dashboard");
+  await expect(replier).toContainText(`node ${fixture().agents.worker.node}`);
   const headings = await panel
     .getByRole("heading", { level: 4 })
     .allTextContents();
-  expect(headings).toEqual(["Node dispatch · attempt 1", "Observer"]);
+  expect(headings).toEqual([
+    "Node dispatch · attempt 1",
+    "Observer",
+    "Review reply author · attempt 1",
+  ]);
 
   // Opening the worker's harness run: the conversation view the app has for a
   // oneharness session, over the record its pointer line names — which is the
@@ -944,16 +990,24 @@ test("shows a node's own agents on its Agents tab, and a node that dispatched no
     runAgentsSchema,
   );
   expect(mine.node).toBe(node);
-  expect(mine.sessions.map((session) => session.runs[0]?.history_id)).toEqual([
+  // The node's worker and the drafting of a reply on its draft, both stamped
+  // with the node; the run's observer is no node's.
+  expect(
+    mine.sessions.map((session) => session.labels["onepipeline.scope"]),
+  ).toEqual(["node", "review-reply"]);
+  expect(mine.sessions[0]?.runs[0]?.history_id).toBe(
     fixture().agents.worker.history_id,
-  ]);
+  );
   await page.goto(`/?run=${runs().live}&node=${node}&tab=agents`);
   const panel = page.getByRole("region", { name: `Agents of ${node}` });
   await expect(
     panel.getByRole("button", { name: "Open transcript" }),
-  ).toHaveCount(1);
+  ).toHaveCount(2);
   await expect(panel).not.toContainText("Observer");
-  await panel.getByRole("button", { name: "Open transcript" }).click();
+  await panel
+    .getByRole("list", { name: "Node dispatch · attempt 1" })
+    .getByRole("button", { name: "Open transcript" })
+    .click();
   await expect(panel).toContainText(fixture().agents.worker.text);
 
   const quiet = await served(
