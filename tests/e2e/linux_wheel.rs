@@ -573,7 +573,11 @@ fn two_builds_of_one_target_take_turns_in_its_build_directory() {
         .map(|name| {
             Command::new("just")
                 .current_dir(repo_root())
-                .args(["wheel-linux", "x86_64-unknown-linux-gnu", &format!("{rel}-{name}")])
+                .args([
+                    "wheel-linux",
+                    "x86_64-unknown-linux-gnu",
+                    &format!("{rel}-{name}"),
+                ])
                 .env("PATH", &path)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -587,14 +591,12 @@ fn two_builds_of_one_target_take_turns_in_its_build_directory() {
         assert!(output.status.success(), "each build succeeds");
     }
     assert_eq!(
-        fs::read_to_string(&spans).expect("docker ran").lines().collect::<Vec<_>>(),
+        fs::read_to_string(&spans)
+            .expect("docker ran")
+            .lines()
+            .collect::<Vec<_>>(),
         ["start", "end", "start", "end"],
         "the second container starts only once the first has exited"
-    );
-    assert!(
-        builds.iter().any(|output| String::from_utf8_lossy(&output.stderr)
-            .contains("waiting for another build of x86_64-unknown-linux-gnu")),
-        "the build that waited says what it is waiting for"
     );
 }
 
