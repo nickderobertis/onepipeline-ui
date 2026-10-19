@@ -440,7 +440,8 @@ fn a_job_runs_what_it_selects_and_a_failing_target_fails_it() {
 }
 
 /// The release pull request's tier is the sweep: every project, whatever the
-/// diff reached, with the host-labelled budgets `just budgets` runs.
+/// diff reached, with the host-labelled budgets `just budgets` runs. Its Linux
+/// wheel is the release rehearsal's, so `wheel-smoke` does not build it again.
 #[test]
 fn the_broader_tier_sweeps_every_project_with_the_budgets() {
     let workspace = workspace(None);
@@ -465,7 +466,7 @@ fn the_broader_tier_sweeps_every_project_with_the_budgets() {
         "dag-ui-build-cache:test",
         "onepipeline-ui:check",
         "onepipeline-ui:install-smoke",
-        "onepipeline-ui:wheel-smoke",
+        "onepipeline-ui-release:test",
         "onepipeline-ui-coverage:coverage",
     ] {
         assert!(
@@ -473,6 +474,10 @@ fn the_broader_tier_sweeps_every_project_with_the_budgets() {
             "the sweep does not select {task}: {selected:?}"
         );
     }
+    assert!(
+        !selected.contains("onepipeline-ui:wheel-smoke"),
+        "the sweep builds the release rehearsal's wheel a second time: {selected:?}"
+    );
     assert!(run.ran().is_empty(), "--plan ran tasks: {:?}", run.ran());
 }
 

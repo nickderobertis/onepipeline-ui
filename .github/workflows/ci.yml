@@ -231,7 +231,8 @@ jobs:
   # formatting, lints and type checks are `lint`'s), the documented install and
   # the release's x86_64 wheel, in one Nx run so the packaging compiles beside
   # the tiers. On the release pull request (`scripts/ci-tier.sh`)
-  # it is the sweep: every project, with the host-labelled budgets.
+  # it is the sweep: every project, with the host-labelled budgets, and the
+  # wheel the release journeys' rehearsal builds, installs and runs.
   test-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
