@@ -112,7 +112,7 @@ fn container_double(dir: &Path, fail_at: Option<&str>) {
              [[ \"$call\" != '{fail_at}'* ]] || exit 1\n"
         )
     };
-    for tool in ["yum", "chmod", "rustup", "python3.12", "chown"] {
+    for tool in ["sed", "yum", "chmod", "rustup", "python3.12", "chown"] {
         executable(&dir.join("container-bin").join(tool), record(tool));
     }
     // The script pipes the pinned checksum into `sha256sum -c -` under
@@ -331,6 +331,23 @@ fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() 
                 "{target}: the container ran `{expected}`; it ran {calls:?}"
             );
         }
+        // vault.centos.org refuses the repositories' metadata, so yum is
+        // pointed at kernel.org's copy of the same 7.9.2009 tree first.
+        let mirror = calls
+            .iter()
+            .position(|call| {
+                call.starts_with("sed -i -E s#https://vault\\.centos\\.org/centos/")
+                    && call.contains("#https://archive.kernel.org/centos-vault/7.9.2009/#")
+            })
+            .unwrap_or_else(|| panic!("{target}: yum was pointed at the mirror; it ran {calls:?}"));
+        let yum = calls
+            .iter()
+            .position(|call| call.starts_with("yum install"))
+            .expect("yum ran");
+        assert!(
+            mirror < yum,
+            "{target}: the mirror is set before yum installs"
+        );
         assert!(
             String::from_utf8_lossy(&output.stdout).contains(&format!("built the {target} wheel")),
             "{target}: success names the wheel it built"
@@ -349,9 +366,15 @@ fn a_container_step_that_fails_is_named_with_its_action_and_its_files_are_still_
     );
     for (fail_at, step, action) in [
         (
+            "sed",
+            "pointing yum at the CentOS 7 vault mirror",
+            "check that the image still names vault.centos.org in /etc/yum.repos.d",
+        ),
+        (
             "yum",
             "installing OpenSSL's Perl prerequisites with yum",
-            "check that the image's yum repositories answer",
+            "check that https://archive.kernel.org/centos-vault/7.9.2009/ serves the os, \
+             updates, extras and sclo/x86_64/rh repositories",
         ),
         ("curl", "installing rustup 1.29.1", rustup),
         ("sha256sum", "installing rustup 1.29.1", rustup),
