@@ -118,14 +118,51 @@ tar -xf "$archive" -C "$work" || {
 
 # The base commit's own lockfile decides its dependency graph, and this process's
 # environment must not reach in and redirect where it is built.
+# Its intermediate artifacts go to this clone's own build directory, `target`
+# (cargo's `build.build-dir`, resolved from the root this script runs in), and
+# only the binary to the scratch tree: every dependency the base locks at the
+# version this branch does is a unit the branch's own debug build already
+# compiled there, so the base commit costs one crate rather than its whole graph
+# cold — over three minutes of a hosted runner's four cores before.
+# Cargo salts workspace artifact names with its compiler wrapper. A fresh
+# forwarding wrapper keeps each archived tree's primary units apart from the
+# branch's and from earlier baselines, while dependency units remain shared.
+# It is native because Cargo launches it directly on Windows.
+case "$binary" in
+  *.exe) wrapper_name="baseline-rustc-${work##*/}.exe" ;;
+  *) wrapper_name="baseline-rustc-${work##*/}" ;;
+esac
+if ! cat > "$work/baseline-rustc.rs" <<'RUST'
+fn main() {
+    let mut args = std::env::args_os().skip(1);
+    let compiler = args.next().expect("Cargo passes the compiler");
+    let status = std::process::Command::new(compiler).args(args).status()
+        .expect("run the compiler");
+    std::process::exit(status.code().unwrap_or(1));
+}
+RUST
+then
+  echo "ensure-baseline: could not write the compiler forwarder" >&2
+  echo "ACTION: check temporary storage is writable and has free space, then retry" >&2
+  exit 1
+fi
+if ! rustc --crate-name baseline_rustc --edition=2021 -D warnings \
+  "$work/baseline-rustc.rs" -o "$work/$wrapper_name"; then
+  echo "ensure-baseline: could not compile the compiler forwarder" >&2
+  echo "ACTION: check the pinned Rust toolchain is installed and temporary storage is writable, then retry" >&2
+  exit 1
+fi
+
 # `--quiet` for the reason every other recipe here is quiet on success: what this
 # provisioning has to say is that it could not do it. Cargo's own diagnostics
 # still reach stderr when the build fails, which is the case the guard below
 # names an action for.
 (
   unset CARGO_TARGET_DIR
-  cargo build --locked --quiet --bin onepipeline-api \
-    --manifest-path "$work/Cargo.toml" --target-dir "$work/target"
+  PATH="$work:$PATH" RUSTC_WORKSPACE_WRAPPER="$wrapper_name" \
+    cargo build --locked --quiet --bin onepipeline-api \
+    --manifest-path "$work/Cargo.toml" --target-dir "$work/target" \
+    --config 'build.build-dir="target"'
 ) || {
   echo "ensure-baseline: could not build the server at $base" >&2
   echo "ACTION: check that commit builds under this toolchain, then retry" >&2

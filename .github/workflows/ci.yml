@@ -231,10 +231,12 @@ jobs:
   # formatting, lints and type checks are `lint`'s), the documented install and
   # the release's x86_64 wheel, in one Nx run so the packaging compiles beside
   # the tiers. On the release pull request (`scripts/ci-tier.sh`)
-  # it is the sweep: every project, with the host-labelled budgets.
+  # it is the sweep: every project, with the host-labelled budgets, and the
+  # wheel the release journeys' rehearsal builds, installs and runs.
   test-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 29.8 min upper estimate / 0.85, rounded up: docs/release-sweep-timing.md.
+    timeout-minutes: 36
     steps:
       # When the job started, for the cache verdict a cancelled run takes below.
       - name: When this job started
@@ -323,7 +325,7 @@ jobs:
           pkill -KILL -f "$GITHUB_WORKSPACE/target/" || true
       - name: Keep a cancelled run's build only when it reached the cap
         if: cancelled()
-        run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 30
+        run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 36
       # The gate provisions the base commit's server itself, when a tier needs
       # it, so it is saved after the gate — whatever the gate's verdict — and
       # only when one was built; on main only, where the commit it was built from

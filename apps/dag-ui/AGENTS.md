@@ -42,7 +42,7 @@ give, `70` for a read API that was never built.
 
 Whatever a server has to do before it binds, it does inside that window, so
 nothing may build there. The read API is built by `dag-ui:build-api-server`,
-which `test` and `bootstrap` depend on; the fixture run directory is written
+which `test` and `test-isolation` depend on; the fixture run directory is written
 here, and it costs ~70 ms for its 750 files, which is the budget it has to stay
 inside.
 

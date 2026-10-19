@@ -6,9 +6,9 @@
 # and differ only in which of those binaries' tests they select, which is declared
 # here once and named by profile from every recipe that runs a tier.
 #
-# The eight filters partition the default collection: `unit` is every binary but the
+# The nine filters partition the default collection: `unit` is every binary but the
 # two the other tiers draw on, and inside `e2e` the `e2e` profile is the complement
-# of the other six. So a test added anywhere runs under exactly one tier, and one
+# of the other seven. So a test added anywhere runs under exactly one tier, and one
 # added to a new module of the `e2e` binary lands in `e2e` rather than nowhere.
 # `tests/e2e/ensure_baseline.rs` holds the module lists below to each other, and to
 # the recipes that run them.
@@ -25,7 +25,7 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|cost|ci_jobs|ci_tier|ensure_baseline|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
+default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|ensure_baseline|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -69,5 +69,12 @@ final-status-level = "fail"
 # `just setup-llmlint` provides. `onepipeline-ui-judged-tier:test`.
 [profile.judged-tier]
 default-filter = "binary(=e2e) and test(/^judged_tier::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# Real Cargo dependency reuse and base/branch executable identity.
+# `onepipeline-ui-baseline-reuse:test` and its cross-platform `test-quick`.
+[profile.baseline-reuse]
+default-filter = "binary(=e2e) and test(/^baseline_reuse::/)"
 status-level = "fail"
 final-status-level = "fail"

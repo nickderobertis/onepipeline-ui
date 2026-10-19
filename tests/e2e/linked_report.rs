@@ -58,11 +58,18 @@ fn locked_releases(lock: &Path) -> BTreeSet<Release> {
 /// Build `onepipeline-api` from this tree with `cargo auditable`, under the
 /// lock, and answer the binary.
 ///
-/// Its own target directory under this clone's `target`, so the suite's build
-/// is not rebuilt with another wrapper and a later run reuses this one's
-/// dependencies. Whatever the suite's own compile was told — coverage
+/// Its binary goes to a target directory of its own under this clone's
+/// `target`, so the one it reads is never one a plain build of the suite has
+/// uplifted over it. Its intermediate artifacts go to the clone's own build
+/// directory, `target` (cargo's `build.build-dir`): the wrapper only reaches this
+/// crate, whose units it keys apart from the suite's, so every dependency is one
+/// the suite's debug build already compiled rather than a whole second graph
+/// compiled cold. Whatever the suite's own compile was told — coverage
 /// instrumentation above all — is not what a release compiles with, so it is
-/// cleared here.
+/// cleared here. So is what cargo tells a test process about the package it
+/// belongs to, which no build of the crate runs with: a dependency's build script
+/// that reads it — ring's reads `CARGO_MANIFEST_DIR` and `OUT_DIR` — would run
+/// again, and rebuild its crate and every dependent over the suite's own.
 fn an_auditable_build() -> PathBuf {
     let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/auditable");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
@@ -80,6 +87,22 @@ fn an_auditable_build() -> PathBuf {
     ] {
         build.env_remove(variable);
     }
+    for (variable, _) in std::env::vars_os() {
+        let name = variable.to_string_lossy();
+        if name.starts_with("CARGO_PKG_")
+            || name.starts_with("CARGO_MANIFEST_")
+            || name.starts_with("CARGO_BIN_EXE_")
+            || [
+                "CARGO_CRATE_NAME",
+                "CARGO_PRIMARY_PACKAGE",
+                "CARGO_TARGET_TMPDIR",
+                "OUT_DIR",
+            ]
+            .contains(&name.as_ref())
+        {
+            build.env_remove(&variable);
+        }
+    }
     build
         .args([
             "auditable",
@@ -88,6 +111,8 @@ fn an_auditable_build() -> PathBuf {
             "--locked",
             "--bin",
             "onepipeline-api",
+            "--config",
+            "build.build-dir=\"target\"",
             "--target-dir",
         ])
         .arg(&target);
