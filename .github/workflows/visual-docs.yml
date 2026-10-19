@@ -5,10 +5,9 @@
 # classify gate, the gallery, its GitHub Pages deploy, and the sticky before/after
 # comment that is the whole point of this for a UI nobody can otherwise see mid-change.
 #
-# A workflow of its own, deliberately. Screenshots assert nothing and cost a container
-# and a Rust build, so nothing here is reachable from `just check`, from `just gate` —
-# this repository's complete pre-push bar — or from ci.yml's quality job, exactly as this
-# repository keeps every other informational tier outside them.
+# What a pull request owes is in ci.yml's `lint` job, which captures through the same
+# repository path and gates on the same baseline; what is left here is main's
+# canonical gallery, a closed pull request's preview cleanup and the monthly prune.
 #
 # Which CPU arch(es) CI captures is read from [capture].arches in screencomp.toml, one
 # lane per arch on a matching runner; this file names no arch of its own.
@@ -16,14 +15,27 @@
 name: Visual docs
 
 on:
+  # Pull requests capture, gate and preview their visual docs in ci.yml's `lint`
+  # job; this workflow runs on a pull request only once it closes, so screencomp
+  # deletes that pull request's gh-pages preview and stale /pr-<n>/ galleries do
+  # not accumulate on the branch. On `closed` the reusable workflow's capture
+  # and its lanes skip.
   pull_request:
-    # `closed` lets screencomp delete this PR's gh-pages preview once it closes,
-    # so stale /pr-<n>/ galleries do not accumulate on the branch.
-    # No `ready_for_review`: the draft's run already reports the required
-    # `report` context on its head commit, and lifting it changes no commit.
-    types: [opened, synchronize, reopened, closed]
+    types: [closed]
+  # The canonical gallery, redeployed from `main` — but no run at all on the
+  # commit that merges release-plz's release pull request, which changes these
+  # three files and nothing else; a run there would spend a capture and a Rust
+  # build at the release commit, beside the release. GitHub skips a push only
+  # when every file it changed matches, so a dependency bump touching only the
+  # manifests skips too, and loses nothing: a change to these files that moved
+  # a picture could not have merged, because `lint`'s capture fails on drift
+  # from the committed baseline, so the deployed gallery is already its gallery.
   push:
     branches: [main]
+    paths-ignore:
+      - CHANGELOG.md
+      - Cargo.toml
+      - Cargo.lock
   workflow_dispatch:
     # On-demand canonical redeploy. A push to main only redeploys the canonical
     # gallery if its visual-docs run runs to completion, and a run can be superseded
@@ -36,8 +48,8 @@ on:
     - cron: "27 4 1 * *"
 
 permissions:
-  contents: write       # push the gh-pages gallery
-  pull-requests: write  # post the diff comment
+  contents: write       # push the gh-pages gallery, and delete a closed PR's preview
+  pull-requests: write  # the reusable workflow's comment job asks for it
   pages: read           # gate the run on the Pages build the deploy triggers
 
 jobs:

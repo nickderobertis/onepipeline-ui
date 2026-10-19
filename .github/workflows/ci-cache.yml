@@ -1,0 +1,198 @@
+name: CI cache
+
+# Keep the Rust build warm that ci.yml's four pull-request jobs restore. Those
+# jobs restore and never save, so the repository's Actions cache holds main's
+# builds and no pull request's: one build-only job per OS here compiles what that
+# OS's pull-request jobs compile (`scripts/ci-warm.sh` holds the list), runs no
+# test, and saves under the key those jobs restore — `warm-linux` for `lint` and
+# `test-linux`, `warm-windows` for `test-windows`, `warm-macos` for `test-macos`.
+# Each restores its own previous save first, so a push rebuilds only what it
+# changed.
+#
+# It is also what catches a merge that breaks `main`: branch protection does not
+# require a branch to be up to date and nothing re-runs the tests on a push, so a
+# job here fails when `main` does not compile. It is not a pull-request check.
+#
+# It saves the two clone-local binaries the jobs provision too — the sibling CLI
+# on every OS and, on Linux, the server of the commit pull requests fork from —
+# under the keys ci.yml restores them by.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One warm build of `main` at a time; a push landing behind a running one waits,
+# and a third replaces the second rather than queueing behind it.
+concurrency:
+  group: ci-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+# ci.yml's own workflow environment: rust-cache hashes these variables into its
+# key, so the key saved here is the key ci.yml restores.
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  warm-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base server is built from the commit this push leaves `main` at,
+          # resolved as `git merge-base HEAD origin/main`.
+          fetch-depth: 0
+      - name: Read the MSRV from Cargo.toml
+        id: msrv
+        run: |
+          version="$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)"
+          [ -n "$version" ] || { echo "::error::Cargo.toml declares no rust-version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: warm-linux
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+      - name: What the provisioned binaries are built from
+        id: pins
+        run: |
+          echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+          echo "base=$(git merge-base HEAD origin/main)" >> "$GITHUB_OUTPUT"
+      - name: Restore the sibling CLI
+        id: sibling
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools/bin/onepipeline
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Restore the base commit's server
+        id: baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .tools/bin/onepipeline-api-baseline
+            .tools/bin/onepipeline-api-baseline.commit
+          key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Save the sibling CLI
+        if: steps.sibling.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .tools/bin/onepipeline
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Build the base commit's server
+        if: steps.baseline.outputs.cache-hit != 'true'
+        run: bash scripts/nx.sh run onepipeline-ui:ensure-baseline
+      - name: Save the base commit's server
+        if: steps.baseline.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .tools/bin/onepipeline-api-baseline
+            .tools/bin/onepipeline-api-baseline.commit
+          key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Compile what lint and test-linux compile
+        run: just ci-warm-linux
+
+  warm-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: warm-windows
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+      - name: What the provisioned sibling is built from
+        id: pins
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+      - name: Restore the sibling CLI
+        id: sibling
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools/bin/onepipeline.exe
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Save the sibling CLI
+        if: steps.sibling.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .tools/bin/onepipeline.exe
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Compile what test-windows compiles
+        run: just ci-warm-windows
+
+  # Not on the push that merges release-plz's release pull request: that commit
+  # changes the version and the changelog alone, and a Mac job there is one more
+  # Mac run a release would start (.github/budgets.yaml).
+  warm-macos:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: warm-macos
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+      - name: What the provisioned sibling is built from
+        id: pins
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+      - name: Restore the sibling CLI
+        id: sibling
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools/bin/onepipeline
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Save the sibling CLI
+        if: steps.sibling.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .tools/bin/onepipeline
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Compile what test-macos compiles
+        run: just ci-warm-macos

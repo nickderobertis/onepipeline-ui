@@ -199,6 +199,22 @@ ci-test-windows *args:
 ci-test-macos *args:
     @bash scripts/ci-job.sh test-macos "$@"
 
+# The main-branch cache warmer's jobs (`.github/workflows/ci-cache.yml`), one per
+# OS: compile everything that OS's pull-request jobs compile and run nothing, so
+# the build saved from `main` is the one those jobs restore. `scripts/ci-warm.sh`
+# holds the list and why each line is there.
+# Compile what Linux's `lint` and `test-linux` compile, running no test.
+ci-warm-linux:
+    @bash scripts/ci-warm.sh linux
+
+# Compile what `test-windows` compiles, running no test.
+ci-warm-windows:
+    @bash scripts/ci-warm.sh windows
+
+# Compile what `test-macos` compiles, running no test.
+ci-warm-macos:
+    @bash scripts/ci-warm.sh macos
+
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
 # is. Warnings denied for the reason release.yml denies them.
@@ -239,9 +255,22 @@ packaging-priority := `command -v nice >/dev/null 2>&1 && echo "nice -n 10" || t
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
 # on its own; this is where the non-deterministic tier joins it.
-# Full gate: `check` plus the diff-scoped llmlint tier.
-gate base="origin/main": check
-    @just lint-llm-diff {{base}}
+#
+# The whole of it runs inside `scripts/gate-time.sh`, which records when it
+# started and ended and then holds that to `onepipeline-ui-gate-time`
+# (budgets.yaml, `host-variable`) as a warning: over the line prints one and the
+# gate still passes; a budget that cannot be measured fails it. So the body has
+# no dependency of its own outside the wrapper — `check` is its first line.
+# Full gate: `check` plus the diff-scoped llmlint tier, timed against its budget.
+[positional-arguments]
+gate base="origin/main":
+    @bash scripts/gate-time.sh -- just _gate-body "$1"
+
+# What `just gate` times: `check`, then the judged tier over the diff from `base`.
+[positional-arguments]
+_gate-body base:
+    @just check
+    @just lint-llm-diff "$1"
     @echo "gate: ok"
 
 # `true` when this branch's diff can reach the crate, so CI can skip the

@@ -28,6 +28,7 @@ name: Release
 #     belongs to no platform (the crate, the npm launcher and frontend, the
 #     SBOM), installs the launcher back, and holds the GitHub Release to the
 #     outcome — a release that did not publish is demoted to a prerelease.
+#     Last, it reports the release-tail budgets, which nothing reads.
 #
 # A failed platform job therefore leaves the other platforms' files published
 # and the platform-independent ones unpublished; re-running the failed jobs
@@ -38,7 +39,8 @@ name: Release
 # later tag's run may read, so saving it would only cost each job its upload.
 #
 # There is no test re-run here. The tree a Release names is the one ci.yml's
-# `sweep` already ran the whole gate over on the release pull request; what this
+# `test-linux` already swept — every project, on the release pull request
+# (scripts/ci-tier.sh) — and the other three jobs checked; what this
 # workflow proves is the artifacts, by installing and running each one before it
 # publishes and again from the registry after.
 #
@@ -239,6 +241,10 @@ jobs:
     permissions:
       # The SBOM is a Release asset, and the demotion rewrites the Release.
       contents: write
+      # The budget figures' reads: the release's runs and jobs, and the pull
+      # requests it carries.
+      actions: read
+      pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
       # Results arrive as environment variables rather than inside a `run:`
@@ -304,3 +310,23 @@ jobs:
             upload-github=${{ steps.upload-github.outcome }}
             verify=${{ steps.verify.outcome }}
         run: just release-publish settle
+      # The release-tail budgets (budgets.yaml, `release-tail`): this release's
+      # CI and CD time and job counts, and the GitHub reads they cost, read
+      # through onevcs's host queries at the onevcs release pinned here, by the
+      # workspace's onebudgetspec. Reached on every path, after the Release is
+      # settled.
+      - name: Install the onevcs CLI the budget figures read GitHub through
+        if: always()
+        run: |
+          bash scripts/workspace-install.sh
+          npm install --prefix "$RUNNER_TEMP/onevcs" --no-audit --no-fund onevcs-cli@0.56.3
+          echo "$RUNNER_TEMP/onevcs/node_modules/.bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+      # Reporting only, and last: an over-budget figure turns this step red with
+      # each figure's breakdown in its log, and no step or job reads its outcome,
+      # so it never blocks, demotes or reverts the release it measures.
+      - name: Report the release-tail budgets
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: onebudgetspec check budgets.yaml --label release-tail
