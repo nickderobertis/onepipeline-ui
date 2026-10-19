@@ -1503,19 +1503,19 @@ fn the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines() 
             .collect::<Vec<_>>()
             .join(", ")
     );
-    // Compared as tokens rather than as a layout: the formatter wraps a
-    // declaration once it outgrows a line and adds a trailing comma, which says
-    // nothing about the vocabulary it declares.
-    let tokens = |text: &str| {
-        text.split_whitespace()
+    // Compared as tokens, because where the formatter breaks a declaration is
+    // its own decision and none of these values spells whitespace or a comma.
+    let tokens = |text: &str| -> String {
+        text.chars()
+            .filter(|c| !c.is_whitespace())
             .collect::<String>()
             .replace(",]", "]")
             .replace(",}", "}")
     };
-    let compact = tokens(&source);
+    let declared = tokens(&source);
     for declaration in [labels, prefix, scopes] {
         assert!(
-            compact.contains(&tokens(&declaration)),
+            declared.contains(&tokens(&declaration)),
             "{} does not declare `{declaration}`; the client's copy of the engine's agent \
              label vocabulary has drifted",
             path.display()

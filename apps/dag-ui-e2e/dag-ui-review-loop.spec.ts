@@ -94,12 +94,12 @@ test("renders a reworked, continued and readjusted stack and every node in it wi
   const panel = page.getByRole("region", { name: "Agents" });
   await expect(panel).toContainText("2 agents");
   const drafting = panel.getByRole("list", {
-    name: "Review comment reply · attempt 1",
+    name: "Review reply author · attempt 1",
   });
   await expect(drafting).toContainText(`node ${replied}`);
   expect(
     await panel.getByRole("heading", { level: 4 }).allTextContents(),
-  ).toEqual(["Node dispatch · attempt 1", "Review comment reply · attempt 1"]);
+  ).toEqual(["Node dispatch · attempt 1", "Review reply author · attempt 1"]);
 
   expect(thrown).toEqual([]);
   expect(unanswered).toEqual([]);

@@ -1863,16 +1863,6 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       reason: z.string().min(1),
     })
     .strict(),
-  // Decline review comments on a node's draft: applying it posts one reply per
-  // named comment saying why it was left, and changes nothing else.
-  z
-    .object({
-      op: z.literal("decline"),
-      id: z.string().min(1),
-      comments: z.array(z.object({ id: z.string(), url: z.string() }).strict()),
-      reason: z.string().min(1),
-    })
-    .strict(),
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // An explicit discovery pass: the engine reads the run's review comments and
   // changes nothing in the graph, so the command carries no field at all.
@@ -1882,6 +1872,17 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
   // comment and changes nothing in the graph, so the command carries no field.
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
   z.object({ op: z.literal("readjust") }).strict(),
+  // Decline review comments on a node's draft: the engine drafts and posts one
+  // reply per named comment from the reason, and changes nothing in the graph.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
+  z
+    .object({
+      op: z.literal("decline"),
+      id: z.string().min(1),
+      comments: z.array(z.object({ id: z.string(), url: z.string() }).strict()),
+      reason: z.string().min(1),
+    })
+    .strict(),
 ]);
 
 /** The ops the envelope may carry, in schema order. */
@@ -2284,10 +2285,10 @@ export const AGENT_LABEL_PREFIX = "onepipeline.";
 /**
  * Which launch of a run a session was written under: a node-scope dispatch (a
  * lifecycle step included), the dag-scope observer graph, the drafting graph
- * a change request's body comes from, or the one a review comment's reply comes
- * from — in the order a reader scans them.
+ * a change request's body comes from, or the drafting graph a review comment's
+ * reply comes from — in the order a reader scans them.
  */
-// llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this vocabulary and this is the browser's one copy of it, which `tests/contract.rs::the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines` reads from this file beside `AGENT_LABELS` and holds to `onepipeline::agents::Scope::ALL`; `review-reply` joins it because that gate failed naming it when the pin moved to 0.78, and moving the copy would leave the gate reading nothing.
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns these scope words and states them in Rust, which no browser can read, so this model is where the client's one copy lives; `tests/contract.rs::the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines` holds it to the linked `onepipeline::agents::Scope::ALL`, and failed naming `review-reply` when the pin moved to 0.78.0.
 export const AGENT_SCOPES = [
   "node",
   "observer",
