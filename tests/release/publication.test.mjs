@@ -5,7 +5,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -15,10 +14,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { launcherShims, plan } from "../../scripts/release.mjs";
+import { plan } from "../../scripts/release.mjs";
+import { cmdRuns, windowsHost } from "./doubles/windows-host.mjs";
 import {
   githubDouble,
   ROOT,
@@ -114,80 +113,40 @@ describe("native publication regressions", () => {
     await registries?.close();
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
-  test("on Windows, bash is handed the npm launcher's sh shim, not the .cmd that v0.40.0's handed it", async () => {
-    // The staged launcher and this target's package, installed by npm from
-    // their tarballs, then given the .bin npm writes on Windows, by npm's own
-    // cmd-shim: an sh script, a .cmd and a .ps1. Git Bash counts a file
-    // executable only by an .exe, .com or .bat name or a `#!` first line, so
-    // the .cmd is left as it sees it, not executable.
-    const work = join(dir, "windows-shims");
-    const prefix = join(work, "npm");
-    mkdirSync(prefix, { recursive: true });
-    const launcher = execFileSync(
-      "node",
-      ["scripts/npm-build.mjs", "launcher", "--out", join(work, "launcher")],
-      { cwd: ROOT, encoding: "utf8" },
-    ).trim();
-    execFileSync("npm", ["pack", "--pack-destination", work], {
-      cwd: launcher,
-      stdio: "pipe",
-    });
-    execFileSync(
-      "npm",
-      [
-        "install",
-        "--prefix",
-        prefix,
-        "--offline",
-        "--omit=optional",
-        "--no-audit",
-        "--no-fund",
-        "--cache",
-        join(work, "npm-cache"),
-        join(work, `onepipeline-api-cli-${VERSION}.tgz`),
-        staged(fileOf("npm")),
-      ],
-      { cwd: ROOT, stdio: "pipe" },
-    );
-    const bin = join(prefix, "node_modules", ".bin");
-    const npmHome = execFileSync("npm", ["root", "-g"], {
-      encoding: "utf8",
-    }).trim();
-    const cmdShim = createRequire(join(npmHome, "npm", "package.json"))(
-      "cmd-shim",
-    );
-    rmSync(join(bin, "onepipeline-api"));
-    await cmdShim(
-      join(prefix, "node_modules/onepipeline-api-cli/bin/onepipeline-api.js"),
-      join(bin, "onepipeline-api"),
-    );
-    chmodSync(join(bin, "onepipeline-api.cmd"), 0o644);
-    const smoke = (command) =>
-      spawnSync(
-        "bash",
+  test("on Windows, the staged verification hands bash the npm launcher's sh shim, not the .cmd that v0.40.0's handed it", () => {
+    // build-windows' own check, unmodified, over this release's staged files
+    // on a stand-in Windows host (./doubles/windows-host.mjs): npm writes the
+    // .bin a Windows npm writes, Git Bash reads its .cmd as not executable,
+    // and cmd.exe is what runs the .cmd Node spawns.
+    const work = scratch("windows-host");
+    const host = windowsHost(work);
+    try {
+      const verify = spawnSync(
+        "node",
         [
-          "scripts/smoke-published.sh",
-          "--expect-version",
+          ...host.node,
+          "scripts/verify-staged-release.mjs",
+          OUT,
+          TARGET,
           VERSION,
-          "--command",
-          command,
-          "--label",
-          "staged windows shim",
         ],
-        { cwd: ROOT, encoding: "utf8" },
+        { cwd: ROOT, env: host.env, encoding: "utf8" },
       );
-    const shims = launcherShims(bin, true);
-    assert.equal(shims.spawn, join(bin, "onepipeline-api.cmd"));
-    const ran = smoke(shims.bash);
-    assert.equal(ran.status, 0, `${ran.stdout}${ran.stderr}`);
-    assert.match(ran.stdout, /staged windows shim: smoke test passed/);
-    // What v0.40.0's build-windows handed bash, refused as it was there.
-    const refused = smoke(shims.spawn);
-    assert.equal(refused.status, 1, refused.stderr);
-    assert.match(
-      refused.stderr,
-      /onepipeline-api\.cmd' is not on PATH after the install/,
-    );
+      assert.equal(verify.status, 0, `${verify.stdout}${verify.stderr}`);
+      assert.match(
+        verify.stdout,
+        new RegExp(
+          `${TARGET}: staged archive/wheel/npm install, server and embedded view passed`,
+        ),
+      );
+      // The server was started from the launcher's .cmd, by cmd.exe.
+      assert.deepEqual(
+        cmdRuns(host).map((cmd) => cmd.split("/").slice(-3).join("/")),
+        ["node_modules/.bin/onepipeline-api.cmd"],
+      );
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 
   test("build-linux's npm check waits for npm to serve what it published, and names the package and version when npm never does", async () => {
