@@ -319,6 +319,31 @@ fn a_tree_with_no_baseline_gets_one_built_from_this_branchs_base() {
     );
 }
 
+/// The base commit is compiled against this clone's own build directory, where
+/// the branch's debug build has already compiled every dependency the two lock
+/// alike, so provisioning costs the base's one crate rather than its whole graph.
+/// Only the binary lands in the scratch tree, which is why the binary installed is
+/// still the base's own.
+#[test]
+fn the_base_is_built_from_the_units_this_clone_already_compiled() {
+    let fixture = Fixture::new();
+
+    let provisioning = fixture.run();
+    assert!(provisioning.status.success(), "{}", stderr(&provisioning));
+    assert!(
+        fixture
+            .calls()
+            .contains("--config build.build-dir=\"target\""),
+        "the base commit's build does not share this clone's build directory: {}",
+        fixture.calls()
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.binary()).expect("the provisioned server"),
+        AT_THE_BASE,
+        "the binary installed is not the one built from the base commit's tree"
+    );
+}
+
 #[test]
 fn a_baseline_already_stamped_with_this_base_is_not_built_again() {
     let fixture = Fixture::new();
