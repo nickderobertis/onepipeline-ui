@@ -207,7 +207,7 @@ fans one uniformly-named target across all of them.
   rules on what every PR owes. It is the last whole-gate run a release gets:
   `release.yml` re-runs no tests. A Release made by hand naming a commit no sweep
   covered therefore gets only the artifact proofs below — every file installed
-  and run before it publishes and again from the registry after.
+  and run before it publishes, and read back from its registry after.
 - **Each release job's work is one recipe, and two rules hold the release
   together** (`scripts/release.mjs` says what each phase does): every target is
   compiled **once**, and the archive, wheel and npm package are packed from that
@@ -218,6 +218,13 @@ fans one uniformly-named target across all of them.
   unpublished** until it is re-run — and a re-run finishes the release, because
   every upload publishes only what its registry does not already serve. A
   target is changed in `scripts/release.mjs`'s table and nowhere else.
+- **npm serves a publish minutes after `npm publish` returns, and names a
+  version before it serves the tarball** — longer than a platform job has
+  left after compiling. So no platform job waits for npm; `publish`'s `check`
+  fetches every platform package by version, waiting only on what a
+  successful job published, before the launcher that pins them goes out. npm
+  also installs a launcher whose platform package it cannot fetch and exits
+  0, so an install that lacks the platform package is retried, never counted.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

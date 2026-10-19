@@ -163,8 +163,18 @@ give_back() {
   exit "$status"
 }
 trap give_back EXIT
+# The image's CentOS 7 repositories point at vault.centos.org, which answers
+# their repomd.xml and refuses (403) every primary.sqlite.bz2 it names, so yum
+# reads the same 7.9.2009 tree from kernel.org's copy of the vault instead.
+# Only where it fetches from changes: every package is still held to the
+# image's CentOS 7 signing key (gpgcheck=1 stays on each repository).
+at "pointing yum at the CentOS 7 vault mirror" \
+  "check that the image still names vault.centos.org in /etc/yum.repos.d, then re-run"
+sed -i -E \
+  's#https://vault\.centos\.org/centos/(7|\$releasever)/#https://archive.kernel.org/centos-vault/7.9.2009/#' \
+  /etc/yum.repos.d/*.repo
 at "installing OpenSSL's Perl prerequisites with yum" \
-  "check that the image's yum repositories answer, then re-run"
+  "check that https://archive.kernel.org/centos-vault/7.9.2009/ serves the os, updates, extras and sclo/x86_64/rh repositories, then re-run"
 yum install -y -q perl-IPC-Cmd perl-Time-Piece
 at "installing rustup $RUSTUP_VERSION" \
   "check that static.rust-lang.org serves rustup $RUSTUP_VERSION for $TARGET with the SHA-256 this script pins, then re-run"

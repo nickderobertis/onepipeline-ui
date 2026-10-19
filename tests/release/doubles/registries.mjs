@@ -22,6 +22,10 @@ import { execFileSync } from "node:child_process";
 //                                clients retry a 500 themselves
 //   control/hide                 lines naming files or package@version this
 //                                registry pretends not to serve
+//   control/unserved             lines naming npm package@version listed in
+//                                its packument whose tarball answers 404, as
+//                                npm's own registry does for minutes after it
+//                                takes a publish
 //   control/corrupt              lines naming files served with other bytes
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
 //                                `crate-index=foreign` (JSON, not an entry),
@@ -260,7 +264,11 @@ async function npm(request, response, path) {
     if (!valid(PACKAGE, pkg) || !valid(VERSION, version))
       return reply(response, 404, { error: "Not found" });
     const file = join(state, "npm", pkg, `${version}.tgz`);
-    if (!existsSync(file) || hidden(`${pkg}@${version}`))
+    if (
+      !existsSync(file) ||
+      hidden(`${pkg}@${version}`) ||
+      lines("unserved").includes(`${pkg}@${version}`)
+    )
       return reply(response, 404, { error: "Not found" });
     downloaded("npm", `${pkg}-${version}.tgz`);
     return reply(
