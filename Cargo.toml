@@ -572,7 +572,15 @@ onemessagebus = "0.9.1"
 # translation is left in this graph or in a browser-adopted run's driver. Its
 # adopted driver dispatches nothing until it has read its project's claim off
 # the store, so a run adopted from a project no store holds stays put.
-onepipeline = "=0.75.0"
+# 0.78.0 is the engine a host takes for the harness core that launches Codex
+# with plugins off, which 0.77.0, passed through here, links; a host holds this
+# reader to that same engine, so it can adopt the fix only once this moves.
+# 0.78.0 also holds live notes per receiver and links onetaskgraph 0.7.3, whose
+# store tolerates a source no layer defines. No route is added and no response
+# changes; the test-only `onetaskgraph-*` requirements below move with it to
+# the release its lock resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
+onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -631,8 +639,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.7.1"
-onetaskgraph-plugin-api = "=0.7.1"
+onetaskgraph-core = "=0.7.3"
+onetaskgraph-plugin-api = "=0.7.3"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was
