@@ -30,17 +30,19 @@ probe = "scripts/release-probe.sh"
 id = "crate:onepipeline-ui"
 name = "crate"
 what = "The read API itself: the library and the `onepipeline-api` binary, on crates.io."
-published_by = ".github/workflows/release.yml — the publish-crate job's `cargo publish`, under Cargo.toml's [package] name."
+published_by = ".github/workflows/release.yml — the publish job's `just release-publish upload crate` step (`cargo publish`), under Cargo.toml's [package] name."
 manifest = "Cargo.toml"
 
 [[target]]
 id = "pypi:onepipeline-api-cli"
 name = "pypi-cli"
 what = "The same binary, as per-platform wheels maturin wraps it in."
-published_by = ".github/workflows/release.yml — the publish-pypi job, under pyproject.toml's [project] name."
+published_by = ".github/workflows/release.yml — the build-linux, build-macos and build-windows jobs together, each uploading its own platform's wheels with `just release-<os> upload pypi`, under pyproject.toml's [project] name."
 manifest = "pyproject.toml"
 
-# The npm launcher, and the only entry here with a `covers` list. The per-platform
+# The npm launcher, and the only entry here with a `covers` list. arm64 Linux is
+# no longer among them: from the release after v0.38.1 nothing builds it, and
+# the launcher refuses that platform, naming `cargo install` instead. The per-platform
 # packages it covers exist for this launcher to resolve at its own exact version:
 # nothing depends on one by name, so none of them is a target of their own and a
 # consumer never waits on one. They are still named, because the release that
@@ -50,11 +52,10 @@ manifest = "pyproject.toml"
 id = "npm:onepipeline-api-cli"
 name = "npm-cli"
 what = "The same binary again, as the launcher a consumer installs from npm."
-published_by = ".github/workflows/release.yml — the publish-npm job, from `npm-build.mjs launcher` and, for the covered names, `npm-build.mjs platform` over the build-npm target matrix."
+published_by = ".github/workflows/release.yml — the publish job's `just release-publish upload npm` step, from `npm-build.mjs launcher`; each covered name by the build job of its platform (build-linux, build-macos, build-windows), from `npm-build.mjs platform` with `just release-<os> upload npm`."
 manifest = "npm/onepipeline-api-cli/package.json"
 covers = [
   "npm:onepipeline-api-cli-linux-x64",
-  "npm:onepipeline-api-cli-linux-arm64",
   "npm:onepipeline-api-cli-darwin-arm64",
   "npm:onepipeline-api-cli-win32-x64",
 ]
@@ -65,7 +66,7 @@ covers = [
 id = "npm:onepipeline-ui"
 name = "npm-ui"
 what = "The browser view: the built frontend bundle, carrying no binary, served against the read API above."
-published_by = ".github/workflows/release.yml — the publish-npm job's `npm-build.mjs ui`, under npm/onepipeline-ui/package.json's name."
+published_by = ".github/workflows/release.yml — the publish job's `just release-publish upload npm` step, from `npm-build.mjs ui`, under npm/onepipeline-ui/package.json's name."
 manifest = "npm/onepipeline-ui/package.json"
 
 # Retired rather than renamed, and recorded rather than deleted: a consumer that

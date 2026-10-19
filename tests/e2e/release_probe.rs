@@ -14,8 +14,9 @@
 //! The two answers that need a live public registry — the version one serves,
 //! and the emptiness of one that has never released a name — are not here. The
 //! deterministic gate is offline (AGENTS.md), so they are proven where this
-//! repository already verifies against real registries: the `probe` job in
-//! `.github/workflows/published-smoke.yml`, which drives this same script.
+//! repository already verifies against real registries: the `publish` job's
+//! `verify` step in `.github/workflows/release.yml`, whose
+//! `probeDeclaredTargets` in `scripts/release.mjs` drives this same script.
 //!
 //! One thing is stood in for, by [`Probe::with_curl`]: `curl` on PATH. A public
 //! registry cannot be made unreachable, made to answer 503, or made to serve
@@ -326,9 +327,9 @@ fn a_host_without_the_tools_it_needs_is_not_answered() {
 // expected version is known. Standing in for the program on PATH is the narrowest
 // cut available: the script under test is the real script, spawned the way the
 // contract says a consumer spawns it, over the real URL it built. What a live
-// registry does answer is driven against real registries by the `probe` job in
-// `.github/workflows/published-smoke.yml`, which is where this repository puts
-// verification that cannot be offline.
+// registry does answer is driven against real registries by the `publish` job's
+// `verify` step in `.github/workflows/release.yml`, which is where this
+// repository puts verification that cannot be offline.
 
 #[test]
 fn a_registry_it_cannot_reach_is_not_answered_rather_than_reported_as_unreleased() {
@@ -457,7 +458,7 @@ fn a_document_that_names_no_version_is_read_as_no_release_yet() {
 /// The registry read is the one thing stood in for, for the reason this module's
 /// header gives; the identifiers, the script, and its own reading of each
 /// registry's answer are real. What a *live* registry serves for each of these
-/// is the `probe` job in `.github/workflows/published-smoke.yml`.
+/// is the `publish` job's `verify` step in `.github/workflows/release.yml`.
 #[test]
 fn every_identifier_the_declaration_names_is_one_this_probe_answers() {
     let declaration = release_declaration::declared();

@@ -73,8 +73,8 @@ and because nothing else recovers *why* the tooling is what it is.
   and the same script holds it to `engines.node`.
   npm stays where the registry is the subject rather than this workspace:
   `npm pack`/`npm publish` of what `scripts/npm-build.mjs` assembles, the
-  `verify-npm` and `published-smoke.yml` installs that prove what an npm user
-  gets, and global installs of harness CLIs and of bun itself in the
+  release jobs' `test-install` and `verify` installs that prove what an npm
+  user gets, and global installs of harness CLIs and of bun itself in the
   visual-docs container. Siblings are named `workspace:*`; none of those
   manifests is published.
 - **Excluded:** asdf/direnv — `rust-toolchain.toml` and the lockfiles already
@@ -184,14 +184,12 @@ fans one uniformly-named target across all of them.
   may bypass in a break-glass.
 - **All gating checks are required**, including the `gate` job and the separate
   `llmlint` job. `gate` rules on `quality` (the deterministic affected tier) and
-  on the x86_64 Linux `wheel` leg through `scripts/gate-verdict.sh`, so a job that must
+  on the Linux `wheel` leg through `scripts/gate-verdict.sh`, so a job that must
   block a merge joins it there rather than as a context protection would also have to
-  list — v0.16.0's wheels failed with every required check green. `published-smoke` is *not* required and cannot be: branch
-  protection lists contexts a pull request reports, and it runs on a completed
-  run of `release.yml` or on a manual dispatch — neither of which is one. Nothing
-  turns red for it, so its own `report` job files a failure as an issue and
-  comments on that same issue each further time; without that it detects rot and
-  tells nobody.
+  list — v0.16.0's wheels failed with every required check green. Nothing follows
+  a release on `workflow_run`: what a published artifact does when installed is
+  proven inside the release job that published it (below), whose failure demotes
+  the Release rather than going unread.
 - **Releases are fully automated; the only human action is merging a PR.**
   release-plz is the single version driver — it computes the version, writes
   `CHANGELOG.md` and the manifests, tags `vX.Y.Z`, and cuts the Release, which
@@ -205,9 +203,20 @@ fans one uniformly-named target across all of them.
   (`github.event.before` as `ONEPIPELINE_UI_NX_BASE_SHA`), and `ci.yml`'s `sweep`
   job runs `just check` over every project on the release PR alone —
   `scripts/ci-tier.sh` tells the two apart. `sweep` stays out of `gate`, which
-  rules on what every PR owes. `release.yml`'s `test` job sweeps once more, and
-  stays: a Release can be made by hand naming any commit, which no sweep may have
-  covered, and that job is the last gate before artifacts are built from it.
+  rules on what every PR owes. It is the last whole-gate run a release gets:
+  `release.yml` re-runs no tests. A Release made by hand naming a commit no sweep
+  covered therefore gets only the artifact proofs below — every file installed
+  and run before it publishes and again from the registry after.
+- **Each release job's work is one recipe, and two rules hold the release
+  together** (`scripts/release.mjs` says what each phase does): every target is
+  compiled **once**, and the archive, wheel and npm package are packed from that
+  binary and installed and run before anything publishes; and nothing
+  platform-independent (the crate, the npm launcher and frontend, the SBOM)
+  publishes until every platform's files are served. So **a failed platform job
+  leaves the other platforms published and the platform-independent artifacts
+  unpublished** until it is re-run — and a re-run finishes the release, because
+  every upload publishes only what its registry does not already serve. A
+  target is changed in `scripts/release.mjs`'s table and nowhere else.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.
@@ -219,10 +228,11 @@ fans one uniformly-named target across all of them.
   whose sources ride along in the crate tarball as the price. Anything a
   published artifact carries has to be added there, and `tests/packaging.rs`
   fails if it is not.
-- **A release that did not publish must not look like one.** `release.yml`'s
-  last job runs `scripts/release-status.sh` over every other job's result: if a
-  job the operator's switches say had to succeed did not, the GitHub Release is
-  demoted to a prerelease with a banner naming the jobs, and the job fails. The
+- **A release that did not publish must not look like one.** The `publish` job's
+  last step runs `scripts/release-status.sh` over the platform jobs' results and
+  its own steps': if one the operator's switches say had to succeed did not, the
+  GitHub Release is demoted to a prerelease with a banner naming them, and the
+  job fails. The job runs `if: always()`, so a failed platform job demotes too. The
   tag is never touched — tags here are immutable — so the recovery for any
   stranded version is the next patch version, never a re-run of its tag, whose
   tree is the one that failed. v0.2.0 and v0.3.0 are stranded that way and stay
@@ -253,10 +263,10 @@ fans one uniformly-named target across all of them.
   non-zero exit (**not answered**), and the third is never the second: a consumer
   holds forever on it, so an unreachable registry must never read as an
   unreleased artifact. `tests/packaging.rs` derives the published set from
-  `release.yml` and the manifests and fails on either kind of drift — a new
-  publish job it cannot read is a panic, not an omission. A new artifact means a
-  new entry there; the `probe` job in `published-smoke.yml` is what asks a real
-  registry.
+  `release.yml`, each release recipe's plan and the manifests, and fails on
+  either kind of drift — a new job it cannot read is a panic, not an omission. A
+  new artifact means a new entry there; the `publish` job's `verify` step is what
+  asks a real registry, on every release.
 - **The bump is read off the public surface, and a green reading is only as good
   as a baseline that builds.** `semver_check = true` has release-plz diff the API
   against the last release with cargo-semver-checks, so a breaking change no

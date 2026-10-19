@@ -1,0 +1,55 @@
+{
+  "name": "onepipeline-ui-release",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
+  "namedInputs": {
+    "releaseMachinery": [
+      "{projectRoot}/**/*",
+      "apiServerSurface",
+      "embeddedView",
+      "sharedGlobals",
+      "{workspaceRoot}/justfile",
+      "{workspaceRoot}/pyproject.toml",
+      "{workspaceRoot}/README.md",
+      "{workspaceRoot}/LICENSE",
+      "{workspaceRoot}/CHANGELOG.md",
+      "{workspaceRoot}/docs/contract.md",
+      "{workspaceRoot}/release-plz.toml",
+      "{workspaceRoot}/release-targets.toml",
+      "{workspaceRoot}/npm/**/*",
+      "{workspaceRoot}/scripts/release.mjs",
+      "{workspaceRoot}/scripts/release-package.py",
+      "{workspaceRoot}/scripts/verify-staged-release.mjs",
+      "{workspaceRoot}/scripts/build-linux-wheel.sh",
+      "{workspaceRoot}/scripts/npm-build.mjs",
+      "{workspaceRoot}/scripts/publish-npm.sh",
+      "{workspaceRoot}/scripts/retry-install.sh",
+      "{workspaceRoot}/scripts/smoke-published.sh",
+      "{workspaceRoot}/scripts/release-probe.sh",
+      "{workspaceRoot}/scripts/release-status.sh",
+      "{workspaceRoot}/.github/workflows/release.yml",
+      "{workspaceRoot}/.github/workflows/release-plz.yml",
+      "{workspaceRoot}/.github/workflow-graph.mjs",
+      "{workspaceRoot}/.github/fixtures/release-v0.37.0.json"
+    ]
+  },
+  "targets": {
+    "tools": {
+      "command": "just release-tools",
+      "cache": false
+    },
+    "lint": {
+      "command": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings tests/release",
+      "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
+    },
+    "test": {
+      "command": "node --test --test-concurrency=1 tests/release/tools.test.mjs tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/check.test.mjs tests/release/staging.test.mjs tests/release/journeys.test.mjs",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
+      "inputs": ["releaseMachinery"]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

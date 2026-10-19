@@ -6,15 +6,7 @@
   "targets": {
     "test": {
       "command": "just _tier-test-covered repo-tooling",
-      "//staging": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the release-staging journey's build was always paid by this tier: it ran inside `the_release_staging_path_builds_installs_and_serves_the_native_artifact` on every run of it. Moving it behind `onepipeline-ui:release-staging` — its own target, keyed on what decides the staged bytes — is the edge the rule asks for: no run of this tier pays more than before, a cached one pays nothing, and Nx can start it before the tier's own compile. A project of its own would split one test out of the `packaging` binary the partition in tests/e2e/ensure_baseline.rs reads by binary.",
-      "dependsOn": [
-        { "projects": ["dag-ui"], "target": "build" },
-        { "projects": ["onepipeline-ui"], "target": "release-staging" }
-      ],
-      "//staging-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]",
-      "options": {
-        "env": { "ONEPIPELINE_UI_RELEASE_STAGING": "target/release-staging" }
-      },
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "inputs": ["repoMachinery"],
       "outputs": [
         "{workspaceRoot}/target/llvm-cov-target/repo-tooling-*.profraw"
@@ -66,7 +58,6 @@
       "{workspaceRoot}/tests/e2e/packaging.rs",
       "{workspaceRoot}/tests/e2e/release_probe.rs",
       "{workspaceRoot}/tests/e2e/release_status.rs",
-      "{workspaceRoot}/tests/e2e/report_workflow_failure.rs",
       "{workspaceRoot}/tests/e2e/semver_check.rs",
       "{workspaceRoot}/tests/e2e/workspace_install.rs",
       "{workspaceRoot}/tests/support/fixture_run.rs",

@@ -37,6 +37,12 @@
 #
 # Bounded well inside the sixty seconds the contract allows: at most three
 # attempts of twelve seconds each.
+#
+# Each registry's address can be pointed elsewhere — RELEASE_CRATES_API,
+# RELEASE_PYPI_URL and NPM_CONFIG_REGISTRY, each defaulting to the public
+# registry — which is how the release's `publish` job asks it the same question
+# of a local registry double in tests/release, and why it reads npm's own
+# setting: a host whose npm resolves through a mirror is answered by that mirror.
 set -euo pipefail
 
 # Every failure names what to do next: the caller sees stderr and an exit code,
@@ -72,19 +78,22 @@ case "$registry" in
     # crates.io names a crate with the same characters Cargo does.
     [[ "$name" =~ ^[A-Za-z0-9_-]{1,64}$ ]] ||
       fail "'$name' is not a crate name" "$usage" 2
-    url="https://crates.io/api/v1/crates/$name"
+    url="${RELEASE_CRATES_API:-https://crates.io}"
+    url="${url%/}/api/v1/crates/$name"
     ;;
   pypi)
     [[ "$name" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]{0,212}[A-Za-z0-9])?$ ]] ||
       fail "'$name' is not a PyPI project name" "$usage" 2
-    url="https://pypi.org/pypi/$name/json"
+    url="${RELEASE_PYPI_URL:-https://pypi.org}"
+    url="${url%/}/pypi/$name/json"
     ;;
   npm)
     [[ "$name" =~ ^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$ ]] && [ "${#name}" -le 214 ] ||
       fail "'$name' is not an npm package name" "$usage" 2
     # A scoped name carries a `/`, which is a path separator in the URL unless
     # it is encoded.
-    url="https://registry.npmjs.org/${name//\//%2F}/latest"
+    url="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}"
+    url="${url%/}/${name//\//%2F}/latest"
     ;;
   *)
     fail "'$registry' is not a registry this probe reads" "$usage" 2

@@ -16,4 +16,7 @@ export default defineConfig({
   workers: 1,
   // Two whole runs of the browser tier, each starting five servers of its own.
   timeout: 900_000,
+  // Not the tier's: Playwright empties a run's output directory as it starts, and
+  // this run overlaps the tier's own runs (`playwright.config.ts`'s `OUTPUT_DIR`).
+  outputDir: "./test-results/isolation",
 });

@@ -72,7 +72,7 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// packaging targets, the lints, the docs and the MSRV check compile the crate
 /// too, and one Nx run of a CI job runs them beside the view's build — a view
 /// rebuilt under a compile deletes a file `build.rs` is embedding.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 18] = [
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 17] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-quick",
     "onepipeline-ui-e2e:test",
@@ -86,7 +86,6 @@ const TASKS_THAT_COMPILE_THE_READ_API: [&str; 18] = [
     "dag-ui:build-api-server",
     "onepipeline-ui:install-smoke",
     "onepipeline-ui:wheel-smoke",
-    "onepipeline-ui:release-staging",
     "onepipeline-ui:lint",
     "onepipeline-ui:doc",
     "onepipeline-ui:msrv",
@@ -95,7 +94,7 @@ const TASKS_THAT_COMPILE_THE_READ_API: [&str; 18] = [
 
 /// The targets those tasks are reached through.
 const COMPILING_TIERS: &str =
-    "test,test-quick,test-baseline,test-cost,install-smoke,wheel-smoke,release-staging,lint,doc,msrv";
+    "test,test-quick,test-baseline,test-cost,install-smoke,wheel-smoke,lint,doc,msrv";
 
 /// What builds the view the binary embeds.
 const VIEW_BUILD: &str = "dag-ui:build";

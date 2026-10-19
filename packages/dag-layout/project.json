@@ -10,7 +10,7 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "npx biome check packages/dag-layout && npx eslint --max-warnings 0 packages/dag-layout"
+      "command": "node node_modules/@biomejs/biome/bin/biome check packages/dag-layout && npx eslint --max-warnings 0 packages/dag-layout"
     },
     "test": {
       "command": "npx vitest run --root packages/dag-layout"
@@ -19,10 +19,10 @@
       "command": "node node_modules/typescript/bin/tsc -p packages/dag-layout/tsconfig.json --noEmit"
     },
     "format": {
-      "command": "npx biome check --write --linter-enabled=false packages/dag-layout"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false packages/dag-layout"
     },
     "format-check": {
-      "command": "npx biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/dag-layout"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/dag-layout"
     },
     "check": {
       "executor": "nx:noop"

@@ -2,10 +2,12 @@
 # Build the `onepipeline-api-cli` wheel for one Linux target inside the
 # manylinux image the release publishes it from.
 #
-# This is the one definition of a Linux wheel build: release.yml's Linux
-# `build-wheels` legs and ci.yml's `wheel` legs both run it through `just
-# wheel-linux`, so a pull request builds under the image, prerequisites and
-# maturin invocation a release does. v0.16.0 is why: every required check passed
+# This is the one definition of a Linux wheel build: the release's `build-linux`
+# job reaches it through `just release-linux build` (scripts/release.mjs), and
+# ci.yml's `wheel` job through `just wheel-linux`, so a pull request builds under
+# the image, prerequisites and maturin invocation a release does. The release
+# packs the archive and the npm package from this wheel's binary too, so all
+# three carry its glibc 2.17 floor. v0.16.0 is why: every required check passed
 # on the change that linked onetaskgraph's HTTP stores, and the first place their
 # vendored OpenSSL met this image was the release, which then published no wheel.
 #
@@ -31,7 +33,7 @@
 # were refused. Exit 1: the build or its environment failed, named on stderr.
 set -euo pipefail
 
-usage="run 'build-linux-wheel.sh --target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu [--out DIR]'"
+usage="run 'build-linux-wheel.sh --target x86_64-unknown-linux-gnu [--out DIR]'"
 
 fail_usage() {
   echo "$1" >&2
@@ -58,8 +60,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# The Linux targets release.yml's `build-wheels` matrix builds;
-# tests/e2e/linux_wheel.rs fails when the two sets differ.
+# The Linux targets scripts/release.mjs releases; tests/e2e/linux_wheel.rs fails
+# when the two sets differ. aarch64-unknown-linux-gnu is no longer released.
 # Each carries the SHA-256 static.rust-lang.org publishes for rustup-init
 # $rustup_version on that architecture, so the installer the container runs is
 # the one pinned here and not whatever the download returned.
@@ -68,10 +70,6 @@ case "$target" in
   x86_64-unknown-linux-gnu)
     arch=x86_64 platform=linux/amd64
     rustup_sha256=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71
-    ;;
-  aarch64-unknown-linux-gnu)
-    arch=aarch64 platform=linux/arm64
-    rustup_sha256=15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433
     ;;
   "") fail_usage "--target is required" ;;
   *) fail_usage "no manylinux build is defined for $target" ;;
@@ -112,9 +110,9 @@ channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "$root/rust-toolchain.toml")" \
   || fail "the browser view is not built at $root/apps/dag-ui/dist, and the wheel's binary embeds it" \
     "run 'just build', then re-run"
 
-# The image maturin-action's `manylinux: auto` selected for these targets on the
-# release's native runners, and the maturin every release leg pins —
-# tests/e2e/linux_wheel.rs holds this to release.yml's `maturin-version`.
+# The image maturin-action's `manylinux: auto` selected for this target, and the
+# maturin the justfile pins for every release build — tests/e2e/linux_wheel.rs
+# holds this to its `maturin-version`.
 image="quay.io/pypa/manylinux2014_$arch"
 maturin_version="1.14.1"
 

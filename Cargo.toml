@@ -71,8 +71,9 @@ include = [
   # there and the maturin invocation are what decide those wheels' bytes, and a
   # change to it has to be able to cut the release that publishes them.
   "/scripts/build-linux-wheel.sh",
-  # Darwin carriers reuse the final wheel binary; these decide their bytes.
-  "/scripts/release-darwin.sh",
+  # Every platform's archive and npm package reuse the final wheel binary, and
+  # these decide which target is compiled how and packed under which name.
+  "/scripts/release.mjs",
   "/scripts/release-package.py",
 
   # The frontend bundle the `onepipeline-ui` npm package carries: its sources,

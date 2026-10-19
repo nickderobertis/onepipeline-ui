@@ -1,6 +1,7 @@
 name: Release-plz
 
-# Conventional-commit release automation. On every push to main:
+# Conventional-commit release automation, as one job. On every push to main:
+#   * guard       — does nothing at all until the RELEASE_PLZ_TOKEN secret is set.
 #   * release     — if a merged version-bump PR left Cargo.toml at a version with
 #                   no tag yet, tag vX.Y.Z and cut the GitHub Release.
 #   * release-pr  — open/update a "release vX.Y.Z" PR that bumps the version and
@@ -9,19 +10,23 @@ name: Release-plz
 #                   checks pass; the merge re-triggers `release` above.
 #
 # The Release release-plz cuts (via the PAT) fires the `release: published` event
-# that drives release.yml to build and attach the binaries — so artifacts publish
-# only after a green gate, with no manual step. Merging a PR is the only human
-# action in a release.
+# that drives release.yml to build and publish the artifacts, with no manual
+# step. Merging a PR is the only human action in a release.
 #
 # RELEASE_PLZ_TOKEN is a PAT, not the default GITHUB_TOKEN: a tag/release created
 # by GITHUB_TOKEN does NOT trigger other workflows, so release.yml would never
 # build the binaries. The PAT needs `contents: write` + `pull-requests: write`.
-# Until that secret is set, the `guard` job keeps this workflow dormant.
 #
 # This crate is not published to crates.io by default, so release-plz has no
 # registry baseline to compute the next version from; `--registry-manifest-path`
 # points it at a checkout of the last release tag as the baseline, restoring
 # conventional-commit versioning from git history.
+#
+# RELEASE_PLZ_DRY_RUN is never set here. tests/release/release-plz.test.mjs sets
+# it to drive these same steps over a scratch repository: `release` then plans
+# its tag and Release with `--dry-run`, `release-pr` prepares the bump in the
+# working tree with `release-plz update`, and `auto-merge` names the PR it would
+# queue, so the rehearsal writes no remote and no registry.
 
 on:
   push:
@@ -40,14 +45,22 @@ env:
   CARGO_SEMVER_CHECKS_VERSION: "0.50.0"
 
 jobs:
-  guard:
+  release-plz:
     runs-on: ubuntu-latest
-    # Reads whether a secret is set and writes a job output — no repo access.
-    permissions: {}
-    outputs:
-      enabled: ${{ steps.check.outputs.enabled }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz
+      cancel-in-progress: false
     steps:
-      - id: check
+      # Before the checkout, which would fail on the missing token rather than
+      # say why nothing ran: until the secret exists every later step is skipped
+      # and the run is green, which is what keeps a fork or a fresh repository
+      # dormant.
+      - name: Is release automation switched on
+        id: guard
         env:
           TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
@@ -60,28 +73,20 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-  release-plz:
-    needs: guard
-    if: needs.guard.outputs.enabled == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    concurrency:
-      group: release-plz
-      cancel-in-progress: false
-    steps:
       - uses: actions/checkout@v4
+        if: steps.guard.outputs.enabled == 'true'
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.guard.outputs.enabled == 'true'
 
       # taiki-e/install-action verifies the downloaded archive's checksum before
       # unpacking it; a `curl | tar` pipeline would execute an unauthenticated
       # download.
       - uses: taiki-e/install-action@v2
+        if: steps.guard.outputs.enabled == 'true'
         with:
           tool: |
             release-plz@${{ env.RELEASE_PLZ_VERSION }}
@@ -89,9 +94,10 @@ jobs:
             just
 
       - name: Tag and publish a merged version bump
+        if: steps.guard.outputs.enabled == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-        run: release-plz release --git-token "$GITHUB_TOKEN"
+        run: release-plz release ${RELEASE_PLZ_DRY_RUN:+--dry-run} --git-token "$GITHUB_TOKEN"
 
       # Compute the baseline AFTER `release` so it reflects the tag that step
       # just created. Computed earlier, `release-pr` would compare against the
@@ -99,6 +105,7 @@ jobs:
       # and opening yet another release PR — a self-sustaining release loop.
       - name: Use the latest release tag as the version baseline
         id: baseline
+        if: steps.guard.outputs.enabled == 'true'
         run: |
           tag="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
           if [ -n "$tag" ]; then
@@ -129,14 +136,14 @@ jobs:
       #
       # llmlint: ignore-block[diagnostics_error_or_absent] a run that succeeds on a warning is one whose commits announce a break, whose version no verdict could change; every release claiming compatibility still fails here. Why, in `scripts/semver-check.sh`.
       - name: Read the public surface against the baseline
-        if: "${{ steps.baseline.outputs.root != '' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
+        if: "${{ steps.guard.outputs.enabled == 'true' && steps.baseline.outputs.root != '' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
         run: just semver-check "${{ steps.baseline.outputs.root }}" "${{ steps.baseline.outputs.ref }}"
       # llmlint: ignore-end[diagnostics_error_or_absent]
 
       # Belt to the baseline fix: never open/merge a release PR on a push that is
       # itself a merged release commit.
       - name: Open or update the release PR
-        if: "${{ !startsWith(github.event.head_commit.message, 'chore: release') }}"
+        if: "${{ steps.guard.outputs.enabled == 'true' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           # release-plz takes its own reading, and it is the one the bump comes
@@ -146,16 +153,23 @@ jobs:
           # no previous release there is nothing cached and nothing to compare.
           CARGO_NET_OFFLINE: ${{ steps.baseline.outputs.root != '' && 'true' || 'false' }}
           # llmlint: ignore-end[changed_behavior_has_e2e]
-        run: release-plz release-pr ${{ steps.baseline.outputs.arg }} --git-token "$GITHUB_TOKEN"
+        run: |
+          if [ -n "${RELEASE_PLZ_DRY_RUN:-}" ]; then
+            release-plz update ${{ steps.baseline.outputs.arg }}
+          else
+            release-plz release-pr ${{ steps.baseline.outputs.arg }} --git-token "$GITHUB_TOKEN"
+          fi
 
       - name: Auto-merge the release PR when the gate is green
-        if: "${{ !startsWith(github.event.head_commit.message, 'chore: release') }}"
+        if: "${{ steps.guard.outputs.enabled == 'true' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
           pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,headRefName \
                  --jq 'map(select(.headRefName | startswith("release-plz-"))) | .[0].number // empty')
-          if [ -n "$pr" ]; then
+          if [ -n "$pr" ] && [ -n "${RELEASE_PLZ_DRY_RUN:-}" ]; then
+            echo "Would enable auto-merge on release PR #$pr"
+          elif [ -n "$pr" ]; then
             echo "Enabling auto-merge on release PR #$pr"
             gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --auto --squash --delete-branch \
               || echo "::warning::could not enable auto-merge on #$pr (already enabled, or already merging)"

@@ -50,6 +50,19 @@ export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onep
 # installed, so nothing on PATH can be it.
 export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
 
+# The release tools, pinned once: release-plz.yml installs release-plz at its
+# RELEASE_PLZ_VERSION and release.yml cargo-cyclonedx, which
+# `.github/tests/release.test.mjs` holds to these; the Python ones are installed
+# from here by `release-python-tools`, and maturin is the one the manylinux
+# build (scripts/build-linux-wheel.sh) pins too.
+release-plz-version := "0.3.158"
+cyclonedx-version := "0.5.7"
+maturin-version := "1.14.1"
+twine-version := "6.1.0"
+packaging-version := "25.0"
+python := if os_family() == "windows" { "python" } else { "python3" }
+python-pins := "maturin==" + maturin-version + " twine==" + twine-version + " packaging==" + packaging-version
+
 # The `cargo-prune-superseded` release `pool-maintenance` runs, pinned once here:
 # `_ensure-pruner` installs exactly this and nothing else reads a version for it.
 prune-superseded-version := "0.1.1"
@@ -188,12 +201,11 @@ ci-test-macos *args:
 
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
-# is. Warnings denied for the reason release.yml denies them, which is also what
-# lets it share `target/release`'s dependencies with `release-staging` on Linux.
+# is. Warnings denied for the reason release.yml denies them.
 # The bin directory is resolved by `cd`, so a root cargo did not write is named
 # rather than read as a command missing from PATH, and the binary is handed to
 # the smoke test by its path: the Windows leg's PATH lookup did not find it there.
-# Compiled at low priority, as `release-staging` is: see `packaging-priority`.
+# Compiled at low priority: see `packaging-priority`.
 # Install this revision the documented way and smoke-test the installed binary.
 _crate-install-smoke:
     @RUSTFLAGS="-D warnings" {{packaging-priority}} cargo install --path . --locked --quiet --root target/install-smoke
@@ -205,7 +217,7 @@ _crate-install-smoke:
       || { echo "installed into $bin: $(ls -la "$bin" 2>&1)" >&2; exit 1; }
 
 # The release's x86_64 Linux wheel, built by the one definition release.yml's
-# `build-wheels` leg runs (`wheel-linux`), then installed into a fresh virtualenv
+# `build-linux` job runs (`wheel-linux`), then installed into a fresh virtualenv
 # and smoke-tested. Needs Docker and the browser view `dag-ui:build` writes.
 # Build the x86_64 Linux wheel as the release does, install it, smoke-test it.
 _crate-wheel-smoke:
@@ -216,19 +228,6 @@ _crate-wheel-smoke:
     @PATH="$PWD/target/wheel-smoke/venv/bin:$PATH" bash scripts/smoke-published.sh \
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "onepipeline-api-cli wheel on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
-
-# The release-staging journey's artifact, built once as a cached Nx target rather
-# than inside the repo-tooling tier: the tier's critical path was this one test.
-# Warnings denied, as on every other release-profile compile here.
-# `ONEPIPELINE_UI_RELEASE_STAGING` hands the journey the directory; without it the
-# journey stages its own, so a bare `cargo nextest` still proves the path.
-# The `tee` keeps the dry run's output on the log as well as in the file; the
-# recipe shell's `pipefail` (`set shell` above) is what fails the recipe with the
-# dry run's own status, which `tests/packaging.rs` holds.
-# Rehearse the native release staging into target/release-staging.
-_crate-release-staging:
-    @rm -rf target/release-staging && mkdir -p target/release-staging
-    @RUSTFLAGS="-D warnings" {{packaging-priority}} bash scripts/release-native-dry-run.sh target/release-staging | tee target/release-staging/dry-run.stdout
 
 # The packaging targets' release builds are long batch compiles that `ci-test-linux`
 # runs beside the test tiers, and the cost journeys count a subscriber's poll
@@ -284,13 +283,86 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Shared by release.yml's Linux `build-wheels` legs and ci.yml's `wheel` legs, so
-# a pull request meets the prerequisites and maturin invocation a release does.
-# Needs Docker, and the browser view `just build` writes.
+# Shared by the release's `build-linux` job (through `release-linux build`) and
+# ci.yml's `wheel` job, so a pull request meets the prerequisites and maturin
+# invocation a release does. Needs Docker, and the browser view `just build`
+# writes.
 # Build the onepipeline-api-cli wheel for one Linux target in the release's image.
 [positional-arguments]
 wheel-linux target out="dist":
     @bash scripts/build-linux-wheel.sh --target "$1" --out "$2"
+
+# One recipe per release job in `.github/workflows/release.yml`; the phases
+# each takes are in scripts/release.mjs's header. `build` needs `just build`
+# first, and the Linux one Docker, the macOS and Windows ones maturin.
+# The build-linux release job: build, install, publish and verify Linux.
+[positional-arguments]
+release-linux *args:
+    @node scripts/release.mjs linux "$@"
+
+# The build-macos release job: build, install, publish and verify Apple Silicon.
+[positional-arguments]
+release-macos *args:
+    @node scripts/release.mjs macos "$@"
+
+# The build-windows release job: build, install, publish and verify Windows.
+[positional-arguments]
+release-windows *args:
+    @node scripts/release.mjs windows "$@"
+
+# The publish release job: the platform-independent artifacts and the verdict.
+[positional-arguments]
+release-publish *args:
+    @node scripts/release.mjs publish "$@"
+
+# The Python tools the release jobs run, at their pins, into the Python on PATH
+# (`just python=… release-python-tools` names another): maturin for the macOS
+# and Windows builds, twine for `upload pypi`, and packaging for reading a
+# wheel's version.
+# Install the release jobs' Python tools.
+release-python-tools:
+    @{{python}} -m pip install --quiet --disable-pip-version-check {{python-pins}}
+
+# The tools the release recipes reach that no lockfile pins, at the versions the
+# release workflows install, into `.tools`: release-plz and cargo-cyclonedx, and
+# a Python environment with `release-python-tools`. The release journeys
+# (tests/release) put `.tools/bin` and `.tools/release-venv/bin` first on PATH.
+# One already on PATH that reports exactly the pin — what ci.yml's
+# taiki-e/install-action step unpacks from the tool's checksummed release
+# archive — is copied in rather than compiled again: compiling release-plz was
+# most of what test-linux waited on before these journeys could start. Any
+# other version on PATH is passed over and the pin compiled.
+# Provision the release recipes' tools into .tools.
+release-tools:
+    @[ "$(.tools/bin/release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
+      || { [ "$(release-plz --version 2>/dev/null)" = "release-plz {{release-plz-version}}" ] \
+           && mkdir -p .tools/bin && cp "$(command -v release-plz)" .tools/bin/release-plz; } \
+      || cargo install release-plz --version {{release-plz-version}} --locked --root .tools --quiet \
+      || { echo "cannot install release-plz {{release-plz-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
+    @[ "$(.tools/bin/cargo-cyclonedx cyclonedx --version 2>/dev/null | cut -d' ' -f2)" = "{{cyclonedx-version}}" ] \
+      || { [ "$(cargo-cyclonedx cyclonedx --version 2>/dev/null | cut -d' ' -f2)" = "{{cyclonedx-version}}" ] \
+           && mkdir -p .tools/bin && cp "$(command -v cargo-cyclonedx)" .tools/bin/cargo-cyclonedx; } \
+      || cargo install cargo-cyclonedx --version {{cyclonedx-version}} --locked --root .tools --quiet \
+      || { echo "cannot install cargo-cyclonedx {{cyclonedx-version}} into .tools — fix the cargo error above, then re-run" >&2; exit 1; }
+    @just _release-venv
+
+# The release journeys' Python environment, rebuilt from nothing whenever any
+# pin differs from the ones its stamp records, so a changed pin never leaves an
+# old tool installed beside it. It installs with no index, from a wheelhouse in
+# `.tools` that is fetched from PyPI only when its own stamp names other pins:
+# rebuilding the environment is offline, which is what lets the journey in
+# tests/release/tools.test.mjs rebuild one inside the affected tier.
+_release-venv:
+    @[ "$(cat .tools/release-wheels/pins 2>/dev/null)" = "{{python-pins}}" ] \
+      || { { [ -x .tools/release-venv/bin/python ] || python3 -m venv .tools/release-venv; } \
+           && .tools/release-venv/bin/python -m pip download --quiet --disable-pip-version-check --dest .tools/release-wheels {{python-pins}} \
+           && echo "{{python-pins}}" > .tools/release-wheels/pins; } \
+      || { echo "cannot fetch {{python-pins}} into .tools/release-wheels — check that python3 has venv and PyPI is reachable" >&2; exit 1; }
+    @[ "$(cat .tools/release-venv/pins 2>/dev/null)" = "{{python-pins}}" ] \
+      || { rm -rf .tools/release-venv && python3 -m venv .tools/release-venv \
+           && .tools/release-venv/bin/python -m pip install --quiet --disable-pip-version-check --no-index --find-links .tools/release-wheels {{python-pins}} \
+           && echo "{{python-pins}}" > .tools/release-venv/pins; } \
+      || { echo "cannot install {{python-pins}} into .tools/release-venv from .tools/release-wheels — delete .tools/release-wheels/pins and re-run to fetch them again" >&2; exit 1; }
 
 # Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
 # the frontend's components, and the browser journeys — and the coverage floor

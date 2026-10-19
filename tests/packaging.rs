@@ -248,20 +248,19 @@ fn the_launcher_and_the_journeys_carry_exactly_the_stops_the_server_handles() {
 
 #[test]
 fn every_release_target_has_a_platform_package_on_both_sides() {
-    let workflow = read(".github/workflows/release.yml");
+    let targets = read("scripts/release.mjs");
     let build = read("scripts/npm-build.mjs");
     let launcher = read(&format!("npm/{WRAPPER}/bin/{COMMAND}.js"));
     let manifest = read("npm/onepipeline-api-cli/package.json");
     for (target, package) in [
         ("x86_64-unknown-linux-gnu", "onepipeline-api-cli-linux-x64"),
-        (
-            "aarch64-unknown-linux-gnu",
-            "onepipeline-api-cli-linux-arm64",
-        ),
         ("aarch64-apple-darwin", "onepipeline-api-cli-darwin-arm64"),
         ("x86_64-pc-windows-msvc", "onepipeline-api-cli-win32-x64"),
     ] {
-        assert!(workflow.contains(target), "release.yml builds no {target}");
+        assert!(
+            targets.contains(&format!("\"{target}\": {{")),
+            "scripts/release.mjs releases no {target}"
+        );
         assert!(build.contains(target), "npm-build.mjs maps no {target}");
         assert!(
             launcher.contains(package),
@@ -910,6 +909,102 @@ fn the_launcher_refuses_intel_macos_rather_than_looking_for_a_package_no_release
     );
 }
 
+/// The committed launcher, installed into a scratch `node_modules` beside one
+/// platform package per release target, each carrying a stand-in binary that
+/// prints which package it came from. Run as if node reported `platform`/`arch`,
+/// what it prints is which package the launcher resolved and executed.
+#[cfg(unix)]
+fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = tempfile::tempdir().expect("temp dir");
+    let modules = scratch.path().join("node_modules");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read(&format!("npm/{WRAPPER}/package.json"))).expect("manifest");
+    for package in manifest["optionalDependencies"]
+        .as_object()
+        .expect("optional dependencies")
+        .keys()
+    {
+        let bin = modules.join(package).join("bin");
+        fs::create_dir_all(&bin).expect("platform package");
+        fs::write(
+            modules.join(package).join("package.json"),
+            format!("{{\"name\":\"{package}\",\"version\":\"0.0.0\"}}"),
+        )
+        .expect("platform manifest");
+        for name in [COMMAND.to_owned(), format!("{COMMAND}.exe")] {
+            let path = bin.join(name);
+            fs::write(
+                &path,
+                format!("#!/bin/sh\necho \"resolved {package} $*\"\n"),
+            )
+            .expect("stand-in binary");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("executable");
+        }
+    }
+    let launcher = modules.join(WRAPPER).join("bin");
+    fs::create_dir_all(&launcher).expect("launcher package");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("npm/{WRAPPER}/bin/{COMMAND}.js")),
+        launcher.join(format!("{COMMAND}.js")),
+    )
+    .expect("copy the committed launcher");
+    let preload = scratch.path().join("host.cjs");
+    fs::write(
+        &preload,
+        format!(
+            "Object.defineProperty(process, 'platform', {{ value: '{platform}' }});\n\
+             Object.defineProperty(process, 'arch', {{ value: '{arch}' }});\n"
+        ),
+    )
+    .expect("write preload");
+    std::process::Command::new("node")
+        .arg("--require")
+        .arg(&preload)
+        .arg(launcher.join(format!("{COMMAND}.js")))
+        .arg("--version")
+        .output()
+        .expect("node is on PATH")
+}
+
+/// arm64 Linux is no longer released, so the launcher refuses it the way it
+/// refuses Intel macOS — naming the one install left there, cargo — and still
+/// resolves and runs the platform package of every target that is released.
+#[cfg(unix)]
+#[test]
+fn the_launcher_refuses_arm64_linux_naming_cargo_and_resolves_every_released_platform() {
+    let arm = launcher_resolving_on("linux", "arm64");
+    assert_eq!(arm.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&arm.stderr);
+    assert!(
+        stderr.contains("arm64 Linux is no longer supported"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("cargo install onepipeline-ui --locked"),
+        "{stderr}"
+    );
+    // No wheel ships for it either, so pip is not offered as a way out.
+    assert!(!stderr.contains("pip install"), "{stderr}");
+    assert!(!stderr.contains("resolved"), "{stderr}");
+
+    for (platform, arch) in [("linux", "x64"), ("darwin", "arm64"), ("win32", "x64")] {
+        let run = launcher_resolving_on(platform, arch);
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert_eq!(
+            run.status.code(),
+            Some(0),
+            "{platform}-{arch}: {}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(
+            stdout.trim(),
+            format!("resolved onepipeline-api-cli-{platform}-{arch} --version"),
+            "{platform}-{arch}"
+        );
+    }
+}
+
 // A repository that declares no release target releases nothing as far as the
 // mechanism sequencing work across repositories is concerned: a dependency
 // landing here would earn a consumer no hold at all, silently. So
@@ -1017,104 +1112,97 @@ fn npm_platform_package(build: &str, target: &str) -> String {
         .replace("${facts.arch}", fact("arch"))
 }
 
+/// What `scripts/release.mjs` plans for one release job — `just release-<job>
+/// plan` — which is the list every job's build stages and its uploads publish.
+fn release_plan(job: &str) -> serde_json::Value {
+    let output = std::process::Command::new("node")
+        .arg("scripts/release.mjs")
+        .arg(job)
+        .arg("plan")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("node is on PATH");
+    assert!(
+        output.status.success(),
+        "`release.mjs {job} plan` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("a plan is JSON")
+}
+
 /// Every name this repository publishes, registry-qualified, derived from the
 /// release configuration.
 ///
-/// Nothing here is a transcribed list. Each publishing job in `release.yml`
-/// names the registry, and the name is read from whatever that job publishes
-/// under: `Cargo.toml` for the crate, `pyproject.toml` for the wheels, and for
-/// npm the committed manifest of each package `scripts/npm-build.mjs` assembles
-/// plus the per-platform names it generates over the release matrix. A publish
-/// job this cannot read is a panic rather than a silent omission — a new
-/// artifact has to fail here, not pass unnoticed.
+/// Nothing here is a transcribed list. Each job in `release.yml` is one release
+/// recipe, and the recipe's own plan says what it publishes to which registry;
+/// a planned package counts only when the job really runs that registry's
+/// upload step, and every name is held to what it publishes under:
+/// `Cargo.toml` for the crate, `pyproject.toml` for the wheels, and for npm the
+/// committed manifest of each package `scripts/npm-build.mjs` assembles plus
+/// the per-platform names it generates for each target. A job this cannot read
+/// is a panic rather than a silent omission — a new artifact has to fail here,
+/// not pass unnoticed.
 fn published_names() -> BTreeSet<String> {
     let workflow = read(".github/workflows/release.yml");
+    let build = read("scripts/npm-build.mjs");
+    let committed_npm: BTreeSet<String> = ["launcher", "ui"]
+        .iter()
+        .map(|mode| {
+            let manifest: serde_json::Value = serde_json::from_str(&read(&format!(
+                "npm/{}/package.json",
+                npm_build_source_dir(&build, mode)
+            )))
+            .expect("parse a committed npm manifest");
+            manifest["name"]
+                .as_str()
+                .expect("a package name")
+                .to_owned()
+        })
+        .collect();
     let mut published = BTreeSet::new();
     for job in workflow_jobs(&workflow) {
-        let Some(registry) = job.strip_prefix("publish-") else {
-            continue;
+        let recipe = match job.as_str() {
+            "publish" => "publish",
+            other => other.strip_prefix("build-").unwrap_or_else(|| {
+                panic!(
+                    "release.yml has a `{other}` job whose artifacts this gate cannot name. \
+                     Teach `published_names` what it publishes and declare it in \
+                     release-targets.toml — an artifact nobody declares earns a consumer no \
+                     hold on the release that carries it."
+                )
+            }),
         };
         let block = workflow_job(&workflow, &job);
-        match registry {
-            "crate" => {
-                assert!(
-                    block.contains("cargo publish"),
-                    "the publish-crate job no longer runs `cargo publish`, so what it \
-                     puts on crates.io is not what Cargo.toml names"
-                );
-                published.insert(format!(
-                    "crate:{}",
-                    manifest_name(&read("Cargo.toml"), "[package]")
-                ));
+        for artifact in release_plan(recipe)["artifacts"]
+            .as_array()
+            .expect("a plan lists artifacts")
+        {
+            let registry = artifact["registry"].as_str().expect("a registry");
+            // A Release asset is a file on the tag, not a name a consumer waits on.
+            if registry == "github" {
+                continue;
             }
-            "pypi" => {
-                assert!(
-                    block.contains("pypa/gh-action-pypi-publish"),
-                    "the publish-pypi job no longer uploads the maturin wheels, so what \
-                     it puts on PyPI is not what pyproject.toml names"
-                );
-                published.insert(format!(
-                    "pypi:{}",
-                    manifest_name(&read("pyproject.toml"), "[project]")
-                ));
-            }
-            "npm" => {
-                assert!(
-                    block.contains("scripts/publish-npm.sh"),
-                    "the publish-npm job no longer publishes through scripts/publish-npm.sh"
-                );
-                let build = read("scripts/npm-build.mjs");
-                // Read from the whole workflow, not this job: the per-platform
-                // packages are assembled on the native runners in `build-npm`
-                // and published from the tarballs it hands over, so a mode this
-                // job never types is still a package this job publishes.
-                let modes = names_after(&workflow, "node scripts/npm-build.mjs ", |character| {
-                    character.is_ascii_alphabetic()
-                });
-                assert!(
-                    !modes.is_empty(),
-                    "release.yml assembles no npm package at all, yet publishes to npm"
-                );
-                for mode in modes {
-                    if mode == "platform" {
-                        let mut targets = names_after(
-                            &workflow_job(&workflow, "build-npm"),
-                            "- target: ",
-                            |character| !character.is_whitespace(),
-                        );
-                        assert!(
-                            !targets.is_empty(),
-                            "the build-npm job builds no target, so no platform package \
-                             is published for the launcher to resolve"
-                        );
-                        let darwin = workflow_job(&workflow, "darwin");
-                        assert!(
-                            darwin.contains("aarch64-apple-darwin"),
-                            "Darwin job omits aarch64-apple-darwin"
-                        );
-                        targets.insert("aarch64-apple-darwin".to_owned());
-                        for target in targets {
-                            published
-                                .insert(format!("npm:{}", npm_platform_package(&build, &target)));
-                        }
-                    } else {
-                        let directory = npm_build_source_dir(&build, &mode);
-                        let manifest: serde_json::Value =
-                            serde_json::from_str(&read(&format!("npm/{directory}/package.json")))
-                                .expect("parse a committed npm manifest");
-                        published.insert(format!(
-                            "npm:{}",
-                            manifest["name"].as_str().expect("a package name")
-                        ));
-                    }
+            assert!(
+                block.contains(&format!("just release-{recipe} upload {registry}")),
+                "release.yml's `{job}` job plans {} for {registry} and never runs its upload",
+                artifact["file"]
+            );
+            let package = artifact["package"].as_str().expect("a package name");
+            match registry {
+                "crate" => assert_eq!(package, manifest_name(&read("Cargo.toml"), "[package]")),
+                "pypi" => assert_eq!(package, manifest_name(&read("pyproject.toml"), "[project]")),
+                "npm" => match artifact["target"].as_str() {
+                    Some(target) => assert_eq!(package, npm_platform_package(&build, target)),
+                    None => assert!(
+                        committed_npm.contains(package),
+                        "{package} is planned for npm and is no committed manifest's name"
+                    ),
+                },
+                other => {
+                    panic!("release.mjs plans an upload to `{other}`, which this gate cannot name")
                 }
             }
-            other => panic!(
-                "release.yml has a `publish-{other}` job whose artifact this gate cannot \
-                 name. Teach `published_names` what it publishes and declare it in \
-                 release-targets.toml — an artifact nobody declares earns a consumer no \
-                 hold on the release that carries it."
-            ),
+            published.insert(format!("{registry}:{package}"));
         }
     }
     assert!(
@@ -1217,7 +1305,7 @@ fn every_name_this_repository_publishes_is_accounted_for_by_exactly_one_release_
 /// The undeclared direction, driven: a name the release configuration publishes
 /// and the declaration does not account for.
 ///
-/// A new per-platform package added to the `build-npm` matrix is exactly how
+/// A new release target added to scripts/release.mjs is exactly how
 /// this arrives in practice — the workflow publishes it, nothing declares it,
 /// and a consumer holding on the launcher that resolves it is told there is
 /// nothing to wait for.
@@ -1479,8 +1567,12 @@ fn the_declaration_names_a_probe_and_manifests_this_repository_carries() {
         carried(&probe),
         "{FILE} names `{probe}`, which this repository does not carry"
     );
+    // The release's `publish` job asks it, of the registries it just published
+    // to, in `just release-publish verify`.
     assert!(
-        read(".github/workflows/published-smoke.yml").contains(&probe),
+        read("scripts/release.mjs").contains(&probe)
+            && workflow_job(&read(".github/workflows/release.yml"), "publish")
+                .contains("just release-publish verify"),
         "nothing asks a live registry what `{probe}` answers, so the version it \
          serves and the emptiness of a name it has never released are verified \
          nowhere — the gate is offline and cannot verify either"
@@ -1501,104 +1593,6 @@ fn the_declaration_names_a_probe_and_manifests_this_repository_carries() {
             manifest = manifest.as_str()
         );
     }
-}
-
-/// The one alarm on a published-smoke failure is wired to a job that can
-/// actually run it.
-///
-/// `tests/e2e/report_workflow_failure.rs` holds what the reporter *does*; what
-/// it cannot hold is whether the workflow reaches it, and there are exactly two
-/// ways that goes wrong silently. A job that never checks the repository out has
-/// no `scripts/` in its workspace, so the reporter is missing on the one run it
-/// exists for — that is the defect this was copied from. And a job that does not
-/// declare `issues: write` gets a token that cannot open the issue, because a
-/// workflow-run leg is given no more than the workflow declares. Neither shows
-/// up until a smoke has already failed and told nobody, which is the whole
-/// failure this repository is trying to stop having.
-#[test]
-fn the_published_smoke_can_reach_and_run_its_own_failure_reporter() {
-    const REPORTER: &str = "scripts/report-workflow-failure.sh";
-    let workflow = read(".github/workflows/published-smoke.yml");
-
-    assert!(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(REPORTER)
-            .is_file(),
-        "the published smoke reports its failures with `{REPORTER}`, which this \
-         repository does not carry"
-    );
-
-    let report = workflow
-        .split_once("\n  report:\n")
-        .map(|(_, rest)| rest)
-        .expect(
-            "published-smoke.yml declares no `report` job, so a failure of it is announced nowhere",
-        );
-
-    assert!(
-        report.contains("actions/checkout@"),
-        "the `report` job does not check this repository out, so `{REPORTER}` is \
-         not in its workspace and the failure it exists to announce is announced \
-         nowhere"
-    );
-    assert!(
-        report.contains(REPORTER),
-        "the `report` job does not run `{REPORTER}`"
-    );
-    assert!(
-        report.contains("issues: write"),
-        "the `report` job does not ask for `issues: write`, so its token cannot \
-         open the issue it exists to open"
-    );
-
-    // The title is how the reporter finds the thread it already opened, so it
-    // has to be the same text on every run. One `${{ … }}` in it — a run number,
-    // a ref, the release it followed — and every failure opens its own issue,
-    // which is the pile this was built to avoid.
-    let title = report
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("TITLE:"))
-        .expect("the `report` job passes the reporter no TITLE, so it has nothing to file under");
-    assert!(
-        !title.contains("${{"),
-        "the `report` job's title is computed per run (`{}`), so a second failure \
-         would not find the issue the first one opened",
-        title.trim()
-    );
-}
-
-/// The smoke is triggered by a workflow it names in prose, so the name has to
-/// still be that workflow's.
-///
-/// `workflow_run` matches on a workflow's *display name*, and GitHub says
-/// nothing when it matches none: renaming `release.yml` would leave the smoke
-/// silently never running again, which is indistinguishable from a smoke that
-/// keeps passing. The name is not derivable at trigger time — a workflow cannot
-/// reference another workflow's `name:` — so this is the drift gate that keeps
-/// the restatement honest.
-#[test]
-fn the_published_smoke_is_triggered_by_the_workflow_that_actually_releases() {
-    let released_by = read(".github/workflows/release.yml")
-        .lines()
-        .find_map(|line| line.strip_prefix("name:"))
-        .map(|name| name.trim().to_owned())
-        .expect("release.yml declares no name for `workflow_run` to match on");
-
-    let workflow = read(".github/workflows/published-smoke.yml");
-    let (trigger, _) = workflow
-        .split_once("\n\njobs:\n")
-        .expect("published-smoke.yml declares no jobs");
-    let watched = trigger
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("workflows:"))
-        .expect("published-smoke.yml does not run on another workflow's completion");
-
-    assert!(
-        watched.contains(&format!("\"{released_by}\"")),
-        "the published smoke waits on {watched}, and the workflow that publishes \
-         this repository is named `{released_by}` — a `workflow_run` that matches \
-         nothing never runs and never says so"
-    );
 }
 
 /// Every workspace sibling is depended on through bun's `workspace:` protocol.
@@ -1828,62 +1822,65 @@ fn required_feature() -> String {
 /// Every release job that compiles the binary builds the view first and
 /// compiles with the feature that refuses to build without it.
 ///
-/// Each job is read for what compiles in it rather than looked up by name, so a
-/// job added to the workflow that compiles the binary some new way fails here
-/// until it is taught, instead of shipping a binary whose `--ui` refuses. The
-/// order matters as much as the presence: a view built after the compile is a
-/// view the compile did not see.
+/// Each job compiles through its recipe's `build` phase, so the job is read for
+/// the order — a view built after the compile is a view the compile did not
+/// see — and the scripts the phase runs are read for the feature, which every
+/// way they compile has to turn on. A job added that compiles some other way
+/// fails here until it is taught.
 #[test]
 fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
     let workflow = read(".github/workflows/release.yml");
     let feature = required_feature();
-    // How each way of compiling the binary is asked to turn the feature on.
-    let compiles: &[(&str, &str)] = &[
-        ("taiki-e/upload-rust-binary-action", "features: {feature}"),
-        ("PyO3/maturin-action", "--features {feature}"),
-        ("cargo build", "--features {feature}"),
-        ("scripts/release-darwin.sh", "scripts/release-darwin.sh"),
-    ];
     let mut compiling = Vec::new();
     for job in workflow_jobs(&workflow) {
         let block = workflow_job(&workflow, &job);
-        // `cargo publish` compiles too — to verify the crate — but what it
-        // uploads is source, and a crates.io consumer builds their own.
-        let Some((marker, spelled)) = compiles
-            .iter()
-            .find(|(marker, _)| block.contains(marker) && !block.contains("cargo publish"))
-        else {
+        for marker in ["cargo build", "maturin-action", "upload-rust-binary-action"] {
+            assert!(
+                !block.contains(marker),
+                "release.yml's `{job}` job compiles with {marker} outside its recipe"
+            );
+        }
+        let Some(os) = job.strip_prefix("build-") else {
             continue;
         };
-        if *marker == "scripts/release-darwin.sh" {
-            assert!(read("scripts/release-darwin.sh").contains(&format!("--features {feature}")));
-        }
         compiling.push(job.clone());
+        let compiled = block
+            .find(&format!("just release-{os} build"))
+            .unwrap_or_else(|| panic!("release.yml's `{job}` job never builds its targets"));
         let built = block.find("just build").unwrap_or_else(|| {
             panic!(
                 "release.yml's `{job}` job compiles the binary and never builds the browser view, \
                  so what it ships refuses `--ui`"
             )
         });
-        let compiled = block.find(marker).expect("the marker was found above");
         assert!(
             built < compiled,
             "release.yml's `{job}` job builds the browser view after compiling the binary, so \
              the binary it ships embeds nothing"
         );
-        let spelled = spelled.replace("{feature}", &feature);
-        assert!(
-            block.contains(&spelled),
-            "release.yml's `{job}` job compiles the binary without `{spelled}`, so a release \
-             that stopped building the view would ship an `--ui` that refuses rather than fail"
-        );
     }
     compiling.sort();
     assert_eq!(
         compiling,
-        ["build-npm", "build-wheels", "darwin", "upload"],
+        ["build-linux", "build-macos", "build-windows"],
         "the set of release jobs that compile the binary has changed; every prebuilt \
          distribution has to embed the view"
+    );
+    // The two ways the build phase compiles: maturin on the runner, and maturin
+    // inside the manylinux image.
+    let spelled = format!("--features {feature}");
+    // Whitespace-insensitive: a formatter may put each argument on its own line.
+    let phase: String = read("scripts/release.mjs")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        phase.contains(&format!("\"--features\", \"{feature}\"")),
+        "scripts/release.mjs compiles without `{spelled}`"
+    );
+    assert!(
+        read("scripts/build-linux-wheel.sh").contains(&spelled),
+        "scripts/build-linux-wheel.sh compiles without `{spelled}`"
     );
 }
 
@@ -1957,229 +1954,6 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
     assert!(refusal.contains("bundled-ui"), "{refusal}");
     assert!(refusal.contains("just build"), "{refusal}");
     assert!(refusal.contains("ACTION:"), "{refusal}");
-}
-
-/// The staged release this journey reads: the `onepipeline-ui:release-staging`
-/// Nx target's output when the tier hands it over, copied so the journey's edits
-/// never reach a cached output; otherwise staged here by the same script, so a
-/// bare `cargo nextest` still proves the whole path. Answers the dry run's stdout
-/// beside the directory.
-#[cfg(target_os = "linux")]
-fn staged_release(scratch: &Path) -> String {
-    if let Some(staged) = std::env::var_os("ONEPIPELINE_UI_RELEASE_STAGING") {
-        let staged = Path::new(env!("CARGO_MANIFEST_DIR")).join(staged);
-        let stdout = fs::read_to_string(staged.join("dry-run.stdout")).unwrap_or_else(|error| {
-            panic!(
-                "{} holds no dry run's stdout ({error}); run 'just nx run onepipeline-ui:release-staging'",
-                staged.display()
-            )
-        });
-        // The producer's virtualenv links the host interpreter and nothing below
-        // reads it, so it stays where it was built.
-        let copied = std::process::Command::new("bash")
-            .arg("-c")
-            .arg("cd \"$1\" && tar --exclude=./producer -cf - . | tar -xf - -C \"$2\"")
-            .arg("copy-staging")
-            .arg(&staged)
-            .arg(scratch)
-            .output()
-            .expect("copy the staged release");
-        assert!(
-            copied.status.success(),
-            "copying {} failed: {}",
-            staged.display(),
-            String::from_utf8_lossy(&copied.stderr)
-        );
-        return stdout;
-    }
-    let output = std::process::Command::new("bash")
-        .arg("scripts/release-native-dry-run.sh")
-        .arg(scratch)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .expect("run production packaging dry run");
-    assert!(
-        output.status.success(),
-        "production dry run failed:\n{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-/// A scratch tree carrying the real justfile, with the release dry run the
-/// `release-staging` recipe drives standing in as a script that prints a line
-/// and exits with `status`. Answers the tree and what `just _crate-release-staging`
-/// did there.
-#[cfg(unix)]
-fn stage_with_a_dry_run_exiting(status: i32) -> (tempfile::TempDir, std::process::Output) {
-    let tree = tempfile::tempdir().expect("temp dir");
-    fs::create_dir_all(tree.path().join("scripts")).expect("the copy's scripts directory");
-    // The justfile's variables read the manifests and the lock when it loads.
-    for name in ["justfile", "Cargo.toml", "Cargo.lock"] {
-        fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join(name),
-            tree.path().join(name),
-        )
-        .unwrap_or_else(|error| panic!("copy {name} into the scratch tree: {error}"));
-    }
-    // llmlint: ignore[e2e_not_mocked] the subject is the recipe's handling of its producer's exit, and the real producer compiles a release build; standing in for that script is what lets a journey choose the exit the recipe must carry.
-    fs::write(
-        tree.path().join("scripts/release-native-dry-run.sh"),
-        format!("printf 'staged into %s\\n' \"$1\"\nps -o nice= -p $$ > niceness\nexit {status}\n"),
-    )
-    .expect("write the stand-in dry run");
-    let output = std::process::Command::new("just")
-        .arg("_crate-release-staging")
-        .current_dir(tree.path())
-        .output()
-        .expect("just is on PATH");
-    (tree, output)
-}
-
-/// The cached Nx target's output is what the release-staging journey reads, so
-/// a dry run that succeeded leaves its stdout there and on the log.
-#[cfg(unix)]
-#[test]
-fn the_release_staging_recipe_keeps_the_dry_runs_stdout() {
-    let (tree, output) = stage_with_a_dry_run_exiting(0);
-    let log = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "the recipe failed over a dry run that succeeded:\n{log}\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let kept = fs::read_to_string(tree.path().join("target/release-staging/dry-run.stdout"))
-        .expect("the recipe left the dry run's stdout");
-    assert_eq!(kept, "staged into target/release-staging\n");
-    assert!(log.contains("staged into target/release-staging"), "{log}");
-}
-
-/// The dry run compiles a release build, which `ci-test-linux` runs beside the
-/// test tiers; it runs below the caller's priority so the tiers keep their CPU.
-#[cfg(unix)]
-#[test]
-fn the_release_staging_dry_run_runs_below_its_callers_priority() {
-    let (tree, output) = stage_with_a_dry_run_exiting(0);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let niceness = |text: &str| text.trim().parse::<i32>().expect("a niceness");
-    // Read with `ps`, which Linux and macOS both answer; macOS's `nice` prints
-    // nothing when given no command.
-    let ours = niceness(&String::from_utf8_lossy(
-        &std::process::Command::new("ps")
-            .args(["-o", "nice=", "-p", &std::process::id().to_string()])
-            .output()
-            .expect("ps is on PATH")
-            .stdout,
-    ));
-    let staged = niceness(
-        &fs::read_to_string(tree.path().join("niceness")).expect("the dry run's niceness"),
-    );
-    assert_eq!(
-        staged,
-        (ours + 10).min(19),
-        "the dry run ran at niceness {staged}"
-    );
-}
-
-/// A dry run that failed fails the recipe with its own status, through the `tee`
-/// that copies its output: a target that exited 0 here would be cached by Nx as
-/// a staged release, and the journey would read a directory nothing staged.
-#[cfg(unix)]
-#[test]
-fn a_release_staging_dry_run_that_fails_fails_the_recipe() {
-    let (_tree, output) = stage_with_a_dry_run_exiting(3);
-    assert_eq!(
-        output.status.code(),
-        Some(3),
-        "the recipe did not carry the dry run's exit:\n{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-/// Linux can rehearse the real producer and installers without pretending to
-/// execute Darwin bytes. The release job drives these same staging commands
-/// with maturin's native/cross-built Darwin wheels.
-#[cfg(target_os = "linux")]
-#[test]
-fn the_release_staging_path_builds_installs_and_serves_the_native_artifact() {
-    let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")
-        .map_or_else(std::env::temp_dir, PathBuf::from);
-    let scratch = tempfile::tempdir_in(root).expect("release staging directory");
-    let stdout = staged_release(scratch.path());
-    assert!(stdout.contains("embedded view passed"), "{stdout}");
-    let record_path = fs::read_dir(scratch.path())
-        .expect("staging entries")
-        .filter_map(Result::ok)
-        .map(|entry| entry.path().join("reuse.json"))
-        .find(|path| path.is_file())
-        .expect("native reuse record");
-    let record: serde_json::Value =
-        serde_json::from_slice(&fs::read(record_path).expect("record bytes")).expect("reuse JSON");
-    let target = record["target"].as_str().expect("record target");
-    let manifest_path = fs::read_dir(scratch.path().join("npm"))
-        .expect("platform packages")
-        .filter_map(Result::ok)
-        .map(|entry| entry.path().join("package.json"))
-        .find(|path| path.is_file())
-        .expect("native platform manifest");
-    let original = fs::read(&manifest_path).expect("manifest bytes");
-    let mut manifest: serde_json::Value =
-        serde_json::from_slice(&original).expect("platform metadata");
-    manifest["version"] = serde_json::json!("9.9.9");
-    fs::write(
-        &manifest_path,
-        serde_json::to_vec(&manifest).expect("encode metadata"),
-    )
-    .expect("write mismatched metadata");
-    let verify = |provider: Option<&Path>| {
-        let mut command = std::process::Command::new("node");
-        command
-            .arg("scripts/verify-staged-release.mjs")
-            .arg(scratch.path())
-            .arg(target)
-            .arg(env!("CARGO_PKG_VERSION"))
-            .current_dir(env!("CARGO_MANIFEST_DIR"));
-        if let Some(provider) = provider {
-            let mut paths = vec![provider.to_path_buf()];
-            paths.extend(std::env::split_paths(
-                &std::env::var_os("PATH").expect("PATH"),
-            ));
-            command.env("PATH", std::env::join_paths(paths).expect("provider PATH"));
-        }
-        command.output().expect("verify actual staged products")
-    };
-    let mismatch = verify(None);
-    assert!(!mismatch.status.success());
-    let message = String::from_utf8_lossy(&mismatch.stderr);
-    assert!(
-        message.contains("invalid staged npm platform metadata"),
-        "{message}"
-    );
-    assert!(message.contains("ACTION:"), "{message}");
-    fs::write(&manifest_path, original).expect("restore platform manifest");
-    let provider = scratch.path().join("npm-provider");
-    fs::create_dir(&provider).expect("provider directory");
-    let npm = provider.join("npm");
-    fs::write(&npm, "#!/usr/bin/env bash\nprintf '[]\n'\n").expect("malformed pack provider");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(npm, fs::Permissions::from_mode(0o755)).expect("provider executable");
-    }
-    let malformed = verify(Some(&provider));
-    assert!(!malformed.status.success());
-    let message = String::from_utf8_lossy(&malformed.stderr);
-    assert!(
-        message.contains("npm pack returned invalid launcher metadata"),
-        "{message}"
-    );
-    assert!(message.contains("ACTION:"), "{message}");
 }
 
 #[test]
