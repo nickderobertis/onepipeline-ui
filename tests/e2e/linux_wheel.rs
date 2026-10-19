@@ -553,6 +553,51 @@ fn docker_that_cannot_run_the_image_exits_one_naming_it() {
     );
 }
 
+/// `ci-test-linux` runs `wheel-smoke` beside the release journeys, and both
+/// build this target into the one `target/wheel-<target>`: two containers
+/// compiling there at once replaced the binary maturin was reading.
+#[test]
+fn two_builds_of_one_target_take_turns_in_its_build_directory() {
+    let (_scratch, dir) = scratch("concurrent");
+    let spans = dir.join("spans.log");
+    executable(
+        &dir.join("bin/docker"),
+        format!(
+            "#!/usr/bin/env bash\necho start >> '{spans}'\nsleep 2\necho end >> '{spans}'\n",
+            spans = spans.display()
+        ),
+    );
+    let path = path_with_double(&dir);
+    let rel = out_arg(&dir);
+    let builds: Vec<_> = ["a", "b"]
+        .map(|name| {
+            Command::new("just")
+                .current_dir(repo_root())
+                .args(["wheel-linux", "x86_64-unknown-linux-gnu", &format!("{rel}-{name}")])
+                .env("PATH", &path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("just runs")
+        })
+        .into_iter()
+        .map(|child| logged(child.wait_with_output().expect("the build exits"), &dir))
+        .collect();
+    for output in &builds {
+        assert!(output.status.success(), "each build succeeds");
+    }
+    assert_eq!(
+        fs::read_to_string(&spans).expect("docker ran").lines().collect::<Vec<_>>(),
+        ["start", "end", "start", "end"],
+        "the second container starts only once the first has exited"
+    );
+    assert!(
+        builds.iter().any(|output| String::from_utf8_lossy(&output.stderr)
+            .contains("waiting for another build of x86_64-unknown-linux-gnu")),
+        "the build that waited says what it is waiting for"
+    );
+}
+
 #[test]
 fn a_host_without_docker_is_told_to_install_it() {
     let (_scratch, dir) = scratch("no-docker");
