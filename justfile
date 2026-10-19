@@ -201,14 +201,24 @@ ci-test-macos *args:
 
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
-# is. Warnings denied for the reason release.yml denies them.
+# is. Built with the dev profile and no flags of its own, so it installs the
+# `target/debug` units `dag-ui:build-api-server` already compiled instead of
+# compiling the whole graph again under the release profile: that compile alone
+# was 17 minutes cold on Windows, and it is what held the test jobs past their
+# 30-minute cap. The release profile is proven where a release is built — on Linux
+# by `wheel-smoke` and the release rehearsal in `tests/release`, and on every
+# platform by release.yml's build jobs, which install and run their files before
+# anything publishes. Warnings in this compile are `_crate-lint`'s to deny: its
+# `clippy --all-targets -D warnings` is this same dev-profile compile, run over
+# the same projects, and a `RUSTFLAGS` here would re-key every unit in
+# `target/debug` the tiers share.
 # The bin directory is resolved by `cd`, so a root cargo did not write is named
 # rather than read as a command missing from PATH, and the binary is handed to
 # the smoke test by its path: the Windows leg's PATH lookup did not find it there.
-# Compiled at low priority: see `packaging-priority`.
+# Compiled, when it has to be, at low priority: see `packaging-priority`.
 # Install this revision the documented way and smoke-test the installed binary.
 _crate-install-smoke:
-    @RUSTFLAGS="-D warnings" {{packaging-priority}} cargo install --path . --locked --quiet --root target/install-smoke
+    @{{packaging-priority}} cargo install --path . --locked --debug --quiet --root target/install-smoke
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
       PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \
@@ -229,10 +239,10 @@ _crate-wheel-smoke:
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "onepipeline-api-cli wheel on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
 
-# The packaging targets' release builds are long batch compiles that `ci-test-linux`
-# runs beside the test tiers, and the cost journeys count a subscriber's poll
-# ticks, which a starved server misses: at a lower priority those compiles take
-# only the CPU the tiers leave, and every core once the tiers are done. `nice`
+# An install whose units nothing has compiled yet is a long batch compile that
+# `ci-test-linux` runs beside the test tiers, and the cost journeys count a
+# subscriber's poll ticks, which a starved server misses: at a lower priority it
+# takes only the CPU the tiers leave, and every core once they are done. `nice`
 # where the host has it; where it does not, the command runs as it is.
 packaging-priority := `command -v nice >/dev/null 2>&1 && echo "nice -n 10" || true`
 
