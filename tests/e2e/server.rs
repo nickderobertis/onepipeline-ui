@@ -6,6 +6,7 @@
 //! compiled binary over a directory the SDK itself writes and reads the bytes
 //! that come back.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 // The journeys that write a config chain and a harness stand-in are `cfg(unix)`
@@ -18731,3 +18732,189 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     reads
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The engine's stacking, rework, continuation, review-loop and readjustment
+/// records, each served through every read route rather than refused or dropped.
+///
+/// The corpus is the run `onepipeline` 0.78 journals for a stacked change set
+/// taken over from another host: two nodes continued from the store, a stack
+/// base assembled, review comments read and surfaced, one node reworked into a
+/// replacement and its dependent restacked, a retitle the host would not confirm
+/// and its remedy, comments answered, declined and left undrafted, and the
+/// readjustment once the root landed — a node absorbed, a draft retargeted and
+/// reopened, a stack landed out of order, a change closed, checks read, a read
+/// that failed — until a later host superseded the driver. Every pipeline record
+/// in it is held to the schema the engine publishes for its kind once the server
+/// stops, so none of it is a shape the engine never writes.
+#[test]
+fn a_reworked_and_readjusted_stack_is_served_whole_through_every_read_route() {
+    let corpus = fixture_run::review_loop();
+    let run_id = corpus["run_id"].as_str().expect("the corpus's run");
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_loop(root);
+    });
+    let run = format!("/api/v2/runs/{run_id}");
+
+    // The run: every node the record leaves standing, in the state and with the
+    // outcome its last settlement gave it — the rework's replacement in place of
+    // the node it replaced, still owed its check verdict after the readjustment,
+    // and the node whose change merged while its rework ran.
+    let detail = http::get(serving.address, &run);
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    let outcomes: BTreeMap<String, (String, String)> = detail["graph"]["node_results"]
+        .as_object()
+        .expect("the node results")
+        .iter()
+        .map(|(node, result)| {
+            let word = |key: &str| result[key].as_str().unwrap_or_default().to_owned();
+            (node.clone(), (word("status"), word("outcome")))
+        })
+        .collect();
+    let expected: BTreeMap<String, (String, String)> = [
+        ("api", "done", "change-review-draft"),
+        ("cli", "done", "change-review-draft"),
+        ("docs", "done", "change-review-draft"),
+        ("helper", "done", "change-review-draft"),
+        ("schema", "failed", "merged-during-rework"),
+        ("ui-rework-1", "done", "change-review-draft-unchecked"),
+    ]
+    .into_iter()
+    .map(|(node, status, outcome)| (node.to_owned(), (status.to_owned(), outcome.to_owned())))
+    .collect();
+    assert_eq!(outcomes, expected, "{}", detail["graph"]["node_results"]);
+    let planned: Vec<&str> = detail["graph"]["plan"]["tasks"]
+        .as_array()
+        .expect("the plan's tasks")
+        .iter()
+        .filter_map(|task| task["id"].as_str())
+        .collect();
+    assert!(planned.contains(&"ui-rework-1"), "{planned:?}");
+    assert!(
+        !planned.contains(&"ui"),
+        "the reworked node is replaced: {planned:?}"
+    );
+    for node in expected.keys().map(String::as_str).chain(["ui"]) {
+        assert!(
+            detail["node_details"][node].is_object(),
+            "no detail for {node}: {}",
+            detail["node_details"]
+        );
+    }
+    assert_eq!(detail["run"]["last_event"], json!("driver-superseded"));
+
+    // The results: the engine's own rendering of each of those records, the
+    // rework, the continuation and the readjustment among them.
+    let results = http::get(serving.address, &format!("{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let rendered = results.json()["rendered"]
+        .as_str()
+        .expect("the rendered results")
+        .to_owned();
+    for said in [
+        "2 nodes continued from run 'dag-ui-review-loop-earlier'",
+        "continued from the store on feature/cli",
+        "reworked — as ui-rework-1: review asked for the empty case",
+        "restacked onto ui-rework-1's branch feature/ui",
+        "failed (merged-during-rework)",
+        "done (change-review-draft-unchecked)",
+        "found merged on the host by a readjustment",
+        "merged into api's branch, and lands only with it",
+        "readjusted onto the root main from stack/ui after api landed or merged",
+        "check verdict outstanding until the next trigger reads it",
+    ] {
+        assert!(
+            rendered.contains(said),
+            "results do not say {said:?}:\n{rendered}"
+        );
+    }
+
+    // The events stream: the run is announced, folded from its whole record.
+    let mut stream = http::stream(
+        serving.address,
+        &format!("/api/v2/events?run_id={run_id}"),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    let snapshot = stream.next_frame().expect("a snapshot");
+    assert_eq!(snapshot.event, "snapshot");
+    let announced = snapshot.json();
+    let announced = announced["runs"]
+        .as_array()
+        .and_then(|runs| runs.iter().find(|listed| listed["run_id"] == json!(run_id)))
+        .cloned()
+        .unwrap_or_else(|| panic!("the run is not announced: {announced}"));
+    assert_eq!(announced["last_event"], json!("driver-superseded"));
+    assert_eq!(announced["node_counts"], json!({ "done": 5, "failed": 1 }));
+
+    // The timeline: every record the journal holds, at its own place and under
+    // its own kind, with each surface the engine raised served as raised.
+    let timeline = http::get(serving.address, &format!("{run}/timeline?scope=run"));
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    let mut served: BTreeMap<String, Value> = BTreeMap::new();
+    for span in timeline["spans"].as_array().expect("the spans") {
+        for event in span["events"].as_array().expect("a span's events") {
+            served.insert(
+                event["id"].as_str().expect("an event id").to_owned(),
+                event.clone(),
+            );
+        }
+    }
+    let records = corpus["records"].as_array().expect("the corpus's records");
+    assert_eq!(served.len(), records.len(), "{timeline}");
+    let mut surfaces = Vec::new();
+    for (index, record) in records.iter().enumerate() {
+        let event = served
+            .get(&format!("e{index}"))
+            .unwrap_or_else(|| panic!("record {index} ({record}) is not served"));
+        assert_eq!(event["kind"], record["kind"], "{event}");
+        if record["kind"] == json!("planner-surfaced") {
+            assert_eq!(
+                event["surface"]["kind"], record["payload"]["kind"],
+                "{event}"
+            );
+            surfaces.push(record["payload"]["kind"].as_str().expect("a surface kind"));
+        }
+    }
+    surfaces.sort_unstable();
+    surfaces.dedup();
+    assert_eq!(
+        surfaces,
+        [
+            "change-base-overridden",
+            "change-closed",
+            "readjust-pending",
+            "review-comment",
+            "review-reply-pending",
+            "stack-merged-out-of-order",
+        ]
+    );
+}
+
+/// The run a continued node names is the one it was settled on, on another
+/// host, and nothing this server holds: asking for it is refused as unknown
+/// rather than answered with the run that continued it.
+#[test]
+fn the_run_a_continued_node_came_from_is_not_one_this_host_serves() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_loop(root);
+    });
+    let continued = http::get(serving.address, "/api/v2/runs/dag-ui-review-loop").json();
+    assert_eq!(
+        continued["graph"]["node_results"]["cli"]["status"],
+        json!("done")
+    );
+    for path in [
+        "/api/v2/runs/dag-ui-review-loop-earlier",
+        "/api/v2/runs/dag-ui-review-loop-earlier/results",
+    ] {
+        let refused = http::get(serving.address, path);
+        assert_eq!(refused.status, 404, "{path}: {}", refused.body);
+        assert_eq!(
+            refused.json()["error"]["code"],
+            json!("run_not_found"),
+            "{path}"
+        );
+    }
+}
