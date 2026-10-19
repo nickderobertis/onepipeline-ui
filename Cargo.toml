@@ -572,7 +572,14 @@ onemessagebus = "0.9.1"
 # translation is left in this graph or in a browser-adopted run's driver. Its
 # adopted driver dispatches nothing until it has read its project's claim off
 # the store, so a run adopted from a project no store holds stays put.
-onepipeline = "=0.75.0"
+# 0.78.0 links onetaskgraph 0.7.3, whose loader leaves a source no layer gives a
+# `plugin` unconfigured rather than refusing the whole configuration, so a
+# browser-adopted run's driver reads its store on a host whose user layer only
+# routes sources a repository's own `onetaskgraph.yaml` defines. No route is
+# added; the test-only `onetaskgraph-*` requirements below move with it to the
+# release its lock resolves. This changes the engine types carried by
+# ApiError::from_engine and the other engine-typed public items.
+onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -610,7 +617,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. 0.52.0 is the
-# release engine 0.75.0 requires (^0.52.0), so the lock moves both to it and
+# release engine 0.78.0 requires (^0.52.0), so the lock moves both to it and
 # keeps one copy.
 onevcs = "=0.52.0"
 # The same library the crate links above, with the schema bundle it publishes
@@ -631,8 +638,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.7.1"
-onetaskgraph-plugin-api = "=0.7.1"
+onetaskgraph-core = "=0.7.3"
+onetaskgraph-plugin-api = "=0.7.3"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was
