@@ -26,7 +26,7 @@ function load() {
   );
 }
 
-// The shared interface: each id, the runner its name says, and a 30-minute cap.
+// Linux gets 36 minutes from docs/release-sweep-timing.md; the other caps stay 30.
 const FOUR = {
   lint: "ubuntu-latest",
   "test-linux": "ubuntu-latest",
@@ -69,9 +69,10 @@ export function jobProblems(workflows) {
     }
     if ("name" in job) problems.push(`job ${id} overrides its name`);
     if ("needs" in job) problems.push(`job ${id} has a needs edge`);
-    if (job["timeout-minutes"] !== 30)
+    const cap = id === "test-linux" ? 36 : 30;
+    if (job["timeout-minutes"] !== cap)
       problems.push(
-        `job ${id} has timeout-minutes ${job["timeout-minutes"]}, not 30`,
+        `job ${id} has timeout-minutes ${job["timeout-minutes"]}, not ${cap}`,
       );
     if (job["runs-on"] !== runner)
       problems.push(`job ${id} runs on ${job["runs-on"]}, not ${runner}`);

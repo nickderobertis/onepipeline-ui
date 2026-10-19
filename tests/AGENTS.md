@@ -82,7 +82,7 @@ hold nothing but their `project.json`, and these rules are theirs.
 
 - **A new module of the e2e binary lands in `e2e`** unless its name joins
   another profile's list — the `e2e` filter is the complement of the other
-  six, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
+  seven, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
   `tests/e2e/ensure_baseline.rs` holds the profiles to one partition and every
   tier project to the profile it names.
 - **A tier is reached only through its inputs.** No tier has a project-graph

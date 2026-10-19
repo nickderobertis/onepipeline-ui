@@ -36,6 +36,7 @@
 //! directive that permits it and the reason it is the narrowest cut available.
 
 mod baseline;
+mod baseline_reuse;
 mod ci_jobs;
 mod ci_tier;
 mod cli;

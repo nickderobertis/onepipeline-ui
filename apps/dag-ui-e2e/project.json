@@ -55,13 +55,8 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui-e2e"
     },
     "bootstrap": {
-      "command": "npx playwright install chromium",
-      "dependsOn": [
-        {
-          "projects": ["dag-ui"],
-          "target": "build-api-server"
-        }
-      ]
+      "//": "Provision only the browser here. test and test-isolation build the API through dag-ui:build-api-server, so compilation can overlap the other test tiers.",
+      "command": "npx playwright install chromium"
     },
     "check": {
       "executor": "nx:noop"

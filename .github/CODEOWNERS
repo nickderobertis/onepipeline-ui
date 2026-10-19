@@ -15,6 +15,7 @@
 /tests/tiers/e2e/        @nickderobertis
 /tests/tiers/repo-tooling/ @nickderobertis
 /tests/tiers/baseline/   @nickderobertis
+/tests/tiers/baseline-reuse/ @nickderobertis
 /tests/tiers/cost/       @nickderobertis
 /tests/tiers/linked-report/ @nickderobertis
 /tests/tiers/ci-jobs/     @nickderobertis
