@@ -2290,6 +2290,7 @@ export const AGENT_LABEL_PREFIX = "onepipeline.";
  * draft's review comments — in the order a reader scans them.
  */
 // biome-ignore format: `tests/contract.rs` holds this one line to the engine's `Scope::ALL`
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns these scope words; this browser package restates them because nothing a browser can read declares them, as the doc comment above `AGENT_LABELS` says. `tests/contract.rs::the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines` holds this line to the linked `onepipeline::agents::Scope::ALL`, so the copy cannot drift, and it failed naming exactly `review-reply` when the pin moved to 0.78.
 export const AGENT_SCOPES = ["node", "observer", "pr-author", "review-reply"] as const;
 export type AgentScope = (typeof AGENT_SCOPES)[number];
 

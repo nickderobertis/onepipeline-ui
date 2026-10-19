@@ -418,6 +418,12 @@ const HARNESS_CWD = "/tmp/dag-ui-e2e/project";
  */
 const OBSERVER_SESSION_FILE = "monitor-20260817T001100Z-3163800";
 export const OBSERVER_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c00";
+/**
+ * And the drafting of the replies to the publish node's review comments, under
+ * the engine's `review-reply` launch at that node's first attempt.
+ */
+const REVIEW_REPLY_SESSION_FILE = "review-reply-20260817T001230Z-3163810";
+export const REVIEW_REPLY_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c02";
 const SIBLING_SESSION_FILE = "worker-sibling-20260817T000500Z-3163700";
 export const SIBLING_HISTORY_ID = "01a00d0f-c094-7660-b26c-8a53baaf9c01";
 /** What the sibling's worker said, which opening its entry on the project page reads. */
@@ -486,6 +492,11 @@ function writeHarnessHistory(root) {
   writeFileSync(path, harnessSessionRecord());
   for (const [id, session, text] of [
     [OBSERVER_HISTORY_ID, OBSERVER_SESSION_FILE, "nothing has been quiet"],
+    [
+      REVIEW_REPLY_HISTORY_ID,
+      REVIEW_REPLY_SESSION_FILE,
+      "declined the rename as out of scope",
+    ],
     [SIBLING_HISTORY_ID, SIBLING_SESSION_FILE, SIBLING_SESSION_TEXT],
   ]) {
     writeFileSync(
@@ -1866,9 +1877,10 @@ function writeLiveRun(root) {
   );
 
   // What the engine's overlay had every oneharness under this run's launches
-  // append to the run's own pointer file: the observer's session, and the
-  // dashboard worker's — the latter also relayed as the artifact below, so one
-  // session opens from the timeline and from the agents listing to one record.
+  // append to the run's own pointer file: the observer's session, the
+  // dashboard worker's — also relayed as the artifact below, so one session
+  // opens from the timeline and from the agents listing to one record — and
+  // the drafting of the publish node's review replies.
   writePointerFile(dir, [
     pointerLine(
       harnessHistory.dir,
@@ -1885,6 +1897,14 @@ function writeLiveRun(root) {
       "claude-code:alternate",
       "2026-08-17T00:11:58Z",
       agentLabels(LIVE_RUN, "node", "dashboard", 1),
+    ),
+    pointerLine(
+      harnessHistory.dir,
+      REVIEW_REPLY_SESSION_FILE,
+      REVIEW_REPLY_HISTORY_ID,
+      "claude-code",
+      "2026-08-17T00:12:30Z",
+      agentLabels(LIVE_RUN, "review-reply", "publish", 1),
     ),
   ]);
 
@@ -3025,10 +3045,10 @@ export function facts(workspace) {
      * the sibling's, on the project page.
      */
     agents: {
-      live: 2,
+      live: 3,
       sibling: 1,
       history: 0,
-      observatory: 3,
+      observatory: 4,
       worker: {
         history_id: HARNESS_SESSION_ARTIFACT,
         node: "dashboard",

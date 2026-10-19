@@ -205,6 +205,13 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await expect(
     shortcut.getByRole("option", { name: "retitle", exact: true }),
   ).toHaveCount(1);
+  // A decline posts replies rather than editing the graph, so it is typed as
+  // JSON, like `review` and `readjust`, and offered as no shortcut.
+  for (const unoffered of ["decline", "review", "readjust"]) {
+    await expect(
+      shortcut.getByRole("option", { name: unoffered, exact: true }),
+    ).toHaveCount(0);
+  }
   await shortcut.selectOption("finding");
   await composer.getByLabel("Message").fill("stop and read this first");
   await composer.getByLabel("Blocking").check();
@@ -897,10 +904,20 @@ test("lists every agent the run launched, grouped by scope and attempt, and open
   await expect(dispatch).toContainText("started");
   const observer = panel.getByRole("list", { name: "Observer" });
   await expect(observer).toContainText("monitor");
+  // The drafting of a node's review replies, after the observer in the
+  // engine's scope order, under its node's attempt.
+  const replies = panel.getByRole("list", {
+    name: "Review reply drafter · attempt 1",
+  });
+  await expect(replies).toContainText("node publish");
   const headings = await panel
     .getByRole("heading", { level: 4 })
     .allTextContents();
-  expect(headings).toEqual(["Node dispatch · attempt 1", "Observer"]);
+  expect(headings).toEqual([
+    "Node dispatch · attempt 1",
+    "Observer",
+    "Review reply drafter · attempt 1",
+  ]);
 
   // Opening the worker's harness run: the conversation view the app has for a
   // oneharness session, over the record its pointer line names — which is the
