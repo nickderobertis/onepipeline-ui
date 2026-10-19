@@ -18830,6 +18830,15 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
             "results do not say {said:?}:\n{rendered}"
         );
     }
+    // A line for every node the run holds, the reworked one among them.
+    for node in expected.keys().map(String::as_str).chain(["ui"]) {
+        assert!(
+            rendered
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some(node)),
+            "results carry no line for {node}:\n{rendered}"
+        );
+    }
 
     // The events stream: the run is announced, folded from its whole record.
     let mut stream = http::stream(
@@ -18918,5 +18927,75 @@ fn the_run_a_continued_node_came_from_is_not_one_this_host_serves() {
             json!("run_not_found"),
             "{path}"
         );
+    }
+}
+
+/// The events stream over the review-loop run as its driver wrote it: every
+/// record appended one at a time to a journal that started empty is announced
+/// as a change to this run, nothing it streams is a frame for anything else,
+/// and the snapshot a client opens afterwards is the run the run route folds
+/// from the whole journal.
+#[test]
+fn the_events_stream_announces_each_record_of_a_reworked_stack_as_it_is_written() {
+    let corpus = fixture_run::review_loop();
+    let run_id = corpus["run_id"].as_str().expect("the corpus's run");
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_loop_unjournaled(root);
+    });
+    let mut stream = http::stream(
+        serving.address,
+        &format!("/api/v2/events?run_id={run_id}"),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
+
+    let journal = serving.run_dir(run_id).join("events.jsonl");
+    for (index, line) in fixture_run::review_loop_lines().iter().enumerate() {
+        let mut written = fs::OpenOptions::new()
+            .append(true)
+            .open(&journal)
+            .expect("the journal");
+        std::io::Write::write_all(&mut written, format!("{line}\n").as_bytes())
+            .expect("append a record");
+        drop(written);
+        // A record may also raise a transcript or activity frame for this run;
+        // what each append owes is a run change.
+        loop {
+            let frame = stream
+                .frame_within(Duration::from_secs(10))
+                .unwrap_or_else(|| panic!("record {index} was never announced: {line}"));
+            assert!(
+                ["run.changed", "conversation.changed", "activity.changed"]
+                    .contains(&frame.event.as_str()),
+                "record {index} streamed {}: {}",
+                frame.event,
+                frame.data
+            );
+            assert_eq!(frame.json()["run_id"], json!(run_id), "{}", frame.data);
+            if frame.event == "run.changed" {
+                break;
+            }
+        }
+    }
+
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run_id}")).json();
+    let mut reopened = http::stream(
+        serving.address,
+        &format!("/api/v2/events?run_id={run_id}"),
+        None,
+    );
+    let snapshot = reopened.next_frame().expect("a snapshot");
+    assert_eq!(snapshot.event, "snapshot");
+    let listed = snapshot.json();
+    let announced = listed["runs"]
+        .as_array()
+        .and_then(|runs| runs.iter().find(|run| run["run_id"] == json!(run_id)))
+        .cloned()
+        .unwrap_or_else(|| panic!("the run is not announced: {listed}"));
+    assert_eq!(announced["last_event"], json!("driver-superseded"));
+    assert_eq!(announced["node_counts"], json!({ "done": 5, "failed": 1 }));
+    for key in ["state", "phase", "last_event", "last_progress_at"] {
+        assert_eq!(announced[key], detail["run"][key], "{key}");
     }
 }
