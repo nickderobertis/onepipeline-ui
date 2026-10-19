@@ -1259,14 +1259,12 @@ test("draws a review reply posted, and one not drafted, as the publication they 
   for (const kind of ["review-reply-posted", "review-reply-not-drafted"]) {
     const drawn = marker(kind);
     await expect(drawn).toBeVisible();
-    // Drawn as the publication glyph, the one the change it answers is drawn as.
     expect(await glyphName(drawn)).toBe(expectedGlyph(kind));
     expect(await glyphName(drawn)).toBe(opened);
     // Said in words for the reader who does not read glyphs.
     await drawn.hover();
     await expect(reading).toContainText("Publication");
     await expect(reading).not.toContainText("Activity");
-    // And drawn the same way in the transcript as on the plot.
     const row = transcript.getByRole("button", { name: `Open ${kind}` });
     await expect(row).toHaveCount(1);
     expect(await glyphName(row)).toBe(opened);

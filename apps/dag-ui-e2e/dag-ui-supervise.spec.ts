@@ -207,8 +207,6 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await expect(
     shortcut.getByRole("option", { name: "retitle", exact: true }),
   ).toHaveCount(1);
-  // A decline posts replies rather than editing the graph, so it is typed as
-  // JSON, like `review` and `readjust`, and offered as no shortcut.
   for (const unoffered of ["decline", "review", "readjust"]) {
     await expect(
       shortcut.getByRole("option", { name: unoffered, exact: true }),

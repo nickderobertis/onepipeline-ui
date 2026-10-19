@@ -15950,7 +15950,6 @@ fn an_adopted_run_reads_a_user_layer_that_refines_sources_it_does_not_define() {
         &inherited,
     );
 
-    // The read routes serve the run under the defined source's project.
     let listed = http::get(serving.address, "/api/v2/runs");
     assert_eq!(listed.status, 200, "{}", listed.body);
     let row = listed.json()["runs"]
@@ -16002,7 +16001,6 @@ fn an_adopted_run_reads_a_user_layer_that_refines_sources_it_does_not_define() {
             .is_some_and(|updated| updated > 0)),
         "no projection wrote the settlement through the store: {records:?}"
     );
-    // And it landed in the defined source's own document.
     let after = fs::read_to_string(&task).expect("the task document");
     assert_ne!(after, before, "the task document was not written back");
     assert!(after.contains("onepipeline.settlement"), "{after}");
