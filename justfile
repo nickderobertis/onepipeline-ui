@@ -201,14 +201,15 @@ ci-test-macos *args:
 
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
-# is. Built with the dev profile and no flags of its own, so it installs the
-# `target/debug` units `dag-ui:build-api-server` already compiled instead of
-# compiling the whole graph again under the release profile: that compile alone
-# was 17 minutes cold on Windows, and it is what held the test jobs past their
-# 30-minute cap. The release profile is proven where a release is built — on Linux
-# by `wheel-smoke` and the release rehearsal in `tests/release`, and on every
-# platform by release.yml's build jobs, which install and run their files before
-# anything publishes. Warnings in this compile are `_crate-lint`'s to deny: its
+# is. Built with the dev profile and no flags of its own, so it shares the
+# `target/debug` units `dag-ui:build-api-server` compiles — where that target has
+# run, the install compiles nothing — instead of compiling the whole graph again
+# under the release profile: that compile alone was 17 minutes cold on Windows,
+# and it is what held the test jobs past their 30-minute cap. The release
+# profile is proven where a release is built — on Linux by `wheel-smoke` and the
+# release rehearsal in `tests/release`, and on every platform by release.yml's
+# build jobs, which install and run their files before anything publishes.
+# Warnings in this compile are `_crate-lint`'s to deny: its
 # `clippy --all-targets -D warnings` is this same dev-profile compile, run over
 # the same projects, and a `RUSTFLAGS` here would re-key every unit in
 # `target/debug` the tiers share.

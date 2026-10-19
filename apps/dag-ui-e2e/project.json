@@ -55,13 +55,8 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui-e2e"
     },
     "bootstrap": {
-      "command": "npx playwright install chromium",
-      "dependsOn": [
-        {
-          "projects": ["dag-ui"],
-          "target": "build-api-server"
-        }
-      ]
+      "//": "The browser only. The read API the browser tier serves through is built by `dag-ui:build-api-server`, which `test` and `test-isolation` depend on themselves; a bootstrap that built it too compiled the whole graph inside CI's serial bootstrap step, ahead of the run that compiles it anyway: three minutes cold on Linux and up to four and a half on Windows (CI runs 39190752893 and 39247750671) before any check could start.",
+      "command": "npx playwright install chromium"
     },
     "check": {
       "executor": "nx:noop"
