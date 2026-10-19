@@ -1841,7 +1841,7 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
         .optional(),
     })
     .strict(),
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these command declarations; this browser package validates the reply wire format it consumes. `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` reads the linked engine schema into the golden, and the consumer journey compares this union with that golden op for op and field for field. These are reconciled wire schemas, not implementations of rework or retitle.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these command declarations; this browser package validates the reply wire format it consumes. `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` reads the linked engine schema into the golden, and the consumer journey compares this union with that golden op for op and field for field. These are reconciled wire schemas, not implementations of rework, retitle or decline.
   z
     .object({
       op: z.literal("rework"),
@@ -1860,6 +1860,18 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       op: z.literal("retitle"),
       id: z.string().min(1),
       title: z.string().min(1),
+      reason: z.string().min(1),
+    })
+    .strict(),
+  // Declining posts one reply per named comment, so a decline naming none is
+  // one the engine refuses to post.
+  z
+    .object({
+      op: z.literal("decline"),
+      id: z.string().min(1),
+      comments: z
+        .array(z.object({ id: z.string(), url: z.string() }).strict())
+        .min(1),
       reason: z.string().min(1),
     })
     .strict(),
@@ -2273,10 +2285,12 @@ export const AGENT_LABELS = {
 export const AGENT_LABEL_PREFIX = "onepipeline.";
 /**
  * Which launch of a run a session was written under: a node-scope dispatch (a
- * lifecycle step included), the dag-scope observer graph, or the drafting graph
- * a change request's body comes from — in the order a reader scans them.
+ * lifecycle step included), the dag-scope observer graph, the drafting graph
+ * a change request's body comes from, or the one that drafts the replies to a
+ * draft's review comments — in the order a reader scans them.
  */
-export const AGENT_SCOPES = ["node", "observer", "pr-author"] as const;
+// biome-ignore format: `tests/contract.rs` holds this one line to the engine's `Scope::ALL`
+export const AGENT_SCOPES = ["node", "observer", "pr-author", "review-reply"] as const;
 export type AgentScope = (typeof AGENT_SCOPES)[number];
 
 /**

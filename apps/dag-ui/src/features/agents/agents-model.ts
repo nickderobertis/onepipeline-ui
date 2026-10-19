@@ -8,7 +8,7 @@ import {
 
 /**
  * One group of a listing: the sessions one launch of a run wrote — a scope, and
- * under `node` and `pr-author` the attempt they belong to.
+ * under `node`, `pr-author` and `review-reply` the attempt they belong to.
  *
  * A session the engine stamped no scope on, or a word this build has never
  * seen, is grouped under its own word rather than dropped: the label is the
@@ -27,6 +27,7 @@ const SCOPE_LABELS: Readonly<Record<AgentScope, string>> = {
   node: "Node dispatch",
   observer: "Observer",
   "pr-author": "Change request author",
+  "review-reply": "Review reply drafter",
 };
 
 /** Whether a stamped scope word is one the engine declares. */

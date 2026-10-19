@@ -26,13 +26,13 @@ export type VerdictShortcut = keyof typeof VERDICT_SHORTCUTS;
 
 /**
  * The engine reply commands the composer offers no shortcut for. `review` asks
- * the driver for a discovery pass and `readjust` asks it to bring the run's
- * drafts onto what has landed; neither edits the graph. The grammar still
- * spells both, so an envelope carrying one is validated and listed like any
- * other.
+ * the driver for a discovery pass, `readjust` asks it to bring the run's drafts
+ * onto what has landed, and `decline` posts a reply to each review comment it
+ * names; none of them edits the graph. The grammar still spells all three, so
+ * an envelope carrying one is validated and listed like any other.
  */
-type UnofferedOp = Extract<ReplyOp, "review" | "readjust">;
-const UNOFFERED_OPS: readonly UnofferedOp[] = ["review", "readjust"];
+type UnofferedOp = Extract<ReplyOp, "review" | "readjust" | "decline">;
+const UNOFFERED_OPS: readonly UnofferedOp[] = ["review", "readjust", "decline"];
 type ComposerOp = Exclude<ReplyOp, UnofferedOp>;
 
 const isComposerOp = (op: ReplyOp): op is ComposerOp =>

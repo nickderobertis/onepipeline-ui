@@ -1319,6 +1319,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "settle",
     "rework",
     "retitle",
+    "decline",
     "review",
     "readjust",
   ]);
@@ -1413,6 +1414,39 @@ test("rework and retitle envelopes round-trip and refuse incomplete commands", (
         ...envelope,
         commands: [{ ...command, unknown: true }],
       }).success,
+    ).toBe(false);
+  }
+});
+
+test("a decline envelope round-trips and refuses one naming no comment", () => {
+  const decline = {
+    op: "decline",
+    id: "docs",
+    comments: [{ id: "42", url: "https://example.com/review/42" }],
+    reason: "out of scope for this change",
+  };
+  const envelope = { version: REPLY_ENVELOPE_VERSION, commands: [decline] };
+  expect(
+    replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
+  ).toEqual(envelope);
+  for (const field of ["id", "comments", "reason"]) {
+    const incomplete = Object.fromEntries(
+      Object.entries(decline).filter(([key]) => key !== field),
+    );
+    expect(
+      replyEnvelopeSchema.safeParse({ ...envelope, commands: [incomplete] })
+        .success,
+    ).toBe(false);
+  }
+  for (const refused of [
+    { ...decline, comments: [] },
+    { ...decline, comments: [{ id: "42" }] },
+    { ...decline, reason: "" },
+    { ...decline, unknown: true },
+  ]) {
+    expect(
+      replyEnvelopeSchema.safeParse({ ...envelope, commands: [refused] })
+        .success,
     ).toBe(false);
   }
 });
