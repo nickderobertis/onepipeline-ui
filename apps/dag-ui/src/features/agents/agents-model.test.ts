@@ -1,4 +1,4 @@
-import { type AgentSession } from "@onepipeline-ui/dag-model";
+import type { AgentSession } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { groupAgentSessions, groupLabel } from "./agents-model";
 

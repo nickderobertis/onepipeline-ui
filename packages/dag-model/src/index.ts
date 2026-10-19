@@ -2288,6 +2288,7 @@ export const AGENT_LABEL_PREFIX = "onepipeline.";
  * a change request's body comes from, or the drafting graph a review comment's
  * reply comes from — in the order a reader scans them.
  */
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns these scope words and states them in Rust, which no browser can read, so this model is where the client's one copy lives; `tests/contract.rs::the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines` holds it to the linked `onepipeline::agents::Scope::ALL`, and failed naming `review-reply` when the pin moved to 0.78.0.
 export const AGENT_SCOPES = [
   "node",
   "observer",

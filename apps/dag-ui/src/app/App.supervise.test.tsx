@@ -289,6 +289,48 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     expect(sent[1]).toBe('{"nonsense": 1}');
   });
 
+  test("offers no decline shortcut, and sends a decline typed into the editor as typed", async () => {
+    const sent: string[] = [];
+    const { client } = telemetryHarness((url, init) => {
+      if (verbOf(url) === "channel/reply") {
+        sent.push(bodyOf(init));
+        return Response.json(receipt());
+      }
+      return defaultResponder(url);
+    });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("region", { name: "Reply" });
+    // Declining is answered by replies the run drafts, not composed from a
+    // form, so the shortcut list beside `rework` and `retitle` does not name it.
+    const shortcut = within(composer).getByLabelText("Shortcut");
+    const offered = within(shortcut)
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("value"));
+    expect(offered).toContain("retitle");
+    expect(offered).not.toContain("decline");
+    const decline = {
+      version: 3,
+      commands: [
+        {
+          op: "decline",
+          id: "dashboard",
+          comments: [{ id: "review-1", url: "https://example.com/review/1" }],
+          reason: "out of scope for this change",
+        },
+      ],
+    };
+    const typed = JSON.stringify(decline);
+    const editor = within(composer).getByLabelText("Envelope (sent as typed)");
+    await userEvent.clear(editor);
+    // `{` and `[` open a key descriptor in user-event, so each is doubled.
+    await userEvent.type(editor, typed.replace(/[{[]/g, "$&$&"));
+    await userEvent.click(
+      within(composer).getByRole("button", { name: "Send reply" }),
+    );
+    await within(composer).findByRole("alert", { name: "Reply receipt" });
+    expect(sent).toEqual([typed]);
+  });
+
   test("edits a node's overrides and the run-wide list as ordered lists, and clears one by sending `[]`", async () => {
     const sent: string[] = [];
     const { client } = telemetryHarness((url, init) => {
@@ -799,6 +841,50 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
       within(first).getByRole("button", { name: "Close transcript" }),
     );
     expect(within(first).queryByText("Oneharness conversation")).toBeNull();
+  });
+
+  test("reads a review reply's drafting under its own heading, after the node's dispatches and the observer", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=agents`);
+    const listing = runAgents(LIVE_RUN);
+    const dispatch = listing.sessions.find(
+      (session) => session.labels["onepipeline.scope"] === "node",
+    );
+    if (dispatch === undefined)
+      throw new Error("the fixture lists no node dispatch");
+    const replier = {
+      ...dispatch,
+      name: "replier-dashboard",
+      history_session: "replier-dashboard-20260726T120000Z-4245",
+      labels: {
+        ...dispatch.labels,
+        "onepipeline.scope": "review-reply",
+        "onepipeline.attempt": "1",
+      },
+    };
+    const { client } = telemetryHarness((url) =>
+      verbOf(url) === "agents"
+        ? Response.json({
+            ...listing,
+            sessions: [replier, ...listing.sessions],
+          })
+        : defaultResponder(url),
+    );
+    render(<App client={client} />);
+    const panel = await screen.findByRole("region", { name: "Agents" });
+    const reply = await within(panel).findByRole("list", {
+      name: "Review reply author · attempt 1",
+    });
+    expect(reply).toHaveTextContent("replier-dashboard");
+    expect(reply).toHaveTextContent("node dashboard");
+    const groups = within(panel)
+      .getAllByRole("list")
+      .map((list) => list.getAttribute("aria-label"));
+    expect(groups.filter((name) => !name?.startsWith("Harness runs"))).toEqual([
+      "Node dispatch · attempt 1",
+      "Node dispatch · attempt 2",
+      "Observer",
+      "Review reply author · attempt 1",
+    ]);
   });
 
   test("shows a node's own sessions, and a node that dispatched nothing as none", async () => {
