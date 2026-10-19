@@ -575,10 +575,7 @@ onemessagebus = "0.9.1"
 # 0.78.0 links onetaskgraph 0.7.3, whose loader leaves a source no layer gives a
 # `plugin` unconfigured rather than refusing the whole configuration, so a
 # browser-adopted run's driver reads its store on a host whose user layer only
-# routes sources a repository's own `onetaskgraph.yaml` defines. No route is
-# added; the test-only `onetaskgraph-*` requirements below move with it to the
-# release its lock resolves. This changes the engine types carried by
-# ApiError::from_engine and the other engine-typed public items.
+# routes sources a repository's own `onetaskgraph.yaml` defines.
 onepipeline = "=0.78.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
