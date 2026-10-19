@@ -17,16 +17,20 @@ import { execFileSync } from "node:child_process";
 //   crates/<name>-<vers>.crate   every crate published, with .json beside it
 //   uploads.log                  one line per accepted upload: registry and file
 //   served.log                   one line per file downloaded: registry and file
+//                                npm-unavailable records refused tarball reads
 //   control/fail/<file>          every upload of <file> answers 500 until the
 //                                marker is removed — persistent, because the
 //                                clients retry a 500 themselves
 //   control/hide                 lines naming files or package@version this
-//                                registry pretends not to serve
+//                                registry pretends not to serve; tarball: before
+//                                package@version hides only its npm tarball
 //   control/corrupt              lines naming files served with other bytes
 //   control/delay                lines `<package>@<version>=<seconds>`: npm
 //                                serves that version only once <seconds> have
 //                                passed since this file was written, as npm
-//                                lists a new version minutes after taking it
+//                                lists a new version minutes after taking it;
+//                                prefix the key with tarball: to delay only
+//                                the tarball while metadata is already visible
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
 //                                `crate-index=foreign` (JSON, not an entry),
 //                                `<read>=not-json` (a 200 that does not parse),
@@ -276,9 +280,13 @@ async function npm(request, response, path) {
     if (
       !existsSync(file) ||
       hidden(`${pkg}@${version}`) ||
-      delayed(`${pkg}@${version}`)
-    )
+      delayed(`${pkg}@${version}`) ||
+      delayed(`tarball:${pkg}@${version}`) ||
+      hidden(`tarball:${pkg}@${version}`)
+    ) {
+      downloaded("npm-unavailable", `${pkg}-${version}.tgz`);
       return reply(response, 404, { error: "Not found" });
+    }
     downloaded("npm", `${pkg}-${version}.tgz`);
     return reply(
       response,
