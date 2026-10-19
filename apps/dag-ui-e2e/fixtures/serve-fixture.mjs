@@ -15,13 +15,16 @@
  * Usage:
  *   serve-fixture.mjs --workspace DIR --port N [--ui]
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
- *                      | --preserved-corpus | --review-corpus]
+ *                      | --preserved-corpus | --review-corpus
+ *                      | --review-loop-corpus]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
- *                                                  with --shutdown-corpus, and the
+ *                                                  with --shutdown-corpus, the
  *                                                  kept-branch journey's with
- *                                                  --preserved-corpus
+ *                                                  --preserved-corpus, and the
+ *                                                  reworked stack's with
+ *                                                  --review-loop-corpus
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -55,6 +58,7 @@ import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import {
   buildPreservedRuns,
+  buildReviewLoopRuns,
   buildRuns,
   buildShutdownRuns,
   churnLive,
@@ -67,6 +71,7 @@ import {
   recordWords,
   removePageRuns,
   removeRun,
+  reviewLoopFacts,
   SUPERVISOR_SESSION,
   settleDashboard,
   shutdownFacts,
@@ -393,6 +398,7 @@ function parseArgs(argv) {
     "--shutdown-corpus",
     "--preserved-corpus",
     "--review-corpus",
+    "--review-loop-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -476,6 +482,18 @@ if (
   die(
     "--review-corpus serves its own corpus",
     "pass --review-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (
+  args["review-loop-corpus"] &&
+  (asked.length > 0 ||
+    args["shutdown-corpus"] ||
+    args["preserved-corpus"] ||
+    args["review-corpus"])
+) {
+  die(
+    "--review-loop-corpus serves its own corpus",
+    "pass --review-loop-corpus with --workspace, --port and --ui alone",
   );
 }
 if (args["shutdown-corpus"] && args["preserved-corpus"]) {
@@ -638,6 +656,8 @@ if (args.stall) {
       };
       if (args["preserved-corpus"]) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };
+      } else if (args["review-loop-corpus"]) {
+        corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
       } else if (args["shutdown-corpus"]) {
         const pid = args["live-dispatch-pid"];
         const livePid = pid === undefined ? undefined : Number(pid);
