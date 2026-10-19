@@ -405,9 +405,12 @@ test("composes review replies, applies rework and reports retitle delivery refus
     // a form, so no shortcut names it; typed into the editor, it reaches the
     // engine as a decline, which refuses it past its schema — the comment was
     // never read on this run — rather than as an unknown op.
-    await expect(
-      composer.getByLabel("Shortcut").locator("option[value=decline]"),
-    ).toHaveCount(0);
+    const shortcutOption = (name: string) =>
+      composer
+        .getByLabel("Shortcut")
+        .getByRole("option", { name, exact: true });
+    await expect(shortcutOption("retitle")).toHaveCount(1);
+    await expect(shortcutOption("decline")).toHaveCount(0);
     const declineRefusal =
       "refused: decline: node 'review-draft': comment review-1 was not read for it — run `onepipeline review` and decline a comment it surfaced";
     const decline = {
