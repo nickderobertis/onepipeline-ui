@@ -2470,9 +2470,6 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
             vcs::DRAFT_KEPT_FOR_REVIEW,
         ),
         (onevcs::EventKind::ChecksSettled, vcs::CHECKS_SETTLED),
-        // Stacking, the review loop and landings: a stack base assembled over
-        // its parents, review feedback read and answered, and the standings,
-        // retargets and reopenings a stack's readjustment records.
         (
             onevcs::EventKind::StackBaseAssembled,
             vcs::STACK_BASE_ASSEMBLED,
