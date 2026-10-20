@@ -91,7 +91,8 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "review-reply-not-drafted": "publication",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A manager landing's lifecycle, a draft's change request landing, being
-  // absorbed, closed or reopened, and the readjustment that follows a landing.
+  // absorbed, closed or reopened, the store's closure of the issues a landing
+  // closed, and the readjustment that follows a landing.
   // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these kinds when the pin moved to 0.72.
   "landing-registered": "publication",
   "landing-drafting": "publication",
@@ -99,6 +100,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "landing-finished": "publication",
   "landing-refused": "failure",
   "landing-died": "failure",
+  "landing-closures": "publication",
   "node-landed": "publication",
   "node-absorbed": "publication",
   "stack-landed-out-of-order": "publication",
