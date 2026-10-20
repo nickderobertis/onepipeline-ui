@@ -19651,7 +19651,6 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
     eventually("the adopted engine let go", || !process_is_live(pid));
     drop(driver);
 
-    // Settled with every node done, and served with the fields every run is.
     let settled = detail();
     assert_eq!(settled["run"]["run_id"], json!(run), "{}", settled["run"]);
     assert_eq!(
@@ -19681,8 +19680,6 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
     assert_eq!(nodes[0]["node"], json!(node), "{}", settled["run"]);
     assert_ne!(base(), seeded_base, "the node never landed");
 
-    // The home's card is at the project kind's `done` option, and its issue
-    // closed as completed.
     let after = board.state();
     let home = &after["issues"]["plan"];
     assert_eq!(
@@ -19690,8 +19687,8 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         (&json!("Shipped"), &json!("CLOSED"), &json!("COMPLETED")),
         "{after}"
     );
-    // One option write and one close for the home, and no read of the board's
-    // items.
+    // The home is written by the item the launch recorded, never found by
+    // listing the board.
     let requests = after["requests"]
         .as_array()
         .expect("the board's request log");
@@ -19721,7 +19718,6 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         );
     }
 
-    // One record of the home's write, saying it was written.
     let records = homed();
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(
