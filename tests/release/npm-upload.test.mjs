@@ -1,10 +1,10 @@
 // A platform job's `upload npm`, on what npm's registry does with a publish it
-// takes. v0.41.2's build-windows reported its package published while npm held
-// it staged — awaiting a maintainer's 2FA approval, served to nobody — because
-// `npm publish` exits 0 on a staged publish exactly as on a published one. The
-// real recipe and the real npm CLI are driven here against the npm double, which
-// stages a publish the way npm's registry does: a 2xx to the PUT, the version
-// listed only in the stage queue, and a 409 to any later publish of it.
+// takes. npm can stage a publish — hold it for a maintainer's 2FA approval,
+// served to nobody — and `npm publish` exits 0 on that exactly as on a
+// publication. The real recipe and the real npm CLI are driven here against the
+// npm double, which stages a publish the way npm's registry does: a 2xx to the
+// PUT, the version listed only in the stage queue, and a 409 to any later
+// publish of it.
 //
 // What an upload publishes is the tarball its build staged and nothing else, so
 // each job's is packed here from a manifest alone: no binary is compiled, and
@@ -77,7 +77,6 @@ function stagedPackage(job) {
 const upload = (job, out, extra = {}) =>
   recipe(job, ["upload", "npm", "--out", out], { ...env, ...extra });
 
-// What npm answers for pkg@version, as anyone asking it would be answered.
 function npmServes(id) {
   const view = spawnSync(
     "npm",
@@ -173,6 +172,31 @@ test("a stage queue npm does not answer after a publish fails the upload rather 
   }
   // npm did take this one, so the re-run finds it served.
   const rerun = upload("linux-arm64", out);
+  assert.equal(rerun.status, 0, rerun.output);
+  assert.match(
+    rerun.stdout,
+    new RegExp(`already served ${escapeRegExp(artifact.file)}`),
+  );
+});
+
+test("a stage queue whose entries name no version or stage id fails the upload rather than reading it as published", () => {
+  const { artifact, out, id } = stagedPackage("linux");
+  registries.breakReads(["npm-stage=malformed"]);
+  try {
+    const unread = upload("linux", out);
+    assert.notEqual(unread.status, 0, unread.output);
+    assert.match(
+      unread.stderr,
+      new RegExp(
+        `npm answered its stage list for '${escapeRegExp(id)}' with something that is not one`,
+      ),
+    );
+    assert.match(unread.stderr, /did not return staged versions with ids/);
+    assert.doesNotMatch(unread.output, /npm published/);
+  } finally {
+    registries.clear();
+  }
+  const rerun = upload("linux", out);
   assert.equal(rerun.status, 0, rerun.output);
   assert.match(
     rerun.stdout,

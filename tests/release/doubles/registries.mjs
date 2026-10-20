@@ -41,7 +41,9 @@ import { execFileSync } from "node:child_process";
 //                                `<read>=not-json` (a 200 that does not parse),
 //                                `<read>=empty` (a 200 with nothing, or null) or
 //                                `npm-packument=other-version` (each version's
-//                                manifest names another),
+//                                manifest names another) or
+//                                `npm-stage=malformed` (entries naming no
+//                                version and no stage id),
 //                                for the reads a release makes of a registry:
 //                                pypi-json, npm-packument, npm-stage,
 //                                crate-index and crate-api
@@ -297,10 +299,16 @@ async function npm(request, response, path) {
   if (path === "/-/stage" && request.method === "GET") {
     if (!/^Bearer \S+/.test(request.headers.authorization ?? ""))
       return reply(response, 401, { error: "Unauthorized" });
-    if (broken("npm-stage", response)) return;
     const wanted = new URL(request.url, "http://double").searchParams.get(
       "package",
     );
+    // A list whose entries name no version and no stage id.
+    if (lines("broken").includes("npm-stage=malformed"))
+      return reply(response, 200, {
+        items: [null, { packageName: wanted }],
+        total: 2,
+      });
+    if (broken("npm-stage", response)) return;
     const items = readdirSync(join(state, "npm-staged"))
       .filter((file) => file.endsWith(".json"))
       .map((file) =>
