@@ -155,10 +155,19 @@ test("a call it cannot measure is refused before anything is cloned", () => {
     for (const [args, reason] of [
       [[], /--commit is required/],
       [["--commit", "no-such-ref", "--workdir", work], /is not a commit/],
-      [["--commit", "HEAD", "--workdir", join(ROOT, "x")], /inside this checkout/],
+      [
+        ["--commit", "HEAD", "--workdir", join(ROOT, "x")],
+        /inside this checkout/,
+      ],
       [["--commit", "HEAD", "--workdir", "relative"], /not an absolute path/],
-      [["--commit", "HEAD", "--cpus", "all", "--workdir", work], /not a CPU list/],
-      [["--commit", "HEAD", "--fixture", "HEAD", "--workdir", work], /not FROM\.\.\.TO/],
+      [
+        ["--commit", "HEAD", "--cpus", "all", "--workdir", work],
+        /not a CPU list/,
+      ],
+      [
+        ["--commit", "HEAD", "--fixture", "HEAD", "--workdir", work],
+        /not FROM\.\.\.TO/,
+      ],
       [["--commit", "HEAD", "--bogus"], /unknown argument/],
     ]) {
       const run = measure(args, dir, d);
