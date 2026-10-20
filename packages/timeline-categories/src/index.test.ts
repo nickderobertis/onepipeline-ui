@@ -115,6 +115,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "run-hook-fired": "lifecycle",
   "run-hook-finished": "lifecycle",
   "run-hook-withheld": "lifecycle",
+  // The store's answer when the run's home was marked done at its success ending.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` failed naming it when the pin moved to 0.80.1, which declares it, and demands an entry here for it.
+  "home-status": "lifecycle",
   // The driver's own sweep over the harness identity pool — housekeeping of the
   // run's driving, like an adoption, and no node's work.
   "pool-maintenance": "lifecycle",
@@ -143,6 +146,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "turn-activity": "session",
   "judge-decided": "verification",
   "turn-interrupted": "recovery",
+  // A manager note admitted to a member's inbox, or taken back before any turn
+  // took it: the planner talking to the run, like the note it shows.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the producer owns the kinds and this package owns the category they read under; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` named exactly these two when the pin moved to oneagentgraph 0.6.0, which declares them, and demands an entry here for each.
+  "note-admitted": "planning",
+  "note-withdrawn": "planning",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "fallback-advanced": "recovery",
   "cron-fired": "recovery",
   "cron-reset": "recovery",

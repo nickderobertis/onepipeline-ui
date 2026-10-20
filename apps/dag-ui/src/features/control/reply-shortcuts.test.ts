@@ -236,8 +236,9 @@ describe("reply shortcuts", () => {
     });
   });
 
-  test("the engine's review, readjust and decline ops are spelled by the grammar but offered as no shortcut", () => {
-    for (const op of ["review", "readjust", "decline"]) {
+  test("the engine's review, readjust, decline and withdraw-note ops are spelled by the grammar but offered as no shortcut", () => {
+    const unoffered = ["review", "readjust", "decline", "withdraw-note"];
+    for (const op of unoffered) {
       expect(REPLY_OPS).toContain(op);
       expect(isKnownOp(op)).toBe(true);
       expect(isShortcut(op)).toBe(false);
@@ -246,9 +247,7 @@ describe("reply shortcuts", () => {
       "approve",
       "reject",
       "continue",
-      ...REPLY_OPS.filter(
-        (op) => op !== "review" && op !== "readjust" && op !== "decline",
-      ),
+      ...REPLY_OPS.filter((op) => !unoffered.includes(op)),
     ]);
   });
 });

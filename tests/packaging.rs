@@ -554,8 +554,9 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change —
 /// 0.79.0 links 0.8.0, whose store names a closed item's status after its closure,
-/// and 0.79.1 links the same release.
-const STORE_RELEASE: &str = "0.8.0";
+/// and 0.79.1 links the same release; 0.80.1 links 0.9.0, whose store the run's
+/// home is marked `done` through.
+const STORE_RELEASE: &str = "0.9.0";
 
 /// The members of the plan-store family the shipped binary cannot be without:
 /// the store itself, the plugin boundary, and the GitHub plugin a board is read
@@ -697,11 +698,14 @@ fn a_plan_store_moved_together_or_resolved_twice_is_refused_naming_it() {
     assert_eq!(
         doubled,
         [
-            "the lock resolves onetaskgraph-plugin-api 0.7.3, not the store release 0.8.0"
-                .to_owned(),
-            "the lock resolves onetaskgraph-plugin-api at 2 releases, {\"0.7.3\", \"0.8.0\"}, \
-             where the binary links one"
-                .to_owned(),
+            format!(
+                "the lock resolves onetaskgraph-plugin-api 0.7.3, not the store release \
+                 {STORE_RELEASE}"
+            ),
+            format!(
+                "the lock resolves onetaskgraph-plugin-api at 2 releases, \
+                 {{\"0.7.3\", \"{STORE_RELEASE}\"}}, where the binary links one"
+            ),
         ]
     );
 }
