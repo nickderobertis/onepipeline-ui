@@ -42,7 +42,10 @@ are nested intervals: they must not be added to each other. The remaining
 release tests account for about 75 s. The release rehearsal now has its own
 target, with two dependents, so its tools run at the head of the queue and the
 rehearsal follows them rather than trailing the test tiers. Tools tests follow
-the rehearsal because they recreate its Python environment.
+the rehearsal because they recreate its Python environment. (Since split
+further: the journeys that read none of the rehearsal's files run beside it in
+`test-standalone`, and only the tools tests follow both;
+[linux-cold-cache-timing.md](linux-cold-cache-timing.md).)
 
 Changes preserve all assertions in the release journeys:
 
