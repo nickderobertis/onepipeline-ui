@@ -21,6 +21,7 @@ import zipfile
 
 TARGET_ARCHES = {
     "x86_64-unknown-linux-gnu": "x86_64",
+    "aarch64-unknown-linux-gnu": "aarch64",
     "aarch64-apple-darwin": "arm64",
     "x86_64-pc-windows-msvc": "amd64",
 }
@@ -62,7 +63,9 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
             if binary[:4] != b"\xcf\xfa\xed\xfe" or struct.unpack("<I", binary[4:8])[0] != expected_cpu:
                 raise StagingError("wheel binary does not have the declared Darwin architecture", "rebuild the wheel with maturin --target set to this Darwin target")
         elif "linux" in target:
-            if binary[:6] != b"\x7fELF\x02\x01" or struct.unpack("<H", binary[18:20])[0] != 62:
+            # ELF e_machine: 62 is x86-64, 183 is AArch64.
+            expected_machine = 62 if target.startswith("x86_64") else 183
+            if binary[:6] != b"\x7fELF\x02\x01" or struct.unpack("<H", binary[18:20])[0] != expected_machine:
                 raise StagingError("wheel binary does not have the declared Linux architecture", "choose the wheel built for this Linux target")
         else:
             # PE: the MZ stub points at the PE header, whose machine is AMD64.

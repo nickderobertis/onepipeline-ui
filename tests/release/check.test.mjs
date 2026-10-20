@@ -48,7 +48,7 @@ after(async () => {
 });
 
 const allBuilt =
-  "build-linux=success build-macos=success build-windows=success";
+  "build-linux=success build-linux-arm64=success build-macos=success build-windows=success";
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const publish = (args, extra) => recipe("publish", args, { ...env, ...extra });
@@ -56,7 +56,8 @@ const publish = (args, extra) => recipe("publish", args, { ...env, ...extra });
 test("a build job the workflow reported no result for counts as missing, and publish uploads nothing platform-independent", () => {
   // build-windows is left out, as a workflow that stopped reporting it would.
   const extra = {
-    BUILD_RESULTS: "build-linux=success build-macos=success",
+    BUILD_RESULTS:
+      "build-linux=success build-linux-arm64=success build-macos=success",
   };
   const check = publish(["check"], extra);
   assert.notEqual(check.status, 0, check.output);
@@ -78,7 +79,7 @@ test("PyPI answering a 200 that is not JSON is refused, never read as nothing se
   try {
     const check = publish(["check"], {
       BUILD_RESULTS:
-        "build-linux=success build-macos=success build-windows=success",
+        "build-linux=success build-linux-arm64=success build-macos=success build-windows=success",
     });
     assert.notEqual(check.status, 0, check.output);
     assert.match(
@@ -275,7 +276,7 @@ test("a release-status.sh stopped by a signal fails settle rather than ending it
   assert.ok(!existsSync(hold));
 });
 
-// Every platform's files where the three build jobs leave them, under their
+// Every platform's files where the four build jobs leave them, under their
 // planned names; `unseed` takes them away again.
 function seedPlatforms() {
   const V = version();
@@ -397,18 +398,28 @@ test("a platform package npm does not list yet is waited for beside one it lists
 test("the wait is one deadline for every platform package, not one per package", () => {
   const V = version();
   seedPlatforms();
-  // Two packages npm never serves: the second gets what the first left.
-  registries.unserve([
-    `onepipeline-api-cli-linux-x64@${V}`,
-    `onepipeline-api-cli-win32-x64@${V}`,
-  ]);
   try {
+    // What asking npm about every platform package costs when it serves them
+    // all, measured on this host now: each platform package adds its own npm
+    // calls, so only the time beyond this is the wait.
+    const servedStarted = Date.now();
+    const served = publish(["check"], {
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "20",
+    });
+    assert.equal(served.status, 0, served.output);
+    const asking = (Date.now() - servedStarted) / 1000;
+    // Two packages npm never serves: the second gets what the first left.
+    registries.unserve([
+      `onepipeline-api-cli-linux-x64@${V}`,
+      `onepipeline-api-cli-win32-x64@${V}`,
+    ]);
     const started = Date.now();
     const check = publish(["check"], {
       BUILD_RESULTS: allBuilt,
       RELEASE_CHECK_BUDGET: "20",
     });
-    const elapsed = (Date.now() - started) / 1000;
+    const elapsed = (Date.now() - started) / 1000 - asking;
     assert.notEqual(check.status, 0, check.output);
     for (const pkg of ["linux-x64", "win32-x64"])
       assert.match(
@@ -479,7 +490,7 @@ test("a platform package whose build job did not succeed is reported at once, ne
     const started = Date.now();
     const check = publish(["check"], {
       BUILD_RESULTS:
-        "build-linux=success build-macos=success build-windows=failure",
+        "build-linux=success build-linux-arm64=success build-macos=success build-windows=failure",
       RELEASE_CHECK_BUDGET: "600",
     });
     assert.notEqual(check.status, 0, check.output);
@@ -504,6 +515,49 @@ test("a platform package whose build job did not succeed is reported at once, ne
     );
   } finally {
     unseed();
+  }
+});
+
+// The arm64 Linux job is the one platform job added back after a release
+// shipped without it, so the launcher that pins its package is held to it the
+// way it is held to every other: a failed job and a package npm never serves
+// each stop every platform-independent upload.
+test("an arm64 Linux job that failed, or whose package npm never serves, keeps the launcher unpublished", () => {
+  const V = version();
+  const arm64 = `onepipeline-api-cli-linux-arm64@${V}`;
+  assert.ok(platformPackages().includes("onepipeline-api-cli-linux-arm64"));
+  for (const [results, hidden, expected] of [
+    [
+      allBuilt.replace(
+        "build-linux-arm64=success",
+        "build-linux-arm64=failure",
+      ),
+      () => registries.hide([arm64]),
+      `build-linux-arm64 \\(failure\\), npm ${escapeRegExp(arm64)}`,
+    ],
+    [
+      allBuilt,
+      () => registries.unserve([arm64]),
+      `not every platform published .*npm ${escapeRegExp(arm64)}`,
+    ],
+  ]) {
+    seedPlatforms();
+    hidden();
+    try {
+      const extra = { BUILD_RESULTS: results, RELEASE_CHECK_BUDGET: "3" };
+      const check = publish(["check"], extra);
+      assert.notEqual(check.status, 0, check.output);
+      assert.match(check.stderr, new RegExp(expected));
+      for (const registry of ["crate", "npm", "github"]) {
+        const upload = publish(["upload", registry], extra);
+        assert.notEqual(upload.status, 0, `${registry}: ${upload.output}`);
+        assert.match(upload.stderr, /not every platform published/, registry);
+      }
+      assert.deepEqual(registries.uploads(), []);
+      assert.deepEqual(gh.uploads(), []);
+    } finally {
+      unseed();
+    }
   }
 });
 

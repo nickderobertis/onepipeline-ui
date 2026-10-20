@@ -254,6 +254,10 @@ fn every_release_target_has_a_platform_package_on_both_sides() {
     let manifest = read("npm/onepipeline-api-cli/package.json");
     for (target, package) in [
         ("x86_64-unknown-linux-gnu", "onepipeline-api-cli-linux-x64"),
+        (
+            "aarch64-unknown-linux-gnu",
+            "onepipeline-api-cli-linux-arm64",
+        ),
         ("aarch64-apple-darwin", "onepipeline-api-cli-darwin-arm64"),
         ("x86_64-pc-windows-msvc", "onepipeline-api-cli-win32-x64"),
     ] {
@@ -1127,28 +1131,18 @@ fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
         .expect("node is on PATH")
 }
 
-/// arm64 Linux is no longer released, so the launcher refuses it the way it
-/// refuses Intel macOS — naming the one install left there, cargo — and still
-/// resolves and runs the platform package of every target that is released.
+/// The launcher resolves and runs the platform package of every released
+/// target — arm64 Linux among them again, after v0.40.0 through v0.41.0
+/// refused it — and offers a platform it resolves none of the other installs.
 #[cfg(unix)]
 #[test]
-fn the_launcher_refuses_arm64_linux_naming_cargo_and_resolves_every_released_platform() {
-    let arm = launcher_resolving_on("linux", "arm64");
-    assert_eq!(arm.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&arm.stderr);
-    assert!(
-        stderr.contains("arm64 Linux is no longer supported"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("cargo install onepipeline-ui --locked"),
-        "{stderr}"
-    );
-    // No wheel ships for it either, so pip is not offered as a way out.
-    assert!(!stderr.contains("pip install"), "{stderr}");
-    assert!(!stderr.contains("resolved"), "{stderr}");
-
-    for (platform, arch) in [("linux", "x64"), ("darwin", "arm64"), ("win32", "x64")] {
+fn the_launcher_resolves_every_released_platform_arm64_linux_included() {
+    for (platform, arch) in [
+        ("linux", "x64"),
+        ("linux", "arm64"),
+        ("darwin", "arm64"),
+        ("win32", "x64"),
+    ] {
         let run = launcher_resolving_on(platform, arch);
         let stdout = String::from_utf8_lossy(&run.stdout);
         assert_eq!(
@@ -1163,6 +1157,11 @@ fn the_launcher_refuses_arm64_linux_naming_cargo_and_resolves_every_released_pla
             "{platform}-{arch}"
         );
     }
+    let launcher = read(&format!("npm/{WRAPPER}/bin/{COMMAND}.js"));
+    assert!(
+        !launcher.contains("arm64 Linux is no longer supported"),
+        "the launcher still refuses arm64 Linux"
+    );
 }
 
 // A repository that declares no release target releases nothing as far as the
@@ -1190,8 +1189,11 @@ fn workflow_jobs(workflow: &str) -> Vec<String> {
         .skip_while(|line| *line != "jobs:")
         .filter_map(|line| {
             let id = line.strip_prefix("  ")?.strip_suffix(':')?;
-            (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c == '-'))
-                .then(|| id.to_owned())
+            (!id.is_empty()
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+            .then(|| id.to_owned())
         })
         .collect()
 }
@@ -2022,7 +2024,12 @@ fn every_release_job_that_compiles_the_binary_embeds_the_view_it_built() {
     compiling.sort();
     assert_eq!(
         compiling,
-        ["build-linux", "build-macos", "build-windows"],
+        [
+            "build-linux",
+            "build-linux-arm64",
+            "build-macos",
+            "build-windows"
+        ],
         "the set of release jobs that compile the binary has changed; every prebuilt \
          distribution has to embed the view"
     );
