@@ -653,20 +653,21 @@ describe("publication against registry doubles", () => {
       ),
       sha(readFileSync(staged(fileOf("npm")))),
     );
-    // A version npm already serves from some other build is refused rather
-    // than counted as published: nothing in this job installs it back, and npm
-    // will not take this build over it.
+    // A version npm already serves from some other build is an earlier
+    // attempt's, since nothing else publishes under this version's name: npm
+    // never replaces a version, so it is kept, named with both digests, and
+    // nothing is published over it — as v0.41.2's build-windows re-run had to.
     const tarball = join(registries.state, "npm", npmPackage, `${VERSION}.tgz`);
     const ours = readFileSync(tarball);
     writeFileSync(tarball, "another build's tarball");
     try {
       const count = registries.uploads().length;
       const other = linux("upload", "npm");
-      assert.notEqual(other.status, 0, other.output);
+      assert.equal(other.status, 0, other.output);
       assert.match(
-        other.stderr,
+        other.stdout,
         new RegExp(
-          `npm already serves ${npmPackage}@${VERSION.replace(/\./g, "\\.")}, and not the ${fileOf("npm").file.replace(/\./g, "\\.")} this job built`,
+          `npm already holds ${npmPackage}@${VERSION.replace(/\./g, "\\.")} from an earlier attempt of ${TAG.replace(/\./g, "\\.")} \\(sha512-\\S+, where this build's is sha512-\\S+\\); it is kept`,
         ),
       );
       assert.equal(registries.uploads().length, count, "it published nothing");
@@ -723,7 +724,7 @@ describe("publication against registry doubles", () => {
     }
   });
 
-  test("verification fails when a registry serves an unusable package, another build, or none for this platform", () => {
+  test("verification fails when a registry serves an unusable package, another build that does not run, or none for this platform", () => {
     const cases = [
       [
         "PyPI has no wheel for this platform",
@@ -748,7 +749,9 @@ describe("publication against registry doubles", () => {
       }
     }
     // PyPI serving an installable wheel, and the Release an archive with a
-    // checksum that matches it, each carrying some other binary.
+    // checksum that matches it, each carrying some other binary. Each records
+    // that file as the one it holds, so it is read as an earlier attempt's
+    // build, which is installed and run — and this one does not run.
     const wheel = join(registries.state, "pypi", fileOf("wheel").file);
     const wheelBytes = readFileSync(wheel);
     execFileSync("python3", [
@@ -778,8 +781,14 @@ describe("publication against registry doubles", () => {
       const run = linux("verify");
       assert.notEqual(run.status, 0, run.output);
       assert.match(
+        run.stdout,
+        /the Release serves \S+ from an earlier attempt .*; installing and running that build/,
+      );
+      assert.match(
         run.stderr,
-        /the GitHub Release archive installed a different binary than this job built/,
+        new RegExp(
+          `GitHub Release ${TAG.replace(/\./g, "\\.")} ${TARGET}: smoke test failed`,
+        ),
       );
     } finally {
       writeFileSync(archive, archiveBytes);
@@ -789,8 +798,14 @@ describe("publication against registry doubles", () => {
       const run = linux("verify");
       assert.notEqual(run.status, 0, run.output);
       assert.match(
+        run.stdout,
+        /PyPI serves \S+ from an earlier attempt .*; installing and running that build/,
+      );
+      assert.match(
         run.stderr,
-        /PyPI installed a different binary than this job built/,
+        new RegExp(
+          `PyPI onepipeline-api-cli ${VERSION.replace(/\./g, "\\.")} on ${TARGET}: smoke test failed`,
+        ),
       );
     } finally {
       writeFileSync(wheel, wheelBytes);
