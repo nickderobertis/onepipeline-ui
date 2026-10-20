@@ -97,10 +97,31 @@ def checked(seed):
                 or held["reason"] not in STATES.get(held["state"], [])
                 or (held["parent"] is not None and held["parent"] not in seed["issues"])):
             parser.error(f"seeded issue {name!r} does not fit the board")
+    numbers = [held["number"] for held in seed["issues"].values()]
+    if len(set(numbers)) != len(numbers):
+        parser.error("two seeded issues share a number, which one repository never does")
+    for name in seed["issues"]:
+        # A parent chain ends at an issue with none: one that returns to an issue
+        # already on it is a cycle GitHub's sub-issues refuse.
+        seen = {name}
+        parent = seed["issues"][name]["parent"]
+        while parent is not None:
+            if parent in seen:
+                parser.error(f"seeded issue {name!r} is its own ancestor")
+            seen.add(parent)
+            parent = seed["issues"][parent]["parent"]
     return seed
 
 
-seed = checked(json.loads(arguments.seed.read_text())) if arguments.seed else default_seed()
+def read_seed(path):
+    """The seed `path` holds, or a usage error for one that is not there or not JSON."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        parser.error(f"the seed {path} is not readable JSON: {error}")
+
+
+seed = checked(read_seed(arguments.seed)) if arguments.seed else default_seed()
 options = seed["options"]
 state = {"repository": seed["repository"], "issues": {}, "requests": []}
 for name, held in seed["issues"].items():

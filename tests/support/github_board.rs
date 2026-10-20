@@ -150,10 +150,23 @@ fn the_board_refuses_a_seed_github_could_not_answer_before_listening() {
         // A repository that is no `owner/name`.
         serde_json::json!({"repository": "service", "options": ["Todo"],
             "issues": {"seven": issue("OPEN", None)}}),
+        // Two issues under one number, and an issue that is its own parent.
+        serde_json::json!({"repository": "owner/service", "options": ["Todo"],
+            "issues": {"seven": issue("OPEN", None), "again": issue("OPEN", None)}}),
+        serde_json::json!({"repository": "owner/service", "options": ["Todo"],
+            "issues": {"seven": {"number": 7, "title": "issue 7", "content": "",
+                "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
+                "parent": "seven"}}}),
+        // A seed that is not JSON at all.
+        Value::String("{not json".to_owned()),
     ] {
         let dir = tempfile::tempdir().expect("board directory");
         let path = dir.path().join("seed.json");
-        std::fs::write(&path, refused.to_string()).expect("the seed");
+        let written = match &refused {
+            Value::String(text) => text.clone(),
+            seed => seed.to_string(),
+        };
+        std::fs::write(&path, written).expect("the seed");
         let output = Command::new("python3")
             .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/github_board.py"))
             .arg(dir.path())

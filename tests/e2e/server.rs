@@ -19148,12 +19148,9 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     let repos = scratch_repo::seed_boundary(&dir);
     let service = &repos.private;
     let log = dir.join("harness.log");
-    // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
-    // journey stands in for, on the terms `write_harness_standin` states. The launch,
-    // the attest and adopt routes, the retained driver, the linked `onevcs` cutting and
-    // landing the session over real git, and the linked store reading and writing the
-    // loopback board over HTTP are all real; the stand-in only commits what an agent would.
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the attest and adopt routes, the retained driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only commits what an agent would.
     let standin = write_closing_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
     let graph = write_node_scope_graph(&dir);
 
