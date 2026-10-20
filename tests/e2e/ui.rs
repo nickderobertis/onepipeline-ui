@@ -404,12 +404,10 @@ fn no_bundle_target() -> PathBuf {
 }
 
 /// The build directory that build's intermediate units go to: this clone's own
-/// `target`, where `cargo build --bin onepipeline-api` — `dag-ui:build-api-server`
-/// — compiles the same dependency graph, so the packaged tree costs its own crate
-/// rather than a second cold compile of that graph, OpenSSL from source included,
-/// which was most of the e2e tier's test time on a cold target
-/// (docs/linux-cold-cache-timing.md). `scripts/ensure-baseline-api.sh` shares the
-/// same units with another commit's tree the same way.
+/// `target`, where `dag-ui:build-api-server` compiles the same dependency graph,
+/// so the packaged tree costs its own crate rather than a second compile of that
+/// graph (docs/linux-cold-cache-timing.md). `scripts/ensure-baseline-api.sh`
+/// shares the same units with another commit's tree the same way.
 fn shared_build_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("target")
 }
