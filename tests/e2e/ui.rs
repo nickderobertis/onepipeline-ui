@@ -403,6 +403,65 @@ fn no_bundle_target() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("target/no-bundle")
 }
 
+/// The build directory that build's intermediate units go to: this clone's own
+/// `target`, where `cargo build --bin onepipeline-api` — `dag-ui:build-api-server`
+/// — compiles the same dependency graph, so the packaged tree costs its own crate
+/// rather than a second cold compile of that graph, OpenSSL from source included,
+/// which was most of the e2e tier's test time on a cold target
+/// (docs/linux-cold-cache-timing.md). `scripts/ensure-baseline-api.sh` shares the
+/// same units with another commit's tree the same way.
+fn shared_build_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("target")
+}
+
+/// Forwards `RUSTC_WORKSPACE_WRAPPER`'s call to the compiler it names.
+const FORWARDER: &str = "fn main() {
+    let mut args = std::env::args_os().skip(1);
+    let compiler = args.next().expect(\"Cargo passes the compiler\");
+    let status = std::process::Command::new(compiler).args(args).status()
+        .expect(\"run the compiler\");
+    std::process::exit(status.code().unwrap_or(1));
+}
+";
+
+/// The workspace wrapper the packaged tree is built with, compiled once into
+/// `target`: native, because Cargo launches it directly on Windows.
+///
+/// Cargo hashes a workspace member's units by its path relative to the
+/// workspace, so the unpacked tree's crate would take the very file names the
+/// suite's own build of this crate has in the shared build directory, and each
+/// would overwrite the other's. Cargo salts those names with the workspace
+/// wrapper, and only those, so a wrapper of its own keeps the tree's crate
+/// apart while every dependency unit stays the one already built.
+fn workspace_wrapper(target: &Path) -> PathBuf {
+    let wrapper = target.join(format!("no-bundle-rustc{}", std::env::consts::EXE_SUFFIX));
+    if wrapper.is_file() {
+        return wrapper;
+    }
+    fs::create_dir_all(target).expect("the no-bundle target directory");
+    let source = target.join("no-bundle-rustc.rs");
+    fs::write(&source, FORWARDER).expect("write the compiler forwarder");
+    let partial = target.join(format!(
+        "no-bundle-rustc.partial{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let output = std::process::Command::new("rustc")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["--edition=2021", "-D", "warnings"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&partial)
+        .output()
+        .unwrap_or_else(|err| panic!("rustc could not start for the compiler forwarder: {err}"));
+    assert!(
+        output.status.success(),
+        "rustc could not compile the compiler forwarder:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::rename(&partial, &wrapper).expect("install the compiler forwarder");
+    wrapper
+}
+
 /// Build `onepipeline-api` the way `cargo install onepipeline-ui` from
 /// crates.io does, and answer the binary: out of the crate tarball `cargo
 /// package` makes — which carries the view's sources and never its build — with
@@ -436,6 +495,29 @@ fn a_build_without_the_bundle() -> PathBuf {
             "LLVM_PROFILE_FILE",
         ] {
             command.env_remove(variable);
+        }
+        // What cargo sets for this test binary is no part of a host's build
+        // either, and some of it decides whether a dependency is rebuilt: `ring`
+        // reruns its build script when `CARGO_MANIFEST_DIR` or `OUT_DIR`
+        // changes, so a build that inherited them would recompile, in the shared
+        // build directory, the units every other build there compiled without.
+        for (variable, _) in std::env::vars_os() {
+            let name = variable.to_string_lossy();
+            if [
+                "CARGO_MANIFEST_",
+                "CARGO_PKG_",
+                "CARGO_BIN_EXE_",
+                "CARGO_CRATE_NAME",
+                "CARGO_PRIMARY_PACKAGE",
+                "CARGO_TARGET_TMPDIR",
+                "CARGO_RUSTC_CURRENT_DIR",
+                "OUT_DIR",
+            ]
+            .iter()
+            .any(|set_for_the_test| name.starts_with(set_for_the_test))
+            {
+                command.env_remove(&variable);
+            }
         }
         command
     };
@@ -489,6 +571,7 @@ fn a_build_without_the_bundle() -> PathBuf {
 
     let mut build = cargo_in(&tree);
     build
+        .env("RUSTC_WORKSPACE_WRAPPER", workspace_wrapper(&target))
         .args([
             "build",
             "--offline",
@@ -497,7 +580,12 @@ fn a_build_without_the_bundle() -> PathBuf {
             "onepipeline-api",
             "--target-dir",
         ])
-        .arg(&target);
+        .arg(&target)
+        .arg("--config")
+        .arg(format!(
+            "build.build-dir={}",
+            toml::Value::String(shared_build_dir().display().to_string())
+        ));
     run(build, "cargo build of the packaged crate");
     target
         .join("debug")
