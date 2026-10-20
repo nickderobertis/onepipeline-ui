@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.1...v0.41.2) - 2026-10-20
+
+### Added
+
+- *(release)* build, publish and verify linux-arm64 again as a sixth release job ([#390](https://github.com/nickderobertis/onepipeline-ui/pull/390))
+
+### Fixed
+
+- *(release)* wait for wheels and npm packages a registry has not listed yet ([#391](https://github.com/nickderobertis/onepipeline-ui/pull/391))
+- *(deps)* link the engine release carrying this plan's fixes ([#388](https://github.com/nickderobertis/onepipeline-ui/pull/388))
+
 ## [0.41.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.0...v0.41.1) - 2026-10-20
 
 ### Added
