@@ -93,9 +93,11 @@ def checked(seed):
                 or held["number"] < 1
                 or not all(isinstance(held[key], str) for key in ["title", "content"])
                 or not isinstance(held["metadata"], dict)
+                or not all(isinstance(held[key], str) for key in ["status", "state"])
                 or held["status"] not in seed["options"]
                 or held["reason"] not in STATES.get(held["state"], [])
-                or (held["parent"] is not None and held["parent"] not in seed["issues"])):
+                or not (held["parent"] is None
+                        or (isinstance(held["parent"], str) and held["parent"] in seed["issues"]))):
             parser.error(f"seeded issue {name!r} does not fit the board")
     numbers = [held["number"] for held in seed["issues"].values()]
     if len(set(numbers)) != len(numbers):

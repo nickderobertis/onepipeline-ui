@@ -157,6 +157,17 @@ fn the_board_refuses_a_seed_github_could_not_answer_before_listening() {
             "issues": {"seven": {"number": 7, "title": "issue 7", "content": "",
                 "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
                 "parent": "seven"}}}),
+        // A state and a parent that are no names at all.
+        seed(
+            serde_json::json!({"number": 7, "title": "issue 7", "content": "",
+            "metadata": {}, "status": "Todo", "state": ["OPEN"], "reason": null,
+            "parent": null}),
+        ),
+        seed(
+            serde_json::json!({"number": 7, "title": "issue 7", "content": "",
+            "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
+            "parent": {"id": "plan"}}),
+        ),
         // A seed that is not JSON at all.
         Value::String("{not json".to_owned()),
     ] {
@@ -183,7 +194,7 @@ fn the_board_refuses_a_seed_github_could_not_answer_before_listening() {
         assert!(!dir.path().join("endpoint").exists(), "{refused}");
     }
 
-    // The same seed made answerable is served, with its issue read by number.
+    // The same seed made answerable is served as seeded.
     let dir = tempfile::tempdir().expect("board workspace");
     let board = GitHubBoard::start_seeded(dir.path(), &seed(issue("CLOSED", Some("DUPLICATE"))));
     assert_eq!(board.state()["issues"]["seven"]["number"], 7);
