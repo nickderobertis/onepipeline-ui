@@ -1315,6 +1315,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "complete",
     "amend",
     "note",
+    "withdraw-note",
     "finding",
     "settle",
     "rework",
@@ -1365,6 +1366,54 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("a note's delivery deadline and its withdrawal are spelled as the engine declares them", () => {
+  const sent = {
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      {
+        op: "note",
+        id: "docs",
+        addressee: "worker",
+        text: "measure it too",
+        delivery_timeout_seconds: 300,
+      },
+      {
+        op: "withdraw-note",
+        envelope: "reply-7",
+        index: 0,
+        reason: "superseded by the next note",
+      },
+    ],
+  };
+  expect(replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(sent)))).toEqual(
+    sent,
+  );
+  const withCommand = (command: Record<string, unknown>) =>
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [command],
+    }).success;
+  // A deadline no note can meet, a position before the first command, a
+  // fractional one, a blank reason and a withdrawal naming no envelope are each
+  // refused, as the engine refuses them.
+  const note = { op: "note", id: "docs", addressee: "worker", text: "x" };
+  expect(withCommand({ ...note, delivery_timeout_seconds: 0 })).toBe(false);
+  const withdrawal = {
+    op: "withdraw-note",
+    envelope: "reply-7",
+    index: 1,
+    reason: "r",
+  };
+  expect(withCommand(withdrawal)).toBe(true);
+  expect(withCommand({ ...withdrawal, index: -1 })).toBe(false);
+  expect(withCommand({ ...withdrawal, index: 0.5 })).toBe(false);
+  expect(withCommand({ ...withdrawal, reason: "" })).toBe(false);
+  expect(withCommand({ ...withdrawal, envelope: "" })).toBe(false);
+  expect(
+    withCommand({ op: "withdraw-note", envelope: "reply-7", index: 1 }),
+  ).toBe(false);
 });
 
 test("rework and retitle envelopes round-trip and refuse incomplete commands", () => {
