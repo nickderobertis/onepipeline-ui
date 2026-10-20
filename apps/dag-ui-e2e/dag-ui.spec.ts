@@ -920,6 +920,38 @@ test("shows the moment a planner redirected a running turn", async ({
 });
 
 /**
+ * A note the planner asked a running turn to take at its end says whether it did,
+ * and a note recorded before the engine said how still reads as the delivery it
+ * was — off the read API serving the engine's own `note-delivered` records.
+ */
+test("says how a live turn took a note, where the record says", async ({
+  page,
+}) => {
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+
+  await openObservatory(page, `/?run=${runs().outcomes}&node=migrate`);
+  const notes = transcript
+    .getByRole("article")
+    .filter({ hasText: "Redirected into the running turn" });
+  await expect(notes).toHaveCount(2);
+  const said: string[] = [];
+  for (const index of [0, 1]) {
+    await notes.nth(index).click();
+    await expect(itemDetail(page)).toContainText(
+      "Live — into the turn that was already running",
+    );
+    said.push((await itemDetail(page).textContent()) ?? "");
+    await page.keyboard.press("Escape");
+  }
+  // One was left to end and says so; the other's record never said, so neither
+  // way a turn can take a note is claimed for it.
+  const leftToEnd = "Left to end — the note reached it as it ended";
+  expect(said.filter((text) => text.includes(leftToEnd))).toHaveLength(1);
+  const unsaid = said.find((text) => !text.includes(leftToEnd)) ?? "";
+  expect(unsaid).not.toContain("Interrupted —");
+});
+
+/**
  * A surface of a kind this build has never seen, and an edit by an author it has
  * never seen, drawn as any other surface or edit — in a real browser, off the read
  * API serving a run a host's own observer binding wrote into.

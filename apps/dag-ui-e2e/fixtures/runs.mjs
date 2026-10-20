@@ -2243,6 +2243,42 @@ function writeOutcomesRun(root) {
     node: "migrate",
     persona: "worker",
   });
+  // Two manager notes the running turn took: one through the engine that says
+  // how — the planner asked for the turn to be left to end, and it was — and one
+  // recorded before the engine said so, which carries no `turn` at all.
+  // Stamped at the dispatch itself, so the run's own bounds are what they were
+  // before these were recorded.
+  const note = (text, turn) =>
+    journal.emit(
+      "pipeline",
+      "edit-committed",
+      { ...run, node: "migrate" },
+      {
+        author: "planner",
+        command: {
+          op: "note",
+          id: "migrate",
+          addressee: "worker",
+          text,
+          ...(turn === undefined
+            ? {}
+            : { deliver: "turn-end", delivery_timeout_seconds: 300 }),
+        },
+        operations: [
+          {
+            kind: "note-delivered",
+            node: "migrate",
+            addressee: "worker",
+            text,
+            reached: "worker",
+            ...(turn === undefined ? {} : { turn }),
+          },
+        ],
+        operation_kinds: ["note-delivered"],
+      },
+    );
+  note("finish the table you are on before the index", "turn-end");
+  note("and keep the old column until the backfill reads it");
   journal
     .advance(2)
     .emit(
