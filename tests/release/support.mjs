@@ -81,7 +81,9 @@ export async function registryDoubles(dir) {
       stdio: "inherit",
     },
   );
-  for (let i = 0; i < 100 && !existsSync(join(state, "port")); i++)
+  // It mints two RSA keys before it listens, which on a loaded host takes
+  // longer than five seconds, so it is given thirty.
+  for (let i = 0; i < 600 && !existsSync(join(state, "port")); i++)
     await sleep(50);
   const port = readFileSync(join(state, "port"), "utf8");
   const base = `http://127.0.0.1:${port}`;
@@ -190,22 +192,30 @@ export function releaseEnv({ gh, registries, home, extra = {} }) {
 }
 
 // The same recipe left running, for a journey that changes what a registry
-// serves while the recipe waits on it: resolves once it exits.
+// serves while the recipe waits on it: resolves once it exits. `output()` is
+// what it has printed so far and `exited()` whether it has, so a journey can
+// change the registry once the recipe says it is waiting rather than after a
+// guessed delay.
 export function recipeRunning(job, args, env) {
   const child = spawn("just", [`release-${job}`, ...args], { cwd: ROOT, env });
   let stdout = "";
   let stderr = "";
+  let exited = false;
   child.stdout.on("data", (chunk) => {
     stdout += chunk;
   });
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
   });
-  return new Promise((done) =>
-    child.once("exit", (status) =>
-      done({ status, stdout, stderr, output: `${stdout}\n${stderr}` }),
-    ),
+  const running = new Promise((done) =>
+    child.once("exit", (status) => {
+      exited = true;
+      done({ status, stdout, stderr, output: `${stdout}\n${stderr}` });
+    }),
   );
+  running.output = () => `${stdout}\n${stderr}`;
+  running.exited = () => exited;
+  return running;
 }
 
 export function recipe(job, args, env) {

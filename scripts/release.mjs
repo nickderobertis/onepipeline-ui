@@ -35,9 +35,10 @@
 //                 every platform job succeeded. Each upload repeats it first, so
 //                 a missing platform publishes nothing platform-independent.
 //                 The phase itself, and only it, waits for npm to serve each
-//                 platform package that a job which succeeded published —
-//                 fetching it by version as an install does — so the launcher
-//                 that pins them never goes out ahead of them.
+//                 platform package — fetching it by version as an install
+//                 does — and for PyPI to list each wheel, unless a job failed
+//                 or a Release asset is missing, so the launcher that pins
+//                 them never goes out ahead of them.
 //   build         assemble the platform-independent files: the npm launcher,
 //                 the npm frontend package, the crate and the CycloneDX SBOM.
 //   upload R      crate, npm or github, idempotent as above.
@@ -69,7 +70,7 @@
 //   RELEASE_CARGO_PUBLISH_FLAGS extra `cargo publish` flags, as words
 //   RELEASE_VERIFY_BUDGET    seconds a registry install is retried (600)
 //   RELEASE_CHECK_BUDGET     seconds `check` waits, in all, for npm to serve the
-//                            platform packages (900)
+//                            platform packages and PyPI to list the wheels (900)
 //   BUILD_RESULTS            `build-<os>=<result>` pairs the publish job was handed
 //   STEP_RESULTS             `<step>=<outcome>` pairs of the publish job's own steps
 //
@@ -950,14 +951,20 @@ function pairs(name) {
 // the crate claims the release, so neither goes out while one platform is
 // missing. A platform job that did not succeed is missing whatever it left.
 //
-// npm's platform packages are then fetched by version, as an install fetches
-// them, because npm takes a publish and serves it minutes later, and lists a
-// version before it serves its tarball.
-// With `wait`, which the phase passes, each is waited for; the uploads' repeat
-// of the check fetches each once. Only a package a job that succeeded
-// published is waited for: one whose job did not succeed, or which anything
-// else here is missing beside, may never have reached npm, and is reported now
-// rather than read as a registry that has not caught up.
+// Neither package registry serves an upload the moment it takes it. npm lists
+// a version minutes after `npm publish` returns — v0.41.1's linux-x64 package
+// was taken at 05:22:57 and npm's own `time` for it reads 05:27:10 — and lists
+// it before it serves its tarball, so its platform packages are fetched by
+// version, as an install fetches them. PyPI's JSON API is served from a cache
+// that can still omit a wheel uploaded seconds before: v0.41.1's macOS and
+// Windows wheels, taken at 05:25:19 and 05:25:17, were not in it at 05:25:58.
+// So a wheel or package a registry does not answer for yet is *late*, not
+// missing, and with `wait`, which the phase passes, every late one is waited
+// for within one deadline; the uploads' repeat of the check asks each once.
+// Only what is late for nothing else is waited for: when a job did not
+// succeed, or a Release asset — which GitHub's API answers for at once — is
+// missing, the check cannot pass however long it waits, so everything late is
+// reported now rather than read as a registry that has not caught up.
 function checkBudget() {
   const budget = process.env.RELEASE_CHECK_BUDGET || "900";
   if (!/^\d+$/.test(budget))
@@ -992,47 +999,22 @@ async function check({ wait = false } = {}) {
       if (a.registry === "github" && !assets.has(a.file))
         missing.push(`GitHub Release ${a.file}`);
       if (a.registry === "pypi" && wheels && !wheels.has(a.file))
-        missing.push(`PyPI ${a.file}`);
+        unlisted.push(a);
       if (a.registry === "npm" && npm && !npmServes(a.package, version))
         unlisted.push(a);
     }
+  const named = (a) =>
+    a.registry === "pypi" ? `PyPI ${a.file}` : `npm ${a.package}@${version}`;
   if (missing.length || (!wait && unlisted.length))
-    missing.push(...unlisted.map((a) => `npm ${a.package}@${version}`));
-  else if (npm) {
-    // One deadline for every package, so three slow ones cannot take three
-    // budgets.
+    missing.push(...unlisted.map(named));
+  else {
+    // One deadline for every late wheel and package, so three slow ones
+    // cannot take three budgets.
     const deadline = Date.now() + budget * 1000;
-    const work = scratch("check-npm");
-    try {
-      for (const job of Object.keys(PLATFORMS))
-        for (const a of plan(job, version).artifacts.filter(
-          (artifact) => artifact.registry === "npm",
-        )) {
-          try {
-            retried(
-              `npm ${a.package} ${version}`,
-              `check that npm serves ${a.package}@${version}: build-${job} published it, so npm took it, but has not served it within the wait`,
-              "npm",
-              [
-                "cache",
-                "add",
-                "--prefer-online",
-                "--cache",
-                portable(join(work, a.package)),
-                `${a.package}@${version}`,
-              ],
-              {
-                budget: Math.max(1, Math.ceil((deadline - Date.now()) / 1000)),
-              },
-            );
-          } catch (error) {
-            if (!(error instanceof Fault)) throw error;
-            missing.push(`npm ${a.package}@${version}`);
-          }
-        }
-    } finally {
-      rmSync(work, { recursive: true, force: true });
-    }
+    const late = unlisted.filter((a) => a.registry === "pypi");
+    if (late.length)
+      missing.push(...(await awaitWheels(version, late, deadline)).map(named));
+    if (npm) await awaitNpm(version, deadline, missing);
   }
   if (missing.length)
     throw new Fault(
@@ -1040,6 +1022,76 @@ async function check({ wait = false } = {}) {
       "re-run the failed build job; the publish job publishes once every platform is served",
     );
   say(`release publish: every platform's ${tag} files are served`);
+}
+
+// PyPI's JSON for this version, asked again until it lists every wheel in
+// `late` or the deadline passes, backing off as scripts/retry-install.sh does.
+// Returns the wheels it still did not list. A read that fails, or answers
+// something that is not a list of files, is refused as at first rather than
+// waited out as a wheel PyPI has not caught up with.
+async function awaitWheels(version, late, deadline) {
+  const started = Date.now();
+  let delay = (deadline - started) / 1000 < 30 ? 1 : 5;
+  let pending = late;
+  for (let attempt = 1; ; attempt++) {
+    const elapsed = Math.round((Date.now() - started) / 1000);
+    const names = pending.map((a) => a.file).join(", ");
+    if (Date.now() + delay * 1000 > deadline) {
+      process.stderr.write(
+        `::error::PyPI ${names}: still not listed after ${attempt} reads over ${elapsed}s\n`,
+      );
+      return pending;
+    }
+    process.stderr.write(
+      `  PyPI does not list ${names} yet after ${elapsed}s; asking again in ${delay}s...\n`,
+    );
+    await new Promise((done) => setTimeout(done, delay * 1000));
+    const listed = await pypiFiles(version);
+    pending = pending.filter((a) => !listed.has(a.file));
+    if (!pending.length) {
+      process.stderr.write(
+        `PyPI ${late.map((a) => a.file).join(", ")}: listed after ${Math.round((Date.now() - started) / 1000)}s\n`,
+      );
+      return [];
+    }
+    delay = Math.min(delay * 2, 60);
+  }
+}
+
+// Every platform package fetched by version within the deadline; one npm does
+// not serve by then is added to `missing`.
+async function awaitNpm(version, deadline, missing) {
+  const work = scratch("check-npm");
+  try {
+    for (const job of Object.keys(PLATFORMS))
+      for (const a of plan(job, version).artifacts.filter(
+        (artifact) => artifact.registry === "npm",
+      )) {
+        try {
+          retried(
+            `npm ${a.package} ${version}`,
+            `check that npm serves ${a.package}@${version}: build-${job} published it, so npm took it, but has not served it within the wait`,
+            "npm",
+            [
+              "cache",
+              "add",
+              "--prefer-online",
+              "--cache",
+              portable(join(work, a.package)),
+              `${a.package}@${version}`,
+            ],
+            {
+              budget: Math.max(1, Math.ceil((deadline - Date.now()) / 1000)),
+            },
+          );
+        } catch (error) {
+          if (!(error instanceof Fault)) throw error;
+          missing.push(`npm ${a.package}@${version}`);
+        }
+      }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 function buildPublish(out) {
@@ -1285,18 +1337,17 @@ async function verifyPublish(out) {
       "re-run this job's upload crate",
     );
   if (switchedOn("NPM_PUBLISH")) {
-    if (!npmServes("onepipeline-ui", version))
-      throw new Fault(
-        `npm does not serve onepipeline-ui@${version}`,
-        "re-run this job's upload npm",
-      );
     // The frontend, installed as a consumer installs it, carries the bundle
-    // this job built and packed.
+    // this job built and packed. The install is retried until npm serves it,
+    // and is the only question asked of npm about it: npm lists a publish minutes
+    // after taking it, so v0.41.0's single `npm view`, six seconds after
+    // `upload npm` returned, refused a frontend whose npm `time` is 97 seconds
+    // after the upload.
     const frontend = scratch("verify-frontend");
     try {
       retried(
         `npm onepipeline-ui ${version}`,
-        "check that npm serves the frontend package at this version",
+        "check that npm serves the frontend package at this version; if it never took it, re-run this job's upload npm",
         "npm",
         [
           "install",

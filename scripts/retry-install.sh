@@ -2,8 +2,9 @@
 # Run an install until the registry it resolves from actually serves the
 # version, bounded by a total time budget.
 #
-# A publish is not one event. PyPI's JSON API answers for a new version seconds
-# after the upload, but `pip install` resolves through the *simple index* behind
+# A publish is not one event. PyPI's JSON API usually answers for a new version
+# seconds after the upload (v0.41.1's still omitted two wheels forty seconds
+# after theirs), but `pip install` resolves through the *simple index* behind
 # a CDN, which converges later and per edge; npm's packument has the same shape.
 # Releases v0.1.4, v0.1.5 and v0.1.6 each went red in a post-publish verify leg
 # with "No matching distribution found for onepipeline-api-cli==0.1.6 (from versions:
