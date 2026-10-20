@@ -203,7 +203,19 @@ python3.12 -m maturin build --release --locked --features bundled-ui \
   --target "$TARGET" --compatibility manylinux2014 --out "$OUT"
 SCRIPT
 
-docker run --rm --platform "$platform" \
+# The container's CPU weight. Under cgroup v2 Docker's default of 1024 shares is
+# cpu.weight 100, a systemd service's default, so where the caller runs in a
+# service — as on the host these were measured on — the container competes with
+# everything the caller runs as one equal group. `ci-test-linux` runs this build
+# beside five other tasks, most of them compiling on a cold target, and it is
+# that job's longest chain: on a cold target on 4 cores its compile took
+# 15.8-17.0 minutes at the default weight, 11.2-12.1 at 4096 shares (cpu.weight
+# 303 under runc's mapping), and 9.8 alone (docs/linux-cold-cache-timing.md). Weight
+# only divides CPU that two groups both want, so a release job's build, which has
+# the runner to itself, is unchanged.
+cpu_shares=4096
+
+docker run --rm --platform "$platform" --cpu-shares "$cpu_shares" \
   -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" -w /io \
   -e TARGET="$target" -e OUT="$out_rel" -e CHANNEL="$channel" -e MATURIN_VERSION="$maturin_version" \
   -e RUSTUP_VERSION="$rustup_version" -e RUSTUP_SHA256="$rustup_sha256" \
