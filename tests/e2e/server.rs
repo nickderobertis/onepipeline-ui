@@ -17238,8 +17238,8 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
-/// it records the argv it was given and its stdin's prompt frame, as
-/// [`write_harness_standin`] does, in a file of its own under `records`, and
+/// it records its stdin's first line and then each argument it was given, NUL
+/// terminated, in a file of its own under `records`, and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17257,7 +17257,8 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nIFS= read -r frame\nprintf '%s %s\\n' \"$*\" \"$frame\" > {:?}/argv-$$.txt\n\
+            "#!/bin/sh\nIFS= read -r frame\n\
+             {{ printf '%s\\n' \"$frame\"; printf '%s\\0' \"$@\"; }} > {:?}/argv-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
@@ -17471,22 +17472,36 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
 
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
-    // side; the producer is told it is the private side of a mixed plan. Each
-    // record ends in the `user` frame the dispatch's prompt rode on stdin, and what
-    // is held is that prompt as the frame decodes it, not its JSON escaping.
+    // side; the producer is told it is the private side of a mixed plan. The prompt
+    // rides one of two places, and what is held is the prompt itself either way: a
+    // turn the engine opened under control is handed it as the `user` frame on
+    // stdin, decoded rather than read through its JSON escaping; a turn whose
+    // control ask oneharness refused — as it does where the socket under this
+    // journey's session store would overrun `sun_path`, which macOS's deep
+    // temporary directory makes it — is asked again without it, the prompt in
+    // argv after `-p`.
     let dispatched: Vec<String> = fs::read_dir(&records)
         .expect("the dispatch records")
         .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
         .map(|record| {
-            let frame = record
-                .find(r#"{"type":"user""#)
-                .unwrap_or_else(|| panic!("no prompt frame on the harness's stdin: {record}"));
-            let frame: Value =
-                serde_json::from_str(record[frame..].trim_end()).expect("the prompt frame");
-            frame["message"]["content"][0]["text"]
-                .as_str()
-                .unwrap_or_else(|| panic!("a prompt frame with no text: {frame}"))
-                .to_owned()
+            let (frame, argv) = record
+                .split_once('\n')
+                .unwrap_or_else(|| panic!("a record with no stdin line: {record:?}"));
+            if !frame.is_empty() {
+                let frame: Value = serde_json::from_str(frame)
+                    .unwrap_or_else(|err| panic!("a stdin line that is no frame ({err}): {frame}"));
+                assert_eq!(frame["type"], json!("user"), "{frame}");
+                return frame["message"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("a prompt frame with no text: {frame}"))
+                    .to_owned();
+            }
+            let argv: Vec<&str> = argv.split_terminator('\0').collect();
+            argv.iter()
+                .position(|arg| *arg == "-p")
+                .and_then(|at| argv.get(at + 1))
+                .map(|prompt| (*prompt).to_owned())
+                .unwrap_or_else(|| panic!("no prompt on stdin or after `-p`: {argv:?}"))
         })
         .collect();
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
