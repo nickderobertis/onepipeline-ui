@@ -26,16 +26,27 @@ import { execFileSync } from "node:child_process";
 //                                its packument whose tarball answers 404, as
 //                                npm's own registry does for minutes after it
 //                                takes a publish
+//   control/stage                lines naming npm package@version whose
+//                                publish is staged rather than published, as
+//                                npm's own registry does to a publish it holds
+//                                for a maintainer's approval: the PUT answers a
+//                                2xx, the version is listed only by
+//                                GET /-/stage and served by nothing, and
+//                                another publish of it is refused with a 409.
+//                                npm-staged/<package>@<version>.{json,tgz} is
+//                                what it holds; approving moves both under npm/
 //   control/corrupt              lines naming files served with other bytes
 //   control/broken               lines `<read>=<status>`, `<read>=malformed` or
 //                                `crate-index=foreign` (JSON, not an entry),
 //                                `<read>=not-json` (a 200 that does not parse),
 //                                `<read>=empty` (a 200 with nothing, or null) or
 //                                `npm-packument=other-version` (each version's
-//                                manifest names another),
+//                                manifest names another) or
+//                                `npm-stage=malformed` (entries naming no
+//                                version and no stage id),
 //                                for the reads a release makes of a registry:
-//                                pypi-json, npm-packument, crate-index and
-//                                crate-api
+//                                pypi-json, npm-packument, npm-stage,
+//                                crate-index and crate-api
 //
 // Prefixes: /pypi/..., /simple/..., /files/... and /legacy/ for PyPI; /npm/...
 // for npm; /index/... and /api/v1/... for the crate registry.
@@ -48,7 +59,7 @@ import { execFileSync } from "node:child_process";
 // SSL_CERT_FILE at that authority reaches this double instead of GitHub: every
 // read is answered with nothing and every write refused, both logged to
 // forge.log.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -67,7 +78,7 @@ if (!state) {
   console.error("usage: registries.mjs STATE_DIR");
   process.exit(2);
 }
-for (const dir of ["pypi", "npm", "crates", "control/fail"])
+for (const dir of ["pypi", "npm", "npm-staged", "crates", "control/fail"])
   mkdirSync(join(state, dir), { recursive: true });
 
 const lines = (name) =>
@@ -285,6 +296,28 @@ async function npm(request, response, path) {
     if (!newest) return reply(response, 404, { error: "Not found" });
     return reply(response, 200, versions[newest]);
   }
+  // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] npm's stage queue has no published schema or offline fixture to derive this from. The envelope (`items`, `total`) and the entry fields (`id`, `packageName`, `version`) are what the npm CLI's own `npm stage list` reads, and the journeys run that real CLI against this double, so a shape it stopped reading fails them through the client the release itself runs.
+  if (path === "/-/stage" && request.method === "GET") {
+    if (!/^Bearer \S+/.test(request.headers.authorization ?? ""))
+      return reply(response, 401, { error: "Unauthorized" });
+    const wanted = new URL(request.url, "http://double").searchParams.get(
+      "package",
+    );
+    if (lines("broken").includes("npm-stage=malformed"))
+      return reply(response, 200, {
+        items: [null, { packageName: wanted }],
+        total: 2,
+      });
+    if (broken("npm-stage", response)) return;
+    const items = readdirSync(join(state, "npm-staged"))
+      .filter((file) => file.endsWith(".json"))
+      .map((file) =>
+        JSON.parse(readFileSync(join(state, "npm-staged", file), "utf8")),
+      )
+      .filter((item) => !wanted || item.packageName === wanted);
+    return reply(response, 200, { items, total: items.length });
+  }
+  // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
   const pkg = decodeURIComponent(path.slice(1));
   const otherVersion = lines("broken").includes("npm-packument=other-version");
   if (
@@ -320,6 +353,29 @@ async function npm(request, response, path) {
       return reply(response, 403, {
         error: `You cannot publish over the previously published versions: ${version}.`,
       });
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] npm's registry documents no response for a staged publish, and the CLI does not read the PUT's body, so only the status matters: a 2xx, as `npm publish` exited 0 on the publish npm staged for v0.41.2's win32-x64 package. The 409 and its text are what npm's registry answered that job's re-run (run 39426287439, attempt 2, build-windows). No offline copy of either exists to hold this to.
+    const held = join(state, "npm-staged", `${pkg}@${version}`);
+    if (existsSync(`${held}.json`))
+      return reply(response, 409, {
+        error: `Cannot publish over previously staged version "${version}".`,
+      });
+    if (lines("stage").includes(`${pkg}@${version}`)) {
+      const bytes = Buffer.from(attachment.data, "base64");
+      writeFileSync(`${held}.tgz`, bytes);
+      writeFileSync(
+        `${held}.json`,
+        JSON.stringify({
+          id: randomUUID(),
+          packageName: pkg,
+          version,
+          tag: "latest",
+          shasum: createHash("sha1").update(bytes).digest("hex"),
+          manifest,
+        }),
+      );
+      return reply(response, 200, { ok: true });
+    }
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     mkdirSync(join(state, "npm", pkg), { recursive: true });
     writeFileSync(
       join(state, "npm", pkg, `${version}.tgz`),

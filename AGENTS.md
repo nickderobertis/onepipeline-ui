@@ -238,6 +238,12 @@ fans one uniformly-named target across all of them.
   after its upload. npm also installs a launcher whose platform package it
   cannot fetch and exits 0, so an install that lacks the platform package is
   retried, never counted.
+- **An `npm publish` that exits 0 may have been staged, not published**, and
+  an upload fails on one. A staged version is served by nothing until a
+  maintainer approves it (`npm stage approve <id>`), and a re-run cannot publish
+  over it, so approve, then re-run. A release that is to publish unattended
+  needs a credential npm lets publish directly — a registry setting, not code
+  here.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.
