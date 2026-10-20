@@ -16,7 +16,9 @@
       "cache": false
     },
     "ensure-baseline": {
+      "//": "After the browser tiers' server: both build into target's one build directory, which cargo locks for a whole build, and on a cold target the baseline otherwise held it through the debug graph while that server, and the browser tiers behind it, waited (docs/linux-cold-cache-timing.md). Once the server is built, the baseline compiles its own crate over the units it left.",
       "command": "just _ensure-baseline",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build-api-server" }],
       "cache": false
     },
     "format": {
