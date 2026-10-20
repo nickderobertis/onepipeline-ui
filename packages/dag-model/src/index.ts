@@ -1818,6 +1818,18 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       criterion: z.string().min(1).optional(),
       deliver: noteDeliverSchema.optional(),
       persist: z.boolean().optional(),
+      delivery_timeout_seconds: z.number().int().positive().optional(),
+    })
+    .strict(),
+  // Take back a note an earlier envelope sent, named by that envelope's id and
+  // the note's 0-based position among its commands.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
+  z
+    .object({
+      op: z.literal("withdraw-note"),
+      envelope: z.string().min(1),
+      index: z.number().int().nonnegative(),
+      reason: z.string().min(1),
     })
     .strict(),
   z

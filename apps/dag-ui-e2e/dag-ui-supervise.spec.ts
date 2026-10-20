@@ -199,7 +199,8 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   const composer = page.getByRole("region", { name: "Reply" });
   // The engine's graph edits are available through the shortcut composer; the
   // commands that edit no graph — a review pass, a readjustment, a decline of
-  // review comments — are spelled by the grammar and offered no shortcut.
+  // review comments, a withdrawal of a sent note — are spelled by the grammar
+  // and offered no shortcut.
   const shortcut = composer.getByLabel("Shortcut");
   await expect(
     shortcut.getByRole("option", { name: "rework", exact: true }),
@@ -207,7 +208,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await expect(
     shortcut.getByRole("option", { name: "retitle", exact: true }),
   ).toHaveCount(1);
-  for (const unoffered of ["decline", "review", "readjust"]) {
+  for (const unoffered of ["decline", "review", "readjust", "withdraw-note"]) {
     await expect(
       shortcut.getByRole("option", { name: unoffered, exact: true }),
     ).toHaveCount(0);

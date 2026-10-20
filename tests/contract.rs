@@ -2686,6 +2686,9 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         input_bytes: 31,
         reason: Some("the member is between turns".into()),
         truncated: false,
+        offer: None,
+        accepted: None,
+        party: None,
     })
     .expect("the refusal serializes");
     let declared: Vec<&str> = refused
@@ -2709,6 +2712,9 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         input_bytes: 31,
         reason: None,
         truncated: false,
+        offer: None,
+        accepted: None,
+        party: None,
     })
     .expect("the delivery serializes");
     assert!(
@@ -3165,6 +3171,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
             criterion: None,
             deliver,
             persist: true,
+            delivery_timeout_seconds: None,
         })
         .expect("the command serializes")
     };
@@ -3196,8 +3203,8 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
     };
     for (disposition, word, read) in [
         (Reached::Queued, "queued", true),
-        (Reached::Worker, "worker", true),
-        (Reached::Supervisor, "supervisor", true),
+        (Reached::Worker { turn: None }, "worker", true),
+        (Reached::Supervisor { turn: None }, "supervisor", true),
         (
             Reached::JudgedWith {
                 completion_reason: "the note settled it".into(),
@@ -3205,7 +3212,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
             "judged-with",
             true,
         ),
-        (Reached::Carried, "carried", false),
+        (Reached::Carried { reason: None }, "carried", false),
     ] {
         assert_eq!(
             disposition.a_conversation_read_it(),
@@ -3430,6 +3437,8 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         EventKind::TurnCompleted,
         EventKind::JudgeDecided,
         EventKind::TurnInterrupted,
+        EventKind::NoteAdmitted,
+        EventKind::NoteWithdrawn,
         EventKind::MemberHeartbeat,
         EventKind::FallbackAdvanced,
         EventKind::OneharnessSession,
@@ -3450,6 +3459,8 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         | EventKind::TurnCompleted
         | EventKind::JudgeDecided
         | EventKind::TurnInterrupted
+        | EventKind::NoteAdmitted
+        | EventKind::NoteWithdrawn
         | EventKind::MemberHeartbeat
         | EventKind::FallbackAdvanced
         | EventKind::OneharnessSession
