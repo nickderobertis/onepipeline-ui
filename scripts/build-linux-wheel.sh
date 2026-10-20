@@ -203,15 +203,7 @@ python3.12 -m maturin build --release --locked --features bundled-ui \
   --target "$TARGET" --compatibility manylinux2014 --out "$OUT"
 SCRIPT
 
-# The container's CPU weight. At Docker's default it competes as one equal
-# cgroup with everything its caller runs, and in `ci-test-linux` it is the head
-# of the longest chain beside five other tasks compiling on a cold target; 4096
-# shares (cpu.weight 303) favours it there (docs/linux-cold-cache-timing.md).
-# Weight only divides CPU that two groups both want, so a release job's build,
-# which has the runner to itself, is unchanged.
-cpu_shares=4096
-
-docker run --rm --platform "$platform" --cpu-shares "$cpu_shares" \
+docker run --rm --platform "$platform" \
   -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" -w /io \
   -e TARGET="$target" -e OUT="$out_rel" -e CHANNEL="$channel" -e MATURIN_VERSION="$maturin_version" \
   -e RUSTUP_VERSION="$rustup_version" -e RUSTUP_SHA256="$rustup_sha256" \
