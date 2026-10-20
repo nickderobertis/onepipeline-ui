@@ -671,7 +671,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(11));
+    assert_eq!(body["timeline_schema_version"], json!(12));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -4687,6 +4687,110 @@ fn a_note_carried_to_the_next_dispatch_is_served_as_not_yet_delivered() {
     );
 }
 
+/// How a live turn took a note is served beside the party that took it, and a
+/// record that does not say is served as it always was.
+///
+/// The engine that links here can leave a running turn to end rather than
+/// interrupt it, and its `worker` and `supervisor` dispositions record which as
+/// `turn`. A planner who asked for `turn-end` reads whether that is what
+/// happened; a note recorded before the field existed still opens, saying
+/// nothing about it; and a word outside the engine's pair is a record this build
+/// cannot read, served as no redirection rather than relayed.
+#[test]
+fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
+    let note = |reached: &str, turn: Option<&str>| {
+        let mut operation = json!({
+            "kind": "note-delivered",
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "addressee": "worker",
+            "text": "x",
+            "reached": reached,
+        });
+        if let Some(turn) = turn {
+            operation["turn"] = json!(turn);
+        }
+        json!({
+            "author": "planner",
+            "command": {
+                "op": "note",
+                "id": fixture_run::REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": "x",
+                "deliver": "turn-end",
+                "delivery_timeout_seconds": 30,
+            },
+            "operations": [operation],
+            "operation_kinds": ["note-delivered"],
+        })
+    };
+    let notes = [
+        note("worker", Some("turn-end")),
+        note("supervisor", Some("interrupted")),
+        note("worker", None),
+        note("worker", Some("sideways")),
+    ];
+    let serving = Serving::start(move |root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for payload in &notes {
+            fixture_run::append_relayed(
+                &dir,
+                "pipeline",
+                "edit-committed",
+                json!({ "run_id": fixture_run::RUN_ID }),
+                payload.clone(),
+            );
+        }
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(timeline["timeline_schema_version"], json!(12));
+    // Every appended record is stamped at one instant, after everything the
+    // live run wrote, so they are its last four edits in the order appended.
+    let appended: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| {
+            event["kind"] == json!("edit-committed")
+                && event["at"] == json!("2026-08-07T12:01:00.000Z")
+        })
+        .collect();
+    let [left_to_end, interrupted, unsaid, unreadable] = <[Value; 4]>::try_from(appended)
+        .unwrap_or_else(|appended| panic!("the four appended edits: {appended:?}"));
+    let served = |reached: &str, turn: Option<&str>| {
+        let mut redirection = json!({
+            "reached": reached,
+            "delivered": true,
+            "delivery": "live",
+            "node_id": fixture_run::REDIRECTED_NODE_ID,
+        });
+        if let Some(turn) = turn {
+            redirection["turn"] = json!(turn);
+        }
+        redirection
+    };
+    assert_eq!(
+        left_to_end["redirection"],
+        served("worker", Some("turn-end")),
+        "{left_to_end}"
+    );
+    assert_eq!(
+        interrupted["redirection"],
+        served("supervisor", Some("interrupted")),
+        "{interrupted}"
+    );
+    assert_eq!(
+        unsaid["redirection"],
+        served("worker", None),
+        "a record written before `turn` existed is served as it was: {unsaid}"
+    );
+    assert!(
+        unreadable.get("redirection").is_none(),
+        "a turn outside the engine's pair is not relayed: {unreadable}"
+    );
+}
+
 /// Every answer `node_control` can give, each driven from a run that produces it.
 ///
 /// The reading has one job — telling a planner whether correcting a node is on
@@ -6047,7 +6151,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(11));
+    assert_eq!(timeline["timeline_schema_version"], json!(12));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -12933,6 +13037,163 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     );
 }
 
+/// The note op's newer fields and the op that takes a note back pass through
+/// the reply route as written, and are answered in the engine's words.
+///
+/// A note asking for the running turn to be left to end, bounded by a delivery
+/// timeout, is the linked engine's to judge: over a run nothing is driving it is
+/// carried to the node's next dispatch and recorded exactly as it was sent. A
+/// timeout no turn can meet, and a `withdraw-note` naming a note the run cannot
+/// take back, are refused by that engine naming what they said — which is the
+/// proof each field reached it unrewritten.
+#[test]
+fn a_turn_end_note_and_its_withdrawal_reach_the_engine_and_are_answered_in_its_words() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let post = |commands: Value| {
+        http::post(
+            serving.address,
+            &reply,
+            &json!({ "version": 3, "commands": commands }).to_string(),
+        )
+    };
+    let refused = |commands: Value| {
+        let answered = post(commands);
+        assert_eq!(answered.status, 422, "{}", answered.body);
+        let answered = answered.json();
+        assert_eq!(answered["error"]["code"], json!("refused"), "{answered}");
+        answered["error"]["message"]
+            .as_str()
+            .expect("the engine's refusal")
+            .to_owned()
+    };
+
+    // A node no dispatch has reached, for the note to be owed to.
+    let added = post(json!([{
+        "op": "add",
+        "node": {
+            "id": "extra",
+            "persona": "engineer",
+            "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done",
+        },
+    }]));
+    assert_eq!(added.status, 200, "{}", added.body);
+
+    let note = json!({
+        "op": "note",
+        "id": "extra",
+        "addressee": "worker",
+        "text": "and say which turn took it",
+        "deliver": "turn-end",
+        "delivery_timeout_seconds": 30,
+    });
+    let noted = post(json!([note]));
+    assert_eq!(noted.status, 200, "{}", noted.body);
+    let noted = noted.json();
+    assert_enveloped(&noted);
+    assert_eq!(noted["receipt"]["state"], json!("applied"), "{noted}");
+    assert_eq!(noted["receipt"]["commands"], json!("applied"), "{noted}");
+
+    // No turn was running to leave to end, so the engine carried it — and the
+    // timeline serves that as the delivery it was, with no turn to speak of.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let carried: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| event["redirection"]["node_id"] == json!("extra"))
+        .collect();
+    assert_eq!(
+        carried.len(),
+        1,
+        "one delivery for the one note: {timeline}"
+    );
+    assert_eq!(
+        carried[0]["redirection"],
+        json!({
+            "reached": "carried",
+            "delivered": false,
+            "delivery": "deferred",
+            "node_id": "extra",
+        }),
+        "{}",
+        carried[0]
+    );
+    // And the edit the engine committed names the command exactly as posted,
+    // `deliver` and `delivery_timeout_seconds` included.
+    let mut watched = http::stream(
+        serving.address,
+        &format!("/api/v2/runs/{run}/watch?timeout=0&until=settled"),
+        None,
+    );
+    assert_eq!(watched.status, 200);
+    let committed: Vec<Value> = std::iter::from_fn(|| watched.next_frame())
+        .filter(|frame| frame.event == "event")
+        .map(|frame| frame.json()["event"].clone())
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .filter(|event| event["payload"]["command"]["op"] == json!("note"))
+        .collect();
+    assert_eq!(committed.len(), 1, "{committed:?}");
+    assert_eq!(committed[0]["payload"]["command"], note, "{}", committed[0]);
+
+    // A timeout no turn can meet is the engine's refusal, naming the field.
+    let zero = refused(json!([{
+        "op": "note",
+        "id": "extra",
+        "addressee": "worker",
+        "text": "x",
+        "deliver": "turn-end",
+        "delivery_timeout_seconds": 0,
+    }]));
+    assert!(zero.contains("`delivery_timeout_seconds` is 0"), "{zero}");
+
+    // Each part of a withdrawal reaches the engine as written: the envelope it
+    // names, the position, and the reason, each refused in its own words.
+    let withdraw = |envelope: &str, index: u32, reason: &str| {
+        refused(json!([{
+            "op": "withdraw-note",
+            "envelope": envelope,
+            "index": index,
+            "reason": reason,
+        }]))
+    };
+    let unnumbered = withdraw("the-last-one", 0, "superseded");
+    assert!(
+        unnumbered.contains("withdraw-note: 'the-last-one' is not an envelope id"),
+        "{unnumbered}"
+    );
+    let unexplained = withdraw("0", 0, "  ");
+    assert!(
+        unexplained.contains("withdraw-note: `reason` is blank"),
+        "{unexplained}"
+    );
+    let unknown = withdraw("41", 0, "superseded");
+    assert!(
+        unknown.contains("withdraw-note: the run holds no envelope 41"),
+        "{unknown}"
+    );
+    // Nothing above was taken back: the carried note is still the run's only
+    // delivery of it, and no withdrawal was recorded.
+    let after = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    );
+    assert!(
+        !after
+            .iter()
+            .any(|event| event["kind"] == json!("note-withdrawn")),
+        "{after:?}"
+    );
+}
+
 /// A verdict naming a settled run's question is that question's ruling, and
 /// never the run asking to complete. A host raises its end-of-run question on
 /// the run's channel through the bus — non-blocking, because the run is not
@@ -15107,7 +15368,13 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         .expect("the note's delivery was recorded");
     assert_eq!(
         recorded[delivered]["redirection"],
-        json!({ "reached": "worker", "delivered": true, "delivery": "live", "node_id": node }),
+        json!({
+            "reached": "worker",
+            "turn": "turn-end",
+            "delivered": true,
+            "delivery": "live",
+            "node_id": node,
+        }),
         "{}",
         recorded[delivered]
     );

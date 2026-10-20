@@ -26,8 +26,10 @@ use onepipeline::agents::{AgentScope, AgentSession, Agents, RUN_ID_LABEL};
 // member is to the pipeline.
 use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
+use onepipeline::note::NoteTurn;
 use onepipeline::plan::{Node, Plan};
 use onepipeline::views::{liveness_word, RunPaths, RunSummary, RunView};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -766,7 +768,7 @@ mod edits {
     /// `context` op recorded it. Nothing writes this any more; runs that hold
     /// one are still read.
     pub const CONTEXT_ADDED: &str = "context-added";
-    /// `{node, addressee, text, criterion?, reached, completion_reason?}` — a
+    /// `{node, addressee, text, criterion?, reached, turn?, completion_reason?}` — a
     /// manager's note was delivered into a node's live conversation, or carried
     /// to that node's next dispatch because no turn of it took the note.
     pub const NOTE_DELIVERED: &str = "note-delivered";
@@ -791,6 +793,11 @@ mod edits {
     /// Closed, as the enum is: a word outside it is a record this build cannot
     /// read and is dropped rather than relayed for a client to fail on.
     pub const REACHED_WORDS: [&str; 5] = ["queued", "worker", "supervisor", "judged-with", CARRIED];
+    /// How the live turn that took a delivered note took it — the tag
+    /// `onepipeline::note::NoteTurn` is written under beside a `worker` or
+    /// `supervisor` [`REACHED`], and read back as that public enum. Absent from a
+    /// record written before the field existed, which says nothing about it.
+    pub const TURN: &str = "turn";
 }
 
 /// The party a record names as its own, when it names one this crate serves.
@@ -4923,6 +4930,13 @@ fn redirection(event: &Envelope) -> Option<Value> {
                         .and_then(Value::as_str)
                         .filter(|word| edits::REACHED_WORDS.contains(word))?;
                     record.insert("reached".into(), json!(reached));
+                    // Optional on the sibling's type, and closed there: absent is a
+                    // record that does not say, and a word its enum does not spell
+                    // is one this build cannot read.
+                    if let Some(turn) = note.get(edits::TURN) {
+                        let turn = NoteTurn::deserialize(turn).ok()?;
+                        record.insert("turn".into(), json!(turn.as_str()));
+                    }
                     if reached == edits::CARRIED {
                         edits::DEFERRED
                     } else {

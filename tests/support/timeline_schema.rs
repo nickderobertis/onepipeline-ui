@@ -9,5 +9,6 @@
 /// event is byte-for-byte what the schema before it served. This list is that
 /// declaration read back, so a bump appends its own entry here, and
 /// `tests/contract.rs` fails when an entry names a field the paragraph for its
-/// schema does not.
-pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[(11, "review")];
+/// schema does not. A field added inside an object an event already carried is
+/// named by its dotted path, as `redirection.turn` is.
+pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[(11, "review"), (12, "redirection.turn")];

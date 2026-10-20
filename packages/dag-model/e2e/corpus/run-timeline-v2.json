@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "timeline_schema_version": 11,
+  "timeline_schema_version": 12,
   "observed_at": "2026-07-19T00:10:00+00:00",
   "run_id": "demo",
   "spans": [
@@ -38,6 +38,18 @@
             "delivered": false,
             "delivery": "deferred",
             "node_id": "signoff"
+          }
+        },
+        {
+          "id": "e8a",
+          "kind": "edit-committed",
+          "at": "2026-07-19T00:00:06+00:00",
+          "redirection": {
+            "reached": "worker",
+            "turn": "turn-end",
+            "delivered": true,
+            "delivery": "live",
+            "node_id": "api"
           }
         },
         {

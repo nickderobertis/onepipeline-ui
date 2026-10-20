@@ -257,6 +257,12 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
  *
+ * `12` is where a redirection began saying how a live turn took a note. A server
+ * on `11` serves a note a running turn was left to end for exactly as it serves
+ * one that interrupted the turn, so a planner who asked for `turn-end` cannot read
+ * whether that is what happened; under `12` the record's `turn` is served beside
+ * its `reached`, and a record that never said serves none.
+ *
  * `10` is where a span's `agent_role` became the member name the run's own graphs
  * declared, as telemetry `17` is for the same field elsewhere. A server on `9`
  * serves one of five words it keeps and the observer's `monitor` member as
@@ -316,7 +322,7 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 11;
+export const TIMELINE_SCHEMA_VERSION = 12;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1232,7 +1238,9 @@ export const timelineReferenceSchema = openObject({
  * offered, and — exactly when the turn did not take them — why; `onepipeline`'s
  * `edit-committed` adds `delivery`, its own word for where the note ended up, and the
  * node it was for — and, where the engine recorded which party of the running
- * conversation took the note, `reached`, whose one word for nobody is `carried`.
+ * conversation took the note, `reached`, whose one word for nobody is `carried` —
+ * and, where the record says how a live turn took it, `turn`: `interrupted`, its
+ * replacement opened on the note, or `turn-end`, left to end and reached then.
  * `reason` is never carried beside a delivered redirection, so one can never be
  * read as having had a reason it failed.
  */
@@ -1242,6 +1250,7 @@ export const redirectionSchema = openObject({
   reached: z
     .enum(["queued", "worker", "supervisor", "judged-with", "carried"])
     .optional(),
+  turn: z.enum(["interrupted", "turn-end"]).optional(),
   member: z.string().min(1).optional(),
   input_bytes: counter.optional(),
   reason: z.string().min(1).optional(),

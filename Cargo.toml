@@ -142,7 +142,7 @@ oneharness-core = "0.28.2"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.6.0"
+oneagentgraph = "0.7.0"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
 onejudge = "0.20.0"
@@ -621,8 +621,19 @@ onemessagebus = "0.9.1"
 # `onetaskgraph-*` requirements move with it to the releases its lock resolves.
 # This changes the engine types carried by ApiError::from_engine and the other
 # engine-typed public items.
+# 0.80.2 takes a note back while a turn is still running: `withdraw-note`
+# reaches a note waiting in its live conversation as well as one carried to the
+# next dispatch, and records `note-withdrawn` naming where it was. With 0.80.1's
+# `turn-end` delivery and the `turn` its `worker` and `supervisor` dispositions
+# record, it is the engine a browser-adopted run's driver must link for a
+# manager's note from the browser to be held and withdrawn the way the CLI's
+# is; this crate relays both ops unchanged through the reply route and serves
+# `turn` as timeline schema 12's `redirection.turn`. It links oneagentgraph
+# 0.7.0, so that requirement moves with it to the one release the lock
+# resolves. This changes the engine types carried by ApiError::from_engine and
+# the other engine-typed public items.
 # llmlint: ignore-end[comments_earn_their_place]
-onepipeline = "=0.80.1"
+onepipeline = "=0.80.2"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets

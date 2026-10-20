@@ -1040,6 +1040,27 @@ describe("run timeline", () => {
         },
       }).success,
     ).toBe(false);
+    // How a live turn took the note rides beside the party that took it, and a
+    // record written before the engine said so — carrying none — still parses.
+    // A word outside the engine's pair is refused as an unknown party is.
+    const taken = (turn?: string) =>
+      timelineEventSchema.safeParse({
+        id: "e10",
+        kind: "edit-committed",
+        at: "2026-07-26T12:00:06Z",
+        redirection: {
+          reached: "worker",
+          ...(turn === undefined ? {} : { turn }),
+          delivered: true,
+          delivery: "live",
+          node_id: "api",
+        },
+      });
+    expect(taken("turn-end").data?.redirection?.turn).toBe("turn-end");
+    expect(taken("interrupted").data?.redirection?.turn).toBe("interrupted");
+    expect(taken().success).toBe(true);
+    expect(taken().data?.redirection?.turn).toBeUndefined();
+    expect(taken("sideways").success).toBe(false);
     // An ordinary record carries none, and is still a valid event.
     expect(
       timelineEventSchema.parse({
