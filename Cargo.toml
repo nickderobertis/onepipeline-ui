@@ -602,7 +602,8 @@ onemessagebus = "0.9.1"
 # 0.8.0, whose `CopyRequest` gains `statuses`, and onevcs 0.56; the dev-only
 # `onevcs` and `onetaskgraph-*` requirements below move with it to the releases
 # its lock resolves. This changes the engine types carried by
-# ApiError::from_engine and the other engine-typed public items.
+# ApiError::from_engine and the other engine-typed public items, so the move is
+# announced as a break of this crate's surface, which follows onepipeline's.
 # llmlint: ignore-end[comments_earn_their_place]
 onepipeline = "=0.79.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
