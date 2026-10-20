@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.42.0...v0.43.0) - 2026-10-20
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose manager notes interrupt live turns ([#405](https://github.com/nickderobertis/onepipeline-ui/pull/405))
+
+### Fixed
+
+- *(release)* finish a re-run whose earlier attempt already published ([#403](https://github.com/nickderobertis/onepipeline-ui/pull/403))
+
 ## [0.42.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.2...v0.42.0) - 2026-10-20
 
 ### Added
