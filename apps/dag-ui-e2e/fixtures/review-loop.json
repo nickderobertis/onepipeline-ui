@@ -107,6 +107,19 @@
         "change_url": "https://example.invalid/changes/30",
         "head": "cccccccccccccccccccccccccccccccccccccccc",
         "continued": {
+          "rework": {
+            "replacement": "cli",
+            "replaces": "cli-draft",
+            "comments": [
+              {
+                "id": "c-301",
+                "url": "https://example.invalid/changes/30#discussion_c-301"
+              }
+            ],
+            "reason": "review asked for a --json flag",
+            "instruction": "add a --json flag",
+            "replaces_head": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
           "source": "store",
           "run": "dag-ui-review-loop-earlier"
         }
@@ -123,6 +136,18 @@
         "change_url": "https://example.invalid/changes/31",
         "head": "dddddddddddddddddddddddddddddddddddddddd",
         "continued": {
+          "rework": {
+            "replacement": "helper",
+            "replaces": "helper-draft",
+            "comments": [
+              {
+                "id": "c-311",
+                "url": "https://example.invalid/changes/31#discussion_c-311"
+              }
+            ],
+            "reason": "review asked for a --json flag",
+            "instruction": "add a --json flag"
+          },
           "source": "store",
           "run": "dag-ui-review-loop-earlier"
         }
@@ -845,6 +870,29 @@
       }
     },
     {
+      "source": "vcs",
+      "kind": "publication-resumed",
+      "node": "docs",
+      "payload": {
+        "branch": "feature/docs",
+        "head": "3333333333333333333333333333333333333333",
+        "base": "feature/ui",
+        "change_url": "https://example.invalid/changes/23"
+      }
+    },
+    {
+      "source": "vcs",
+      "kind": "change-opened",
+      "node": "docs",
+      "payload": {
+        "url": "https://example.invalid/changes/23",
+        "host": "github",
+        "id": "23",
+        "base": "feature/ui",
+        "author": "a-recording-host"
+      }
+    },
+    {
       "source": "pipeline",
       "kind": "node-settled",
       "node": "docs",
@@ -1052,6 +1100,42 @@
     },
     {
       "source": "pipeline",
+      "kind": "landing-closures",
+      "node": "api",
+      "payload": {
+        "node": "api",
+        "commit": "5555555555555555555555555555555555555555",
+        "closes": ["example/repo#7", "example/repo#8"],
+        "outcome": "projected",
+        "items": [
+          {
+            "issue": "example/repo#7",
+            "source": "board",
+            "task": "board:ISSUE-7",
+            "from": "Todo",
+            "to": {
+              "category": "done",
+              "name": "Done"
+            },
+            "action": "updated"
+          },
+          {
+            "issue": "example/repo#8",
+            "source": "board",
+            "task": "board:ISSUE-8",
+            "from": "Todo",
+            "to": null,
+            "action": "skipped",
+            "reason": "closed as not planned"
+          }
+        ],
+        "unsupported": ["plans"],
+        "class": null,
+        "reason": null
+      }
+    },
+    {
+      "source": "pipeline",
       "kind": "node-absorbed",
       "node": "helper",
       "payload": {
@@ -1059,6 +1143,30 @@
         "into": "api",
         "change_url": "https://example.invalid/changes/31",
         "commit": "5555555555555555555555555555555555555555"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-closures",
+      "payload": {
+        "node": null,
+        "commit": "8888888888888888888888888888888888888888",
+        "closes": ["example/repo#9"],
+        "outcome": "failed",
+        "items": [],
+        "unsupported": [],
+        "class": "refused",
+        "reason": "the source refused the write"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "kind": "finding",
+        "message": "the plan store did not move to done the items of the issues the landing at              8888888888888888888888888888888888888888 closed.\ncloses: example/repo#9\nclass: refused\nreason: the source refused the write\nThe run itself is unaffected — nothing was settled, scheduled or failed on this — but the board may still show those issues' items as open work; move them by hand, or with `onetaskgraph task status complete`.",
+        "source": "proposal",
+        "blocking": false
       }
     },
     {

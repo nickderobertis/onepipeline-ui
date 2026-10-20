@@ -18864,6 +18864,525 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// The `Status` options the closure journeys' boards carry: the shipped
+/// terminal names, `Done` and `Cancelled`, which the linked store names a
+/// closed item after when its card contradicts its closure.
+#[cfg(unix)]
+const CLOSURE_BOARD_OPTIONS: [&str; 6] = [
+    "Todo",
+    "Queued",
+    "In Progress",
+    "Needs Attention",
+    "Done",
+    "Cancelled",
+];
+
+/// One seeded issue of a closure journey's board, in the shape
+/// `github_board.py` documents.
+#[cfg(unix)]
+fn seeded_issue(
+    number: u64,
+    title: &str,
+    metadata: Value,
+    (status, state, reason): (&str, &str, Option<&str>),
+    parent: Option<&str>,
+) -> Value {
+    let content = if parent.is_some() {
+        format!("## What\nDo {title}.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- {title} is done.")
+    } else {
+        String::new()
+    };
+    json!({
+        "number": number,
+        "title": title,
+        "content": content,
+        "metadata": metadata,
+        "status": status,
+        "state": state,
+        "reason": reason,
+        "parent": parent,
+    })
+}
+
+/// The `onetaskgraph.yaml` declaring one `github-projects` source, `board`, on
+/// `board`'s loopback endpoint and nothing else: no setting names a closure of
+/// any kind. `extra` is appended under `sources:` as it is written.
+#[cfg(unix)]
+fn closure_board_config(board: &crate::github_board::GitHubBoard, extra: &str) -> String {
+    format!(
+        "sources:\n  board:\n    plugin: github-projects\n    config:\n      owner: generic\n      \
+         project_number: 1\n      token_env: CACHE_BOARD_TOKEN\n      endpoint: {}/graphql\n      \
+         status_mapping:\n        todo: Todo\n        queued: Queued\n        in-progress: In Progress\n        \
+         unknown: Needs Attention\n        done: Done\n        cancelled: Cancelled\n{extra}",
+        board.url,
+    )
+}
+
+/// The engine's variables a journey launching with the provisioned CLI must not
+/// inherit from the host running it.
+#[cfg(unix)]
+fn inherited_engine_variables() -> Vec<String> {
+    std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("ONETASKGRAPH_") || name.starts_with("ONEPIPELINE_"))
+        .collect()
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_run_reads_and_settles_a_remote_plan_with_caching_enabled_and_disabled` above:
+// the provisioned CLI and the loopback board, with no other process, build or paid
+// dependency, settling in seconds.
+/// A run adopted from the browser reads its remote plan through the store the
+/// engine this binary links, which names a closed item's status after its
+/// closure: a follow-up an earlier run settled `done`, whose issue closed as
+/// completed while its card still read `Todo`, is at `Done` on the board once
+/// the adopted engine settles, with its issue still closed as completed — and
+/// the open task beside it is served and settled exactly as every other remote
+/// plan's is.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    // Start validates the dispatch graph even though this human-only plan never dispatches it.
+    fs::create_dir_all(dir.join("graphs")).expect("graph directory");
+    fs::write(dir.join("graphs/node-scope.yaml"),
+        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: oneharness.toml\n")
+        .expect("the launch graph");
+    fs::write(
+        dir.join("graphs/oneharness.toml"),
+        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+    )
+    .expect("the unused dispatch harness configuration");
+    let run = "closed-followups";
+    let human = |id: &str| json!({"onepipeline.id": id, "onepipeline.kind": "human", "onetaskgraph.repositories": []});
+    // The follow-up an earlier run settled: the engine continues a node from its
+    // stored settlement, never from its card.
+    let mut shipped = human("shipped");
+    shipped["onepipeline.settlement"] = json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Shipped by its follow-up"});
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "generic/approval",
+            "options": CLOSURE_BOARD_OPTIONS,
+            "issues": {
+                "plan": seeded_issue(1, run, json!({
+                    "onepipeline.schema_version": 3,
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.goal": {"text": "Keep people's board edits"},
+                }), ("Todo", "OPEN", None), None),
+                "shipped": seeded_issue(2, "shipped", shipped,
+                    ("Todo", "CLOSED", Some("COMPLETED")), Some("plan")),
+                "approve": seeded_issue(4, "approve", human("approve"),
+                    ("Todo", "OPEN", None), Some("plan")),
+            },
+        }),
+    );
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        closure_board_config(&board, ""),
+    )
+    .expect("the store configuration");
+
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args(["start", "board:plan"])
+        .current_dir(&dir)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env("CACHE_BOARD_TOKEN", &board.token)
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+
+    // The open task, with the fields and values every remote plan's is served with.
+    let detail = http::get(serving.address, &detail_path);
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    let tasks = detail["graph"]["plan"]["tasks"]
+        .as_array()
+        .expect("the source tasks");
+    let approve = tasks
+        .iter()
+        .find(|task| task["id"] == json!("approve"))
+        .unwrap_or_else(|| panic!("the open task is not served: {detail}"));
+    assert_eq!(approve["task"], json!("## What\nDo approve.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- approve is done."));
+    assert_eq!(
+        detail["graph"]["node_status"]["approve"],
+        json!("waiting"),
+        "{detail}"
+    );
+    assert_eq!(
+        detail["graph"]["node_status"]["shipped"],
+        json!("done"),
+        "{detail}"
+    );
+    let grouped = http::get(serving.address, "/api/v2/projects/board:plan");
+    assert_eq!(grouped.status, 200, "{}", grouped.body);
+    assert_eq!(grouped.json()["project"], json!("board:plan"));
+
+    let settled = http::post(serving.address, &format!("{detail_path}/channel/reply"),
+        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string());
+    assert_eq!(settled.status, 200, "{}", settled.body);
+    let adopted = http::post(serving.address, &format!("{detail_path}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid = u32::try_from(adopted.json()["pid"].as_u64().expect("driver pid")).expect("pid");
+    let driver = RetainedDriver(pid);
+    eventually("the adopted engine settled the plan", || {
+        http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    let state = board.state();
+    let held = |name: &str| {
+        let issue = &state["issues"][name];
+        (
+            issue["status"].clone(),
+            issue["state"].clone(),
+            issue["reason"].clone(),
+        )
+    };
+    // The completed follow-up's card follows its closure, and its issue keeps it.
+    assert_eq!(
+        held("shipped"),
+        (json!("Done"), json!("CLOSED"), json!("COMPLETED")),
+        "{state}"
+    );
+    // The open task is where its settlement put it.
+    assert_eq!(
+        held("approve"),
+        (json!("Done"), json!("CLOSED"), json!("COMPLETED")),
+        "{state}"
+    );
+    let body = state["issues"]["approve"]["body"]
+        .as_str()
+        .expect("projected body");
+    let metadata: Value = serde_json::from_str(
+        body.split("<!-- onetaskgraph.metadata\n")
+            .nth(1)
+            .expect("metadata slot")
+            .split("\n-->")
+            .next()
+            .expect("slot JSON"),
+    )
+    .expect("metadata JSON");
+    assert_eq!(
+        metadata["onepipeline.settlement"],
+        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"}),
+        "{metadata}"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A harness stand-in whose dispatch's work closes an issue: it commits one file
+/// in the worktree it is run in with a message whose body says `Closes #7`, the
+/// words a landing reports the issues it closed from.
+///
+/// Still the one process a journey stands in for, on
+/// [`write_committing_harness_standin`]'s terms.
+#[cfg(unix)]
+fn write_closing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("closing-harness");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\n\
+             printf 'the dispatch wrote this\\n' > work-$$.txt\n\
+             git add work-$$.txt && git commit -q -m 'feat: ship the service' \
+             -m 'Closes #7' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            log.display().to_string()
+        ),
+    )
+    .expect("the closing harness stand-in");
+    // Owner-only: the one process that runs it is the dispatch this journey's own
+    // server starts, as this user.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the closing harness stand-in");
+    standin
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispatches_it`
+// and `an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders`: the
+// provisioned CLI, `/bin/sh` stand-ins the journey writes, `git` over a scratch repository
+// in its own workspace and the loopback board, settling in seconds.
+/// A landing a browser-adopted run makes hands the store the issues it closes,
+/// and the store this binary links moves their cards.
+///
+/// The run is launched by the released CLI from a directory whose
+/// `onetaskgraph.yaml` declares a `local-md` plan source and a `github-projects`
+/// source on the loopback board, and nothing naming a closure. Its driver lets go
+/// at the approval gating the node, before anything lands. Once the approval is
+/// attested, the driver the adopt route retains — this binary's own engine —
+/// dispatches the node; the harness stand-in commits `Closes #7` in the session
+/// the linked `onevcs` cut; the node lands `local-direct` on `owner/service`;
+/// and the store reads issue 7 by repository and number, moves its card to
+/// `Done` and closes it as completed, leaves issue 9 alone, and reads nothing
+/// else of the board.
+#[cfg(unix)]
+#[test]
+fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let service = &repos.private;
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the attest and adopt routes, the retained driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only commits what an agent would.
+    let standin = write_closing_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+
+    fixture_run::configure_local_md_store(&dir);
+    let approval = create_store_task(
+        &dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the change."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let node = "ship";
+    create_store_task(
+        &dir,
+        "feat: ship the service",
+        onetaskgraph_core::Body::plain(
+            "## What\nShip the service.\n\n## Why\nIssue 7 asks for it.\n\n\
+             ## Acceptance criteria\n- The service is shipped.",
+        ),
+        &[
+            ("onepipeline.id", json!(node)),
+            ("onepipeline.persona", json!("engineer")),
+            ("onepipeline.repo", json!(service.alias)),
+        ],
+        &[&approval],
+    );
+    let open = |number: u64| {
+        seeded_issue(
+            number,
+            &format!("issue {number}"),
+            json!({}),
+            ("Todo", "OPEN", None),
+            None,
+        )
+    };
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "owner/service",
+            "options": CLOSURE_BOARD_OPTIONS,
+            "issues": {"seven": open(7), "nine": open(9)},
+        }),
+    );
+    // The plan source the store tasks above were written to, beside the board.
+    let local_md = fs::read_to_string(dir.join("onetaskgraph.yaml"))
+        .expect("the plan source's configuration")
+        .strip_prefix("sources:\n")
+        .expect("a sources mapping")
+        .to_owned();
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        closure_board_config(&board, &local_md),
+    )
+    .expect("the store configuration");
+    let before = board.state();
+
+    let state = dir.join("state");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment: Vec<(&str, String)> = vec![
+        ("CACHE_BOARD_TOKEN", board.token.clone()),
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        // The store's user layer: this workspace's own, empty, so the sources a
+        // landing's closures ask are the launch directory's and no host's.
+        ("XDG_CONFIG_HOME", dir.join("config").display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            service.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args([
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+        ])
+        .current_dir(&dir)
+        .envs(environment.iter().map(|(name, value)| (name, value)))
+        .env(crate::serving::ONEVCS_HOME_ENV, &onevcs_home)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, &graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(&root),
+        )
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let launched: Value =
+        serde_json::from_slice(&launched.stdout).expect("start prints its launch");
+    let run = launched["run_id"].as_str().expect("a run id").to_owned();
+    let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    eventually("the launched driver let go of the run", || {
+        !process_is_live(pid)
+    });
+
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &environment
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect::<Vec<_>>(),
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || http::get(serving.address, &detail_path).json();
+    // Stopped before its node landed: the launch dispatched nothing, and the board
+    // is as it was seeded.
+    assert_eq!(
+        detail()["graph"]["node_status"][node],
+        json!("blocked"),
+        "{}",
+        detail()["graph"]
+    );
+    assert!(!log.exists(), "the launch dispatched the node");
+
+    let attested = http::post(
+        serving.address,
+        &format!("{detail_path}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let adopted = http::post(serving.address, &format!("{detail_path}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    eventually("the adopted run's node settled", || {
+        matches!(
+            detail()["graph"]["node_status"][node].as_str(),
+            Some("done" | "failed")
+        )
+    });
+    let journal = root.join(&run).join("events.jsonl");
+    let closures = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .filter(|record| {
+                record["source"] == json!("pipeline") && record["kind"] == json!("landing-closures")
+            })
+            .collect()
+    };
+    eventually("the landing's closures were recorded", || {
+        !closures().is_empty()
+    });
+    eventually("the adopted run settled", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+    let settled = detail();
+    assert_eq!(
+        settled["graph"]["node_results"][node]["outcome"],
+        json!("merged"),
+        "{}",
+        settled["graph"]
+    );
+
+    // Issue 7's card is `Done` and its issue closed as completed; issue 9 is as
+    // it was seeded.
+    let after = board.state();
+    let held = |state: &Value, name: &str| {
+        let issue = &state["issues"][name];
+        (
+            issue["status"].clone(),
+            issue["state"].clone(),
+            issue["reason"].clone(),
+        )
+    };
+    assert_eq!(
+        held(&after, "seven"),
+        (json!("Done"), json!("CLOSED"), json!("COMPLETED")),
+        "{after}"
+    );
+    assert_eq!(after["issues"]["nine"], before["issues"]["nine"], "{after}");
+    // Read by repository and number: nothing read the board's items or searched.
+    let requests = after["requests"]
+        .as_array()
+        .expect("the board's request log");
+    assert!(!requests.is_empty(), "the store asked the board nothing");
+    for request in requests {
+        let query = request["query"].as_str().expect("a query");
+        assert!(
+            !query.contains("items(") && !query.contains("search("),
+            "a request read the board's items or searched: {request}"
+        );
+    }
+
+    // One record of the store's closures, naming the commit the node landed at.
+    let landed = on_origin(service, &["rev-parse", scratch_repo::BASE_BRANCH]);
+    assert!(
+        landed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&landed.stderr)
+    );
+    let landed = String::from_utf8_lossy(&landed.stdout).trim().to_owned();
+    let records = closures();
+    assert_eq!(records.len(), 1, "{records:#?}");
+    let payload = &records[0]["payload"];
+    assert_eq!(payload["commit"], json!(landed), "{payload}");
+    assert_eq!(payload["node"], json!(node), "{payload}");
+    assert_eq!(payload["closes"], json!(["owner/service#7"]), "{payload}");
+    assert_eq!(payload["outcome"], json!("projected"), "{payload}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// The engine's stacking, rework, continuation, review-loop and readjustment
 /// records, served through the run, results, events and timeline routes rather
 /// than refused or dropped.
@@ -19006,7 +19525,9 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
             .get(&format!("e{index}"))
             .unwrap_or_else(|| panic!("record {index} ({record}) is not served"));
         assert_eq!(event["kind"], record["kind"], "{event}");
-        if record["kind"] == json!("planner-surfaced") {
+        if record["kind"] == json!("planner-surface-queued")
+            || record["kind"] == json!("planner-surfaced")
+        {
             assert_eq!(
                 event["surface"]["kind"], record["payload"]["kind"],
                 "{event}"
@@ -19021,12 +19542,88 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
         [
             "change-base-overridden",
             "change-closed",
+            "finding",
             "readjust-pending",
             "review-comment",
             "review-reply-pending",
             "stack-merged-out-of-order",
         ]
     );
+}
+
+/// A continuation's rework read off the store names the superseded node's
+/// settled head, `replaces_head`, where the store's provenance carried it — a
+/// field no record the engine wrote before carried. No route's contract serves
+/// it, so the run whose journal holds it is served through the run, results,
+/// events and timeline routes exactly as a twin whose record predates it.
+#[test]
+fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_none() {
+    let corpus = fixture_run::review_loop();
+    let headed = corpus["run_id"]
+        .as_str()
+        .expect("the corpus's run")
+        .to_owned();
+    let unheaded = format!("{headed}-unheaded");
+    let mut twin = corpus.clone();
+    twin["run_id"] = json!(unheaded);
+    twin["launch"]["run_id"] = json!(unheaded);
+    twin["stream"] = json!(format!(
+        "{}-unheaded",
+        corpus["stream"].as_str().expect("the corpus's stream")
+    ));
+    let stripped = twin["records"]
+        .as_array_mut()
+        .expect("the corpus's records")
+        .iter_mut()
+        .filter_map(|record| record.pointer_mut("/payload/continued/rework"))
+        .filter_map(|rework| rework.as_object_mut()?.remove("replaces_head"))
+        .count();
+    assert_eq!(
+        stripped, 1,
+        "the corpus holds one continued rework naming its head"
+    );
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_loop_corpus(root, &corpus);
+        fixture_run::write_review_loop_corpus(root, &twin);
+    });
+    // The twin as the headed run would read: its own run id is the one thing
+    // that tells the two apart on any route, and the instant each answer was
+    // given the one thing that tells two answers apart.
+    let as_headed = |served: &Value| -> Value {
+        let mut read: Value = serde_json::from_str(&served.to_string().replace(&unheaded, &headed))
+            .expect("a served document re-read");
+        if let Some(envelope) = read.as_object_mut() {
+            envelope.remove("observed_at");
+        }
+        read
+    };
+
+    for path in ["", "/results", "/timeline?scope=run"] {
+        let read = |run: &str| {
+            let served = http::get(serving.address, &format!("/api/v2/runs/{run}{path}"));
+            assert_eq!(served.status, 200, "{run}{path}: {}", served.body);
+            served.json()
+        };
+        assert_eq!(
+            as_headed(&read(&headed)),
+            as_headed(&read(&unheaded)),
+            "{path} reads the two runs differently"
+        );
+    }
+
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    assert_eq!(stream.status, 200);
+    let snapshot = stream.next_frame().expect("a snapshot");
+    assert_eq!(snapshot.event, "snapshot");
+    let snapshot = snapshot.json();
+    let announced = |run: &str| {
+        snapshot["runs"]
+            .as_array()
+            .and_then(|runs| runs.iter().find(|listed| listed["run_id"] == json!(run)))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not announced: {snapshot}"))
+    };
+    assert_eq!(announced(&headed), as_headed(&announced(&unheaded)));
 }
 
 /// The run a continued node names is the one it was settled on, on another

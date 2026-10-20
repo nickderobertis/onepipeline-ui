@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.40.2"
+version = "0.41.1"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -591,19 +591,26 @@ onemessagebus = "0.9.1"
 # requirements below move with it to the releases its lock resolves. This
 # changes the engine types carried by ApiError::from_engine and the other
 # engine-typed public items.
-# 0.79.0 links oneharness-core 0.28.5, whose harness core shares one
-# `codex app-server` per configuration across concurrent controlled Codex turns
-# and stops it after a linger through a sweeper the leasing binary hosts. A host
-# holds this reader to the engine it pins, so it adopts that core only once this
-# moves. No turn this binary drives leases one: a single-sided member's turn is
-# an uncontrolled `codex exec`, and a two-party member's turns run in the
-# `oneharness` executable onejudge spawns, which hosts its own sweeper — so
-# `src/main.rs` calls no `serve_sweeper_if_requested`. It links onetaskgraph
-# 0.8.0, whose `CopyRequest` gains `statuses`, and onevcs 0.56; the dev-only
-# `onevcs` and `onetaskgraph-*` requirements below move with it to the releases
-# its lock resolves. This changes the engine types carried by
-# ApiError::from_engine and the other engine-typed public items, so the move is
-# announced as a break of this crate's surface, which follows onepipeline's.
+# 0.79.0 hands the store the GitHub issues each landing closes and journals what
+# it did as `landing-closures`, and links onetaskgraph 0.8.0, whose store names a
+# closed item's status after its closure — `Done` when completed, `Cancelled`
+# otherwise — and whose `task copy` takes `--status`. A browser-adopted run's
+# driver is this copy of the engine, so its landings move the cards they close
+# and its plan reads follow those closures once this moves; this crate serves the
+# record as journalled and adds no status rule. It links onevcs 0.56.3, whose
+# `publication-resumed` kind is relayed to the browser. It also links
+# oneharness-core 0.28.5, whose harness core shares one `codex app-server` per
+# configuration across concurrent controlled Codex turns and stops it after a
+# linger through a sweeper the leasing binary hosts. A host holds this reader to
+# the engine it pins, so it adopts that core only once this moves. No turn this
+# binary drives leases one: a single-sided member's turn is an uncontrolled
+# `codex exec`, and a two-party member's turns run in the `oneharness`
+# executable onejudge spawns, which hosts its own sweeper — so `src/main.rs`
+# calls no `serve_sweeper_if_requested`. The dev-only `onevcs` and
+# `onetaskgraph-*` requirements below move with it to the releases its lock
+# resolves. This changes the engine types carried by ApiError::from_engine and
+# the other engine-typed public items, so the move is announced as a break of
+# this crate's surface, which follows onepipeline's.
 # llmlint: ignore-end[comments_earn_their_place]
 onepipeline = "=0.79.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
@@ -645,9 +652,10 @@ libc = "0.2"
 # dependency above, which the crate now links in its own right. 0.52.0 is the
 # release engine 0.75.0 requires (^0.52.0), so the lock moves both to it and
 # keeps one copy. 0.52.1 is the release engine 0.78.0 resolves (^0.52.0), and
-# declares the stacking, review and landing kinds that engine relays. 0.56.2
-# is the release engine 0.79.0 resolves (^0.56.2).
-onevcs = "=0.56.2"
+# declares the stacking, review and landing kinds that engine relays. 0.56.3 is
+# the release engine 0.79.0 resolves (^0.56.2), and declares
+# `publication-resumed`, which `payload::vcs` copies.
+onevcs = "=0.56.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so

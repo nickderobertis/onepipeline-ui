@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "onepipeline-ui"
-version = "0.40.2"
+version = "0.41.1"
 dependencies = [
  "assert_cmd",
  "auditable-info",
@@ -1823,9 +1823,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.56.2"
+version = "0.56.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05923d5908426e70b739929d0956dc89040720351e07aca1d8480af1b1b8bbe8"
+checksum = "f03c2ca2e07651a6f28d75a40123d3ceecd33428eeb1abacb600233ce1e0871f"
 dependencies = [
  "aho-corasick",
  "clap",

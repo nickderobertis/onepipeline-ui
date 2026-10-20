@@ -433,6 +433,11 @@ pub mod vcs {
     /// `{change_url, restored_base, at}` — a closed change request was reopened
     /// over the base branch restored on the origin at commit `at`.
     pub const CHANGE_REOPENED: &str = "change-reopened";
+    /// `{branch, head, base, change_url}` — a publication found its change
+    /// request open at the boundary its verification passed and resumed it at its
+    /// hosted checks, pushing nothing. Precedes that publication's
+    /// [`CHANGE_OPENED`]; not a [`PUSH`], because nothing was pushed.
+    pub const PUBLICATION_RESUMED: &str = "publication-resumed";
 
     /// The relayed kinds that do not, on their own, say a publication began.
     ///
