@@ -43,6 +43,18 @@ Beside these, the manylinux compile (the head of the release chain) took
 default weight makes its container one equal cgroup against everything the job
 runs, where the job runs in a systemd service, as on the measuring host.
 
+Main's job 118705585520 (run 39445326668) failed rather than overran, on
+another cold cache: its step ended at 15:35:55 with `Failed tasks:
+dag-ui-e2e:test`, the journey "falls back to the empty state once no run is
+left" not seeing the empty state within its 15 s. Its `ENOENT … opendir
+target/wheel-smoke/venv/…/colorama/tests/{target,trybuild}` annotations come
+two seconds later from rust-cache's post-job "Cleaning … target" pass, which then
+saved the cache; successful jobs (118466628123) carry the same annotations, so
+they fail nothing. The finished tree does not add load to that journey's window:
+on a cold run its 4 CPUs were 3.03 of 4 busy during it against 3.10 before, and
+the manylinux container no longer overlaps it at all. It does not make that
+wait safer either.
+
 ## What changed
 
 - `tests/release/project.json`: `rehearse` runs `journeys.test.mjs` alone.
