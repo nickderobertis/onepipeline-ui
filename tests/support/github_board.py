@@ -1,13 +1,20 @@
-"""Loopback GitHub board for the cache-enabled browser adoption journey.
+"""Loopback GitHub board for the browser adoption journeys over a remote plan.
 
 Answers come from mutable board state; unknown operations are refused. The real
 released GitHub plugin and engine read and project through this HTTP boundary.
-Adapted from onepipeline 0.70.0's tests/e2e/github_loopback.py.
+Adapted from onepipeline 0.70.0's tests/e2e/github_loopback.py, and from 0.79.0's
+for the read of issues by repository and number a landing's closures make.
+
+An optional second argument names a JSON seed replacing the default plan and its
+one approval: `{"repository": "owner/name", "options": [...], "issues": {NAME:
+{"number": N, "title": T, "content": C, "metadata": {...}, "status": OPTION,
+"state": "OPEN" | "CLOSED", "reason": null | REASON, "parent": NAME | null}}}`.
 """
 import argparse
 import json
 import os
 import pathlib
+import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import TCPServer
 
@@ -20,7 +27,9 @@ def directory(value):
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("root", type=directory)
-root = parser.parse_args().root
+parser.add_argument("seed", nargs="?", type=pathlib.Path)
+arguments = parser.parse_args()
+root = arguments.root
 token = os.environ.get("CACHE_BOARD_TOKEN", "")
 if not token.strip():
     parser.error("CACHE_BOARD_TOKEN must contain a nonempty board credential")
@@ -45,36 +54,149 @@ def described(content, metadata):
     return content + "\n\n<!-- onetaskgraph.metadata\n" + json.dumps(metadata) + "\n-->"
 
 
-state = {"issues": {}, "requests": []}
-for name in ["plan", "approve"]:
-    metadata = ({"onepipeline.schema_version": 3, "onepipeline.concurrency": 1,
-                 "onepipeline.goal": {"text": "Keep people's board edits"}}
-                if name == "plan" else
-                {"onepipeline.id": name, "onepipeline.kind": "human",
-                 "onetaskgraph.repositories": []})
-    content = "" if name == "plan" else (
-        f"## What\nDo {name}.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- {name} is done.")
-    state["issues"][name] = {"body": described(content, metadata), "status": "Todo", "state": "OPEN",
-                              "title": "cached-approval" if name == "plan" else name}
+STATES = {"OPEN": [None], "CLOSED": ["COMPLETED", "NOT_PLANNED", "DUPLICATE"]}
+REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+SEEDED = {"number", "title", "content", "metadata", "status", "state", "reason", "parent"}
 
 
-def issue(name):
+def default_seed():
+    """The plan and its one approval every journey that names no seed reads."""
+    issues = {}
+    for name in ["plan", "approve"]:
+        metadata = ({"onepipeline.schema_version": 3, "onepipeline.concurrency": 1,
+                     "onepipeline.goal": {"text": "Keep people's board edits"}}
+                    if name == "plan" else
+                    {"onepipeline.id": name, "onepipeline.kind": "human",
+                     "onetaskgraph.repositories": []})
+        content = "" if name == "plan" else (
+            f"## What\nDo {name}.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- {name} is done.")
+        issues[name] = {"number": 1, "title": "cached-approval" if name == "plan" else name,
+                        "content": content, "metadata": metadata, "status": "Todo",
+                        "state": "OPEN", "reason": None,
+                        "parent": None if name == "plan" else "plan"}
+    return {"repository": "generic/approval", "options": options, "issues": issues}
+
+
+def checked(seed):
+    """A journey's seed, refused unless every part is one this board can answer as GitHub
+    would: open issues carry no reason, closed ones one GitHub closes with, every card sits at
+    one of the board's options, and every parent is an issue of the seed."""
+    if (not isinstance(seed, dict) or set(seed) != {"repository", "options", "issues"}
+            or not isinstance(seed["repository"], str) or not REPOSITORY.match(seed["repository"])
+            or not isinstance(seed["options"], list) or not seed["options"]
+            or not all(isinstance(option, str) and option for option in seed["options"])
+            or not isinstance(seed["issues"], dict) or not seed["issues"]):
+        parser.error("a seed names a repository, its Status options and its issues")
+    for name, held in seed["issues"].items():
+        if (not isinstance(held, dict) or set(held) != SEEDED
+                or not isinstance(held["number"], int) or isinstance(held["number"], bool)
+                or held["number"] < 1
+                or not all(isinstance(held[key], str) for key in ["title", "content"])
+                or not isinstance(held["metadata"], dict)
+                or not all(isinstance(held[key], str) for key in ["status", "state"])
+                or held["status"] not in seed["options"]
+                or held["reason"] not in STATES.get(held["state"], [])
+                or not (held["parent"] is None
+                        or (isinstance(held["parent"], str) and held["parent"] in seed["issues"]))):
+            parser.error(f"seeded issue {name!r} does not fit the board")
+    numbers = [held["number"] for held in seed["issues"].values()]
+    if len(set(numbers)) != len(numbers):
+        parser.error("two seeded issues share a number, which one repository never does")
+    for name in seed["issues"]:
+        # A parent chain ends at an issue with none: one that returns to an issue
+        # already on it is a cycle GitHub's sub-issues refuse.
+        seen = {name}
+        parent = seed["issues"][name]["parent"]
+        while parent is not None:
+            if parent in seen:
+                parser.error(f"seeded issue {name!r} is its own ancestor")
+            seen.add(parent)
+            parent = seed["issues"][parent]["parent"]
+    return seed
+
+
+def read_seed(path):
+    """The seed `path` holds, or a usage error for one that is not there or not JSON."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        parser.error(f"the seed {path} is not readable JSON: {error}")
+
+
+seed = checked(read_seed(arguments.seed)) if arguments.seed else default_seed()
+options = seed["options"]
+state = {"repository": seed["repository"], "issues": {}, "requests": []}
+for name, held in seed["issues"].items():
+    state["issues"][name] = {"body": described(held["content"], held["metadata"]),
+                             "status": held["status"], "state": held["state"],
+                             "reason": held["reason"], "title": held["title"],
+                             "number": held["number"], "parent": held["parent"]}
+
+
+def children(name):
+    return [child for child, held in state["issues"].items() if held["parent"] == name]
+
+
+def issue(name, membership_of=None):
+    """The issue GitHub answers for `name`: every board membership carrying its card's
+    `Status`, as a board read's `fieldValues` or, by `membership_of`, as a read by reference
+    asks for it."""
     held = state["issues"][name]
     values = [{"name": held["status"], "optionId": held["status"], "field": field()}]
     membership = {"id": "ITEM-" + name, "project": {"id": "BOARD", "number": 1},
                   "fieldValues": connection(values), "updatedAt": "2026-01-01T00:00:00Z"}
+    if membership_of is not None:
+        membership = membership_of(membership, values[0])
     value = {"__typename": "Issue", "id": name, "title": held["title"],
-             "body": held["body"], "state": held["state"], "stateReason": None, "number": 1,
+             "body": held["body"], "state": held["state"], "stateReason": held["reason"],
+             "number": held["number"],
              "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
-             "repository": {"nameWithOwner": "generic/approval"},
+             "repository": {"nameWithOwner": state["repository"]},
              "commentCount": {"totalCount": 0}, "relationshipEvents": {"totalCount": 0},
-             "url": None, "parent": None if name == "plan" else {"id": "plan"},
-             "subIssuesSummary": {"total": 1 if name == "plan" else 0},
+             "url": None, "parent": None if held["parent"] is None else {"id": held["parent"]},
+             "subIssuesSummary": {"total": len(children(name))},
              "labels": connection([]), "projectItems": connection([membership]),
              "blockedBy": connection([]), "blocking": connection([])}
-    if name == "plan":
-        value["subIssues"] = connection([issue("approve")])
+    if children(name):
+        value["subIssues"] = connection([issue(child) for child in children(name)])
     return value
+
+
+def by_reference(membership, status):
+    """A membership as a read by reference selects it: its `Status` by name, no other field."""
+    return {"id": membership["id"], "updatedAt": membership["updatedAt"],
+            "project": membership["project"],
+            "status": {"name": status["name"], "field": status["field"]}}
+
+
+def issues_by_reference(variables):
+    """Every `r<slot>` alias of a read by repository and number: the issue this board holds
+    under that number, or GitHub's `NOT_FOUND` for a repository or issue it does not."""
+    data, errors = {}, []
+    slot = 0
+    while "owner%d" % slot in variables:
+        owner, name = variables["owner%d" % slot], variables.get("name%d" % slot)
+        number = variables.get("number%d" % slot)
+        if (not isinstance(owner, str) or not isinstance(name, str)
+                or not isinstance(number, int) or isinstance(number, bool) or number < 1):
+            raise ValueError("slot %d of a read by reference names no owner, name and number" % slot)
+        held = [held_name for held_name, held in state["issues"].items()
+                if held["number"] == number]
+        if "%s/%s" % (owner, name) != state["repository"]:
+            data["r%d" % slot] = None
+            errors.append({"type": "NOT_FOUND", "path": ["r%d" % slot],
+                           "message": "Could not resolve to a Repository"})
+        elif not held:
+            data["r%d" % slot] = {"issue": None}
+            errors.append({"type": "NOT_FOUND", "path": ["r%d" % slot, "issue"],
+                           "message": "Could not resolve to an issue"})
+        else:
+            data["r%d" % slot] = {"issue": issue(held[0], by_reference)}
+        slot += 1
+    answer = {"data": data}
+    if errors:
+        answer["errors"] = errors
+    return answer
 
 
 def write_field(supplied, clear=False):
@@ -143,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
                     and not isinstance(request["operationName"], str))):
             raise ValueError("GraphQL requires a query string and an object of variables")
         state["requests"].append(request)
+        if "r0:repository(owner:$owner0" in query:
+            return issues_by_reference(variables)
         if "updateIssue(" in query:
             supplied = variables.get("input")
             if (not isinstance(supplied, dict) or not isinstance(supplied.get("id"), str)
@@ -165,6 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 held["body"] = supplied["body"]
             if movement is not None:
                 held["state"] = movement["value"]
+                held["reason"] = movement.get("stateReason")
             return {"data": {"updateIssue": {"issue": issue(supplied["id"])}}}
         if "second:updateProjectV2ItemFieldValue(" in query:
             raise ValueError("the batched field update is not served here")

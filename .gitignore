@@ -39,3 +39,6 @@ shots/review/
 # other's images nor dirty the tree.
 shots/local/
 /site/
+
+# Bytecode Python writes beside the loopback fixtures it runs.
+__pycache__/
