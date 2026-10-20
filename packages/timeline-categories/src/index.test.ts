@@ -108,6 +108,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-checks-read": "verification",
   "readjust-read-failed": "failure",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // What the store did with the issues one landing closed: the landing's own
+  // aftermath, which the `landing` rule files with it.
+  "landing-closures": "publication",
   // A run-end hook is the run's own boundary: it fires once the driver has let
   // go of the run, and what it reports is that the run ended one way or another.
   "run-hook-fired": "lifecycle",
