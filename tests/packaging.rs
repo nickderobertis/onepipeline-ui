@@ -698,11 +698,14 @@ fn a_plan_store_moved_together_or_resolved_twice_is_refused_naming_it() {
     assert_eq!(
         doubled,
         [
-            "the lock resolves onetaskgraph-plugin-api 0.7.3, not the store release 0.8.0"
-                .to_owned(),
-            "the lock resolves onetaskgraph-plugin-api at 2 releases, {\"0.7.3\", \"0.8.0\"}, \
-             where the binary links one"
-                .to_owned(),
+            format!(
+                "the lock resolves onetaskgraph-plugin-api 0.7.3, not the store release \
+                 {STORE_RELEASE}"
+            ),
+            format!(
+                "the lock resolves onetaskgraph-plugin-api at 2 releases, \
+                 {{\"0.7.3\", \"{STORE_RELEASE}\"}}, where the binary links one"
+            ),
         ]
     );
 }
