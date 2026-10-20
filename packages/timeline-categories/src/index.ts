@@ -276,7 +276,8 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "scratch-removed": "lifecycle",
   "scratch-retained": "lifecycle",
   // llmlint: ignore-end[changed_behavior_has_e2e]
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]  // The store's answer when the run's home was marked done: written once, after
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // The store's answer when the run's home was marked done: written once, after
   // the run reached its success ending, so it is the run's own boundary — like a
   // run-end hook — and no node's work. Neither `home` nor `status` names a rule,
   // and neither generalises to one.
