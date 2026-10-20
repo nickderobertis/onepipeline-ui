@@ -9,10 +9,11 @@
 // this file in the project's test target, builds a native wheel instead, so its
 // registry journeys run without a manylinux image or its external mirrors.
 //
-// What a Linux host cannot do is build the macOS and Windows targets; their
-// files are the hosted jobs' to produce, so where a journey needs them on a
-// registry (publish's availability check, the launcher's optional dependencies)
-// they are seeded under their planned names, as those jobs would leave them.
+// What this x86_64 Linux host cannot do is build the arm64 Linux, macOS and
+// Windows targets; their files are the hosted jobs' to produce, so where a
+// journey needs them on a registry (publish's availability check, the
+// launcher's optional dependencies) they are seeded under their planned names,
+// as those jobs would leave them.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -238,67 +239,70 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
   });
 
   // tests/e2e/linux_wheel.rs runs the script's yum repository rewrite over
-  // copies of the image's repository files, offline. This rehearsal has just
-  // built in that image, so it holds the copies to it: each is the image's
-  // file (bar the trailing whitespace the checkout trims), and every image file
-  // with a section yum reads is among them.
-  test("the image's yum repository files are the ones the offline build journey rewrites", () => {
+  // copies of each Linux image's repository files, offline. This rehearsal has
+  // just built in the x86_64 image, so it holds the copies to the images: each
+  // is the image's file (bar the trailing whitespace the checkout trims), and
+  // every image file with a section yum reads is among them. The files are
+  // copied out of a created container rather than read by running one, so the
+  // aarch64 image is read on this host without emulating it.
+  test("the images' yum repository files are the ones the offline build journey rewrites", () => {
     assert.equal(rehearsal.status, 0, rehearsal.output);
-    const arch = TARGET.split("-")[0];
-    const image = readFileSync(
+    const script = readFileSync(
       join(ROOT, "scripts/build-linux-wheel.sh"),
       "utf8",
-    )
-      .match(/^image="([^"]+)"$/m)[1]
-      .replace("$arch", arch);
-    const listing = execFileSync(
-      "docker",
-      [
-        "run",
-        "--rm",
-        image,
-        "sh",
-        "-c",
-        'for f in /etc/yum.repos.d/*.repo; do printf "\\n==> %s\\n" "$(basename "$f")"; cat "$f"; done',
-      ],
-      { encoding: "utf8" },
     );
-    const files = new Map(
-      listing
-        .split("\n==> ")
-        .slice(1)
-        .map((part) => {
-          const [name, ...body] = part.split("\n");
-          return [name, body.join("\n")];
-        }),
-    );
-    const trimmed = (text) => text.replace(/[ \t]+$/gm, "").trimEnd();
-    // Whether a file names a baseurl in a section yum reads: one that does
-    // not say `enabled=0`.
-    const read = (text) =>
-      text
-        .split(/^\[/m)
-        .slice(1)
-        .some(
-          (section) =>
-            /^baseurl=/m.test(section) && !/^enabled=0[ \t]*$/m.test(section),
-        );
-    const fixtures = join(ROOT, "tests/fixtures/manylinux2014-yum.repos.d");
-    const copies = readdirSync(fixtures).sort();
-    for (const name of copies)
-      assert.equal(
-        trimmed(readFileSync(join(fixtures, name), "utf8")),
-        trimmed(files.get(name) ?? ""),
-        `${image} has changed /etc/yum.repos.d/${name}; copy it to tests/fixtures/manylinux2014-yum.repos.d/ and check tests/e2e/linux_wheel.rs's expected repositories`,
+    for (const [arch, platform] of [
+      ["x86_64", "linux/amd64"],
+      ["aarch64", "linux/arm64"],
+    ]) {
+      const image = script
+        .match(/^image="([^"]+)"$/m)[1]
+        .replace("$arch", arch);
+      const copy = join(dir, `yum.repos.d-${arch}`);
+      rmSync(copy, { recursive: true, force: true });
+      const container = execFileSync(
+        "docker",
+        ["create", "--platform", platform, image, "true"],
+        { encoding: "utf8" },
+      ).trim();
+      try {
+        execFileSync("docker", ["cp", `${container}:/etc/yum.repos.d`, copy]);
+      } finally {
+        execFileSync("docker", ["rm", container]);
+      }
+      const files = new Map(
+        readdirSync(copy)
+          .filter((name) => name.endsWith(".repo"))
+          .map((name) => [name, readFileSync(join(copy, name), "utf8")]),
       );
-    const unread = [...files]
-      .filter(([name, text]) => read(text) && !copies.includes(name))
-      .map(([name]) => name);
-    assert.deepEqual(
-      unread,
-      [],
-      `${image} has repository files with an enabled baseurl the offline journey does not copy; add them to tests/fixtures/manylinux2014-yum.repos.d/`,
-    );
+      const trimmed = (text) => text.replace(/[ \t]+$/gm, "").trimEnd();
+      // Whether a file names a baseurl in a section yum reads: one that does
+      // not say `enabled=0`.
+      const read = (text) =>
+        text
+          .split(/^\[/m)
+          .slice(1)
+          .some(
+            (section) =>
+              /^baseurl=/m.test(section) && !/^enabled=0[ \t]*$/m.test(section),
+          );
+      const fixture = `tests/fixtures/manylinux2014_${arch}-yum.repos.d`;
+      const copies = readdirSync(join(ROOT, fixture)).sort();
+      for (const name of copies)
+        assert.equal(
+          trimmed(readFileSync(join(ROOT, fixture, name), "utf8")),
+          trimmed(files.get(name) ?? ""),
+          `${image} has changed /etc/yum.repos.d/${name}; copy it to ${fixture}/ and check tests/e2e/linux_wheel.rs's expected repositories`,
+        );
+      const unread = [...files]
+        .filter(([name, text]) => read(text) && !copies.includes(name))
+        .map(([name]) => name);
+      assert.deepEqual(
+        unread,
+        [],
+        `${image} has repository files with an enabled baseurl the offline journey does not copy; add them to ${fixture}/`,
+      );
+    }
   });
 
   test("a test-install that fails stops the recipe before any publish command", () => {
@@ -533,7 +537,11 @@ describe("publication against registry doubles", () => {
   let gh;
   let registries;
   let env;
-  const platforms = { macos: plan("macos"), windows: plan("windows") };
+  const platforms = {
+    "linux-arm64": plan("linux-arm64"),
+    macos: plan("macos"),
+    windows: plan("windows"),
+  };
   before(async () => {
     assert.ok(
       existsSync(join(OUT, "assets")),
@@ -849,11 +857,11 @@ describe("publication against registry doubles", () => {
     return { results, settle };
   }
   const allBuilt =
-    "build-linux=success build-macos=success build-windows=success";
+    "build-linux=success build-linux-arm64=success build-macos=success build-windows=success";
 
   test("the publish recipe assembles every platform-independent file", () => {
-    // What the macOS and Windows jobs leave on each registry, under their
-    // planned names: this host cannot build them.
+    // What the arm64 Linux, macOS and Windows jobs leave on each registry,
+    // under their planned names: this host cannot build them.
     for (const p of Object.values(platforms))
       for (const artifact of p.artifacts) {
         if (artifact.registry === "github")
@@ -1061,7 +1069,7 @@ describe("publication against registry doubles", () => {
 
   test("with a failed platform build, publish uploads nothing platform-independent and demotes the release", () => {
     const { results, settle } = publishJob(
-      "build-linux=success build-macos=failure build-windows=success",
+      "build-linux=success build-linux-arm64=success build-macos=failure build-windows=success",
     );
     assert.equal(results.check, "failure");
     assert.match(results["check-output"], /build-macos \(failure\)/);

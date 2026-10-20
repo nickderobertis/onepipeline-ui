@@ -157,18 +157,22 @@ describe("native publication regressions", () => {
 // platform-independent. A release that finds any of its own version already
 // served must treat it as published and finish the rest.
 //
-// The macOS and Windows files are staged as their jobs would stage them, from
-// this host's Linux build renamed to their planned names and npm metadata: a
-// Linux host can run their uploads, not their builds or their verify.
+// The arm64 Linux, macOS and Windows files are staged as their jobs would stage
+// them, from this host's x86_64 Linux build renamed to their planned names and
+// npm metadata: this host can run their uploads, not their builds or their
+// verify.
 describe("a whole release against registry doubles", () => {
   const publishOut = join(ROOT, "target/local-publication/whole-publish");
   const outs = {
     get linux() {
       return OUT;
     },
+    "linux-arm64": join(ROOT, "target/local-publication/linux-arm64"),
     macos: join(ROOT, "target/local-publication/macos"),
     windows: join(ROOT, "target/local-publication/windows"),
   };
+  // The jobs whose files this host stages rather than builds.
+  const foreign = ["linux-arm64", "macos", "windows"];
   const stagedOf = (job, artifact) =>
     job === "linux"
       ? staged(artifact)
@@ -184,6 +188,7 @@ describe("a whole release against registry doubles", () => {
         );
   const plans = {
     linux: linuxPlan,
+    "linux-arm64": plan("linux-arm64"),
     macos: plan("macos"),
     windows: plan("windows"),
   };
@@ -197,7 +202,7 @@ describe("a whole release against registry doubles", () => {
       existsSync(join(OUT, "assets")),
       "the native fixture staged the Linux carriers",
     );
-    for (const job of ["macos", "windows"]) {
+    for (const job of foreign) {
       rmSync(outs[job], { recursive: true, force: true });
       for (const artifact of plans[job].artifacts) {
         const file = stagedOf(job, artifact);
@@ -230,7 +235,7 @@ describe("a whole release against registry doubles", () => {
     }
   });
   after(() => {
-    for (const job of ["macos", "windows"])
+    for (const job of foreign)
       rmSync(outs[job], { recursive: true, force: true });
     rmSync(publishOut, { recursive: true, force: true });
   });
@@ -252,14 +257,14 @@ describe("a whole release against registry doubles", () => {
       assert.equal(run.status, 0, `${job} ${args.join(" ")}: ${run.output}`);
       return run;
     };
-    for (const job of ["linux", "macos", "windows"]) {
+    for (const job of ["linux", ...foreign]) {
       for (const registry of ["npm", "pypi", "github"])
         step(job, ["upload", registry]);
       // Only this host's own platform can be installed and run here.
       if (job === "linux") step(job, ["verify"]);
     }
     const BUILD_RESULTS =
-      "build-linux=success build-macos=success build-windows=success";
+      "build-linux=success build-linux-arm64=success build-macos=success build-windows=success";
     step("publish", ["check"], { BUILD_RESULTS });
     step("publish", ["build"]);
     for (const registry of ["crate", "npm", "github"])

@@ -296,9 +296,10 @@ export function cacheProblems(workflows) {
   return problems;
 }
 
-// Linux arm64 is dropped: ci.yml builds, installs and smoke-tests no
-// aarch64-unknown-linux-gnu wheel and names no arm64 Linux runner, and `wheel`
-// keeps only its x86_64 leg until the old jobs are removed.
+// Linux arm64 stays out of pull-request CI: ci.yml builds, installs and
+// smoke-tests no aarch64-unknown-linux-gnu wheel and names no arm64 Linux
+// runner, and `wheel` keeps only its x86_64 leg. The release builds arm64 Linux
+// in its own `build-linux-arm64` job (.github/tests/release.test.mjs).
 const ARM_LINUX_RUNNER = /^ubuntu-[\w.]+-arm$/;
 export function linuxArm64Problems(workflows) {
   const problems = [];

@@ -611,8 +611,17 @@ onemessagebus = "0.9.1"
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items, so the move is announced as a break of
 # this crate's surface, which follows onepipeline's.
+# 0.79.1 reads the shapes the onevcs 0.56.3 and onetaskgraph 0.8.0 it already
+# linked carry: a publication held on `Unavailability::HostVisibility` settles
+# as that unavailable check, a held node's `workspace-wait` names each idle slot
+# `WorkspaceCapacity::ineligible` lists and why, and a copy the destination
+# answered malformed is refused as `EngineError::CopyDestinationUncertain`,
+# naming its destination. A host holds this reader to the engine it pins, so a
+# browser-adopted run's driver says and refuses those the way the CLI's does
+# only once this moves; this crate serves each as journalled, matches on none
+# of them, and changes no route, sibling release or MSRV.
 # llmlint: ignore-end[comments_earn_their_place]
-onepipeline = "=0.79.0"
+onepipeline = "=0.79.1"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -654,7 +663,8 @@ libc = "0.2"
 # keeps one copy. 0.52.1 is the release engine 0.78.0 resolves (^0.52.0), and
 # declares the stacking, review and landing kinds that engine relays. 0.56.3 is
 # the release engine 0.79.0 resolves (^0.56.2), and declares
-# `publication-resumed`, which `payload::vcs` copies.
+# `publication-resumed`, which `payload::vcs` copies; engine 0.79.1 resolves the
+# same release (^0.56.3).
 onevcs = "=0.56.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`

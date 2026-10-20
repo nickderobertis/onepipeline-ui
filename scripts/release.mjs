@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The whole of a release's work, one recipe per CD job.
 //
-// release.yml's jobs live here: `build-linux`, `build-macos` and
-// `build-windows` each call `just release-<os>`, and `publish` calls
-// `just release-publish` (release-plz.yml's one job is release-plz itself). The workflow only sets up a runner and calls a
+// release.yml's jobs live here: `build-linux`, `build-linux-arm64`,
+// `build-macos` and `build-windows` each call `just release-<os>`, and
+// `publish` calls `just release-publish` (release-plz.yml's one job is
+// release-plz itself). The workflow only sets up a runner and calls a
 // phase; what is built, under which name, and what is uploaded where is decided
 // in this file, so it can be planned without building, driven on a developer's
 // host and held to the last release's published artifacts.
@@ -11,9 +12,10 @@
 // A platform job, in the order release.yml runs its phases:
 //
 //   build         compile each of its targets ONCE (maturin, inside the
-//                 manylinux image on Linux) and package the archive, the
-//                 checksum, the wheel and the npm platform package from that one
-//                 binary (scripts/release-package.py refuses different bytes).
+//                 manylinux image of the runner's own architecture on Linux)
+//                 and package the archive, the checksum, the wheel and the npm
+//                 platform package from that one binary
+//                 (scripts/release-package.py refuses different bytes).
 //   test-install  install those exact files (archive, pip, npm through a local
 //                 registry) and run what each installed.
 //   upload R      publish this platform's files to one registry R (github, pypi
@@ -27,7 +29,7 @@
 //                 upload reported rather than run. Only with --dry-run: a
 //                 release runs each phase as its own workflow step.
 //
-// The publish job, which `needs` all three:
+// The publish job, which `needs` all four:
 //
 //   check         every platform's files are on every switched-on registry and
 //                 every platform job succeeded. Each upload repeats it first, so
@@ -71,7 +73,7 @@
 //   BUILD_RESULTS            `build-<os>=<result>` pairs the publish job was handed
 //   STEP_RESULTS             `<step>=<outcome>` pairs of the publish job's own steps
 //
-// Usage: release.mjs <linux|macos|windows|publish> <phase> [R] [--out DIR]
+// Usage: release.mjs <linux|linux-arm64|macos|windows|publish> <phase> [R] [--out DIR]
 //        [--version X.Y.Z (plan only)] [--dry-run]
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -104,14 +106,21 @@ const PYTHON = WINDOWS ? "python" : "python3";
 // The one table of what is released. A target belongs to exactly one platform
 // job; its npm package name and wheel tag are what v0.37.0 published, which
 // .github/tests/release.test.mjs holds every platform's plan to.
-// aarch64-unknown-linux-gnu was released up to v0.38.1 and is no longer built
-// (the npm launcher refuses linux-arm64 with the cargo install instead), and
-// x86_64-apple-darwin before it.
+// aarch64-unknown-linux-gnu was last released in v0.39.0 and is built again,
+// natively on GitHub's arm64 Linux runner, by its own job;
+// x86_64-apple-darwin stopped before that and stays stopped.
 export const TARGETS = {
   "x86_64-unknown-linux-gnu": {
     platform: "linux",
     npm: "linux-x64",
     wheelTag: "manylinux_2_17_x86_64.manylinux2014_x86_64",
+    archive: "tar.gz",
+    exe: "",
+  },
+  "aarch64-unknown-linux-gnu": {
+    platform: "linux-arm64",
+    npm: "linux-arm64",
+    wheelTag: "manylinux_2_17_aarch64.manylinux2014_aarch64",
     archive: "tar.gz",
     exe: "",
   },
@@ -130,13 +139,19 @@ export const TARGETS = {
     exe: ".exe",
   },
 };
+// Each platform job and the runner it builds on, natively: a Linux target is
+// compiled in the manylinux image of its own architecture, never emulated.
 export const PLATFORMS = {
   linux: "ubuntu-latest",
+  "linux-arm64": "ubuntu-24.04-arm",
   macos: "macos-latest",
   windows: "windows-latest",
 };
 const WHEEL_PACKAGE = "onepipeline-api-cli";
 const CRATE = "onepipeline-ui";
+// A Linux target is built inside the manylinux image (`just wheel-linux`); every
+// other target by maturin on its runner's own toolchain.
+const manylinux = (target) => target.endsWith("-unknown-linux-gnu");
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // A phase's one success line, which a phase run inside another (`all`, or the
@@ -578,14 +593,13 @@ function requireStaged(out, artifacts) {
 function buildPlatform(job, out) {
   const { version, targets, artifacts } = plan(job);
   const tag = releaseTag(version);
-  if (job !== "linux")
-    for (const target of targets)
-      must(
-        "rustup target add",
-        `confirm the pinned toolchain supports ${target}`,
-        "rustup",
-        ["target", "add", target],
-      );
+  for (const target of targets.filter((t) => !manylinux(t)))
+    must(
+      "rustup target add",
+      `confirm the pinned toolchain supports ${target}`,
+      "rustup",
+      ["target", "add", target],
+    );
   if (!existsSync(join(REPO_ROOT, "apps/dag-ui/dist/index.html")))
     throw new Fault(
       "the browser view is not built, and the binary embeds it",
@@ -595,7 +609,7 @@ function buildPlatform(job, out) {
   mkdirSync(out, { recursive: true });
   for (const target of targets) {
     const wheels = join(out, `build-${target}`);
-    if (job === "linux") {
+    if (manylinux(target)) {
       // The manylinux image, through the one Linux wheel definition ci.yml's
       // `wheel` job also runs (`just wheel-linux`): the binary the wheel, the
       // archive and the npm package all carry is compiled here once, to a

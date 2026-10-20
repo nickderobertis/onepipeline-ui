@@ -3,8 +3,9 @@
 # manylinux image the release publishes it from.
 #
 # This is the one definition of a Linux wheel build: the release's `build-linux`
-# job reaches it through `just release-linux build` (scripts/release.mjs), and
-# ci.yml's `wheel` job through `just wheel-linux`, so a pull request builds under
+# and `build-linux-arm64` jobs reach it through `just release-linux build` and
+# `just release-linux-arm64 build` (scripts/release.mjs), and ci.yml's `wheel`
+# job through `just wheel-linux`, so a pull request builds under
 # the image, prerequisites and maturin invocation a release does. The release
 # packs the archive and the npm package from this wheel's binary too, so all
 # three carry its glibc 2.17 floor. v0.16.0 is why: every required check passed
@@ -33,7 +34,7 @@
 # were refused. Exit 1: the build or its environment failed, named on stderr.
 set -euo pipefail
 
-usage="run 'build-linux-wheel.sh --target x86_64-unknown-linux-gnu [--out DIR]'"
+usage="run 'build-linux-wheel.sh --target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu [--out DIR]'"
 
 fail_usage() {
   echo "$1" >&2
@@ -61,7 +62,7 @@ while [ $# -gt 0 ]; do
 done
 
 # The Linux targets scripts/release.mjs releases; tests/e2e/linux_wheel.rs fails
-# when the two sets differ. aarch64-unknown-linux-gnu is no longer released.
+# when the two sets differ.
 # Each carries the SHA-256 static.rust-lang.org publishes for rustup-init
 # $rustup_version on that architecture, so the installer the container runs is
 # the one pinned here and not whatever the download returned.
@@ -70,6 +71,10 @@ case "$target" in
   x86_64-unknown-linux-gnu)
     arch=x86_64 platform=linux/amd64
     rustup_sha256=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71
+    ;;
+  aarch64-unknown-linux-gnu)
+    arch=aarch64 platform=linux/arm64
+    rustup_sha256=15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433
     ;;
   "") fail_usage "--target is required" ;;
   *) fail_usage "no manylinux build is defined for $target" ;;
@@ -166,15 +171,18 @@ trap give_back EXIT
 # The image's CentOS 7 repositories point at vault.centos.org, which answers
 # their repomd.xml and refuses (403) every primary.sqlite.bz2 it names, so yum
 # reads the same 7.9.2009 tree from kernel.org's copy of the vault instead.
+# The aarch64 image names the vault's `altarch` tree where the x86_64 one names
+# `centos`, and kernel.org mirrors both under the same layout.
 # Only where it fetches from changes: every package is still held to the
 # image's CentOS 7 signing key (gpgcheck=1 stays on each repository).
 at "pointing yum at the CentOS 7 vault mirror" \
   "check that the image still names vault.centos.org in /etc/yum.repos.d, then re-run"
 sed -i -E \
-  's#https://vault\.centos\.org/centos/(7|\$releasever)/#https://archive.kernel.org/centos-vault/7.9.2009/#' \
+  -e 's#https://vault\.centos\.org/centos/(7|\$releasever)/#https://archive.kernel.org/centos-vault/7.9.2009/#' \
+  -e 's#https://vault\.centos\.org/altarch/(7|\$releasever)/#https://archive.kernel.org/centos-vault/altarch/7.9.2009/#' \
   /etc/yum.repos.d/*.repo
 at "installing OpenSSL's Perl prerequisites with yum" \
-  "check that https://archive.kernel.org/centos-vault/7.9.2009/ serves the os, updates, extras and sclo/x86_64/rh repositories, then re-run"
+  "check that https://archive.kernel.org/centos-vault/ serves the os, updates, extras and sclo/<arch>/rh repositories for 7.9.2009 (under altarch/ for aarch64), then re-run"
 yum install -y -q perl-IPC-Cmd perl-Time-Piece
 at "installing rustup $RUSTUP_VERSION" \
   "check that static.rust-lang.org serves rustup $RUSTUP_VERSION for $TARGET with the SHA-256 this script pins, then re-run"

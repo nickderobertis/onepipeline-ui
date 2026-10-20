@@ -10,6 +10,7 @@
 //     bin/onepipeline-api.js            resolves + execs the platform binary
 //     optionalDependencies:            one per release target in scripts/release.mjs
 //       onepipeline-api-cli-linux-x64
+//       onepipeline-api-cli-linux-arm64
 //       onepipeline-api-cli-darwin-arm64
 //       onepipeline-api-cli-win32-x64  each carries the matching prebuilt binary
 //
@@ -60,6 +61,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // optionalDependencies in npm/onepipeline-api-cli/package.json.
 const TARGETS = {
   "x86_64-unknown-linux-gnu": { platform: "linux", arch: "x64", exe: false },
+  "aarch64-unknown-linux-gnu": { platform: "linux", arch: "arm64", exe: false },
   "aarch64-apple-darwin": { platform: "darwin", arch: "arm64", exe: false },
   "x86_64-pc-windows-msvc": { platform: "win32", arch: "x64", exe: true },
 };

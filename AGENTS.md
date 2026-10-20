@@ -217,7 +217,12 @@ fans one uniformly-named target across all of them.
   leaves the other platforms published and the platform-independent artifacts
   unpublished** until it is re-run — and a re-run finishes the release, because
   every upload publishes only what its registry does not already serve. A
-  target is changed in `scripts/release.mjs`'s table and nowhere else.
+  target is changed in `scripts/release.mjs`'s table and nowhere else. The
+  platform jobs are `build-linux`, `build-linux-arm64` (on the
+  `ubuntu-24.04-arm` runner, so the arm64 binary is built and run natively),
+  `build-macos` (Apple Silicon only; Intel macOS is not released) and
+  `build-windows`, which with release-plz and `publish` make six CD jobs.
+  Pull-request CI builds no arm64 Linux leg.
 - **npm serves a publish minutes after `npm publish` returns, and names a
   version before it serves the tarball** — longer than a platform job has
   left after compiling. So no platform job waits for npm; `publish`'s `check`
