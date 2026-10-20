@@ -541,6 +541,166 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
     }
 }
 
+/// The plan-store release this crate's pinned engine links, which every
+/// `onetaskgraph-*` crate in the lock must be.
+///
+/// Stated here rather than read off either edge, because the edges are what it
+/// checks: `onepipeline` pins the family exactly and this crate's dev-dependencies
+/// follow it, so a lock where both moved to another store together would satisfy
+/// a comparison of the two and still link a store whose closure handling nothing
+/// here was proven against. It moves with the `onepipeline` pin, as one change —
+/// 0.79.0 links 0.8.0, whose store names a closed item's status after its closure.
+const STORE_RELEASE: &str = "0.8.0";
+
+/// The members of the plan-store family the shipped binary cannot be without:
+/// the store itself, the plugin boundary, and the GitHub plugin a board is read
+/// and its closures written through.
+const STORE_MEMBERS: [&str; 3] = [
+    "onetaskgraph-core",
+    "onetaskgraph-plugin-api",
+    "onetaskgraph-github-projects",
+];
+
+/// Every way `lock` and `manifest` fail to link exactly [`STORE_RELEASE`] of the
+/// plan store, as a reader would be told them: a family member at another
+/// release, a member resolved at more than one, a required member missing, an
+/// engine edge to another release, or a dev-dependency pinned to anything but
+/// that release exactly.
+fn store_identity_disagreements(lock: &str, manifest: &str) -> Vec<String> {
+    let lock: toml::Table = toml::from_str(lock).expect("Cargo.lock parses");
+    let mut releases: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut engine_edges: Vec<String> = Vec::new();
+    for package in lock["package"].as_array().expect("the lock lists packages") {
+        let name = package["name"].as_str().expect("a package name");
+        let version = package["version"].as_str().expect("a package version");
+        if name.starts_with("onetaskgraph-") {
+            releases
+                .entry(name.to_owned())
+                .or_default()
+                .insert(version.to_owned());
+        }
+        if name == "onepipeline" {
+            for edge in package
+                .get("dependencies")
+                .and_then(toml::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(toml::Value::as_str)
+            {
+                if edge.starts_with("onetaskgraph-") {
+                    engine_edges.push(edge.to_owned());
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    for member in STORE_MEMBERS {
+        if !releases.contains_key(member) {
+            found.push(format!("the lock resolves no {member}"));
+        }
+    }
+    for (name, versions) in &releases {
+        if versions.len() > 1 {
+            found.push(format!(
+                "the lock resolves {name} at {} releases, {versions:?}, where the binary links one",
+                versions.len()
+            ));
+        }
+        for version in versions.iter().filter(|version| *version != STORE_RELEASE) {
+            found.push(format!(
+                "the lock resolves {name} {version}, not the store release {STORE_RELEASE}"
+            ));
+        }
+    }
+    // An edge names a version only when the lock holds more than one of that
+    // crate, and any version it names is one the binary would link.
+    for edge in &engine_edges {
+        if let Some((name, version)) = edge.split_once(' ') {
+            if version != STORE_RELEASE {
+                found.push(format!(
+                    "onepipeline resolves {name} {version}, not the store release {STORE_RELEASE}"
+                ));
+            }
+        }
+    }
+    let manifest: toml::Table = toml::from_str(manifest).expect("Cargo.toml parses");
+    let exact = format!("={STORE_RELEASE}");
+    for member in ["onetaskgraph-core", "onetaskgraph-plugin-api"] {
+        let requirement = manifest["dev-dependencies"]
+            .get(member)
+            .and_then(toml::Value::as_str);
+        if requirement != Some(exact.as_str()) {
+            found.push(format!(
+                "Cargo.toml requires {member} as {requirement:?}, not exactly {exact}"
+            ));
+        }
+    }
+    found
+}
+
+/// The lock links exactly one release of every `onetaskgraph-*` crate, and it is
+/// the store release the pinned engine links.
+#[test]
+fn the_lock_links_exactly_one_release_of_the_plan_store_and_it_is_the_engines() {
+    let disagrees = store_identity_disagreements(&read("Cargo.lock"), &read("Cargo.toml"));
+    assert!(
+        disagrees.is_empty(),
+        "the plan store this crate links is not {STORE_RELEASE}, once: {}",
+        disagrees.join("; ")
+    );
+}
+
+/// A lock and manifest that moved to another store together — every edge
+/// agreeing, so the sibling comparison above passes — are refused naming the
+/// release, as is a lock that resolves a second release of one member.
+#[test]
+fn a_plan_store_moved_together_or_resolved_twice_is_refused_naming_it() {
+    let lock = read("Cargo.lock");
+    let manifest = read("Cargo.toml");
+    let moved_to = "0.8.1";
+    let mut moved_lock = lock.clone();
+    for member in ["onetaskgraph-core", "onetaskgraph-plugin-api"] {
+        let entry = format!("name = \"{member}\"\nversion = \"{STORE_RELEASE}\"\n");
+        assert_eq!(moved_lock.matches(&entry).count(), 1, "one {member} entry");
+        moved_lock = moved_lock.replace(
+            &entry,
+            &format!("name = \"{member}\"\nversion = \"{moved_to}\"\n"),
+        );
+    }
+    let moved_manifest = manifest.replace(
+        &format!("= \"={STORE_RELEASE}\""),
+        &format!("= \"={moved_to}\""),
+    );
+    let mut moved = store_identity_disagreements(&moved_lock, &moved_manifest);
+    moved.sort();
+    assert_eq!(
+        moved,
+        [
+            format!("Cargo.toml requires onetaskgraph-core as Some(\"={moved_to}\"), not exactly ={STORE_RELEASE}"),
+            format!("Cargo.toml requires onetaskgraph-plugin-api as Some(\"={moved_to}\"), not exactly ={STORE_RELEASE}"),
+            format!("the lock resolves onetaskgraph-core {moved_to}, not the store release {STORE_RELEASE}"),
+            format!("the lock resolves onetaskgraph-plugin-api {moved_to}, not the store release {STORE_RELEASE}"),
+        ]
+    );
+
+    let twice = format!(
+        "{lock}\n[[package]]\nname = \"onetaskgraph-plugin-api\"\nversion = \"0.7.3\"\n\
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n"
+    );
+    let mut doubled = store_identity_disagreements(&twice, &manifest);
+    doubled.sort();
+    assert_eq!(
+        doubled,
+        [
+            "the lock resolves onetaskgraph-plugin-api 0.7.3, not the store release 0.8.0"
+                .to_owned(),
+            "the lock resolves onetaskgraph-plugin-api at 2 releases, {\"0.7.3\", \"0.8.0\"}, \
+             where the binary links one"
+                .to_owned(),
+        ]
+    );
+}
+
 /// The oneharness history store is read by linking its library, never by
 /// spawning its CLI.
 ///
