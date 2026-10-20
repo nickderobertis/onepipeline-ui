@@ -15144,7 +15144,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         recorded[delivered]
     );
     // And the envelope the driver claimed is answered rather than left claimed:
-    // the channel holds no unclaimed command and one outcome, for that reply.
+    // the channel holds no unclaimed command and one outcome, for that reply,
+    // which names how the conversation took the note — as the held turn ended.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -15152,7 +15153,12 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         json!([{
             "id": receipt["receipt"]["reply"],
             "applied": true,
-            "results": [{ "index": 0, "op": "note", "outcome": "applied" }],
+            "results": [{
+                "index": 0,
+                "op": "note",
+                "outcome": "applied",
+                "turn": "turn-end",
+            }],
         }]),
         "{channel}"
     );
@@ -16887,8 +16893,13 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The harness stand-in a dispatch here runs: it records the argv it was given
-/// and answers as the adapter expects, so a journey can read back *that* it ran
-/// and *what as*.
+/// and the first line of its stdin, and answers as the adapter expects, so a
+/// journey can read back *that* it ran and *what as*.
+///
+/// The stdin line is where a dispatch's task is: a turn the run can interrupt
+/// is spawned as `-p --input-format stream-json` and handed its prompt as one
+/// `user` frame on stdin, which stays open for a control frame, so the stand-in
+/// reads that one line rather than to the end.
 ///
 /// The harness program is the one process this suite stands in for, and it is
 /// the narrowest place to cut: everything above it — the adopt route, the
@@ -16916,7 +16927,7 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\nprintf '{{\"type\":\"result\",\
+            "#!/bin/sh\nIFS= read -r frame\nprintf '%s %s %s\\n' \"$0\" \"$*\" \"$frame\" >> {:?}\nprintf '{{\"type\":\"result\",\
              \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
              \"session_id\":\"standin\"}}\\n'\n",
             log.display().to_string()
@@ -16945,7 +16956,7 @@ fn write_committing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\n\
+            "#!/bin/sh\nIFS= read -r frame\nprintf '%s %s %s\\n' \"$0\" \"$*\" \"$frame\" >> {:?}\n\
              printf 'the dispatch wrote this\\n' > work-$$.txt\n\
              git add work-$$.txt && git commit -q -m 'feat: the dispatch work' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
@@ -17066,7 +17077,7 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
 
     // And the member that started ran the harness the **parent** config names,
     // reached only by following the child's `extends`. The stand-in records the
-    // argv it was given, so what is asserted is the whole answer: the program
+    // argv and prompt frame it was given, so what is asserted is the whole answer: the program
     // the chain selected, composed by the `claude-code` adapter the parent
     // asked for, carrying this node's own task.
     eventually(
@@ -17227,7 +17238,8 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
-/// it records the argv it was given in a file of its own under `records`, and
+/// it records the argv it was given and its stdin's prompt frame, as
+/// [`write_harness_standin`] does, in a file of its own under `records`, and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17245,7 +17257,7 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" > {:?}/argv-$$.txt\n\
+            "#!/bin/sh\nIFS= read -r frame\nprintf '%s %s\\n' \"$*\" \"$frame\" > {:?}/argv-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
@@ -17459,10 +17471,23 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
 
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
-    // side; the producer is told it is the private side of a mixed plan.
+    // side; the producer is told it is the private side of a mixed plan. Each
+    // record ends in the `user` frame the dispatch's prompt rode on stdin, and what
+    // is held is that prompt as the frame decodes it, not its JSON escaping.
     let dispatched: Vec<String> = fs::read_dir(&records)
         .expect("the dispatch records")
         .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
+        .map(|record| {
+            let frame = record
+                .find(r#"{"type":"user""#)
+                .unwrap_or_else(|| panic!("no prompt frame on the harness's stdin: {record}"));
+            let frame: Value =
+                serde_json::from_str(record[frame..].trim_end()).expect("the prompt frame");
+            frame["message"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("a prompt frame with no text: {frame}"))
+                .to_owned()
+        })
         .collect();
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
     let told = |task: &str| -> &String {
@@ -19105,7 +19130,7 @@ fn write_closing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\n\
+            "#!/bin/sh\nIFS= read -r frame\nprintf '%s %s %s\\n' \"$0\" \"$*\" \"$frame\" >> {:?}\n\
              printf 'the dispatch wrote this\\n' > work-$$.txt\n\
              git add work-$$.txt && git commit -q -m 'feat: ship the service' \
              -m 'Closes #7' >&2 || exit 1\n\
