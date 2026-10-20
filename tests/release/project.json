@@ -63,9 +63,13 @@
       "inputs": ["releaseMachinery"]
     },
     "test-standalone": {
-      "//": "The release journeys that read none of the rehearsal’s files, run beside it rather than after it. Each stages into its own tree under target/ and serves its doubles on ports the system picks. check.test.mjs is not among them: it times publish's waits against their budget, which the cold compiles running beside the rehearsal throw off. publication.test.mjs goes last: its native build waits for the debug graph the other builds in target compile, and the rest need none.",
+      "//": "The release journeys that read none of the rehearsal’s files, run beside it rather than after it. Each stages into its own tree under target/ and serves its doubles on ports the system picks. check.test.mjs is not among them: it times publish's waits against their budget, which the cold compiles running beside the rehearsal throw off. publication.test.mjs goes last: its native build waits for the debug graph the other builds in target compile, and the rest need none. It also follows dag-ui:test, whose tests time out at 5 s in the job's first minutes, which this has no need to share.",
       "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
+      "dependsOn": [
+        { "projects": ["dag-ui"], "target": "build" },
+        { "projects": ["dag-ui"], "target": "test" },
+        "tools"
+      ],
       "inputs": ["releaseMachinery"]
     },
     "test": {
