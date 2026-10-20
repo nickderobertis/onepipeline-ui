@@ -15144,7 +15144,9 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         recorded[delivered]
     );
     // And the envelope the driver claimed is answered rather than left claimed:
-    // the channel holds no unclaimed command and one outcome, for that reply.
+    // the channel holds no unclaimed command and one outcome, for that reply —
+    // naming, as the engine's `verbs::channel` does, that the held turn took
+    // the note as it ended.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -15152,7 +15154,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         json!([{
             "id": receipt["receipt"]["reply"],
             "applied": true,
-            "results": [{ "index": 0, "op": "note", "outcome": "applied" }],
+            "results": [{ "index": 0, "op": "note", "outcome": "applied", "turn": "turn-end" }],
         }]),
         "{channel}"
     );
@@ -16887,8 +16889,12 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The harness stand-in a dispatch here runs: it records the argv it was given
-/// and answers as the adapter expects, so a journey can read back *that* it ran
-/// and *what as*.
+/// and the prompt it was handed, on one line, and answers as the adapter
+/// expects, so a journey can read back *that* it ran and *what as*.
+///
+/// The prompt is the first line of its stdin: the `claude-code` adapter runs it
+/// `-p --input-format stream-json` and writes the task as one `user` message,
+/// then holds stdin open for control frames, so it reads that line and no more.
 ///
 /// The harness program is the one process this suite stands in for, and it is
 /// the narrowest place to cut: everything above it — the adopt route, the
@@ -16916,7 +16922,9 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\nprintf '{{\"type\":\"result\",\
+            "#!/bin/sh\nIFS= read -r prompt\n\
+             printf '%s %s %s\\n' \"$0\" \"$*\" \"$prompt\" >> {:?}\n\
+             printf '{{\"type\":\"result\",\
              \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
              \"session_id\":\"standin\"}}\\n'\n",
             log.display().to_string()
@@ -17066,7 +17074,7 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
 
     // And the member that started ran the harness the **parent** config names,
     // reached only by following the child's `extends`. The stand-in records the
-    // argv it was given, so what is asserted is the whole answer: the program
+    // argv and prompt it was given, so what is asserted is the whole answer: the program
     // the chain selected, composed by the `claude-code` adapter the parent
     // asked for, carrying this node's own task.
     eventually(
@@ -17227,7 +17235,8 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
-/// it records the argv it was given in a file of its own under `records`, and
+/// it records the argv it was given, and on the line after it the stream-json
+/// prompt frame it was handed on stdin, in a file of its own under `records`, and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17245,7 +17254,7 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" > {:?}/argv-$$.txt\n\
+            "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n%s\\n' \"$*\" \"$prompt\" > {:?}/argv-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
@@ -17460,9 +17469,21 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
     // side; the producer is told it is the private side of a mixed plan.
+    // Each record is the argv, then the stream-json `user` frame the adapter
+    // wrote the task in, read back as the text it carries.
     let dispatched: Vec<String> = fs::read_dir(&records)
         .expect("the dispatch records")
         .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
+        .map(|record| {
+            let (argv, frame) = record.split_once('\n').expect("an argv line and a prompt");
+            let frame: Value = serde_json::from_str(frame.trim_end()).unwrap_or_else(|err| {
+                panic!("the prompt is not a stream-json frame: {err}: {record}")
+            });
+            let text = frame["message"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the prompt frame carries no text: {frame}"));
+            format!("{argv}\n{text}")
+        })
         .collect();
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
     let told = |task: &str| -> &String {
@@ -19379,6 +19400,336 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     assert_eq!(payload["node"], json!(node), "{payload}");
     assert_eq!(payload["closes"], json!(["owner/service#7"]), "{payload}");
     assert_eq!(payload["outcome"], json!("projected"), "{payload}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A harness stand-in whose first dispatch is still running when the run is
+/// put down: the first time it is run it records that it was and waits, never
+/// committing, so the node cannot land; every later run commits one file in
+/// the worktree it is run in and answers as [`write_harness_standin`]'s does.
+///
+/// Still the one process a journey stands in for, on
+/// [`write_committing_harness_standin`]'s terms. The wait is bounded, so a
+/// dispatch nothing ends still exits on its own.
+#[cfg(unix)]
+fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("held-once-harness");
+    let held = dir.join("held-once");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {log:?}\n\
+             if [ ! -e {held:?} ]; then : > {held:?}; exec sleep 120; fi\n\
+             printf 'the dispatch wrote this\\n' > work-$$.txt\n\
+             git add work-$$.txt && git commit -q -m 'feat: ship the service' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            log = log.display().to_string(),
+            held = held.display().to_string(),
+        ),
+    )
+    .expect("the held-once harness stand-in");
+    // Owner-only: the one process that runs it is a dispatch this journey's own
+    // launch or server starts, as this user.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the held-once harness stand-in");
+    standin
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes` above: the
+// provisioned CLI, a `/bin/sh` stand-in the journey writes, `git` over a scratch
+// repository in its own workspace and the loopback board, settling in seconds.
+/// A run adopted from the browser marks its plan's home done once it settles,
+/// through the store this binary links, exactly as a run its launching engine
+/// drives does.
+///
+/// The released CLI launches a one-node plan whose home is a project item on
+/// the loopback board, open at `In Progress`, from a directory whose
+/// `onetaskgraph.yaml` declares that board and names no closure and no home.
+/// The node's first dispatch is still running when the shutdown route puts the
+/// run down, so nothing has landed. The driver the adopt route retains — this
+/// binary's own engine — dispatches the node again; the harness stand-in
+/// commits in the session the linked `onevcs` cut, the node lands
+/// `local-direct` on `owner/service`, and the run settles with every node
+/// `done`. The store then moves the home's card to the board's project-kind
+/// `done` option and closes its issue as completed, in one option write and one
+/// close and without reading the board's items, and the run's journal holds the
+/// one `home-status` record that says it was written.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_that_settles_marks_its_plans_home_done() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let service = &repos.private;
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the shutdown and adopt routes, the retained driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only waits or commits what an agent would.
+    let standin = write_held_once_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+
+    let node = "ship";
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "owner/service",
+            // The project kind's `done` is an option of its own, so the card
+            // the home ends at is the project half of the mapping and no task's.
+            "options": CLOSURE_BOARD_OPTIONS.iter().copied().chain(["Shipped"]).collect::<Vec<_>>(),
+            "issues": {
+                "plan": seeded_issue(1, "ship-the-service", json!({
+                    "onepipeline.schema_version": 3,
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.goal": {"text": "Ship the service"},
+                }), ("In Progress", "OPEN", None), None),
+                // Its repository is the issue's own, `owner/service`, which is
+                // the scratch service's origin.
+                node: seeded_issue(2, node, json!({
+                    "onepipeline.id": node,
+                    "onepipeline.persona": "engineer",
+                }), ("Todo", "OPEN", None), Some("plan")),
+            },
+        }),
+    );
+    let config = closure_board_config(&board, "");
+    let per_kind = "        done: Done\n";
+    assert_eq!(config.matches(per_kind).count(), 1, "{config}");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        config.replace(
+            per_kind,
+            "        done:\n          task: Done\n          project: Shipped\n",
+        ),
+    )
+    .expect("the store configuration");
+
+    let state = dir.join("state");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment: Vec<(&str, String)> = vec![
+        ("CACHE_BOARD_TOKEN", board.token.clone()),
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        // The store's user layer: this workspace's own, empty, so the sources the
+        // home's write asks are the launch directory's and no host's.
+        ("XDG_CONFIG_HOME", dir.join("config").display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            service.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args(["start", "board:plan", "--detach"])
+        .current_dir(&dir)
+        .envs(environment.iter().map(|(name, value)| (name, value)))
+        .env(crate::serving::ONEVCS_HOME_ENV, &onevcs_home)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, &graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(&root),
+        )
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let launched: Value =
+        serde_json::from_slice(&launched.stdout).expect("start prints its launch");
+    let run = launched["run_id"].as_str().expect("a run id").to_owned();
+    let launched_pid =
+        u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    // The launching driver started the node's first dispatch, which waits.
+    eventually("the launched driver dispatched the node", || {
+        dir.join("held-once").exists()
+    });
+
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &environment
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect::<Vec<_>>(),
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || http::get(serving.address, &detail_path).json();
+    let base = || {
+        let landed = on_origin(service, &["rev-parse", scratch_repo::BASE_BRANCH]);
+        assert!(
+            landed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&landed.stderr)
+        );
+        String::from_utf8_lossy(&landed.stdout).trim().to_owned()
+    };
+    let seeded_base = base();
+
+    // Put down mid-dispatch, before its node lands: the run is adoptable, the
+    // service's base has not moved, and the home is where it was seeded.
+    // The waiting dispatch takes no interrupt, so it is ended once its grace
+    // is out; the route answers after that and the branch pushes.
+    let shutdown = http::post_within(
+        serving.address,
+        &format!("{detail_path}/shutdown"),
+        r#"{"grace": 1}"#,
+        DRIVER_PATIENCE,
+    );
+    assert_eq!(shutdown.status, 200, "{}", shutdown.body);
+    let shutdown = shutdown.json();
+    let stopped: Vec<&Value> = shutdown["runs"][0]["dispatches"]
+        .as_array()
+        .expect("the dispatches the shutdown acted on")
+        .iter()
+        .collect();
+    assert_eq!(stopped.len(), 1, "{shutdown}");
+    assert_eq!(stopped[0]["node"], json!(node), "{shutdown}");
+    eventually("the launched driver let go of the run", || {
+        !process_is_live(launched_pid)
+    });
+    assert_ne!(
+        detail()["run"]["state"],
+        json!("settled"),
+        "{}",
+        detail()["run"]
+    );
+    assert_ne!(
+        detail()["graph"]["node_status"][node],
+        json!("done"),
+        "{}",
+        detail()["graph"]
+    );
+    assert_eq!(base(), seeded_base, "the node landed before the adoption");
+    let before = board.state();
+    assert_eq!(
+        (
+            &before["issues"]["plan"]["status"],
+            &before["issues"]["plan"]["state"]
+        ),
+        (&json!("In Progress"), &json!("OPEN")),
+        "{before}"
+    );
+
+    let adopted = http::post(serving.address, &format!("{detail_path}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    let journal = root.join(&run).join("events.jsonl");
+    let homed = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .filter(|record| {
+                record["source"] == json!("pipeline") && record["kind"] == json!("home-status")
+            })
+            .collect()
+    };
+    eventually("the adopted run settled", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted run's home was written", || !homed().is_empty());
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    // Settled with every node done, and served with the fields every run is.
+    let settled = detail();
+    assert_eq!(settled["run"]["run_id"], json!(run), "{}", settled["run"]);
+    assert_eq!(
+        settled["run"]["state"],
+        json!("settled"),
+        "{}",
+        settled["run"]
+    );
+    let statuses = settled["graph"]["node_status"]
+        .as_object()
+        .expect("the node statuses");
+    assert_eq!(
+        statuses.keys().map(String::as_str).collect::<Vec<_>>(),
+        [node],
+        "{}",
+        settled["graph"]
+    );
+    assert_eq!(statuses[node], json!("done"), "{}", settled["graph"]);
+    assert_eq!(
+        settled["graph"]["node_results"][node]["outcome"],
+        json!("merged"),
+        "{}",
+        settled["graph"]
+    );
+    let nodes = settled["run"]["nodes"].as_array().expect("the run's nodes");
+    assert_eq!(nodes.len(), 1, "{}", settled["run"]);
+    assert_eq!(nodes[0]["node"], json!(node), "{}", settled["run"]);
+    assert_ne!(base(), seeded_base, "the node never landed");
+
+    // The home's card is at the project kind's `done` option, and its issue
+    // closed as completed.
+    let after = board.state();
+    let home = &after["issues"]["plan"];
+    assert_eq!(
+        (&home["status"], &home["state"], &home["reason"]),
+        (&json!("Shipped"), &json!("CLOSED"), &json!("COMPLETED")),
+        "{after}"
+    );
+    // One option write and one close for the home, and no read of the board's
+    // items.
+    let requests = after["requests"]
+        .as_array()
+        .expect("the board's request log");
+    let home_writes = requests
+        .iter()
+        .filter(|request| {
+            let query = request["query"].as_str().unwrap_or_default();
+            query.contains("updateProjectV2ItemFieldValue(")
+                && request["variables"]["input"]["itemId"] == json!("ITEM-plan")
+        })
+        .count();
+    let home_closes = requests
+        .iter()
+        .filter(|request| {
+            let query = request["query"].as_str().unwrap_or_default();
+            query.contains("updateIssue(")
+                && request["variables"]["input"]["id"] == json!("plan")
+                && request["variables"]["input"]["stateInput"]["value"] == json!("CLOSED")
+        })
+        .count();
+    assert_eq!((home_writes, home_closes), (1, 1), "{requests:#?}");
+    for request in requests {
+        let query = request["query"].as_str().expect("a query");
+        assert!(
+            !query.contains("items("),
+            "a request read the board's items: {request}"
+        );
+    }
+
+    // One record of the home's write, saying it was written.
+    let records = homed();
+    assert_eq!(records.len(), 1, "{records:#?}");
+    assert_eq!(
+        records[0]["payload"]["outcome"],
+        json!("written"),
+        "{}",
+        records[0]
+    );
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
