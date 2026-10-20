@@ -8,6 +8,15 @@
 # yields its canonical name@version, and only a registry 404 permits publication.
 # Auth, network, and server errors fail closed rather than being mistaken for
 # "not published yet".
+#
+# An `npm publish` that exits 0 is not yet a publication. npm's registry can
+# *stage* a plain publish — hold it, unserved, until a maintainer approves it
+# with 2FA — and answer the PUT with a 2xx the CLI does not read, so npm prints
+# `+ name@version` and exits 0 either way. v0.41.2's win32-x64 package went that
+# way: build-windows reported it published, npm never served it, and the re-run's
+# publish was refused with `409 Cannot publish over previously staged version
+# "0.41.2"`. So every publish is followed by a read of npm's stage queue, and a
+# version npm staged fails here, naming it and its stage id.
 set -euo pipefail
 
 fail() {
@@ -51,6 +60,29 @@ for package in "$@"; do
     if ! npm publish "$package" --access public >"$work/publish-output" 2>&1; then
       cat "$work/publish-output" >&2
       fail "npm could not publish '$identity'; fix the reported authentication or package error, then re-run the release"
+    fi
+    if ! stages="$(npm stage list "${identity%@*}" --json 2>"$work/stage-error")"; then
+      cat "$work/publish-output" "$work/stage-error" >&2
+      fail "cannot ask npm whether it staged '$identity' rather than publishing it; re-run the release when the npm registry answers"
+    fi
+    # The single-quoted program is JavaScript; its template expression is not shell.
+    # shellcheck disable=SC2016
+    if ! stage="$(printf '%s' "$stages" | node -e '
+      const [name, version] = process.argv.slice(1);
+      let input = "";
+      process.stdin.on("data", chunk => input += chunk).on("end", () => {
+        const items = JSON.parse(input);
+        if (!Array.isArray(items)) throw new Error("npm stage list did not return a list");
+        const held = items.find(item => item?.packageName === name && item?.version === version);
+        if (held) process.stdout.write(typeof held.id === "string" && held.id ? held.id : "(no id)");
+      });
+    ' "${identity%@*}" "${identity##*@}" 2>"$work/stage-error")"; then
+      cat "$work/stage-error" >&2
+      fail "npm answered its stage list for '$identity' with something that is not one; re-run the release when the npm registry answers"
+    fi
+    if [ -n "$stage" ]; then
+      cat "$work/publish-output" >&2
+      fail "npm staged '$identity' (stage id $stage) instead of publishing it, so it serves nothing; approve it with \`npm stage approve $stage\` and re-run the release, or give the release a credential npm lets publish directly"
     fi
     published="$published $identity"
   else

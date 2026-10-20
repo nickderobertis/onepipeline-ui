@@ -6,7 +6,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -115,10 +117,39 @@ export async function registryDoubles(dir) {
         : [],
     hide: (entries) => control("hide", entries),
     unserve: (entries) => control("unserved", entries),
+    stage: (entries) => control("stage", entries),
+    // A maintainer approving every version npm staged: each is published as
+    // it was staged, and npm serves it from then on.
+    approveStaged: () => {
+      const held = join(state, "npm-staged");
+      for (const file of readdirSync(held).filter((f) => f.endsWith(".json"))) {
+        const { packageName, version, manifest } = JSON.parse(
+          readFileSync(join(held, file), "utf8"),
+        );
+        const { dist: _dist, ...rest } = manifest;
+        mkdirSync(join(state, "npm", packageName), { recursive: true });
+        renameSync(
+          join(held, file.replace(/\.json$/, ".tgz")),
+          join(state, "npm", packageName, `${version}.tgz`),
+        );
+        writeFileSync(
+          join(state, "npm", packageName, `${version}.json`),
+          JSON.stringify(rest),
+        );
+        rmSync(join(held, file));
+      }
+    },
     corrupt: (entries) => control("corrupt", entries),
     breakReads: (entries) => control("broken", entries),
     clear: () => {
-      for (const name of ["hide", "unserved", "corrupt", "broken", "fail"])
+      for (const name of [
+        "hide",
+        "unserved",
+        "stage",
+        "corrupt",
+        "broken",
+        "fail",
+      ])
         rmSync(join(state, "control", name), { recursive: true, force: true });
       mkdirSync(join(state, "control", "fail"));
     },
