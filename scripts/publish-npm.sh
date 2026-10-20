@@ -63,6 +63,7 @@ for package in "$@"; do
       cat "$work/publish-output" "$work/stage-error" >&2
       fail "cannot ask npm whether it staged '$identity' rather than publishing it; re-run the release when the npm registry answers"
     fi
+    # llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] npm publishes no schema for its stage queue; `id`, `packageName` and `version` are the fields its own CLI reads off each entry (`npm stage list` prints them, `npm stage approve` takes the id), and this runs against npm's real registry on every release, where an entry of any other shape is refused below rather than read as no staged version.
     if ! stage="$(printf '%s' "$stages" | node -e '
       const [name, version] = process.argv.slice(1);
       let input = "";
@@ -80,6 +81,7 @@ for package in "$@"; do
       cat "$work/stage-error" >&2
       fail "npm answered its stage list for '$identity' with something that is not one; re-run the release when the npm registry answers"
     fi
+    # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     if [ -n "$stage" ]; then
       cat "$work/publish-output" >&2
       fail "npm staged '$identity' (stage id $stage) instead of publishing it, so it serves nothing; approve it with \`npm stage approve $stage\` and re-run the release, or give the release a credential npm lets publish directly"
