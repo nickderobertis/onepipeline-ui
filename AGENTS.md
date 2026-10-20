@@ -225,11 +225,19 @@ fans one uniformly-named target across all of them.
   Pull-request CI builds no arm64 Linux leg.
 - **npm serves a publish minutes after `npm publish` returns, and names a
   version before it serves the tarball** — longer than a platform job has
-  left after compiling. So no platform job waits for npm; `publish`'s `check`
-  fetches every platform package by version, waiting only on what a
-  successful job published, before the launcher that pins them goes out. npm
-  also installs a launcher whose platform package it cannot fetch and exits
-  0, so an install that lacks the platform package is retried, never counted.
+  left after compiling — **and PyPI's JSON API can omit a wheel uploaded
+  seconds before.** So no platform job waits for npm; `publish`'s `check`
+  fetches every platform package by version and re-reads PyPI until it lists
+  every wheel, within one deadline, before the launcher that pins them goes
+  out. A registry that has not answered yet is late, never missing: only a
+  failed job or a missing Release asset is reported without the wait.
+  v0.41.1's check read two late wheels as missing, so waited for nothing and
+  failed in six seconds over five files both registries served minutes later.
+  `verify` likewise asks npm for the frontend only through its retried
+  install: v0.41.0's one `npm view` refused a frontend npm listed 97 seconds
+  after its upload. npm also installs a launcher whose platform package it
+  cannot fetch and exits 0, so an install that lacks the platform package is
+  retried, never counted.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

@@ -24,11 +24,13 @@ name: Release
 #     always; PyPI and npm when their switches are on), and then installs the
 #     version back from the Release and PyPI on its own OS and
 #     runs it. npm serves a publish minutes after taking it, longer than these
-#     jobs have left, so its copy is waited for once, in publish's check.
+#     jobs have left, so its copy is waited for once, in publish's check,
+#     beside PyPI's listing of each wheel.
 #     The four run side by side and need nothing from one another.
 #   * publish — once all four have run, whatever they did: refuses to publish
 #     anything unless every platform's files are served, waiting for npm to
-#     serve each platform package a successful job published, then publishes
+#     serve each platform package and PyPI to list each wheel when every
+#     platform job succeeded, then publishes
 #     what belongs to no platform (the crate, the npm launcher and frontend,
 #     the SBOM), installs the launcher back, and holds the GitHub Release to the
 #     outcome — a release that did not publish is demoted to a prerelease.
@@ -314,7 +316,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just,cargo-cyclonedx@0.5.7
-      - name: Every platform served its files, npm's waited for
+      - name: Every platform served its files, npm's and PyPI's waited for
         id: check
         run: just release-publish check
       - name: Assemble the crate, the npm launcher and frontend, and the SBOM

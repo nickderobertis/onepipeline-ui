@@ -1304,7 +1304,8 @@ describe("publication against registry doubles", () => {
       registries.clear();
     }
     // Hiding is keyed by name@version for the crate and npm alike, so the
-    // frontend is lost by moving its files aside instead.
+    // frontend is lost by moving its files aside instead. It is waited for as
+    // a publish npm has not listed yet, and refused once the wait ends.
     const frontend = join(registries.state, "npm", "onepipeline-ui");
     renameSync(frontend, join(dir, "frontend-aside"));
     try {
@@ -1313,9 +1314,10 @@ describe("publication against registry doubles", () => {
       assert.match(
         run.stderr,
         new RegExp(
-          `npm does not serve onepipeline-ui@${VERSION.replace(/\./g, "\\.")}`,
+          `npm onepipeline-ui ${VERSION.replace(/\./g, "\\.")}: still not installable after \\d+ attempts`,
         ),
       );
+      assert.match(run.stderr, /re-run this job's upload npm/);
     } finally {
       renameSync(join(dir, "frontend-aside"), frontend);
     }
