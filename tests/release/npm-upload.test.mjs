@@ -11,7 +11,14 @@
 // what is under test is the publish and its report, not the package.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { plan } from "../../scripts/release.mjs";
@@ -135,21 +142,40 @@ test("a publish npm stages instead of publishing fails the upload, naming the pa
   }
 });
 
-test("a publish npm takes is reported published, and npm serves it", () => {
+test("a publish npm takes is reported published, and npm serves it, beside another version and another package npm has staged", () => {
   const { artifact, out, id } = stagedPackage("macos");
-  const published = upload("macos", out);
-  assert.equal(published.status, 0, published.output);
-  assert.match(
-    published.stdout,
-    new RegExp(
-      `release macos: npm published ${escapeRegExp(artifact.file)}; already served nothing`,
-    ),
-  );
-  assert.deepEqual(
-    registries.uploads().filter((line) => line.includes(artifact.package)),
-    [`npm ${artifact.file}`],
-  );
-  assert.equal(npmServes(id), true);
+  // Only this package at this version is held to the stage queue.
+  const held = join(registries.state, "npm-staged");
+  for (const [packageName, staged] of [
+    [artifact.package, "0.0.1"],
+    ["onepipeline-api-cli-win32-x64", VERSION],
+  ])
+    writeFileSync(
+      join(held, `${packageName}@${staged}.json`),
+      JSON.stringify({
+        id: randomUUID(),
+        packageName,
+        version: staged,
+        tag: "latest",
+      }),
+    );
+  try {
+    const published = upload("macos", out);
+    assert.equal(published.status, 0, published.output);
+    assert.match(
+      published.stdout,
+      new RegExp(
+        `release macos: npm published ${escapeRegExp(artifact.file)}; already served nothing`,
+      ),
+    );
+    assert.deepEqual(
+      registries.uploads().filter((line) => line.includes(artifact.package)),
+      [`npm ${artifact.file}`],
+    );
+    assert.equal(npmServes(id), true);
+  } finally {
+    for (const file of readdirSync(held)) rmSync(join(held, file));
+  }
 });
 
 test("a stage queue npm does not answer after a publish fails the upload rather than reading it as published", () => {

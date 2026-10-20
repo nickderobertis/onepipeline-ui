@@ -296,13 +296,13 @@ async function npm(request, response, path) {
     if (!newest) return reply(response, 404, { error: "Not found" });
     return reply(response, 200, versions[newest]);
   }
+  // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] npm's stage queue has no published schema or offline fixture to derive this from. The envelope (`items`, `total`) and the entry fields (`id`, `packageName`, `version`) are what the npm CLI's own `npm stage list` reads, and the journeys run that real CLI against this double, so a shape it stopped reading fails them through the client the release itself runs.
   if (path === "/-/stage" && request.method === "GET") {
     if (!/^Bearer \S+/.test(request.headers.authorization ?? ""))
       return reply(response, 401, { error: "Unauthorized" });
     const wanted = new URL(request.url, "http://double").searchParams.get(
       "package",
     );
-    // A list whose entries name no version and no stage id.
     if (lines("broken").includes("npm-stage=malformed"))
       return reply(response, 200, {
         items: [null, { packageName: wanted }],
@@ -317,6 +317,7 @@ async function npm(request, response, path) {
       .filter((item) => !wanted || item.packageName === wanted);
     return reply(response, 200, { items, total: items.length });
   }
+  // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
   const pkg = decodeURIComponent(path.slice(1));
   const otherVersion = lines("broken").includes("npm-packument=other-version");
   if (
@@ -352,6 +353,7 @@ async function npm(request, response, path) {
       return reply(response, 403, {
         error: `You cannot publish over the previously published versions: ${version}.`,
       });
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] npm's registry documents no response for a staged publish, and the CLI does not read the PUT's body, so only the status matters: a 2xx, as `npm publish` exited 0 on the publish npm staged for v0.41.2's win32-x64 package. The 409 and its text are what npm's registry answered that job's re-run (run 39426287439, attempt 2, build-windows). No offline copy of either exists to hold this to.
     const held = join(state, "npm-staged", `${pkg}@${version}`);
     if (existsSync(`${held}.json`))
       return reply(response, 409, {
@@ -373,6 +375,7 @@ async function npm(request, response, path) {
       );
       return reply(response, 200, { ok: true });
     }
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
     mkdirSync(join(state, "npm", pkg), { recursive: true });
     writeFileSync(
       join(state, "npm", pkg, `${version}.tgz`),
