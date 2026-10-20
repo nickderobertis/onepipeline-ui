@@ -545,6 +545,129 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
     }
 }
 
+/// The engine release this crate links, which `Cargo.toml` must require exactly
+/// and `Cargo.lock` must resolve once.
+///
+/// Stated here rather than read off either file, for the reason
+/// [`STORE_RELEASE`] is: the requirement and the lock are what it checks, and the
+/// comparison of the two above passes for any release both moved to together —
+/// including one whose adopted runs write their plan's home nothing. It moves
+/// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
+const ENGINE_RELEASE: &str = "0.80.1";
+
+/// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
+/// engine, as a reader would be told them: a requirement that is not that release
+/// exactly, and a lock that resolves it at another release or more than one.
+fn engine_identity_disagreements(lock: &str, manifest: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let manifest: toml::Table = toml::from_str(manifest).expect("Cargo.toml parses");
+    let exact = format!("={ENGINE_RELEASE}");
+    let requirement = manifest["dependencies"]
+        .get("onepipeline")
+        .and_then(toml::Value::as_str);
+    if requirement != Some(exact.as_str()) {
+        found.push(format!(
+            "Cargo.toml requires onepipeline as {requirement:?}, not exactly {exact}"
+        ));
+    }
+    let lock: toml::Table = toml::from_str(lock).expect("Cargo.lock parses");
+    let versions: BTreeSet<&str> = lock["package"]
+        .as_array()
+        .expect("the lock lists packages")
+        .iter()
+        .filter(|package| package["name"].as_str() == Some("onepipeline"))
+        .map(|package| package["version"].as_str().expect("a package version"))
+        .collect();
+    if versions.is_empty() {
+        found.push("the lock resolves no onepipeline".to_owned());
+    }
+    if versions.len() > 1 {
+        found.push(format!(
+            "the lock resolves onepipeline at {} releases, {versions:?}, where the binary links one",
+            versions.len()
+        ));
+    }
+    for version in versions
+        .iter()
+        .filter(|version| **version != ENGINE_RELEASE)
+    {
+        found.push(format!(
+            "the lock resolves onepipeline {version}, not the engine release {ENGINE_RELEASE}"
+        ));
+    }
+    found
+}
+
+/// The manifest and lock link exactly the engine release this crate was proven
+/// against.
+#[test]
+fn the_manifest_and_lock_link_exactly_the_engine_release() {
+    let disagrees = engine_identity_disagreements(&read("Cargo.lock"), &read("Cargo.toml"));
+    assert!(
+        disagrees.is_empty(),
+        "the engine this crate links is not {ENGINE_RELEASE}, once: {}",
+        disagrees.join("; ")
+    );
+}
+
+/// A manifest and lock that moved to another engine together — so the
+/// requirement-against-lock comparison above passes — are refused naming the
+/// release, as is a lock that resolves a second release of the engine.
+#[test]
+fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
+    let lock = read("Cargo.lock");
+    let manifest = read("Cargo.toml");
+    let moved_to = "0.80.2";
+    let entry = format!("name = \"onepipeline\"\nversion = \"{ENGINE_RELEASE}\"\n");
+    assert_eq!(lock.matches(&entry).count(), 1, "one onepipeline entry");
+    let moved_lock = lock.replace(
+        &entry,
+        &format!("name = \"onepipeline\"\nversion = \"{moved_to}\"\n"),
+    );
+    let requirement = format!("onepipeline = \"={ENGINE_RELEASE}\"");
+    assert_eq!(
+        manifest.matches(&requirement).count(),
+        1,
+        "one onepipeline requirement"
+    );
+    let moved_manifest = manifest.replace(&requirement, &format!("onepipeline = \"={moved_to}\""));
+
+    // Moved together, the two still agree with each other — the case the
+    // comparison of requirement and lock cannot see.
+    assert_eq!(
+        dependency_requirement(&moved_manifest, "onepipeline"),
+        format!("={}", locked_version(&moved_lock, "onepipeline"))
+    );
+    let mut moved = engine_identity_disagreements(&moved_lock, &moved_manifest);
+    moved.sort();
+    assert_eq!(
+        moved,
+        [
+            format!(
+                "Cargo.toml requires onepipeline as Some(\"={moved_to}\"), not exactly ={ENGINE_RELEASE}"
+            ),
+            format!("the lock resolves onepipeline {moved_to}, not the engine release {ENGINE_RELEASE}"),
+        ]
+    );
+
+    let twice = format!(
+        "{lock}\n[[package]]\nname = \"onepipeline\"\nversion = \"0.79.1\"\n\
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n"
+    );
+    let mut doubled = engine_identity_disagreements(&twice, &manifest);
+    doubled.sort();
+    assert_eq!(
+        doubled,
+        [
+            format!("the lock resolves onepipeline 0.79.1, not the engine release {ENGINE_RELEASE}"),
+            format!(
+                "the lock resolves onepipeline at 2 releases, {{\"0.79.1\", \"{ENGINE_RELEASE}\"}}, \
+                 where the binary links one"
+            ),
+        ]
+    );
+}
+
 /// The plan-store release this crate's pinned engine links, which every
 /// `onetaskgraph-*` crate in the lock must be.
 ///
