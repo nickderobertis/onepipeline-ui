@@ -206,6 +206,9 @@ async function pypi(request, response, path) {
         filename,
         packagetype: "bdist_wheel",
         url: `http://${request.headers.host}/files/${filename}`,
+        digests: {
+          sha256: sha256(readFileSync(join(state, "pypi", filename))),
+        },
       })),
     });
   }

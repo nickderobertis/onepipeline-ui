@@ -218,6 +218,7 @@ export function releaseEnv({ gh, registries, home, extra = {} }) {
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "500",
     RELEASE_VERIFY_BUDGET: "6",
     RELEASE_CHECK_BUDGET: "6",
+    RELEASE_NPM_HELD_BUDGET: "6",
     ...extra,
   };
 }
