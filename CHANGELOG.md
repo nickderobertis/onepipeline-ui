@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.2...v0.42.0) - 2026-10-20
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that marks a plan's home done when its run settles ([#400](https://github.com/nickderobertis/onepipeline-ui/pull/400))
+
 ## [0.41.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.1...v0.41.2) - 2026-10-20
 
 ### Added
