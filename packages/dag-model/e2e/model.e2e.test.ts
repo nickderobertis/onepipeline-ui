@@ -194,6 +194,16 @@ test("the checked-in v2 run-timeline contract parses, and v1's meaning is refuse
     landing_commit: "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334",
   });
 
+  // How a live turn took a note, beside the party that took it: this one was
+  // left to end and reached as it did, rather than interrupted.
+  expect(events.find((event) => event.id === "e8a")?.redirection).toEqual({
+    reached: "worker",
+    turn: "turn-end",
+    delivered: true,
+    delivery: "live",
+    node_id: "api",
+  });
+
   // Where a change request's review stood: a required check that skipped is
   // `skipped` rather than passed, the settlement says it passed with that check
   // skipped, and the draft kept for its user's review says so by its kind.

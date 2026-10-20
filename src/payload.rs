@@ -766,7 +766,7 @@ mod edits {
     /// `context` op recorded it. Nothing writes this any more; runs that hold
     /// one are still read.
     pub const CONTEXT_ADDED: &str = "context-added";
-    /// `{node, addressee, text, criterion?, reached, completion_reason?}` — a
+    /// `{node, addressee, text, criterion?, reached, turn?, completion_reason?}` — a
     /// manager's note was delivered into a node's live conversation, or carried
     /// to that node's next dispatch because no turn of it took the note.
     pub const NOTE_DELIVERED: &str = "note-delivered";
@@ -791,6 +791,16 @@ mod edits {
     /// Closed, as the enum is: a word outside it is a record this build cannot
     /// read and is dropped rather than relayed for a client to fail on.
     pub const REACHED_WORDS: [&str; 5] = ["queued", "worker", "supervisor", "judged-with", CARRIED];
+    /// How the live turn that took a delivered note took it — the tag
+    /// `onepipeline::note::NoteTurn` is written under beside a `worker` or
+    /// `supervisor` [`REACHED`]. Absent from a record written before the field
+    /// existed, which says nothing about it.
+    pub const TURN: &str = "turn";
+    /// The words a delivered note's `turn` can carry, in the SDK's own order:
+    /// the party's running turn was interrupted and replaced by one opening on
+    /// the note, or was left to end and the note reached it then. Closed, as
+    /// [`REACHED_WORDS`] is.
+    pub const TURN_WORDS: [&str; 2] = ["interrupted", "turn-end"];
 }
 
 /// The party a record names as its own, when it names one this crate serves.
@@ -4923,6 +4933,15 @@ fn redirection(event: &Envelope) -> Option<Value> {
                         .and_then(Value::as_str)
                         .filter(|word| edits::REACHED_WORDS.contains(word))?;
                     record.insert("reached".into(), json!(reached));
+                    // Optional on the sibling's type, and closed there: absent is a
+                    // record that does not say, and a word outside the pair is one
+                    // this build cannot read.
+                    if let Some(turn) = note.get(edits::TURN) {
+                        let turn = turn
+                            .as_str()
+                            .filter(|word| edits::TURN_WORDS.contains(word))?;
+                        record.insert("turn".into(), json!(turn));
+                    }
                     if reached == edits::CARRIED {
                         edits::DEFERRED
                     } else {

@@ -262,7 +262,14 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 /// ended — the last such settlement or lift — rather than at the moment it was
 /// opened. Additive as `surface` was in 9: every other event, and every span of a
 /// run that recorded none of those, is byte-for-byte what 10 served.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 11;
+///
+/// **Schema 12 says how a live turn took a note.** The engine that links here
+/// can leave a party's running turn to end rather than interrupt it, and records
+/// which it did as `turn` — `interrupted` or `turn-end` — on a `worker` or
+/// `supervisor` disposition. A `redirection` read off such a record carries it
+/// beside `reached`; one written before the field existed carries none. Every
+/// other event is byte-for-byte what 11 served.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 12;
 
 /// The largest run-list page any request can ask for.
 ///
