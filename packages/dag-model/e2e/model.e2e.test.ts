@@ -978,6 +978,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "complete",
     "amend",
     "note",
+    "withdraw-note",
     "finding",
     "settle",
     "rework",
@@ -996,6 +997,42 @@ test("a reply envelope composed against the engine's grammar carries what the en
   });
   expect(edit.version).toBe(3);
   expect(edit.commands).toHaveLength(3);
+  // A note may wait for the running turn to end, and bound how long it waits;
+  // a later envelope takes it back by the envelope and position that sent it.
+  const withdrawal = {
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      {
+        op: "note",
+        id: "docs",
+        addressee: "worker",
+        text: "measure it too",
+        deliver: "turn-end",
+        delivery_timeout_seconds: 300,
+      },
+      {
+        op: "withdraw-note",
+        envelope: "reply-7",
+        index: 0,
+        reason: "superseded by the amend",
+      },
+    ],
+  };
+  expect(replyEnvelopeSchema.parse(withdrawal)).toEqual(withdrawal);
+  // A bound no note can meet, a position before the first command, and a
+  // withdrawal that says nothing of why are each refused, as the engine refuses them.
+  for (const command of [
+    { ...withdrawal.commands[0], delivery_timeout_seconds: 0 },
+    { ...withdrawal.commands[1], index: -1 },
+    { op: "withdraw-note", envelope: "reply-7", index: 0 },
+  ]) {
+    expect(
+      replyEnvelopeSchema.safeParse({
+        version: REPLY_ENVELOPE_VERSION,
+        commands: [command],
+      }).success,
+    ).toBe(false);
+  }
   // The field the engine retired is refused by name, as the engine refuses it,
   // and an op the engine does not declare never reaches the wire.
   expect(

@@ -1315,6 +1315,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "complete",
     "amend",
     "note",
+    "withdraw-note",
     "finding",
     "settle",
     "rework",

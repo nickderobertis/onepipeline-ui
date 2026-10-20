@@ -1723,8 +1723,11 @@ export const REPLY_ENVELOPE_VERSION = 3;
 
 /** Who a note is for: the worker's task, the supervisor's, or both parties. */
 export const noteAddresseeSchema = z.enum(["worker", "supervisor", "both"]);
-/** Whether a note is attempted on the running turn (`live`) or held for the next dispatch. */
-export const noteDeliverSchema = z.enum(["live", "next"]);
+/**
+ * Whether a note interrupts the running turn (`live`), reaches it only as it
+ * ends (`turn-end`), or is held for the next dispatch (`next`).
+ */
+export const noteDeliverSchema = z.enum(["live", "turn-end", "next"]);
 /**
  * What a dropped node's direct dependents become. Detaching first: a form that
  * offers the two in this order defaults to the one that loses nothing.
@@ -1818,6 +1821,18 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       criterion: z.string().min(1).optional(),
       deliver: noteDeliverSchema.optional(),
       persist: z.boolean().optional(),
+      delivery_timeout_seconds: z.number().int().positive().optional(),
+    })
+    .strict(),
+  // Take back a note an earlier envelope sent, named by that envelope's id and
+  // the note's 0-based position among its commands, before any turn reads it.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move to 0.80.1 failed without it.
+  z
+    .object({
+      op: z.literal("withdraw-note"),
+      envelope: z.string().min(1),
+      index: z.number().int().nonnegative(),
+      reason: z.string().min(1),
     })
     .strict(),
   z
