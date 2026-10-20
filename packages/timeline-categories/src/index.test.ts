@@ -161,7 +161,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "merge-completed": "publication",
   "change-opened": "publication",
   // A publication that found its change request open and resumed it at its checks.
-  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] `onevcs` owns this kind and this package owns the category it reads under; this corpus is where that decision is pinned for every producer, as the doc comment above `CORPUS` states, beside the other `vcs` rows. Its spelling is held to `onevcs::EventKind::PublicationResumed` by `tests/contract.rs::the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares` through `payload::vcs::PUBLICATION_RESUMED`, and the review-loop corpus the browser tier serves carries the record.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] `onevcs` owns this kind and this package owns the category it reads under.
   "publication-resumed": "publication",
   "change-check": "verification",
   "change-merged": "publication",
