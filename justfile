@@ -189,6 +189,15 @@ ci-lint *args:
 ci-test-linux *args:
     @bash scripts/ci-job.sh test-linux "$@"
 
+# `scripts/measure-cold-linux.sh` times `ci-test-linux` from an empty target in
+# a clone of one commit, pinned to a hosted runner's four CPUs with every
+# compiler cache off; docs/linux-cold-cache-timing.md has the runs and the
+# arguments they took. It compiles everything from nothing, so nothing runs it.
+# Time the Linux job's recipe on a cold Rust cache, in a clone of one commit.
+[positional-arguments]
+measure-cold-linux *args:
+    @bash scripts/measure-cold-linux.sh "$@"
+
 # The Windows job: the platform-sensitive tiers, the browser build, the install.
 [positional-arguments]
 ci-test-windows *args:
