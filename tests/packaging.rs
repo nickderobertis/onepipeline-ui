@@ -549,7 +549,8 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// follow it, so a lock where both moved to another store together would satisfy
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change —
-/// 0.79.0 links 0.8.0, whose store names a closed item's status after its closure.
+/// 0.79.0 links 0.8.0, whose store names a closed item's status after its closure,
+/// and 0.79.1 links the same release.
 const STORE_RELEASE: &str = "0.8.0";
 
 /// The members of the plan-store family the shipped binary cannot be without:
