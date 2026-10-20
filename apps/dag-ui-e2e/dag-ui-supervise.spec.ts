@@ -199,7 +199,8 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   const composer = page.getByRole("region", { name: "Reply" });
   // The engine's graph edits are available through the shortcut composer; the
   // commands that edit no graph — a review pass, a readjustment, a decline of
-  // review comments — are spelled by the grammar and offered no shortcut.
+  // review comments, a withdrawal of a note an earlier envelope sent — are
+  // spelled by the grammar and offered no shortcut.
   const shortcut = composer.getByLabel("Shortcut");
   await expect(
     shortcut.getByRole("option", { name: "rework", exact: true }),
@@ -207,7 +208,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await expect(
     shortcut.getByRole("option", { name: "retitle", exact: true }),
   ).toHaveCount(1);
-  for (const unoffered of ["decline", "review", "readjust"]) {
+  for (const unoffered of ["decline", "review", "readjust", "withdraw-note"]) {
     await expect(
       shortcut.getByRole("option", { name: unoffered, exact: true }),
     ).toHaveCount(0);
@@ -446,6 +447,37 @@ test("composes review replies, applies rework and reports retitle delivery refus
     expect(declineError.code).toBe("refused");
     expect(declineError.message).toBe(declineRefusal);
     await expect(refusal(page, "Reply")).toContainText(declineRefusal);
+    // Withdrawing a note is likewise typed rather than composed: the composer
+    // keeps no record of the envelopes it sent. It reaches the engine as a
+    // withdrawal, which refuses it on its merits — that envelope sent no note —
+    // rather than as an unknown op.
+    await expect(shortcutOption("withdraw-note")).toHaveCount(0);
+    const withdrawal = {
+      version: 3,
+      commands: [
+        {
+          op: "withdraw-note",
+          envelope: "no-such-envelope",
+          index: 0,
+          reason: "Superseded by the rework",
+        },
+      ],
+    };
+    await composer
+      .getByLabel("Envelope (sent as typed)")
+      .fill(JSON.stringify(withdrawal));
+    const withdrawn = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes(`/runs/${run}/channel/reply`),
+    );
+    await composer.getByRole("button", { name: "Send reply" }).click();
+    const withdrawResponse = await withdrawn;
+    expect(withdrawResponse.request().postDataJSON()).toEqual(withdrawal);
+    const withdrawError = await refusedBy(withdrawResponse, 422);
+    expect(withdrawError.code).toBe("refused");
+    expect(withdrawError.message).toMatch(/^refused: withdraw-note: /);
+    await expect(refusal(page, "Reply")).toContainText(withdrawError.message);
     await composer.getByLabel("Shortcut").selectOption("rework");
     await composer
       .getByLabel("Title", { exact: true })
