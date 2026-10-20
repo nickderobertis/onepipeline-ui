@@ -160,6 +160,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "merge-queued": "publication",
   "merge-completed": "publication",
   "change-opened": "publication",
+  // A publication that found its change request open and resumed it at its checks.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] `onevcs` owns this kind and this package owns the category it reads under.
+  "publication-resumed": "publication",
   "change-check": "verification",
   "change-merged": "publication",
   "sync-conflict": "failure",

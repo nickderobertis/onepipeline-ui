@@ -7373,10 +7373,16 @@ pub fn review_loop() -> Value {
 /// Write the review-loop corpus under `root` as the engine records a run: its
 /// launch record, the plan its `run-started` carried, and its journal.
 pub fn write_review_loop(root: &Path) -> PathBuf {
-    let dir = write_review_loop_unjournaled(root);
+    write_review_loop_corpus(root, &review_loop())
+}
+
+/// Write `corpus` — the review-loop corpus, or a copy of it a journey has edited
+/// — under `root` exactly as [`write_review_loop`] writes the original.
+pub fn write_review_loop_corpus(root: &Path, corpus: &Value) -> PathBuf {
+    let dir = write_review_loop_unjournaled_corpus(root, corpus);
     fs::write(
         dir.join("events.jsonl"),
-        format!("{}\n", review_loop_lines().join("\n")),
+        format!("{}\n", review_loop_lines_of(corpus).join("\n")),
     )
     .expect("the journal");
     dir
@@ -7386,7 +7392,10 @@ pub fn write_review_loop(root: &Path) -> PathBuf {
 /// and a journal that is still empty, for a journey that appends the records
 /// one at a time as the driver wrote them.
 pub fn write_review_loop_unjournaled(root: &Path) -> PathBuf {
-    let corpus = review_loop();
+    write_review_loop_unjournaled_corpus(root, &review_loop())
+}
+
+fn write_review_loop_unjournaled_corpus(root: &Path, corpus: &Value) -> PathBuf {
     let run = corpus["run_id"].as_str().expect("the corpus names its run");
     let dir = root.join(run);
     fs::create_dir_all(&dir).expect("the run directory");
@@ -7400,7 +7409,10 @@ pub fn write_review_loop_unjournaled(root: &Path) -> PathBuf {
 /// The review-loop corpus's journal, one envelope a line in the order it was
 /// written: one record a second from [`START`] on the corpus's one stream.
 pub fn review_loop_lines() -> Vec<String> {
-    let corpus = review_loop();
+    review_loop_lines_of(&review_loop())
+}
+
+fn review_loop_lines_of(corpus: &Value) -> Vec<String> {
     let run = corpus["run_id"].as_str().expect("the corpus names its run");
     let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
         .expect("the fixture's start");

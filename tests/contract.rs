@@ -624,7 +624,15 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     // fixture run was recorded on this name, so every liveness verdict below
     // is the one a reader on any other host reaches.
     std::env::set_var("HOSTNAME", READING_HOST);
-    let (_workspace, root) = fixture_run::workspace();
+    let (workspace, root) = fixture_run::workspace();
+    // `host` and `status` carry a free-space line per filesystem among the runs
+    // root and the `onevcs` state root the lifecycle workspaces are cut under.
+    // That root is this workspace's own, empty — beside the runs root as every
+    // served journey's is — rather than the operator's, so the golden pins the
+    // one line a shared filesystem reads as on any host, not this host's mounts.
+    let onevcs_home = workspace.path().join("onevcs-home");
+    fs::create_dir_all(&onevcs_home).expect("an empty onevcs state root");
+    std::env::set_var("ONEVCS_HOME", &onevcs_home);
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
     // One run's launches wrote sessions and the other's wrote none, so the
@@ -2488,6 +2496,10 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
         ),
         (onevcs::EventKind::ChangeRetargeted, vcs::CHANGE_RETARGETED),
         (onevcs::EventKind::ChangeReopened, vcs::CHANGE_REOPENED),
+        (
+            onevcs::EventKind::PublicationResumed,
+            vcs::PUBLICATION_RESUMED,
+        ),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }

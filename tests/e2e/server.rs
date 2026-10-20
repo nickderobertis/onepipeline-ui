@@ -19525,7 +19525,9 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
             .get(&format!("e{index}"))
             .unwrap_or_else(|| panic!("record {index} ({record}) is not served"));
         assert_eq!(event["kind"], record["kind"], "{event}");
-        if record["kind"] == json!("planner-surfaced") {
+        if record["kind"] == json!("planner-surface-queued")
+            || record["kind"] == json!("planner-surfaced")
+        {
             assert_eq!(
                 event["surface"]["kind"], record["payload"]["kind"],
                 "{event}"
@@ -19540,12 +19542,88 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
         [
             "change-base-overridden",
             "change-closed",
+            "finding",
             "readjust-pending",
             "review-comment",
             "review-reply-pending",
             "stack-merged-out-of-order",
         ]
     );
+}
+
+/// A continuation's rework read off the store names the superseded node's
+/// settled head, `replaces_head`, where the store's provenance carried it — a
+/// field no record the engine wrote before carried. No route's contract serves
+/// it, so the run whose journal holds it is served through the run, results,
+/// events and timeline routes exactly as a twin whose record predates it.
+#[test]
+fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_none() {
+    let corpus = fixture_run::review_loop();
+    let headed = corpus["run_id"]
+        .as_str()
+        .expect("the corpus's run")
+        .to_owned();
+    let unheaded = format!("{headed}-unheaded");
+    let mut twin = corpus.clone();
+    twin["run_id"] = json!(unheaded);
+    twin["launch"]["run_id"] = json!(unheaded);
+    twin["stream"] = json!(format!(
+        "{}-unheaded",
+        corpus["stream"].as_str().expect("the corpus's stream")
+    ));
+    let stripped = twin["records"]
+        .as_array_mut()
+        .expect("the corpus's records")
+        .iter_mut()
+        .filter_map(|record| record.pointer_mut("/payload/continued/rework"))
+        .filter_map(|rework| rework.as_object_mut()?.remove("replaces_head"))
+        .count();
+    assert_eq!(
+        stripped, 1,
+        "the corpus holds one continued rework naming its head"
+    );
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_loop_corpus(root, &corpus);
+        fixture_run::write_review_loop_corpus(root, &twin);
+    });
+    // The twin as the headed run would read: its own run id is the one thing
+    // that tells the two apart on any route, and the instant each answer was
+    // given the one thing that tells two answers apart.
+    let as_headed = |served: &Value| -> Value {
+        let mut read: Value = serde_json::from_str(&served.to_string().replace(&unheaded, &headed))
+            .expect("a served document re-read");
+        if let Some(envelope) = read.as_object_mut() {
+            envelope.remove("observed_at");
+        }
+        read
+    };
+
+    for path in ["", "/results", "/timeline?scope=run"] {
+        let read = |run: &str| {
+            let served = http::get(serving.address, &format!("/api/v2/runs/{run}{path}"));
+            assert_eq!(served.status, 200, "{run}{path}: {}", served.body);
+            served.json()
+        };
+        assert_eq!(
+            as_headed(&read(&headed)),
+            as_headed(&read(&unheaded)),
+            "{path} reads the two runs differently"
+        );
+    }
+
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    assert_eq!(stream.status, 200);
+    let snapshot = stream.next_frame().expect("a snapshot");
+    assert_eq!(snapshot.event, "snapshot");
+    let snapshot = snapshot.json();
+    let announced = |run: &str| {
+        snapshot["runs"]
+            .as_array()
+            .and_then(|runs| runs.iter().find(|listed| listed["run_id"] == json!(run)))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not announced: {snapshot}"))
+    };
+    assert_eq!(announced(&headed), as_headed(&announced(&unheaded)));
 }
 
 /// The run a continued node names is the one it was settled on, on another

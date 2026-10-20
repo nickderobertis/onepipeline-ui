@@ -594,7 +594,8 @@ onemessagebus = "0.9.1"
 # otherwise — and whose `task copy` takes `--status`. A browser-adopted run's
 # driver is this copy of the engine, so its landings move the cards they close
 # and its plan reads follow those closures once this moves; this crate serves the
-# record as journalled and adds no status rule. The dev-only `onevcs` and
+# record as journalled and adds no status rule. It links onevcs 0.56.3, whose
+# `publication-resumed` kind is relayed to the browser. The dev-only `onevcs` and
 # `onetaskgraph-*` requirements below move with it to the releases its lock
 # resolves. This changes the engine types carried by ApiError::from_engine and
 # the other engine-typed public items.
@@ -640,7 +641,8 @@ libc = "0.2"
 # release engine 0.75.0 requires (^0.52.0), so the lock moves both to it and
 # keeps one copy. 0.52.1 is the release engine 0.78.0 resolves (^0.52.0), and
 # declares the stacking, review and landing kinds that engine relays. 0.56.3 is
-# the release engine 0.79.0 resolves (^0.56.2).
+# the release engine 0.79.0 resolves (^0.56.2), and declares
+# `publication-resumed`, which `payload::vcs` copies.
 onevcs = "=0.56.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
