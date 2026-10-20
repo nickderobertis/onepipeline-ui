@@ -13,19 +13,20 @@ name: Release
 # workflow — a tag or release created by the default GITHUB_TOKEN triggers
 # nothing, and the release would silently ship no artifacts.
 #
-# Four jobs, and each job's work is one recipe in the justfile, implemented by
+# Five jobs, and each job's work is one recipe in the justfile, implemented by
 # scripts/release.mjs, which says what each phase does and holds the one table
 # of release targets:
 #
-#   * build-linux, build-macos, build-windows — each builds its platform's
-#     targets once, packs the archive, the wheel and the npm platform package
-#     from that one binary, installs and runs those exact files, publishes them
-#     (Release assets always; PyPI and npm when their switches are on), and then
-#     installs the version back from the Release and PyPI on its own OS and
+#   * build-linux, build-linux-arm64, build-macos, build-windows — each builds
+#     its platform's targets once, natively on that platform's runner, packs
+#     the archive, the wheel and the npm platform package from that one binary,
+#     installs and runs those exact files, publishes them (Release assets
+#     always; PyPI and npm when their switches are on), and then installs the
+#     version back from the Release and PyPI on its own OS and
 #     runs it. npm serves a publish minutes after taking it, longer than these
 #     jobs have left, so its copy is waited for once, in publish's check.
-#     The three run side by side and need nothing from one another.
-#   * publish — once all three have run, whatever they did: refuses to publish
+#     The four run side by side and need nothing from one another.
+#   * publish — once all four have run, whatever they did: refuses to publish
 #     anything unless every platform's files are served, waiting for npm to
 #     serve each platform package a successful job published, then publishes
 #     what belongs to no platform (the crate, the npm launcher and frontend,
@@ -135,6 +136,55 @@ jobs:
       - name: Install the version from the Release and PyPI on Linux and run it
         run: just release-linux verify
 
+  # build-linux's twin for aarch64-unknown-linux-gnu, on GitHub's arm64 Linux
+  # runner: the manylinux2014_aarch64 image runs natively there, so the binary
+  # is compiled, installed and run on the architecture it ships for, never
+  # under emulation.
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Install the release's Python tools
+        run: just release-python-tools
+      - name: Build the browser view
+        run: just build
+      - name: Build every arm64 Linux target once, and pack its archive, wheel and npm package
+        run: just release-linux-arm64 build
+      - name: Install and run those exact files before anything publishes
+        run: just release-linux-arm64 test-install
+      - name: Publish the npm platform packages
+        if: vars.NPM_PUBLISH == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: just release-linux-arm64 upload npm
+      - name: Publish the wheels to PyPI
+        if: vars.PYPI_PUBLISH == 'true'
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: just release-linux-arm64 upload pypi
+      - name: Publish the archives and checksums to the Release
+        run: just release-linux-arm64 upload github
+      - name: Install the version from the Release and PyPI on arm64 Linux and run it
+        run: just release-linux-arm64 verify
+
   build-macos:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -235,7 +285,7 @@ jobs:
   # failed platform from being followed by the launcher and the crate is `check`,
   # which every upload below also repeats before publishing anything.
   publish:
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-linux, build-linux-arm64, build-macos, build-windows]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -249,6 +299,7 @@ jobs:
       # workflow did not write.
       BUILD_RESULTS: >-
         build-linux=${{ needs.build-linux.result }}
+        build-linux-arm64=${{ needs.build-linux-arm64.result }}
         build-macos=${{ needs.build-macos.result }}
         build-windows=${{ needs.build-windows.result }}
     steps:

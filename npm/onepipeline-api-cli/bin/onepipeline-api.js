@@ -23,6 +23,7 @@ const { spawn } = require("node:child_process");
 // optionalDependencies in package.json; keep the three in lockstep.
 const PACKAGES = {
   "linux-x64": "onepipeline-api-cli-linux-x64",
+  "linux-arm64": "onepipeline-api-cli-linux-arm64",
   "darwin-arm64": "onepipeline-api-cli-darwin-arm64",
   "win32-x64": "onepipeline-api-cli-win32-x64",
 };
@@ -41,17 +42,11 @@ function fail(message) {
 // Platforms an earlier release carried and no later one does, each with the way
 // to install there now, rather than sending the user looking for an optional
 // dependency that never existed. Intel macOS stopped when Darwin builds moved to
-// one Apple Silicon job; arm64 Linux stopped when every release target came to
-// be built once on its own platform's runner, and since no wheel ships for it
-// either, cargo is the only way left.
+// one Apple Silicon job.
 const DISCONTINUED = {
   "darwin-x64":
     "Intel macOS is no longer supported: prebuilt binaries ship for Apple " +
     `Silicon (darwin-arm64) only. ${OTHER_INSTALLS}`,
-  "linux-arm64":
-    "arm64 Linux is no longer supported: prebuilt binaries ship for " +
-    "linux-x64 only, on npm and PyPI alike. Build it from source instead: " +
-    "'cargo install onepipeline-ui --locked'.",
 };
 
 function binaryPath() {

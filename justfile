@@ -288,10 +288,10 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Shared by the release's `build-linux` job (through `release-linux build`) and
-# ci.yml's `wheel` job, so a pull request meets the prerequisites and maturin
-# invocation a release does. Needs Docker, and the browser view `just build`
-# writes.
+# Shared by the release's `build-linux` and `build-linux-arm64` jobs (through
+# `release-linux build` and `release-linux-arm64 build`) and ci.yml's `wheel`
+# job, so a pull request meets the prerequisites and maturin invocation a
+# release does. Needs Docker, and the browser view `just build` writes.
 # Build the onepipeline-api-cli wheel for one Linux target in the release's image.
 [positional-arguments]
 wheel-linux target out="dist":
@@ -299,11 +299,17 @@ wheel-linux target out="dist":
 
 # One recipe per release job in `.github/workflows/release.yml`; the phases
 # each takes are in scripts/release.mjs's header. `build` needs `just build`
-# first, and the Linux one Docker, the macOS and Windows ones maturin.
+# first, and the Linux ones Docker on their own architecture, the macOS and
+# Windows ones maturin.
 # The build-linux release job: build, install, publish and verify Linux.
 [positional-arguments]
 release-linux *args:
     @node scripts/release.mjs linux "$@"
+
+# The build-linux-arm64 release job: build, install, publish and verify arm64 Linux.
+[positional-arguments]
+release-linux-arm64 *args:
+    @node scripts/release.mjs linux-arm64 "$@"
 
 # The build-macos release job: build, install, publish and verify Apple Silicon.
 [positional-arguments]

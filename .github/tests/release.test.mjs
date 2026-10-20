@@ -33,7 +33,7 @@ function recipeSteps() {
   for (const [job, definition] of Object.entries(release().jobs))
     definition.steps.forEach((step, index) => {
       for (const match of (step.run ?? "").matchAll(
-        /just release-(\w+) ([\w-]+)(?: (\w+))?/g,
+        /just release-([\w-]+) ([\w-]+)(?: (\w+))?/g,
       ))
         steps.push({
           job,
@@ -61,9 +61,15 @@ const hermetic = (extra = {}) => ({
   ...extra,
 });
 
-test("the release is exactly four jobs, three platform builds side by side and a publish that needs them all", () => {
+test("CD is exactly six jobs: release-plz, then four platform builds side by side and a publish that needs them all", () => {
   const jobs = release().jobs;
   assert.deepEqual(Object.keys(jobs).sort(), [...RELEASE_JOBS].sort());
+  assert.deepEqual([...BUILD_JOBS].sort(), [
+    "build-linux",
+    "build-linux-arm64",
+    "build-macos",
+    "build-windows",
+  ]);
   for (const [os, runner] of Object.entries(PLATFORMS)) {
     const job = jobs[`build-${os}`];
     assert.equal(job["runs-on"], runner, `build-${os} runs on ${runner}`);
@@ -74,8 +80,11 @@ test("the release is exactly four jobs, three platform builds side by side and a
   assert.equal(jobs.publish["timeout-minutes"], 30);
   assert.deepEqual([...jobs.publish.needs].sort(), [...BUILD_JOBS].sort());
 
+  // arm64 Linux builds natively, on GitHub's arm64 Linux runner.
+  assert.equal(jobs["build-linux-arm64"]["runs-on"], "ubuntu-24.04-arm");
   const plz = workflow("release-plz.yml").jobs;
   assert.deepEqual(Object.keys(plz), ["release-plz"]);
+  assert.equal(Object.keys(jobs).length + Object.keys(plz).length, 6);
   assert.equal(plz["release-plz"]["timeout-minutes"], 30);
   assert.equal(plz["release-plz"]["runs-on"], "ubuntu-latest");
 });
@@ -159,7 +168,10 @@ test("every release target is uploaded by the jobs release-targets.toml says pub
   for (const target of declaration.target) {
     const named = new Set(
       RELEASE_JOBS.filter((job) =>
-        new RegExp(`\\b${job}\\b(?! release)`).test(target.published_by),
+        // Whole job names: build-linux is not named by build-linux-arm64.
+        new RegExp(`(?<![\\w-])${job}(?![\\w-])(?! release)`).test(
+          target.published_by,
+        ),
       ),
     );
     const ids = [target.id, ...(target.covers ?? [])];
@@ -290,74 +302,75 @@ test("the demotion is reached when a platform job fails", () => {
     );
 });
 
-test("no workflow, recipe or release declaration builds or names arm64 Linux", () => {
-  const sources = [
-    ...workflows().map((w) => `.github/workflows/${w.file}`),
-    "justfile",
-    "release-targets.toml",
-    "npm/onepipeline-api-cli/package.json",
-  ];
-  for (const source of sources)
-    assert.doesNotMatch(
-      readFileSync(source, "utf8"),
-      /aarch64-unknown-linux-gnu|linux-arm64|ubuntu-[\w.]*-arm\b|linux\/arm64|manylinux\w*_aarch64/,
-      source,
+// arm64 Linux is released again, by a job of its own that mirrors build-linux
+// step for step on the arm64 runner. Pull-request CI and every other workflow
+// still build and name none of it: ci.yml's own ban is held in
+// .github/tests/ci-jobs.test.mjs.
+test("arm64 Linux is built natively by build-linux-arm64, mirroring build-linux, and by no other workflow", () => {
+  const jobs = release().jobs;
+  const arm = jobs["build-linux-arm64"];
+  assert.equal(arm["runs-on"], "ubuntu-24.04-arm");
+  assert.equal(arm["timeout-minutes"], 30);
+  assert.deepEqual(arm.permissions, jobs["build-linux"].permissions);
+  // The same steps, each with the arm64 job's recipe where build-linux has its
+  // own; only the step names say which platform they are on.
+  const shape = (job, recipe) =>
+    jobs[job].steps.map(({ name: _name, ...step }) =>
+      JSON.parse(
+        JSON.stringify(step).replaceAll(`just ${recipe} `, "just RECIPE "),
+      ),
     );
-  for (const { file, document } of workflows())
+  assert.deepEqual(
+    shape("build-linux-arm64", "release-linux-arm64"),
+    shape("build-linux", "release-linux"),
+  );
+  // Native, never emulated.
+  assert.doesNotMatch(
+    readFileSync(".github/workflows/release.yml", "utf8"),
+    /qemu|binfmt|setup-qemu-action|cross-rs|--platform/,
+  );
+  assert.deepEqual(TARGETS["aarch64-unknown-linux-gnu"], {
+    platform: "linux-arm64",
+    npm: "linux-arm64",
+    wheelTag: "manylinux_2_17_aarch64.manylinux2014_aarch64",
+    archive: "tar.gz",
+    exe: "",
+  });
+  assert.deepEqual(plan("linux-arm64").targets, ["aarch64-unknown-linux-gnu"]);
+  assert.deepEqual(plan("linux").targets, ["x86_64-unknown-linux-gnu"]);
+  const launcher = JSON.parse(
+    readFileSync("npm/onepipeline-api-cli/package.json", "utf8"),
+  );
+  assert.ok("onepipeline-api-cli-linux-arm64" in launcher.optionalDependencies);
+  for (const { file, document } of workflows()) {
+    if (file === "release.yml") continue;
+    assert.doesNotMatch(
+      readFileSync(`.github/workflows/${file}`, "utf8"),
+      /aarch64-unknown-linux-gnu|linux-arm64|ubuntu-[\w.]*-arm\b|linux\/arm64|manylinux\w*_aarch64/,
+      file,
+    );
     for (const [job, definition] of Object.entries(document.jobs ?? {}))
       assert.doesNotMatch(
         JSON.stringify(definition["runs-on"] ?? ""),
         /arm/,
         `${file} ${job} runs on an arm64 runner`,
       );
-  assert.ok(!Object.keys(TARGETS).includes("aarch64-unknown-linux-gnu"));
-  // The scripts the recipes run refuse it rather than building it.
-  const wheel = spawnSync(
-    "bash",
-    ["scripts/build-linux-wheel.sh", "--target", "aarch64-unknown-linux-gnu"],
-    { encoding: "utf8", env: hermetic() },
-  );
-  assert.equal(wheel.status, 2, wheel.stderr);
-  assert.match(wheel.stderr, /no manylinux build is defined/);
-  const npm = spawnSync(
-    "node",
-    [
-      "scripts/npm-build.mjs",
-      "platform",
-      "--target",
-      "aarch64-unknown-linux-gnu",
-      "--binary",
-      "package.json",
-    ],
-    { encoding: "utf8" },
-  );
-  assert.notEqual(npm.status, 0);
-  assert.match(npm.stderr, /unknown target/);
-  const pkg = spawnSync(
-    "python3",
-    [
-      "scripts/release-package.py",
-      "--target",
-      "aarch64-unknown-linux-gnu",
-      "--wheel",
-      "missing.whl",
-      "--out",
-      ".",
-      "--tag",
-      "v1.0.0",
-    ],
-    { encoding: "utf8" },
-  );
-  assert.notEqual(pkg.status, 0);
-  assert.match(pkg.stderr, /invalid choice/);
+  }
+  // And only build-linux-arm64 runs on one in release.yml.
+  for (const [job, definition] of Object.entries(jobs))
+    if (job !== "build-linux-arm64")
+      assert.doesNotMatch(
+        JSON.stringify(definition["runs-on"] ?? ""),
+        /arm/,
+        `release.yml ${job} runs on an arm64 runner`,
+      );
 });
 
 // Plan mode is the macOS and Windows contract here: the macOS and Windows build recipes need native macOS and Windows toolchains this Linux host cannot run, so inside the dispatch their proof is the recipes' plan mode checked against the last release's published artifacts; the Linux recipe is driven for real end to end, and the hosted build jobs build and run the foreign artifacts on every release.
-test("every release job's plan is what v0.37.0 published, with arm64 Linux dropped and no Intel macOS", () => {
+test("every release job's plan is what v0.37.0 published, arm64 Linux included and no Intel macOS", () => {
   const published = JSON.parse(
     readFileSync(".github/fixtures/release-v0.37.0.json", "utf8"),
   );
-  const dropped = /aarch64-unknown-linux-gnu|_aarch64|linux-arm64/;
   const planned = (job) => {
     const os = job === "publish" ? "publish" : job.replace(/^build-/, "");
     const result = spawnSync(
@@ -377,23 +390,21 @@ test("every release job's plan is what v0.37.0 published, with arm64 Linux dropp
       .filter((a) => a.registry === "github")
       .map((a) => a.file)
       .sort(),
-    published.github.filter((f) => !dropped.test(f)).sort(),
+    [...published.github].sort(),
   );
   assert.deepEqual(
     all
       .filter((a) => a.registry === "pypi")
       .map((a) => ({ file: a.file, tags: a.tags }))
       .sort((a, b) => a.file.localeCompare(b.file)),
-    published.pypi.filter((w) => !dropped.test(w.file)),
+    published.pypi,
   );
   assert.deepEqual(
     all
       .filter((a) => a.registry === "npm")
       .map((a) => ({ package: a.package, file: a.file }))
       .sort((a, b) => a.package.localeCompare(b.package)),
-    published.npm
-      .filter((p) => !dropped.test(p.package))
-      .sort((a, b) => a.package.localeCompare(b.package)),
+    [...published.npm].sort((a, b) => a.package.localeCompare(b.package)),
   );
   assert.deepEqual(
     all
@@ -569,6 +580,69 @@ with tarfile.open(root/'npm-artifacts'/'onepipeline-api-cli-darwin-arm64-1.0.0.t
   }
 });
 
+test("the arm64 Linux carriers hold the wheel's AArch64 ELF binary byte for byte, and an x86-64 one is refused", () => {
+  const scratch = mkdtempSync(join(scratchRoot(), "linux-arm64-contract-"));
+  try {
+    const target = "aarch64-unknown-linux-gnu";
+    // A structural ELF64 header with the machine in e_machine. Never executed:
+    // this host is x86_64, and the hosted arm64 job installs and runs the real
+    // binary on every release.
+    const fixture = (machine) => {
+      const wheel = join(scratch, `l-${machine}.whl`);
+      execFileSync("python3", [
+        "-c",
+        `import struct,zipfile,sys
+elf=b'\\x7fELF\\x02\\x01\\x01'+b'\\0'*9+struct.pack('<HH',2,int(sys.argv[2]))+b'\\0'*44
+with zipfile.ZipFile(sys.argv[1],'w') as z:
+ z.writestr('onepipeline_api_cli-1.0.0.data/scripts/onepipeline-api',elf)
+ z.writestr('onepipeline_api_cli-1.0.0.dist-info/METADATA','Name: onepipeline-api-cli\\nVersion: 1.0.0\\n')
+ z.writestr('onepipeline_api_cli-1.0.0.dist-info/WHEEL','Wheel-Version: 1.0\\nTag: py3-none-manylinux_2_17_aarch64\\nTag: py3-none-manylinux2014_aarch64\\n')`,
+        wheel,
+        String(machine),
+      ]);
+      return wheel;
+    };
+    const args = (wheel) => [
+      "scripts/release-package.py",
+      "--target",
+      target,
+      "--wheel",
+      wheel,
+      "--out",
+      scratch,
+      "--tag",
+      "v1.0.0",
+    ];
+    execFileSync("python3", args(fixture(183)), { stdio: "pipe" });
+    const stem = `onepipeline-api-v1.0.0-${target}`;
+    execFileSync("python3", [
+      "-c",
+      `import hashlib,sys,tarfile,pathlib
+root=pathlib.Path(sys.argv[1]); stem=sys.argv[2]
+exe=(root/'aarch64-unknown-linux-gnu'/'onepipeline-api').read_bytes()
+assert exe[18:20] == bytes([183, 0])
+with tarfile.open(root/'assets'/(stem+'.tar.gz')) as t:
+ assert set(t.getnames()) == {'onepipeline-api','README.md','LICENSE','CHANGELOG.md'}
+ assert t.extractfile('onepipeline-api').read() == exe
+line=(root/'assets'/(stem+'.sha256')).read_text()
+assert line == hashlib.sha256((root/'assets'/(stem+'.tar.gz')).read_bytes()).hexdigest()+'  '+stem+'.tar.gz\\n', line
+with tarfile.open(root/'npm-artifacts'/'onepipeline-api-cli-linux-arm64-1.0.0.tgz') as t:
+ assert t.extractfile('package/bin/onepipeline-api').read() == exe
+`,
+      scratch,
+      stem,
+    ]);
+    // An x86-64 ELF handed in as the arm64 target is refused.
+    const x64 = spawnSync("python3", args(fixture(62)), {
+      encoding: "utf8",
+    });
+    assert.notEqual(x64.status, 0);
+    assert.match(x64.stderr, /declared Linux architecture/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("the Windows carriers are a .zip and v0.37.0's checksum line, holding the wheel's PE binary byte for byte", () => {
   const scratch = mkdtempSync(join(scratchRoot(), "windows-contract-"));
   try {
@@ -634,7 +708,11 @@ test("production packaging commands reject unsupported targets and malformed ver
   for (const [args, message] of [
     [[".", "unrecognized-target", "1.0.0"], /unsupported staged target/],
     [[".", "x86_64-apple-darwin", "1.0.0"], /unsupported staged target/],
-    [[".", "aarch64-unknown-linux-gnu", "1.0.0"], /unsupported staged target/],
+    // arm64 Linux is a staging target again: past the target, to the ROOT.
+    [
+      ["package.json", "aarch64-unknown-linux-gnu", "1.0.0"],
+      /ROOT is not a directory/,
+    ],
     [[".", "aarch64-apple-darwin", "bad-version"], /invalid release version/],
     [
       ["package.json", "aarch64-apple-darwin", "1.0.0"],

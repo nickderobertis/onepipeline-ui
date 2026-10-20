@@ -37,12 +37,12 @@ manifest = "Cargo.toml"
 id = "pypi:onepipeline-api-cli"
 name = "pypi-cli"
 what = "The same binary, as per-platform wheels maturin wraps it in."
-published_by = ".github/workflows/release.yml — the build-linux, build-macos and build-windows jobs together, each uploading its own platform's wheels with `just release-<os> upload pypi`, under pyproject.toml's [project] name."
+published_by = ".github/workflows/release.yml — the build-linux, build-linux-arm64, build-macos and build-windows jobs together, each uploading its own platform's wheels with `just release-<os> upload pypi`, under pyproject.toml's [project] name."
 manifest = "pyproject.toml"
 
 # The npm launcher, and the only entry here with a `covers` list. arm64 Linux is
-# no longer among them: from the release after v0.38.1 nothing builds it, and
-# the launcher refuses that platform, naming `cargo install` instead. The per-platform
+# among them again: v0.40.0 through v0.41.0 shipped without it, and its own
+# build-linux-arm64 job builds it from the release after. The per-platform
 # packages it covers exist for this launcher to resolve at its own exact version:
 # nothing depends on one by name, so none of them is a target of their own and a
 # consumer never waits on one. They are still named, because the release that
@@ -52,10 +52,11 @@ manifest = "pyproject.toml"
 id = "npm:onepipeline-api-cli"
 name = "npm-cli"
 what = "The same binary again, as the launcher a consumer installs from npm."
-published_by = ".github/workflows/release.yml — the publish job's `just release-publish upload npm` step, from `npm-build.mjs launcher`; each covered name by the build job of its platform (build-linux, build-macos, build-windows), from `npm-build.mjs platform` with `just release-<os> upload npm`."
+published_by = ".github/workflows/release.yml — the publish job's `just release-publish upload npm` step, from `npm-build.mjs launcher`; each covered name by the build job of its platform (build-linux, build-linux-arm64, build-macos, build-windows), from `npm-build.mjs platform` with `just release-<os> upload npm`."
 manifest = "npm/onepipeline-api-cli/package.json"
 covers = [
   "npm:onepipeline-api-cli-linux-x64",
+  "npm:onepipeline-api-cli-linux-arm64",
   "npm:onepipeline-api-cli-darwin-arm64",
   "npm:onepipeline-api-cli-win32-x64",
 ]

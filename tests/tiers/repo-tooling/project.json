@@ -54,6 +54,7 @@
       "{workspaceRoot}/tests/e2e/ensure_baseline.rs",
       "{workspaceRoot}/tests/e2e/ensure_sibling.rs",
       "{workspaceRoot}/tests/e2e/linux_wheel.rs",
+      "{workspaceRoot}/tests/fixtures/manylinux2014_*-yum.repos.d/*",
       "{workspaceRoot}/tests/e2e/nx_affected.rs",
       "{workspaceRoot}/tests/e2e/packaging.rs",
       "{workspaceRoot}/tests/e2e/release_probe.rs",

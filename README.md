@@ -177,6 +177,8 @@ pip install onepipeline-api-cli        # prebuilt wheel, no Rust toolchain
 npm install -g onepipeline-api-cli     # prebuilt binary, no Rust toolchain
 ```
 
+The prebuilt binary ships for Linux x86_64 and arm64, Apple Silicon macOS and
+Windows x64; Intel macOS is not prebuilt, so `cargo install` is the way there.
 All three install one command, `onepipeline-api`:
 
 ```bash
