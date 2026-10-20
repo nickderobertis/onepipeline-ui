@@ -45,18 +45,26 @@
       "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
     },
     "rehearse": {
-      "//": "A separate target gives the longest chain priority in Nx’s dependency-count queue. Keep test after rehearse: tools.test.mjs recreates the Python environment the journeys use.",
-      "command": "node --test --test-concurrency=1 tests/release/publication.test.mjs tests/release/journeys.test.mjs",
+      "//": "The manylinux build and the journeys over its files, alone: the longest chain, so a separate target gives it priority in Nx’s dependency-count queue, and nothing that does not read its files waits behind it (docs/linux-cold-cache-timing.md).",
+      "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"],
       "cache": true
     },
+    "test-standalone": {
+      "//": "The release journeys that read none of the rehearsal’s files, run beside it rather than after it. Each stages into its own tree under target/ and serves its doubles on ports the system picks. check.test.mjs is not among them: it times publish's waits against their budget, which the cold compiles running beside the rehearsal throw off.",
+      "command": "node --test --test-concurrency=1 tests/release/publication.test.mjs tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs",
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
+      "inputs": ["releaseMachinery"]
+    },
     "test": {
-      "command": "node --test --test-concurrency=1 tests/release/tools.test.mjs tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/check.test.mjs tests/release/staging.test.mjs",
+      "//": "Last, after every other release journey: check.test.mjs times waits, so it stays where it always ran, behind the rehearsal and the compiles that run beside it, and tools.test.mjs, which recreates the Python environment and the tool copies in .tools that the others run, after it.",
+      "command": "node --test --test-concurrency=1 tests/release/check.test.mjs tests/release/tools.test.mjs",
       "dependsOn": [
         { "projects": ["dag-ui"], "target": "build" },
         "tools",
-        "rehearse"
+        "rehearse",
+        "test-standalone"
       ],
       "inputs": ["releaseMachinery"]
     },

@@ -407,6 +407,16 @@ function smoke(command, version, label) {
   );
 }
 
+// Where `publish build --out OUT` has cargo-cyclonedx write the SBOM before it is
+// moved into OUT. cargo-cyclonedx writes beside the manifest, so the checkout
+// root is the only place it can go; naming the file after OUT is what lets two
+// builds into two staging trees run at once (tests/release runs two) without
+// one moving or deleting the other's.
+export function sbomScratch(out) {
+  const id = createHash("sha256").update(resolve(out)).digest("hex");
+  return join(REPO_ROOT, `bom-${id.slice(0, 16)}.json`);
+}
+
 // The `onepipeline-api` an npm install under `prefix` provides, as each caller
 // can run it. On Windows npm writes three launchers into node_modules/.bin: an
 // extensionless sh script, a .cmd and a .ps1. Git Bash, which runs
@@ -1128,6 +1138,7 @@ function buildPublish(out) {
     join(out, "crates", crate),
     readFileSync(join(target, "package", crate)),
   );
+  const sbom = sbomScratch(out);
   must(
     "generating the CycloneDX SBOM",
     "install cargo-cyclonedx 0.5.7 (`just release-tools`), then re-run",
@@ -1142,14 +1153,14 @@ function buildPublish(out) {
       "--target",
       "all",
       "--override-filename",
-      "bom",
+      basename(sbom, ".json"),
     ],
   );
   writeFileSync(
     join(out, "assets", `onepipeline-api-${tag}.cdx.json`),
-    readFileSync(join(REPO_ROOT, "bom.json")),
+    readFileSync(sbom),
   );
-  rmSync(join(REPO_ROOT, "bom.json"), { force: true });
+  rmSync(sbom, { force: true });
   requireStaged(out, artifacts);
   console.log(
     `release publish: assembled ${artifacts.map((a) => a.file).join(", ")}`,

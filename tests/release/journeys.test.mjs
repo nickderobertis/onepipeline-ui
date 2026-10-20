@@ -5,9 +5,10 @@
 // uploaded to them, so the real clients — gh, twine, pip, npm, cargo and the
 // release probe — are what publish and install.
 //
-// The journeys below share one manylinux build. ./publication.test.mjs, beside
-// this file in the project's test target, builds a native wheel instead, so its
-// registry journeys run without a manylinux image or its external mirrors.
+// The journeys below share one manylinux build. ./publication.test.mjs builds a
+// native wheel instead, so its registry journeys run without a manylinux image
+// or its external mirrors — and, in the project's `test-standalone` target,
+// beside this file rather than after it.
 //
 // What this x86_64 Linux host cannot do is build the arm64 Linux, macOS and
 // Windows targets; their files are the hosted jobs' to produce, so where a
@@ -31,7 +32,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { npmLauncher, plan } from "../../scripts/release.mjs";
+import { npmLauncher, plan, sbomScratch } from "../../scripts/release.mjs";
 import {
   githubDouble,
   ROOT,
@@ -905,7 +906,8 @@ describe("publication against registry doubles", () => {
       );
     }
     assert.ok(
-      !existsSync(join(ROOT, "bom.json")),
+      !existsSync(sbomScratch(publishOut)) &&
+        !existsSync(join(ROOT, "bom.json")),
       "the SBOM is moved out of the checkout",
     );
     // A dry run of each upload names what it would publish, and neither reads
