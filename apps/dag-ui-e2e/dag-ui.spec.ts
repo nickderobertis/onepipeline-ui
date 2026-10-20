@@ -920,9 +920,10 @@ test("shows the moment a planner redirected a running turn", async ({
 });
 
 /**
- * A note the planner asked a running turn to take at its end says whether it did,
- * and a note recorded before the engine said how still reads as the delivery it
- * was — off the read API serving the engine's own `note-delivered` records.
+ * A note a running turn took says how — left to end, as the planner asked, or by
+ * interrupting it — and a note recorded before the engine said how still reads as
+ * the delivery it was — off the read API serving the engine's own
+ * `note-delivered` records.
  */
 test("says how a live turn took a note, where the record says", async ({
   page,
@@ -933,9 +934,9 @@ test("says how a live turn took a note, where the record says", async ({
   const notes = transcript
     .getByRole("article")
     .filter({ hasText: "Redirected into the running turn" });
-  await expect(notes).toHaveCount(2);
+  await expect(notes).toHaveCount(3);
   const said: string[] = [];
-  for (const index of [0, 1]) {
+  for (const index of [0, 1, 2]) {
     await notes.nth(index).click();
     await expect(itemDetail(page)).toContainText(
       "Live — into the turn that was already running",
@@ -943,12 +944,17 @@ test("says how a live turn took a note, where the record says", async ({
     said.push((await itemDetail(page).textContent()) ?? "");
     await page.keyboard.press("Escape");
   }
-  // One was left to end and says so; the other's record never said, so neither
-  // way a turn can take a note is claimed for it.
+  // One was left to end and one interrupted the turn, and each says so; the
+  // third's record never said, so neither way is claimed for it.
   const leftToEnd = "Left to end — the note reached it as it ended";
+  const interrupted = "Interrupted — its replacement opened on the note";
   expect(said.filter((text) => text.includes(leftToEnd))).toHaveLength(1);
-  const unsaid = said.find((text) => !text.includes(leftToEnd)) ?? "";
-  expect(unsaid).not.toContain("Interrupted —");
+  expect(said.filter((text) => text.includes(interrupted))).toHaveLength(1);
+  expect(
+    said.filter(
+      (text) => !text.includes(leftToEnd) && !text.includes(interrupted),
+    ),
+  ).toHaveLength(1);
 });
 
 /**
