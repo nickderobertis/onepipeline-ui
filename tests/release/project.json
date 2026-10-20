@@ -45,26 +45,16 @@
       "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
     },
     "rehearse": {
-      "//": "The manylinux build alone, with the checks on what it staged: the head of the longest chain, so a separate target gives it priority in Nx’s dependency-count queue, and its staged tree is an output so the journeys that read it can run after it in targets of their own, beside each other (docs/linux-cold-cache-timing.md).",
+      "//": "The manylinux build alone, with the checks on what it staged: the head of the longest chain, so a separate target gives it priority in Nx’s dependency-count queue, and its staged tree is an output so the journeys that read it can run after it in a target of their own, beside each other (docs/linux-cold-cache-timing.md).",
       "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"],
       "outputs": ["{workspaceRoot}/target/release-journey/linux"],
       "cache": true
     },
-    "test-rehearsal-failures": {
-      "//": "The recipe refusing the rehearsal’s staged files broken one way at a time. Reads the staged tree and writes only trees of its own.",
-      "command": "node --test --test-concurrency=1 tests/release/rehearsal-failures.test.mjs",
-      "dependsOn": [
-        { "projects": ["dag-ui"], "target": "build" },
-        "tools",
-        "rehearse"
-      ],
-      "inputs": ["releaseMachinery"]
-    },
-    "test-registries": {
-      "//": "The publication phases over the rehearsal’s staged files, against registry doubles. Reads the staged tree and writes only trees of its own.",
-      "command": "node --test --test-concurrency=1 tests/release/registries.test.mjs",
+    "test-staged": {
+      "//": "The journeys over the rehearsal’s staged files, the two files at once: the recipe refusing them broken one way at a time, and the publication phases over them against registry doubles. Each reads the staged tree and writes only trees of its own. One target rather than two, so they start together in the slot the rehearsal frees.",
+      "command": "node --test --test-concurrency=2 tests/release/rehearsal-failures.test.mjs tests/release/registries.test.mjs",
       "dependsOn": [
         { "projects": ["dag-ui"], "target": "build" },
         "tools",
@@ -73,8 +63,8 @@
       "inputs": ["releaseMachinery"]
     },
     "test-standalone": {
-      "//": "The release journeys that read none of the rehearsal’s files, run beside it rather than after it. Each stages into its own tree under target/ and serves its doubles on ports the system picks. check.test.mjs is not among them: it times publish's waits against their budget, which the cold compiles running beside the rehearsal throw off.",
-      "command": "node --test --test-concurrency=1 tests/release/publication.test.mjs tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs",
+      "//": "The release journeys that read none of the rehearsal’s files, run beside it rather than after it. Each stages into its own tree under target/ and serves its doubles on ports the system picks. check.test.mjs is not among them: it times publish's waits against their budget, which the cold compiles running beside the rehearsal throw off. publication.test.mjs goes last: its native build waits for the debug graph the other builds in target compile, and the rest need none.",
+      "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"]
     },
@@ -85,8 +75,7 @@
         { "projects": ["dag-ui"], "target": "build" },
         "tools",
         "rehearse",
-        "test-rehearsal-failures",
-        "test-registries",
+        "test-staged",
         "test-standalone"
       ],
       "inputs": ["releaseMachinery"]

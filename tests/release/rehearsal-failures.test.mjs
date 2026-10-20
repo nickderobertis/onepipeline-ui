@@ -1,7 +1,7 @@
 // What the build-linux recipe does with staged files that do not install: the
 // rehearsal's own files, from ./journeys.test.mjs, broken one way at a time,
 // and a host on which the test-install cannot make its environment. A target of
-// its own (`onepipeline-ui-release:test-rehearsal-failures`), after the
+// its own (`onepipeline-ui-release:test-staged`), after the
 // rehearsal and beside ./registries.test.mjs, because neither reads what the
 // other writes.
 import assert from "node:assert/strict";

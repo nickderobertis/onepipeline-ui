@@ -3,7 +3,7 @@
 // build-linux recipe in its dry-run mode — which stages the files every
 // journey over a manylinux build reads (./rehearsal.mjs names them).
 //
-// The journeys over those files run after this one, in targets of their own,
+// The journeys over those files run after this one, in a target of their own,
 // beside each other: ./rehearsal-failures.test.mjs, the recipe refusing staged
 // files that do not install, and ./registries.test.mjs, the publication phases
 // of build-linux and publish against local doubles of PyPI, npm, the crate

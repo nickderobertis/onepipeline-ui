@@ -1,7 +1,7 @@
 // The publication phases of build-linux and publish against local doubles of
 // PyPI, npm, the crate registry and the GitHub Release (./doubles), over the
 // files the rehearsal in ./journeys.test.mjs staged. A target of its own
-// (`onepipeline-ui-release:test-registries`), after the rehearsal and beside
+// (`onepipeline-ui-release:test-staged`), after the rehearsal and beside
 // ./rehearsal-failures.test.mjs, because neither reads what the other writes.
 //
 // What this x86_64 Linux host cannot do is build the arm64 Linux, macOS and
