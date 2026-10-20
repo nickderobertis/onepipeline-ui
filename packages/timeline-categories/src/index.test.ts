@@ -108,6 +108,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "node-checks-read": "verification",
   "readjust-read-failed": "failure",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // What the plan store did with the issues one landing closed: the landing's own
+  // aftermath on the board, filed by its `landing` with the rest of the landing.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.79.0.
+  "landing-closures": "publication",
   // A run-end hook is the run's own boundary: it fires once the driver has let
   // go of the run, and what it reports is that the run ended one way or another.
   "run-hook-fired": "lifecycle",
@@ -158,6 +162,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "merge-queued": "publication",
   "merge-completed": "publication",
   "change-opened": "publication",
+  // A publication that found its change request open and resumed it at its checks.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] `onevcs` owns this kind and this package owns the category it reads under; this corpus is where that decision is pinned for every producer, as the doc comment above `CORPUS` states, beside the other `vcs` rows. Its spelling is held to `onevcs::EventKind::PublicationResumed` by `tests/contract.rs::the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares` through `payload::vcs::PUBLICATION_RESUMED`, and the review-loop corpus the browser tier serves carries the record.
+  "publication-resumed": "publication",
   "change-check": "verification",
   "change-merged": "publication",
   "sync-conflict": "failure",

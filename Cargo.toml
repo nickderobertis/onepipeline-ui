@@ -588,8 +588,17 @@ onemessagebus = "0.9.1"
 # requirements below move with it to the releases its lock resolves. This
 # changes the engine types carried by ApiError::from_engine and the other
 # engine-typed public items.
+# 0.79.0 hands the plan store the GitHub issues each landing closes, so the store
+# moves their items to done, and journals what the store did as
+# `landing-closures`. It raises a non-blocking `finding` when the store fails.
+# A browser-adopted run's driver does what the CLI's does, and the record shows
+# on the timeline rather than being refused. It links onevcs 0.56.3, whose
+# `publication-resumed` kind is relayed to the browser, and onetaskgraph 0.8.0.
+# The dev-only `onevcs` and `onetaskgraph-*` requirements below move with it.
+# This changes the engine types carried by ApiError::from_engine and the other
+# engine-typed public items.
 # llmlint: ignore-end[comments_earn_their_place]
-onepipeline = "=0.78.0"
+onepipeline = "=0.79.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -629,8 +638,10 @@ libc = "0.2"
 # dependency above, which the crate now links in its own right. 0.52.0 is the
 # release engine 0.75.0 requires (^0.52.0), so the lock moves both to it and
 # keeps one copy. 0.52.1 is the release engine 0.78.0 resolves (^0.52.0), and
-# declares the stacking, review and landing kinds that engine relays.
-onevcs = "=0.52.1"
+# declares the stacking, review and landing kinds that engine relays. 0.56.3 is
+# the release engine 0.79.0 resolves (^0.56.2), and declares
+# `publication-resumed`, which `payload::vcs` copies.
+onevcs = "=0.56.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -649,8 +660,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.7.3"
-onetaskgraph-plugin-api = "=0.7.3"
+onetaskgraph-core = "=0.8.0"
+onetaskgraph-plugin-api = "=0.8.0"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # adoption journey over a panel-judged member reads the provider block it was

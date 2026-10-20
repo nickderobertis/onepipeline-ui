@@ -2488,6 +2488,10 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
         ),
         (onevcs::EventKind::ChangeRetargeted, vcs::CHANGE_RETARGETED),
         (onevcs::EventKind::ChangeReopened, vcs::CHANGE_REOPENED),
+        (
+            onevcs::EventKind::PublicationResumed,
+            vcs::PUBLICATION_RESUMED,
+        ),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }

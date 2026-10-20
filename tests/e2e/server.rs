@@ -19006,7 +19006,9 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
             .get(&format!("e{index}"))
             .unwrap_or_else(|| panic!("record {index} ({record}) is not served"));
         assert_eq!(event["kind"], record["kind"], "{event}");
-        if record["kind"] == json!("planner-surfaced") {
+        if record["kind"] == json!("planner-surface-queued")
+            || record["kind"] == json!("planner-surfaced")
+        {
             assert_eq!(
                 event["surface"]["kind"], record["payload"]["kind"],
                 "{event}"
@@ -19021,6 +19023,7 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
         [
             "change-base-overridden",
             "change-closed",
+            "finding",
             "readjust-pending",
             "review-comment",
             "review-reply-pending",

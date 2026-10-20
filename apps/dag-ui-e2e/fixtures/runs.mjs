@@ -3686,10 +3686,11 @@ export function preservedFacts() {
 }
 
 /**
- * The review-loop corpus: one run `onepipeline` 0.78 journals for a stacked change
+ * The review-loop corpus: one run `onepipeline` 0.79 journals for a stacked change
  * set taken over from another host and taken through review — continued from the
- * store, reworked, restacked, retitled, answered and declined, and readjusted as its
- * root landed, until a later host superseded its driver.
+ * store, reworked, restacked, resumed, retitled, answered and declined, and
+ * readjusted as its root landed, with the issues each landing closed handed to the
+ * plan store, until a later host superseded its driver.
  *
  * The records are one document, `review-loop.json`, which `tests/e2e/server.rs`
  * serves through every read route from the same file, so the run the view renders
