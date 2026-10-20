@@ -16892,9 +16892,13 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
 /// and the prompt it was handed, on one line, and answers as the adapter
 /// expects, so a journey can read back *that* it ran and *what as*.
 ///
-/// The prompt is the first line of its stdin: the `claude-code` adapter runs it
-/// `-p --input-format stream-json` and writes the task as one `user` message,
-/// then holds stdin open for control frames, so it reads that line and no more.
+/// Where the engine opens the turn with control, the prompt is the first line
+/// of its stdin: the `claude-code` adapter runs it `-p --input-format
+/// stream-json` and writes the task as one `user` message, then holds stdin
+/// open for control frames, so it reads that line and no more. Where oneharness
+/// refuses control — on macOS a long `$TMPDIR` puts the control socket past the
+/// 104-byte `sun_path` — the task rides `-p` as its positional instead and stdin
+/// is empty; either way the task is somewhere on the one line.
 ///
 /// The harness program is the one process this suite stands in for, and it is
 /// the narrowest place to cut: everything above it — the adopt route, the
@@ -17235,8 +17239,9 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
-/// it records the argv it was given, and on the line after it the stream-json
-/// prompt frame it was handed on stdin, in a file of its own under `records`, and
+/// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
+/// first line of its stdin — the stream-json prompt frame, where the turn was
+/// opened with control — beside it in `stdin-<pid>.txt`, and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17254,12 +17259,13 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n%s\\n' \"$*\" \"$prompt\" > {:?}/argv-$$.txt\n\
+            "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n' \"$*\" > {records:?}/argv-$$.txt\n\
+             printf '%s' \"$prompt\" > {records:?}/stdin-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
              \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
-            records.display().to_string(),
+            records = records.display().to_string(),
             dir = fixture_run::EXPORT_SOURCE_DIRECTORY,
         ),
     )
@@ -17469,20 +17475,46 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
     // side; the producer is told it is the private side of a mixed plan.
-    // Each record is the argv, then the stream-json `user` frame the adapter
-    // wrote the task in, read back as the text it carries.
+    // Each dispatch is its argv and the task it was handed, which the adapter
+    // writes as a stream-json `user` frame on stdin where the turn has control and
+    // as `-p`'s positional where oneharness refused it (see
+    // `write_harness_standin`) — so the text is read from whichever carried it.
     let dispatched: Vec<String> = fs::read_dir(&records)
         .expect("the dispatch records")
-        .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
-        .map(|record| {
-            let (argv, frame) = record.split_once('\n').expect("an argv line and a prompt");
-            let frame: Value = serde_json::from_str(frame.trim_end()).unwrap_or_else(|err| {
-                panic!("the prompt is not a stream-json frame: {err}: {record}")
+        .map(|entry| entry.expect("a record").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("argv-"))
+        })
+        .map(|path| {
+            let argv = fs::read_to_string(&path).expect("an argv record");
+            let stdin_of = path.with_file_name(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("a record name")
+                    .replacen("argv-", "stdin-", 1),
+            );
+            let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
+            let streamed = argv.contains("--input-format stream-json");
+            if stdin.is_empty() {
+                assert!(
+                    !streamed,
+                    "a stream-json turn was written no prompt frame: {argv}"
+                );
+                return argv;
+            }
+            assert!(
+                streamed,
+                "a prompt reached stdin outside a stream-json turn: {argv}"
+            );
+            let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
+                panic!("the prompt is not a stream-json frame: {err}: {stdin}")
             });
             let text = frame["message"]["content"][0]["text"]
                 .as_str()
                 .unwrap_or_else(|| panic!("the prompt frame carries no text: {frame}"));
-            format!("{argv}\n{text}")
+            format!("{argv}{text}")
         })
         .collect();
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
