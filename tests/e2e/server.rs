@@ -12066,7 +12066,8 @@ fn process_is_live(pid: u32) -> bool {
 }
 
 /// A driver the pinned engine CLI started for this journey's read fixtures,
-/// ended if the journey did not end it. Its pid comes from that CLI's answer.
+/// ended if the journey did not end it. `Serving::drive_fixture` obtains the
+/// attached CLI process's pid from `Child::id` when it spawns it.
 #[cfg(unix)]
 struct RetainedDriver(u32);
 
@@ -12077,9 +12078,8 @@ impl Drop for RetainedDriver {
             let Ok(raw) = i32::try_from(self.0) else {
                 return;
             };
-            // SAFETY: the pid is the driver the engine CLI reported to this
-            // journey, which started it; a stale pid is not signalled because
-            // the probe above found nothing there.
+            // SAFETY: the pid comes from Child::id for this journey's own
+            // attached engine CLI. SIGTERM passes no memory to libc.
             unsafe {
                 libc::kill(raw, libc::SIGTERM);
             }
