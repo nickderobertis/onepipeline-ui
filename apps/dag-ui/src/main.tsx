@@ -7,6 +7,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { AppErrorBoundary } from "./app/AppErrorBoundary";
+import { SpikeMock } from "./spike/SpikeMock";
+
+// THROWAWAY visual spike: `?spike=<view>` renders the static mock instead.
+const spike = new URLSearchParams(window.location.search).get("spike");
 
 const root = document.getElementById("root");
 if (!root) throw new Error("DAG UI root element is missing");
@@ -14,7 +18,7 @@ if (!root) throw new Error("DAG UI root element is missing");
 createRoot(root).render(
   <StrictMode>
     <AppErrorBoundary>
-      <App />
+      {spike === null ? <App /> : <SpikeMock view={spike} />}
     </AppErrorBoundary>
   </StrictMode>,
 );
