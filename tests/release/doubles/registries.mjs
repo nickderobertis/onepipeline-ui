@@ -55,6 +55,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -550,7 +551,10 @@ proxy.on("connect", (request, socket, head) => {
 server.listen(0, "127.0.0.1", () => {
   proxy.listen(0, "127.0.0.1", () => {
     writeFileSync(join(state, "proxy-port"), String(proxy.address().port));
-    writeFileSync(join(state, "port"), String(server.address().port));
+    // Renamed into place: support.mjs reads it the moment it exists, and a
+    // file written where it is read can be caught empty, which names port 80.
+    writeFileSync(join(state, "port.partial"), String(server.address().port));
+    renameSync(join(state, "port.partial"), join(state, "port"));
   });
 });
 for (const signal of ["SIGTERM", "SIGINT"])
