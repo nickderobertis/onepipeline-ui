@@ -88,7 +88,7 @@ containers.
 `just measure-cold-linux` (`scripts/measure-cold-linux.sh`) clones one commit
 into `/tmp`, applies a fixture change on top, provisions it untimed, removes
 `target`, `.nx` and the baseline server, and runs `just ci-test-linux` pinned to
-4 CPUs with Docker pinned to the same 4 and every compiler cache off. The
+`--cpus` with Docker pinned to the same CPUs and every compiler cache off. The
 journeys' scratch directory sits beside the clone, on the same filesystem. The
 fixture is PR #395's change, which selects that job's 20 tasks (22 on the
 finished tree, with `test-staged` and `test-standalone`):
@@ -96,42 +96,64 @@ finished tree, with `test-staged` and `test-standalone`):
 ```sh
 git fetch origin pull/395/head:refs/remotes/origin/pr-395
 just measure-cold-linux --commit 1c71ecd --fixture 1c71ecd...origin/pr-395 \
-  --label pair-before --workdir /tmp/onepipeline-ui-cold
+  --label before --cpus 0-3 --workdir /tmp/onepipeline-ui-cold
 just measure-cold-linux --commit HEAD --fixture 1c71ecd...origin/pr-395 \
-  --label pair-final --workdir /tmp/onepipeline-ui-cold
+  --label final --cpus 0-3 --workdir /tmp/onepipeline-ui-cold
 ```
 
-The host is shared, and other work on it moved every run's duration by more
-than the change did (the before tree took 30m46s–38m00s), so each comparison is
-a pair run back to back, the second order reversed:
+The host is shared with other work, which moved the before tree alone between
+27m14s and 38m00s, so each ratio below compares a before-tree run with a
+finished-tree run made under conditions as close as the host allowed. Host load
+is the 1-minute load average on the host's 8 CPUs (start and end of each run,
+or its mean over the run where it was sampled); the job's own work is part of it.
 
-| Pair | Before (1c71ecd) | Finished tree | Ratio |
-| --- | ---: | ---: | ---: |
-| 1, before first, host load 6–18 | 35m04s | 23m59s | 0.684 |
-| 2, finished first, host load 21–25 | 38m00s | 26m19s | 0.693 |
+| # | When, layout | Before (1c71ecd) | Finished tree | Ratio |
+| --- | --- | ---: | ---: | ---: |
+| 1 | 10-20 morning, within the hour, CPUs 0-3, load 3.7-6.6 | 28m51s ⁷ | 22m21s ¹ ⁷ | 0.775 |
+| 2 | 10-20 evening, back to back, CPUs 0-3, load 4.8-13.7 | 30m46s | 23m23s ² | 0.760 |
+| 3 | 10-20 evening, 1.5 h after #2's before run, CPUs 0-3, load 6-17 | 30m46s | 23m12s ² | 0.754 |
+| 4 | 10-20 night, back to back, CPUs 0-3, load 6.3-18.9 | 35m04s | 23m59s ³ | 0.684 |
+| 5 | 10-20 night, back to back, finished first, CPUs 0-3, mean load 21.4 finished, 24.6 before | 38m00s | 26m19s ⁴ | 0.693 |
+| 6 | 10-21, back to back, CPUs 0-3, mean load 16.0 before, 20.5 finished | 27m14s | 22m42s ⁵ | 0.834 |
+| 7 | 10-21, at the same time, before on CPUs 0-3 and finished on 4-7, load 8-24 | 34m56s ⁶ | 30m56s ⁵ | 0.886 |
 
-Every test passed in all four runs, as in the three other default-weight runs
-that evening (one before-tree run, 30m46s, and two of earlier finished-tree
-commits, 23m23s and 23m12s). Pair 1's finished-tree run is the commit
-before the weight's revert with the measurement's `--default-cpu-weight`, which
-removes that weight at `docker run`; pair 2's is the revert itself. The
-finished tree adds only a lock-only patch bump of three TLS crates after them
-(RUSTSEC-2026-0381, -0382 and -0383) and a formatting fix to a test.
+¹ An earlier form of the change: the rehearsal split and the baseline and
+`ui.rs` fixes, without `test-staged` or the browser tier's ordering.
+² Earlier commits of this branch (a6c5efe, 24087db), with their CPU weight
+removed at `docker run` by an earlier revision of the measurement.
+³ b8782a8 with its CPU weight removed the same way, which is e7d2622's tree.
+⁴ e7d2622, the weight's revert. ⁵ 9fa9b23, the finished tree but for the lock
+bump, a formatting fix and the measurement's own hardening.
+⁶ A Playwright journey timed out in this run, as in main's job 118705585520;
+Nx ran every other task, so its duration stands.
+⁷ Made with the ad-hoc harness this script was written from, under the same
+conditions; in both runs `tools.test.mjs`'s copy-from-PATH case failed with
+EXDEV, its scratch directory being on another filesystem than the clone, which
+the script's scratch placement fixed.
+
+Every other test passed in every run listed. Left out: runs of commits that set
+the CPU weight, which the tree no longer does; a run on 10-20 that stopped when
+`check.test.mjs` failed beside the rehearsal, which is why it runs after it; and
+the second simultaneous pair, whose finished-tree run stopped on the registry
+double's port race (fixed in 93a5e97) with a Playwright timeout beside it, and
+whose before-tree run was stopped when measuring ended.
 
 ## Estimate under the finished tree, cold
 
-A hosted cold job is a before-tree job scaled by the measured ratio. The longest
-hosted cold job of these: 118494578589 (main, 29 tasks), cancelled with its
-rehearsal done 35.0 minutes into Nx and `release:test`'s ~2.1 minutes still to
-run, about 37.1 minutes; PR #395's 20-task job ran 34.7. Taking 37.6 minutes for
-a hosted cold before-tree Nx run, the larger pair ratio, 5% for a ratio from two
-pairs, and the 1.4–1.8 minutes before Nx and 0.3–0.5 after it:
+The median of the seven ratios is 0.760, and the worst is 0.886 (#7, where two
+cold jobs and the host's other work saturated all 8 CPUs). A hosted cold job is a
+hosted before-tree job scaled by the ratio, plus the 1.4-1.8 minutes before Nx
+and the 0.3-0.5 after it. PR #395's cold job ran the fixture's 20 tasks for 34.7
+minutes of Nx; the longest hosted cold job, 118494578589 (main, 29 tasks), was
+cancelled with its rehearsal done 35.0 minutes in and `release:test`'s ~2.1
+minutes still to run, about 37.1.
 
-- high: 37.6 × 0.693 × 1.05 + 2.3 = **29.7 min**, 17.5% under the 36-minute cap
-  and within its 30.6-minute 85%
-- low: 25.5 (the fastest hosted cold job, 118486067053) × 0.684 + 1.7 =
-  **19.1 min**
+| Ratio | PR #395's job (34.7) | Longest job (37.1) |
+| --- | ---: | ---: |
+| median, 0.760 | **28.7 min**, 20% under the cap | 30.5 min, 15% under |
+| worst, 0.886 | 33.1 min, 8% under | 35.2 min, 2% under |
 
-Runner variance enters through the hosted durations, which span 25.5–37.1
-minutes of Nx for cold jobs; the cap is unchanged. A hosted cold job over 29.7
-minutes falsifies the high figure.
+The estimate is the median's 28.7 minutes for the job this change was made for,
+at least 15% under the 36-minute cap; the worst measured case, 35.2 minutes,
+stays under it. The cap is unchanged. A hosted cold job over 30.5 minutes is
+outside every median figure above.
