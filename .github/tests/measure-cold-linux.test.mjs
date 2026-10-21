@@ -24,7 +24,7 @@ const HEAD = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], {
   encoding: "utf8",
 }).trim();
 
-function doubles(dir, { jobStatus = 0 } = {}) {
+function doubles(dir, { jobStatus = 0, bootstrapStatus = 0 } = {}) {
   const bin = join(dir, "bin");
   mkdirSync(bin);
   const log = join(dir, "calls");
@@ -41,17 +41,30 @@ function doubles(dir, { jobStatus = 0 } = {}) {
     "just",
     [
       `printf 'just %s cwd=%s\\n' "$*" "$PWD" >> '${log}'`,
+      // What a provisioned clone holds that a cold job does not: the timed run
+      // must start without each of them.
+      'if [ "$1" = bootstrap ]; then',
+      "  mkdir -p target/debug .nx/cache .nx/workspace-data .tools/bin",
+      "  touch target/debug/unit .nx/cache/entry .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit",
+      `  [ ${bootstrapStatus} -eq 0 ] || { echo "bootstrap: cannot reach the registry" >&2; exit ${bootstrapStatus}; }`,
+      "fi",
       'if [ "$1" = ci-test-linux ]; then',
       `  printf 'env RUSTC_WRAPPER=[%s] CARGO_BUILD_RUSTC_WRAPPER=[%s] SCRATCH=%s BASE=%s\\n' "\${RUSTC_WRAPPER-unset}" "\${CARGO_BUILD_RUSTC_WRAPPER-unset}" "$ONEPIPELINE_NODE_SCRATCH_DIR" "$ONEPIPELINE_UI_NX_BASE_SHA" >> '${log}'`,
+      `  for left in target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit; do [ ! -e "$left" ] || printf 'left %s\\n' "$left" >> '${log}'; done`,
+      `  printf 'head %s %s\\n' "$(git rev-parse HEAD^{tree})" "$(git log -1 --format=%s)" >> '${log}'`,
       "  docker run --rm --cpu-shares 4096 -v /x:/y image build",
       "  docker info",
       '  echo "  Run duration:      1m 2s"',
+      `  [ ${jobStatus} -eq 0 ] || echo "Failed tasks: dag-ui:test" >&2`,
       `  exit ${jobStatus}`,
       "fi",
     ].join("\n"),
   );
   return { bin, log };
 }
+
+const git = (...args) =>
+  execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim();
 
 function measure(args, dir, d) {
   return spawnSync("bash", [SCRIPT, ...args], {
@@ -99,6 +112,7 @@ test("a cold run is timed in a clone of the commit, with Docker pinned to the ru
       "the wheel build's own weight is passed through",
     );
     assert.match(calls, /^docker info$/m, "other commands pass untouched");
+    assert.doesNotMatch(calls, /^left /m, "the timed run starts cold");
     assert.ok(!existsSync(clone), "the clone is removed without --keep");
     assert.ok(existsSync(join(work, "t.log")), "the recipe's log is left");
   } finally {
@@ -129,6 +143,9 @@ test("--default-cpu-weight drops the wheel build's weight, and the recipe's fail
     );
     assert.equal(run.status, 7, run.stdout + run.stderr);
     assert.match(run.stdout, /^measure-cold-linux: w exit=7 /m);
+    assert.match(run.stderr, /'just ci-test-linux' failed in the clone/);
+    assert.match(run.stderr, /Failed tasks: dag-ui:test/, "the log's tail");
+    assert.match(run.stderr, /^ACTION: read .*w\.log/m);
     const calls = readFileSync(d.log, "utf8");
     assert.match(calls, /^taskset -c 2-5$/m);
     assert.match(
@@ -142,6 +159,79 @@ test("--default-cpu-weight drops the wheel build's weight, and the recipe's fail
       }).trim(),
       HEAD,
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--fixture is applied on --commit as one commit, and the commit stays the base", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir);
+    const work = join(dir, "work");
+    const parent = git("rev-parse", "HEAD~1");
+    const run = measure(
+      [
+        "--commit",
+        "HEAD~1",
+        "--fixture",
+        "HEAD~1...HEAD",
+        "--label",
+        "f",
+        "--workdir",
+        work,
+      ],
+      dir,
+      d,
+    );
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    const calls = readFileSync(d.log, "utf8");
+    assert.match(calls, new RegExp(` BASE=${parent}$`, "m"));
+    assert.match(
+      calls,
+      new RegExp(
+        `^head ${git("rev-parse", "HEAD^{tree}")} fixture: HEAD~1\\.\\.\\.HEAD$`,
+        "m",
+      ),
+      "the clone holds HEAD's tree, as HEAD~1 plus the fixture",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a fixture that does not apply, or a provisioning that fails, stops before anything is timed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir);
+    const work = join(dir, "work");
+    const applied = measure(
+      ["--commit", "HEAD", "--fixture", "HEAD~1...HEAD", "--workdir", work],
+      dir,
+      d,
+    );
+    assert.equal(applied.status, 1, applied.stdout + applied.stderr);
+    assert.match(applied.stderr, /the fixture HEAD~1\.\.\.HEAD does not apply/);
+    assert.match(applied.stderr, /^ACTION: /m);
+    assert.ok(!existsSync(d.log), "nothing was provisioned or timed");
+
+    mkdirSync(join(dir, "b"));
+    const broken = doubles(join(dir, "b"), { bootstrapStatus: 3 });
+    const failed = measure(
+      ["--commit", "HEAD", "--label", "p", "--workdir", work],
+      dir,
+      broken,
+    );
+    assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+    assert.match(failed.stderr, /'just bootstrap' failed in the clone/);
+    assert.match(failed.stderr, /^ACTION: fix what the log names/m);
+    assert.match(
+      readFileSync(join(work, "p-bootstrap.log"), "utf8"),
+      /cannot reach the registry/,
+    );
+    const calls = readFileSync(broken.log, "utf8");
+    assert.doesNotMatch(calls, /release-tools|ci-test-linux/);
+    assert.doesNotMatch(failed.stdout, /measure-cold-linux: p exit=/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -167,6 +257,18 @@ test("a call it cannot measure is refused before anything is cloned", () => {
       [
         ["--commit", "HEAD", "--fixture", "HEAD", "--workdir", work],
         /not FROM\.\.\.TO/,
+      ],
+      [
+        ["--commit", "HEAD", "--fixture", "HEAD...x...HEAD", "--workdir", work],
+        /not FROM\.\.\.TO/,
+      ],
+      [
+        ["--commit", "HEAD", "--label", "..", "--workdir", work],
+        /not a plain name/,
+      ],
+      [
+        ["--commit", "HEAD", "--workdir", `${ROOT}/target/../x`],
+        /inside this checkout/,
       ],
       [["--commit", "HEAD", "--bogus"], /unknown argument/],
     ]) {

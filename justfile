@@ -189,10 +189,8 @@ ci-lint *args:
 ci-test-linux *args:
     @bash scripts/ci-job.sh test-linux "$@"
 
-# `scripts/measure-cold-linux.sh` times `ci-test-linux` from an empty target in
-# a clone of one commit, pinned to a hosted runner's four CPUs with every
-# compiler cache off; docs/linux-cold-cache-timing.md has the runs and the
-# arguments they took. It compiles everything from nothing, so nothing runs it.
+# It compiles everything from nothing, so nothing runs it; the runs it made and
+# their arguments are in docs/linux-cold-cache-timing.md.
 # Time the Linux job's recipe on a cold Rust cache, in a clone of one commit.
 [positional-arguments]
 measure-cold-linux *args:

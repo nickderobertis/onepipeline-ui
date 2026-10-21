@@ -41,7 +41,7 @@ fail() {
   exit 1
 }
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 commit="" fixture="" label="" cpus="0-3" default_weight="" workdir="/tmp/onepipeline-ui-cold" keep=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -68,14 +68,19 @@ case "$workdir" in
   /*) ;;
   *) usage "--workdir '$workdir' is not an absolute path" ;;
 esac
-case "$workdir/" in
+# Compared as the filesystem resolves it, symlinks and `..` included: this
+# script deletes and clones under it.
+resolved="$(realpath -m -- "$workdir")" || usage "--workdir '$workdir' does not resolve to a path"
+case "$resolved/" in
   "$root"/*) usage "--workdir '$workdir' is inside this checkout, whose target it would share" ;;
 esac
+workdir="$resolved"
 sha="$(git -C "$root" rev-parse --verify --quiet "$commit^{commit}")" \
   || usage "--commit '$commit' is not a commit in this repository"
 if [ -n "$fixture" ]; then
   case "$fixture" in
-    *...*) ;;
+    *...*...*) usage "--fixture '$fixture' is not FROM...TO" ;;
+    ?*...?*) ;;
     *) usage "--fixture '$fixture' is not FROM...TO" ;;
   esac
   if ! git -C "$root" rev-parse --verify --quiet "${fixture%%...*}^{commit}" >/dev/null ||
@@ -84,7 +89,7 @@ if [ -n "$fixture" ]; then
   fi
 fi
 label="${label:-cold-${sha:0:7}}"
-printf '%s' "$label" | grep -Eq '^[A-Za-z0-9._-]+$' || usage "--label '$label' is not a plain name"
+printf '%s' "$label" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || usage "--label '$label' is not a plain name"
 for tool in taskset docker git just; do
   command -v "$tool" >/dev/null || fail "$tool is not on PATH" "install $tool; this measures a Linux host with Docker"
 done
@@ -98,16 +103,17 @@ rm -rf "$clone" "$scratch" "$shims"
 mkdir -p "$workdir" "$scratch" "$shims" || fail "could not create $workdir" "make its parent writable, or pass another --workdir"
 
 git clone --quiet "$root" "$clone" || fail "could not clone $root into $clone" "free space on the filesystem holding $workdir"
-git -C "$clone" checkout --quiet -B measure "$sha"
-git -C "$clone" update-ref refs/remotes/origin/main "$sha"
+git -C "$clone" checkout --quiet -B measure "$sha" \
+  || fail "could not check $sha out in $clone (git's reason is above)" "free space on the filesystem holding $workdir, then re-run"
+git -C "$clone" update-ref refs/remotes/origin/main "$sha" \
+  || fail "could not point the clone's origin/main at $sha" "check that $clone/.git is writable, then re-run"
 if [ -n "$fixture" ]; then
   git -C "$root" diff "$fixture" | git -C "$clone" apply --index \
     || fail "the fixture $fixture does not apply on $sha" "pick a fixture whose files $sha still has unchanged"
-  git -C "$clone" -c user.name=measure -c user.email=measure@localhost commit --quiet -m "fixture: $fixture"
+  git -C "$clone" -c user.name=measure -c user.email=measure@localhost commit --quiet -m "fixture: $fixture" \
+    || fail "the fixture $fixture changes nothing on $sha" "pick a fixture $sha does not already contain"
 fi
 
-# The shim every `docker run` the recipe starts goes through. It reads what to
-# do from MEASURE_DOCKER, MEASURE_CPUS and MEASURE_DEFAULT_WEIGHT, set below.
 cat >"$shims/docker" <<'SHIM'
 #!/usr/bin/env bash
 [ "${1:-}" = run ] || exec "$MEASURE_DOCKER" "$@"
@@ -146,13 +152,13 @@ run_env=(
 # Provisioning, untimed, as the job's steps before the gate: the release tools
 # are copied from this checkout's .tools when they are at the pins there, which
 # is what `just release-tools` does with a binary on PATH.
-(
-  cd "$clone"
-  env "${run_env[@]}" just bootstrap >"$workdir/$label-bootstrap.log" 2>&1
-  env "${run_env[@]}" PATH="$root/.tools/bin:$shims:$PATH" just release-tools >>"$workdir/$label-bootstrap.log" 2>&1
-) || fail "provisioning the clone failed (log: $workdir/$label-bootstrap.log)" "fix what the log names, then re-run"
-
+provisioning="$workdir/$label-bootstrap.log"
 cd "$clone"
+env "${run_env[@]}" just bootstrap >"$provisioning" 2>&1 \
+  || fail "'just bootstrap' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
+env "${run_env[@]}" PATH="$root/.tools/bin:$shims:$PATH" just release-tools >>"$provisioning" 2>&1 \
+  || fail "'just release-tools' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
+
 rm -rf target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit
 started="$(date +%s)"
 status=0
@@ -160,6 +166,11 @@ env "${run_env[@]}" taskset -c "$cpus" just ci-test-linux >"$log" 2>&1 || status
 wall=$(($(date +%s) - started))
 nx="$(sed 's/\x1b\[[0-9;]*m//g' "$log" | sed -n 's/^ *Run duration: *//p' | tail -n1)"
 echo "measure-cold-linux: $label exit=$status wall=${wall}s nx=${nx:-unknown} log=$log"
+if [ "$status" -ne 0 ]; then
+  echo "measure-cold-linux: 'just ci-test-linux' failed in the clone of $sha (exit $status); its last lines:" >&2
+  sed 's/\x1b\[[0-9;]*m//g' "$log" | tail -n 20 >&2
+  echo "ACTION: read $log for the failing task; a timing from a failed run is not a measurement, so fix it and re-run" >&2
+fi
 cd "$workdir"
 [ -n "$keep" ] || rm -rf "$clone" "$scratch" "$shims"
 exit "$status"
