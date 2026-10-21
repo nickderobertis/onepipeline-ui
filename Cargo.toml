@@ -640,8 +640,21 @@ onemessagebus = "0.9.1"
 # requirements below move with it to the release its lock resolves. This
 # changes the engine types carried by ApiError::from_engine and the other
 # engine-typed public items.
+# 0.82.0 is the engine a host launches a Linear-homed plan with. It links the
+# same onetaskgraph 0.9.2 as 0.81.0: the release whose copy records a Linear
+# item's `body_digest` over what Linear stored rather than what was rendered,
+# and homes a private plan in its private source. A host holds its launch and
+# this reader to one engine, so only once this moves does a browser-adopted run
+# of a plan copied into Linear load its tasks under the rendered-only check the
+# way the host's own launch does, against the digest of what Linear stored, and
+# write back into that private home. 0.82.0 also names a run by its public id
+# on every plan store not declared private, which this crate serves no field
+# of. No route or MSRV changes, and the dev-only `onevcs` and `onetaskgraph-*`
+# requirements already name the releases its lock resolves. This changes the
+# engine types carried by ApiError::from_engine and the other engine-typed
+# public items.
 # llmlint: ignore-end[comments_earn_their_place]
-onepipeline = "=0.81.0"
+onepipeline = "=0.82.0"
 # llmlint: ignore-end[changed_behavior_has_e2e]
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
@@ -684,7 +697,7 @@ libc = "0.2"
 # declares the stacking, review and landing kinds that engine relays. 0.56.3 is
 # the release engine 0.79.0 resolves (^0.56.2), and declares
 # `publication-resumed`, which `payload::vcs` copies; engine 0.79.1 resolves the
-# same release (^0.56.3).
+# same release (^0.56.3), as does 0.82.0.
 onevcs = "=0.56.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
