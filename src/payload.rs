@@ -4781,6 +4781,29 @@ pub fn timeline(
     scope: &Scope<'_>,
     filter: &EventFilter,
 ) -> Value {
+    // Continued sessions can relay one producer record repeatedly. Canonicalize
+    // before transcript numbering and all span folds, so duplicate journal lines
+    // affect neither event addresses nor counts nor intervals.
+    let mut seen = BTreeSet::new();
+    let repeated = view
+        .events
+        .iter()
+        .any(|event| !seen.insert((&event.stream, event.seq)));
+    let canonical = repeated.then(|| {
+        let mut identities = BTreeSet::new();
+        RunView {
+            paths: view.paths.clone(),
+            launch: view.launch.clone(),
+            state: view.state.clone(),
+            events: view
+                .events
+                .iter()
+                .filter(|event| identities.insert((&event.stream, event.seq)))
+                .cloned()
+                .collect(),
+        }
+    });
+    let view = canonical.as_ref().unwrap_or(view);
     let transcripts = Transcripts::of(view, declared);
     let turns = turn_ids(view, &transcripts);
     let lens = Lens {

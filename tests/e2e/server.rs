@@ -671,7 +671,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(12));
+    assert_eq!(body["timeline_schema_version"], json!(13));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -4746,7 +4746,7 @@ fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
         &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(12));
+    assert_eq!(timeline["timeline_schema_version"], json!(13));
     // Every appended record is stamped at one instant, after everything the
     // live run wrote, so they are its last four edits in the order appended.
     let appended: Vec<Value> = events_on(&timeline)
@@ -6151,7 +6151,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(12));
+    assert_eq!(timeline["timeline_schema_version"], json!(13));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -20674,5 +20674,50 @@ fn the_events_stream_announces_each_record_of_a_reworked_stack_as_it_is_written(
     assert_eq!(announced["node_counts"], json!({ "done": 5, "failed": 1 }));
     for key in ["state", "phase", "last_event", "last_progress_at"] {
         assert_eq!(announced[key], detail["run"][key], "{key}");
+    }
+}
+
+/// Continued sessions may relay the same VCS envelope again. Identity is the
+/// producer's stream and sequence, regardless of how many journal lines carry it.
+#[test]
+fn repeated_journal_identities_count_once_on_both_timeline_scopes() {
+    let original = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let repeated = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        let path = dir.join("events.jsonl");
+        let journal = fs::read_to_string(&path).expect("the recorded journal");
+        let triples: String = journal
+            .lines()
+            .flat_map(|line| [line, line, line])
+            .map(|line| format!("{line}\n"))
+            .collect();
+        fs::write(path, triples).expect("repeat each recorded identity three times");
+    });
+    for query in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let read = |address| {
+            let response = http::get(
+                address,
+                &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+            );
+            assert_eq!(response.status, 200, "{}", response.body);
+            let mut body = response.json();
+            body.as_object_mut()
+                .expect("an envelope")
+                .remove("observed_at");
+            for span in body["spans"].as_array_mut().expect("spans") {
+                for event in span["events"].as_array_mut().expect("events") {
+                    // Event addresses encode journal positions; duplication may
+                    // move positions without changing the record's meaning.
+                    event.as_object_mut().expect("event").remove("id");
+                }
+            }
+            body
+        };
+        assert_eq!(read(original.address), read(repeated.address), "{query}");
     }
 }

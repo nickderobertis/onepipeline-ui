@@ -322,7 +322,7 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 12;
+export const TIMELINE_SCHEMA_VERSION = 13;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);

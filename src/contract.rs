@@ -269,7 +269,7 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 /// `supervisor` disposition. A `redirection` read off such a record carries it
 /// beside `reached`; one written before the field existed carries none. Every
 /// other event is byte-for-byte what 11 served.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 12;
+pub const TIMELINE_SCHEMA_VERSION: u32 = 13;
 
 /// The largest run-list page any request can ask for.
 ///
