@@ -4765,7 +4765,9 @@ struct Lens<'a> {
 impl Lens<'_> {
     /// The events of one span, as the reader asked for them.
     fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
-        events
+        let mut ordered = events.to_vec();
+        ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
+        ordered
             .iter()
             .filter(|(_, event)| self.filter.allows(event))
             .map(|(index, event)| timeline_event(*index, event, self.turns))
@@ -4811,10 +4813,20 @@ pub fn timeline(
         filter,
         transcripts: &transcripts,
     };
-    let spans = match scope {
+    let mut spans = match scope {
         Scope::Run => run_spans(view, &lens),
         Scope::Node(node) => node_spans(view, node.as_str(), &lens),
     };
+    if let Some(end) = timeline_end(view) {
+        for span in &mut spans {
+            if span["ended_at"].is_null() {
+                span["ended_at"] = json!(end.ts);
+                if span["status"] == "running" {
+                    span["status"] = json!("stopped");
+                }
+            }
+        }
+    }
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
         "run_id": view.paths.run,
@@ -5324,6 +5336,34 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     Value::Object(item)
 }
 
+/// The execution boundary, independently of commands recorded after execution.
+fn timeline_end(view: &RunView) -> Option<Moment> {
+    let statuses = view.state.statuses();
+    let settled = !statuses.is_empty()
+        && statuses
+            .values()
+            .all(|status| matches!(status.as_str(), "done" | "failed" | "cancelled" | "skipped"));
+    if settled {
+        return view
+            .events
+            .iter()
+            .filter(|e| e.source == Source::Pipeline && e.kind.0 == "node-settled")
+            .filter_map(Moment::of)
+            .max_by_key(|m| m.at);
+    }
+    view.events
+        .iter()
+        .rev()
+        .find(|e| {
+            e.source == Source::Pipeline
+                && matches!(
+                    e.kind.0.as_str(),
+                    "run-stopped" | "host-shutdown" | "driver-exited"
+                )
+        })
+        .and_then(Moment::of)
+}
+
 /// The run, with the nodes it is executing beneath it.
 ///
 /// One root span, not one per round. Execution is continuous, so what the run is
@@ -5342,12 +5382,9 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
     // A run ends when it stops being driven, and only then. A graph that has
     // completed and a run that recorded a stop are both over; anything else is
     // still open, however quiet it has gone.
-    let closed = view.state.stop_recorded() || graph_complete(view);
-    let ended = if closed {
-        events.last().map_or(Value::Null, |(_, e)| json!(e.ts))
-    } else {
-        Value::Null
-    };
+    let end = timeline_end(view);
+    let closed = end.is_some();
+    let ended = end.map_or(Value::Null, |end| json!(end.ts));
     spans.push(json!({
         "id": run_id,
         "kind": "run",
@@ -5510,13 +5547,27 @@ fn relayed_sessions<'a>(
         if event.source != Source::Agentgraph {
             continue;
         }
-        let Some(session) = event
+        let session = event
             .labels
             .extra
             .get("session")
             .and_then(Value::as_str)
-            .filter(|session| ConversationId::try_from(*session).is_ok())
-        else {
+            .or_else(|| {
+                events.iter().find_map(|(_, candidate)| {
+                    (candidate.stream == event.stream
+                        && (member_label(event).is_none()
+                            || member_label(event) == member_label(candidate)))
+                    .then(|| {
+                        candidate
+                            .labels
+                            .extra
+                            .get("session")
+                            .and_then(Value::as_str)
+                    })
+                    .flatten()
+                })
+            });
+        let Some(session) = session.filter(|s| ConversationId::try_from(*s).is_ok()) else {
             continue;
         };
         match sessions.iter_mut().find(|(name, _)| *name == session) {
@@ -5573,111 +5624,34 @@ fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) 
     found
 }
 
-fn dispatches(events: &[(usize, &Envelope)]) -> Vec<Moment> {
-    ordered(events, &|event| {
-        event.source == Source::Pipeline
-            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
-    })
-}
-
-/// Where the run said one session began, and where it said nothing, where the
-/// session first spoke.
-fn session_appeared(
-    events: &[(usize, &Envelope)],
-    session: &str,
-    relayed: &[(usize, &Envelope)],
-) -> Option<Moment> {
-    ordered(events, &|event| {
-        event.source == Source::Agentgraph
-            && event.kind.0 == graph::MEMBER_STARTED
-            && belongs_to(event, session)
-    })
-    .into_iter()
-    .next()
-    .or_else(|| {
-        relayed
-            .iter()
-            .filter_map(|(_, event)| Moment::of(event))
-            .min_by_key(|moment| moment.at)
-    })
-}
-
-/// The attempt at a node that ran a session appearing at one moment: the latest
-/// `node-dispatched` at or before it, or the node's first where the session
-/// appeared before any of them.
-fn attempt_of<'a>(dispatched: &'a [Moment], appeared: Option<&Moment>) -> Option<&'a Moment> {
-    appeared
-        .and_then(|appeared| {
-            dispatched
-                .iter()
-                .rev()
-                .find(|moment| moment.at <= appeared.at)
-        })
-        .or_else(|| dispatched.first())
-}
-
-/// When one dispatched session ran, inside the attempt of its node that ran it.
-///
-/// `src/AGENTS.md` states the bracketing rule and why a node's own window cannot
-/// stand in for it. Nothing here may close a session before the last thing it
-/// said, and one nothing has ended yet is returned open.
+/// A session's own first and last records bound its lane. External closure
+/// proves it ended, but does not add the time another session spent to its work.
 fn session_interval(
     events: &[(usize, &Envelope)],
     session: &str,
     relayed: &[(usize, &Envelope)],
 ) -> (Moment, Option<Moment>) {
-    let dispatched = dispatches(events);
-    let appeared = session_appeared(events, session, relayed);
-    let started = attempt_of(&dispatched, appeared.as_ref())
-        // Never after the session's own first word: a node that relayed
-        // something before it was ever dispatched has no attempt to hand this
-        // one, and a span that does not contain its own events is one no pointer
-        // into it can reach.
-        .filter(|dispatch| {
-            appeared
-                .as_ref()
-                .is_none_or(|appeared| dispatch.at <= appeared.at)
-        })
-        .or(appeared.as_ref())
-        .cloned()
-        .or_else(|| relayed.first().and_then(|(_, event)| Moment::of(event)))
-        .unwrap_or_else(|| Moment {
-            at: 0,
-            ts: now_rfc3339(),
-        });
-    // The last thing the session said, which nothing may close it before: a
-    // session that spoke again after a record that would have ended it outlived
-    // that record, and a span that does not contain its own events is one no
-    // pointer into it can reach.
-    let last_said = relayed
-        .iter()
-        .filter_map(|(_, event)| millis_of(&event.ts))
-        .max()
-        .unwrap_or(started.at);
-    let after = |moments: Vec<Moment>| {
-        moments
-            .into_iter()
-            .find(|moment| moment.at > started.at && moment.at >= last_said)
-    };
-    let ended = [
-        after(dispatched),
-        after(ordered(events, &|event| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-        })),
-        after(ordered(events, &|event| {
-            event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
-        })),
-        after(ordered(events, &|event| {
-            event.source == Source::Agentgraph
-                && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
-                && belongs_to(event, session)
-        })),
-    ]
-    .into_iter()
-    .flatten()
-    .min_by_key(|moment| moment.at);
-    (started, ended)
+    let own = ordered(events, &|event| {
+        belongs_to(event, session) || relayed.iter().any(|(_, own)| std::ptr::eq(*own, event))
+    });
+    let started = own.first().cloned().unwrap_or_else(|| Moment {
+        at: 0,
+        ts: now_rfc3339(),
+    });
+    let last = own.last().cloned().unwrap_or_else(|| started.clone());
+    let closed = events.iter().any(|(_, event)| {
+        millis_of(&event.ts).is_some_and(|at| at >= last.at)
+            && (event.source == Source::Pipeline
+                && matches!(event.kind.0.as_str(), "node-settled" | "node-dispatched")
+                || event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
+                || event.source == Source::Agentgraph
+                    && belongs_to(event, session)
+                    && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
+                || event.source == Source::Agentgraph
+                    && relayed.iter().any(|(_, own)| own.stream == event.stream)
+                    && event.kind.0 == "graph-settled")
+    });
+    (started, closed.then_some(last))
 }
 
 /// The branch a node opened and what became of it, from the records `onevcs`
@@ -6052,9 +6026,14 @@ fn role_rollups(
     });
     let mut counted: Vec<Category> = Vec::new();
     for (session, relayed) in relayed_sessions(events) {
-        let Some(role) =
-            declared.role_of_dispatched(relayed.first().map(|(_, event)| *event), start)
-        else {
+        let Some(role) = declared.role_of_dispatched(
+            relayed
+                .iter()
+                .find(|(_, e)| e.labels.extra.get("session").is_some())
+                .or_else(|| relayed.first())
+                .map(|(_, event)| *event),
+            start,
+        ) else {
             continue;
         };
         let pair = (
@@ -6305,11 +6284,14 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
             }),
         );
-        if let Some(role) = lens
-            .transcripts
-            .declared
-            .role_of_dispatched(relayed.first().map(|(_, event)| *event), start)
-        {
+        if let Some(role) = lens.transcripts.declared.role_of_dispatched(
+            relayed
+                .iter()
+                .find(|(_, e)| e.labels.extra.get("session").is_some())
+                .or_else(|| relayed.first())
+                .map(|(_, event)| *event),
+            start,
+        ) {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert("status".into(), json!(status));

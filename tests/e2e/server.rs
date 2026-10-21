@@ -1297,12 +1297,11 @@ fn a_lifecycle_nodes_lanes_are_each_served_over_the_attempt_that_ran_them() {
     // The attempt is the unit a session is bracketed by, and this node had one:
     // both of the members it ran in sequence open at the `node-dispatched` that
     // asked for them, and each closes where the run said that member was over.
-    // A session is never opened from its own first word — the run's own boundary
-    // is what brackets it, and between two members of one attempt the run
-    // recorded no boundary at all.
-    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    // Each session opens on its own first record, including the drafter that
+    // started after the worker ended.
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
-    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
     // The publication opens at the gate rather than at 12:02:01, where `onevcs`
     // cut the worktree the worker then spent eighteen minutes on.
@@ -1334,7 +1333,7 @@ fn a_session_the_graph_lost_and_one_whose_worktree_went_each_end_where_that_happ
         &lost,
         &format!("dispatch.{}", fixture_run::DIED_CONVERSATION_ID),
     );
-    assert_eq!(died["started_at"], json!("2026-08-07T12:05:00.000Z"));
+    assert_eq!(died["started_at"], json!("2026-08-07T12:05:01.000Z"));
     assert_eq!(died["ended_at"], json!("2026-08-07T12:05:30.000Z"));
     assert!(
         died["ended_at"].as_str()
@@ -1351,8 +1350,8 @@ fn a_session_the_graph_lost_and_one_whose_worktree_went_each_end_where_that_happ
         &taken,
         &format!("dispatch.{}", fixture_run::RECLAIMED_CONVERSATION_ID),
     );
-    assert_eq!(reclaimed["started_at"], json!("2026-08-07T12:06:00.000Z"));
-    assert_eq!(reclaimed["ended_at"], json!("2026-08-07T12:06:30.000Z"));
+    assert_eq!(reclaimed["started_at"], json!("2026-08-07T12:06:02.000Z"));
+    assert_eq!(reclaimed["ended_at"], json!("2026-08-07T12:06:03.000Z"));
     assert_eq!(
         span_named(&taken, &format!("node.{}", fixture_run::RECLAIMED_NODE_ID))["ended_at"],
         json!("2026-08-07T12:06:31.000Z")
@@ -1717,7 +1716,7 @@ fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_t
         &format!("dispatch.{}", fixture_run::MUSED_CONVERSATION_ID),
     );
     assert_eq!(role_of(dispatch), None, "{dispatch}");
-    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:04:00.000Z"));
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:04:02.000Z"));
     assert!(session_of(fixture_run::MUSED_NODE_ID)
         .get("agent_role")
         .is_none());
@@ -1976,9 +1975,9 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         &spans,
         &format!("rollup.{}.agent.pr-author", fixture_run::DRAFTED_NODE_ID),
     );
-    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
-    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
 
     // The re-asked node's two attempts are one category, and it covers both.
@@ -1987,7 +1986,7 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         &format!("rollup.{}.agent.worker", fixture_run::RETRIED_NODE_ID),
     );
     assert_eq!(retried["count"], json!(2));
-    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:01.000Z"));
+    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:02.000Z"));
     assert_eq!(retried["ended_at"], json!("2026-08-07T12:01:30.000Z"));
 
     // Every node of this run dispatched a worker, and every one of them is in the
@@ -20720,4 +20719,63 @@ fn repeated_journal_identities_count_once_on_both_timeline_scopes() {
         };
         assert_eq!(read(original.address), read(repeated.address), "{query}");
     }
+}
+
+#[test]
+fn recorded_sessions_use_their_own_records_and_the_run_ends_at_settlement() {
+    let corpus = fixture_run::recorded_timeline();
+    let records = corpus["records"].as_array().expect("records");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+    });
+    let run = corpus["run_id"].as_str().expect("run");
+    let node = corpus["node"].as_str().expect("node");
+    let read = |query| {
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?{query}"),
+        )
+        .json()
+    };
+    let node_timeline = read(format!("scope=node&node={node}"));
+    let overall = read("scope=run".to_owned());
+    for role in ["worker", "pr-author"] {
+        let stream = records
+            .iter()
+            .find(|e| e["kind"] == "member-started" && e["labels"]["member"] == role)
+            .expect("a recorded member")["stream"]
+            .as_str()
+            .expect("stream");
+        let own: Vec<&Value> = records.iter().filter(|e| e["stream"] == stream).collect();
+        let first = own
+            .iter()
+            .map(|e| e["ts"].as_str().expect("timestamp"))
+            .min()
+            .expect("first");
+        let last = own
+            .iter()
+            .map(|e| e["ts"].as_str().expect("timestamp"))
+            .max()
+            .expect("last");
+        for timeline in [&node_timeline, &overall] {
+            let span = timeline["spans"]
+                .as_array()
+                .expect("spans")
+                .iter()
+                .find(|s| s["agent_role"] == role)
+                .expect("session lane");
+            assert_eq!(span["started_at"], first, "{role}: {span}");
+            assert_eq!(span["ended_at"], last, "{role}: {span}");
+        }
+    }
+    let end = &records
+        .iter()
+        .find(|e| e["kind"] == "node-settled")
+        .expect("settlement")["ts"];
+    assert_eq!(overall["spans"][0]["ended_at"], *end);
+    let late = events_on(&overall)
+        .into_iter()
+        .find(|e| e["kind"] == "completion-requested")
+        .expect("late marker");
+    assert!(late["at"].as_str() > end.as_str());
 }

@@ -7438,3 +7438,36 @@ fn review_loop_lines_of(corpus: &Value) -> Vec<String> {
     }
     journal.lines
 }
+
+/// A public-repository worker and its change-request drafter recorded on this
+/// host. The corpus retains producer timestamps and identities, including relays.
+pub fn recorded_timeline() -> Value {
+    serde_json::from_str(include_str!(
+        "../../apps/dag-ui-e2e/fixtures/timeline-recorded.json"
+    ))
+    .expect("the recorded timeline corpus")
+}
+
+/// Write the recorded corpus without restamping or renumbering its journal.
+pub fn write_recorded_timeline(root: &Path) -> PathBuf {
+    let corpus = recorded_timeline();
+    let dir = root.join(corpus["run_id"].as_str().expect("run id"));
+    fs::create_dir_all(&dir).expect("run directory");
+    for name in ["launch", "plan"] {
+        fs::write(dir.join(format!("{name}.json")), pretty(&corpus[name])).expect("record");
+    }
+    let mut lines = String::new();
+    for record in corpus["records"].as_array().expect("records") {
+        lines.push_str(&record.to_string());
+        lines.push('\n');
+        if record["kind"] == "member-started" {
+            declare_graph(
+                root,
+                record["stream"].as_str().expect("stream"),
+                &[record["labels"]["member"].as_str().expect("member")],
+            );
+        }
+    }
+    fs::write(dir.join("events.jsonl"), lines).expect("journal");
+    dir
+}

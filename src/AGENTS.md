@@ -89,17 +89,11 @@ anything new here is a proposal to make upstream first.
   a reading rather than a download: a node that dispatched two hundred of them is
   two hundred spans at `scope=node` and one per category at `scope=run`. The SDK
   counts neither.
-- **The interval one dispatched session ran over.** The journal brackets a
-  *node*, not a session: `payload::session_interval` reads one from the attempt
-  that ran it — the `node-dispatched` it appeared after, closed by the next
-  dispatch, the settlement, the `session-closed` or the session's own
-  `member-settled`, joined by the `{stream}.{member}` rule schema 14 already
-  resolves a report by. Every session of one attempt opens at that attempt's
-  dispatch, including one the attempt reached only later: the run records no
-  boundary between the members inside an attempt, and a session opened from its
-  own first word is not bracketed by anything the run said. A node re-asked in
-  place otherwise reads as having run its attempts over one window, which cannot
-  say what was running at a given moment.
+- **The interval one dispatched session ran over.** `payload::session_interval`
+  uses the session's own first and last records, joining member records by
+  `{stream}.{member}` and graph records through their stream. A settlement or
+  external closure proves the session ended without extending its work into
+  another session's time. Both timeline scopes use this reading.
 - **The party a record's session ran under.** `transportRoleSchema` is a pair
   with `agentRoleSchema`, and nothing stamps the transport half as such;
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`

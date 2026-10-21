@@ -290,7 +290,7 @@
       "id": "dispatch.node-scope-1786925518098-3163646.worker",
       "kind": "dispatch",
       "label": "node-scope-1786925518098-3163646.worker",
-      "started_at": "2026-08-07T12:00:02.000Z",
+      "started_at": "2026-08-07T12:00:03.000Z",
       "ended_at": "2026-08-07T12:00:05.500Z",
       "parent_id": "node.contract-interface",
       "node_id": "contract-interface",

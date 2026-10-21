@@ -193,7 +193,14 @@ with the same **`(stream, seq)`** identifies one record, even when a continued
 session relays it again. The first occurrence supplies the record; duplicates
 contribute neither additional events nor additional spans or counts in either
 timeline scope. Canonicalization precedes transcript numbering, so repeating a
-record cannot change a timeline event's transcript address. No field is removed.
+record cannot change a timeline event's transcript address. Event arrays are ordered
+by each record's timestamp, with journal position breaking ties. Session lanes
+open at their own first record and close at their own last record once a closure
+is recorded. Both scopes use those same bounds. A run whose nodes all settled
+ends at its last node settlement; otherwise a recorded run stop, host shutdown
+or final driver exit ends it. Open spans close at that execution boundary.
+Commands recorded later remain events, without extending execution or idle.
+No field is removed.
 
 
 **A node's result carries the release that carried its work.** `graph.node_results[NODE]` gains **`release`** — `{identity, target, style?, version}` — beside the `pr` it already carries, and it is **absent**, never null, for a node the run recorded no release for, exactly as `pr` is absent for a node that opened no change request. It is the newest `release-observed` on the merged store whose `landing_commit` is the commit that node's work landed as, which is also the `commit` its publication is served with. **The join is that commit and never a node label**: a release is observed long after the dispatch that produced the work has settled and outside any session of it, so nothing is there to stamp that envelope with a node, and a label lookup would find nothing on every run. Where such an envelope does happen to carry one it is corroboration and nothing is filtered on it. `style` alone is optional, because an envelope written before that field existed carries none. A record naming no identity, no target or no version is served no release at all: those three are what a release *is*, and this API does not invent the rest. Nothing here computes a release, polls a registry or runs a probe — this is a read surface, and everything about how a release is discovered belongs to the producers above.

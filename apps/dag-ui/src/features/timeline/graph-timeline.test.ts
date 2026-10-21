@@ -192,3 +192,19 @@ describe("the whole graph on one clock", () => {
     expect(graph.line.items).toHaveLength(1);
   });
 });
+
+test("late commands remain markers outside a settled execution range", () => {
+  const timeline = structuredClone(settled);
+  const root = timeline.spans.find((span) => span.kind === "run");
+  if (root === undefined || root.ended_at === null) throw new Error("settled root");
+  const end = Date.parse(root.ended_at);
+  const late = new Date(end + 41 * 60 * 60 * 1000).toISOString();
+  root.events.push({ id: "late-completion", kind: "completion-requested", at: late });
+  timeline.spans.push({ id: "late-publication", kind: "publication", label: "late",
+    started_at: late, ended_at: late, events: [] });
+  const graph = graphTimeline(timeline, settledNodes);
+  expect(graph.range[1]).toBe(end);
+  expect(graph.line.markers.find((m) => m.id === "late-completion")?.at).toBe(Date.parse(late));
+  expect(graph.line.items.every((item) => item.end <= end)).toBe(true);
+  expect(graph.rows.flatMap((row) => row.items).every((item) => item.end <= end)).toBe(true);
+});

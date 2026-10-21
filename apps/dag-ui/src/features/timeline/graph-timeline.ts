@@ -202,6 +202,11 @@ function runRange(timeline?: RunTimeline): readonly [number, number] {
   const starts = spans.map((span) => Date.parse(span.started_at));
   if (starts.length === 0) return [0, 1];
   const start = Math.min(...starts);
+  const root = spans.find((span) => span.kind === "run");
+  if (root?.ended_at !== undefined && root.ended_at !== null) {
+    const end = Date.parse(root.ended_at);
+    return [start, end > start ? end : start + 1];
+  }
   const recorded = Math.max(
     ...spans.map((span) =>
       span.ended_at === null
@@ -237,8 +242,9 @@ function row({
   const work = spans.flatMap((span): TimelineItem<GraphSegment>[] => {
     const lane = spanLane(span);
     if (lane === null) return [];
-    const start = Date.parse(span.started_at);
-    const end = plottedEnd(span, lane, start, range);
+    const start = Math.max(Date.parse(span.started_at), range[0]);
+    if (start > range[1]) return [];
+    const end = Math.min(plottedEnd(span, lane, start, range), range[1]);
     const conversationId =
       span.reference?.kind === "conversation"
         ? span.reference.value
