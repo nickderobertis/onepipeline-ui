@@ -7,7 +7,7 @@ import { App } from "./App";
 beforeEach(() => window.history.replaceState(null, "", "/?list=runs"));
 afterEach(cleanup);
 
-test("offers only host shutdown, validates grace, and shows the host report without reading unwatched", async () => {
+function setupShutdown() {
   const sent: string[] = [];
   const { client } = telemetryHarness((url, init) => {
     if (url.pathname === "/api/v2/unwatched")
@@ -32,26 +32,44 @@ test("offers only host shutdown, validates grace, and shows the host report with
     return defaultResponder(url);
   });
   render(<App client={client} />);
-  const control = await screen.findByRole("button", {
-    name: "Shut down the entire host",
-  });
+  return sent;
+}
+
+async function openShutdown() {
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Shut down the entire host" }),
+  );
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByRole("list", { name: "Runs on this host" });
+  return dialog;
+}
+
+test("offers only host shutdown and cancels without sending", async () => {
+  const sent = setupShutdown();
+  const dialog = await openShutdown();
   expect(
     screen.queryByRole("button", { name: "Shut down all my runs" }),
   ).not.toBeInTheDocument();
-  await userEvent.click(control);
-  let dialog = await screen.findByRole("dialog");
-  await within(dialog).findByRole("list", { name: "Runs on this host" });
   await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   expect(sent).toEqual([]);
-  await userEvent.click(control);
-  dialog = await screen.findByRole("dialog");
-  await within(dialog).findByRole("list", { name: "Runs on this host" });
+});
+
+test("rejects fractional grace before sending host shutdown", async () => {
+  const sent = setupShutdown();
+  const dialog = await openShutdown();
   const grace = within(dialog).getByRole("spinbutton");
   await userEvent.clear(grace);
   await userEvent.type(grace, "1.5");
   expect(
     within(dialog).getByRole("button", { name: "Shut down the host" }),
   ).toBeDisabled();
+  expect(sent).toEqual([]);
+});
+
+test("sends host shutdown with grace and shows its report", async () => {
+  const sent = setupShutdown();
+  const dialog = await openShutdown();
+  const grace = within(dialog).getByRole("spinbutton");
   await userEvent.clear(grace);
   await userEvent.type(grace, "2");
   await userEvent.click(
