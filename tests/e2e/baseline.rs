@@ -258,16 +258,11 @@ fn the_comparison_asks_for_every_route_the_contract_defines() {
         .map(|(route, _)| route)
         .collect();
     for route in routes::TABLE {
-        // The two streams have no single response to compare: each stays open
-        // rather than answering once, and what the event stream opens with is
-        // the run list this already asks for. `tests/e2e/server.rs` drives
-        // both. A route that writes to the run is not a comparison either: what
-        // it serves is what the engine did, and asking two servers to do it is
-        // two stops or two adoptions of one run.
-        if route.path == routes::EVENTS
-            || route.path == routes::RUN_WATCH
-            || route.method == routes::Method::Post
-        {
+        // The event stream stays open rather than answering once, and opens
+        // with the run list this already asks for. Server journeys cover it.
+        // A write route answers what the engine did; asking two servers to do
+        // it would perform the operation twice.
+        if route.path == routes::EVENTS || route.method == routes::Method::Post {
             continue;
         }
         let route = route.path;

@@ -1,10 +1,8 @@
 import {
-  type Adopted,
   API_V2_PATHS,
   API_V2_QUERY,
   API_V2_TIMELINE_SCOPES,
   type ArtifactContent,
-  adoptedSchema,
   apiErrorSchema,
   artifactContentSchema,
   type ChannelNext,
@@ -51,10 +49,6 @@ import {
   surfacedSchema,
   type Unwatched,
   unwatchedSchema,
-  type WatchEventName,
-  type WatchFrameData,
-  watchEventNameSchema,
-  watchFrameDataSchema,
 } from "@onepipeline-ui/dag-model";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] client.e2e.test.ts crosses a real loopback HTTP
@@ -94,35 +88,6 @@ export interface SubscribeOptions {
    */
   readonly filter?: string;
   readonly onEvent: (event: TelemetryEvent) => void;
-  readonly onError?: (error: unknown) => void;
-}
-
-/**
- * One frame of a held watch: the server's cursor within the connection, which of
- * the three frames it is, and the engine's own record for it.
- */
-export interface WatchFrame {
-  readonly id: string;
-  readonly event: WatchEventName;
-  readonly data: WatchFrameData;
-}
-
-export interface WatchOptions {
-  readonly runId: string;
-  /**
-   * What ends the wait — the CLI's own conditions, repeatable — beside the run
-   * finishing and nothing driving it. Omitted, the server defaults to `surface`.
-   */
-  readonly until?: readonly string[];
-  /** Whole seconds, `0` to read once and return, or `"none"` to never give up. */
-  readonly timeout?: number | "none";
-  /** The heartbeat interval in whole seconds, `0` to turn it off. */
-  readonly tick?: number;
-  /** Which events the stream reports, as a profile name or an inline spec. */
-  readonly filter?: string;
-  /** Resume from the cursor an earlier watch returned. */
-  readonly cursor?: string;
-  readonly onFrame: (frame: WatchFrame) => void;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -436,33 +401,7 @@ export class TelemetryClient {
     );
   }
 
-  /**
-   * The engine's host shutdown over one run, as the acting session: each live
-   * dispatch asked to stop and given `grace` seconds, the run torn down, and every
-   * branch its records name pushed. A run another session owns is refused
-   * `409 not_owner` before anything is signalled.
-   *
-   * The answer is the engine's report whatever it found — read `complete`, never
-   * the status, for whether it all went as asked. The request is held for as long
-   * as the grace runs, which is minutes by default.
-   */
-  async shutdownRun(
-    runId: string,
-    options: ShutdownOptions = {},
-  ): Promise<ShutdownReport> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.runShutdown(runId)),
-      shutdownReportSchema.parse,
-      json("POST", shutdownBody(options)),
-    );
-  }
-
-  /**
-   * The engine's host shutdown over every run the acting session owns (`mine`),
-   * or over every run on the host whoever owns it (`host`), on the terms
-   * {@link shutdownRun} states.
-   */
+  /** Shut down the entire host and read its report, including incomplete teardown. */
   async shutdown(
     scope: HostShutdownScope,
     options: ShutdownOptions = {},
@@ -472,55 +411,6 @@ export class TelemetryClient {
       shutdownReportSchema.parse,
       json("POST", { scope, ...shutdownBody(options) }),
     );
-  }
-
-  /** Adopt a run nothing is driving; the answer names the retained driver's pid. */
-  async adopt(runId: string): Promise<Adopted> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.adopt(runId)),
-      adoptedSchema.parse,
-      {
-        method: "POST",
-      },
-    );
-  }
-
-  /**
-   * Hold `GET .../watch` as a server-sent stream. While it is held the server is
-   * the run's registered watcher; the `returned` frame ends the wait and this
-   * closes the source on it, so the browser does not reopen a wait that is over.
-   */
-  watch(options: WatchOptions): TelemetrySubscription {
-    requireOpaqueId(options.runId, "run ID");
-    const url = this.#url(API_V2_PATHS.watch(options.runId));
-    for (const condition of options.until ?? [])
-      url.searchParams.append(API_V2_QUERY.until, condition);
-    if (options.timeout !== undefined)
-      url.searchParams.set(API_V2_QUERY.timeout, String(options.timeout));
-    if (options.tick !== undefined)
-      url.searchParams.set(API_V2_QUERY.tick, String(options.tick));
-    if (options.filter !== undefined)
-      url.searchParams.set(API_V2_QUERY.filter, options.filter);
-    if (options.cursor !== undefined)
-      url.searchParams.set(API_V2_QUERY.cursor, options.cursor);
-    const source = this.#open(url);
-    for (const eventName of watchEventNameSchema.options) {
-      source.addEventListener(eventName, (rawEvent) => {
-        try {
-          // DOM's EventListener callback erases the MessageEvent subtype even though
-          // EventSource listeners for named server events always receive one.
-          const event = rawEvent as MessageEvent<string>;
-          const data = watchFrameDataSchema.parse(JSON.parse(event.data));
-          if (eventName === "returned") source.close();
-          options.onFrame({ id: event.lastEventId, event: eventName, data });
-        } catch (error) {
-          options.onError?.(error);
-        }
-      });
-    }
-    source.onerror = (error) => options.onError?.(error);
-    return { close: () => source.close() };
   }
 
   /** The runs the acting session owns that nothing is watching. */

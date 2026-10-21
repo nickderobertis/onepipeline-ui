@@ -145,7 +145,8 @@ pub const API_VERSION: u32 = 2;
 /// the same value; the version moves because a client that has never seen the
 /// lists shows a node about to dispatch under another model or harness config
 /// as one dispatching under the graph as written.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
+/// Schema 22 adds the exact timeline `event_id` to each live-activity entry.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 22;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -309,15 +310,8 @@ pub mod routes {
     pub const RUN_ATTEST: &str = "/api/v2/runs/{run}/attest";
     /// End the run and its dispatch tree: `verbs::stop`.
     pub const RUN_STOP: &str = "/api/v2/runs/{run}/stop";
-    /// Retain this binary as a fresh driver: `verbs::adopt`.
-    pub const RUN_ADOPT: &str = "/api/v2/runs/{run}/adopt";
-    /// Shut one run down, gently: `verbs::shutdown` at run scope.
-    pub const RUN_SHUTDOWN: &str = "/api/v2/runs/{run}/shutdown";
-    /// Shut down every run this session owns, or the whole host:
-    /// `verbs::shutdown` at `mine` or `host` scope.
+    /// Shut down the entire host through the SDK.
     pub const SHUTDOWN: &str = "/api/v2/shutdown";
-    /// A watch on the run as a server-sent event stream: `verbs::watch`.
-    pub const RUN_WATCH: &str = "/api/v2/runs/{run}/watch";
     /// Which of the acting session's runs nothing is watching: `verbs::Unwatched::within`,
     /// under the wake budget the server's environment sets.
     pub const UNWATCHED: &str = "/api/v2/unwatched";
@@ -391,7 +385,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 30;
+    pub const COUNT: usize = 27;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -411,10 +405,7 @@ pub mod routes {
         post(RUN_CHANNEL_SURFACE),
         post(RUN_ATTEST),
         post(RUN_STOP),
-        post(RUN_ADOPT),
-        post(RUN_SHUTDOWN),
         post(SHUTDOWN),
-        get(RUN_WATCH),
         get(UNWATCHED),
         get(HOST),
         get(RUN_STATUS),
@@ -711,90 +702,6 @@ pub struct EventFrame {
     pub data: Value,
 }
 
-/// The three frames `GET /api/v2/runs/{run}/watch` streams, named as the SSE
-/// `event:` line names them.
-///
-/// One per variant of the SDK's own `WatchFrame`: a meaningful event, a
-/// heartbeat, and the ending that closes the stream. The data beside each is
-/// the machine record `onepipeline watch` prints for that frame, rendered by
-/// the SDK, so a client of this stream and a script reading that verb read one
-/// shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WatchEvent {
-    /// One meaningful event of the run.
-    Event,
-    /// Nothing happened for a whole tick, and the watch is still there.
-    Tick,
-    /// The wait is over, and this says why; the stream closes after it.
-    Returned,
-}
-
-impl WatchEvent {
-    /// The name this frame is written as in an SSE `event:` line.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Event => "event",
-            Self::Tick => "tick",
-            Self::Returned => "returned",
-        }
-    }
-}
-
-/// One frame of `GET /api/v2/runs/{run}/watch`.
-///
-/// `data` is the machine record the SDK renders for the frame — a bare
-/// [`Value`], because the record's shape is the engine's own and this crate
-/// projects it rather than restating it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WatchFrame {
-    /// The server-issued cursor within the connection, from zero.
-    pub id: u64,
-    /// Which kind of frame this is.
-    pub event: WatchEvent,
-    /// The engine's own record for it.
-    pub data: Value,
-}
-
-/// The query of `GET /api/v2/runs/{run}/watch`: the shape of the wait, as the
-/// CLI's own flags take it.
-///
-/// Every field is the SDK's own type where the SDK declares one — a condition
-/// and a timeout are parsed by the engine's parsers, so a spelling the CLI
-/// refuses is refused here in the same words — and the filter is this crate's,
-/// resolved against the run being watched.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WatchQuery {
-    /// What ends the wait, beside the run finishing and nothing driving it.
-    pub until: Vec<onepipeline::cli::WatchUntil>,
-    /// How long to wait before giving up.
-    pub timeout: onepipeline::cli::WatchTimeout,
-    /// How long a silence may last before the stream says it is still there;
-    /// zero turns the heartbeat off.
-    pub tick: std::time::Duration,
-    /// Which events are reported.
-    pub filter: Option<FilterSpec>,
-    /// The cursor an earlier watch returned, to resume from. Placed against the
-    /// run by the engine, which is the one reading that decides it.
-    // llmlint: ignore[invalid_states_unrepresentable] the token is external input the engine's `WatchRequest` takes as a `String` for the reason the engine states on that field: whether it is a cursor is decided by placing it against *this run's journal*, which only the engine's own read can do, and a type here that claimed it without that read would be a second reading of a token whose one reading is the engine's. The boundary this crate keeps is the bound and the character set in `server::watch_query`.
-    pub cursor: Option<String>,
-}
-
-impl Default for WatchQuery {
-    fn default() -> Self {
-        Self {
-            until: vec![onepipeline::cli::WatchUntil::default()],
-            timeout: onepipeline::cli::WatchTimeout::Bounded(
-                onepipeline::cli::DEFAULT_WATCH_TIMEOUT_SECONDS,
-            ),
-            tick: std::time::Duration::from_secs(onepipeline::cli::DEFAULT_WATCH_TICK_SECONDS),
-            filter: None,
-            cursor: None,
-        }
-    }
-}
-
 /// The query of `POST /api/v2/runs/{run}/channel/next`: the profile the
 /// answered events are shaped through.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -844,33 +751,12 @@ pub struct StopRequest {
     pub force: bool,
 }
 
-/// The body of `POST /api/v2/runs/{run}/shutdown`.
-///
-/// Empty or absent is the default shutdown — the engine's own default grace,
-/// nothing forced — exactly as an empty body on `stop` is a stop that forces
-/// nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RunShutdownRequest {
-    /// How long, in integer seconds, a dispatch has to end itself after it is
-    /// asked. Omitted, the engine's own default; `0` is the engine's force path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grace: Option<u64>,
-    /// Skip the interrupt and the wait and go straight to the teardown.
-    /// Omitted, `false`.
-    #[serde(default)]
-    pub force: bool,
-}
-
 /// Which runs `POST /api/v2/shutdown` acts on.
 ///
-/// The engine's two scopes that name no one run. One run is the run route's,
-/// so a body cannot name a run here and a path there.
+/// The host is the only scope this API accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ShutdownScope {
-    /// Every run the acting session owns, as `runs --mine` selects them.
-    Mine,
     /// Every run under the runs root, whoever owns it.
     Host,
 }
@@ -882,10 +768,10 @@ pub struct ShutdownRequest {
     /// Which runs. Required: a shutdown that named none is refused before
     /// anything is signalled, as the engine's own verb refuses one.
     pub scope: ShutdownScope,
-    /// As [`RunShutdownRequest::grace`].
+    /// How long, in integer seconds, to allow dispatches to end themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grace: Option<u64>,
-    /// As [`RunShutdownRequest::force`].
+    /// Skip the interrupt and wait. Omitted, false.
     #[serde(default)]
     pub force: bool,
 }

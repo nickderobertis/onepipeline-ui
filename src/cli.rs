@@ -6,16 +6,6 @@
 //! only exists once the directory has been read, and act as one [`SessionId`],
 //! which only exists once the value has been checked.
 //!
-//! Beside `serve` the binary carries the engine's two hidden driver verbs,
-//! because `POST /api/v2/runs/{run}/adopt` retains **this executable** as the
-//! run's driver: `drive-run RUN --adopt` is the process the SDK spawns, and
-//! `drive` is what that driver spawns for each dispatch once the engine has
-//! recorded that this executable answers its command line. Both are the
-//! engine's own argument shapes, parsed by the engine's own parser and run
-//! through its own entry point, so the driver an adoption leaves behind runs the
-//! engine this binary links and nothing else — the process model
-//! `docs/contract.md` states.
-
 use std::fs;
 use std::net::SocketAddr;
 use std::num::NonZeroU64;
@@ -46,50 +36,11 @@ pub struct Cli {
 }
 
 /// The subcommands `onepipeline-api` accepts.
-#[allow(
-    clippy::large_enum_variant,
-    reason = "parsed once per process, so the size of the engine's own driver arguments \
-              costs nothing a box would save; boxing the variant would change the shape of \
-              a public enum a consumer matches on"
-)]
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
     /// Serve the read API described in docs/contract.md.
     Serve(ServeArgs),
-    /// Drive one run's engine loop in this process, adopting it if asked.
-    ///
-    /// Not part of the documented surface and hidden from `--help`: it is the
-    /// process `POST /api/v2/runs/{run}/adopt` retains as the run's driver,
-    /// spelled exactly as the engine spells its own — `drive-run RUN --adopt` —
-    /// so the driver an adoption leaves behind is this executable running the
-    /// engine it links. Nothing but this binary's own adopt route spells it.
-    #[command(hide = true, name = DRIVE_RUN_VERB)]
-    DriveRun(onepipeline::cli::DriveRunArgs),
-    /// Drive one agent graph in this process, relaying its envelopes as NDJSON.
-    ///
-    /// Hidden for the same reason: once the engine has recorded that this
-    /// executable answers its command line, a dispatch the retained driver gives
-    /// a process of its own is this executable at this verb. It names no run —
-    /// it is a graph and a task, exactly as the engine's own takes them.
-    #[command(hide = true, name = DRIVE_VERB)]
-    Drive(onepipeline::cli::DriveArgs),
 }
-
-/// The engine's hidden retained-driver verb, as it spells it on a command line.
-///
-/// Restated because the engine declares the name privately and spells it on the
-/// command line it builds for the process it retains. The drift gate is
-/// `tests/e2e/cli.rs`'s `the_hidden_driver_verbs_answer_as_the_engines_own_do`,
-/// which hands this binary and the provisioned `onepipeline` the same verb and
-/// holds their answers together: a spelling the engine no longer answers fails
-/// on the engine's side of that comparison.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the one source is a private `const` in the engine (`engine::DRIVE_VERB`, `agentgraph::DRIVE_VERB`), so there is no declaration to import; the journey named above is the drift gate, over the engine's own binary.
-pub const DRIVE_RUN_VERB: &str = "drive-run";
-
-/// The engine's hidden per-dispatch verb, on the same terms and under the same
-/// gate.
-// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] as `DRIVE_RUN_VERB` above: the engine declares it privately, and the same journey drives both binaries at this verb.
-pub const DRIVE_VERB: &str = "drive";
 
 impl Command {
     /// The subcommand's name as a user typed it.
@@ -97,8 +48,6 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Serve(_) => "serve",
-            Self::DriveRun(_) => DRIVE_RUN_VERB,
-            Self::Drive(_) => DRIVE_VERB,
         }
     }
 }

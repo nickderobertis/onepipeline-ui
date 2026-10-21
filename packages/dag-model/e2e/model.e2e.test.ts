@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This verifies the package export as a consumer uses it.
 import {
-  adoptedSchema,
   channelNextSchema,
   channelQueueSchema,
   conversationSchema,
@@ -9,6 +8,7 @@ import {
   dagConversationSchema,
   graphStateSchema,
   launchProvenanceSchema,
+  liveActivitySchema,
   nodeConversationsSchema,
   nodeTelemetrySchema,
   parseRunDetail,
@@ -37,8 +37,6 @@ import {
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
   unwatchedSchema,
-  watchEventNameSchema,
-  watchFrameDataSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "vitest";
 import { z } from "zod";
@@ -127,6 +125,25 @@ test("a package consumer validates an API response through the public export", (
       runs: [],
     }).runs,
   ).toEqual([]);
+  const activity = {
+    node: "dashboard",
+    at: 1786104004500,
+    kind: "tool_use",
+    name: "Bash",
+    detail: "just check",
+    events: 1,
+    event_id: "e14",
+  };
+  expect(
+    liveActivitySchema.parse(JSON.parse(JSON.stringify(activity))),
+  ).toEqual(activity);
+  const legacy = JSON.parse(
+    JSON.stringify({ ...activity, event_id: undefined }),
+  );
+  expect(liveActivitySchema.parse(legacy)).not.toHaveProperty("event_id");
+  expect(() =>
+    liveActivitySchema.parse({ ...activity, event_id: "" }),
+  ).toThrow();
 });
 
 test("the checked-in v2 run-detail contract parses and v1 is rejected", async () => {
@@ -890,7 +907,6 @@ test("the projects and every wrapped verb this repository serves parse through t
   );
   expect(surfaced.state).toBe("queued");
 
-  // Stopping and adopting.
   const stopped = stoppedSchema.parse(await served("run-stop.json"));
   expect(stopped).toMatchObject({
     stopped: true,
@@ -898,42 +914,6 @@ test("the projects and every wrapped verb this repository serves parse through t
     forced: false,
     teardown: "elsewhere",
   });
-  expect(adoptedSchema.parse(await served("run-adopt.json")).pid).toBe(4242);
-
-  // The watch stream's three frames, each named by its SSE event and carrying
-  // the record the engine prints for it.
-  const frames = z
-    .array(
-      z.object({
-        id: z.number(),
-        event: watchEventNameSchema,
-        data: watchFrameDataSchema,
-      }),
-    )
-    .parse(await served("run-watch.json"));
-  expect(frames.map((frame) => frame.event)).toEqual([
-    "event",
-    "event",
-    "returned",
-  ]);
-  const ending = frames.at(-1)?.data;
-  expect(ending?.watch).toBe("return");
-  if (ending?.watch === "return") {
-    expect(ending.condition).toBe("settled");
-    expect(ending.cursor).toMatch(/^1:/);
-    expect(ending.unread.oldest_seconds).toBeNull();
-  }
-  expect(
-    watchFrameDataSchema.parse({
-      watch: "heartbeat",
-      run_id: "run-20260807-a1b2c3",
-      unread: {
-        count: 1,
-        oldest_seconds: 4,
-        kinds: [{ kind: "finding", count: 1 }],
-      },
-    }).watch,
-  ).toBe("heartbeat");
   expect(unwatchedSchema.parse(await served("unwatched.json"))).toMatchObject({
     reported: [],
     unresolved: [],

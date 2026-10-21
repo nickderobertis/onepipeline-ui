@@ -23,6 +23,12 @@ pub enum ApiError {
     /// way must not meet a framework's own 404 body when it mistypes a path.
     #[error("no such route")]
     NoSuchRoute,
+    /// A browser supervision route removed from this release.
+    #[error("route {0} was removed from API 2 at schema 22; serving binary release {version}", version = env!("CARGO_PKG_VERSION"))]
+    RemovedRoute(String),
+    /// Shutdown is restricted to the host.
+    #[error("shutdown scope must be host, got {0}")]
+    RemovedShutdownScope(String),
     /// A query parameter is not one this route accepts.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
@@ -179,6 +185,8 @@ impl ApiError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NoSuchRoute => "no_such_route",
+            Self::RemovedRoute(_) => "removed_route",
+            Self::RemovedShutdownScope(_) => "removed_shutdown_scope",
             Self::InvalidRequest(_) => "invalid_request",
             Self::InvalidRunId(_) => "invalid_run_id",
             Self::InvalidNodeId(_) => "invalid_node_id",
@@ -212,6 +220,7 @@ impl ApiError {
     #[must_use]
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::RemovedShutdownScope(_) => StatusCode::BAD_REQUEST,
             Self::InvalidRequest(_)
             | Self::InvalidRunId(_)
             | Self::InvalidNodeId(_)
@@ -221,7 +230,8 @@ impl ApiError {
             | Self::InvalidProjectId(_)
             | Self::InvalidCorrelation(_)
             | Self::Refused(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::NoSuchRoute
+            Self::RemovedRoute(_)
+            | Self::NoSuchRoute
             | Self::RunNotFound(_)
             | Self::ProjectNotFound(_)
             | Self::ConversationNotFound(_)
