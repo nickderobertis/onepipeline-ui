@@ -20,6 +20,7 @@
       "{workspaceRoot}/scripts/ci-job.sh",
       "{workspaceRoot}/scripts/ci-cache-verdict.sh",
       "{workspaceRoot}/scripts/measure-cold-linux.sh",
+      "{workspaceRoot}/scripts/measure-cold-linux.d/**/*",
       "{workspaceRoot}/justfile"
     ]
   },

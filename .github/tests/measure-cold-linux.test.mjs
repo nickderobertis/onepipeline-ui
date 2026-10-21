@@ -453,6 +453,59 @@ test("a run whose trees rm cannot clear says which, and keeps the measured statu
   }
 });
 
+test("a fixture that applies but cannot be committed says git refused it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir, { gitFails: "commit" });
+    const run = measure(
+      [
+        "--commit",
+        "HEAD~1",
+        "--fixture",
+        "HEAD~1...HEAD",
+        "--workdir",
+        join(dir, "work"),
+      ],
+      dir,
+      d,
+    );
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stderr, /fatal: commit refused by the journey/);
+    assert.match(
+      run.stderr,
+      /could not commit the fixture HEAD~1\.\.\.HEAD on /,
+    );
+    assert.match(
+      run.stderr,
+      /^ACTION: if git says there is nothing to commit/m,
+    );
+    assert.ok(!existsSync(d.log), "nothing was provisioned");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the measurement's own Docker shim on PATH is refused rather than run in a loop", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir, { without: ["docker"] });
+    const run = measure(
+      ["--commit", "HEAD", "--workdir", join(dir, "work")],
+      dir,
+      d,
+      `${d.bin}:${join(ROOT, "scripts/measure-cold-linux.d")}:${process.env.PATH}`,
+    );
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(
+      run.stderr,
+      /the docker on PATH is this measurement's own shim/,
+    );
+    assert.ok(!existsSync(join(dir, "work")), "nothing was cloned");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a missing tool is named before anything is cloned", () => {
   const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
   try {
@@ -480,6 +533,7 @@ test("a call it cannot measure is refused before anything is cloned", () => {
     const work = join(dir, "work");
     for (const [args, reason] of [
       [[], /--commit is required/],
+      [["--commit"], /--commit needs a value/],
       [["--commit", "no-such-ref", "--workdir", work], /is not a commit/],
       [
         ["--commit", "HEAD", "--workdir", join(ROOT, "x")],

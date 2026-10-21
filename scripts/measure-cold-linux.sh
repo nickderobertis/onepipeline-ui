@@ -70,7 +70,7 @@ case "$workdir" in
 esac
 # Compared as the filesystem resolves it, symlinks and `..` included: this
 # script deletes and clones under it.
-resolved="$(realpath -m -- "$workdir")" || usage "--workdir '$workdir' does not resolve to a path"
+resolved="$(realpath -m -- "$workdir")"
 case "$resolved/" in
   "$root"/*) usage "--workdir '$workdir' is inside this checkout, whose target it would share" ;;
 esac
@@ -95,21 +95,22 @@ for tool in taskset docker git just; do
   command -v "$tool" >/dev/null || fail "$tool is not on PATH" "install $tool; this measures a Linux host with Docker"
 done
 docker_bin="$(command -v docker)"
+[ "$docker_bin" -ef "$root/scripts/measure-cold-linux.d/docker" ] \
+  && fail "the docker on PATH is this measurement's own shim" "take $root/scripts/measure-cold-linux.d off PATH, then re-run"
 
 clone="$workdir/$label"
 scratch="$workdir/$label-scratch"
-shims="$workdir/$label-shims"
 log="$workdir/$label.log"
 # Each is deleted below, so none may be this checkout or hold it, however the
 # filesystem resolves its name.
-for doomed in "$clone" "$scratch" "$shims"; do
+for doomed in "$clone" "$scratch"; do
   case "$root/" in
     "$(realpath -m -- "$doomed")"/*) usage "--workdir '$workdir' with --label '$label' names $doomed, which holds this checkout" ;;
   esac
 done
-rm -rf "$clone" "$scratch" "$shims" \
-  || fail "could not remove the last run's $clone, $scratch and $shims (rm's reason is above)" "make them writable, or pass another --label"
-mkdir -p "$workdir" "$scratch" "$shims" || fail "could not create $workdir" "make its parent writable, or pass another --workdir"
+rm -rf "$clone" "$scratch" \
+  || fail "could not remove the last run's $clone and $scratch (rm's reason is above)" "make them writable, or pass another --label"
+mkdir -p "$workdir" "$scratch" || fail "could not create $workdir" "make its parent writable, or pass another --workdir"
 
 git clone --quiet "$root" "$clone" || fail "could not clone $root into $clone" "free space on the filesystem holding $workdir"
 git -C "$clone" checkout --quiet -B measure "$sha" \
@@ -120,39 +121,15 @@ if [ -n "$fixture" ]; then
   git -C "$root" diff "$fixture" | git -C "$clone" apply --index \
     || fail "the fixture $fixture does not apply on $sha" "pick a fixture whose files $sha still has unchanged"
   git -C "$clone" -c user.name=measure -c user.email=measure@localhost commit --quiet -m "fixture: $fixture" \
-    || fail "the fixture $fixture changes nothing on $sha" "pick a fixture $sha does not already contain"
+    || fail "could not commit the fixture $fixture on $sha (git's reason is above)" "if git says there is nothing to commit, $sha already holds the fixture; otherwise fix what git names, then re-run"
 fi
 
-shim_failed() {
-  fail "could not write the Docker shim at $shims/docker" "check that $shims is writable and its filesystem has space, then re-run"
-}
-if ! cat >"$shims/docker" <<'SHIM'
-#!/usr/bin/env bash
-[ "${1:-}" = run ] || exec "$MEASURE_DOCKER" "$@"
-shift
-args=()
-while [ "$#" -gt 0 ]; do
-  if [ -n "$MEASURE_DEFAULT_WEIGHT" ]; then
-    case "$1" in
-      --cpu-shares) shift 2; continue ;;
-      --cpu-shares=*) shift; continue ;;
-    esac
-  fi
-  args+=("$1")
-  shift
-done
-exec "$MEASURE_DOCKER" run --cpuset-cpus="$MEASURE_CPUS" "${args[@]}"
-SHIM
-then
-  shim_failed
-fi
-chmod +x "$shims/docker" || shim_failed
 
 # No compiler cache anywhere: a hosted runner has none, and a host's
 # `build.rustc-wrapper` would otherwise reach the journeys that clear
 # RUSTC_WRAPPER from their own builds.
 run_env=(
-  "PATH=$shims:$PATH"
+  "PATH=$root/scripts/measure-cold-linux.d:$PATH"
   "MEASURE_DOCKER=$docker_bin"
   "MEASURE_CPUS=$cpus"
   "MEASURE_DEFAULT_WEIGHT=$default_weight"
@@ -175,7 +152,7 @@ provisioning_failed() {
   fail "'$1' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
 }
 env "${run_env[@]}" just bootstrap >"$provisioning" 2>&1 || provisioning_failed "just bootstrap"
-env "${run_env[@]}" PATH="$root/.tools/bin:$shims:$PATH" just release-tools >>"$provisioning" 2>&1 \
+env "${run_env[@]}" PATH="$root/.tools/bin:$root/scripts/measure-cold-linux.d:$PATH" just release-tools >>"$provisioning" 2>&1 \
   || provisioning_failed "just release-tools"
 
 rm -rf target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit \
@@ -184,18 +161,19 @@ started="$(date +%s)"
 status=0
 env "${run_env[@]}" taskset -c "$cpus" just ci-test-linux >"$log" 2>&1 || status=$?
 wall=$(($(date +%s) - started))
-nx="$(sed 's/\x1b\[[0-9;]*m//g' "$log" | sed -n 's/^ *Run duration: *//p' | tail -n1)"
+# An unreadable log leaves the summary's duration unknown rather than ending it.
+nx="$({ sed 's/\x1b\[[0-9;]*m//g' "$log" || true; } | sed -n 's/^ *Run duration: *//p' | tail -n1)"
 echo "measure-cold-linux: $label exit=$status wall=${wall}s nx=${nx:-unknown} log=$log"
 if [ "$status" -ne 0 ]; then
   echo "measure-cold-linux: 'just ci-test-linux' failed in the clone of $sha (exit $status); its last lines:" >&2
-  sed 's/\x1b\[[0-9;]*m//g' "$log" | tail -n 20 >&2
+  { sed 's/\x1b\[[0-9;]*m//g' "$log" || true; } | tail -n 20 >&2
   echo "ACTION: read $log for the failing task; a timing from a failed run is not a measurement, so fix it and re-run" >&2
 fi
 cd "$workdir"
 # The measured status is what this exits with; a cleanup that fails says so
 # and changes nothing about it.
-if [ -z "$keep" ] && ! rm -rf "$clone" "$scratch" "$shims"; then
-  echo "measure-cold-linux: could not remove $clone, $scratch and $shims after the run (rm's reason is above)" >&2
+if [ -z "$keep" ] && ! rm -rf "$clone" "$scratch"; then
+  echo "measure-cold-linux: could not remove $clone and $scratch after the run (rm's reason is above)" >&2
   echo "ACTION: remove them by hand before the next run with --label $label" >&2
 fi
 exit "$status"
