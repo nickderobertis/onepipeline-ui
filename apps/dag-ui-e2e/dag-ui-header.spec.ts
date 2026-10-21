@@ -37,8 +37,7 @@ async function currentActivity(origin: string, run: string) {
           .object({ activity: liveActivityListSchema })
           .parse(JSON.parse(data ?? "null")).activity;
         const latest = activity.at(-1);
-        if (latest?.event_id === undefined)
-          throw new Error("activity names its event");
+        if (latest === undefined) throw new Error("the stream lists activity");
         return latest;
       }
     }

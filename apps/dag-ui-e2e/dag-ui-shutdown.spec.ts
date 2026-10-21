@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { API_V2_PATHS } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -211,6 +213,40 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
   expect((await shutDownRuns(server)).sort()).toEqual(
     Object.values(runs).sort(),
   );
+});
+
+test("confirms an empty host shutdown after correcting an invalid grace", async ({
+  page,
+}) => {
+  server = await startServer();
+  const root = join(server.workspace, "runs");
+  rmSync(root, { recursive: true });
+  mkdirSync(root);
+  const sent = shutdownsSent(page);
+  await page.goto(`${server.origin}/?list=runs`);
+  await page.getByRole("button", { name: "Shut down the entire host" }).click();
+  const dialog = dialogOf(page);
+  await expect(dialog).toContainText("all 0 runs on this host");
+  await expect(
+    dialog.getByRole("list", { name: "Runs on this host" }),
+  ).toBeAttached();
+  await expect(dialog.getByRole("listitem")).toHaveCount(0);
+  const confirm = dialog.getByRole("button", { name: "Shut down the host" });
+  await setGrace(dialog, "-1", "seconds");
+  await expect(confirm).toBeDisabled();
+  expect(sent).toEqual([]);
+  await setGrace(dialog, "0", "seconds");
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(
+    page.getByRole("alert", { name: "Shutdown of the entire host report" }),
+  ).toContainText("Shutdown complete");
+  expect(sent).toEqual([
+    {
+      path: API_V2_PATHS.shutdown,
+      body: '{"scope":"host","grace":0,"force":false}',
+    },
+  ]);
 });
 
 // llmlint: ignore-block[e2e_not_mocked] nothing is doubled: the request is forwarded to the real `onepipeline-api serve` this journey started, the engine performs the real shutdown, and the bytes the browser reads are that server's own answer, fulfilled unchanged. What the route changes is *when* the browser receives it — the one condition this journey is about, which no corpus can produce on demand: a shutdown with nothing live to wait for answers in milliseconds, and one with a real grace to wait out answers in minutes.

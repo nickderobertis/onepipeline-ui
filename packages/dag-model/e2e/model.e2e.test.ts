@@ -140,7 +140,7 @@ test("a package consumer validates an API response through the public export", (
   const legacy = JSON.parse(
     JSON.stringify({ ...activity, event_id: undefined }),
   );
-  expect(liveActivitySchema.parse(legacy)).not.toHaveProperty("event_id");
+  expect(() => liveActivitySchema.parse(legacy)).toThrow();
   expect(() =>
     liveActivitySchema.parse({ ...activity, event_id: "" }),
   ).toThrow();

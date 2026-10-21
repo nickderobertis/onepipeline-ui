@@ -109,6 +109,7 @@ export function App({
   // recomputed here.
   const runs = telemetry.list?.runs ?? [];
   const selectedRunId = telemetry.runId;
+  const lastActivity = telemetry.activity.at(-1);
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
   const projects = useProjects(
@@ -257,25 +258,20 @@ export function App({
                   </>
                 )}
               </span>
-              {telemetry.activity.at(-1) !== undefined && (
+              {lastActivity !== undefined && (
                 <button
                   className="last-activity connection"
                   type="button"
-                  title={`${telemetry.activity.at(-1)?.node}: ${[telemetry.activity.at(-1)?.name, telemetry.activity.at(-1)?.detail].filter(Boolean).join(" ") || telemetry.activity.at(-1)?.kind}`}
+                  title={`${lastActivity.node}: ${[lastActivity.name, lastActivity.detail].filter(Boolean).join(" ") || lastActivity.kind}`}
                   onClick={() => {
-                    const activity = telemetry.activity.at(-1);
-                    if (activity === undefined) return;
-                    selection.selectNode(activity.node);
-                    selection.selectItem(activity.event_id);
+                    selection.selectNode(lastActivity.node);
+                    selection.selectItem(lastActivity.event_id);
                   }}
                 >
-                  {telemetry.activity.at(-1)?.node}:{" "}
-                  {[
-                    telemetry.activity.at(-1)?.name,
-                    telemetry.activity.at(-1)?.detail,
-                  ]
+                  {lastActivity.node}:{" "}
+                  {[lastActivity.name, lastActivity.detail]
                     .filter(Boolean)
-                    .join(" ") || telemetry.activity.at(-1)?.kind}
+                    .join(" ") || lastActivity.kind}
                 </button>
               )}
               <Button

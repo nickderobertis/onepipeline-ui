@@ -1589,7 +1589,7 @@ export const sseEventNameSchema = z.enum([
 export const sseEventDataSchema = arbitraryRecord;
 
 export interface LiveActivity {
-  event_id?: string;
+  event_id: string;
   node: string;
   step?: string;
   at: number;
@@ -1599,7 +1599,7 @@ export interface LiveActivity {
   events: number;
 }
 export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
-  event_id: z.string().min(1).optional(),
+  event_id: z.string().min(1),
   node: z.string().min(1),
   step: z.string().min(1).optional(),
   at: z.number().finite(),
