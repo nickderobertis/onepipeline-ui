@@ -99,6 +99,12 @@ clone="$workdir/$label"
 scratch="$workdir/$label-scratch"
 shims="$workdir/$label-shims"
 log="$workdir/$label.log"
+# Each is deleted below, so none may be this checkout or hold it.
+for doomed in "$clone" "$scratch" "$shims"; do
+  case "$root/" in
+    "$doomed"/*) usage "--workdir '$workdir' with --label '$label' names $doomed, which holds this checkout" ;;
+  esac
+done
 rm -rf "$clone" "$scratch" "$shims"
 mkdir -p "$workdir" "$scratch" "$shims" || fail "could not create $workdir" "make its parent writable, or pass another --workdir"
 

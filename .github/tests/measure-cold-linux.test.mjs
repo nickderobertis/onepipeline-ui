@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -24,11 +25,21 @@ const HEAD = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], {
   encoding: "utf8",
 }).trim();
 
-function doubles(dir, { jobStatus = 0, bootstrapStatus = 0 } = {}) {
+function doubles(
+  dir,
+  {
+    jobStatus = 0,
+    bootstrapStatus = 0,
+    toolsStatus = 0,
+    summary = true,
+    without = [],
+  } = {},
+) {
   const bin = join(dir, "bin");
   mkdirSync(bin);
   const log = join(dir, "calls");
   const write = (name, body) =>
+    without.includes(name) ||
     writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}\n`, {
       mode: 0o755,
     });
@@ -48,13 +59,15 @@ function doubles(dir, { jobStatus = 0, bootstrapStatus = 0 } = {}) {
       "  touch target/debug/unit .nx/cache/entry .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit",
       `  [ ${bootstrapStatus} -eq 0 ] || { echo "bootstrap: cannot reach the registry" >&2; exit ${bootstrapStatus}; }`,
       "fi",
+      `if [ "$1" = release-tools ] && [ ${toolsStatus} -ne 0 ]; then echo "release-tools: cannot install release-plz" >&2; exit ${toolsStatus}; fi`,
       'if [ "$1" = ci-test-linux ]; then',
       `  printf 'env RUSTC_WRAPPER=[%s] CARGO_BUILD_RUSTC_WRAPPER=[%s] SCRATCH=%s BASE=%s\\n' "\${RUSTC_WRAPPER-unset}" "\${CARGO_BUILD_RUSTC_WRAPPER-unset}" "$ONEPIPELINE_NODE_SCRATCH_DIR" "$ONEPIPELINE_UI_NX_BASE_SHA" >> '${log}'`,
       `  for left in target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit; do [ ! -e "$left" ] || printf 'left %s\\n' "$left" >> '${log}'; done`,
       `  printf 'head %s %s\\n' "$(git rev-parse HEAD^{tree})" "$(git log -1 --format=%s)" >> '${log}'`,
       "  docker run --rm --cpu-shares 4096 -v /x:/y image build",
+      "  docker run --cpu-shares=4096 image check",
       "  docker info",
-      '  echo "  Run duration:      1m 2s"',
+      summary ? '  echo "  Run duration:      1m 2s"' : "  true",
       `  [ ${jobStatus} -eq 0 ] || echo "Failed tasks: dag-ui:test" >&2`,
       `  exit ${jobStatus}`,
       "fi",
@@ -66,10 +79,10 @@ function doubles(dir, { jobStatus = 0, bootstrapStatus = 0 } = {}) {
 const git = (...args) =>
   execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim();
 
-function measure(args, dir, d) {
+function measure(args, dir, d, path = `${d.bin}:${process.env.PATH}`) {
   return spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${d.bin}:${process.env.PATH}` },
+    env: { ...process.env, PATH: path },
     cwd: dir,
   });
 }
@@ -110,6 +123,10 @@ test("a cold run is timed in a clone of the commit, with Docker pinned to the ru
       calls,
       /^docker run --cpuset-cpus=0-3 --rm --cpu-shares 4096 -v \/x:\/y image build$/m,
       "the wheel build's own weight is passed through",
+    );
+    assert.match(
+      calls,
+      /^docker run --cpuset-cpus=0-3 --cpu-shares=4096 image check$/m,
     );
     assert.match(calls, /^docker info$/m, "other commands pass untouched");
     assert.doesNotMatch(calls, /^left /m, "the timed run starts cold");
@@ -152,6 +169,7 @@ test("--default-cpu-weight drops the wheel build's weight, and the recipe's fail
       calls,
       /^docker run --cpuset-cpus=2-5 --rm -v \/x:\/y image build$/m,
     );
+    assert.match(calls, /^docker run --cpuset-cpus=2-5 image check$/m);
     assert.ok(existsSync(join(work, "w")), "--keep leaves the clone");
     assert.equal(
       execFileSync("git", ["-C", join(work, "w"), "rev-parse", "HEAD"], {
@@ -214,6 +232,14 @@ test("a fixture that does not apply, or a provisioning that fails, stops before 
     assert.match(applied.stderr, /the fixture HEAD~1\.\.\.HEAD does not apply/);
     assert.match(applied.stderr, /^ACTION: /m);
     assert.ok(!existsSync(d.log), "nothing was provisioned or timed");
+    const empty = measure(
+      ["--commit", "HEAD", "--fixture", "HEAD...HEAD", "--workdir", work],
+      dir,
+      d,
+    );
+    assert.equal(empty.status, 1, empty.stdout + empty.stderr);
+    assert.match(empty.stderr, /the fixture HEAD\.\.\.HEAD does not apply/);
+    assert.ok(!existsSync(d.log), "an empty fixture provisions nothing either");
 
     mkdirSync(join(dir, "b"));
     const broken = doubles(join(dir, "b"), { bootstrapStatus: 3 });
@@ -232,6 +258,110 @@ test("a fixture that does not apply, or a provisioning that fails, stops before 
     const calls = readFileSync(broken.log, "utf8");
     assert.doesNotMatch(calls, /release-tools|ci-test-linux/);
     assert.doesNotMatch(failed.stdout, /measure-cold-linux: p exit=/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failing release-tools stops before the timed run, and a log with no Nx summary says so", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const work = join(dir, "work");
+    mkdirSync(join(dir, "t"));
+    const tools = doubles(join(dir, "t"), { toolsStatus: 4 });
+    const failed = measure(
+      ["--commit", "HEAD", "--label", "r", "--workdir", work],
+      dir,
+      tools,
+    );
+    assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+    assert.match(failed.stderr, /'just release-tools' failed in the clone/);
+    assert.doesNotMatch(readFileSync(tools.log, "utf8"), /ci-test-linux/);
+
+    mkdirSync(join(dir, "s"));
+    const quiet = doubles(join(dir, "s"), { summary: false });
+    const run = measure(
+      ["--commit", "HEAD", "--label", "q", "--workdir", work],
+      dir,
+      quiet,
+    );
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(
+      run.stdout,
+      /^measure-cold-linux: q exit=0 wall=\d+s nx=unknown /m,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a workdir and label that name the checkout itself are refused before anything is deleted", () => {
+  // A checkout of its own, holding a copy of the script, so a refusal that
+  // regressed would delete this scratch tree rather than the repository.
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir);
+    const checkout = join(dir, "checkout");
+    mkdirSync(join(checkout, "scripts"), { recursive: true });
+    copyFileSync(SCRIPT, join(checkout, "scripts/measure-cold-linux.sh"));
+    for (const args of [
+      ["init", "--quiet"],
+      ["add", "-A"],
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@localhost",
+        "commit",
+        "--quiet",
+        "-m",
+        "c",
+      ],
+    ])
+      execFileSync("git", ["-C", checkout, ...args]);
+    const run = spawnSync(
+      "bash",
+      [
+        join(checkout, "scripts/measure-cold-linux.sh"),
+        "--commit",
+        "HEAD",
+        "--workdir",
+        dir,
+        "--label",
+        "checkout",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${d.bin}:${process.env.PATH}` },
+        cwd: dir,
+      },
+    );
+    assert.equal(run.status, 2, run.stdout + run.stderr);
+    assert.match(run.stderr, /names .*checkout, which holds this checkout/);
+    assert.ok(
+      existsSync(join(checkout, "scripts/measure-cold-linux.sh")),
+      "the checkout is still there",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a missing tool is named before anything is cloned", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir, { without: ["just"] });
+    const work = join(dir, "work");
+    const run = measure(
+      ["--commit", "HEAD", "--workdir", work],
+      dir,
+      d,
+      `${d.bin}:/usr/bin:/bin`,
+    );
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stderr, /just is not on PATH/);
+    assert.match(run.stderr, /^ACTION: install just/m);
+    assert.ok(!existsSync(work), "nothing was cloned");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -269,6 +399,17 @@ test("a call it cannot measure is refused before anything is cloned", () => {
       [
         ["--commit", "HEAD", "--workdir", `${ROOT}/target/../x`],
         /inside this checkout/,
+      ],
+      [
+        [
+          "--commit",
+          "HEAD",
+          "--fixture",
+          "HEAD...no-such-ref",
+          "--workdir",
+          work,
+        ],
+        /does not name two commits/,
       ],
       [["--commit", "HEAD", "--bogus"], /unknown argument/],
     ]) {
