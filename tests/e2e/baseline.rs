@@ -540,6 +540,10 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
         let body = body.as_object_mut().expect("a timeline");
         body.remove("observed_at");
         body.remove("timeline_schema_version");
+        // The envelope's telemetry schema also covers non-timeline routes
+        // (including removed controls); timeline compatibility is governed by
+        // timeline_schema_version, checked above, and the spans compared below.
+        body.remove("telemetry_schema_version");
     }
     (before, as_served_at(after, base_schema), base_schema)
 }
