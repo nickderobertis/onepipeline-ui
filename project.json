@@ -37,6 +37,7 @@
       "inputs": [
         "default",
         "servedGoldens",
+        "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
         "{workspaceRoot}/packages/*/src/**/*"
@@ -49,6 +50,7 @@
       "inputs": [
         "default",
         "servedGoldens",
+        "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
         "{workspaceRoot}/packages/*/src/**/*"
@@ -76,10 +78,6 @@
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "cache": false,
       "//packaging-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
-    },
-    "lint-llm-diff": {
-      "command": "llmlint --diff --diff-base \"$LLMLINT_DIFF_BASE_SHA\"",
-      "options": { "cwd": "." }
     },
     "check": {
       "executor": "nx:noop"

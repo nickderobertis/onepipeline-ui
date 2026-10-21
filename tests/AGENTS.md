@@ -86,8 +86,9 @@ hold nothing but their `project.json`, and these rules are theirs.
   `tests/e2e/ensure_baseline.rs` holds the profiles to one partition and every
   tier project to the profile it names.
 - **A tier is reached only through its inputs.** No tier has a project-graph
-  edge to the crate — the root project is affected by every change, so an edge
-  to it would select every tier every time. Each instead names the files its
+  edge to the crate — the root project owns every file no other project does,
+  so it is affected by most changes, and an edge to it would select every tier
+  on each of them. Each instead names the files its
   tests read, and a module a tier starts reading has to join that list:
   `tests/e2e/ensure_baseline.rs` fails until it does. A file a journey only
   needs to *exist* is left out — `ui::` packages the crate, which lists the
@@ -98,8 +99,8 @@ hold nothing but their `project.json`, and these rules are theirs.
   replayed from the cache restores what the report merges — and
   `onepipeline-ui-coverage:coverage` merges them and holds the union to 95%,
   the same lines one run over the same tests measured. It lives on a project
-  of its own because the root project is always affected: there it would run
-  every instrumented tier on every change. Its inputs are the crate's sources
+  of its own because the root project is affected by most changes: there it
+  would run every instrumented tier on each of them. Its inputs are the crate's sources
   and the suite's own files, so a change that cannot move coverage does not
   re-measure it.
 - **`test-quick`** is a tier without instrumentation, for the cross-platform

@@ -41,6 +41,8 @@
       "{workspaceRoot}/.gitignore",
       "{workspaceRoot}/**/.nxignore",
       "{workspaceRoot}/project.json",
+      "{workspaceRoot}/docs/project.json",
+      "{workspaceRoot}/judged-diff/project.json",
       "{workspaceRoot}/apps/*/project.json",
       "{workspaceRoot}/packages/*/project.json",
       "{workspaceRoot}/tests/tiers/*/project.json",

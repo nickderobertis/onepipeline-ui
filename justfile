@@ -597,7 +597,7 @@ lint-llm-validate *args:
 
 # The blocking `llmlint` PR check; `just gate` runs it before you push.
 #
-# Runs the cached Nx target `onepipeline-ui:lint-llm-diff`, which is llmlint
+# Runs the cached Nx target `onepipeline-ui-judged-diff:lint-llm-diff`, which is llmlint
 # itself keyed on the tracked tree, the resolved base commit and `llmlint
 # fingerprint`: a pass is replayed only for that tree, base and judge, and a
 # failure is never cached. Trailing arguments are Nx's — `--skip-nx-cache`
@@ -616,4 +616,4 @@ lint-llm-diff base="origin/main" *nx_args:
     # terminal (the spike-nx-output-loss report). Remove once Nx collects
     # run-commands output on `close`.
     export NX_RUN_COMMANDS_DIRECTLY=false
-    LLMLINT_DIFF_BASE_SHA="$sha" exec bash scripts/nx.sh run onepipeline-ui:lint-llm-diff "$@"
+    LLMLINT_DIFF_BASE_SHA="$sha" exec bash scripts/nx.sh run onepipeline-ui-judged-diff:lint-llm-diff "$@"

@@ -42,10 +42,10 @@ const CHANGED_PROJECT: &str = "timeline-categories";
 /// `implicitDependencies` joins them to it.
 const UNREACHED: [&str; 3] = ["dag-layout", "telemetry-client", "pool-maintenance"];
 
-/// The change the journey that runs tasks commits: a project with no dependents,
-/// so what runs is the crate's targets — every change reaches the root project —
-/// the browser view's that depend on it, and that project's own.
-const RUN_CHANGED: &str = "pool-maintenance/measure.sh";
+/// The change the journey that runs tasks commits: a file of the crate's root
+/// project that no tier reads (`cargo deny`'s policy), so what runs is the
+/// crate's targets and the browser view's that depend on it.
+const RUN_CHANGED: &str = "deny.toml";
 const RUN_UNREACHED: [&str; 3] = ["dag-layout", "telemetry-client", "timeline-categories"];
 
 /// Strip the terminal colours Nx writes even to a pipe.
