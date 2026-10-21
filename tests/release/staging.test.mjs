@@ -6,9 +6,9 @@
 // up as an upload.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
-import { plan } from "../../scripts/release.mjs";
+import { plan, sbomScratch } from "../../scripts/release.mjs";
 import {
   githubDouble,
   ROOT,
@@ -121,4 +121,32 @@ test("publish's build names the path and the re-run when the filesystem refuses 
   );
   assert.deepEqual(registries.uploads(), []);
   assert.deepEqual(gh.uploads(), []);
+});
+
+// Two publish builds run at once in the release journeys — registries.test.mjs
+// stages into target/release-journey/publish while publication.test.mjs stages
+// into target/local-publication/whole-publish — and cargo-cyclonedx can write
+// only at the checkout root, so each build's SBOM must have a name there of its
+// own, and the same one every time it builds that tree.
+test("publish builds into different staging trees write their SBOMs to different files", () => {
+  const registriesOut = join(ROOT, "target/release-journey/publish");
+  const publicationOut = join(ROOT, "target/local-publication/whole-publish");
+  const named = [registriesOut, publicationOut].map(sbomScratch);
+  assert.notEqual(named[0], named[1]);
+  for (const file of named) {
+    assert.equal(
+      dirname(file),
+      ROOT,
+      `${file} is where cargo-cyclonedx writes`,
+    );
+    assert.match(file, /\/bom-[0-9a-f]{16}\.json$/);
+  }
+  assert.equal(sbomScratch(registriesOut), named[0], "stable for one tree");
+  assert.equal(
+    sbomScratch(
+      join(ROOT, "target/release-journey/../release-journey/publish"),
+    ),
+    named[0],
+    "one tree however its path is spelled",
+  );
 });

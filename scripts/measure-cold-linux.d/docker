@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# `docker` as scripts/measure-cold-linux.sh puts it on PATH: every `docker run`
+# gains --cpuset-cpus=$MEASURE_CPUS, ahead of every argument it was given;
+# everything else is $MEASURE_DOCKER's, unchanged.
+[ "${1:-}" = run ] || exec "$MEASURE_DOCKER" "$@"
+shift
+exec "$MEASURE_DOCKER" run --cpuset-cpus="$MEASURE_CPUS" "$@"
