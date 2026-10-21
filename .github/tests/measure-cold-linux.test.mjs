@@ -411,6 +411,19 @@ test("a call it cannot measure is refused before anything is cloned", () => {
         ],
         /does not name two commits/,
       ],
+      // A label nothing on this host is named: were the refusal to regress,
+      // what it deletes does not exist and what it creates is refused by /.
+      [
+        [
+          "--commit",
+          "HEAD",
+          "--workdir",
+          "/",
+          "--label",
+          "measure-cold-no-such-dir",
+        ],
+        /is the root directory/,
+      ],
       [["--commit", "HEAD", "--bogus"], /unknown argument/],
     ]) {
       const run = measure(args, dir, d);

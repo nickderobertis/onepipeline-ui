@@ -74,6 +74,7 @@ resolved="$(realpath -m -- "$workdir")" || usage "--workdir '$workdir' does not 
 case "$resolved/" in
   "$root"/*) usage "--workdir '$workdir' is inside this checkout, whose target it would share" ;;
 esac
+[ "$resolved" != / ] || usage "--workdir '$workdir' is the root directory, whose children this would delete"
 workdir="$resolved"
 sha="$(git -C "$root" rev-parse --verify --quiet "$commit^{commit}")" \
   || usage "--commit '$commit' is not a commit in this repository"
@@ -99,10 +100,11 @@ clone="$workdir/$label"
 scratch="$workdir/$label-scratch"
 shims="$workdir/$label-shims"
 log="$workdir/$label.log"
-# Each is deleted below, so none may be this checkout or hold it.
+# Each is deleted below, so none may be this checkout or hold it, however the
+# filesystem resolves its name.
 for doomed in "$clone" "$scratch" "$shims"; do
   case "$root/" in
-    "$doomed"/*) usage "--workdir '$workdir' with --label '$label' names $doomed, which holds this checkout" ;;
+    "$(realpath -m -- "$doomed")"/*) usage "--workdir '$workdir' with --label '$label' names $doomed, which holds this checkout" ;;
   esac
 done
 rm -rf "$clone" "$scratch" "$shims"
