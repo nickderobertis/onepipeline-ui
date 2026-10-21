@@ -95,8 +95,17 @@
       "optional": [
         "criterion",
         "deliver",
+        "delivery_timeout_seconds",
         "persist"
       ]
+    },
+    "withdraw-note": {
+      "required": [
+        "envelope",
+        "index",
+        "reason"
+      ],
+      "optional": []
     },
     "finding": {
       "required": [

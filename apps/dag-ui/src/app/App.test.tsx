@@ -403,6 +403,73 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     ).toBeInTheDocument();
   });
 
+  test("says how a live turn took a note, where the record says", async () => {
+    // A manager's note through the engine that says how the running turn took it
+    // — left to end, here — and one recorded before the engine said so, both on
+    // the node the planner already redirected.
+    const noted = parseRunTimeline(runTimeline(LIVE_RUN));
+    const redirected = noted.spans.find((span) =>
+      span.events.some((event) => event.id === "event-10"),
+    );
+    if (redirected === undefined) throw new Error("fixture lost event-10");
+    const note = (id: string, turn?: "turn-end") => ({
+      id,
+      kind: "edit-committed",
+      at: "2026-07-26T11:00:51.000Z",
+      node_id: "dashboard",
+      redirection: {
+        reached: "worker" as const,
+        ...(turn === undefined ? {} : { turn }),
+        delivered: true,
+        delivery: "live" as const,
+        node_id: "dashboard",
+      },
+    });
+    redirected.events.push(
+      note("note-turn-end", "turn-end"),
+      note("note-unsaid"),
+    );
+    const open = (event: string) => {
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&node=dashboard&event=${event}`,
+      );
+      const { client } = telemetryHarness((url) =>
+        isTimeline(url) ? Response.json(noted) : defaultResponder(url),
+      );
+      render(<App client={client} />);
+    };
+
+    // The planner asked for the turn to be left to end, and the record says it was.
+    open("note-turn-end");
+    expect(
+      await within(await openedDetail()).findByText(
+        "Left to end — the note reached it as it ended",
+      ),
+    ).toBeVisible();
+    expect(within(detail()).getByText("Turn")).toBeInTheDocument();
+    expect(
+      within(detail()).getByText(
+        "Live — into the turn that was already running",
+      ),
+    ).toBeInTheDocument();
+    cleanup();
+
+    // A note recorded before the engine said how still opens as the delivery it
+    // was, with no row claiming either way.
+    open("note-unsaid");
+    expect(
+      await within(await openedDetail()).findByText(
+        "Live — into the turn that was already running",
+      ),
+    ).toBeVisible();
+    expect(within(detail()).queryByText("Turn")).toBeNull();
+    expect(
+      within(detail()).queryByText(/^Left to end|^Interrupted —/),
+    ).toBeNull();
+  });
+
   test("shows a verification, a publication, and an aggregate as themselves", async () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=foundation`);
     const { client } = telemetryHarness();

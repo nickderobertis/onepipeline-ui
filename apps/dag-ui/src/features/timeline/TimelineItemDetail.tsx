@@ -536,6 +536,19 @@ function Redirection({
               : "Deferred — onto the node's next dispatch"}
           </dd>
         </div>
+        {/* Only where the record says: a planner who asked for the turn to be
+            left to end reads whether it was, and a record written before the
+            engine said so has nothing to show here. */}
+        {redirection.turn !== undefined && (
+          <div>
+            <dt>Turn</dt>
+            <dd>
+              {redirection.turn === "turn-end"
+                ? "Left to end — the note reached it as it ended"
+                : "Interrupted — its replacement opened on the note"}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Redirected at</dt>
           <dd>

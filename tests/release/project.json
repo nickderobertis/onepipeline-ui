@@ -69,8 +69,8 @@
       "inputs": ["releaseMachinery"]
     },
     "test": {
-      "//": "Last: check.test.mjs times waits, so it runs behind the rehearsal and the compiles beside it, and tools.test.mjs, which recreates the venv and .tools copies the others run, after it.",
-      "command": "node --test --test-concurrency=1 tests/release/check.test.mjs tests/release/tools.test.mjs",
+      "//": "Last: check.test.mjs and npm-upload.test.mjs time waits, so they run behind the rehearsal and the compiles beside it, and tools.test.mjs, which recreates the venv and .tools copies the others run, after it.",
+      "command": "node --test --test-concurrency=1 tests/release/check.test.mjs tests/release/npm-upload.test.mjs tests/release/tools.test.mjs",
       "dependsOn": [
         { "projects": ["dag-ui"], "target": "build" },
         "tools",

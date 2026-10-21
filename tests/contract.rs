@@ -1300,7 +1300,7 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 11);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 12);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -2686,6 +2686,9 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         input_bytes: 31,
         reason: Some("the member is between turns".into()),
         truncated: false,
+        offer: None,
+        accepted: None,
+        party: None,
     })
     .expect("the refusal serializes");
     let declared: Vec<&str> = refused
@@ -2709,6 +2712,9 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         input_bytes: 31,
         reason: None,
         truncated: false,
+        offer: None,
+        accepted: None,
+        party: None,
     })
     .expect("the delivery serializes");
     assert!(
@@ -3165,6 +3171,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
             criterion: None,
             deliver,
             persist: true,
+            delivery_timeout_seconds: None,
         })
         .expect("the command serializes")
     };
@@ -3196,8 +3203,8 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
     };
     for (disposition, word, read) in [
         (Reached::Queued, "queued", true),
-        (Reached::Worker, "worker", true),
-        (Reached::Supervisor, "supervisor", true),
+        (Reached::Worker { turn: None }, "worker", true),
+        (Reached::Supervisor { turn: None }, "supervisor", true),
         (
             Reached::JudgedWith {
                 completion_reason: "the note settled it".into(),
@@ -3205,7 +3212,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
             "judged-with",
             true,
         ),
-        (Reached::Carried, "carried", false),
+        (Reached::Carried { reason: None }, "carried", false),
     ] {
         assert_eq!(
             disposition.a_conversation_read_it(),
@@ -3215,6 +3222,40 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
         );
         assert_eq!(reached(disposition), serde_json::json!(word));
     }
+
+    // How a live turn took the note, written beside a `worker` or `supervisor`
+    // disposition and omitted where the record does not say. Each word is the
+    // one `payload::edits` reads, and the pair is the whole of the SDK's set.
+    use onepipeline::note::NoteTurn;
+    let turns = [NoteTurn::Interrupted, NoteTurn::TurnEnd];
+    for turn in turns {
+        assert_eq!(
+            serde_json::to_value(Reached::Worker { turn: Some(turn) })
+                .expect("the disposition serializes")["turn"],
+            serde_json::json!(turn.as_str())
+        );
+        assert_eq!(
+            serde_json::to_value(Reached::Supervisor { turn: Some(turn) })
+                .expect("the disposition serializes")["turn"],
+            serde_json::json!(turn.as_str())
+        );
+        // Exhaustive, so a third way a turn can take a note fails this build.
+        match turn {
+            NoteTurn::Interrupted | NoteTurn::TurnEnd => {}
+        }
+    }
+    assert_eq!(
+        turns.map(NoteTurn::as_str),
+        ["interrupted", "turn-end"],
+        "the words `docs/contract.md`'s timeline schema 12 names"
+    );
+    assert!(
+        serde_json::to_value(Reached::Worker { turn: None })
+            .expect("the disposition serializes")
+            .get("turn")
+            .is_none(),
+        "a disposition that does not say how is written without `turn`"
+    );
 }
 
 /// Every classified failure and every fall-through reason the fixture reports
@@ -3430,6 +3471,8 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         EventKind::TurnCompleted,
         EventKind::JudgeDecided,
         EventKind::TurnInterrupted,
+        EventKind::NoteAdmitted,
+        EventKind::NoteWithdrawn,
         EventKind::MemberHeartbeat,
         EventKind::FallbackAdvanced,
         EventKind::OneharnessSession,
@@ -3450,6 +3493,8 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         | EventKind::TurnCompleted
         | EventKind::JudgeDecided
         | EventKind::TurnInterrupted
+        | EventKind::NoteAdmitted
+        | EventKind::NoteWithdrawn
         | EventKind::MemberHeartbeat
         | EventKind::FallbackAdvanced
         | EventKind::OneharnessSession

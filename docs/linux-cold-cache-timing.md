@@ -56,8 +56,8 @@ they fail nothing. That journey's 15 s wait is recorded as a follow-up.
   their own (the files they share are named once in `rehearsal.mjs`).
   `test-standalone` runs `doubles`, `plan`, `release-plz`, `probe`, `staging`
   and then `publication.test.mjs` beside the rehearsal.
-  `test` runs `check.test.mjs`, whose waits are timed against their budget, and
-  `tools.test.mjs`, which rebuilds the shared venv, after all of them: run
+  `test` runs `check.test.mjs` and `npm-upload.test.mjs`, whose waits are timed
+  against their budget, and `tools.test.mjs`, which rebuilds the shared venv, after all of them: run
   beside the rehearsal, `check.test.mjs` failed its `>= 14 s` assertion at
   10.5 s. `scripts/release.mjs` names the SBOM's scratch file after its `--out`
   (`sbomScratch`), because two publish builds now run at once.

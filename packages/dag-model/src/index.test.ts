@@ -1040,6 +1040,27 @@ describe("run timeline", () => {
         },
       }).success,
     ).toBe(false);
+    // How a live turn took the note rides beside the party that took it, and a
+    // record written before the engine said so — carrying none — still parses.
+    // A word outside the engine's pair is refused as an unknown party is.
+    const taken = (turn?: string) =>
+      timelineEventSchema.safeParse({
+        id: "e10",
+        kind: "edit-committed",
+        at: "2026-07-26T12:00:06Z",
+        redirection: {
+          reached: "worker",
+          ...(turn === undefined ? {} : { turn }),
+          delivered: true,
+          delivery: "live",
+          node_id: "api",
+        },
+      });
+    expect(taken("turn-end").data?.redirection?.turn).toBe("turn-end");
+    expect(taken("interrupted").data?.redirection?.turn).toBe("interrupted");
+    expect(taken().success).toBe(true);
+    expect(taken().data?.redirection?.turn).toBeUndefined();
+    expect(taken("sideways").success).toBe(false);
     // An ordinary record carries none, and is still a valid event.
     expect(
       timelineEventSchema.parse({
@@ -1315,6 +1336,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "complete",
     "amend",
     "note",
+    "withdraw-note",
     "finding",
     "settle",
     "rework",
@@ -1365,6 +1387,54 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("a note's delivery deadline and its withdrawal are spelled as the engine declares them", () => {
+  const sent = {
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      {
+        op: "note",
+        id: "docs",
+        addressee: "worker",
+        text: "measure it too",
+        delivery_timeout_seconds: 300,
+      },
+      {
+        op: "withdraw-note",
+        envelope: "reply-7",
+        index: 0,
+        reason: "superseded by the next note",
+      },
+    ],
+  };
+  expect(replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(sent)))).toEqual(
+    sent,
+  );
+  const withCommand = (command: Record<string, unknown>) =>
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [command],
+    }).success;
+  // A deadline no note can meet, a position before the first command, a
+  // fractional one, a blank reason and a withdrawal naming no envelope are each
+  // refused, as the engine refuses them.
+  const note = { op: "note", id: "docs", addressee: "worker", text: "x" };
+  expect(withCommand({ ...note, delivery_timeout_seconds: 0 })).toBe(false);
+  const withdrawal = {
+    op: "withdraw-note",
+    envelope: "reply-7",
+    index: 1,
+    reason: "r",
+  };
+  expect(withCommand(withdrawal)).toBe(true);
+  expect(withCommand({ ...withdrawal, index: -1 })).toBe(false);
+  expect(withCommand({ ...withdrawal, index: 0.5 })).toBe(false);
+  expect(withCommand({ ...withdrawal, reason: "" })).toBe(false);
+  expect(withCommand({ ...withdrawal, envelope: "" })).toBe(false);
+  expect(
+    withCommand({ op: "withdraw-note", envelope: "reply-7", index: 1 }),
+  ).toBe(false);
 });
 
 test("rework and retitle envelopes round-trip and refuse incomplete commands", () => {

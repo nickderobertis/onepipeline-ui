@@ -277,6 +277,14 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   "scratch-retained": "lifecycle",
   // llmlint: ignore-end[changed_behavior_has_e2e]
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // The run's home marked `done` through the store once the run settled: the
+  // run's own ending reaching its plan, like a run-end hook, and no node's work.
+  // Neither `home` nor `status` names a rule, and neither generalises to one.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.80.1.
+  // llmlint: ignore-block[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary. What the browser tier proves is the drawing, which filing this kind does not change.
+  "home-status": "lifecycle",
+  // llmlint: ignore-end[changed_behavior_has_e2e]
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 };
 
 /** The hyphen-separated words of one wire kind, which the rules match against. */

@@ -217,6 +217,13 @@ fans one uniformly-named target across all of them.
   leaves the other platforms published and the platform-independent artifacts
   unpublished** until it is re-run — and a re-run finishes the release, because
   every upload publishes only what its registry does not already serve. A
+  rebuild is not byte-identical, so a re-run keeps what PyPI and npm took from
+  an earlier attempt rather than uploading over it, waits for a version npm
+  holds and does not serve yet, and the Release's archive and checksum follow
+  them as a pair (`upload github` in `scripts/release.mjs` says how); `verify`
+  then installs and runs what the registries serve, and names a target they
+  serve as more than one build. v0.41.2's build-windows could not be finished
+  by re-running it before that. A
   target is changed in `scripts/release.mjs`'s table and nowhere else. The
   platform jobs are `build-linux`, `build-linux-arm64` (on the
   `ubuntu-24.04-arm` runner, so the arm64 binary is built and run natively),
@@ -238,6 +245,14 @@ fans one uniformly-named target across all of them.
   after its upload. npm also installs a launcher whose platform package it
   cannot fetch and exits 0, so an install that lacks the platform package is
   retried, never counted.
+- **An `npm publish` that exits 0 may have been staged, not published**, and
+  an upload fails on one. A staged version is served by nothing until a
+  maintainer approves it (`npm stage approve <id>`), and a re-run cannot publish
+  over it: it waits `RELEASE_NPM_HELD_BUDGET` seconds (five minutes) for npm to
+  serve it, naming the stage id, so approve, then re-run — or approve while the
+  re-run waits. A release that is to publish unattended
+  needs a credential npm lets publish directly — a registry setting, not code
+  here.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.

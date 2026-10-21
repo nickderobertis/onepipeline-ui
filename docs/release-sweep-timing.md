@@ -44,8 +44,8 @@ target, with two dependents, so its tools run at the head of the queue and the
 rehearsal follows them rather than trailing the test tiers. Tools tests follow
 the rehearsal because they recreate its Python environment. (Since split
 further: the journeys over the rehearsal's files run after it in `test-staged`,
-those that read none of them beside it in `test-standalone`, and the check and
-tools tests after all three;
+those that read none of them beside it in `test-standalone`, and the check,
+npm-upload and tools tests after all three;
 [linux-cold-cache-timing.md](linux-cold-cache-timing.md).)
 
 Changes preserve all assertions in the release journeys:

@@ -671,7 +671,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(11));
+    assert_eq!(body["timeline_schema_version"], json!(12));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -4687,6 +4687,110 @@ fn a_note_carried_to_the_next_dispatch_is_served_as_not_yet_delivered() {
     );
 }
 
+/// How a live turn took a note is served beside the party that took it, and a
+/// record that does not say is served as it always was.
+///
+/// The engine that links here can leave a running turn to end rather than
+/// interrupt it, and its `worker` and `supervisor` dispositions record which as
+/// `turn`. A planner who asked for `turn-end` reads whether that is what
+/// happened; a note recorded before the field existed still opens, saying
+/// nothing about it; and a word outside the engine's pair is a record this build
+/// cannot read, served as no redirection rather than relayed.
+#[test]
+fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
+    let note = |reached: &str, turn: Option<&str>| {
+        let mut operation = json!({
+            "kind": "note-delivered",
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "addressee": "worker",
+            "text": "x",
+            "reached": reached,
+        });
+        if let Some(turn) = turn {
+            operation["turn"] = json!(turn);
+        }
+        json!({
+            "author": "planner",
+            "command": {
+                "op": "note",
+                "id": fixture_run::REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": "x",
+                "deliver": "turn-end",
+                "delivery_timeout_seconds": 30,
+            },
+            "operations": [operation],
+            "operation_kinds": ["note-delivered"],
+        })
+    };
+    let notes = [
+        note("worker", Some("turn-end")),
+        note("supervisor", Some("interrupted")),
+        note("worker", None),
+        note("worker", Some("sideways")),
+    ];
+    let serving = Serving::start(move |root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for payload in &notes {
+            fixture_run::append_relayed(
+                &dir,
+                "pipeline",
+                "edit-committed",
+                json!({ "run_id": fixture_run::RUN_ID }),
+                payload.clone(),
+            );
+        }
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(timeline["timeline_schema_version"], json!(12));
+    // Every appended record is stamped at one instant, after everything the
+    // live run wrote, so they are its last four edits in the order appended.
+    let appended: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| {
+            event["kind"] == json!("edit-committed")
+                && event["at"] == json!("2026-08-07T12:01:00.000Z")
+        })
+        .collect();
+    let [left_to_end, interrupted, unsaid, unreadable] = <[Value; 4]>::try_from(appended)
+        .unwrap_or_else(|appended| panic!("the four appended edits: {appended:?}"));
+    let served = |reached: &str, turn: Option<&str>| {
+        let mut redirection = json!({
+            "reached": reached,
+            "delivered": true,
+            "delivery": "live",
+            "node_id": fixture_run::REDIRECTED_NODE_ID,
+        });
+        if let Some(turn) = turn {
+            redirection["turn"] = json!(turn);
+        }
+        redirection
+    };
+    assert_eq!(
+        left_to_end["redirection"],
+        served("worker", Some("turn-end")),
+        "{left_to_end}"
+    );
+    assert_eq!(
+        interrupted["redirection"],
+        served("supervisor", Some("interrupted")),
+        "{interrupted}"
+    );
+    assert_eq!(
+        unsaid["redirection"],
+        served("worker", None),
+        "a record written before `turn` existed is served as it was: {unsaid}"
+    );
+    assert!(
+        unreadable.get("redirection").is_none(),
+        "a turn outside the engine's pair is not relayed: {unreadable}"
+    );
+}
+
 /// Every answer `node_control` can give, each driven from a run that produces it.
 ///
 /// The reading has one job — telling a planner whether correcting a node is on
@@ -6047,7 +6151,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(11));
+    assert_eq!(timeline["timeline_schema_version"], json!(12));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -12933,6 +13037,163 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     );
 }
 
+/// The note op's newer fields and the op that takes a note back pass through
+/// the reply route as written, and are answered in the engine's words.
+///
+/// A note asking for the running turn to be left to end, bounded by a delivery
+/// timeout, is the linked engine's to judge: over a run nothing is driving it is
+/// carried to the node's next dispatch and recorded exactly as it was sent. A
+/// timeout no turn can meet, and a `withdraw-note` naming a note the run cannot
+/// take back, are refused by that engine naming what they said — which is the
+/// proof each field reached it unrewritten.
+#[test]
+fn a_turn_end_note_and_its_withdrawal_reach_the_engine_and_are_answered_in_its_words() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let post = |commands: Value| {
+        http::post(
+            serving.address,
+            &reply,
+            &json!({ "version": 3, "commands": commands }).to_string(),
+        )
+    };
+    let refused = |commands: Value| {
+        let answered = post(commands);
+        assert_eq!(answered.status, 422, "{}", answered.body);
+        let answered = answered.json();
+        assert_eq!(answered["error"]["code"], json!("refused"), "{answered}");
+        answered["error"]["message"]
+            .as_str()
+            .expect("the engine's refusal")
+            .to_owned()
+    };
+
+    // A node no dispatch has reached, for the note to be owed to.
+    let added = post(json!([{
+        "op": "add",
+        "node": {
+            "id": "extra",
+            "persona": "engineer",
+            "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done",
+        },
+    }]));
+    assert_eq!(added.status, 200, "{}", added.body);
+
+    let note = json!({
+        "op": "note",
+        "id": "extra",
+        "addressee": "worker",
+        "text": "and say which turn took it",
+        "deliver": "turn-end",
+        "delivery_timeout_seconds": 30,
+    });
+    let noted = post(json!([note]));
+    assert_eq!(noted.status, 200, "{}", noted.body);
+    let noted = noted.json();
+    assert_enveloped(&noted);
+    assert_eq!(noted["receipt"]["state"], json!("applied"), "{noted}");
+    assert_eq!(noted["receipt"]["commands"], json!("applied"), "{noted}");
+
+    // No turn was running to leave to end, so the engine carried it — and the
+    // timeline serves that as the delivery it was, with no turn to speak of.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let carried: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| event["redirection"]["node_id"] == json!("extra"))
+        .collect();
+    assert_eq!(
+        carried.len(),
+        1,
+        "one delivery for the one note: {timeline}"
+    );
+    assert_eq!(
+        carried[0]["redirection"],
+        json!({
+            "reached": "carried",
+            "delivered": false,
+            "delivery": "deferred",
+            "node_id": "extra",
+        }),
+        "{}",
+        carried[0]
+    );
+    // And the edit the engine committed names the command exactly as posted,
+    // `deliver` and `delivery_timeout_seconds` included.
+    let mut watched = http::stream(
+        serving.address,
+        &format!("/api/v2/runs/{run}/watch?timeout=0&until=settled"),
+        None,
+    );
+    assert_eq!(watched.status, 200);
+    let committed: Vec<Value> = std::iter::from_fn(|| watched.next_frame())
+        .filter(|frame| frame.event == "event")
+        .map(|frame| frame.json()["event"].clone())
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .filter(|event| event["payload"]["command"]["op"] == json!("note"))
+        .collect();
+    assert_eq!(committed.len(), 1, "{committed:?}");
+    assert_eq!(committed[0]["payload"]["command"], note, "{}", committed[0]);
+
+    // A timeout no turn can meet is the engine's refusal, naming the field.
+    let zero = refused(json!([{
+        "op": "note",
+        "id": "extra",
+        "addressee": "worker",
+        "text": "x",
+        "deliver": "turn-end",
+        "delivery_timeout_seconds": 0,
+    }]));
+    assert!(zero.contains("`delivery_timeout_seconds` is 0"), "{zero}");
+
+    // Each part of a withdrawal reaches the engine as written: the envelope it
+    // names, the position, and the reason, each refused in its own words.
+    let withdraw = |envelope: &str, index: u32, reason: &str| {
+        refused(json!([{
+            "op": "withdraw-note",
+            "envelope": envelope,
+            "index": index,
+            "reason": reason,
+        }]))
+    };
+    let unnumbered = withdraw("the-last-one", 0, "superseded");
+    assert!(
+        unnumbered.contains("withdraw-note: 'the-last-one' is not an envelope id"),
+        "{unnumbered}"
+    );
+    let unexplained = withdraw("0", 0, "  ");
+    assert!(
+        unexplained.contains("withdraw-note: `reason` is blank"),
+        "{unexplained}"
+    );
+    let unknown = withdraw("41", 0, "superseded");
+    assert!(
+        unknown.contains("withdraw-note: the run holds no envelope 41"),
+        "{unknown}"
+    );
+    // Nothing above was taken back: the carried note is still the run's only
+    // delivery of it, and no withdrawal was recorded.
+    let after = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    );
+    assert!(
+        !after
+            .iter()
+            .any(|event| event["kind"] == json!("note-withdrawn")),
+        "{after:?}"
+    );
+}
+
 /// A verdict naming a settled run's question is that question's ruling, and
 /// never the run asking to complete. A host raises its end-of-run question on
 /// the run's channel through the bus — non-blocking, because the run is not
@@ -15107,7 +15368,13 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         .expect("the note's delivery was recorded");
     assert_eq!(
         recorded[delivered]["redirection"],
-        json!({ "reached": "worker", "delivered": true, "delivery": "live", "node_id": node }),
+        json!({
+            "reached": "worker",
+            "turn": "turn-end",
+            "delivered": true,
+            "delivery": "live",
+            "node_id": node,
+        }),
         "{}",
         recorded[delivered]
     );
@@ -15144,7 +15411,9 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         recorded[delivered]
     );
     // And the envelope the driver claimed is answered rather than left claimed:
-    // the channel holds no unclaimed command and one outcome, for that reply.
+    // the channel holds no unclaimed command and one outcome, for that reply —
+    // naming, as the engine's `verbs::channel` does, that the held turn took
+    // the note as it ended.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -15152,7 +15421,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         json!([{
             "id": receipt["receipt"]["reply"],
             "applied": true,
-            "results": [{ "index": 0, "op": "note", "outcome": "applied" }],
+            "results": [{ "index": 0, "op": "note", "outcome": "applied", "turn": "turn-end" }],
         }]),
         "{channel}"
     );
@@ -16887,8 +17156,16 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The harness stand-in a dispatch here runs: it records the argv it was given
-/// and answers as the adapter expects, so a journey can read back *that* it ran
-/// and *what as*.
+/// and the prompt it was handed, on one line, and answers as the adapter
+/// expects, so a journey can read back *that* it ran and *what as*.
+///
+/// Where the engine opens the turn with control, the prompt is the first line
+/// of its stdin: the `claude-code` adapter runs it `-p --input-format
+/// stream-json` and writes the task as one `user` message, then holds stdin
+/// open for control frames, so it reads that line and no more. Where oneharness
+/// refuses control — on macOS a long `$TMPDIR` puts the control socket past the
+/// 104-byte `sun_path` — the task rides `-p` as its positional instead and stdin
+/// is empty; either way the task is somewhere on the one line.
 ///
 /// The harness program is the one process this suite stands in for, and it is
 /// the narrowest place to cut: everything above it — the adopt route, the
@@ -16916,7 +17193,9 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\nprintf '{{\"type\":\"result\",\
+            "#!/bin/sh\nIFS= read -r prompt\n\
+             printf '%s %s %s\\n' \"$0\" \"$*\" \"$prompt\" >> {:?}\n\
+             printf '{{\"type\":\"result\",\
              \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
              \"session_id\":\"standin\"}}\\n'\n",
             log.display().to_string()
@@ -17066,7 +17345,7 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
 
     // And the member that started ran the harness the **parent** config names,
     // reached only by following the child's `extends`. The stand-in records the
-    // argv it was given, so what is asserted is the whole answer: the program
+    // argv and prompt it was given, so what is asserted is the whole answer: the program
     // the chain selected, composed by the `claude-code` adapter the parent
     // asked for, carrying this node's own task.
     eventually(
@@ -17227,7 +17506,9 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
-/// it records the argv it was given in a file of its own under `records`, and
+/// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
+/// first line of its stdin — the stream-json prompt frame, where the turn was
+/// opened with control — beside it in `stdin-<pid>.txt`, and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17245,12 +17526,13 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" > {:?}/argv-$$.txt\n\
+            "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n' \"$*\" > {records:?}/argv-$$.txt\n\
+             printf '%s' \"$prompt\" > {records:?}/stdin-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
              \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
-            records.display().to_string(),
+            records = records.display().to_string(),
             dir = fixture_run::EXPORT_SOURCE_DIRECTORY,
         ),
     )
@@ -17460,9 +17742,47 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
     // side; the producer is told it is the private side of a mixed plan.
+    // Each dispatch is its argv and the task it was handed, which the adapter
+    // writes as a stream-json `user` frame on stdin where the turn has control and
+    // as `-p`'s positional where oneharness refused it (see
+    // `write_harness_standin`) — so the text is read from whichever carried it.
     let dispatched: Vec<String> = fs::read_dir(&records)
         .expect("the dispatch records")
-        .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
+        .map(|entry| entry.expect("a record").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("argv-"))
+        })
+        .map(|path| {
+            let argv = fs::read_to_string(&path).expect("an argv record");
+            let stdin_of = path.with_file_name(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("a record name")
+                    .replacen("argv-", "stdin-", 1),
+            );
+            let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
+            let streamed = argv.contains("--input-format stream-json");
+            if stdin.is_empty() {
+                assert!(
+                    !streamed,
+                    "a stream-json turn was written no prompt frame: {argv}"
+                );
+                return argv;
+            }
+            assert!(
+                streamed,
+                "a prompt reached stdin outside a stream-json turn: {argv}"
+            );
+            let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
+                panic!("the prompt is not a stream-json frame: {err}: {stdin}")
+            });
+            let text = frame["message"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the prompt frame carries no text: {frame}"));
+            format!("{argv}{text}")
+        })
         .collect();
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
     let told = |task: &str| -> &String {
@@ -19379,6 +19699,332 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     assert_eq!(payload["node"], json!(node), "{payload}");
     assert_eq!(payload["closes"], json!(["owner/service#7"]), "{payload}");
     assert_eq!(payload["outcome"], json!("projected"), "{payload}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A harness stand-in whose first dispatch is still running when the run is
+/// put down: the first time it is run it records that it was and waits, never
+/// committing, so the node cannot land; every later run commits one file in
+/// the worktree it is run in and answers as [`write_harness_standin`]'s does.
+///
+/// Still the one process a journey stands in for, on
+/// [`write_committing_harness_standin`]'s terms. The wait is bounded, so a
+/// dispatch nothing ends still exits on its own.
+#[cfg(unix)]
+fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("held-once-harness");
+    let held = dir.join("held-once");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {log:?}\n\
+             if [ ! -e {held:?} ]; then : > {held:?}; exec sleep 120; fi\n\
+             printf 'the dispatch wrote this\\n' > work-$$.txt\n\
+             git add work-$$.txt && git commit -q -m 'feat: ship the service' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            log = log.display().to_string(),
+            held = held.display().to_string(),
+        ),
+    )
+    .expect("the held-once harness stand-in");
+    // Owner-only: the one process that runs it is a dispatch this journey's own
+    // launch or server starts, as this user.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the held-once harness stand-in");
+    standin
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes` above: the
+// provisioned CLI, a `/bin/sh` stand-in the journey writes, `git` over a scratch
+// repository in its own workspace and the loopback board, settling in seconds.
+/// A run adopted from the browser marks its plan's home done once it settles,
+/// through the store this binary links, exactly as a run its launching engine
+/// drives does.
+///
+/// The released CLI launches a one-node plan whose home is a project item on
+/// the loopback board, open at `In Progress`, from a directory whose
+/// `onetaskgraph.yaml` declares that board and names no closure and no home.
+/// The node's first dispatch is still running when the shutdown route puts the
+/// run down, so nothing has landed. The driver the adopt route retains — this
+/// binary's own engine — dispatches the node again; the harness stand-in
+/// commits in the session the linked `onevcs` cut, the node lands
+/// `local-direct` on `owner/service`, and the run settles with every node
+/// `done`. The store then moves the home's card to the board's project-kind
+/// `done` option and closes its issue as completed, in one option write and one
+/// close and without reading the board's items, and the run's journal holds the
+/// one `home-status` record that says it was written.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_that_settles_marks_its_plans_home_done() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let service = &repos.private;
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the shutdown and adopt routes, the retained driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only waits or commits what an agent would.
+    let standin = write_held_once_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+
+    let node = "ship";
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "owner/service",
+            // The project kind's `done` is an option of its own, so the card
+            // the home ends at is the project half of the mapping and no task's.
+            "options": CLOSURE_BOARD_OPTIONS.iter().copied().chain(["Shipped"]).collect::<Vec<_>>(),
+            "issues": {
+                "plan": seeded_issue(1, "ship-the-service", json!({
+                    "onepipeline.schema_version": 3,
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.goal": {"text": "Ship the service"},
+                }), ("In Progress", "OPEN", None), None),
+                // Its repository is the issue's own, `owner/service`, which is
+                // the scratch service's origin.
+                node: seeded_issue(2, node, json!({
+                    "onepipeline.id": node,
+                    "onepipeline.persona": "engineer",
+                }), ("Todo", "OPEN", None), Some("plan")),
+            },
+        }),
+    );
+    let config = closure_board_config(&board, "");
+    let per_kind = "        done: Done\n";
+    assert_eq!(config.matches(per_kind).count(), 1, "{config}");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        config.replace(
+            per_kind,
+            "        done:\n          task: Done\n          project: Shipped\n",
+        ),
+    )
+    .expect("the store configuration");
+
+    let state = dir.join("state");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment: Vec<(&str, String)> = vec![
+        ("CACHE_BOARD_TOKEN", board.token.clone()),
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        // The store's user layer: this workspace's own, empty, so the sources the
+        // home's write asks are the launch directory's and no host's.
+        ("XDG_CONFIG_HOME", dir.join("config").display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            service.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args(["start", "board:plan", "--detach"])
+        .current_dir(&dir)
+        .envs(environment.iter().map(|(name, value)| (name, value)))
+        .env(crate::serving::ONEVCS_HOME_ENV, &onevcs_home)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, &graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(&root),
+        )
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let launched: Value =
+        serde_json::from_slice(&launched.stdout).expect("start prints its launch");
+    let run = launched["run_id"].as_str().expect("a run id").to_owned();
+    let launched_pid =
+        u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    // The launching driver started the node's first dispatch, which waits.
+    eventually("the launched driver dispatched the node", || {
+        dir.join("held-once").exists()
+    });
+
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &environment
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect::<Vec<_>>(),
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || http::get(serving.address, &detail_path).json();
+    let base = || {
+        let landed = on_origin(service, &["rev-parse", scratch_repo::BASE_BRANCH]);
+        assert!(
+            landed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&landed.stderr)
+        );
+        String::from_utf8_lossy(&landed.stdout).trim().to_owned()
+    };
+    let seeded_base = base();
+
+    // Put down mid-dispatch, before its node lands: the run is adoptable, the
+    // service's base has not moved, and the home is where it was seeded.
+    // The waiting dispatch takes no interrupt, so it is ended once its grace
+    // is out; the route answers after that and the branch pushes.
+    let shutdown = http::post_within(
+        serving.address,
+        &format!("{detail_path}/shutdown"),
+        r#"{"grace": 1}"#,
+        DRIVER_PATIENCE,
+    );
+    assert_eq!(shutdown.status, 200, "{}", shutdown.body);
+    let shutdown = shutdown.json();
+    let stopped: Vec<&Value> = shutdown["runs"][0]["dispatches"]
+        .as_array()
+        .expect("the dispatches the shutdown acted on")
+        .iter()
+        .collect();
+    assert_eq!(stopped.len(), 1, "{shutdown}");
+    assert_eq!(stopped[0]["node"], json!(node), "{shutdown}");
+    eventually("the launched driver let go of the run", || {
+        !process_is_live(launched_pid)
+    });
+    assert_ne!(
+        detail()["run"]["state"],
+        json!("settled"),
+        "{}",
+        detail()["run"]
+    );
+    assert_ne!(
+        detail()["graph"]["node_status"][node],
+        json!("done"),
+        "{}",
+        detail()["graph"]
+    );
+    assert_eq!(base(), seeded_base, "the node landed before the adoption");
+    let before = board.state();
+    assert_eq!(
+        (
+            &before["issues"]["plan"]["status"],
+            &before["issues"]["plan"]["state"]
+        ),
+        (&json!("In Progress"), &json!("OPEN")),
+        "{before}"
+    );
+
+    let adopted = http::post(serving.address, &format!("{detail_path}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+    let journal = root.join(&run).join("events.jsonl");
+    let homed = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .filter(|record| {
+                record["source"] == json!("pipeline") && record["kind"] == json!("home-status")
+            })
+            .collect()
+    };
+    eventually("the adopted run settled", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted run's home was written", || !homed().is_empty());
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    let settled = detail();
+    assert_eq!(settled["run"]["run_id"], json!(run), "{}", settled["run"]);
+    assert_eq!(
+        settled["run"]["state"],
+        json!("settled"),
+        "{}",
+        settled["run"]
+    );
+    let statuses = settled["graph"]["node_status"]
+        .as_object()
+        .expect("the node statuses");
+    assert_eq!(
+        statuses.keys().map(String::as_str).collect::<Vec<_>>(),
+        [node],
+        "{}",
+        settled["graph"]
+    );
+    assert_eq!(statuses[node], json!("done"), "{}", settled["graph"]);
+    assert_eq!(
+        settled["graph"]["node_results"][node]["outcome"],
+        json!("merged"),
+        "{}",
+        settled["graph"]
+    );
+    let nodes = settled["run"]["nodes"].as_array().expect("the run's nodes");
+    assert_eq!(nodes.len(), 1, "{}", settled["run"]);
+    assert_eq!(nodes[0]["node"], json!(node), "{}", settled["run"]);
+    assert_ne!(base(), seeded_base, "the node never landed");
+
+    let after = board.state();
+    let home = &after["issues"]["plan"];
+    assert_eq!(
+        (&home["status"], &home["state"], &home["reason"]),
+        (&json!("Shipped"), &json!("CLOSED"), &json!("COMPLETED")),
+        "{after}"
+    );
+    // The home is written by the item the launch recorded, never found by
+    // listing the board.
+    let requests = after["requests"]
+        .as_array()
+        .expect("the board's request log");
+    let home_writes = requests
+        .iter()
+        .filter(|request| {
+            let query = request["query"].as_str().unwrap_or_default();
+            query.contains("updateProjectV2ItemFieldValue(")
+                && request["variables"]["input"]["itemId"] == json!("ITEM-plan")
+        })
+        .count();
+    let home_closes = requests
+        .iter()
+        .filter(|request| {
+            let query = request["query"].as_str().unwrap_or_default();
+            query.contains("updateIssue(")
+                && request["variables"]["input"]["id"] == json!("plan")
+                && request["variables"]["input"]["stateInput"]["value"] == json!("CLOSED")
+        })
+        .count();
+    assert_eq!((home_writes, home_closes), (1, 1), "{requests:#?}");
+    for request in requests {
+        let query = request["query"].as_str().expect("a query");
+        assert!(
+            !query.contains("items("),
+            "a request read the board's items: {request}"
+        );
+    }
+
+    let records = homed();
+    assert_eq!(records.len(), 1, "{records:#?}");
+    assert_eq!(
+        records[0]["payload"]["outcome"],
+        json!("written"),
+        "{}",
+        records[0]
+    );
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]

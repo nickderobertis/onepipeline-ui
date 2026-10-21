@@ -495,9 +495,16 @@ fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
         .collect();
     for span in timeline["spans"].as_array_mut().into_iter().flatten() {
         for event in span["events"].as_array_mut().into_iter().flatten() {
-            if let Some(event) = event.as_object_mut() {
-                for field in &added {
-                    event.remove(*field);
+            for field in &added {
+                // A dotted field was added inside an object the event already
+                // carried, and only the leaf is newer than the base.
+                let (parents, leaf) = field.rsplit_once('.').unwrap_or(("", field));
+                let holder = parents
+                    .split('.')
+                    .filter(|key| !key.is_empty())
+                    .try_fold(&mut *event, |held, key| held.get_mut(key));
+                if let Some(holder) = holder.and_then(Value::as_object_mut) {
+                    holder.remove(leaf);
                 }
             }
         }
