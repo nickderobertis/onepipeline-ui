@@ -4314,19 +4314,6 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
   });
 }
 
-/**
- * And what an adoption retains once cargo has relinked the binary the fixture found.
- *
- * The adopt route spawns *this executable* by the path it was started from, and
- * `just check` runs cargo test builds beside this tier that unlink that name in
- * `target/debug` and link it to an artifact of their own. A server spawned from
- * that name then reads its own path as deleted and refuses every adoption with
- * `No such file or directory` — which is how both adopt journeys failed the
- * v0.22.0 release. So the fixture serves through a name of its own, and this
- * replaces the found one under a live server, as cargo does, and adopts.
- */
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: 9.4 s on this host (6.3 s when the fixture linked its binary rather than copying it), beside adopt journeys of 1.1 to 1.2 min in the same project. What it holds is this project's own fixture server, `fixtures/serve-fixture.mjs`, which nothing outside `dag-ui-e2e` runs, and it needs exactly what `dag-ui-e2e:test` already depends on, so no narrower edge contains it.
-
 async function detailScroll(
   page: Page,
 ): Promise<{ top: number; bottom: number }> {
