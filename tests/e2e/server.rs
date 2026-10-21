@@ -16955,29 +16955,8 @@ fn launch_rendered_over_local_md_store(
     )
     .expect("the host template");
 
-    let onepipeline = |arguments: &[&str]| {
-        let output = std::process::Command::new(sibling::binary())
-            .args(arguments)
-            .current_dir(dir)
-            .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
-            .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
-            .env(NODE_GRAPH_ENV, node_graph)
-            .env(
-                onepipeline_ui::store::GRAPH_RECORDS_ENV,
-                fixture_run::graph_records_for(root),
-            )
-            .env_remove(onepipeline::templates::ROOT_ENVIRONMENT)
-            .env_remove(onepipeline::templates::REQUIRE_RENDERED_ENVIRONMENT)
-            .output()
-            .expect("the provisioned onepipeline runs");
-        assert!(
-            output.status.success(),
-            "`onepipeline {}` refused: {}",
-            arguments.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
-    };
+    let onepipeline =
+        |arguments: &[&str]| provisioned_onepipeline(root, dir, node_graph, arguments);
 
     let approval = create_store_task(
         dir,
@@ -17021,7 +17000,7 @@ fn launch_rendered_over_local_md_store(
         &[&approval],
     );
 
-    let launched = onepipeline(&[
+    let run = started_and_let_go(&onepipeline(&[
         "start",
         &format!(
             "{}:{}",
@@ -17033,17 +17012,61 @@ fn launch_rendered_over_local_md_store(
         "template-root",
         onepipeline::templates::REQUIRE_RENDERED_FLAG,
         "true",
-    ]);
-    let launched: Value = serde_json::from_slice(&launched).expect("start prints its launch");
+    ]));
+    let template_root = template_root
+        .canonicalize()
+        .expect("the template root resolves");
+    (run, template_root)
+}
+
+/// Run the `onepipeline` CLI this crate pins, from `dir`, over the runs root
+/// `root` and the node-scope graph `node_graph`, with no template setting
+/// inherited from the host, and answer what it printed. A refusal fails the
+/// journey with what the CLI said.
+#[cfg(unix)]
+fn provisioned_onepipeline(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+    arguments: &[&str],
+) -> Vec<u8> {
+    let output = std::process::Command::new(sibling::binary())
+        .args(arguments)
+        .current_dir(dir)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, node_graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(root),
+        )
+        .env_remove(onepipeline::templates::ROOT_ENVIRONMENT)
+        .env_remove(onepipeline::templates::REQUIRE_RENDERED_ENVIRONMENT)
+        // The plan-store user layer `Serving` gives its server, so `start`
+        // reads the store this journey configures and none of the host's.
+        .env("XDG_CONFIG_HOME", dir.join("config"))
+        .output()
+        .expect("the provisioned onepipeline runs");
+    assert!(
+        output.status.success(),
+        "`onepipeline {}` refused: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+/// The run a detached `start` printed as `launched`, once the driver it left
+/// has let go of it.
+#[cfg(unix)]
+fn started_and_let_go(launched: &[u8]) -> String {
+    let launched: Value = serde_json::from_slice(launched).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
     let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
     eventually("the launched driver let go of the run", || {
         !process_is_live(pid)
     });
-    let template_root = template_root
-        .canonicalize()
-        .expect("the template root resolves");
-    (run, template_root)
+    run
 }
 
 /// The launch record of `run` under `root`, as the engine last wrote it.
@@ -17149,6 +17172,291 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
         onepipeline::templates::REQUIRE_RENDERED_KEY,
     ] {
         assert_eq!(record[key], launched[key], "{key}: {record}");
+    }
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The `local-md` source [`launch_copied_from_plan_task_renderings`] copies the
+/// plan into: a second folder of Markdown beside the fixture's, configured in the
+/// same `onetaskgraph.yaml`.
+#[cfg(unix)]
+const COPY_DESTINATION: &str = "plan-home";
+
+/// Launch a run the way a host whose plan was drafted in one source and homed in
+/// another does, with the released `onepipeline` this crate pins.
+///
+/// The plan is drafted in the fixture's `local-md` source: its approval
+/// [`fixture_run::APPROVAL_NODE_ID`] and the agent node
+/// [`fixture_run::DISPATCH_NODE_ID`] it gates, each rendered by the store from
+/// the engine's built-in `plan-task`, as `onepipeline template resolve` states it.
+/// The store this crate links then copies the project and its tasks into
+/// [`COPY_DESTINATION`] — the call `onetaskgraph project copy --tasks` makes —
+/// and `start` launches the copy under the rendered-only check. Its driver
+/// settles the approval as waiting and lets go.
+///
+/// Answers the run id and the copy's report, project first.
+#[cfg(unix)]
+fn launch_copied_from_plan_task_renderings(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+) -> (String, onetaskgraph_core::CopyReport) {
+    fixture_run::configure_local_md_store(dir);
+    let configuration = dir.join("onetaskgraph.yaml");
+    let drafts = fs::read_to_string(&configuration).expect("the store configuration");
+    let home_store = dir.join("home-store");
+    fs::create_dir_all(&home_store).expect("the destination's folder");
+    fs::write(
+        &configuration,
+        format!(
+            "{drafts}  {COPY_DESTINATION}:\n    plugin: local-md\n    config:\n      root: {:?}\n",
+            home_store.display().to_string()
+        ),
+    )
+    .expect("the store configuration with its destination");
+    let onepipeline =
+        |arguments: &[&str]| provisioned_onepipeline(root, dir, node_graph, arguments);
+
+    let loader = onepipeline(&[
+        "template",
+        "resolve",
+        onepipeline::templates::BUILT_IN,
+        "--json",
+    ]);
+    let input = onetaskgraph_core::TemplateInput::Loader(
+        onetaskgraph_core::LoaderDocument::from_json(&String::from_utf8_lossy(&loader))
+            .expect("the engine states a loader document"),
+    );
+    let rendered = |criterion: &str| {
+        let answers = onetaskgraph_core::Answers::from_yaml(&format!(
+            "acceptance_criteria:\n  - {criterion}\n"
+        ))
+        .expect("the answers");
+        let rendering = input
+            .load()
+            .expect("plan-task loads")
+            .render(&answers)
+            .expect("plan-task renders");
+        onetaskgraph_core::Body::rendered(&input, rendering).expect("a rendering")
+    };
+    let approval = create_store_task(
+        dir,
+        "Approve the change",
+        rendered("The change is approved."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    create_store_task(
+        dir,
+        "Resolve the config chain",
+        rendered("The work is done."),
+        &[
+            ("onepipeline.id", json!(fixture_run::DISPATCH_NODE_ID)),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&approval],
+    );
+
+    // An empty environment, so the host's own store configuration is not read.
+    let loaded = onetaskgraph_core::config::load(
+        dir,
+        &onetaskgraph_core::Environment::from_os_pairs(Vec::new()),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the store configuration loads");
+    let engine = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let drafted = onetaskgraph_core::GlobalId::try_from(format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    ))
+    .expect("a project id");
+    let report = tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(
+            engine.copy(&onetaskgraph_core::CopyRequest {
+                items: onetaskgraph_core::CopyItems::new(vec![drafted]).expect("one item"),
+                scope: onetaskgraph_core::CopyScope::Projects { tasks: true },
+                destination: onetaskgraph_plugin_api::SourceName::try_from(
+                    COPY_DESTINATION.to_owned(),
+                )
+                .expect("a source name"),
+                match_by: None,
+                recreate: false,
+                create: false,
+                dry_run: false,
+                comments: false,
+                no_link: false,
+                expect: None,
+                statuses: Vec::new(),
+            }),
+        )
+        .expect("the store copies the plan");
+    let home = report
+        .items
+        .first()
+        .and_then(onetaskgraph_core::CopyOutcome::destination)
+        .unwrap_or_else(|| panic!("the copy names where the project landed: {report:?}"))
+        .to_string();
+
+    let run = started_and_let_go(&onepipeline(&[
+        "start",
+        &home,
+        "--detach",
+        onepipeline::templates::REQUIRE_RENDERED_FLAG,
+        "true",
+    ]));
+    (run, report)
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispatches_it`
+// above: one copy between two folders of Markdown, a real launch whose driver lets go at
+// once, then one dispatch, settling in seconds.
+/// A plan of `plan-task` renderings that the store this binary links copied into
+/// another `local-md` source, launched from there under `--require-rendered true`,
+/// is adopted through the route once its stopped driver's approval is attested,
+/// and the retained driver — this binary's linked engine — loads the copy and
+/// settles every node.
+///
+/// The copy is what a host's own tooling makes of a plan homed somewhere other
+/// than where it was drafted: each task arrives carrying the `onetaskgraph.origin`
+/// it was copied from and the `onetaskgraph.template` provenance whose
+/// `body_digest` is what the destination stores. The settlements are read back
+/// twice: off the run's own record the server serves, and off the copied tasks,
+/// where the driver's write-back lands.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_settles_a_store_copied_plan_launched_under_the_rendered_only_check() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and answers differently on each run. What this journey is about — the linked store's copy, the released engine's `start` over the copy, the adopt route and the retained driver that loads and settles it — is all real, and the stand-in only answers the one turn.
+    let standin = write_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let (run, report) = launch_copied_from_plan_task_renderings(&root, &dir, &graph);
+
+    // Every task the copy filed carries where it came from and the rendering
+    // it holds, and what it holds is what that provenance digests.
+    let copied: Vec<String> = report
+        .items
+        .iter()
+        .skip(1)
+        .map(|item| {
+            item.destination()
+                .unwrap_or_else(|| panic!("a task the copy did not land: {report:?}"))
+                .to_string()
+        })
+        .collect();
+    assert_eq!(copied.len(), 2, "{report:?}");
+    for id in &copied {
+        let task = stored_task(&dir, id);
+        let origin = task.metadata[onetaskgraph_core::GlobalId::ORIGIN_KEY]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id} names no origin: {:?}", task.metadata))
+            .to_owned();
+        assert!(
+            origin.starts_with(&format!("{}:", fixture_run::LOCAL_MD_SOURCE)),
+            "{id} was not copied from the draft: {origin}"
+        );
+        let provenance: onetaskgraph_core::TemplateProvenance = serde_json::from_value(
+            task.metadata[onetaskgraph_core::TemplateProvenance::KEY].clone(),
+        )
+        .unwrap_or_else(|error| panic!("{id} carries no provenance: {error}"));
+        assert_eq!(
+            provenance.template,
+            format!("onepipeline:{}", onepipeline::templates::BUILT_IN),
+            "{id}"
+        );
+        assert_eq!(
+            provenance.body_digest.to_string(),
+            onetaskgraph_core::template::body_digest(task.content.as_deref().unwrap_or_default()),
+            "{id}'s provenance does not digest what the destination stores"
+        );
+    }
+    let launched = launch_record(&root, &run);
+    assert_eq!(
+        launched[onepipeline::templates::REQUIRE_RENDERED_KEY],
+        json!(true),
+        "{launched}"
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+        ],
+    );
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert_eq!(
+        detail()["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("waiting"),
+        "{}",
+        detail()["graph"]
+    );
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
+    assert_eq!(adopted.status, 200, "{}", adopted.body);
+    let pid =
+        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let driver = RetainedDriver(pid);
+
+    eventually("the adopted driver settled the run", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    let settled = detail();
+    for node in [fixture_run::APPROVAL_NODE_ID, fixture_run::DISPATCH_NODE_ID] {
+        assert_eq!(
+            settled["graph"]["node_status"][node],
+            json!("done"),
+            "{node}: {}",
+            settled["graph"]
+        );
+    }
+    let kinds: Vec<Value> = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    )
+    .iter()
+    .map(|event| event["kind"].clone())
+    .collect();
+    for kind in ["driver-adopted", "node-dispatched"] {
+        assert!(kinds.contains(&json!(kind)), "{kind}: {kinds:?}");
+    }
+    assert!(
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("The work is done.")),
+        "the dispatch did not run the copied rendering"
+    );
+    eventually("each settlement reached its copied task", || {
+        copied
+            .iter()
+            .all(|id| stored_task(&dir, id).status.name == "done")
+    });
+    for id in &copied {
+        assert!(
+            stored_task(&dir, id)
+                .metadata
+                .contains_key("onepipeline.settlement"),
+            "{id}"
+        );
     }
     drop(driver);
     serving.stop_on(Stop::Terminate);
