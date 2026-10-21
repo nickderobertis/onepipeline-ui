@@ -3,10 +3,7 @@
   "$schema": "node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
   "sourceRoot": "src",
-  "tags": [
-    "scope:api",
-    "lang:rust"
-  ],
+  "tags": ["scope:api", "lang:rust"],
   "targets": {
     "bootstrap": {
       "command": "just _crate-bootstrap"
