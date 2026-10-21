@@ -238,7 +238,7 @@ third, **Agents**, is the section after this one.
   SDK's own document, and the `host` view. `monitor` is the existing timeline under
   a profile.
 
-`e2e/dag-ui-supervise.spec.ts` drives every one of these against the real API over
+`e2e/dag-ui-controls.spec.ts` drives every one of these against the real API over
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
 every other journey reads is left as it was.
@@ -307,7 +307,7 @@ anything for it.
   the browser, and a session the store no longer holds says so in place of the
   conversation.
 
-`e2e/dag-ui-supervise.spec.ts` drives the run's, a node's and a project's agents
+`e2e/dag-ui-controls.spec.ts` drives the run's, a node's and a project's agents
 against the real API over runs whose pointer files the fixture wrote beside their
 journals, opening one session's transcript from the run and another from the
 project page, and holds both counts to the sessions those files name.

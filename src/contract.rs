@@ -339,7 +339,7 @@ pub mod routes {
     /// The HTTP method a route answers.
     ///
     /// Two, and only two: a read is a `GET`, and a verb that writes to the run —
-    /// claims a surface, submits an envelope, stops, adopts or shuts down — is a
+    /// claims a surface, submits an envelope, stops or shuts down — is a
     /// `POST`, so
     /// nothing a browser prefetches or a proxy retries can act on a run.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

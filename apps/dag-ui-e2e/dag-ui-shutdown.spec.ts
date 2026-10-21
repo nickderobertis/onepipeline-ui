@@ -1,13 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { API_V2_PATHS } from "@onepipeline-ui/dag-model";
+import { API_V2_PATHS, runListSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { exited, startFixtureServer } from "./fixture-server";
 
 /**
- * Shutting a run, the session's runs, or the whole host down from the browser.
+ * Shutting the whole host down from the browser.
  *
  * These journeys **confirm real shutdowns**, and a shutdown really signals
  * processes and really pushes branches — so each one drives a server of its own
@@ -174,6 +174,16 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
   server = await startServer();
   const { runs } = server.facts;
   const sent = shutdownsSent(page);
+  const listing = await page.request.get(`${server.origin}/api/v2/runs`);
+  expect(listing.status()).toBe(200);
+  const rows = runListSchema.parse(await listing.json()).runs;
+  const ownSession = rows.find((row) => row.run_id === runs.mine)?.launch
+    ?.session_key;
+  const otherSession = rows.find((row) => row.run_id === runs.elsewhere)?.launch
+    ?.session_key;
+  expect(ownSession).toBeDefined();
+  expect(otherSession).toBeDefined();
+  expect(otherSession).not.toBe(ownSession);
   await page.goto(`${server.origin}/?list=runs`);
   await page
     .getByRole("group", { name: "Shut down runs on this host" })
@@ -186,8 +196,14 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
     dialog.getByRole("list", { name: "Runs on this host" }),
   );
   expect(items).toHaveLength(4);
-  for (const run of Object.values(runs))
-    expect(items.some((item) => item.startsWith(run))).toBe(true);
+  expect(items).toEqual(
+    expect.arrayContaining([
+      `${runs.mine} — owned by Claude session · ${ownSession}`,
+      `${runs.idle} — owned by Claude session · ${ownSession}`,
+      `${runs.elsewhere} — owned by Codex session · ${otherSession}`,
+      `${runs.unattributed} — owned by Unattributed launch · shutdown…`,
+    ]),
+  );
   await expectForceOffAndSaid(dialog);
   await setGrace(dialog, "30", "seconds");
   await dialog.getByRole("button", { name: "Shut down the host" }).click();

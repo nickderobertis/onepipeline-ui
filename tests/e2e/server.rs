@@ -12030,13 +12030,12 @@ const STRANGER: &str = "another-planner-session";
 /// before calling it failed.
 ///
 /// A ceiling on a **failure**, never a cost a passing journey pays: each wait
-/// returns the moment its condition holds, and the whole adoption journey below
-/// takes under two seconds on this host. The ceiling is generous because a
+/// returns the moment its condition holds, and the engine-driven journeys return
+/// as soon as their records arrive. The ceiling is generous because a
 /// driver is a process the kernel schedules, and a loaded host that took ten
 /// seconds to run one must not read as a driver that never wrote.
 ///
-/// Unix-only with the adoption journey it paces, which is the one thing that
-/// waits on a retained driver.
+/// Unix-only with the engine-driver journeys it paces.
 #[cfg(unix)]
 const DRIVER_PATIENCE: Duration = Duration::from_secs(60);
 
@@ -14268,11 +14267,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "{}",
         recorded[delivered]
     );
-    // The engine names the command envelope an edit came in on the record it
-    // committed — the reply the receipt answered with — and the watch route
-    // serves that record as the engine's own machine record, so the field
-    // reaches a reader as the engine journalled it. The timeline's projection of
-    // the same edit is the contract's `{author, redirection}` and is unchanged.
+    // The timeline projects an edit as `{author, redirection}`; the engine's
+    // command envelope id is not part of that projection.
     assert!(
         recorded[delivered].get("envelope").is_none(),
         "{}",
@@ -15775,7 +15771,7 @@ fn launch_record(root: &Path, run: &str) -> Value {
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// A run a host launched with its own template root and the rendered-only check
-/// on, over a `local-md` store, is adopted through the route once its approval is
+/// on, over a `local-md` store, is adopted through the pinned CLI once its approval is
 /// attested, and the driver the adoption retains dispatches the rendered node.
 ///
 /// The launch is the released engine's own `start`: it resolved the root it was
@@ -16525,7 +16521,7 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
 /// A live edit relayed by the reply route that gives the public repository an
 /// ordinary dependency on the private node is refused in the engine's own
 /// neutral words, naming no node, and leaves the graph as it was. The adoption
-/// that follows dispatches both nodes through the driver this server retains:
+/// that follows dispatches both nodes through the pinned CLI driver:
 /// the private producer keeps its branch, the engine exports the one directory
 /// its export edge names into the public repository, and the public consumer
 /// starts from that export — told only the neutral context the engine's contract
@@ -17622,7 +17618,7 @@ fn an_invalidation_names_the_project_group_that_moved() {
 }
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
-/// The browser's retained engine reads and settles a remotely stored plan with
+/// The pinned CLI engine reads and settles a remotely stored plan with
 /// caching enabled, using the same source configuration as the launching CLI,
 /// and the server's reads of that plan's project answer the same with the cache
 /// on or off.
@@ -18002,8 +17998,8 @@ fn inherited_engine_variables() -> Vec<String> {
 }
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
-/// A run adopted from the browser reads its remote plan through the store the
-/// engine this binary links, which names a closed item's status after its
+/// A run driven by the pinned CLI reads its remote plan through the linked
+/// store, which names a closed item's status after its
 /// closure: a follow-up an earlier run settled `done`, whose issue closed as
 /// completed while its card still read `Todo`, is at `Done` on the board once
 /// the adopted engine settles, with its issue still closed as completed — and
@@ -18195,9 +18191,8 @@ fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
 }
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
-/// A run adopted from the browser marks its plan's home done once it settles,
-/// through the store this binary links, exactly as a run its launching engine
-/// drives does.
+/// A run driven by the pinned CLI marks its plan's home done once it settles;
+/// this reader serves the records that driver writes.
 ///
 /// The released CLI launches a one-node plan whose home is a project item on
 /// the loopback board, open at `In Progress`, from a directory whose

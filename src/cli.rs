@@ -86,11 +86,11 @@ pub struct ServeArgs {
     /// The launching session this server acts as.
     ///
     /// The one identity every write this server makes carries: it is passed to
-    /// the engine's `stop`, `unwatched` and `runs` as the acting session, and it
-    /// is what an adoption is recorded under. Omitted, the session
+    /// the engine's `stop`, `unwatched` and `runs` as the acting session.
+    /// Omitted, the session
     /// `ONEPIPELINE_LAUNCHER_SESSION` names — the same variable the engine's own
     /// CLI reads — and with neither the server is **unattributed**: it owns no
-    /// run, so it is refused every stop it does not force and every adoption.
+    /// run, so it is refused every stop it does not force.
     #[arg(long, value_name = "ID")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionId>,
@@ -131,8 +131,8 @@ impl ServeArgs {
     /// The session this server acts as, or `None` for an unattributed one.
     ///
     /// The one place the flag and the environment are resolved, so every caller
-    /// that needs the acting session — the store, and the environment the
-    /// retained driver inherits — reads one answer: `--session`, else
+    /// that needs the acting session — the store and the process
+    /// environment — reads one answer: `--session`, else
     /// [`SESSION_ENV`], else nobody. The variable crosses the same boundary the
     /// flag does, so a value the flag would refuse is refused here too rather
     /// than acted as.

@@ -20,9 +20,8 @@ read as a whole: its telemetry tiles over the graph timeline, which is the same 
 the same lane words and the same clock used at three scopes — the whole run, one node,
 one conversation — each a single click into the last.
 
-It is not only a read. Every verb the `onepipeline` CLI has once a plan is running is
-here, from the run it is about: stop, adopt, attest, reply on the channel, and shut
-down a run, every run this session owns, or the whole host — each behind a confirm
+The browser can stop a run, attest a human action, reply on the channel, and shut
+down the whole host — each behind a confirm
 that names what it will act on, and each showing the engine's own receipt or refusal
 verbatim rather than a restatement of it. [`docs/dag-ui.md`](docs/dag-ui.md) is the
 design record; what follows is what the screens are.
@@ -141,12 +140,12 @@ GET /api/v2/projects/{project}/agents # the union over the project's runs
 ```
 
 The first seven are the read surface the browser view was written against;
-the rest are every verb the `onepipeline` CLI has once a plan is running,
-wrapped — each a thin call into `onepipeline::verbs`, never a re-implementation
+the rest wrap the supported post-launch verbs — each a thin call into
+`onepipeline::verbs`, never a re-implementation
 and never the binary. Launching a plan and driving the planning stage are
 outside this API; a reply on any run's channel is inside it. The server acts as
 one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
-which is what its stops, adoptions and shutdowns are judged by.
+which is what its stops and shutdowns are judged by.
 
 <!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
 

@@ -2099,7 +2099,7 @@ export const branchPreservedSchema = z.enum([
 ]);
 
 /**
- * `POST /api/v2/runs/{run}/shutdown` and `POST /api/v2/shutdown`: the engine's
+ * `POST /api/v2/shutdown`: the engine's
  * report of a shutdown it performed, whatever it found.
  *
  * `complete` is false when a dispatch was killed at the deadline, a teardown was

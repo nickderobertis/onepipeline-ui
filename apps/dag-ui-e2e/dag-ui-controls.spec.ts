@@ -17,23 +17,17 @@ import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
 
 /**
- * Supervising a run from the browser: the projects the app opens on, and every
- * verb the CLI has once a plan is running, driven against the real read API over
+ * Browser run controls and read panels, driven against the real read API over
  * runs the fixture harness recorded.
  *
- * These journeys **write** to the served runs — a surface raised, a reply queued,
- * a run adopted, two runs stopped — so they act on runs written for them alone:
- * the supervised run the acting session owns, the run another session owns, and
- * the run nothing is driving. The live run every other journey reads is left as
- * it was — but a write is a write *now*, and the run written to becomes the
- * newest activity the flat list leads with, which is why the journeys over the
- * live run name it rather than opening whatever is served first. They share the
- * fixture server with `dag-ui.spec.ts`, whose last journeys take every served run
- * away, these three included, and sort ahead of it by name.
+ * These journeys write surfaces, queue replies and stop runs, so they use a
+ * dedicated corpus: a run the acting session owns, one another session owns,
+ * and one nothing drives. Writes move these runs to the top of the flat list;
+ * journeys reading the shared live run therefore select it by id.
  *
- * The order within this file matters too: the adoption is what puts the human
- * action in front of the attest, the watch is held before the run it watches is
- * stopped, and the stop of the run the session owns is the last thing done to it.
+ * This file sorts before dag-ui.spec.ts, whose final journeys remove the
+ * shared corpus. Within this file, stopping the acting session's run comes
+ * after the journeys that read and write its channel.
  */
 
 /**
