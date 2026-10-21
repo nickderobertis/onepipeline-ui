@@ -33,6 +33,7 @@ function doubles(
     toolsStatus = 0,
     summary = true,
     without = [],
+    gitFails = "",
   } = {},
 ) {
   const bin = join(dir, "bin");
@@ -44,6 +45,17 @@ function doubles(
       mode: 0o755,
     });
   write("docker", `printf 'docker %s\\n' "$*" >> '${log}'`);
+  // The real git, but for the one subcommand a journey has fail.
+  if (gitFails)
+    write(
+      "git",
+      [
+        'for word in "$@"; do',
+        `  if [ "$word" = '${gitFails}' ]; then echo "fatal: ${gitFails} refused by the journey" >&2; exit 128; fi`,
+        "done",
+        `exec '${REAL_GIT}' "$@"`,
+      ].join("\n"),
+    );
   write(
     "taskset",
     `printf 'taskset %s %s\\n' "$1" "$2" >> '${log}'\nshift 2\nexec "$@"`,
@@ -75,6 +87,10 @@ function doubles(
   );
   return { bin, log };
 }
+
+const REAL_GIT = execFileSync("bash", ["-c", "command -v git"], {
+  encoding: "utf8",
+}).trim();
 
 const git = (...args) =>
   execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim();
@@ -342,6 +358,37 @@ test("a workdir and label that name the checkout itself are refused before anyth
       existsSync(join(checkout, "scripts/measure-cold-linux.sh")),
       "the checkout is still there",
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a working directory, clone, checkout or ref it cannot make stops it before provisioning", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const readOnly = join(dir, "read-only");
+    mkdirSync(readOnly, { mode: 0o555 });
+    for (const [fails, workdir, reason] of [
+      ["", join(readOnly, "work"), /could not create .*read-only\/work/],
+      ["clone", join(dir, "w1"), /could not clone /],
+      ["checkout", join(dir, "w2"), /could not check [0-9a-f]{40} out in /],
+      [
+        "update-ref",
+        join(dir, "w3"),
+        /could not point the clone's origin\/main at /,
+      ],
+    ]) {
+      const home = mkdtempSync(join(dir, "doubles-"));
+      const d = doubles(home, { gitFails: fails });
+      const run = measure(["--commit", "HEAD", "--workdir", workdir], dir, d);
+      assert.equal(run.status, 1, `${fails}: ${run.stdout}${run.stderr}`);
+      assert.match(run.stderr, reason, fails);
+      assert.match(run.stderr, /^ACTION: /m, fails);
+      assert.ok(
+        !existsSync(d.log),
+        `${fails || "mkdir"}: nothing was provisioned`,
+      );
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

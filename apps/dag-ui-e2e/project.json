@@ -25,7 +25,7 @@
       ]
     },
     "test-isolation": {
-      "//": "After `test`, whose dependent this makes it: Nx starts the ready task with the most dependents first, and with none the browser tier, on the job's longest chain, started after every crate task with a slot free (docs/linux-cold-cache-timing.md).",
+      "//": "After `test`, so the browser tier has a dependent and Nx starts it before the crate tasks it queued behind (docs/linux-cold-cache-timing.md).",
       "command": "npx playwright test --config apps/dag-ui-e2e/isolation.config.ts",
       "inputs": ["default", "apiServerSurface"],
       "dependsOn": [

@@ -107,7 +107,8 @@ for doomed in "$clone" "$scratch" "$shims"; do
     "$(realpath -m -- "$doomed")"/*) usage "--workdir '$workdir' with --label '$label' names $doomed, which holds this checkout" ;;
   esac
 done
-rm -rf "$clone" "$scratch" "$shims"
+rm -rf "$clone" "$scratch" "$shims" \
+  || fail "could not remove the last run's $clone, $scratch and $shims (rm's reason is above)" "make them writable, or pass another --label"
 mkdir -p "$workdir" "$scratch" "$shims" || fail "could not create $workdir" "make its parent writable, or pass another --workdir"
 
 git clone --quiet "$root" "$clone" || fail "could not clone $root into $clone" "free space on the filesystem holding $workdir"
@@ -122,7 +123,10 @@ if [ -n "$fixture" ]; then
     || fail "the fixture $fixture changes nothing on $sha" "pick a fixture $sha does not already contain"
 fi
 
-cat >"$shims/docker" <<'SHIM'
+shim_failed() {
+  fail "could not write the Docker shim at $shims/docker" "check that $shims is writable and its filesystem has space, then re-run"
+}
+if ! cat >"$shims/docker" <<'SHIM'
 #!/usr/bin/env bash
 [ "${1:-}" = run ] || exec "$MEASURE_DOCKER" "$@"
 shift
@@ -139,7 +143,10 @@ while [ "$#" -gt 0 ]; do
 done
 exec "$MEASURE_DOCKER" run --cpuset-cpus="$MEASURE_CPUS" "${args[@]}"
 SHIM
-chmod +x "$shims/docker"
+then
+  shim_failed
+fi
+chmod +x "$shims/docker" || shim_failed
 
 # No compiler cache anywhere: a hosted runner has none, and a host's
 # `build.rustc-wrapper` would otherwise reach the journeys that clear
@@ -167,7 +174,8 @@ env "${run_env[@]}" just bootstrap >"$provisioning" 2>&1 \
 env "${run_env[@]}" PATH="$root/.tools/bin:$shims:$PATH" just release-tools >>"$provisioning" 2>&1 \
   || fail "'just release-tools' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
 
-rm -rf target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit
+rm -rf target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit \
+  || fail "could not clear the clone's target, Nx cache and baseline server, so the run would not start cold" "make $clone writable, then re-run"
 started="$(date +%s)"
 status=0
 env "${run_env[@]}" taskset -c "$cpus" just ci-test-linux >"$log" 2>&1 || status=$?
@@ -180,5 +188,10 @@ if [ "$status" -ne 0 ]; then
   echo "ACTION: read $log for the failing task; a timing from a failed run is not a measurement, so fix it and re-run" >&2
 fi
 cd "$workdir"
-[ -n "$keep" ] || rm -rf "$clone" "$scratch" "$shims"
+# The measured status is what this exits with; a cleanup that fails says so
+# and changes nothing about it.
+if [ -z "$keep" ] && ! rm -rf "$clone" "$scratch" "$shims"; then
+  echo "measure-cold-linux: could not remove $clone, $scratch and $shims after the run (rm's reason is above)" >&2
+  echo "ACTION: remove them by hand before the next run with --label $label" >&2
+fi
 exit "$status"

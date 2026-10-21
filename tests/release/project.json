@@ -45,7 +45,7 @@
       "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
     },
     "rehearse": {
-      "//": "The manylinux build alone, with the checks on what it staged: the head of the longest chain, so a separate target gives it priority in Nx’s dependency-count queue, and its staged tree is an output so the journeys that read it can run after it in a target of their own, beside each other (docs/linux-cold-cache-timing.md).",
+      "//": "The manylinux build and the checks on what it staged. The staged tree is an output, because test-staged reads it (docs/linux-cold-cache-timing.md).",
       "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"],
@@ -53,7 +53,7 @@
       "cache": true
     },
     "test-staged": {
-      "//": "The journeys over the rehearsal’s staged files, the two files at once: the recipe refusing them broken one way at a time, and the publication phases over them against registry doubles. Each reads the staged tree and writes only trees of its own. One target rather than two, so they start together in the slot the rehearsal frees.",
+      "//": "The journeys over the rehearsal’s staged files, both at once: each reads that tree and writes only its own, and one target starts them together in the slot the rehearsal frees.",
       "command": "node --test --test-concurrency=2 tests/release/rehearsal-failures.test.mjs tests/release/registries.test.mjs",
       "dependsOn": [
         { "projects": ["dag-ui"], "target": "build" },
@@ -63,7 +63,7 @@
       "inputs": ["releaseMachinery"]
     },
     "test-standalone": {
-      "//": "The release journeys that read none of the rehearsal’s files, run beside it rather than after it. Each stages into its own tree under target/ and serves its doubles on ports the system picks. check.test.mjs is not among them: it times publish's waits against their budget, which the cold compiles running beside the rehearsal throw off. publication.test.mjs goes last: its native build waits for the debug graph the other builds in target compile, and the rest need none. It also follows dag-ui:test, whose tests time out at 5 s in the job's first minutes, which this has no need to share.",
+      "//": "The release journeys that read none of the rehearsal’s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here. After dag-ui:test, whose 5 s test timeouts this need not share.",
       "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs",
       "dependsOn": [
         { "projects": ["dag-ui"], "target": "build" },
@@ -73,7 +73,7 @@
       "inputs": ["releaseMachinery"]
     },
     "test": {
-      "//": "Last, after every other release journey: check.test.mjs times waits, so it stays where it always ran, behind the rehearsal and the compiles that run beside it, and tools.test.mjs, which recreates the Python environment and the tool copies in .tools that the others run, after it.",
+      "//": "Last: check.test.mjs times waits, so it runs behind the rehearsal and the compiles beside it, and tools.test.mjs, which recreates the venv and .tools copies the others run, after it.",
       "command": "node --test --test-concurrency=1 tests/release/check.test.mjs tests/release/tools.test.mjs",
       "dependsOn": [
         { "projects": ["dag-ui"], "target": "build" },
