@@ -19,6 +19,7 @@ pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[
     (13, "journal_order"),
     (13, "record_id"),
     (13, "dispatch_id"),
+    (13, "dispatch_group"),
     (13, "persona"),
     (13, "fields"),
 ];
