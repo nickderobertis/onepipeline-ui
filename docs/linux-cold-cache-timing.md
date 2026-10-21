@@ -75,13 +75,22 @@ No assertion was removed. The SBOM assertion now also checks the scratch file
 this build wrote; the journeys that moved run unchanged in their new files.
 
 A higher CPU weight for the manylinux container (`--cpu-shares 4096`) was tried
-and reverted. It shortened the rehearsal by 3.5–3.9 minutes and the job by 0–2,
-but it runs the container from the job's first minute at three times a
-service's weight, beside `dag-ui:test`: that tier's 5 s and 60 s test timeouts
-failed in 3 of the 5 weighted cold runs (every one measured the evening the 7
-runs below were), and in none of those 7, which ran at the default weight. The
-tree no longer depends on how a runner divides CPU between the job and its
-containers.
+and reverted. It shortened the job by 0–2 minutes, but it runs the container
+from the job's first minute at three times a service's weight, beside
+`dag-ui:test`: that tier's 5 s and 60 s test timeouts failed in 3 of the 4
+weighted cold runs, all three made on 10-20 between runs #2 and #4 below, and in
+none of the 7 runs below, which ran at the default weight. The tree no longer
+depends on how a runner divides CPU between the job and its containers. The
+weighted runs, each on CPUs 0-3 beside the same commit at the default weight
+(load was not sampled during the three later ones; the default-weight runs
+interleaved with them saw 4.8–18.9):
+
+| When | Commit | Weighted | Default weight | Outcome of the weighted run |
+| --- | --- | ---: | ---: | --- |
+| 10-20 morning, load 3.7-6.6 | an earlier form of the change (row 1) | 20m15s | 22m21s | passed but for row 1's EXDEV case |
+| 10-20 evening | a6c5efe | 21m21s | 23m23s | `dag-ui:test` timed out at 5 s |
+| 10-20 evening | 24087db | 23m11s | 23m12s | `dag-ui:test` timed out at 5 s |
+| 10-20 night | b8782a8 | 21m29s | 23m59s | `dag-ui:test` timed out at 5 s and 60 s; `release:test` and `test-standalone` did not run, so the duration is short of a full run |
 
 ## Measurement
 
@@ -131,12 +140,15 @@ conditions; in both runs `tools.test.mjs`'s copy-from-PATH case failed with
 EXDEV, its scratch directory being on another filesystem than the clone, which
 the script's scratch placement fixed.
 
-Every other test passed in every run listed. Left out: runs of commits that set
-the CPU weight, which the tree no longer does; a run on 10-20 that stopped when
-`check.test.mjs` failed beside the rehearsal, which is why it runs after it; and
-the second simultaneous pair, whose finished-tree run stopped on the registry
-double's port race (fixed in 93a5e97) with a Playwright timeout beside it, and
-whose before-tree run was stopped when measuring ended.
+Every other test passed in every run listed. Left out: the weighted runs,
+listed above, whose variant the tree no longer carries; a run on 10-20 that
+stopped when `check.test.mjs` failed beside the rehearsal, which is why it runs
+after it; and the second simultaneous pair (10-21, before on CPUs 0-3 and
+finished on 4-7, right after #7, load not sampled), neither of which ran every
+task: the finished-tree run (9fa9b23, 29m13s) stopped on the registry double's
+port race (fixed in 93a5e97) with a Playwright timeout beside it, and the
+before-tree run (33m53s, its `dag-ui-e2e:test-isolation` failing on a port
+already in use) had its `release:test` stopped 44 s in when measuring ended.
 
 ## Estimate under the finished tree, cold
 
