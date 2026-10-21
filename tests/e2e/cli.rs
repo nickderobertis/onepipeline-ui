@@ -36,6 +36,18 @@ fn help_documents_the_serve_command() {
 }
 
 #[test]
+fn removed_driver_commands_are_usage_errors() {
+    for command in ["drive", "drive-run"] {
+        cli()
+            .args([command, "--help"])
+            .assert()
+            .code(USAGE)
+            .stderr(contains(format!("unrecognized subcommand '{command}'")))
+            .stderr(contains("Usage"));
+    }
+}
+
+#[test]
 fn serve_help_documents_its_arguments() {
     cli()
         .args(["serve", "--help"])
