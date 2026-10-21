@@ -169,10 +169,14 @@ run_env=(
 # is what `just release-tools` does with a binary on PATH.
 provisioning="$workdir/$label-bootstrap.log"
 cd "$clone"
-env "${run_env[@]}" just bootstrap >"$provisioning" 2>&1 \
-  || fail "'just bootstrap' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
+provisioning_failed() {
+  echo "measure-cold-linux: '$1' failed in the clone; the last lines of $provisioning:" >&2
+  tail -n 20 "$provisioning" >&2
+  fail "'$1' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
+}
+env "${run_env[@]}" just bootstrap >"$provisioning" 2>&1 || provisioning_failed "just bootstrap"
 env "${run_env[@]}" PATH="$root/.tools/bin:$shims:$PATH" just release-tools >>"$provisioning" 2>&1 \
-  || fail "'just release-tools' failed in the clone (log: $provisioning)" "fix what the log names, then re-run"
+  || provisioning_failed "just release-tools"
 
 rm -rf target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit \
   || fail "could not clear the clone's target, Nx cache and baseline server, so the run would not start cold" "make $clone writable, then re-run"

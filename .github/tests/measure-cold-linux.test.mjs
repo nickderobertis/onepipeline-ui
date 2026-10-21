@@ -34,6 +34,8 @@ function doubles(
     summary = true,
     without = [],
     gitFails = "",
+    stickyCache = false,
+    stickyAfter = false,
   } = {},
 ) {
   const bin = join(dir, "bin");
@@ -70,6 +72,10 @@ function doubles(
       "  mkdir -p target/debug .nx/cache .nx/workspace-data .tools/bin",
       "  touch target/debug/unit .nx/cache/entry .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit",
       `  [ ${bootstrapStatus} -eq 0 ] || { echo "bootstrap: cannot reach the registry" >&2; exit ${bootstrapStatus}; }`,
+      // A build tree rm cannot clear: a file in a directory with no write bit.
+      stickyCache
+        ? "  mkdir -p target/debug/held && touch target/debug/held/unit && chmod 555 target/debug/held"
+        : "  true",
       "fi",
       `if [ "$1" = release-tools ] && [ ${toolsStatus} -ne 0 ]; then echo "release-tools: cannot install release-plz" >&2; exit ${toolsStatus}; fi`,
       'if [ "$1" = ci-test-linux ]; then',
@@ -79,6 +85,9 @@ function doubles(
       "  docker run --rm --cpu-shares 4096 -v /x:/y image build",
       "  docker run --cpu-shares=4096 image check",
       "  docker info",
+      stickyAfter
+        ? "  mkdir -p held && touch held/unit && chmod 555 held"
+        : "  true",
       summary ? '  echo "  Run duration:      1m 2s"' : "  true",
       `  [ ${jobStatus} -eq 0 ] || echo "Failed tasks: dag-ui:test" >&2`,
       `  exit ${jobStatus}`,
@@ -91,6 +100,10 @@ function doubles(
 const REAL_GIT = execFileSync("bash", ["-c", "command -v git"], {
   encoding: "utf8",
 }).trim();
+
+// What a journey left without a write bit, given one back so it can be removed.
+const writable = (path) =>
+  existsSync(path) && execFileSync("chmod", ["-R", "u+w", path]);
 
 const git = (...args) =>
   execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim();
@@ -390,6 +403,52 @@ test("a working directory, clone, checkout or ref it cannot make stops it before
       );
     }
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run whose trees rm cannot clear says which, and keeps the measured status", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  const work = join(dir, "work");
+  try {
+    // The last run's clone, which this one must remove first.
+    mkdirSync(join(work, "old", "held"), { recursive: true });
+    writeFileSync(join(work, "old", "held", "unit"), "");
+    execFileSync("chmod", ["555", join(work, "old", "held")]);
+    const stale = doubles(mkdtempSync(join(dir, "d-")));
+    const refused = measure(
+      ["--commit", "HEAD", "--label", "old", "--workdir", work],
+      dir,
+      stale,
+    );
+    assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+    assert.match(refused.stderr, /could not remove the last run's .*old/);
+    assert.ok(!existsSync(stale.log), "nothing was provisioned");
+
+    // Caches the timed run must start without.
+    const sticky = doubles(mkdtempSync(join(dir, "d-")), { stickyCache: true });
+    const warm = measure(
+      ["--commit", "HEAD", "--label", "warm", "--workdir", work],
+      dir,
+      sticky,
+    );
+    assert.equal(warm.status, 1, warm.stdout + warm.stderr);
+    assert.match(warm.stderr, /so the run would not start cold/);
+    assert.doesNotMatch(readFileSync(sticky.log, "utf8"), /ci-test-linux/);
+
+    // A cleanup that fails after the run: the measured status stands.
+    const after = doubles(mkdtempSync(join(dir, "d-")), { stickyAfter: true });
+    const run = measure(
+      ["--commit", "HEAD", "--label", "after", "--workdir", work],
+      dir,
+      after,
+    );
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /^measure-cold-linux: after exit=0 /m);
+    assert.match(run.stderr, /could not remove .*after.* after the run/);
+    assert.match(run.stderr, /^ACTION: remove them by hand/m);
+  } finally {
+    writable(work);
     rmSync(dir, { recursive: true, force: true });
   }
 });

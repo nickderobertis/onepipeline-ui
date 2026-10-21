@@ -55,7 +55,7 @@ they fail nothing. That journey's 15 s wait is recorded as a follow-up.
   `registries.test.mjs` at once, both reading that tree and writing only trees of
   their own (the files they share are named once in `rehearsal.mjs`).
   `test-standalone` runs `doubles`, `plan`, `release-plz`, `probe`, `staging`
-  and then `publication.test.mjs` beside the rehearsal, after `dag-ui:test`.
+  and then `publication.test.mjs` beside the rehearsal.
   `test` runs `check.test.mjs`, whose waits are timed against their budget, and
   `tools.test.mjs`, which rebuilds the shared venv, after all of them: run
   beside the rehearsal, `check.test.mjs` failed its `>= 14 s` assertion at

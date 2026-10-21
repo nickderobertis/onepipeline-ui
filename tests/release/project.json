@@ -63,13 +63,9 @@
       "inputs": ["releaseMachinery"]
     },
     "test-standalone": {
-      "//": "The release journeys that read none of the rehearsal’s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here. After dag-ui:test, whose 5 s test timeouts this need not share.",
+      "//": "The release journeys that read none of the rehearsal’s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here.",
       "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs",
-      "dependsOn": [
-        { "projects": ["dag-ui"], "target": "build" },
-        { "projects": ["dag-ui"], "target": "test" },
-        "tools"
-      ],
+      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"]
     },
     "test": {
