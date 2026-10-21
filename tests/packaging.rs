@@ -553,7 +553,7 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.80.2";
+const ENGINE_RELEASE: &str = "0.81.0";
 
 /// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
 /// engine, as a reader would be told them: a requirement that is not that release
@@ -617,7 +617,7 @@ fn the_manifest_and_lock_link_exactly_the_engine_release() {
 fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
     let lock = read("Cargo.lock");
     let manifest = read("Cargo.toml");
-    let moved_to = "0.81.0";
+    let moved_to = "0.82.0";
     let entry = format!("name = \"onepipeline\"\nversion = \"{ENGINE_RELEASE}\"\n");
     assert_eq!(lock.matches(&entry).count(), 1, "one onepipeline entry");
     let moved_lock = lock.replace(
@@ -677,7 +677,7 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change, to
 /// the store release that engine links.
-const STORE_RELEASE: &str = "0.9.0";
+const STORE_RELEASE: &str = "0.9.2";
 
 /// The members of the plan-store family the shipped binary cannot be without:
 /// the store itself, the plugin boundary, and the GitHub plugin a board is read
