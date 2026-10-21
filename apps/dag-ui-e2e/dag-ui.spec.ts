@@ -4098,14 +4098,14 @@ test("refuses to serve when the read API has not been built", () => {
  * Later subprocess journeys must still start after a concurrent install moves
  * the build's binary out of target/debug.
  */
-const API_BINARY = (() => {
+function retainedApiBinary(): string {
   const binary = ["onepipeline-api", "onepipeline-api.exe"]
     .map((name) => join(FIXTURE_WORKSPACE, "debug", name))
     .find(existsSync);
   if (binary === undefined)
     throw new Error("the main fixture retained no read API binary");
   return binary;
-})();
+}
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
 function holdPort(port: number): Promise<() => void> {
@@ -4244,8 +4244,9 @@ function freePort(): Promise<number> {
  * the thing under test, so it costs a copy rather than the journey.
  */
 function stageBinary(path: string): void {
+  const binary = retainedApiBinary();
   try {
-    linkSync(API_BINARY, path);
+    linkSync(binary, path);
   } catch (caught) {
     // Narrowed rather than asserted: `catch` binds `unknown`, and the one thing
     // that distinguishes the cross-device refusal from a real failure to stage
@@ -4259,7 +4260,7 @@ function stageBinary(path: string): void {
     ) {
       throw caught;
     }
-    copyFileSync(API_BINARY, path);
+    copyFileSync(binary, path);
   }
 }
 
