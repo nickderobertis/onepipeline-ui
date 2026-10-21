@@ -114,7 +114,9 @@ Every test passed in all four runs, as in the three other default-weight runs
 that evening (one before-tree run, 30m46s, and two of earlier finished-tree
 commits, 23m23s and 23m12s). Pair 1's finished-tree run is the commit
 before the weight's revert with the measurement's `--default-cpu-weight`, which
-removes that weight at `docker run`; pair 2's is the revert itself.
+removes that weight at `docker run`; pair 2's is the revert itself. The
+finished tree adds only a lock-only patch bump of three TLS crates after them
+(RUSTSEC-2026-0381, -0382 and -0383) and a formatting fix to a test.
 
 ## Estimate under the finished tree, cold
 
