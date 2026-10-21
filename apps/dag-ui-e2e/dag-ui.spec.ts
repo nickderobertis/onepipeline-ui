@@ -20,7 +20,7 @@ import {
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   API_V2_PATHS,
   parseRunList,
@@ -4094,15 +4094,18 @@ test("refuses to serve when the read API has not been built", () => {
 });
 
 /**
- * The binary `dag-ui:build-api-server` built, which this run is already being served
- * through. Named from this file rather than from the working directory, for the
- * reason `FIXTURE_COMMAND` is: the tier is launched from the workspace root, and a
- * path that counted directories up from there named one outside the checkout.
+ * The main fixture's retained server, independent of Cargo's mutable output.
+ * Later subprocess journeys must still start after a concurrent install moves
+ * the build's binary out of target/debug.
  */
-const API_BINARY = resolve(
-  import.meta.dirname,
-  "../../target/debug/onepipeline-api",
-);
+const API_BINARY = (() => {
+  const binary = ["onepipeline-api", "onepipeline-api.exe"]
+    .map((name) => join(FIXTURE_WORKSPACE, "debug", name))
+    .find(existsSync);
+  if (binary === undefined)
+    throw new Error("the main fixture retained no read API binary");
+  return binary;
+})();
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
 function holdPort(port: number): Promise<() => void> {

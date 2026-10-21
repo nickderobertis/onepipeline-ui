@@ -175,7 +175,9 @@ function serverBinary() {
  * the filesystem can share the blocks gets one rather than a copy.
  */
 function privateBinary(binary, workspace) {
-  const directory = join(workspace, "bin");
+  // Keep Cargo's debug layout so later fixture servers can use this retained
+  // copy as their target root instead of revisiting Cargo's mutable output.
+  const directory = join(workspace, "debug");
   mkdirSync(directory, { recursive: true });
   const staged = join(directory, basename(binary));
   copyFileSync(binary, staged, constants.COPYFILE_FICLONE);

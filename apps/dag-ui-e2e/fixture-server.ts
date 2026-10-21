@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
+import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
  * A read API of a journey's own, over a corpus written for it alone.
@@ -72,7 +73,12 @@ export async function startFixtureServer(
       "--ui",
       ...corpusArgs,
     ],
-    { stdio: ["ignore", "inherit", "inherit"] },
+    {
+      stdio: ["ignore", "inherit", "inherit"],
+      // The main fixture retained the built server before any journeys started.
+      // Cargo install can move its output away while this tier is still running.
+      env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE },
+    },
   );
   const origin = `http://${LOOPBACK}:${port}`;
   const deadline = Date.now() + 60_000;

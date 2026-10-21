@@ -214,3 +214,29 @@ test("Stop is offered only before a run has ended", async ({ page }) => {
     await server.stop();
   }
 });
+
+test("a private fixture starts after Cargo's output is unavailable", async ({
+  page,
+}) => {
+  const previous = process.env.CARGO_TARGET_DIR;
+  process.env.CARGO_TARGET_DIR = join(
+    import.meta.dirname,
+    "absent-cargo-output",
+  );
+  let server: Awaited<ReturnType<typeof startFixtureServer>> | undefined;
+  try {
+    server = await startFixtureServer("header-retained-binary", []);
+    const response = await page.request.get(
+      `${server.origin}/api/v2/runs/${runs().live}`,
+    );
+    expect(response.ok()).toBe(true);
+    await page.goto(`${server.origin}/?run=${runs().live}`);
+    await expect(
+      page.getByRole("region", { name: "Run header" }).getByRole("heading"),
+    ).toHaveText(runs().live);
+  } finally {
+    if (previous === undefined) delete process.env.CARGO_TARGET_DIR;
+    else process.env.CARGO_TARGET_DIR = previous;
+    await server?.stop();
+  }
+});
