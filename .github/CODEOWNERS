@@ -24,6 +24,8 @@
 # The release jobs' own recipes, driven against local registry doubles.
 /tests/release/          @nickderobertis
 /docs/contract.md        @nickderobertis
+# The judged diff lint: its own project so its whole-workspace key selects only it.
+/judged-diff/            @nickderobertis
 /Cargo.toml              @nickderobertis
 
 # The frontend: the React app and the packages it reads the contract through.
@@ -39,6 +41,8 @@
 /packages/timeline-categories/ @nickderobertis
 /packages/telemetry-client/ @nickderobertis
 /docs/dag-ui.md          @nickderobertis
+# The documents' project: its own so a document selects its drift gates, not the crate.
+/docs/project.json       @nickderobertis
 
 # The distribution wrappers.
 /npm/onepipeline-api-cli/ @nickderobertis

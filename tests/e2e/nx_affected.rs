@@ -324,6 +324,112 @@ fn a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery() {
     }
 }
 
+/// The crate, the view built against it and the view's journeys: what a change
+/// to the crate owes, and what a change to nothing they read must not pay for.
+const PRODUCT: [&str; 3] = ["onepipeline-ui", "dag-ui", "dag-ui-e2e"];
+
+/// The project of the judged diff lint, whose key is every file in the workspace.
+const JUDGED_DIFF: &str = "onepipeline-ui-judged-diff";
+
+#[test]
+fn a_change_to_a_document_the_crate_does_not_package_selects_no_product_project() {
+    for path in [
+        "docs/dag-ui.md",
+        "docs/linux-cold-cache-timing.md",
+        "docs/screens/04-graph-1920x1080.png",
+    ] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        for project in PRODUCT {
+            assert!(
+                !selected(&tasks, project),
+                "a change to {path} checks {project}, which reads nothing it changed: {tasks:?}"
+            );
+        }
+        // What does read a document is its drift gates, and they still run.
+        assert!(
+            tasks.contains("docs:test"),
+            "a change to {path} does not run the drift gates over the documents: {tasks:?}"
+        );
+    }
+}
+
+#[test]
+fn a_change_to_the_journeys_selects_neither_the_crate_nor_the_view() {
+    let workspace = Workspace::new();
+    let tasks = workspace
+        .change("apps/dag-ui-e2e/dag-ui-served.spec.ts")
+        .on_push();
+    assert!(
+        selected(&tasks, "dag-ui-e2e"),
+        "a change to the journeys does not check them: {tasks:?}"
+    );
+    for project in ["onepipeline-ui", "dag-ui"] {
+        assert!(
+            !selected(&tasks, project),
+            "a change to the journeys checks {project}, which does not depend on them: {tasks:?}"
+        );
+    }
+}
+
+#[test]
+fn a_change_to_the_crate_or_a_document_it_packages_selects_every_product_project() {
+    for path in ["src/lib.rs", "docs/contract.md", "README.md"] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        for project in PRODUCT {
+            assert!(
+                selected(&tasks, project),
+                "a change to {path} does not check {project}: {tasks:?}"
+            );
+        }
+    }
+    // The contract is what the crate's tests reconcile the route table against, so
+    // a change to it re-runs them rather than replaying a verdict about the old text.
+    let workspace = Workspace::new();
+    let tasks = workspace.change("docs/contract.md").on_push();
+    assert!(
+        tasks.contains("onepipeline-ui:test"),
+        "a change to docs/contract.md does not run the crate's tests: {tasks:?}"
+    );
+}
+
+#[test]
+fn every_change_selects_the_judged_diff_lint_and_it_selects_nothing_else() {
+    for path in [
+        "docs/dag-ui.md",
+        "apps/dag-ui-e2e/dag-ui-served.spec.ts",
+        "packages/dag-layout/src/index.ts",
+        "pool-maintenance/measure.sh",
+        "src/lib.rs",
+    ] {
+        let workspace = Workspace::new();
+        workspace.change(path);
+        let push = [("CI", "true"), (BASE_SHA, workspace.base.as_str())];
+        let (answer, notices) = workspace.affects(JUDGED_DIFF, &push);
+        assert!(
+            notices.is_empty(),
+            "--affects {JUDGED_DIFF} complained:\n{notices}"
+        );
+        assert_eq!(
+            answer, "true",
+            "--affects {JUDGED_DIFF} for a change to {path}"
+        );
+    }
+    // Nothing depends on it, so the one file every change reaches it through
+    // reaches no product project through it.
+    let workspace = Workspace::new();
+    workspace.change("docs/dag-ui.md");
+    let push = [("CI", "true"), (BASE_SHA, workspace.base.as_str())];
+    for project in PRODUCT {
+        let (answer, _) = workspace.affects(project, &push);
+        assert_eq!(
+            answer, "false",
+            "--affects {project} for a change only the judged diff lint and the documents read"
+        );
+    }
+}
+
 #[test]
 fn a_push_build_is_scoped_to_the_commit_before_the_push() {
     let workspace = Workspace::new();
