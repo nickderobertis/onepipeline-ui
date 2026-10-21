@@ -305,6 +305,13 @@ impl Serving {
             // each adopted driver from — a link to, or a copy of, the image it
             // runs: this workspace's own, removed with it.
             .env("XDG_CACHE_HOME", workspace.path().join("cache"))
+            // Nor the operator's plan-store configuration: the store an adopted
+            // driver links reads its user layer under `XDG_CONFIG_HOME`, and a
+            // host that declares private sources there has every task the
+            // driver could dispatch held on asking them. This workspace's own,
+            // where nothing is configured; a journey that wants a user layer
+            // names one.
+            .env("XDG_CONFIG_HOME", workspace.path().join("config"))
             // Nor the operator's harnesses: a run's status carries the engine's
             // provider block, which probes every harness it finds on `PATH` —
             // the operator's own subscriptions, for up to a minute each, which
