@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.43.0...v0.43.1) - 2026-10-21
+
+### Fixed
+
+- *(ci)* finish the Linux test job reliably inside its time limit ([#409](https://github.com/nickderobertis/onepipeline-ui/pull/409))
+
 ## [0.43.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.42.0...v0.43.0) - 2026-10-20
 
 ### Added
