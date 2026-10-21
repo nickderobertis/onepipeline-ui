@@ -488,6 +488,9 @@ const SURFACES: readonly Surface[] = [
           exact: true,
         }),
       ).toContainText("pr-author");
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .scrollIntoViewIfNeeded();
     },
   },
   {
@@ -511,6 +514,9 @@ const SURFACES: readonly Surface[] = [
         .getByRole("region", { name: "Node timeline", exact: true })
         .getByRole("button", { name: "Expand timeline" })
         .click();
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .scrollIntoViewIfNeeded();
     },
   },
   {
