@@ -1,18 +1,7 @@
 #!/usr/bin/env bash
 # `docker` as scripts/measure-cold-linux.sh puts it on PATH: every `docker run`
-# gains --cpuset-cpus=$MEASURE_CPUS, and with MEASURE_DEFAULT_WEIGHT set loses
-# any --cpu-shares; everything else is $MEASURE_DOCKER's, unchanged.
+# gains --cpuset-cpus=$MEASURE_CPUS, ahead of every argument it was given;
+# everything else is $MEASURE_DOCKER's, unchanged.
 [ "${1:-}" = run ] || exec "$MEASURE_DOCKER" "$@"
 shift
-args=()
-while [ "$#" -gt 0 ]; do
-  if [ -n "$MEASURE_DEFAULT_WEIGHT" ]; then
-    case "$1" in
-      --cpu-shares) shift 2; continue ;;
-      --cpu-shares=*) shift; continue ;;
-    esac
-  fi
-  args+=("$1")
-  shift
-done
-exec "$MEASURE_DOCKER" run --cpuset-cpus="$MEASURE_CPUS" "${args[@]}"
+exec "$MEASURE_DOCKER" run --cpuset-cpus="$MEASURE_CPUS" "$@"

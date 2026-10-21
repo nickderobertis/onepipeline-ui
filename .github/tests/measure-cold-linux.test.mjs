@@ -83,7 +83,7 @@ function doubles(
       `  for left in target .nx/cache .nx/workspace-data .tools/bin/onepipeline-api-baseline .tools/bin/onepipeline-api-baseline.commit; do [ ! -e "$left" ] || printf 'left %s\\n' "$left" >> '${log}'; done`,
       `  printf 'head %s %s\\n' "$(git rev-parse HEAD^{tree})" "$(git log -1 --format=%s)" >> '${log}'`,
       "  docker run --rm --cpu-shares 4096 -v /x:/y image build",
-      "  docker run --cpu-shares=4096 image check",
+      "  docker run image check --cpu-shares 7 --trailing",
       "  docker info",
       stickyAfter
         ? "  mkdir -p held && touch held/unit && chmod 555 held"
@@ -155,7 +155,8 @@ test("a cold run is timed in a clone of the commit, with Docker pinned to the ru
     );
     assert.match(
       calls,
-      /^docker run --cpuset-cpus=0-3 --cpu-shares=4096 image check$/m,
+      /^docker run --cpuset-cpus=0-3 image check --cpu-shares 7 --trailing$/m,
+      "the container's own command keeps every argument",
     );
     assert.match(calls, /^docker info$/m, "other commands pass untouched");
     assert.doesNotMatch(calls, /^left /m, "the timed run starts cold");
@@ -166,7 +167,7 @@ test("a cold run is timed in a clone of the commit, with Docker pinned to the ru
   }
 });
 
-test("--default-cpu-weight drops the wheel build's weight, and the recipe's failure is the script's", () => {
+test("--cpus pins the run and its containers, and the recipe's failure is the script's", () => {
   const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
   try {
     const d = doubles(dir, { jobStatus: 7 });
@@ -181,7 +182,6 @@ test("--default-cpu-weight drops the wheel build's weight, and the recipe's fail
         work,
         "--cpus",
         "2-5",
-        "--default-cpu-weight",
         "--keep",
       ],
       dir,
@@ -196,9 +196,8 @@ test("--default-cpu-weight drops the wheel build's weight, and the recipe's fail
     assert.match(calls, /^taskset -c 2-5$/m);
     assert.match(
       calls,
-      /^docker run --cpuset-cpus=2-5 --rm -v \/x:\/y image build$/m,
+      /^docker run --cpuset-cpus=2-5 --rm --cpu-shares 4096 -v \/x:\/y image build$/m,
     );
-    assert.match(calls, /^docker run --cpuset-cpus=2-5 image check$/m);
     assert.ok(existsSync(join(work, "w")), "--keep leaves the clone");
     assert.equal(
       execFileSync("git", ["-C", join(work, "w"), "rev-parse", "HEAD"], {

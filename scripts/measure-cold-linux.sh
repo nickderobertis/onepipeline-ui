@@ -7,10 +7,8 @@
 # job's earlier steps provision it (bootstrap, the release tools), and its
 # `target`, Nx cache and baseline server removed. The recipe then runs pinned to
 # --cpus, a hosted runner's four, with every compiler cache off. Docker does not
-# inherit `taskset`, so `docker run` is handed `--cpuset-cpus` by a shim on PATH;
-# with --default-cpu-weight the shim also drops the wheel build's
-# `--cpu-shares`, which measures the tree as a runner would run it where that
-# weight changes nothing.
+# inherit `taskset`, so `docker run` is handed `--cpuset-cpus` by a shim on PATH
+# (scripts/measure-cold-linux.d/docker).
 #
 # --fixture names a change, `FROM...TO` in this repository, applied on top as one
 # commit, so the recipe selects what that change selects: the measurements use
@@ -23,7 +21,7 @@
 #
 # Usage:
 #   scripts/measure-cold-linux.sh --commit REV [--fixture FROM...TO] [--label NAME]
-#     [--cpus LIST] [--default-cpu-weight] [--workdir DIR] [--keep]
+#     [--cpus LIST] [--workdir DIR] [--keep]
 #
 # Prints one line, `measure-cold-linux: LABEL exit=N wall=S nx=…`, and leaves the
 # recipe's log beside it. Exit: the recipe's own status; 2 for a usage error;
@@ -32,7 +30,7 @@ set -euo pipefail
 
 usage() {
   echo "measure-cold-linux: $1" >&2
-  echo "ACTION: run 'scripts/measure-cold-linux.sh --commit REV [--fixture FROM...TO] [--label NAME] [--cpus LIST] [--default-cpu-weight] [--workdir DIR] [--keep]'" >&2
+  echo "ACTION: run 'scripts/measure-cold-linux.sh --commit REV [--fixture FROM...TO] [--label NAME] [--cpus LIST] [--workdir DIR] [--keep]'" >&2
   exit 2
 }
 fail() {
@@ -42,7 +40,7 @@ fail() {
 }
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-commit="" fixture="" label="" cpus="0-3" default_weight="" workdir="/tmp/onepipeline-ui-cold" keep=""
+commit="" fixture="" label="" cpus="0-3" workdir="/tmp/onepipeline-ui-cold" keep=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --commit | --fixture | --label | --cpus | --workdir)
@@ -56,7 +54,6 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
-    --default-cpu-weight) default_weight="yes"; shift ;;
     --keep) keep="yes"; shift ;;
     *) usage "unknown argument '$1'" ;;
   esac
@@ -132,7 +129,6 @@ run_env=(
   "PATH=$root/scripts/measure-cold-linux.d:$PATH"
   "MEASURE_DOCKER=$docker_bin"
   "MEASURE_CPUS=$cpus"
-  "MEASURE_DEFAULT_WEIGHT=$default_weight"
   "RUSTC_WRAPPER="
   "CARGO_BUILD_RUSTC_WRAPPER="
   "CARGO_INCREMENTAL=0"
