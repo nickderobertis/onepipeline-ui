@@ -263,9 +263,6 @@ export function NodeTimelineView({
             </div>
           </dl>
         </TabsContent>
-        {/* The sessions this node's dispatches wrote, every one whatever the
-            repository's agent structure, each opening to its transcript. Mounted
-            only while the tab is open, so it is read like the run's own reads. */}
 
         <TabsContent className="node-timeline-panel" value="timeline">
           {/* llmlint: ignore[changed_behavior_has_e2e] the detail and the timeline are
@@ -381,8 +378,12 @@ function NodeExecution({
   // window; pinning it to the nearest edge keeps the cursor on screen instead of
   // dropping it and leaving the reader with no mark at all.
   const plotted = useMemo(
-    () => timeRange(projection.items),
-    [projection.items],
+    () =>
+      timeRange([
+        ...projection.items,
+        ...projection.markers.map(({ at }) => ({ start: at })),
+      ]),
+    [projection.items, projection.markers],
   );
   const cursor =
     sync.cursor === undefined

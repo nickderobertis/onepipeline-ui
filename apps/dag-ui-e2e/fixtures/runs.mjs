@@ -444,6 +444,8 @@ function harnessSessionRecord(
   historyId = HARNESS_SESSION_ARTIFACT,
   session = HARNESS_SESSION_FILE,
   text = HARNESS_SESSION_TEXT,
+  recordedAt = "2026-08-17T00:11:58Z",
+  finishedAt = null,
 ) {
   return `${JSON.stringify({
     type: "run",
@@ -452,7 +454,7 @@ function harnessSessionRecord(
     session,
     name: session.replace(/-\d{8}T\d{6}Z-\d+$/u, ""),
     project: HARNESS_CWD,
-    timestamp: "2026-08-17T00:11:58Z",
+    timestamp: recordedAt,
     harness: "claude-code",
     variant: "alternate",
     harness_id: "claude-code:alternate",
@@ -461,8 +463,18 @@ function harnessSessionRecord(
     permission_mode: "default",
     status: "ok",
     exit_code: 0,
-    duration_ms: 4200,
-    finished_at: null,
+    duration_ms:
+      finishedAt === null
+        ? 4200
+        : Date.parse(finishedAt) - Date.parse(recordedAt),
+    ...(finishedAt === null
+      ? {}
+      : {
+          started_at: recordedAt,
+          model_ms: Date.parse(finishedAt) - Date.parse(recordedAt),
+          tool_ms: 0,
+        }),
+    finished_at: finishedAt,
     text,
     text_source: "json:result",
     usage: {
@@ -1900,13 +1912,60 @@ function writeLiveRun(root) {
   // dashboard worker's — also relayed as the artifact below, so one session
   // opens from the timeline and from the agents listing to one record — and
   // the drafting of a reply to a review comment on that worker's draft.
+  const relayed = journal.lines.map((line) => JSON.parse(line));
+  const workerAt =
+    relayed.find(
+      (event) =>
+        event.source === "agentgraph" &&
+        event.labels.session === WORKER_SESSION,
+    )?.ts ?? stamp(start);
+  const observerAt =
+    relayed.find(
+      (event) =>
+        event.source === "agentgraph" && event.labels.node === undefined,
+    )?.ts ?? stamp(start);
+  const replierAt = stamp(journal.at);
+  for (const [id, session, text, at] of [
+    [
+      HARNESS_SESSION_ARTIFACT,
+      HARNESS_SESSION_FILE,
+      HARNESS_SESSION_TEXT,
+      workerAt,
+    ],
+    [
+      OBSERVER_HISTORY_ID,
+      OBSERVER_SESSION_FILE,
+      "nothing has been quiet",
+      observerAt,
+    ],
+    [
+      REPLIER_HISTORY_ID,
+      REPLIER_SESSION_FILE,
+      "the review reply is drafted",
+      replierAt,
+    ],
+  ]) {
+    writeFileSync(
+      join(harnessHistory.dir, HARNESS_PROJECT, `${session}.jsonl`),
+      harnessSessionRecord(
+        id,
+        session,
+        text,
+        at,
+        id === OBSERVER_HISTORY_ID ? stamp(Date.parse(at) + 42_000) : null,
+      ),
+    );
+  }
+  harnessHistory.bytes = readFileSync(
+    join(harnessHistory.dir, HARNESS_PROJECT, `${HARNESS_SESSION_FILE}.jsonl`),
+  ).length;
   writePointerFile(dir, [
     pointerLine(
       harnessHistory.dir,
       OBSERVER_SESSION_FILE,
       OBSERVER_HISTORY_ID,
       "claude-code",
-      "2026-08-17T00:11:00Z",
+      observerAt,
       agentLabels(LIVE_RUN, "observer"),
     ),
     pointerLine(
@@ -1914,7 +1973,7 @@ function writeLiveRun(root) {
       HARNESS_SESSION_FILE,
       HARNESS_SESSION_ARTIFACT,
       "claude-code:alternate",
-      "2026-08-17T00:11:58Z",
+      workerAt,
       agentLabels(LIVE_RUN, "node", "dashboard", 1),
     ),
     pointerLine(
@@ -1922,7 +1981,7 @@ function writeLiveRun(root) {
       REPLIER_SESSION_FILE,
       REPLIER_HISTORY_ID,
       "claude-code",
-      "2026-08-17T00:12:00Z",
+      replierAt,
       agentLabels(LIVE_RUN, "review-reply", "dashboard", 1),
     ),
   ]);
@@ -3803,12 +3862,83 @@ function buildRecordedTimelines(root) {
     readFileSync(new URL("./timeline-recorded.json", import.meta.url), "utf8"),
   );
   writeRecordedTimeline(root, original);
-  writeRecordedTimeline(
-    root,
-    JSON.parse(
-      readFileSync(new URL("./timeline-retries.json", import.meta.url), "utf8"),
-    ),
+  // A replay with harness-only records proves they cannot consume graph idle.
+  const harnesses = structuredClone(original);
+  harnesses.run_id = `${original.run_id}-harnesses`;
+  harnesses.launch.run_id = harnesses.run_id;
+  for (const record of harnesses.records) {
+    record.labels["onepipeline.run_id"] = harnesses.run_id;
+    if (record.source !== "agentgraph") record.labels.run_id = harnesses.run_id;
+  }
+  writeRecordedTimeline(root, harnesses);
+  const historyStore = join(root, "..", "timeline-harness-history");
+  mkdirSync(join(historyStore, HARNESS_PROJECT), { recursive: true });
+  const observerStart = stamp(Date.parse(original.records[0].ts) + 1000);
+  const workerStart = original.records.find(
+    (record) => record.kind === "node-dispatched",
+  ).ts;
+  const pointers = [];
+  for (const [name, id, scope, started, finished] of [
+    [
+      "timeline-observer",
+      "01a00d0f-c094-7660-b26c-8a53baaf9e01",
+      "observer",
+      observerStart,
+      stamp(Date.parse(observerStart) + 42_000),
+    ],
+    [
+      "timeline-worker",
+      "01a00d0f-c094-7660-b26c-8a53baaf9e02",
+      "node",
+      workerStart,
+      null,
+    ],
+  ]) {
+    const session = `${name}-20261013T000000Z-1`;
+    writeFileSync(
+      join(historyStore, HARNESS_PROJECT, `${session}.jsonl`),
+      harnessSessionRecord(
+        id,
+        session,
+        `${name} transcript`,
+        started,
+        finished,
+      ),
+    );
+    pointers.push(
+      pointerLine(
+        historyStore,
+        session,
+        id,
+        "claude-code",
+        started,
+        agentLabels(
+          harnesses.run_id,
+          scope,
+          scope === "node" ? original.node : undefined,
+          scope === "node" ? 1 : undefined,
+        ),
+      ),
+    );
+  }
+  writePointerFile(join(root, harnesses.run_id), pointers);
+  const retries = JSON.parse(
+    readFileSync(new URL("./timeline-retries.json", import.meta.url), "utf8"),
   );
+  writeRecordedTimeline(root, retries);
+  // Producer-stamped progress boundaries are hidden by the real planner
+  // profile; gate milestones remain, while all graph activity is excluded.
+  const filtered = structuredClone(retries);
+  filtered.run_id = `${retries.run_id}-filtered`;
+  filtered.launch.run_id = filtered.run_id;
+  for (const record of filtered.records) {
+    record.labels["onepipeline.run_id"] = filtered.run_id;
+    if (record.source !== "agentgraph") record.labels.run_id = filtered.run_id;
+    if (["node-dispatched", "node-settled"].includes(record.kind))
+      record.labels.significance = "progress";
+    if (record.kind === "gate-run") record.labels.significance = "milestone";
+  }
+  writeRecordedTimeline(root, filtered);
   for (const terminal of original.terminations) {
     const corpus = structuredClone(original);
     corpus.run_id = `${original.run_id}-${terminal.kind}`;

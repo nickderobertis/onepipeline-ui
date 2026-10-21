@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-use oneharness_core::domain::history::HistoryShowEntry;
+use oneharness_core::domain::history::{HistoryRecord, HistoryShowEntry};
 use oneharness_core::io::history;
 use onepipeline::agents::{
     AgentScope, AgentSession, Agents, ATTEMPT_LABEL, NODE_LABEL, RUN_ID_LABEL, SCOPE_LABEL,
@@ -4683,12 +4683,12 @@ fn pointed_session(paths: &RunPaths, id: &ArtifactId) -> Option<Vec<u8>> {
 /// One record of a oneharness session file, found through the three fields
 /// every pointer at one carries, and read only once its path is proved to
 /// land under the store the pointer named.
-fn session_record(
+fn typed_session_record(
     history_dir: Option<&str>,
     history_project: &str,
     history_session: &str,
     id: &ArtifactId,
-) -> Option<Vec<u8>> {
+) -> Option<HistoryRecord> {
     // An empty value names no store, which is what oneharness itself reads
     // `history_dir = ""` as, so it falls back rather than being refused.
     let named = match history_dir.filter(|value| !value.is_empty()) {
@@ -4730,9 +4730,26 @@ fn session_record(
             }
             _ => None,
         })?;
-    serde_json::to_vec_pretty(&record).ok()
+    Some(record)
 }
 // llmlint: ignore-end[authorization_enforced_server_side]
+
+/// The artifact keeps its established serialization; timeline metadata consumes
+/// the producer's typed record without serializing and parsing its transcript.
+fn session_record(
+    history_dir: Option<&str>,
+    history_project: &str,
+    history_session: &str,
+    id: &ArtifactId,
+) -> Option<Vec<u8>> {
+    serde_json::to_vec_pretty(&typed_session_record(
+        history_dir,
+        history_project,
+        history_session,
+        id,
+    )?)
+    .ok()
+}
 
 /// The scope a timeline request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4869,7 +4886,34 @@ pub fn timeline_harnesses(
         }
         let launch_scope = labels.get(SCOPE_LABEL).map_or("observer", String::as_str);
         for run in &session.runs {
-            let started = serde_json::to_value(&run.started).unwrap_or(Value::Null);
+            let recorded = ArtifactId::try_from(run.history_id.to_string().as_str())
+                .ok()
+                .and_then(|id| {
+                    typed_session_record(
+                        Some(&session.history_dir),
+                        &session.history_project,
+                        &session.history_session,
+                        &id,
+                    )
+                });
+            let valid_time = |stamp: &&str| OffsetDateTime::parse(stamp, &Rfc3339).is_ok();
+            let stated_start = recorded.as_ref().and_then(|record| {
+                record
+                    .started_at
+                    .as_deref()
+                    .filter(valid_time)
+                    .or_else(|| Some(record.timestamp.as_str()).filter(valid_time))
+            });
+            let started = stated_start.map_or_else(
+                || serde_json::to_value(&run.started).unwrap_or(Value::Null),
+                |stamp| json!(stamp),
+            );
+            let ended = recorded
+                .as_ref()
+                .and_then(|record| record.finished_at.as_deref())
+                .filter(valid_time)
+                .filter(|end| millis_of(end) >= started.as_str().and_then(millis_of));
+            let no_recorded_end = ended.is_none();
             let parent = node.map_or_else(
                 || format!("run.{}", view.paths.run),
                 |node| {
@@ -4878,6 +4922,7 @@ pub fn timeline_harnesses(
                         .filter(|span| {
                             span["node_id"] == *node
                                 && span["kind"] == "dispatch"
+                                && span.get("harness_scope").is_none()
                                 && span["started_at"].as_str() <= started.as_str()
                                 && match launch_scope {
                                     "pr-author" | "review-reply" => {
@@ -4896,8 +4941,9 @@ pub fn timeline_harnesses(
             );
             let mut span = json!({
                 "id": format!("harness.{}", run.history_id), "kind": "dispatch",
-                "label": session.name, "started_at": started,
-                "ended_at": timeline_end(view).map(|end| end.ts),
+                "label": if no_recorded_end { format!("{} · no recorded end", session.name) } else { session.name.clone() }, "started_at": started,
+                "ended_at": ended.map_or_else(|| started.clone(), |stamp| json!(stamp)),
+                "status": if no_recorded_end { "no-recorded-end" } else { "done" },
                 "parent_id": parent, "harness_scope": launch_scope,
                 "reference": { "kind": "oneharness_session", "value": run.history_id }, "events": [],
             });
@@ -4911,7 +4957,221 @@ pub fn timeline_harnesses(
             spans.push(span);
         }
     }
+    if let Scope::Node(node) = scope {
+        stamp_dispatch_groups(view, node.as_str(), &mut payload);
+    }
     payload
+}
+
+/// Group identity is folded before filtering; a reading can hide records without
+/// changing which dispatch or drafter owns the sessions that remain.
+fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
+    let Some(key) = dispatch_key(&view.paths.run, node) else {
+        return;
+    };
+    let Some(spans) = payload["spans"].as_array_mut() else {
+        return;
+    };
+    let mut identities = BTreeSet::new();
+    let mut events: Vec<_> = view
+        .events
+        .iter()
+        .filter(|event| identities.insert((&event.stream, event.seq)))
+        .enumerate()
+        .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
+        .collect();
+    let event_key = |index: usize, event: &Envelope| (millis_of(&event.ts), index);
+    events.sort_by_key(|(index, event)| event_key(*index, event));
+    let openings: Vec<_> = events
+        .iter()
+        .copied()
+        .filter(|(_, event)| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
+        })
+        .collect();
+    if openings.is_empty() {
+        return;
+    }
+    let opening_keys: Vec<_> = openings
+        .iter()
+        .map(|(index, event)| event_key(*index, event))
+        .collect();
+    let settlements: Vec<_> = events
+        .iter()
+        .filter(|(_, event)| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+        })
+        .map(|(index, event)| event_key(*index, event))
+        .collect();
+    let closings: Vec<_> = opening_keys
+        .iter()
+        .map(|opened| {
+            settlements
+                .get(settlements.partition_point(|settled| settled <= opened))
+                .copied()
+        })
+        .collect();
+    let owner = |at: (Option<i128>, usize), drafting: bool| {
+        let group = opening_keys
+            .partition_point(|opened| *opened <= at)
+            .checked_sub(1)?;
+        (drafting || closings[group].is_none_or(|end| at <= end)).then_some(group)
+    };
+    let rank = |role: &str| match role {
+        "pr-author" => 1usize,
+        "review-reply" => 2usize,
+        _ => 0usize,
+    };
+    let roles: BTreeMap<String, String> = spans
+        .iter()
+        .filter(|span| span["kind"] == "dispatch" && span.get("harness_scope").is_none())
+        .filter_map(|span| {
+            Some((
+                span["reference"]["value"].as_str()?.to_owned(),
+                span["agent_role"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    let event_rank = |event: &Envelope| {
+        if let Some(persona) = event
+            .labels
+            .extra
+            .get("onepipeline.persona")
+            .and_then(Value::as_str)
+            .or(event.labels.persona.as_deref())
+        {
+            return rank(persona);
+        }
+        session_label(event)
+            .and_then(|session| roles.get(session).map(String::as_str))
+            .or_else(|| member_label(event))
+            .map_or(0, rank)
+    };
+    let mut sessions = BTreeMap::new();
+    let mut streams: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+    let mut stream_ranks: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+    let mut primaries: BTreeMap<usize, ((Option<i128>, usize), String)> = BTreeMap::new();
+    for (session, records) in relayed_sessions(&events) {
+        let Some((index, first)) = records
+            .iter()
+            .min_by_key(|(index, event)| event_key(*index, event))
+        else {
+            continue;
+        };
+        let role = records
+            .iter()
+            .map(|(_, event)| event_rank(event))
+            .find(|rank| *rank > 0)
+            .unwrap_or_else(|| roles.get(session).map_or(0, |role| rank(role)));
+        let at = event_key(*index, first);
+        let Some(group) = owner(at, role > 0) else {
+            continue;
+        };
+        sessions.insert(session.to_owned(), (group, role));
+        for (_, event) in &records {
+            streams
+                .entry(event.stream.clone())
+                .or_default()
+                .insert(group);
+            stream_ranks
+                .entry(event.stream.clone())
+                .or_default()
+                .insert(role);
+        }
+        if role == 0 && primaries.get(&group).is_none_or(|(known, _)| at < *known) {
+            primaries.insert(group, (at, first.stream.clone()));
+        }
+    }
+    let presentation = |group: usize, role: usize| {
+        let (opening_index, opening) = openings[group];
+        let stream = primaries
+            .get(&group)
+            .map_or(opening.stream.as_str(), |(_, stream)| stream.as_str());
+        let base = format!("{key}:{stream}:{}:{}", opening.stream, opening.seq);
+        let (id, label) = match role {
+            1 => (
+                format!("{base}:pr-author"),
+                "Change request drafter".to_owned(),
+            ),
+            2 => (
+                format!("{base}:review-reply"),
+                "Review reply drafter".to_owned(),
+            ),
+            _ => (base, format!("Dispatch {}", group + 1)),
+        };
+        json!({ "id": id, "label": label, "order": opening_index * 3 + role, "started_at": opening.ts })
+    };
+    let mut record_groups = BTreeMap::new();
+    for (index, event) in &events {
+        let mut role = event_rank(event);
+        if role == 0 {
+            if let Some(ranks) = stream_ranks
+                .get(&event.stream)
+                .filter(|ranks| ranks.len() == 1)
+            {
+                role = *ranks.first().expect("one rank");
+            }
+        }
+        let Some(mut group) = owner(event_key(*index, event), role > 0) else {
+            continue;
+        };
+        if event.source == Source::Agentgraph {
+            if let Some(owners) = streams
+                .get(&event.stream)
+                .filter(|owners| owners.len() == 1)
+            {
+                group = *owners.first().expect("one owner");
+            }
+        }
+        record_groups.insert(
+            format!("{}.{}", event.stream, event.seq),
+            presentation(group, role),
+        );
+    }
+    for span in spans {
+        for event in span["events"].as_array_mut().into_iter().flatten() {
+            if let Some(group) = event["record_id"]
+                .as_str()
+                .and_then(|id| record_groups.get(id))
+            {
+                event["dispatch_group"] = group.clone();
+            }
+        }
+        if span["kind"] == "node" {
+            continue;
+        }
+        let role = span["harness_scope"]
+            .as_str()
+            .or_else(|| span["agent_role"].as_str())
+            .map_or(0, rank);
+        let named = span["reference"]["value"]
+            .as_str()
+            .and_then(|session| sessions.get(session))
+            .copied();
+        let attempted = span["dispatch_attempt"].as_str().and_then(|attempt| {
+            openings
+                .iter()
+                .enumerate()
+                .position(|(index, (_, opening))| {
+                    opening
+                        .payload
+                        .get("attempt")
+                        .map_or_else(|| (index + 1).to_string(), Value::to_string)
+                        .trim_matches('"')
+                        == attempt
+                })
+        });
+        let at = (span["started_at"].as_str().and_then(millis_of), usize::MAX);
+        if let Some((group, role)) = named.or_else(|| {
+            attempted
+                .or_else(|| owner(at, role > 0))
+                .map(|group| (group, role))
+        }) {
+            span["dispatch_group"] = presentation(group, role);
+        }
+    }
 }
 
 /// The transcript turn one relayed envelope became.
@@ -5347,6 +5607,22 @@ fn note_operation(event: &Envelope) -> Option<(&'static str, &Map<String, Value>
 /// The fields a reader needs for each record kind. Wire keys are selected here
 /// so neither arbitrary payloads nor session credentials reach a detail panel.
 pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "edit-committed",
+        &[
+            ("author", "Author"),
+            ("operations", "Operations"),
+            ("operation_kinds", "Operation kinds"),
+        ],
+    ),
+    (
+        "planner-replied",
+        &[
+            ("author", "Author"),
+            ("completion", "Completion"),
+            ("reason", "Reason"),
+        ],
+    ),
     (
         "node-dispatched",
         &[

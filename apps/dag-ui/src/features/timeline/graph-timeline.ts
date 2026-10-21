@@ -84,6 +84,8 @@ export interface GraphSegment {
   readonly rowId?: string;
   readonly nodeId?: string;
   readonly conversationId?: string;
+  /** Harness transcript links carry no work or idle attribution. */
+  readonly countsAsWork?: false;
   readonly startedAt: string;
   /** `null` for work the record never closed. */
   readonly endedAt: string | null;
@@ -166,9 +168,10 @@ export function graphTimeline(
       }),
     ),
   ];
-  const work = rows.flatMap((entry) =>
+  const plotted = rows.flatMap((entry) =>
     entry.items.filter((item) => item.payload.kind === "work"),
   );
+  const work = plotted.filter((item) => item.payload.countsAsWork !== false);
   return {
     range,
     live: spans.some((span) => span.ended_at === null),
@@ -179,7 +182,7 @@ export function graphTimeline(
       // every row's, they are laid down first so the work sits over them.
       items: [
         ...idleItems(range, work, undefined),
-        ...compactTimelineItems(work, lanes),
+        ...compactTimelineItems(plotted, lanes),
       ],
       markers: [
         ...compactTimelineMarkers(
@@ -270,6 +273,7 @@ function row({
         payload: {
           id: span.id,
           kind: "work",
+          ...(span.harness_scope === undefined ? {} : { countsAsWork: false }),
           label: `${label} · ${laneLabel(lane, lanes)}`,
           rowId: id,
           ...(nodeId === undefined ? {} : { nodeId }),
@@ -281,8 +285,16 @@ function row({
       },
     ];
   });
-  const idle = idleItems(range, work, { rowId: id, nodeId });
-  const workedMs = union(work).reduce(
+  // Harness pointers show where a transcript can be opened. They are not
+  // graph work: even a record with its own end must not consume idle time.
+  const harnessIds = new Set(
+    spans
+      .filter((span) => span.harness_scope !== undefined)
+      .map((span) => span.id),
+  );
+  const counted = work.filter((item) => !harnessIds.has(item.id));
+  const idle = idleItems(range, counted, { rowId: id, nodeId });
+  const workedMs = union(counted).reduce(
     (total, [from, to]) => total + (to - from),
     0,
   );

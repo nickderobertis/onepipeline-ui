@@ -599,17 +599,9 @@ p {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* The share is what the collapsed line needs at the narrowest width the layout
-     supports, where the ten lane names wrap the legend onto a second row: this is the
-     view an operator lands on, so it is the one view that has to be whole. Being
-     `fit-content`, a plot that needs less than its share still takes only what it
-     needs, and the reading keeps the rest — so raising it costs the reading nothing
-     at any width where the plot already fits.
-     It is a share of what the header leaves, which is why it moved from 60%: the
-     header gained the reading that says whether the node can be corrected, that
-     reading takes a line of its own at the phone, and 60% of what was left there was
-     17px short of the collapsed line. */
-  grid-template-rows: fit-content(64%) minmax(0, 1fr);
+  /* The collapsed plot takes its content height: adding harness lane names must
+     not put its clock below a percentage ceiling. The transcript gets the rest. */
+  grid-template-rows: max-content minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -1872,20 +1864,8 @@ button.graph-row-name {
     padding: 5px 14px 6px;
   }
 
-  /* The collapsed line is the view a node opens on, and at this width its legend
-     needs five rows of the region before a single bar is drawn — more than the share
-     that holds the whole plot on a laptop. It takes four fifths here so the line
-     and its clock are whole on arrival; the reading below keeps the rest and scrolls,
-     which is what a reading does anyway.
-     It was three quarters until the header gained the reading that says whether the
-     node can be corrected. Two badges and the node's own facts do not share one row
-     at 390px, so the header takes a row more here than anywhere else — and three
-     quarters of what it then left was 17px short of the collapsed line. Four fifths
-     was 20px short of it once the queue a ready node sat in became a lane of its
-     own: eleven names take a sixth row here where ten took five. Both states take
-     the same share at this width, because expanding must never make the plot's
-     ceiling *lower* than the line it opens from. */
-  .node-execution,
+  /* Expanded lanes can exceed the phone's height. Bound their scroll region
+     while the collapsed plot continues to take its intrinsic height. */
   .node-execution[data-expanded="true"] {
     grid-template-rows: fit-content(86%) minmax(0, 1fr);
   }

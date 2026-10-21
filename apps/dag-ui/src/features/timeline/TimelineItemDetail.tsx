@@ -676,20 +676,27 @@ function Recorded({
 }) {
   if (row.rowKind === "event") {
     return (
-      <dl className="facts">
-        <div>
-          <dt>Recorded at</dt>
-          <dd>
-            <Timestamp at={row.startedAt} relative />
-          </dd>
-        </div>
-        {Object.entries(row.event.fields ?? {}).map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{typeof value === "string" ? value : JSON.stringify(value)}</dd>
+      <>
+        <dl className="facts">
+          <div>
+            <dt>Recorded at</dt>
+            <dd>
+              <Timestamp at={row.startedAt} relative />
+            </dd>
           </div>
-        ))}
-      </dl>
+          {Object.entries(row.event.fields ?? {}).map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>
+                {typeof value === "string" ? value : JSON.stringify(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {reference !== undefined && (
+          <Reference reference={reference} fallback="No recorded artifact." />
+        )}
+      </>
     );
   }
   const located = row.rowKind === "group" ? undefined : row;

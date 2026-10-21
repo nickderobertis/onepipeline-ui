@@ -20751,13 +20751,6 @@ fn repeated_journal_identities_count_once_on_both_timeline_scopes() {
             body.as_object_mut()
                 .expect("an envelope")
                 .remove("observed_at");
-            for span in body["spans"].as_array_mut().expect("spans") {
-                for event in span["events"].as_array_mut().expect("events") {
-                    // Event addresses encode journal positions; duplication may
-                    // move positions without changing the record's meaning.
-                    event.as_object_mut().expect("event").remove("id");
-                }
-            }
             body
         };
         assert_eq!(read(original.address), read(repeated.address), "{query}");
@@ -21031,6 +21024,11 @@ fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() 
         ));
     }
     let cases: &[(&str, &[&str])] = &[
+        (
+            "edit-committed",
+            &["Author", "Operations", "Operation kinds"],
+        ),
+        ("planner-replied", &["Author", "Completion", "Reason"]),
         ("node-dispatched", &["Attempt", "Persona"]),
         ("session-opened", &["Branch", "Base"]),
         ("session-closed", &["Branch"]),
@@ -21092,6 +21090,139 @@ fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() 
             for absent in ["Token", "Worktree", "Config"] {
                 assert!(!fields.contains_key(absent), "{event}");
             }
+        }
+    }
+}
+
+#[test]
+fn harness_timeline_metadata_uses_typed_records_and_recovers_from_unreadable_bounds() {
+    use oneharness_core::domain::history::{HistoryLine, HistoryRunRecord, HistoryShowEntry};
+    #[derive(Clone, Copy, Debug)]
+    enum Case {
+        Closed,
+        NoEnd,
+        Missing,
+        Malformed,
+        Oversized,
+        BadStart,
+        BadEnd,
+        BadTimes,
+        Backwards,
+    }
+    const START: &str = "2026-08-07T12:00:03Z";
+    const END: &str = "2026-08-07T12:00:12Z";
+    for case in [
+        Case::Closed,
+        Case::NoEnd,
+        Case::Missing,
+        Case::Malformed,
+        Case::Oversized,
+        Case::BadStart,
+        Case::BadEnd,
+        Case::BadTimes,
+        Case::Backwards,
+    ] {
+        let (workspace, root) = fixture_run::workspace();
+        fixture_run::write(&root, fixture_run::RUN_ID);
+        let recorded = launched_session(
+            &workspace.path().join("history"),
+            &root,
+            fixture_run::RUN_ID,
+            node_launch(fixture_run::NODE_ID),
+            "metadata recovery",
+            "the recorded transcript",
+        );
+        let mut record = oneharness_core::io::history::read_session_display(&recorded.path)
+            .expect("producer's session")
+            .into_iter()
+            .find_map(|entry| match entry {
+                HistoryShowEntry::Record(record) => Some(record),
+                _ => None,
+            })
+            .expect("producer's record");
+        record.timestamp = START.to_owned();
+        record.started_at = Some(START.to_owned());
+        record.finished_at = Some(END.to_owned());
+        record.duration_ms = Some(9000);
+        record.model_ms = Some(9000);
+        record.tool_ms = Some(0);
+        record.observed_tool_ms = None;
+        record.time_to_first_token_ms = None;
+        match case {
+            Case::NoEnd => {
+                record.started_at = None;
+                record.finished_at = None;
+                record.model_ms = None;
+                record.tool_ms = None;
+            }
+            Case::Oversized => record.text = Some("x".repeat(70 * 1024)),
+            Case::BadStart => record.started_at = Some("invalid start".to_owned()),
+            Case::BadEnd => record.finished_at = Some("invalid end".to_owned()),
+            Case::BadTimes => {
+                record.timestamp = "invalid timestamp".to_owned();
+                record.started_at = Some("invalid start".to_owned());
+            }
+            Case::Backwards => record.finished_at = Some("2026-08-07T12:00:02Z".to_owned()),
+            Case::Closed | Case::Missing | Case::Malformed => {}
+        }
+        let line = HistoryLine::Run(HistoryRunRecord::from_record(&record));
+        fs::write(
+            &recorded.path,
+            format!(
+                "{}\n",
+                serde_json::to_string(&line).expect("producer's wire format")
+            ),
+        )
+        .expect("recorded metadata");
+        match case {
+            Case::Missing => fs::remove_file(&recorded.path).expect("swept history"),
+            Case::Malformed => {
+                fs::write(&recorded.path, "{broken history\n").expect("corrupted history")
+            }
+            _ => {}
+        }
+        let serving = Serving::start_in(workspace, &[]);
+        let pointers = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/agents", fixture_run::RUN_ID),
+        )
+        .json();
+        let pointer_start = &pointers["sessions"][0]["runs"][0]["started"];
+        assert!(pointer_start.is_string(), "{case:?}: {pointers}");
+        let started = if matches!(case, Case::Missing | Case::Malformed | Case::BadTimes) {
+            pointer_start.clone()
+        } else {
+            json!(START)
+        };
+        let closed = matches!(case, Case::Closed | Case::BadStart | Case::Oversized);
+        for query in [
+            "scope=run".to_owned(),
+            format!("scope=node&node={}", fixture_run::NODE_ID),
+        ] {
+            let response = http::get(
+                serving.address,
+                &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+            );
+            assert_eq!(response.status, 200, "{case:?}: {}", response.body);
+            let timeline = response.json();
+            let span = timeline["spans"]
+                .as_array()
+                .expect("spans")
+                .iter()
+                .find(|span| span["harness_scope"] == "node")
+                .expect("recorded harness");
+            assert_eq!(span["started_at"], started, "{case:?}: {span}");
+            assert_eq!(
+                span["ended_at"],
+                if closed { json!(END) } else { started.clone() },
+                "{case:?}: {span}"
+            );
+            assert_eq!(
+                span["status"],
+                if closed { "done" } else { "no-recorded-end" },
+                "{case:?}: {span}"
+            );
+            assert_eq!(span["reference"]["value"], recorded.history_id);
         }
     }
 }

@@ -374,7 +374,17 @@ export function compactTimelineItems<Payload>(
       result.push(item);
     }
   }
-  return result;
+  // Boundary spans must survive compaction to keep one clock, but a later,
+  // lower-priority boundary must not cover the worker's clickable bar. Paint
+  // the dominant lane last, with its enclosing session above nested judge
+  // sessions in that same role lane. The expanded lanes retain every session.
+  return result.sort(
+    (left, right) =>
+      compactPriority(right, lanes) - compactPriority(left, lanes) ||
+      (left.end ?? left.start) -
+        left.start -
+        ((right.end ?? right.start) - right.start),
+  );
 }
 
 /** Whether two plotted items occupy the same pixels, to within one visual moment. */
@@ -649,11 +659,13 @@ export function nodeTimeline(
   // siblings, which is a run of one kind by every rule here — collapsing first hid
   // an ordinary single dispatch behind a control, and left `groupDispatches` a
   // group row it could nest nothing inside.
-  const modern = scoped.some((span) =>
-    span.events.some((event) => event.stream !== undefined),
+  const servedGroups = scoped.some(
+    (span) =>
+      span.dispatch_group !== undefined ||
+      span.events.some((event) => event.dispatch_group !== undefined),
   );
-  const rows = modern
-    ? recordedDispatchGroups(top)
+  const rows = servedGroups
+    ? servedDispatchGroups(top)
     : group(groupDispatches(labelWorkerRetries(top)));
   return { span: own, rows, total: count(rows) };
 }
@@ -929,6 +941,10 @@ function group(rows: readonly TimelineRow[]): TimelineRow[] {
         children: run,
         displayLabel: `${run.length} grouped ${first.displayKind.toLowerCase()} activities`,
         displayKind: first.displayKind,
+        ...(first.role === undefined ? {} : { role: first.role }),
+        ...(first.transport === undefined
+          ? {}
+          : { transport: first.transport }),
         ...(first.dispatch !== undefined &&
         run.every((row) => row.dispatch?.id === first.dispatch?.id)
           ? { dispatch: first.dispatch }
@@ -1089,171 +1105,64 @@ function groupDispatches(rows: readonly TimelineRow[]): TimelineRow[] {
   return grouped;
 }
 
-/** Group recorded identities rather than whichever session happened to precede one. */
-function recordedDispatchGroups(rows: readonly TimelineRow[]): TimelineRow[] {
-  const flat = flattenRows(rows).filter((row) => row.rowKind !== "group");
-  const events = flat.filter((row) => row.rowKind === "event").sort(byStart);
-  const starts = events.filter((row) => row.kind === "node-dispatched");
-  interface RecordedGroup {
-    opening: Extract<TimelineRow, { rowKind: "event" }>;
-    dispatch: DispatchGroup;
-    primaryStream?: string;
-    members: TimelineRow[];
-    drafters: Map<string, { dispatch: DispatchGroup; members: TimelineRow[] }>;
-  }
-  const groups: RecordedGroup[] = starts.map((row, index) => ({
-    opening: row,
-    dispatch: {
-      id: `${row.event.dispatch_id ?? row.id}:${row.event.stream}:${row.event.seq}`,
-      label: `Dispatch ${index + 1}`,
-    },
-    primaryStream: undefined,
-    members: [],
-    drafters: new Map<
-      string,
-      { dispatch: DispatchGroup; members: TimelineRow[] }
-    >(),
-  }));
-  const outside: TimelineRow[] = [];
-  const streamGroups = new Map<
+/** The server owns grouping even when a filter hides all boundary records. */
+function servedDispatchGroups(rows: readonly TimelineRow[]): TimelineRow[] {
+  const buckets = new Map<
     string,
-    { dispatch: DispatchGroup; members: TimelineRow[] }
-  >();
-  const owner = (row: TimelineRow) => {
-    const attempt =
-      row.rowKind === "span" ? row.span.dispatch_attempt : undefined;
-    if (attempt !== undefined) {
-      const named = groups.find(
-        ({ opening }, index) =>
-          String(opening.event.fields?.Attempt ?? index + 1) === attempt,
-      );
-      if (named !== undefined) return named;
+    {
+      metadata: NonNullable<TimelineEvent["dispatch_group"]>;
+      members: TimelineRow[];
     }
-    const persona = row.rowKind === "event" ? row.event.persona : row.role;
-    const drafting = persona === "pr-author" || persona === "review-reply";
-    return groups.findLast(({ opening }) => {
-      const matching =
-        row.rowKind !== "event" ||
-        row.event.dispatch_id === undefined ||
-        opening.event.dispatch_id === row.event.dispatch_id;
-      return (
-        matching &&
-        byStart(opening, row) <= 0 &&
-        (drafting ||
-          !events.some(
-            (event) =>
-              event.kind === "node-settled" &&
-              byStart(opening, event) < 0 &&
-              byStart(event, row) < 0,
-          ))
-      );
-    });
-  };
-  const place = (
-    row: TimelineRow,
-    target: { dispatch: DispatchGroup; members: TimelineRow[] },
-  ) => target.members.push({ ...row, children: [], dispatch: target.dispatch });
-  // A graph stream fixes the session's identity even when later records are
-  // relayed between those of another graph or another dispatch.
-  for (const row of flat
-    .filter((row) => row.rowKind === "span")
-    .filter((row) => row.kind === "dispatch")
-    .sort(byStart)) {
-    const group = owner(row);
-    if (group === undefined) {
-      outside.push(row);
+  >();
+  const outside: TimelineRow[] = [];
+  for (const row of flattenRows(rows).filter(
+    (row) => row.rowKind !== "group",
+  )) {
+    const metadata =
+      row.rowKind === "event"
+        ? row.event.dispatch_group
+        : row.span.dispatch_group;
+    const member = { ...row, children: [] };
+    if (metadata === undefined) {
+      outside.push(member);
       continue;
     }
-    const scope = row.span.harness_scope ?? row.role;
-    const parent = flat.find(
-      (candidate) => candidate.id === row.span.parent_id,
-    );
-    const stream =
-      row.span.events.find((event) => event.stream !== undefined)?.stream ??
-      (parent?.rowKind === "span"
-        ? parent.span.events.find((event) => event.stream !== undefined)?.stream
-        : undefined) ??
-      row.id;
-    if (
-      group.primaryStream === undefined &&
-      row.span.events.some((event) => event.stream !== undefined) &&
-      scope !== "pr-author" &&
-      scope !== "review-reply"
-    ) {
-      group.primaryStream = stream;
-      group.dispatch = {
-        ...group.dispatch,
-        id: `${group.opening.event.dispatch_id ?? group.opening.id}:${stream}`,
-      };
-    }
-    let target: { dispatch: DispatchGroup; members: TimelineRow[] } = group;
-    if (scope === "pr-author" || scope === "review-reply") {
-      const label =
-        scope === "pr-author"
-          ? "Change request drafter"
-          : "Review reply drafter";
-      target = group.drafters.get(stream) ?? {
-        dispatch: { id: `${group.dispatch.id}:${stream}`, label },
-        members: [],
-      };
-      group.drafters.set(stream, target);
-    }
-    streamGroups.set(stream, target);
-    place(row, target);
+    const bucket = buckets.get(metadata.id) ?? { metadata, members: [] };
+    bucket.members.push({
+      ...member,
+      dispatch: { id: metadata.id, label: metadata.label },
+    });
+    buckets.set(metadata.id, bucket);
   }
-  for (const row of events) {
-    const group = owner(row);
-    const named =
-      row.event.stream === undefined
-        ? undefined
-        : streamGroups.get(row.event.stream);
-    const drafting =
-      row.event.persona === "pr-author" || row.event.persona === "review-reply";
-    const label =
-      row.event.persona === "pr-author"
-        ? "Change request drafter"
-        : "Review reply drafter";
-    const drafters = drafting
-      ? [...(group?.drafters.values() ?? [])].filter(
-          (candidate) => candidate.dispatch.label === label,
-        )
-      : [];
-    const target =
-      named ??
-      drafters.findLast((candidate) => {
-        const first = candidate.members[0];
-        return first !== undefined && byStart(first, row) <= 0;
-      }) ??
-      drafters[0] ??
-      group;
-    if (target === undefined) outside.push(row);
-    else place(row, target);
-  }
-  for (const row of flat.filter(
-    (row) => row.rowKind === "span" && row.kind !== "dispatch",
-  )) {
-    const group = owner(row);
-    if (group === undefined) outside.push({ ...row, children: [] });
-    else place(row, group);
-  }
-  const chunks = [
-    ...outside.map((row) => [row]),
-    ...groups.map((dispatchGroup) => [
-      ...group(dispatchGroup.members.sort(byStart)),
-      ...[...dispatchGroup.drafters.values()].flatMap((drafter) =>
-        group(drafter.members.sort(byStart)),
-      ),
-    ]),
+  const groupedMembers = (members: readonly TimelineRow[]) => [
+    ...group(
+      members
+        .filter((row) => row.rowKind === "span" && row.kind === "dispatch")
+        .sort(byStart),
+    ),
+    ...group(
+      members
+        .filter((row) => row.rowKind !== "span" || row.kind !== "dispatch")
+        .sort(byStart),
+    ),
   ];
-  return chunks
-    .sort((left, right) => {
-      const first = left[0];
-      const next = right[0];
-      return first === undefined || next === undefined
-        ? 0
-        : byStart(first, next);
-    })
-    .flat();
+  return [
+    ...outside.map((row) => ({
+      at: row.startedAt,
+      order: row.rowKind === "event" ? (row.event.journal_order ?? 0) * 3 : 0,
+      rows: [row],
+    })),
+    ...[...buckets.values()].map(({ metadata, members }) => ({
+      at: metadata.started_at,
+      order: metadata.order,
+      rows: groupedMembers(members),
+    })),
+  ]
+    .sort(
+      (left, right) =>
+        Date.parse(left.at) - Date.parse(right.at) || left.order - right.order,
+    )
+    .flatMap(({ rows }) => rows);
 }
 
 /** The parties that run over an agent's work rather than being dispatched alone. */
@@ -1274,7 +1183,9 @@ function sameKind(first: TimelineRow, next: TimelineRow | undefined): boolean {
     next !== undefined &&
     first.rowKind !== "group" &&
     next.rowKind === first.rowKind &&
-    first.kind === next.kind
+    first.kind === next.kind &&
+    first.role === next.role &&
+    first.transport === next.transport
   );
 }
 

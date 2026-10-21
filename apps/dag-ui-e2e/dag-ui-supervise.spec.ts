@@ -9,6 +9,7 @@ import {
   runAgentsSchema,
   runDetailSchema,
   runStatusSchema,
+  runTimelineSchema,
   runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -925,6 +926,23 @@ test("observer and worker harness sessions open from their timelines", async ({
     (session) => session.labels["onepipeline.scope"] === "observer",
   );
   expect(observer).toBeDefined();
+  const timeline = await served(
+    page,
+    `/api/v2/runs/${runs().live}/timeline?scope=run`,
+    runTimelineSchema,
+  );
+  const observed = timeline.spans.find(
+    (span) => span.harness_scope === "observer",
+  );
+  if (observed?.ended_at == null)
+    throw new Error("observer with its own recorded end");
+  expect(Date.parse(observed.ended_at) - Date.parse(observed.started_at)).toBe(
+    42_000,
+  );
+  const worked = timeline.spans.find((span) => span.harness_scope === "node");
+  expect(worked).toBeDefined();
+  expect(worked?.ended_at).toBe(worked?.started_at);
+  expect(worked?.label).toContain("no recorded end");
   await page.goto(`/?run=${runs().live}&view=overall`);
   const graph = page.getByRole("region", {
     name: "Graph timeline",
@@ -953,7 +971,10 @@ test("observer and worker harness sessions open from their timelines", async ({
   );
   if (worker === undefined) throw new Error("worker session");
   await page
-    .getByRole("button", { name: `Open node (${worker.name})`, exact: true })
+    .getByRole("button", {
+      name: `Open node (${worker.name} · no recorded end)`,
+      exact: true,
+    })
     .click();
   await expect(
     page.getByRole("region", { name: "Timeline item detail" }),
@@ -967,6 +988,16 @@ test("observer and worker harness sessions open from their timelines", async ({
   await expect(
     page.getByRole("region", { name: "Review reply drafter", exact: true }),
   ).toContainText("replier-dashboard");
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", {
+      name: "Open review-reply (replier-dashboard · no recorded end)",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Timeline item detail" }),
+  ).toContainText("the review reply is drafted");
   await page.goto(`/?run=${runs().live}&node=foundation`);
   await expect(page.getByRole("button", { name: /^Open node \(/ })).toHaveCount(
     0,

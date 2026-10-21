@@ -1412,6 +1412,14 @@ export const timelineReleaseSchema = openObject({
     });
   }
 });
+/** Unfiltered dispatch ownership, shared by a record and the session lane. */
+export const timelineDispatchGroupSchema = openObject({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  order: counter,
+  started_at: timestamp,
+});
+
 /**
  * `kind` is an open string on purpose: it is the journal event kind that produced
  * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
@@ -1429,6 +1437,7 @@ export const timelineEventSchema = openObject({
   record_id: z.string().min(1).optional(),
   persona: z.string().min(1).optional(),
   dispatch_id: z.string().min(1).optional(),
+  dispatch_group: timelineDispatchGroupSchema.optional(),
   fields: z.record(z.string().min(1), z.json()).optional(),
   kind: z.string().min(1),
   at: timestamp,
@@ -1524,6 +1533,7 @@ export const timelineSpanSchema = openObject({
   agent_role: agentRoleSchema.optional(),
   transport_role: transportRoleSchema.optional(),
   dispatch_id: z.string().min(1).optional(),
+  dispatch_group: timelineDispatchGroupSchema.optional(),
   reference: timelineReferenceSchema.optional(),
   detail: openObject({
     ok: z.boolean().optional(),

@@ -819,9 +819,18 @@
       "kind": "edit-committed",
       "payload": {
         "author": "planner",
-        "command": {},
-        "operations": [],
-        "operation_kinds": []
+        "command": {
+          "op": "amend",
+          "id": "onepipeline-ui-link-retire-scope-4",
+          "text": "Recorded post-execution amendment"
+        },
+        "operations": [
+          {
+            "kind": "task-amended",
+            "node": "onepipeline-ui-link-retire-scope-4"
+          }
+        ],
+        "operation_kinds": ["task-amended"]
       }
     }
   ]

@@ -69,9 +69,12 @@ anything new here is a proposal to make upstream first.
   as alive.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
-  from the pair. Execution is continuous, so the pair is the whole of what
-  identifies a dispatch — the round that used to be its third part is not a thing
-  any run has.
+  from the pair. That pair addresses the node's dispatch endpoint across retries;
+  the round that used to be its third part is not a thing any run has.
+  Schema 13's `dispatch_group` additionally distinguishes the graph stream and
+  opening producer identity. `stamp_dispatch_groups` folds ownership, labels and
+  ordering over the unfiltered journal so a reading cannot renumber dispatches
+  or lose their drafter groups.
 - **An opaque session key.** The raw launching session id may be sensitive and is
   never served, so runs are grouped by a digest of it.
 - **The run list's order.** `RunStore::page` serves the SDK's own `Listing`

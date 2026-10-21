@@ -590,6 +590,9 @@ const SURFACES: readonly Surface[] = [
       await page
         .getByRole("region", { name: "Records after execution" })
         .waitFor();
+      await page
+        .getByRole("region", { name: "Records after execution" })
+        .scrollIntoViewIfNeeded();
       await expect(
         page
           .getByRole("region", { name: "Records after execution" })
