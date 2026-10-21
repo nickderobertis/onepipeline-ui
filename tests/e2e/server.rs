@@ -1229,19 +1229,18 @@ fn span_named<'a>(spans: &'a [Value], id: &str) -> &'a Value {
 }
 
 #[test]
-fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
+fn each_session_of_a_re_asked_node_is_served_over_its_own_records() {
     let serving = lanes();
     let spans = node_spans(&serving, fixture_run::RETRIED_NODE_ID);
 
-    // The abandoned attempt: it began where the run dispatched it, a second
-    // before its member came up, and it is over where the dispatch that
-    // superseded it began, because nothing else ever ended it.
+    // Redispatch proves the first session stopped, but adds none of the gap
+    // between its last record and the replacement session to its work.
     let abandoned = span_named(
         &spans,
         &format!("dispatch.{}", fixture_run::RETRIED_FIRST_CONVERSATION_ID),
     );
-    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:01.000Z"));
-    assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:02.000Z"));
+    assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:00:03.000Z"));
 
     // And the attempt that did the work, from the `node-dispatched` that asked
     // for it, which the run ended itself.
@@ -1249,18 +1248,8 @@ fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
         &spans,
         &format!("dispatch.{}", fixture_run::RETRIED_SECOND_CONVERSATION_ID),
     );
-    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:01.000Z"));
     assert_eq!(ran["ended_at"], json!("2026-08-07T12:01:30.000Z"));
-
-    // Each is the moment the run asked for that attempt, and not the moment the
-    // session it ran first spoke: two attempts of one node are told apart by the
-    // dispatches that bracket them.
-    for (span, dispatched) in [
-        (abandoned, "2026-08-07T12:00:01.000Z"),
-        (ran, "2026-08-07T12:01:00.000Z"),
-    ] {
-        assert_eq!(span["started_at"], json!(dispatched), "{span}");
-    }
 
     // The two attempts of one node no longer read as having run over one window,
     // which is the whole of what a reader opens a node's timeline to see.
@@ -1439,7 +1428,7 @@ fn a_member_no_graph_declared_is_not_read_off_the_persona_beside_it() {
     );
     // The span itself is served in full: what the run recorded about *when* the
     // session ran is not in doubt, only what to call it.
-    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:07:00.000Z"));
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:07:01.000Z"));
     assert_eq!(dispatch["ended_at"], json!("2026-08-07T12:07:30.000Z"));
 
     let run = http::get(
@@ -2028,7 +2017,7 @@ fn a_publication_the_run_never_did_is_absent_and_one_it_never_ruled_on_has_no_st
         &working,
         &format!("dispatch.{}", fixture_run::WORKING_CONVERSATION_ID),
     );
-    assert_eq!(session["started_at"], json!("2026-08-07T12:04:00.000Z"));
+    assert_eq!(session["started_at"], json!("2026-08-07T12:04:02.000Z"));
     assert_eq!(session["ended_at"], Value::Null, "{session}");
 
     // The failure a user can cause: the gate refused the branch, so publication
@@ -3445,6 +3434,49 @@ fn the_agents_a_run_launched_are_served_off_its_pointer_file_and_open_to_their_t
     );
     let serving = Serving::start_in(workspace, &[]);
 
+    for query in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+        )
+        .json();
+        let spans = timeline["spans"].as_array().expect("timeline spans");
+        let worker_span = spans
+            .iter()
+            .find(|s| s["harness_scope"] == "node")
+            .expect("worker harness");
+        assert_eq!(worker_span["node_id"], fixture_run::NODE_ID);
+        assert_eq!(worker_span["reference"]["kind"], "oneharness_session");
+        assert!(!http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/{}",
+                fixture_run::RUN_ID,
+                worker_span["reference"]["value"]
+                    .as_str()
+                    .expect("history id")
+            )
+        )
+        .json()["content"]
+            .as_str()
+            .expect("transcript")
+            .is_empty());
+        let observer_span = spans.iter().find(|s| s["harness_scope"] == "observer");
+        if query == "scope=run" {
+            let observer = observer_span.expect("observer harness");
+            assert_eq!(
+                observer["parent_id"],
+                format!("run.{}", fixture_run::RUN_ID)
+            );
+            assert!(observer.get("node_id").is_none());
+        } else {
+            assert!(observer_span.is_none());
+        }
+    }
+
     // The run's agents: both sessions, each carrying the engine's keys and the
     // repository's own, in the order they first appeared.
     let response = http::get(
@@ -3640,6 +3672,17 @@ fn a_pointer_file_that_cannot_be_read_is_refused_and_leaves_the_count_absent() {
     );
     assert_eq!(response.status, 422, "{}", response.body);
     assert_eq!(response.json()["error"]["code"], json!("refused"));
+    for query in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+        );
+        assert_eq!(timeline.status, 422, "{}", timeline.body);
+        assert_eq!(timeline.json()["error"]["code"], "refused");
+    }
     let detail = http::get(
         serving.address,
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
@@ -20778,4 +20821,277 @@ fn recorded_sessions_use_their_own_records_and_the_run_ends_at_settlement() {
         .find(|e| e["kind"] == "completion-requested")
         .expect("late marker");
     assert!(late["at"].as_str() > end.as_str());
+}
+
+#[test]
+fn terminal_execution_records_close_open_spans_before_late_commands() {
+    for kind in ["run-stopped", "host-shutdown", "driver-exited"] {
+        let corpus = fixture_run::recorded_termination(kind);
+        let run = corpus["run_id"].as_str().expect("run");
+        let node = corpus["node"].as_str().expect("node");
+        let serving = Serving::start(|root| {
+            fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        });
+        for query in ["scope=run".to_owned(), format!("scope=node&node={node}")] {
+            let served = http::get(
+                serving.address,
+                &format!("/api/v2/runs/{run}/timeline?{query}"),
+            )
+            .json();
+            let spans = served["spans"].as_array().expect("spans");
+            assert!(
+                spans.iter().all(|s| !s["ended_at"].is_null()),
+                "{kind}: {served}"
+            );
+            let node = spans.iter().find(|s| s["kind"] == "node").expect("node");
+            assert_eq!(node["ended_at"], "2026-10-13T17:24:58.128Z", "{kind}");
+            for session in spans.iter().filter(|s| s["kind"] == "dispatch") {
+                assert_eq!(session["ended_at"], node["ended_at"], "{kind}: {session}");
+                assert_eq!(session["status"], "stopped", "{kind}: {session}");
+            }
+            if query == "scope=run" {
+                assert_eq!(spans[0]["ended_at"], node["ended_at"]);
+                for late in ["completion-requested", "planner-replied", "edit-committed"] {
+                    let events = events_on(&served);
+                    let marker = events
+                        .iter()
+                        .find(|e| e["kind"] == late)
+                        .expect("late marker");
+                    assert!(marker["at"].as_str() > node["ended_at"].as_str());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn open_timeline_spans_only_say_running_while_the_driver_is_alive() {
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_onepipeline-api"))
+        .arg("--help")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("short-lived process");
+    let ended_pid = child.id();
+    child.wait().expect("reap the process");
+    for (pid, expected) in [(std::process::id(), "running"), (ended_pid, "undriven")] {
+        let serving = Serving::start(|root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, pid);
+        });
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+        )
+        .json();
+        let open: Vec<&Value> = timeline["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .filter(|s| s["kind"] == "dispatch" && s["ended_at"].is_null())
+            .collect();
+        assert!(!open.is_empty(), "{timeline}");
+        assert!(
+            open.iter().all(|s| s["status"] == expected),
+            "{expected}: {open:?}"
+        );
+    }
+}
+
+#[test]
+fn replayed_retries_preserve_record_identity_and_timestamp_ties() {
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../apps/dag-ui-e2e/fixtures/timeline-retries.json"
+    ))
+    .expect("retry corpus");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline_corpus(root, &corpus);
+    });
+    let run = corpus["run_id"].as_str().expect("run");
+    let node = corpus["node"].as_str().expect("node");
+    let served = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+    )
+    .json();
+    let span = served["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|s| s["kind"] == "node")
+        .expect("node");
+    let events = span["events"].as_array().expect("events");
+    let identities: std::collections::BTreeSet<(&str, u64)> = corpus["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .filter(|r| r["labels"]["node"] == node)
+        .map(|r| {
+            (
+                r["stream"].as_str().expect("stream"),
+                r["seq"].as_u64().expect("seq"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        events.len(),
+        identities.len(),
+        "duplicate relays counted as new events"
+    );
+    for pair in events.windows(2) {
+        assert!(pair[0]["at"].as_str() <= pair[1]["at"].as_str());
+        if pair[0]["at"] == pair[1]["at"] {
+            assert!(pair[0]["journal_order"].as_u64() <= pair[1]["journal_order"].as_u64());
+        }
+    }
+}
+
+#[test]
+fn a_later_adoption_takeover_or_dispatch_reopens_the_execution_range() {
+    for kind in ["driver-adopted", "driver-taken-over", "node-dispatched"] {
+        let mut corpus = fixture_run::recorded_termination("driver-exited");
+        let node = corpus["node"].as_str().expect("node").to_owned();
+        let payload = match kind {
+            "driver-adopted" => json!({"adoption":1,"pid":1}),
+            "driver-taken-over" => fixture_run::review_loop()["records"]
+                .as_array()
+                .expect("records")
+                .iter()
+                .find(|r| r["kind"] == kind)
+                .expect("recorded takeover")["payload"]
+                .clone(),
+            _ => json!({"attempt":2,"persona":"engineer"}),
+        };
+        let mut event = json!({"v":2,"ts":"2026-10-15T10:26:00.000Z","stream":"recorded-termination","seq":3,
+            "source":"pipeline","kind":kind,"labels":{"run_id":corpus["run_id"]},"payload":payload,"artifacts":[]});
+        if kind == "node-dispatched" {
+            event["labels"]["node"] = json!(node);
+        }
+        corpus["records"]
+            .as_array_mut()
+            .expect("records")
+            .push(event);
+        let serving = Serving::start(|root| {
+            fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        });
+        let timeline = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run",
+                corpus["run_id"].as_str().expect("run")
+            ),
+        )
+        .json();
+        assert!(
+            timeline["spans"][0]["ended_at"].is_null(),
+            "{kind}: {timeline}"
+        );
+    }
+}
+
+#[test]
+fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() {
+    let original = fixture_run::recorded_timeline();
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+        fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+        let current: oneagentgraph::event::MemberDied = serde_json::from_value(json!({
+            "rule":"process-exited", "cause":"exited", "detail":"process exited 1", "exit_code":1
+        }))
+        .expect("the producer's typed failure payload");
+        fixture_run::append_relayed_on(
+            &root.join(fixture_run::LANES_RUN_ID),
+            "current-member-failure",
+            "member-died",
+            json!({"run_id":fixture_run::LANES_RUN_ID,"node":fixture_run::DIED_NODE_ID,"member":"worker"}),
+            serde_json::to_value(current).expect("failure payload"),
+        );
+
+        for kind in ["run-stopped", "host-shutdown", "driver-exited"] {
+            fixture_run::write_recorded_timeline_corpus(
+                root,
+                &fixture_run::recorded_termination(kind),
+            );
+        }
+    });
+    let run = original["run_id"].as_str().expect("run");
+    let mut events = Vec::new();
+    for id in [
+        run.to_owned(),
+        fixture_run::LANES_RUN_ID.to_owned(),
+        format!("{run}-run-stopped"),
+        format!("{run}-host-shutdown"),
+        format!("{run}-driver-exited"),
+    ] {
+        events.extend(events_on(
+            &http::get(
+                serving.address,
+                &format!("/api/v2/runs/{id}/timeline?scope=run"),
+            )
+            .json(),
+        ));
+    }
+    let cases: &[(&str, &[&str])] = &[
+        ("node-dispatched", &["Attempt", "Persona"]),
+        ("session-opened", &["Branch", "Base"]),
+        ("session-closed", &["Branch"]),
+        ("gate-run", &["Gate", "Result", "Duration (seconds)"]),
+        ("graph-started", &["Name", "Graph"]),
+        ("graph-settled", &["Exit code"]),
+        ("member-started", &["Runner", "Engine"]),
+        ("member-settled", &["Verdict", "Reason"]),
+        ("member-died", &["Reason"]),
+        ("turn-started", &["Turn", "Role"]),
+        ("turn-completed", &["Turn", "Role"]),
+        ("turn-message", &["Turn", "Role", "Message"]),
+        ("node-settled", &["Status", "Outcome", "Detail"]),
+        ("completion-requested", &["Reason"]),
+        ("run-stopped", &["Owner", "Forced"]),
+        ("host-shutdown", &["Scope", "Owner", "Teardown"]),
+        ("driver-exited", &["Settlement"]),
+    ];
+    for &(kind, expected) in cases {
+        let event = events
+            .iter()
+            .find(|e| {
+                e["kind"] == kind
+                    && (kind != "member-died" || e["stream"] != "current-member-failure")
+            })
+            .unwrap_or_else(|| panic!("no {kind}"));
+        let fields = event["fields"]
+            .as_object()
+            .unwrap_or_else(|| panic!("no fields on {kind}: {event}"));
+        let labels: Vec<&str> = fields.keys().map(String::as_str).collect();
+        assert_eq!(labels, expected, "{kind}: {event}");
+        assert!(fields
+            .values()
+            .all(|v| !v.is_null() && v != "" && v != &json!([]) && v != &json!({})));
+    }
+    let current = events
+        .iter()
+        .find(|e| e["stream"] == "current-member-failure")
+        .expect("current failure");
+    assert_eq!(
+        current["fields"],
+        json!({"Rule":"process-exited","Cause":"exited","Detail":"process exited 1"})
+    );
+    let heartbeat = events
+        .iter()
+        .find(|e| e["kind"] == "member-heartbeat")
+        .expect("heartbeat");
+    assert!(
+        heartbeat.get("fields").is_none(),
+        "an empty fact list is omitted"
+    );
+    let activity = events
+        .iter()
+        .find(|e| e["kind"] == "turn-activity")
+        .expect("tool call");
+    assert_eq!(activity["fields"]["Tool"], "command_execution");
+    for event in &events {
+        if let Some(fields) = event["fields"].as_object() {
+            for absent in ["Token", "Worktree", "Config"] {
+                assert!(!fields.contains_key(absent), "{event}");
+            }
+        }
+    }
 }

@@ -818,11 +818,10 @@ impl RunApi for RunStore {
             TimelineScope::Run => Scope::Run,
             TimelineScope::Node { node } => Scope::Node(node),
         };
-        Ok(Self::envelope(payload::timeline(
-            &view,
-            &self.declared(&view),
-            &scope,
-            &filter,
+        let agents = self.agents_of(run, AgentScope::Run)?;
+        let timeline = payload::timeline(&view, &self.declared(&view), &scope, &filter);
+        Ok(Self::envelope(payload::timeline_harnesses(
+            timeline, &view, &scope, &agents,
         )))
     }
 

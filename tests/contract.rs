@@ -4048,3 +4048,58 @@ fn the_browser_fixture_excludes_the_linked_harness_binaries_from_its_path() {
     declared.sort_unstable();
     assert_eq!(corpus, declared);
 }
+
+/// The per-kind panel selection follows the declarations of the producer that
+/// owns each payload. VCS currently publishes kind names but no payload schema.
+#[test]
+fn timeline_record_fields_follow_the_producers_published_payloads() {
+    use onepipeline::event::{EventKind, PipelineKind};
+    fn declares(schema: &Value, root: &Value, key: &str) -> bool {
+        schema["properties"].get(key).is_some()
+            || schema["$ref"]
+                .as_str()
+                .and_then(|reference| reference.strip_prefix('#'))
+                .and_then(|pointer| root.pointer(pointer))
+                .is_some_and(|resolved| declares(resolved, root, key))
+            || ["allOf", "anyOf", "oneOf"].iter().any(|combinator| {
+                schema[*combinator]
+                    .as_array()
+                    .is_some_and(|choices| choices.iter().any(|choice| declares(choice, root, key)))
+            })
+    }
+    let pipeline = onepipeline::payload::registry();
+    let graph = oneagentgraph::event::registry();
+    let graph_schemas = oneagentgraph::event::payload_schemas();
+    let mut missing = Vec::new();
+    for &(kind, fields) in onepipeline_ui::payload::TIMELINE_RECORD_FIELDS {
+        let schema = if let Some(kind) = PipelineKind::from_wire(&EventKind(kind.into())) {
+            pipeline.schema(&onepipeline::payload::schema_of(kind))
+        } else if let Some((_, id)) = graph_schemas.iter().find(|(name, _)| name.as_str() == kind) {
+            graph.schema(id)
+        } else {
+            // VCS publishes no payload schemas; graph lifecycle payloads are
+            // likewise not in its public registry. Their kind declarations and
+            // the recorded-run journeys remain the available producer boundary.
+            assert!(
+                oneagentgraph::event::EventKind::ALL
+                    .iter()
+                    .any(|name| name.as_str() == kind)
+                    || serde_json::from_value::<onevcs::EventKind>(json!(kind)).is_ok(),
+                "undeclared kind {kind}"
+            );
+            continue;
+        }
+        .expect("the producer publishes its payload schema");
+        for &(key, _) in fields {
+            // Historical member-died records predate the typed cause payload and
+            // carried only reason; the real lanes journey keeps that old shape.
+            if !declares(schema, schema, key) && !(kind == "member-died" && key == "reason") {
+                missing.push(format!("{kind}.{key}"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "panel fields no producer declares: {missing:?}"
+    );
+}

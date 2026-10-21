@@ -28,7 +28,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   isUnhealthy,
   type NodeView,
@@ -81,17 +81,10 @@ export function NodeTimelineView({
   onBack,
   selectedTab,
   onSelectTab,
-  agents,
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly node: NodeView;
-  /**
-   * The node's Agents tab, composed by the app: the sessions this node's
-   * dispatches wrote, which is another feature's reading of the run and is
-   * handed in rather than reached for.
-   */
-  readonly agents?: ReactNode;
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
   readonly selectedItemId?: string;
@@ -273,9 +266,7 @@ export function NodeTimelineView({
         {/* The sessions this node's dispatches wrote, every one whatever the
             repository's agent structure, each opening to its transcript. Mounted
             only while the tab is open, so it is read like the run's own reads. */}
-        <TabsContent className="node-tab-panel" value="agents">
-          {selectedTab === "agents" && agents}
-        </TabsContent>
+
         <TabsContent className="node-timeline-panel" value="timeline">
           {/* llmlint: ignore[changed_behavior_has_e2e] the detail and the timeline are
           read from the same strict journal, so no served run fails one and not the

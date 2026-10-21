@@ -269,6 +269,12 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 /// `supervisor` disposition. A `redirection` read off such a record carries it
 /// beside `reached`; one written before the field existed carries none. Every
 /// other event is byte-for-byte what 11 served.
+///
+/// **Schema 13 reads execution records by identity and their own clock.**
+/// Repeated producer identities count once, event arrays use record timestamps,
+/// session lanes use their own records, and post-execution commands remain
+/// markers. Producer identity, journal order, per-kind facts and harness launch
+/// scope are served separately from transcript addresses.
 pub const TIMELINE_SCHEMA_VERSION: u32 = 13;
 
 /// The largest run-list page any request can ask for.

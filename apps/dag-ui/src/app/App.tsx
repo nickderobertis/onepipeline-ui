@@ -21,7 +21,6 @@ import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
   ArrowLeft,
   BookOpenText,
-  Bot,
   Eye,
   Inbox,
   RefreshCw,
@@ -32,7 +31,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { AgentsPanel } from "../features/agents/AgentsPanel";
-import { AgentsView, NodeAgents } from "../features/agents/AgentsView";
 import { useProjectAgents } from "../features/agents/useAgents";
 import { ChannelView } from "../features/control/ChannelView";
 import { ReadsView } from "../features/control/ReadsView";
@@ -377,9 +375,6 @@ export function App({
                   <TabsTrigger value="reads">
                     <BookOpenText size={15} /> Reads
                   </TabsTrigger>
-                  <TabsTrigger value="agents">
-                    <Bot size={15} /> Agents
-                  </TabsTrigger>
                 </TabsList>
                 {/* How much of what the run recorded this reading carries. Beside
                   the views rather than in the toolbar: it selects a reading, like
@@ -443,13 +438,6 @@ export function App({
                       runId={selectedRunId}
                       status={control.status}
                     />
-                  ) : selection.view === "agents" ? (
-                    <AgentsView
-                      client={client}
-                      count={detail.run.agent_count}
-                      invalidations={telemetry.invalidations}
-                      runId={selectedRunId}
-                    />
                   ) : selection.view === "overall" ? (
                     <OverallView
                       client={client}
@@ -465,14 +453,6 @@ export function App({
                     // Opening a node hands it the whole working area: the graph stays
                     // one breadcrumb away rather than one narrow column beside it.
                     <NodeTimelineView
-                      agents={
-                        <NodeAgents
-                          client={client}
-                          invalidations={telemetry.invalidations}
-                          nodeId={selectedNode.id}
-                          runId={selectedRunId}
-                        />
-                      }
                       client={client}
                       node={selectedNode}
                       onBack={() => selection.selectNode(undefined)}

@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
 import { fixture, runs } from "./fixture-facts";
+import recorded from "./fixtures/timeline-recorded.json" with { type: "json" };
 import { graphNodes, metrics, timelineLane } from "./observatory-locators";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
@@ -468,6 +469,132 @@ const SURFACES: readonly Surface[] = [
       await expect(
         list.getByRole("button", { name: "Move override 2 up" }),
       ).toBeEnabled();
+    },
+  },
+  {
+    name: "15-recorded-node-collapsed",
+    title: "Recorded worker and change request drafter, collapsed",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .waitFor();
+      await expect(
+        page.getByRole("region", { name: "Dispatch 1", exact: true }),
+      ).toContainText("gate-run");
+      await expect(
+        page.getByRole("region", {
+          name: "Change request drafter",
+          exact: true,
+        }),
+      ).toContainText("pr-author");
+    },
+  },
+  {
+    name: "16-recorded-node-expanded",
+    title: "Recorded worker and change request drafter, expanded",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .waitFor();
+      await expect(
+        page.getByRole("region", { name: "Dispatch 1", exact: true }),
+      ).toContainText("gate-run");
+      await expect(
+        page.getByRole("region", {
+          name: "Change request drafter",
+          exact: true,
+        }),
+      ).toContainText("pr-author");
+      await page
+        .getByRole("region", { name: "Node timeline", exact: true })
+        .getByRole("button", { name: "Expand timeline" })
+        .click();
+    },
+  },
+  {
+    name: "17-recorded-gate-run",
+    title: "Recorded gate-run fields",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Dispatch 1", exact: true })
+        .getByRole("button", { name: "Open gate-run", exact: true })
+        .first()
+        .click();
+      await page
+        .getByRole("region", { name: "Timeline item detail" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByText("Gate", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).not.toContainText("Still running");
+    },
+  },
+  {
+    name: "18-recorded-session-closed",
+    title: "Recorded session-closed fields",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Dispatch 1", exact: true })
+        .getByRole("button", { name: "Open session-closed", exact: true })
+        .first()
+        .click();
+      await page
+        .getByRole("region", { name: "Timeline item detail" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByText("Branch", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).not.toContainText("Still running");
+    },
+  },
+  {
+    name: "19-recorded-node-dispatched",
+    title: "Recorded node-dispatched fields",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Dispatch 1", exact: true })
+        .getByRole("button", { name: "Open node-dispatched", exact: true })
+        .first()
+        .click();
+      await page
+        .getByRole("region", { name: "Timeline item detail" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByText("Attempt", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).not.toContainText("Still running");
+    },
+  },
+  {
+    name: "20-recorded-overall",
+    title: "Recorded settled execution and the late completion marker",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&view=overall`);
+      await page
+        .getByRole("region", { name: "Records after execution" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Records after execution" })
+          .getByRole("button", { name: /completion-requested/ }),
+      ).toBeVisible();
     },
   },
 ];

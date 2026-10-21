@@ -7451,6 +7451,11 @@ pub fn recorded_timeline() -> Value {
 /// Write the recorded corpus without restamping or renumbering its journal.
 pub fn write_recorded_timeline(root: &Path) -> PathBuf {
     let corpus = recorded_timeline();
+    write_recorded_timeline_corpus(root, &corpus)
+}
+
+/// Serve a variant of the same recording without restamping its original records.
+pub fn write_recorded_timeline_corpus(root: &Path, corpus: &Value) -> PathBuf {
     let dir = root.join(corpus["run_id"].as_str().expect("run id"));
     fs::create_dir_all(&dir).expect("run directory");
     for name in ["launch", "plan"] {
@@ -7470,4 +7475,49 @@ pub fn write_recorded_timeline(root: &Path) -> PathBuf {
     }
     fs::write(dir.join("events.jsonl"), lines).expect("journal");
     dir
+}
+
+/// The same unfinished work stopped by each terminal boundary, with commands
+/// recorded afterwards. The termination payloads are held to the linked SDK.
+pub fn recorded_termination(kind: &str) -> Value {
+    let mut corpus = recorded_timeline();
+    let run = format!("{}-{kind}", corpus["run_id"].as_str().expect("run"));
+    corpus["run_id"] = json!(run);
+    corpus["launch"]["run_id"] = json!(run);
+    let terminal = corpus["terminations"]
+        .as_array()
+        .expect("terminations")
+        .iter()
+        .find(|t| t["kind"] == kind)
+        .expect("termination")
+        .clone();
+    let late = corpus["late_records"]
+        .as_array()
+        .expect("late records")
+        .clone();
+    let records = corpus["records"].as_array_mut().expect("records");
+    let end = records
+        .iter()
+        .find(|e| e["kind"] == "node-settled")
+        .expect("settlement")["ts"]
+        .clone();
+    records.retain(|e| {
+        !matches!(
+            e["kind"].as_str(),
+            Some("node-settled" | "member-settled" | "graph-settled" | "session-closed")
+        )
+    });
+    records.push(json!({ "v": 2, "ts": end, "stream": "recorded-termination", "seq": 0,
+        "source": "pipeline", "kind": terminal["kind"], "labels": {"run_id":run}, "payload": terminal["payload"], "artifacts": [] }));
+    for (seq, record) in (1..).zip(late) {
+        records.push(json!({ "v":2, "ts":"2026-10-15T10:25:01.000Z", "stream":"recorded-termination", "seq":seq,
+            "source":"pipeline", "kind":record["kind"], "labels":{"run_id":run}, "payload":record["payload"], "artifacts":[] }));
+    }
+    for record in records {
+        record["labels"]["onepipeline.run_id"] = json!(run);
+        if record["source"] == "pipeline" || record["source"] == "vcs" {
+            record["labels"]["run_id"] = json!(run);
+        }
+    }
+    corpus
 }

@@ -19,7 +19,9 @@ use std::path::Path;
 
 use oneharness_core::domain::history::HistoryShowEntry;
 use oneharness_core::io::history;
-use onepipeline::agents::{AgentScope, AgentSession, Agents, RUN_ID_LABEL};
+use onepipeline::agents::{
+    AgentScope, AgentSession, Agents, ATTEMPT_LABEL, NODE_LABEL, RUN_ID_LABEL, SCOPE_LABEL,
+};
 // Under the name of the library that writes them. Three vocabularies here are
 // spelled alike and mean different things: `judge::Role` is who wrote a message,
 // `judge::TelemetryRole` is which side ran, and this module's `Party` is what a
@@ -4827,11 +4829,89 @@ pub fn timeline(
             }
         }
     }
+    if !matches!(
+        view.liveness(),
+        onepipeline::views::DriverLiveness::Driving | onepipeline::views::DriverLiveness::Parked
+    ) {
+        for span in &mut spans {
+            if span["ended_at"].is_null() && span["status"] == "running" {
+                span["status"] = json!("undriven");
+            }
+        }
+    }
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
         "run_id": view.paths.run,
         "spans": spans,
     })
+}
+
+/// Add the harness sessions the SDK's pointer-file listing knows about, including
+/// sessions no graph envelope relayed. Transcript references use the same bounded
+/// artifact route as the former Agents tabs.
+#[must_use]
+pub fn timeline_harnesses(
+    mut payload: Value,
+    view: &RunView,
+    scope: &Scope<'_>,
+    agents: &Agents,
+) -> Value {
+    let Some(spans) = payload["spans"].as_array_mut() else {
+        return payload;
+    };
+    for session in &agents.sessions {
+        let labels = session.labels.as_map();
+        let node = labels.get(NODE_LABEL);
+        if let Scope::Node(wanted) = scope {
+            if node.map(String::as_str) != Some(wanted.as_str()) {
+                continue;
+            }
+        }
+        let launch_scope = labels.get(SCOPE_LABEL).map_or("observer", String::as_str);
+        for run in &session.runs {
+            let started = serde_json::to_value(&run.started).unwrap_or(Value::Null);
+            let parent = node.map_or_else(
+                || format!("run.{}", view.paths.run),
+                |node| {
+                    spans
+                        .iter()
+                        .filter(|span| {
+                            span["node_id"] == *node
+                                && span["kind"] == "dispatch"
+                                && span["started_at"].as_str() <= started.as_str()
+                                && match launch_scope {
+                                    "pr-author" | "review-reply" => {
+                                        span["agent_role"] == launch_scope
+                                    }
+                                    _ => {
+                                        span["agent_role"] != "pr-author"
+                                            && span["agent_role"] != "review-reply"
+                                    }
+                                }
+                        })
+                        .max_by_key(|span| span["started_at"].as_str())
+                        .and_then(|span| span["id"].as_str())
+                        .map_or_else(|| format!("node.{node}"), str::to_owned)
+                },
+            );
+            let mut span = json!({
+                "id": format!("harness.{}", run.history_id), "kind": "dispatch",
+                "label": session.name, "started_at": started,
+                "ended_at": timeline_end(view).map(|end| end.ts),
+                "parent_id": parent, "harness_scope": launch_scope,
+                "reference": { "kind": "oneharness_session", "value": run.history_id }, "events": [],
+            });
+            if let Some(attempt) = labels.get(ATTEMPT_LABEL) {
+                span["dispatch_attempt"] = json!(attempt);
+            }
+            if let Some(node) = node {
+                span["node_id"] = json!(node);
+                span["dispatch_id"] = json!(dispatch_key(&view.paths.run, node));
+            }
+            spans.push(span);
+        }
+    }
+    payload
 }
 
 /// The transcript turn one relayed envelope became.
@@ -5264,6 +5344,132 @@ fn note_operation(event: &Envelope) -> Option<(&'static str, &Map<String, Value>
         })
 }
 
+/// The fields a reader needs for each record kind. Wire keys are selected here
+/// so neither arbitrary payloads nor session credentials reach a detail panel.
+pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "node-dispatched",
+        &[
+            ("attempt", "Attempt"),
+            ("persona", "Persona"),
+            ("reason", "Reason"),
+        ],
+    ),
+    (
+        "gate-run",
+        &[
+            ("gate", "Gate"),
+            ("verdict", "Result"),
+            ("seconds", "Duration (seconds)"),
+            ("log", "Log"),
+        ],
+    ),
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 publishes event kinds but no payload schema for session-closed; the recorded-run route/panel journeys hold the historical keys. Follow-up drafts:dag-ui-project-centric/drafts/20261021T211850Z-publish-onevcs-event-payload-schemas-for-timelin publishes that producer boundary and retires this row exception.
+    (
+        "session-closed",
+        &[
+            ("outcome", "Outcome"),
+            ("branch", "Branch"),
+            ("head", "Head"),
+        ],
+    ),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 publishes event kinds but no payload schema for session-opened; the recorded-run route/panel journeys hold the historical keys. Follow-up drafts:dag-ui-project-centric/drafts/20261021T211850Z-publish-onevcs-event-payload-schemas-for-timelin publishes that producer boundary and retires this row exception.
+    ("session-opened", &[("branch", "Branch"), ("base", "Base")]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits graph-started from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    ("graph-started", &[("name", "Name"), ("graph", "Graph")]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits graph-settled from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    ("graph-settled", &[("exit_code", "Exit code")]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    (
+        "member-started",
+        &[("runner", "Runner"), ("engine", "Engine")],
+    ),
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits member-heartbeat from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    ("member-heartbeat", &[]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits member-settled from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    (
+        "member-settled",
+        &[("verdict", "Verdict"), ("completion_reason", "Reason")],
+    ),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    (
+        "member-died",
+        &[
+            ("rule", "Rule"),
+            ("cause", "Cause"),
+            ("detail", "Detail"),
+            ("reason", "Reason"),
+        ],
+    ),
+    ("turn-started", &[("turn", "Turn"), ("role", "Role")]),
+    (
+        "turn-activity",
+        &[("name", "Tool"), ("detail", "Detail"), ("output", "Output")],
+    ),
+    (
+        "turn-completed",
+        &[("turn", "Turn"), ("role", "Role"), ("usage", "Usage")],
+    ),
+    (
+        "turn-message",
+        &[("turn", "Turn"), ("role", "Role"), ("text", "Message")],
+    ),
+    (
+        "node-settled",
+        &[
+            ("status", "Status"),
+            ("outcome", "Outcome"),
+            ("detail", "Detail"),
+        ],
+    ),
+    ("completion-requested", &[("reason", "Reason")]),
+    (
+        "run-stopped",
+        &[
+            ("owner", "Owner"),
+            ("forced", "Forced"),
+            ("teardown", "Teardown"),
+        ],
+    ),
+    (
+        "host-shutdown",
+        &[
+            ("scope", "Scope"),
+            ("owner", "Owner"),
+            ("teardown", "Teardown"),
+        ],
+    ),
+    (
+        "driver-exited",
+        &[("reason", "Reason"), ("settlement", "Settlement")],
+    ),
+];
+
+fn record_fields(event: &Envelope) -> Map<String, Value> {
+    TIMELINE_RECORD_FIELDS
+        .iter()
+        .find(|(kind, _)| *kind == event.kind.0)
+        .map(|(_, fields)| {
+            fields
+                .iter()
+                .filter_map(|(key, label)| {
+                    event
+                        .payload
+                        .get(*key)
+                        .filter(|v| {
+                            !v.is_null() && **v != json!("") && **v != json!([]) && **v != json!({})
+                        })
+                        .map(|value| ((*label).to_owned(), value.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// One journal envelope as a timeline event.
 fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
     let turn = turns.get(index).and_then(Option::as_ref);
@@ -5272,6 +5478,33 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
         "id".into(),
         json!(turn.map_or_else(|| format!("e{index}"), |turn| turn.id.clone())),
     );
+    item.insert(
+        "record_id".into(),
+        json!(format!("{}.{}", event.stream, event.seq)),
+    );
+    item.insert("stream".into(), json!(event.stream));
+    item.insert("seq".into(), json!(event.seq));
+    item.insert("journal_order".into(), json!(index));
+    if let Some(persona) = &event.labels.persona {
+        item.insert("persona".into(), json!(persona));
+    }
+    if let Some(node) = event.labels.node.as_deref() {
+        if let Some(run) = event
+            .labels
+            .extra
+            .get("onepipeline.run_id")
+            .and_then(Value::as_str)
+            .or(event.labels.run_id.as_deref())
+        {
+            if let Some(key) = dispatch_key(run, node) {
+                item.insert("dispatch_id".into(), json!(key));
+            }
+        }
+    }
+    let fields = record_fields(event);
+    if !fields.is_empty() {
+        item.insert("fields".into(), Value::Object(fields));
+    }
     item.insert("kind".into(), json!(event.kind.0));
     item.insert("at".into(), json!(event.ts));
     if let Some(node) = &event.labels.node {
@@ -5351,6 +5584,7 @@ fn timeline_end(view: &RunView) -> Option<Moment> {
             .filter_map(Moment::of)
             .max_by_key(|m| m.at);
     }
+    // A historical exit does not close a later adoption or redispatch.
     view.events
         .iter()
         .rev()
@@ -5358,8 +5592,19 @@ fn timeline_end(view: &RunView) -> Option<Moment> {
             e.source == Source::Pipeline
                 && matches!(
                     e.kind.0.as_str(),
-                    "run-stopped" | "host-shutdown" | "driver-exited"
+                    "run-stopped"
+                        | "host-shutdown"
+                        | "driver-exited"
+                        | "driver-adopted"
+                        | "driver-taken-over"
+                        | "node-dispatched"
                 )
+        })
+        .filter(|e| {
+            matches!(
+                e.kind.0.as_str(),
+                "run-stopped" | "host-shutdown" | "driver-exited"
+            )
         })
         .and_then(Moment::of)
 }

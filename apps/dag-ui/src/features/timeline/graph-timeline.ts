@@ -181,10 +181,19 @@ export function graphTimeline(
         ...idleItems(range, work, undefined),
         ...compactTimelineItems(work, lanes),
       ],
-      markers: compactTimelineMarkers(
-        rows.flatMap((entry) => [...entry.markers]),
-        work,
-      ),
+      markers: [
+        ...compactTimelineMarkers(
+          rows.flatMap((entry) =>
+            entry.markers.filter((marker) => marker.at <= range[1]),
+          ),
+          work,
+        ),
+        // Post-execution records share no work interval. Keep every identity,
+        // including commands recorded at the same instant, on their own rail.
+        ...rows.flatMap((entry) =>
+          entry.markers.filter((marker) => marker.at > range[1]),
+        ),
+      ],
       lanes,
     },
   };
@@ -293,12 +302,12 @@ function row({
     markers: spans.flatMap((span) =>
       span.events.map(
         (event): TimelineMarker<GraphSegment> => ({
-          id: event.id,
+          id: event.record_id ?? event.id,
           label: `${label} · ${event.step_id ?? event.kind}`,
           at: Date.parse(event.at),
           status: event.status,
           payload: {
-            id: event.id,
+            id: event.record_id ?? event.id,
             kind: "record",
             label: event.kind,
             rowId: id,

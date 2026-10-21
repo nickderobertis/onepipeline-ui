@@ -3023,6 +3023,7 @@ function writeNamedRun(root) {
 
 /** Write every run this fixture serves, oldest first. */
 export function buildRuns(root, workspace, review = false) {
+  buildRecordedTimelines(root);
   mkdirSync(root, { recursive: true });
   writeSupervisedRun(root, review);
   writeElsewhereRun(root);
@@ -3794,4 +3795,110 @@ const REVIEW_LOOP_NODE = "docs";
 /** What the review-loop corpus wrote, published beside it as `facts()` is beside the main one. */
 export function reviewLoopFacts() {
   return { run: REVIEW_LOOP.run_id, replied_node: REVIEW_LOOP_NODE };
+}
+
+/** The recorded timeline and its stop-boundary recovery variants. */
+function buildRecordedTimelines(root) {
+  const original = JSON.parse(
+    readFileSync(new URL("./timeline-recorded.json", import.meta.url), "utf8"),
+  );
+  writeRecordedTimeline(root, original);
+  writeRecordedTimeline(
+    root,
+    JSON.parse(
+      readFileSync(new URL("./timeline-retries.json", import.meta.url), "utf8"),
+    ),
+  );
+  for (const terminal of original.terminations) {
+    const corpus = structuredClone(original);
+    corpus.run_id = `${original.run_id}-${terminal.kind}`;
+    corpus.launch.run_id = corpus.run_id;
+    const end = corpus.records.find(
+      (record) => record.kind === "node-settled",
+    ).ts;
+    corpus.records = corpus.records.filter(
+      (record) =>
+        ![
+          "node-settled",
+          "member-settled",
+          "graph-settled",
+          "session-closed",
+        ].includes(record.kind),
+    );
+    corpus.records.push({
+      v: 2,
+      ts: end,
+      stream: "recorded-termination",
+      seq: 0,
+      source: "pipeline",
+      kind: terminal.kind,
+      payload: terminal.payload,
+      labels: { run_id: corpus.run_id },
+      artifacts: [],
+    });
+    for (const [index, late] of corpus.late_records.entries()) {
+      corpus.records.push({
+        v: 2,
+        ts: "2026-10-15T10:25:01.000Z",
+        stream: "recorded-termination",
+        seq: index + 1,
+        source: "pipeline",
+        kind: late.kind,
+        payload: late.payload,
+        labels: { run_id: corpus.run_id },
+        artifacts: [],
+      });
+    }
+    for (const record of corpus.records) {
+      record.labels["onepipeline.run_id"] = corpus.run_id;
+      if (record.source === "pipeline" || record.source === "vcs")
+        record.labels.run_id = corpus.run_id;
+    }
+    if (terminal.kind === "run-stopped") {
+      const clipped = structuredClone(corpus);
+      clipped.run_id = `${original.run_id}-clipping`;
+      clipped.launch.run_id = clipped.run_id;
+      const gate = original.records.find(
+        (record) => record.kind === "gate-run",
+      );
+      for (const [index, id] of ["late-gate-a", "late-gate-b"].entries()) {
+        const record = structuredClone(gate);
+        record.stream = "recorded-late-work";
+        record.seq = index;
+        record.ts = `2026-10-15T10:25:0${index + 2}.000Z`;
+        record.artifacts = [{ id, kind: "log", bytes: 0 }];
+        clipped.records.push(record);
+      }
+      const close = structuredClone(
+        original.records.find((record) => record.kind === "session-closed"),
+      );
+      close.stream = "recorded-late-work";
+      close.seq = 2;
+      close.ts = "2026-10-15T10:25:04.000Z";
+      clipped.records.push(close);
+      for (const record of clipped.records) {
+        record.labels["onepipeline.run_id"] = clipped.run_id;
+        if (record.source !== "agentgraph")
+          record.labels.run_id = clipped.run_id;
+      }
+      writeRecordedTimeline(root, clipped);
+    }
+    writeRecordedTimeline(root, corpus);
+  }
+}
+
+/** Write producer timestamps and identities without renumbering the journal. */
+function writeRecordedTimeline(root, corpus) {
+  const dir = join(root, corpus.run_id);
+  mkdirSync(dir, { recursive: true });
+  writeJson(join(dir, "plan.json"), corpus.plan);
+  writeJson(join(dir, "launch.json"), corpus.launch);
+  writeFileSync(
+    join(dir, "events.jsonl"),
+    `${corpus.records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+  );
+  for (const record of corpus.records) {
+    if (record.kind === "member-started")
+      declareGraph(root, record.stream, [record.labels.member]);
+  }
 }

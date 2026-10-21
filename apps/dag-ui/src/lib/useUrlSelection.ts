@@ -79,7 +79,6 @@ export const RUN_VIEWS = {
   channel: "channel",
   watch: "watch",
   reads: "reads",
-  agents: "agents",
 } as const;
 export type RunView = keyof typeof RUN_VIEWS;
 
@@ -145,7 +144,6 @@ export const NODE_TAB_LABELS = {
   dependencies: "Dependencies",
   pr: "PR",
   checks: "Checks",
-  agents: "Agents",
 };
 export type NodeTab = keyof typeof NODE_TAB_LABELS;
 
