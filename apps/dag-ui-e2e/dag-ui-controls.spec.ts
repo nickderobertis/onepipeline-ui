@@ -794,9 +794,8 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
       page.getByRole("group", { name: "Status", exact: true }),
     ).toContainText(String(liveness?.[2]).toLowerCase());
     await expect(header).toContainText(`Summary${tally?.trim()}`);
-    // Every node's status word, as the engine folds it, beside the run's own: the
-    // graph the node view draws is the run's recorded one, which on a run whose
-    // result was recorded over its fold can read a different word.
+    // Every node's status word as the engine folds it, each in Node statuses —
+    // the one word the graph and Dependencies show too.
     const nodeStatuses = page.getByRole("region", {
       name: "Node statuses",
       exact: true,
