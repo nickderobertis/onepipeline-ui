@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.44.0...v0.45.0) - 2026-10-22
+
+### Added
+
+- [**breaking**] remove watch, adopt and owner-scoped shutdown from the Observatory and its read API ([#425](https://github.com/nickderobertis/onepipeline-ui/pull/425))
+- *(deps)* [**breaking**] link the engine whose plan store verifies Linear copies and homes private plans privately ([#422](https://github.com/nickderobertis/onepipeline-ui/pull/422))
+
 ## [0.44.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.43.1...v0.44.0) - 2026-10-21
 
 ### Performance
