@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { defineConfig } from "@playwright/test";
@@ -112,6 +112,26 @@ for (const server of held) {
 }
 `;
 
+/**
+ * A fixed name for the fixture directory, which only the screenshot tier asks for.
+ *
+ * The Host page prints paths under it, and `mkdtempSync`'s random suffix gives
+ * their masks a different width on every capture. The capture runs in a container
+ * whose temporary directory nothing else shares; elsewhere `mkdirSync` refuses a
+ * second run rather than sharing a directory.
+ */
+const fixtureName = z
+  .string()
+  .regex(/^[a-z0-9-]+$/, "a fixture name is lowercase letters, digits and -");
+
+function makeWorkspace(): string {
+  const named = process.env.DAG_UI_E2E_FIXTURE_NAME;
+  if (named === undefined) return mkdtempSync(FIXTURE_PREFIX);
+  const workspace = `${FIXTURE_PREFIX}${fixtureName.parse(named)}`;
+  mkdirSync(workspace);
+  return workspace;
+}
+
 function chooseSession(): Session {
   const [api, ui, offlineApi, offlineUi, stalledApi, stalledUi] = z
     .tuple([port, port, port, port, port, port])
@@ -129,7 +149,7 @@ function chooseSession(): Session {
     offlineUi,
     stalledApi,
     stalledUi,
-    workspace: mkdtempSync(FIXTURE_PREFIX),
+    workspace: makeWorkspace(),
   };
 }
 

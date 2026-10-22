@@ -123,12 +123,12 @@ anything new here is a proposal to make upstream first.
   each with the state it moved from. The transitions themselves are still served,
   as the node's own records.
 - **Which of three accounts of a node's status is the one to serve.**
-  `payload::recorded_statuses` orders them — what the journal settled for that
-  node, then what the run's own `result.json` held for it, then what the graph
-  derives for it — because the SDK exposes the fold and the document separately
-  and nothing in it rules on which speaks for a node they disagree about. The
-  ordering is what the three *are*: the first two are records of the node, the
-  third is a gate recomputed on every read.
+  `payload::node_statuses` serves the engine's `statuses()` word, the one
+  `onepipeline status` and `results` print, so no two views can show a node two
+  words. What the journal settled for the node, then what the run's own
+  `result.json` held, is kept as the node's outcome where it differs, and is the
+  whole account for a node the graph does not carry. The SDK exposes those
+  accounts separately and rules on none of them, so the ordering lives here.
 - **Whether an in-flight node's turn can be redirected.** `payload::node_control`
   answers, per node the run has in flight, what `onepipeline`'s reconciler answers
   by pulling the lever — which a read surface must not do, because serving a run

@@ -60,6 +60,7 @@ export interface DagTelemetryState {
   readonly activity: readonly LiveActivity[];
   readonly error?: Error;
   readonly refresh: () => Promise<void>;
+  readonly reconcileRuns: (rows: RunList["runs"]) => void;
   readonly loadMore: () => Promise<void>;
   readonly hasMore: boolean;
   /**
@@ -90,11 +91,10 @@ export function useDagTelemetry(
    */
   filter?: string,
   /**
-   * Whether an address naming no run opens the first one served. It does under
-   * the flat run list, whose whole point is the newest activity; it does not on
-   * the projects, where an address naming no run is asking for the project list
-   * rather than for a run. A run that *is* named but not served still falls back
-   * to the first, so a stale bookmark opens something rather than nothing.
+   * Whether an address naming no run opens the first one served. It does
+   * wherever a run is shown; it does not on the Host page, which is about the
+   * host rather than any run. A run that *is* named but not served still falls
+   * back to the first, so a stale bookmark opens something rather than nothing.
    */
   selectFirst = true,
 ): DagTelemetryState {
@@ -125,11 +125,19 @@ export function useDagTelemetry(
   //: Whether the next page of the run list is on its way, so the list can say so.
   const [loadingMore, setLoadingMore] = useState(false);
 
+  const [missingRuns, setMissingRuns] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [knownRunIds, setKnownRunIds] = useState<ReadonlySet<string>>();
   const runId =
     list === undefined
       ? undefined
-      : list.runs.some(({ run_id }) => run_id === requestedRunId)
-        ? requestedRunId
+      : requestedRunId !== undefined &&
+          !missingRuns.has(requestedRunId) &&
+          (knownRunIds === undefined || knownRunIds.has(requestedRunId))
+        ? list.runs.some((run) => run.run_id === requestedRunId)
+          ? requestedRunId
+          : undefined
         : requestedRunId !== undefined || selectFirst
           ? list.runs.at(0)?.run_id
           : undefined;
@@ -168,11 +176,36 @@ export function useDagTelemetry(
     setStreamError(undefined);
   }, []);
 
+  const knownRuns = useRef<ReadonlySet<string> | undefined>(undefined);
+  const retainKnown = useCallback(
+    (value: RunList): RunList =>
+      knownRuns.current === undefined
+        ? value
+        : {
+            ...value,
+            runs: value.runs.filter((row) =>
+              knownRuns.current?.has(row.run_id),
+            ),
+          },
+    [],
+  );
+  const reconcileRuns = useCallback((rows: RunList["runs"]) => {
+    knownRuns.current = new Set(rows.map((row) => row.run_id));
+    setKnownRunIds(knownRuns.current);
+    setList((current) =>
+      current === undefined
+        ? current
+        : { ...current, runs: [...rows], next_cursor: undefined },
+    );
+    setRecord((current) =>
+      current && knownRuns.current?.has(current.runId) ? current : undefined,
+    );
+  }, []);
   const loadList = useCallback(async () => {
     const revision = listRevision.current;
     const answer = await client.listRuns(true);
-    if (revision === listRevision.current) setList(answer);
-  }, [client]);
+    if (revision === listRevision.current) setList(retainKnown(answer));
+  }, [client, retainKnown]);
   /**
    * The cursor a page read is out for, so the scroll that asked for it can fire as
    * often as a scroll fires without asking for the same page twice.
@@ -187,7 +220,7 @@ export function useDagTelemetry(
     paging.current = cursor;
     setLoadingMore(true);
     try {
-      const next = await client.listRuns(true, cursor);
+      const next = retainKnown(await client.listRuns(true, cursor));
       setList((current) =>
         current === undefined
           ? next
@@ -209,7 +242,7 @@ export function useDagTelemetry(
       paging.current = undefined;
       setLoadingMore(false);
     }
-  }, [client, list, served]);
+  }, [client, list, served, retainKnown]);
 
   /**
    * Refresh the one row an invalidation named, and nothing else.
@@ -227,9 +260,25 @@ export function useDagTelemetry(
    * never surveys the runs root, so silence about a run is not a statement that it
    * went away.
    */
+  const rowRequests = useRef(new Map<string, number>());
   const refreshRow = useCallback(
     async (runId: string) => {
+      const request = (rowRequests.current.get(runId) ?? 0) + 1;
+      rowRequests.current.set(runId, request);
       const answer = await client.selectRuns([runId]);
+      if (
+        rowRequests.current.get(runId) !== request ||
+        (knownRuns.current !== undefined && !knownRuns.current.has(runId))
+      )
+        return;
+      setMissingRuns((current) => {
+        const missing = answer.missing?.includes(runId) === true;
+        if (current.has(runId) === missing) return current;
+        const next = new Set(current);
+        if (missing) next.add(runId);
+        else next.delete(runId);
+        return next;
+      });
       setList((current) => {
         if (current === undefined) return current;
         if (answer.missing?.includes(runId) === true) {
@@ -250,6 +299,19 @@ export function useDagTelemetry(
     },
     [client],
   );
+
+  useEffect(() => {
+    if (
+      list !== undefined &&
+      requestedRunId !== undefined &&
+      !missingRuns.has(requestedRunId) &&
+      !list.runs.some((run) => run.run_id === requestedRunId)
+    ) {
+      void refreshRow(requestedRunId).catch((caught) =>
+        setReadError(asError(caught)),
+      );
+    }
+  }, [list, requestedRunId, missingRuns, refreshRow]);
 
   /** The first list this view takes, which asks for nothing to be read again. */
   const open = useCallback(async () => {
@@ -323,7 +385,9 @@ export function useDagTelemetry(
     // "Loading execution history…" for as long as the run kept moving.
     const amend = (change: (previous: RunRecord) => RunRecord) => {
       setRecord((previous) =>
-        previous !== undefined && reading(previous)
+        previous !== undefined &&
+        reading(previous) &&
+        (knownRuns.current === undefined || knownRuns.current.has(runId))
           ? change(previous)
           : previous,
       );
@@ -407,7 +471,7 @@ export function useDagTelemetry(
         // It means nothing about a reading this view asked for and did not get.
         setStreamError(undefined);
         if (event.event === "snapshot") {
-          setList(parseRunList(event.data));
+          setList(retainKnown(parseRunList(event.data)));
           // The **opening** snapshot is the state the first list read has just
           // taken, so nothing about the open run is read again for it. A later one
           // means the stream dropped and came back, and a run that moved during
@@ -422,6 +486,24 @@ export function useDagTelemetry(
         const invalidated = invalidatedRunId(event);
         if (invalidated === undefined) return;
         setInvalidations((current) => current + 1);
+        if (event.event === "run.removed") {
+          rowRequests.current.set(
+            invalidated,
+            (rowRequests.current.get(invalidated) ?? 0) + 1,
+          );
+          setMissingRuns((current) => new Set([...current, invalidated]));
+          setList(
+            (current) =>
+              current && {
+                ...current,
+                runs: current.runs.filter((row) => row.run_id !== invalidated),
+              },
+          );
+          setRecord((current) =>
+            current?.runId === invalidated ? undefined : current,
+          );
+          return;
+        }
         // One row for one invalidation. The first page is not refetched: doing so
         // threw away every page the reader had scrolled to, so a list on a host
         // with anything moving snapped back to the top before it could be read.
@@ -438,7 +520,7 @@ export function useDagTelemetry(
       },
     });
     return () => subscription.close();
-  }, [client, refreshRow, open]);
+  }, [client, refreshRow, open, retainKnown]);
 
   useEffect(() => {
     if (runId === undefined) {
@@ -490,6 +572,7 @@ export function useDagTelemetry(
       // the one they can do something about.
       error: readError ?? streamError,
       refresh,
+      reconcileRuns,
       loadMore,
       hasMore: list?.next_cursor !== undefined,
       loadingMore,
@@ -505,6 +588,7 @@ export function useDagTelemetry(
       readError,
       streamError,
       refresh,
+      reconcileRuns,
       loadMore,
       loadingMore,
       invalidations,

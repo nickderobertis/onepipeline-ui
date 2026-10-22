@@ -39,6 +39,12 @@ export interface NodeView {
    * Empty for a node nothing is holding.
    */
   readonly blockers: readonly string[];
+  /**
+   * The plan nodes that name this one as a dependency, in plan order: what this
+   * node's settling releases, which is what a reader deciding whether to act on a
+   * waiting node needs to know.
+   */
+  readonly dependents: readonly string[];
 }
 
 /**
@@ -107,9 +113,32 @@ export function nodeViews(detail: RunDetail): NodeView[] {
           ...(graph.node_gated_by[task.id] ?? []),
           ...(result?.blocked_by ?? []),
         ],
+        dependents: graph.plan.tasks
+          .filter((other) => other.deps?.includes(task.id))
+          .map((other) => other.id),
       },
     ];
   });
+}
+
+/**
+ * How the run's graph stands as a whole — `failed`, `waiting` or `complete` — read
+ * from the engine's own per-node statuses (`GET /status`'s `node_status`) by the
+ * engine's own rule (`graph::state_of`): any node failed or skipped fails the
+ * graph, only a graph whose every node is done is complete, and anything else is
+ * waiting. An empty graph is complete, as the engine reads it.
+ *
+ * Derived here rather than served because it is a pure reading of statuses every
+ * client already holds.
+ */
+export function graphStateWord(
+  statuses: Readonly<Record<string, string>>,
+): "failed" | "waiting" | "complete" {
+  const all = Object.values(statuses);
+  if (all.some((status) => status === "failed" || status === "skipped"))
+    return "failed";
+  if (all.every((status) => status === "done")) return "complete";
+  return "waiting";
 }
 
 /** The harness that launched a run, named the one way this app names it. */

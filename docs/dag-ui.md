@@ -99,31 +99,21 @@ the API, or route those paths to it.
 
 ## Use
 
-**The app opens on the projects.** A bare address is the project list
-`GET /api/v2/projects` serves: one card per project, in the server's own order —
-newest activity first, by the group's last write — each carrying the plan's name
-and its qualified id, how many runs, when it last wrote, and its runs' states
-counted in the server's own words (`2 active · 1 settled`). The `(no project)`
-group — the runs whose launch recorded none — is a card like any other, wherever
-its own recency puts it, headed by that word rather than by the plan name of
-whichever run in it wrote last. The left navigation lists the same groups as rows.
-Clicking either opens the project's page, `GET /api/v2/projects/{project}` (the
-`(no project)` group has no id and no route, so its page is taken off the listing):
-every DAG launched against it, most recent activity first, each row the same row
-the run list serves — its settlement, its nodes counted, what is driving it in the
-engine's word, how many surfaces nobody has read, and when it last wrote — and
-each opening to the run view below. The project rides in the address (`?project=`,
-with `none` for the group that has no id), so a page is linkable and a run opened
-from one keeps the page one step back. Nothing here recomputes the order or the
-counts; the tallies are of the served rows, in the served words.
+**Projects are the sidebar's one list.** Groups come from `GET /api/v2/projects`,
+most recent activity first, and expand into runs by newest launch first, with undated launches last by activity.
+Opening a project selects its newest visible run. Effective `labels.kind` values
+populate the kind filter from data, including unfamiliar kinds; all are shown by
+default and hidden kinds are kept in repeated `hide-kind` URL parameters. A run
+without a kind carries no badge. Runs without a resolved group sit under **Other
+runs** at the end. Copy-origin and overlay groups are resolved by the engine.
 
-**The flat run list is one toggle away** (`?list=runs`), and under it an address
-naming no run opens the first one served, as it always did. That list is one flat
-list, ordered by last activity, tagged by the launching Claude or Codex session
-read from the `launch` attribution the row carries — its `session_key`, the same
-fingerprint `just runs` prints — rather than gathered into sections by it: a
-grouping that outranks time is what the projects are for. A run with no launch
-record at all reads as `Unattributed`. Select a run, then:
+There is no project landing or separate project page. The run id stays in `?run=`;
+its launching session is in **Run details** in the header. **Host** opens the host's
+resources, provider health, dispatches, and runs. Its unwatched count is read on entry
+and **Refresh host**, never on a cadence. Host shutdown lives there alone, with a
+confirmation naming each owner and the number of runs it affects.
+
+Select a run, then:
 
 - **Overall** is where an address that names no view lands, and it is the run read
   as a whole: its telemetry tiles over the **graph timeline** (below).
@@ -137,7 +127,7 @@ record at all reads as `Unattributed`. Select a run, then:
   that says nothing about having more beside it.
 - select a node in the graph or keyboard-accessible node list to open its
   **timeline view** (below).
-- **Channel** and **Reads** are the supervising surface, described in
+- **Channel** is the supervising surface, described in
   [Supervising a run](#supervising-a-run): every verb the CLI has once a plan is
   running, from the run it is about.
 - **Agents** is every agent the run launched, described in
@@ -231,12 +221,10 @@ third, **Agents**, is the section after this one.
   reads says which field rather than sending something the engine would refuse for
   a reason that is not the reader's. A correlation names the question a verdict
   answers.
-- **Reads** are the rendered verbs, each a panel showing the SDK's own text — byte
-  for byte what the binary prints, because those verbs answer rendered views rather
-  than records: `status`, `results`, `goals`, the `transcript` per node (a node the
-  run never dispatched is the engine's refusal, shown as such), `telemetry` as the
-  SDK's own document, and the `host` view. `monitor` is the existing timeline under
-  a profile.
+- The former Reads information is structured in the remaining views: status and
+  unread age in **Run details**, goals, repository identities, results, timing and
+  usage in **Overall**, per-node outcomes in **Task**, publication and checks in
+  **Remote**, and transcript turns in the conversation. Host resources are on **Host**.
 
 `e2e/dag-ui-controls.spec.ts` drives every one of these against the real API over
 runs the fixture writes for them alone — the supervised run the acting session
@@ -293,11 +281,6 @@ anything for it.
   with no count beside it rather than a zero.
 - **A node's Agents tab** is `GET .../nodes/{node}/agents`: the sessions that
   node's dispatches wrote, and none for a node that dispatched nothing.
-- **A project's page** ends with the union across its runs,
-  `GET /api/v2/projects/{project}/agents`, grouped the same way, and its row in the
-  navigation and its card on the landing carry the group's `agent_count`. The
-  `(no project)` group has no id and so no route, and its page shows its runs
-  alone.
 - **Open transcript** on a harness run opens it through the conversation view the
   app already has for a `oneharness_session` artifact — `GET
   /api/v2/runs/{run}/artifacts/{history_id}`, asked for under the run the entry
@@ -640,8 +623,8 @@ being photographed.
 | `08-conversation` | a conversation in the right panel |
 | `09-node-redirected` | a node reading as having a reachable turn, with the redirection that turn took open beside it |
 | `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
-| `11-project-list` | the projects the app opens on, the `(no project)` group among them |
-| `12-project-page` | a project's page: its runs, newest activity first |
+| `11-project-list` | projects and their runs in one sidebar |
+| `12-host` | host resources, unwatched runs and host shutdown |
 | `21-remote` | publication, release and each check’s evidence |
 | `13-channel` | the channel: the queue, the composer and the surface form |
 | `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |

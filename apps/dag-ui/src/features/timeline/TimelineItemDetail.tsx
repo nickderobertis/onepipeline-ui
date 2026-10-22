@@ -766,7 +766,14 @@ function Recorded({
       </dl>
       <h3 className="detail-heading">Reference</h3>
       <Reference
-        fallback="This item points at no recorded artifact."
+        fallback={
+          // A dispatch names its conversation whenever the run recorded one, so a
+          // dispatch naming none is one whose transcript this run does not hold —
+          // said in words, rather than left as a panel with no conversation in it.
+          row.rowKind === "span" && row.span.kind === "dispatch"
+            ? "No transcript was recorded for this dispatch."
+            : "This item points at no recorded artifact."
+        }
         reference={reference}
       />
     </>

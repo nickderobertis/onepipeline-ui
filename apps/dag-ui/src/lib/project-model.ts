@@ -70,3 +70,19 @@ export function projectAgentCount(group: ProjectGroup): string | undefined {
   if (group.agent_count === undefined) return undefined;
   return `${group.agent_count} ${group.agent_count === 1 ? "agent" : "agents"}`;
 }
+
+/** Newest launch first, then activity for undated launches or equal launch times. */
+export function newestRuns(runs: readonly RunSummary[]): RunSummary[] {
+  return [...runs].sort((left, right) => {
+    const a = left.launch?.started_at;
+    const b = right.launch?.started_at;
+    if (a !== undefined && b === undefined) return -1;
+    if (a === undefined && b !== undefined) return 1;
+    return (
+      (b === undefined ? 0 : Date.parse(b)) -
+        (a === undefined ? 0 : Date.parse(a)) ||
+      (right.last_progress_at ?? 0) - (left.last_progress_at ?? 0) ||
+      left.run_id.localeCompare(right.run_id)
+    );
+  });
+}

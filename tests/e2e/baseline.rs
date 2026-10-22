@@ -578,7 +578,7 @@ fn invalid_or_regressed_telemetry_schemas_fail_the_timeline_comparison() {
     let mut before = response.json();
     let mut after = before.clone();
     before["telemetry_schema_version"] = 21.into();
-    after["telemetry_schema_version"] = 23.into();
+    after["telemetry_schema_version"] = 24.into();
     assert_eq!(telemetry_schemas_are_compatible(&before, &after), Ok(()));
     assert!(telemetry_schemas_are_compatible(&after, &before).is_err());
     let mut missing = after.clone();

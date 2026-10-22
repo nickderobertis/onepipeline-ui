@@ -456,6 +456,18 @@ of. No route or MSRV changes, and the dev-only `onevcs` and `onetaskgraph-*`
 requirements already name the releases its lock resolves. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed
 public items.
+0.84.0 is the engine whose runs carry labels. It serves each run's effective
+labels — those recorded at launch with any `labels.json` overlay the `label`
+verb wrote laid over them — and resolves the group a run belongs to, through a
+board copy's origin where one exists, so `/api/v2/runs` rows and
+`/api/v2/projects` groups carry `labels` and `group` under telemetry schema 24.
+It also exposes a run's recorded launch time, the structured host reading
+`/api/v2/host` serves beside its text, and the telemetry document run detail
+carries. A reply that queues a note now finishes once the note is queued rather
+than once it is delivered (onepipeline #1094). It links the same onetaskgraph
+0.9.2, onevcs 0.56.3 and oneagentgraph 0.7.0 as 0.82.0. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed
+public items.
 0.84.1 links oneharness-core 0.28.8 and oneagentgraph 0.7.1, carrying the
 shared Codex app-server cleanup fix (oneharness#1520). The lock follows the
 engine release's own resolution. Browser adoption remains removed under the

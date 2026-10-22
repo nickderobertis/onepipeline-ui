@@ -1416,6 +1416,87 @@ button.graph-row-name {
   padding: 20px 28px 32px;
 }
 
+/*
+ * The Host page holds absolute paths, dispatch proofs and a five-column table, none
+ * of which has a natural break. A grid track's default minimum is its content's, so
+ * without these the column grew past a phone's width and clipped the page.
+ */
+.host-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-page :where(h2, dd, p, td) {
+  overflow-wrap: anywhere;
+}
+
+/* Five columns need about 40rem before their headers run together. A narrower
+   column, a phone's, stacks each dispatch instead: one line per field, each led by
+   its column's name, so nothing is clipped and the page never scrolls sideways. */
+.host-table {
+  container-type: inline-size;
+}
+
+.host-page table {
+  width: 100%;
+}
+
+.host-page :where(th, td) {
+  padding: 4px 16px 4px 0;
+  text-align: start;
+  vertical-align: top;
+}
+
+.host-page th {
+  white-space: nowrap;
+}
+
+@container (max-width: 40rem) {
+  .host-table thead {
+    display: none;
+  }
+
+  .host-table :where(table, tbody, tr, td) {
+    display: block;
+  }
+
+  .host-table tr {
+    padding-block: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .host-table td {
+    padding: 2px 0;
+  }
+
+  .host-table td::before {
+    content: attr(data-label) ": ";
+    color: var(--muted-foreground);
+  }
+}
+
+.host-page .host-shutdown {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-page .host-shutdown-actions > button {
+  flex-shrink: 1;
+  max-width: 100%;
+  height: auto;
+  min-height: 2rem;
+  white-space: normal;
+  text-align: start;
+}
+
+/* A host name is an identifier, and a fixed-width face also gives one of a given
+   length the same width wherever it is read. */
+.host-page .host-name {
+  font-family: var(--font-mono);
+}
+
+.host-page .host-age {
+  font-variant-numeric: tabular-nums;
+}
+
 .channel-section h3 {
   display: flex;
   align-items: center;
@@ -2044,4 +2125,65 @@ button.graph-row-name {
     > :not(:first-child) {
     display: none;
   }
+}
+
+.kind-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 16px 0;
+  font-size: 12px;
+}
+.kind-filter legend {
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+}
+.kind-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.project-group {
+  margin-top: 14px;
+}
+.project-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+.project-group .project-link {
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  text-align: left;
+}
+.run-header-details {
+  padding: 8px 24px;
+  font-size: 12px;
+}
+.run-header-details summary {
+  cursor: pointer;
+}
+.structured-fields fieldset {
+  min-width: 0;
+  margin: 8px 0;
+  padding: 4px 0 4px 12px;
+  border-left: 1px solid var(--border);
+}
+.structured-fields legend {
+  font-weight: 600;
+  font-size: 12px;
+}
+.structured-fields ol {
+  margin-left: 16px;
+}
+.run-header-details {
+  flex-shrink: 0;
+  max-height: min(40vh, 320px);
+  overflow: auto;
+}
+.shutdown-status {
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow: auto;
 }

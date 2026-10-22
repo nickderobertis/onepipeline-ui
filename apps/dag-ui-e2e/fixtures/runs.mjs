@@ -4148,3 +4148,96 @@ export function writeFailedHeaderRun(root) {
   journal.write();
   return runId;
 }
+
+/** A project's six kinds, a copy-origin main, an ungrouped run and an ended legacy run. */
+export function buildProjectCentricRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const project = "local-md:project-centric";
+  const kinds = [
+    "planning",
+    "spikes",
+    "main",
+    "finalize",
+    "design",
+    "follow-ups",
+  ];
+  for (const [index, kind] of kinds.entries()) {
+    const run = `project-${kind}`;
+    writeEventlessRun(root, run, "claude-code", SUPERVISOR_SESSION);
+    const dir = join(root, run);
+    const record = launch(
+      run,
+      "claude-code",
+      SUPERVISOR_SESSION,
+      stamp(HISTORIC + index * 1000),
+      4248,
+    );
+    Object.assign(record, {
+      project: kind === "main" ? "local-md:board-copy" : project,
+      labels: { kind },
+      ...(kind === "main" ? { project_origin: project } : { group: project }),
+    });
+    writeJson(join(dir, "launch.json"), record);
+    const journal = new Journal(dir, streamOf(run), HISTORIC + index * 1000);
+    journal.emit("pipeline", "run-started", { run_id: run }, {});
+    journal.write();
+  }
+  for (const [id, started, activity] of [
+    ["order-tied-a", HISTORIC, HISTORIC],
+    ["order-tied-b", HISTORIC, HISTORIC],
+    ["order-tied-active", HISTORIC, HISTORIC + 1000],
+    ["order-undated-old", undefined, HISTORIC],
+    ["order-undated-active", undefined, HISTORIC + 1000],
+  ]) {
+    writeEventlessRun(root, id);
+    const recordPath = join(root, id, "launch.json");
+    const record = launch(id, "a-plain-shell", "", undefined, 4248);
+    Object.assign(record, {
+      group: "local-md:ordering",
+      ...(started === undefined ? {} : { started_at: stamp(started) }),
+    });
+    writeJson(recordPath, record);
+    const journal = new Journal(join(root, id), streamOf(id), activity);
+    journal.emit("pipeline", "run-started", { run_id: id }, {});
+    journal.write();
+  }
+  writeEventlessRun(root, "project-ungrouped");
+  writeEventlessRun(root, "project-unfamiliar");
+  const unfamiliar = join(root, "project-unfamiliar", "launch.json");
+  writeJson(unfamiliar, {
+    ...launch("project-unfamiliar", "a-plain-shell", "", stamp(HISTORIC), 4248),
+    labels: { kind: "field-research" },
+    group: "local-md:another-project",
+  });
+  // No labels or group were recorded at launch. The fixture entry point invokes
+  // the pinned engine's label verb after this ended journal has been written.
+  writeEventlessRun(root, "project-before-labels");
+  const dir = join(root, "project-before-labels");
+  const journal = new Journal(
+    dir,
+    streamOf("project-before-labels"),
+    HISTORIC - 10000,
+  );
+  journal.emit(
+    "pipeline",
+    "run-started",
+    { run_id: "project-before-labels" },
+    {},
+  );
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "run-stopped",
+      { run_id: "project-before-labels" },
+      { forced: false },
+    );
+  journal.write();
+}
+
+export function projectCentricFacts() {
+  return {
+    project: "local-md:project-centric",
+    kinds: ["planning", "spikes", "main", "finalize", "design", "follow-ups"],
+  };
+}

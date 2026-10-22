@@ -1,7 +1,15 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { API_V2_PATHS, runListSchema } from "@onepipeline-ui/dag-model";
+import {
+  API_V2_PATHS,
+  hostReadingSchema,
+  projectListSchema,
+  renderedRootSchema,
+  runListSchema,
+  runStatusSchema,
+  unwatchedSchema,
+} from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { exited, startFixtureServer } from "./fixture-server";
@@ -41,6 +49,10 @@ const factsSchema = z.object({
   live_node: z.string().min(1),
 });
 type ShutdownFacts = z.infer<typeof factsSchema>;
+
+const hostEnvelopeSchema = renderedRootSchema.extend({
+  reading: hostReadingSchema,
+});
 
 interface ShutdownServer {
   readonly origin: string;
@@ -119,8 +131,8 @@ const dialogOf = (page: Page): Locator => page.getByRole("dialog");
 const itemsOf = (list: Locator): Promise<string[]> =>
   list.getByRole("listitem").allInnerTexts();
 
-/** Open a run's view on the server's own origin, with its header acting. */
-async function openRun(
+/** Open a run and navigate to Host on the server's own origin. */
+async function openHostFromRun(
   page: Page,
   server: ShutdownServer,
   run: string,
@@ -130,6 +142,10 @@ async function openRun(
   await expect(
     page.getByRole("heading", { name: run, exact: true }).first(),
   ).toBeVisible();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Host", exact: true })
+    .click();
 }
 
 /** Set the dialog's grace and read back that it holds it. */
@@ -184,7 +200,7 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
   expect(ownSession).toBeDefined();
   expect(otherSession).toBeDefined();
   expect(otherSession).not.toBe(ownSession);
-  await page.goto(`${server.origin}/?list=runs`);
+  await page.goto(`${server.origin}/?page=host`);
   await page
     .getByRole("group", { name: "Shut down runs on this host" })
     .getByRole("button", { name: "Shut down the entire host" })
@@ -195,13 +211,12 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
   const items = await itemsOf(
     dialog.getByRole("list", { name: "Runs on this host" }),
   );
-  expect(items).toHaveLength(4);
+  expect(items).toHaveLength(3);
   expect(items).toEqual(
     expect.arrayContaining([
-      `${runs.mine} — owned by Claude session · ${ownSession}`,
-      `${runs.idle} — owned by Claude session · ${ownSession}`,
-      `${runs.elsewhere} — owned by Codex session · ${otherSession}`,
-      `${runs.unattributed} — owned by Unattributed launch · shutdown…`,
+      `Claude session · ${ownSession} — 2 runs`,
+      `Codex session · ${otherSession} — 1 run`,
+      `Unattributed launch · shutdown… — 1 run`,
     ]),
   );
   await expectForceOffAndSaid(dialog);
@@ -239,7 +254,7 @@ test("confirms an empty host shutdown after correcting an invalid grace", async 
   rmSync(root, { recursive: true });
   mkdirSync(root);
   const sent = shutdownsSent(page);
-  await page.goto(`${server.origin}/?list=runs`);
+  await page.goto(`${server.origin}/?page=host`);
   await page.getByRole("button", { name: "Shut down the entire host" }).click();
   const dialog = dialogOf(page);
   await expect(dialog).toContainText("all 0 runs on this host");
@@ -282,7 +297,7 @@ test("while the answer is held open the control shows the shutdown proceeding, w
     await released;
     await route.fulfill({ response: answer });
   });
-  await openRun(page, server, runs.idle);
+  await openHostFromRun(page, server, runs.idle);
   await page.getByRole("button", { name: "Shut down the entire host" }).click();
   await setGrace(dialogOf(page), "20", "seconds");
   await dialogOf(page)
@@ -335,7 +350,7 @@ test("a request whose connection drops is shown lost — not proceeding, and wit
     await dropped;
     await route.abort("connectionreset");
   });
-  await openRun(page, server, runs.idle);
+  await openHostFromRun(page, server, runs.idle);
   await page.getByRole("button", { name: "Shut down the entire host" }).click();
   await dialogOf(page)
     .getByRole("button", { name: "Shut down the host" })
@@ -384,7 +399,19 @@ test("a live dispatch that outlasts the grace is killed, and the report says so 
   const ended = exited(sleeper);
   server = await startServer(pid);
   const { runs, live_node } = server.facts;
-  await openRun(page, server, runs.mine);
+  await openHostFromRun(page, server, runs.mine);
+  await page.getByRole("button", { name: "Shut down the entire host" }).click();
+  await dialogOf(page)
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
+  expect(sleeper.exitCode).toBeNull();
+  expect(sleeper.signalCode).toBeNull();
+  const afterCancel = await page.request.get(
+    `${server.origin}/api/v2/runs/${runs.mine}/status`,
+  );
+  expect(
+    runStatusSchema.parse(await afterCancel.json()).node_status[live_node],
+  ).toBe("running");
   await page.getByRole("button", { name: "Shut down the entire host" }).click();
   await setGrace(dialogOf(page), "3", "seconds");
   await dialogOf(page)
@@ -406,5 +433,334 @@ test("a live dispatch that outlasts the grace is killed, and the report says so 
   await expect(report).toContainText("Teardown: signalled");
   await ended;
   expect(sleeper.signalCode).toBe("SIGTERM");
+  const host = hostEnvelopeSchema.parse(
+    await (await page.request.get(`${server.origin}/api/v2/host`)).json(),
+  );
+  expect(host.reading.gone.length).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Refresh host", exact: true }).click();
+  for (const gone of host.reading.gone)
+    await expect(
+      page.getByRole("region", { name: "Gone dispatches", exact: true }),
+    ).toContainText(`${gone.run} · ${gone.node} · ${gone.reason}`);
 });
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+test("reads structured host data and refreshes fixture-owned unwatched runs only on request", async ({
+  page,
+}) => {
+  server = await startServer();
+  const current = server;
+  const response = await page.request.get(`${current.origin}/api/v2/host`);
+  const host = hostEnvelopeSchema.parse(await response.json());
+  expect(host.reading.schema_version).toBe(1);
+  expect(host.reading.free_space.length).toBeGreaterThan(0);
+  const initial = unwatchedSchema.parse(
+    await (await page.request.get(`${current.origin}/api/v2/unwatched`)).json(),
+  );
+  expect(initial.reported.length).toBeGreaterThan(0);
+  let calls = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v2/unwatched") calls += 1;
+  });
+  await page.clock.install();
+  let releaseHost: () => void = () => undefined;
+  const releasedHost = new Promise<void>((resolve) => {
+    releaseHost = resolve;
+  });
+  let hostHeld: () => void = () => undefined;
+  const heldHost = new Promise<void>((resolve) => {
+    hostHeld = resolve;
+  });
+  // llmlint: ignore[e2e_not_mocked] The real Host response is forwarded unchanged and only its arrival is held, so the browser's pending read can be asserted without a timing race or a fabricated payload.
+  await page.route(
+    (url) => url.pathname === "/api/v2/host",
+    async (route) => {
+      const response = await route.fetch();
+      hostHeld();
+      await releasedHost;
+      await route.fulfill({ response });
+    },
+  );
+  const displayedResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/v2/host",
+  );
+  await page.goto(`${current.origin}/?page=host`);
+  await heldHost;
+  const pendingHost = page
+    .getByRole("region", { name: "Host", exact: true })
+    .getByRole("status")
+    .filter({ hasText: "Reading host…" });
+  try {
+    await expect(pendingHost).toBeVisible();
+  } finally {
+    releaseHost();
+  }
+  const displayed = hostEnvelopeSchema.parse(
+    await (await displayedResponse).json(),
+  );
+  const view = page.getByRole("region", { name: "Host", exact: true });
+  await expect(pendingHost).toHaveCount(0);
+  await expect(
+    view.getByRole("heading", {
+      name: `Unwatched runs: ${initial.reported.length}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    view.getByRole("status", { name: "Runs root path", exact: true }),
+  ).toHaveText(host.reading.root);
+  await expect(view.getByRole("region", { name: "Free space" })).toContainText(
+    String(host.reading.free_space[0]?.total_bytes),
+  );
+  const roots = displayed.reading.free_space.flatMap((space) => space.roots);
+  for (const [index, root] of roots.entries()) {
+    await expect(
+      view
+        .getByRole("status", { name: "Filesystem root path", exact: true })
+        .nth(index),
+    ).toHaveText(root.path ?? "unresolved");
+    await expect(
+      view.getByRole("region", { name: "Free space", exact: true }),
+    ).toContainText(`${root.role}:`);
+  }
+  for (const [index, root] of roots
+    .filter((root) => root.measured_at !== null)
+    .entries())
+    await expect(
+      view
+        .getByRole("status", { name: "Measured root ancestor", exact: true })
+        .nth(index),
+    ).toHaveText(root.measured_at ?? "missing ancestor");
+  for (const [index, space] of displayed.reading.free_space.entries()) {
+    await expect(
+      view
+        .getByRole("status", { name: "Free capacity bytes", exact: true })
+        .nth(index),
+    ).toHaveText(String(space.free_bytes ?? "Unknown"));
+    await expect(
+      view
+        .getByRole("status", { name: "Total capacity bytes", exact: true })
+        .nth(index),
+    ).toHaveText(String(space.total_bytes ?? "Unknown"));
+  }
+  expect(
+    host.reading.dispatches.some((dispatch) => dispatch.proof === "unproven"),
+  ).toBe(true);
+  for (const dispatch of displayed.reading.dispatches) {
+    const row = view
+      .getByRole("region", { name: "Providers and dispatches" })
+      .getByRole("row")
+      .filter({
+        has: page.getByRole("cell", { name: dispatch.node, exact: true }),
+      });
+    await expect(row.getByRole("cell")).toHaveText([
+      dispatch.run,
+      dispatch.node,
+      dispatch.launcher,
+      String(dispatch.age_ms ?? "Unknown"),
+      `${dispatch.proof}${dispatch.unproven ? `: ${dispatch.unproven}` : ""}`,
+    ]);
+  }
+  for (const run of initial.reported)
+    await expect(
+      view.getByRole("region", { name: "Unwatched runs", exact: true }),
+    ).toContainText(`${run.run}${run.standing} · ${run.why_not_watched}`);
+  const projects = projectListSchema.parse(
+    await (await page.request.get(`${current.origin}/api/v2/projects`)).json(),
+  );
+  const hostRuns = view.getByRole("region", {
+    name: "Runs on the host",
+    exact: true,
+  });
+  for (const run of projects.projects.flatMap((group) => group.runs))
+    await expect(hostRuns).toContainText(`${run.run_id} · ${run.state}`);
+  await view.getByText("Provider health", { exact: true }).click();
+  await expectStructuredHostFields(
+    view.getByRole("group", { name: "Provider health", exact: true }),
+    projects.provider_health,
+  );
+  const owned = initial.reported.find(
+    (run) => run.run === current.facts.runs.mine,
+  );
+  expect(owned).toBeDefined();
+  rmSync(join(current.workspace, "runs", current.facts.runs.mine), {
+    recursive: true,
+  });
+  await page.clock.runFor(60_000);
+  expect(calls).toBe(1);
+  await expect(
+    view.getByRole("heading", {
+      name: `Unwatched runs: ${initial.reported.length}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await view.getByRole("button", { name: "Refresh host", exact: true }).click();
+  await expect(
+    view.getByRole("heading", {
+      name: `Unwatched runs: ${initial.reported.length - 1}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(calls).toBe(2);
+  const acknowledgements = join(
+    current.workspace,
+    "runs",
+    current.facts.runs.idle,
+    "acknowledgements",
+  );
+  mkdirSync(acknowledgements, { recursive: true });
+  writeFileSync(join(acknowledgements, "unreadable.json"), "not JSON");
+  const unresolvedResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/v2/unwatched",
+  );
+  await view.getByRole("button", { name: "Refresh host", exact: true }).click();
+  const unresolved = unwatchedSchema.parse(
+    await (await unresolvedResponse).json(),
+  );
+  expect(unresolved.unresolved.length).toBeGreaterThan(0);
+  for (const diagnostic of unresolved.unresolved)
+    await expect(
+      view.getByRole("region", { name: "Unwatched runs", exact: true }),
+    ).toContainText(diagnostic.trim());
+  const unreadable = join(current.workspace, "runs", "unreadable-host-run");
+  mkdirSync(unreadable);
+  writeFileSync(join(unreadable, "launch.json"), "not JSON");
+  await view.getByRole("button", { name: "Refresh host", exact: true }).click();
+  const refusedRoot = hostEnvelopeSchema.parse(
+    await (await page.request.get(`${current.origin}/api/v2/host`)).json(),
+  );
+  expect(
+    refusedRoot.reading.skipped.some((row) => row.path === unreadable),
+  ).toBe(true);
+  for (const skipped of refusedRoot.reading.skipped)
+    await expect(
+      view.getByText(`${skipped.path}: ${skipped.reason}`, { exact: true }),
+    ).toBeVisible();
+  await page.context().setOffline(true);
+  await view.getByRole("button", { name: "Refresh host", exact: true }).click();
+  await expect(view.getByRole("alert")).toBeVisible();
+  await page.context().setOffline(false);
+  await view.getByRole("button", { name: "Refresh host", exact: true }).click();
+  await expect(view.getByRole("alert")).toHaveCount(0);
+  rmSync(join(current.workspace, "runs"), { recursive: true });
+  writeFileSync(join(current.workspace, "runs"), "not a directory");
+  await view.getByRole("button", { name: "Refresh host", exact: true }).click();
+  const rootError = hostEnvelopeSchema.parse(
+    await (await page.request.get(`${current.origin}/api/v2/host`)).json(),
+  );
+  expect(rootError.reading.root_error).not.toBeNull();
+  await expect(
+    view.getByRole("alert").filter({
+      hasText: rootError.reading.root_error ?? "missing root error",
+    }),
+  ).toBeVisible();
+});
+
+test("shows unresolved host roots and unavailable capacity from the real host read", async ({
+  page,
+}) => {
+  const fixture = await startFixtureServer("host-unresolved", [
+    "--shutdown-corpus",
+    "--unresolved-workspaces",
+  ]);
+  server = { ...fixture, facts: factsSchema.parse(fixture.facts) };
+  const journal = join(
+    server.workspace,
+    "runs",
+    server.facts.runs.mine,
+    "events.jsonl",
+  );
+  const recordSchema = z
+    .object({ kind: z.string(), ts: z.string() })
+    .passthrough();
+  const records = readFileSync(journal, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => recordSchema.parse(JSON.parse(line)));
+  for (const record of records)
+    if (record.kind === "node-dispatched") record.ts = "unrecorded-time";
+  writeFileSync(
+    journal,
+    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+  );
+  const response = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/v2/host",
+  );
+  await page.goto(`${server.origin}/?page=host`);
+  const host = hostEnvelopeSchema.parse(await (await response).json());
+  const view = page.getByRole("region", { name: "Host", exact: true });
+  const undatedDispatch = host.reading.dispatches.find(
+    (row) => row.age_ms === null,
+  );
+  expect(undatedDispatch).toBeDefined();
+  if (!undatedDispatch)
+    throw new Error("fixture did not produce an undated dispatch");
+  const row = view
+    .getByRole("region", { name: "Providers and dispatches", exact: true })
+    .getByRole("row")
+    .filter({
+      has: page.getByRole("cell", { name: undatedDispatch.node, exact: true }),
+    });
+  await expect(row.getByRole("cell")).toHaveText([
+    undatedDispatch.run,
+    undatedDispatch.node,
+    undatedDispatch.launcher,
+    "Unknown",
+    `${undatedDispatch.proof}${undatedDispatch.unproven ? `: ${undatedDispatch.unproven}` : ""}`,
+  ]);
+  const unresolved = host.reading.free_space.find((space) =>
+    space.roots.some((root) => root.path === null),
+  );
+  expect(unresolved).toBeDefined();
+  expect(unresolved?.free_bytes).toBeNull();
+  expect(unresolved?.total_bytes).toBeNull();
+  expect(unresolved?.error).toBeTruthy();
+  await expect(
+    view
+      .getByRole("status", { name: "Filesystem root path", exact: true })
+      .filter({ hasText: /^unresolved$/ }),
+  ).toBeVisible();
+  await expect(
+    view
+      .getByRole("status", { name: "Free capacity bytes", exact: true })
+      .filter({ hasText: "Unknown" }),
+  ).toBeVisible();
+  await expect(
+    view
+      .getByRole("status", { name: "Total capacity bytes", exact: true })
+      .filter({ hasText: "Unknown" }),
+  ).toBeVisible();
+  await expect(
+    view.getByText(unresolved?.error ?? "missing error", { exact: true }),
+  ).toBeVisible();
+});
+
+async function expectStructuredHostFields(
+  scope: Locator,
+  value: unknown,
+  path = "Record",
+): Promise<void> {
+  if (value === undefined || value === null) {
+    await expect(scope).toContainText("Not recorded");
+  } else if (Array.isArray(value)) {
+    const list = scope.getByRole("list", { name: path, exact: true });
+    if (value.length === 0) await expect(scope).toContainText("None");
+    else
+      for (const [index, item] of value.entries())
+        await expectStructuredHostFields(
+          list.getByRole("listitem", { name: `${path}.${index}`, exact: true }),
+          item,
+          `${path}.${index}`,
+        );
+  } else if (typeof value === "object") {
+    for (const [key, item] of Object.entries(value))
+      await expectStructuredHostFields(
+        scope.getByRole("group", { name: `${path}.${key}`, exact: true }),
+        item,
+        `${path}.${key}`,
+      );
+  } else
+    await expect(scope).toContainText(
+      typeof value === "boolean" ? (value ? "Yes" : "No") : String(value),
+    );
+}

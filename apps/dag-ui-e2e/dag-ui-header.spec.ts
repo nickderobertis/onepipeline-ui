@@ -100,7 +100,12 @@ for (const viewport of VIEWPORTS) {
       await expect(page.getByLabel(/unwatched$/)).toHaveCount(0);
       await expect(
         page.getByRole("button", { name: "Shut down the entire host" }),
-      ).toBeAttached();
+      ).toHaveCount(0);
+      await expect(
+        page
+          .getByRole("navigation")
+          .getByRole("button", { name: "Host", exact: true }),
+      ).toBeVisible();
       const activity = header.getByRole("button", {
         name: `dashboard: Bash ${command}`,
         exact: true,

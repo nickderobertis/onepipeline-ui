@@ -918,8 +918,9 @@ fn launcher_word(launcher: &str) -> &'static str {
 /// Closed because a client switches on it exhaustively: a word outside this set
 /// has no rendering, and the run's recorded result can hold any word at all.
 // llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field the run's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
-const NODE_STATUSES: [&str; 11] = [
+const NODE_STATUSES: [&str; 12] = [
     "pending",
+    "ready",
     "running",
     "waiting",
     "blocked",
@@ -935,16 +936,12 @@ const NODE_STATUSES: [&str; 11] = [
 
 /// The status word a client renders, from whatever the run recorded.
 ///
-/// One translation: the SDK's `ready` — eligible now, nothing dispatched — has
-/// no member in the client's vocabulary, and `pending` is what that vocabulary
-/// calls a node that has not started. Anything else the vocabulary does not hold
-/// is `unknown`, rather than passed through for a client to fail on or mapped
-/// onto a neighbouring meaning it does not have. The word itself is not lost:
-/// `node_counts` reports what the run actually wrote.
+/// The engine's own words pass through unchanged — `ready` among them, since
+/// schema 24. Anything else the vocabulary does not hold is `unknown`, rather
+/// than passed through for a client to fail on or mapped onto a neighbouring
+/// meaning it does not have. The word itself is not lost: `node_counts` reports
+/// what the engine said.
 fn status_word(status: &str) -> &str {
-    if status == "ready" {
-        return "pending";
-    }
     if NODE_STATUSES.contains(&status) {
         status
     } else {
@@ -1008,7 +1005,7 @@ fn read_json(path: &Path) -> Option<Value> {
 #[must_use]
 pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for recorded in recorded_statuses(view).values() {
+    for recorded in node_statuses(view).values() {
         *counts.entry(recorded.status.clone()).or_insert(0) += 1;
     }
     let mut summary = Map::new();
@@ -1024,6 +1021,12 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
+    if !view.launch.labels.is_empty() {
+        summary.insert("labels".into(), json!(view.launch.labels));
+    }
+    if let Some(group) = &view.launch.group {
+        summary.insert("group".into(), json!(group));
+    }
     // Schema 18: where the run belongs and whether anything waits on it, read
     // off the fold exactly as `run_row` reads them off the summary — the launch
     // record's project, the launched plan's name through the SDK's own loader
@@ -1102,6 +1105,12 @@ pub fn run_row(
         json!(summary_node_counts(summary, paths)),
     );
     row.insert("launch".into(), summary_launch(run, summary));
+    if !summary.labels.is_empty() {
+        row.insert("labels".into(), json!(summary.labels));
+    }
+    if let Some(group) = &summary.group {
+        row.insert("group".into(), json!(group));
+    }
     // Schema 18, off the document and the two bounded reads beside it: the
     // project and name the summary records, the SDK's listing liveness over the
     // document, and the channel's unread count — `verbs::channel` over the
@@ -1199,7 +1208,7 @@ fn summary_timing_quality(summary: &RunSummary) -> &'static str {
 /// **The run's own recorded result is the whole account for a run whose graph
 /// nothing folded** — a run this host cannot read a journal for records its
 /// nodes nowhere else — so an empty count falls back to it, exactly as
-/// [`recorded_statuses`] does for a node the graph does not name. A run whose
+/// [`node_statuses`] does for a node the graph does not name. A run whose
 /// graph the summary counted is counted from the summary alone: those counts are
 /// the projection's own statuses, which is what the graph payload renders from,
 /// so a row and the graph it opens cannot describe different graphs.
@@ -1219,58 +1228,62 @@ fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
     let mut record = Map::new();
     record.insert("launch_id".into(), json!(run));
     record.insert("launcher".into(), json!(launcher_word(&summary.launcher)));
+    if let Some(at) = &summary.started_at {
+        record.insert("started_at".into(), json!(at));
+    }
     if !summary.session.is_empty() {
         record.insert("session_key".into(), json!(session_key(&summary.session)));
     }
     Value::Object(record)
 }
 
-/// Every node's status as the run itself last wrote it, in the run's own words.
+/// Every node's status in the engine's own word, beside the outcome the run
+/// recorded for it.
 ///
 /// The same derivation the graph payload renders from, so a list row and the
-/// graph it opens cannot describe different graphs — the disagreement an
-/// operator would otherwise see between the two.
+/// graph it opens cannot describe different graphs — and the same word
+/// `onepipeline status` and `results` print, because those are the engine's
+/// `statuses()` too. Two views showing a node two different words is the failure
+/// this exists to rule out, and the engine's reading is the authoritative one:
+/// it is what decides what the run does next.
 ///
-/// Three accounts, in the order they are worth: **what the journal settled for
-/// that node**, then **what the run's own recorded result held for it**, then
-/// **what the graph derives for it**. Rounds are gone, and with them the reason
-/// this used to prefer a recorded document wholesale — a closed round's result
-/// was the only account of it that survived the *next* round starting, and
-/// nothing overwrites the fold now.
+/// What the run *recorded* for a node is not lost. The outcome is the
+/// settlement's own word where the fold kept one, and the recorded result's
+/// where that holds one; a node whose recorded status differs from the engine's
+/// (`not-completed`, `improvised`, a `blocked` the graph has since read as
+/// `skipped`) carries that recorded word as its outcome when nothing else does.
+/// `result.json` stays the whole account for a node the graph does not carry —
+/// a run whose plan this host cannot read.
 ///
-/// The order is what the three *are*. The first two are records of the node; the
-/// third is a gate recomputed from its dependencies on every read, so it is what
-/// a node nothing has recorded reads as and never an overrule of something that
-/// did. `result.json` — which the SDK rewrites whenever a driver closes out —
-/// holds words no settlement carried, and is the whole account for a run whose
-/// journal this host cannot fold.
-///
-/// It is the same precedence [`node_result`] keeps, so a node's status and its
+/// It is the same reading [`node_result`] keeps, so a node's status and its
 /// result can never come from two different accounts of it.
 ///
-/// The words are unmapped on purpose: a count reports what the run wrote, where
-/// a status a client switches on cannot.
-fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
+/// The words are unmapped on purpose: a count reports what the engine said,
+/// where a status a client switches on cannot.
+fn node_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
     let document: BTreeMap<String, Recorded> = recorded_result(view).into_iter().collect();
     let mut statuses: BTreeMap<String, Recorded> = view
         .state
         .statuses()
         .into_iter()
         .map(|(node, derived)| {
-            let outcome = || view.state.outcomes.get(&node).cloned();
-            // What the journal settled for this node, which is an account of the
-            // node itself rather than of the graph around it.
-            let settled = view.state.recorded.get(&node).map(|status| Recorded {
-                status: status.status().as_str().to_owned(),
-                outcome: outcome(),
-            });
-            let recorded = settled
-                .or_else(|| document.get(&node).cloned())
-                .unwrap_or_else(|| Recorded {
-                    status: derived.as_str().to_owned(),
-                    outcome: outcome(),
-                });
-            (node, recorded)
+            let status = derived.as_str().to_owned();
+            // What the run itself recorded for the node: the journal's settlement
+            // first, then the document a driver wrote as it closed out.
+            let recorded = view
+                .state
+                .recorded
+                .get(&node)
+                .map(|settled| settled.status().as_str().to_owned())
+                .or_else(|| document.get(&node).map(|entry| entry.status.clone()));
+            let outcome = view
+                .state
+                .outcomes
+                .get(&node)
+                .cloned()
+                .or_else(|| document.get(&node).and_then(|entry| entry.outcome.clone()))
+                .or_else(|| recorded.filter(|word| *word != status));
+            (node, Recorded { status, outcome })
         })
         .collect();
     // A node the document names and the graph does not: a run whose plan this
@@ -1331,6 +1344,9 @@ fn launch(view: &RunView) -> Value {
         "launcher".into(),
         json!(launcher_word(&view.launch.launcher)),
     );
+    if let Some(at) = view.launch.launched_at() {
+        record.insert("started_at".into(), json!(at));
+    }
     if !view.launch.session.is_empty() {
         record.insert(
             "session_key".into(),
@@ -1792,7 +1808,7 @@ fn run_telemetry(
     telemetry: Option<&RunTelemetry>,
     transcripts: &Transcripts<'_>,
 ) -> Value {
-    let statuses = recorded_statuses(view);
+    let statuses = node_statuses(view);
     let nodes: Vec<Value> = statuses
         .iter()
         .map(|(node, recorded)| node_telemetry(view, node, recorded, transcripts))
@@ -2145,7 +2161,7 @@ fn graph_state(view: &RunView) -> Option<Value> {
     // The same derivation the list row renders from — the fold per node, with the
     // recorded result filling the gaps — so a row and the graph it opens cannot
     // describe different graphs.
-    let statuses: BTreeMap<String, String> = recorded_statuses(view)
+    let statuses: BTreeMap<String, String> = node_statuses(view)
         .into_iter()
         .map(|(node, recorded)| (node, status_word(&recorded.status).to_owned()))
         .collect();
@@ -2184,10 +2200,11 @@ fn graph_state(view: &RunView) -> Option<Value> {
         .filter(|(_, blockers)| !blockers.as_array().is_some_and(Vec::is_empty))
         .collect();
 
+    let engine = engine_words(view);
     let node_results: Map<String, Value> = plan
         .tasks
         .iter()
-        .filter_map(|node| node_result(view, node, result.as_ref()))
+        .filter_map(|node| node_result(view, &engine, node, result.as_ref()))
         .collect();
 
     // Only work in flight has a turn to redirect, so this is one entry per node
@@ -2314,15 +2331,37 @@ fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
         .map(|event| event.payload.clone())
 }
 
+/// A node's status as the engine's `statuses()` words it.
+///
+/// The SDK keeps its status enum private, so the word is what crosses; the field
+/// is private to this module, and [`engine_words`] is the one place a value is
+/// made, so nothing but an engine word can reach a node's served status.
+#[derive(Clone, Copy)]
+struct EngineWord(&'static str);
+
+/// Every node's [`EngineWord`], from the derivation every view serves.
+fn engine_words(view: &RunView) -> BTreeMap<String, EngineWord> {
+    view.state
+        .statuses()
+        .into_iter()
+        .map(|(node, status)| (node, EngineWord(status.as_str())))
+        .collect()
+}
+
 /// One node's result: what the live fold says, or — for a node the fold has
 /// nothing for — what the run's own recorded result document held.
 ///
-/// The fold leads, in the same order [`recorded_statuses`] reads them. There is
+/// The fold leads, in the same order [`node_statuses`] reads them. There is
 /// no closed round whose fold has moved on, so the fold is always the current
 /// account; the recorded document is what a run whose journal this host cannot
 /// fold still has, and it holds words no settlement carried. A node in neither is
 /// a node the run has nothing to say about, and it is served no entry at all.
-fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(String, Value)> {
+fn node_result(
+    view: &RunView,
+    engine: &BTreeMap<String, EngineWord>,
+    node: &Node,
+    result: Option<&Value>,
+) -> Option<(String, Value)> {
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
     if let Some(status) = view.state.recorded.get(&node.id) {
@@ -2374,6 +2413,29 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
             item.insert("completed".into(), json!(word == "done"));
             item.insert("status".into(), json!(word));
         }
+    }
+    // The engine's word for the node, which every other view of it serves too;
+    // the word the run recorded, where it differs and no outcome was recorded,
+    // rides as the outcome rather than being lost — see [`node_statuses`].
+    if let Some(EngineWord(word)) = engine.get(&node.id).copied() {
+        let recorded = view
+            .state
+            .recorded
+            .get(&node.id)
+            .map(|settled| settled.status().as_str().to_owned())
+            .or_else(|| {
+                result
+                    .and_then(|r| r["nodes"].as_array())
+                    .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))
+                    .and_then(|entry| entry["status"].as_str())
+                    .map(str::to_owned)
+            })
+            .filter(|recorded| recorded != word);
+        if let Some(recorded) = recorded.filter(|_| !item.contains_key("outcome")) {
+            item.insert("outcome".into(), json!(recorded));
+        }
+        item.insert("status".into(), json!(status_word(word)));
+        item.insert("completed".into(), json!(word == "done"));
     }
     // The release that carried this node's work, beside the change request that
     // opened it — and absent, never null, for a node the run recorded no release
@@ -2485,6 +2547,10 @@ pub fn run_detail(
         run["agent_count"] = json!(count);
     }
     payload.insert("run".into(), run);
+    payload.insert(
+        "telemetry".into(),
+        json!(onepipeline::telemetry::of_run(&view.paths, &view.events)),
+    );
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),

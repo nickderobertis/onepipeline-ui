@@ -19,7 +19,9 @@ import type { RunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { RecordDisclosure } from "../../lib/RecordDisclosure";
 import type { NodeView } from "../../lib/run-model";
+import { StructuredFields } from "../../lib/StructuredFields";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
 import {
@@ -118,6 +120,31 @@ export function OverallView({
                 ? `last event ${detail.run.last_event}`
                 : "no events recorded yet"}
             </p>
+          </section>
+          <section aria-label="Run records">
+            <RecordDisclosure label="Timing and usage">
+              <StructuredFields value={detail.telemetry} />
+            </RecordDisclosure>
+            <RecordDisclosure label="Goal and repository identities">
+              <StructuredFields
+                value={{
+                  goal: detail.graph?.plan.goal,
+                  repositories: [
+                    ...new Set(
+                      detail.graph?.plan.tasks.flatMap((task) =>
+                        task.repo ? [task.repo] : [],
+                      ) ?? [],
+                    ),
+                  ],
+                }}
+              />
+            </RecordDisclosure>
+            <RecordDisclosure label="Recorded results">
+              <StructuredFields value={detail.graph?.result} />
+            </RecordDisclosure>
+            <RecordDisclosure label="Provider health">
+              <StructuredFields value={detail.provider_health} />
+            </RecordDisclosure>
           </section>
           <section aria-label="Run metrics" className="metric-grid">
             <Metric

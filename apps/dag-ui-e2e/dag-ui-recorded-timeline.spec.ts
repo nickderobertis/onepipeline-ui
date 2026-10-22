@@ -762,6 +762,23 @@ test("keeps the reading cursor when an open event's timeline is expanded", async
     detail.getByRole("heading", { name: "gate-run", exact: true }),
   ).toBeVisible();
   const transcript = page.getByRole("region", { name: "Node transcript" });
+  // Opening the event smooth-scrolls the transcript to it, and a wheel that lands
+  // mid-animation is absorbed by it. A reader wheels after the reading has come to
+  // rest, so wait until the scroll holds still across two frames.
+  await transcript.evaluate(
+    (element) =>
+      new Promise<void>((settled) => {
+        let last = -1;
+        const check = () => {
+          if (element.scrollTop === last) settled();
+          else {
+            last = element.scrollTop;
+            requestAnimationFrame(() => requestAnimationFrame(check));
+          }
+        };
+        check();
+      }),
+  );
   const bounds = await transcript.boundingBox();
   if (bounds === null) throw new Error("node transcript has no bounds");
   // Wheel over the reading's exposed left edge beside the drawer.

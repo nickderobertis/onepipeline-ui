@@ -11,7 +11,7 @@ import { defaultResponder, telemetryHarness } from "../test/telemetry-harness";
 import { App } from "./App";
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/?list=runs");
+  window.history.replaceState(null, "", "/?page=host");
   // No clock advancement is needed: reads settle as promises and DOM events
   // drive the dialog. A newly introduced timer wait must fail this journey.
   vi.useFakeTimers();
@@ -24,13 +24,11 @@ afterEach(() => {
 async function setupShutdown() {
   const sent: string[] = [];
   const { client } = telemetryHarness((url, init) => {
-    if (url.pathname === "/api/v2/unwatched")
-      throw new Error("run pages do not read unwatched");
     if (url.pathname === "/api/v2/shutdown") {
       sent.push(String(init?.body));
       return Response.json({
         api_version: 2,
-        telemetry_schema_version: 23,
+        telemetry_schema_version: 24,
         observed_at: "2026-08-07T12:00:00Z",
         scope: "host",
         root: "/runs",

@@ -64,15 +64,10 @@ the reader is at the end of it.
 
 ### Projects
 
-![The project list the app opens on: a grid of cards, each naming a plan and its qualified id, how many runs it holds, their states counted, and when it last wrote — with a card headed "(no project)" among them for the runs whose launch recorded none](docs/screens/11-project-list-1440x900.png)
-
-![A single project's page: its name and id, then the DAGs launched against it as rows, most recent first, each carrying its settlement, its nodes counted, what is driving it and when it last wrote](docs/screens/12-project-page-1440x900.png)
-
-A bare address is the project list, in the server's own order. The runs whose launch
-recorded no project are a card like any other, headed by that word rather than by the
-plan name of whichever run in them wrote last. A project's page is every DAG launched
-against it, each row the same row the flat run list serves. Nothing here recomputes an
-order or a count: the tallies are of the served rows, in the served words.
+The sidebar lists projects by most recent activity, with their runs underneath.
+Selecting a project opens its newest visible run. Kind filters are discovered from
+run labels and saved in the URL. Ungrouped runs sit under **Other runs** at the end.
+**Host** opens resources, unwatched runs, and the confirmed host shutdown.
 
 ### The channel
 
@@ -151,7 +146,7 @@ which is what its stops and shutdowns are judged by.
 <!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (23), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (24), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy

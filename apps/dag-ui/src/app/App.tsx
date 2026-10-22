@@ -19,8 +19,6 @@ import {
 } from "@oneharness/ui";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
-  ArrowLeft,
-  BookOpenText,
   Inbox,
   RefreshCw,
   Route,
@@ -28,17 +26,14 @@ import {
   TriangleAlert,
   Workflow,
 } from "lucide-react";
-import { useEffect, useMemo } from "react";
-import { AgentsPanel } from "../features/agents/AgentsPanel";
-import { useProjectAgents } from "../features/agents/useAgents";
+import { useEffect, useMemo, useState } from "react";
 import { ChannelView } from "../features/control/ChannelView";
-import { ReadsView } from "../features/control/ReadsView";
 import { RunActions } from "../features/control/RunActions";
 import { useRunControl } from "../features/control/useRunControl";
 import { DagGraph } from "../features/graph/DagGraph";
+import { HostPage } from "../features/host/HostPage";
 import { RunNavigation } from "../features/navigation/RunNavigation";
-import { ProjectPage, ProjectsLanding } from "../features/projects/ProjectPage";
-import { useProject, useProjects } from "../features/projects/useProjects";
+import { useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
   HostShutdownButtons,
@@ -48,8 +43,16 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
-import { groupForKey, projectLabel } from "../lib/project-model";
-import { currentOverrides, graphOf, nodeViews } from "../lib/run-model";
+import { newestRuns } from "../lib/project-model";
+import { RecordDisclosure } from "../lib/RecordDisclosure";
+import {
+  currentOverrides,
+  graphOf,
+  graphStateWord,
+  launchLabel,
+  nodeViews,
+} from "../lib/run-model";
+import { StructuredFields } from "../lib/StructuredFields";
 import { Timestamp } from "../lib/Timestamp";
 import {
   DETAIL_LEVELS,
@@ -99,9 +102,9 @@ export function App({
     selection.runId,
     timelineScope,
     filter,
-    // Under the flat list an address naming no run opens the first served; on
-    // the projects it opens the project list.
-    selection.list === "runs",
+    // An address naming no run opens the first one served, except on the Host
+    // page, which picks none itself; a run the address already names stays read.
+    !selection.host,
   );
   // The order is the server's — most recent activity first — and is never
   // recomputed here.
@@ -110,50 +113,59 @@ export function App({
   const lastActivity = telemetry.activity.at(-1);
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
+  const [projectRefresh, setProjectRefresh] = useState(0);
   const projects = useProjects(
     client,
-    telemetry.invalidations,
-    selection.list === "projects",
+    telemetry.invalidations + projectRefresh,
+    true,
   );
-  // The page is read only while it is the thing on screen: a run opened from
-  // it is the run's own reads, with the page one step back.
-  const project = useProject(
-    client,
-    selectedRunId === undefined ? selection.projectKey : undefined,
-    telemetry.invalidations,
-  );
-  const openedProject =
-    selection.projectKey === undefined
-      ? undefined
-      : (project.group ??
-        groupForKey(projects.list?.projects ?? [], selection.projectKey));
-  // The union of the opened project's agents across its runs, read for a
-  // project with an id while its page is the thing on screen: the `(no
-  // project)` group has none, and so no route.
-  const projectAgents = useProjectAgents(
-    client,
-    selectedRunId === undefined
-      ? (openedProject?.project ?? undefined)
-      : undefined,
-    telemetry.invalidations,
-  );
+  useEffect(() => {
+    if (projects.list)
+      telemetry.reconcileRuns(
+        projects.list.projects.flatMap((group) => group.runs),
+      );
+  }, [projects.list, telemetry.reconcileRuns]);
+  const hostList =
+    telemetry.list && projects.list
+      ? {
+          ...telemetry.list,
+          runs: projects.list.projects.flatMap((group) => group.runs),
+          next_cursor: undefined,
+        }
+      : telemetry.list;
   const control = useRunControl(client, selectedRunId, telemetry.invalidations);
   // Held here rather than under the run's view: a shutdown is minutes long, and
   // what it is doing stays on screen whichever run or list the reader moves to.
   const hostShutdowns = useHostShutdowns(client);
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
-  const liveRunIds = useMemo(
-    () =>
-      new Set(
-        (telemetry.list?.runs ?? [])
-          .filter(
-            ({ state }) => !["complete", "failed", "cancelled"].includes(state),
-          )
-          .map(({ run_id }) => run_id),
-      ),
-    [telemetry.list],
-  );
+  useEffect(() => {
+    if (selection.host || !projects.list) return;
+    const groups = projects.list.projects;
+    const currentGroup = groups.find((group) =>
+      group.runs.some((run) => run.run_id === selection.runId),
+    );
+    const current = currentGroup?.runs.find(
+      (run) => run.run_id === selection.runId,
+    );
+    const candidates =
+      (currentGroup ? newestRuns(currentGroup.runs) : undefined) ??
+      [
+        ...groups.filter((group) => group.project !== null),
+        ...groups.filter((group) => group.project === null),
+      ].flatMap((group) => newestRuns(group.runs));
+    const visible = candidates.filter(
+      (run) =>
+        !run.labels?.kind || !selection.hiddenKinds.includes(run.labels.kind),
+    );
+    if (
+      (!selection.runId ||
+        (current?.labels?.kind &&
+          selection.hiddenKinds.includes(current.labels.kind))) &&
+      visible[0]
+    )
+      selection.selectRun(visible[0].run_id);
+  }, [projects.list, selection]);
 
   useEffect(() => {
     if (selectedRunId && selection.runId && selection.runId !== selectedRunId) {
@@ -179,26 +191,12 @@ export function App({
       <TimelinePopoverLayer />
       <div className="app-shell">
         <RunNavigation
-          list={selection.list}
-          onSelectList={selection.selectList}
           projects={projects.list?.projects}
-          selectedProjectKey={selection.projectKey}
-          onSelectProject={selection.selectProject}
-          runs={runs}
           selectedRunId={selectedRunId}
-          liveRunIds={liveRunIds}
-          hasMore={telemetry.hasMore}
-          loadingMore={telemetry.loadingMore}
-          onLoadMore={telemetry.loadMore}
           onSelect={selection.selectRun}
-          hostActions={
-            <HostShutdownButtons
-              list={telemetry.list}
-              loadMore={telemetry.loadMore}
-              loadingMore={telemetry.loadingMore}
-              shutdowns={hostShutdowns}
-            />
-          }
+          onHost={selection.selectHost}
+          hiddenKinds={selection.hiddenKinds}
+          onKindsChange={selection.selectKinds}
         />
         <main className="workspace">
           <section
@@ -206,35 +204,17 @@ export function App({
             className={`topbar${selectedRunId ? " run-topbar" : ""}`}
           >
             <div className="topbar-title">
-              {/* The way back to the project a run was opened from, where it was. */}
-              {selection.projectKey !== undefined && selectedRunId && (
-                <Button
-                  aria-label={`Back to ${openedProject ? projectLabel(openedProject) : "the project"}`}
-                  className="topbar-back"
-                  onClick={() => selection.selectProject(selection.projectKey)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <ArrowLeft size={14} />
-                  {openedProject ? projectLabel(openedProject) : "Project"}
-                </Button>
-              )}
               <div>
                 <p className="eyebrow">Execution telemetry</p>
                 <h2>
-                  {selectedRunId ??
-                    (selection.projectKey !== undefined
-                      ? ((openedProject && projectLabel(openedProject)) ??
-                        selection.projectKey)
-                      : selection.list === "projects"
-                        ? "Projects"
-                        : "No DAG selected")}
+                  {selection.host
+                    ? "Host"
+                    : (selectedRunId ?? "No DAG selected")}
                 </h2>
               </div>
             </div>
             <div className="topbar-actions">
-              {selectedRunId !== undefined && (
+              {!selection.host && selectedRunId !== undefined && (
                 <RunActions
                   control={control}
                   runId={selectedRunId}
@@ -273,7 +253,10 @@ export function App({
                 </button>
               )}
               <Button
-                onClick={() => void telemetry.refresh()}
+                onClick={() => {
+                  setProjectRefresh((value) => value + 1);
+                  void telemetry.refresh();
+                }}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -282,6 +265,58 @@ export function App({
               </Button>
             </div>
           </section>
+          {!selection.host && detail && (
+            <RecordDisclosure
+              label="Run details"
+              className="run-header-details"
+            >
+              <p>Launching session: {launchLabel(detail.launch)}</p>
+              {/* A reading already shown stays beside this, so a failed re-read
+                  says the figures below are the last ones served. */}
+              {control.status.error && (
+                <p role="alert">
+                  Status unavailable: {control.status.error.message}
+                </p>
+              )}
+              {control.status.value && (
+                <dl>
+                  <dt>Summary</dt>
+                  <dd>{control.status.value.summary}</dd>
+                  <dt>Graph state</dt>
+                  <dd>{graphStateWord(control.status.value.node_status)}</dd>
+                  <dt>Unread surfaces</dt>
+                  <dd>{control.status.value.unread_surfaces.count}</dd>
+                  <dt>Oldest unread (seconds)</dt>
+                  <dd>
+                    {control.status.value.unread_surfaces.oldest_seconds ??
+                      "None"}
+                  </dd>
+                  {/* How long the run's journal has been quiet: the age Status
+                      gave a parked driver, read off the run's own last write. */}
+                  <dt>Last progress</dt>
+                  <dd>
+                    <output aria-label="Last progress">
+                      {detail.run.last_progress_at === undefined ? (
+                        "Not recorded"
+                      ) : (
+                        <Timestamp
+                          at={new Date(
+                            detail.run.last_progress_at * 1000,
+                          ).toISOString()}
+                          relative
+                        />
+                      )}
+                    </output>
+                  </dd>
+                </dl>
+              )}
+              {control.status.value && (
+                <section aria-label="Node statuses">
+                  <StructuredFields value={control.status.value.node_status} />
+                </section>
+              )}
+            </RecordDisclosure>
+          )}
           {telemetry.error && (
             // `Alert` carries `role="alert"` itself, so the banner keeps announcing
             // itself the moment a read fails.
@@ -290,8 +325,17 @@ export function App({
               variant="destructive"
             >
               <TriangleAlert />
-              <AlertTitle>Live telemetry issue</AlertTitle>
+              <AlertTitle>
+                Live telemetry issue
+                {projects.error && " · Projects unavailable"}
+              </AlertTitle>
               <AlertDescription>{telemetry.error.message}</AlertDescription>
+            </Alert>
+          )}
+          {projects.error && !telemetry.error && (
+            <Alert variant="destructive">
+              <AlertTitle>Projects unavailable</AlertTitle>
+              <AlertDescription>{projects.error.message}</AlertDescription>
             </Alert>
           )}
           <ShutdownStatus
@@ -300,32 +344,19 @@ export function App({
             rows={runs}
             state={hostShutdowns.host.state}
           />
-          {selectedRunId === undefined && selection.projectKey !== undefined ? (
-            <ProjectPage
-              agents={
-                openedProject?.project == null ? undefined : (
-                  <AgentsPanel
-                    agents={projectAgents}
-                    client={client}
-                    count={openedProject.agent_count}
-                    title={`Agents of ${projectLabel(openedProject)}`}
-                  />
-                )
-              }
-              error={project.error}
-              group={openedProject}
-              loading={project.loading && openedProject === undefined}
-              onSelectRun={selection.selectRun}
-              projectKey={selection.projectKey}
-            />
-          ) : selectedRunId === undefined &&
-            selection.list === "projects" &&
-            !telemetry.loading ? (
-            <ProjectsLanding
-              error={projects.error}
-              groups={projects.list?.projects}
-              onSelect={selection.selectProject}
-            />
+          {selection.host ? (
+            <HostPage
+              client={client}
+              onRefresh={() => setProjectRefresh((value) => value + 1)}
+              list={hostList}
+            >
+              <HostShutdownButtons
+                list={hostList}
+                loadMore={telemetry.loadMore}
+                loadingMore={telemetry.loadingMore}
+                shutdowns={hostShutdowns}
+              />
+            </HostPage>
           ) : (
             <Tabs
               className="min-h-0 flex-1 gap-0"
@@ -350,10 +381,6 @@ export function App({
                   </TabsTrigger>
                   <TabsTrigger value="channel">
                     <Inbox size={15} /> Channel
-                  </TabsTrigger>
-
-                  <TabsTrigger value="reads">
-                    <BookOpenText size={15} /> Reads
                   </TabsTrigger>
                 </TabsList>
                 {/* How much of what the run recorded this reading carries. Beside
@@ -403,14 +430,6 @@ export function App({
                       overrides={graph && currentOverrides(graph)}
                       runId={selectedRunId}
                     />
-                  ) : selection.view === "reads" ? (
-                    <ReadsView
-                      client={client}
-                      invalidations={telemetry.invalidations}
-                      nodes={nodes}
-                      runId={selectedRunId}
-                      status={control.status}
-                    />
                   ) : selection.view === "overall" ? (
                     <OverallView
                       client={client}
@@ -428,6 +447,7 @@ export function App({
                     <NodeTimelineView
                       client={client}
                       node={selectedNode}
+                      nodes={nodes}
                       onBack={() => selection.selectNode(undefined)}
                       onSelectItem={selection.selectItem}
                       runId={selectedRunId}

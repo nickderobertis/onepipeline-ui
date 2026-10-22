@@ -20,6 +20,7 @@ import {
   isGraceUnit,
   type ScopedRun,
 } from "./shutdown-model";
+import { useShutdownOwners } from "./useShutdownOwners";
 
 const WHAT_IT_DOES =
   "Each live dispatch is asked to stop and commit, and given the grace to end itself; whatever is still standing then is torn down, and every branch the run's records name is pushed to its origin. Nothing is sent until you confirm.";
@@ -200,15 +201,14 @@ function RunList({
   readonly runs: readonly ScopedRun[];
   readonly warning?: boolean;
 }) {
+  const owners = useShutdownOwners(runs);
   return (
     <div className="shutdown-runs" data-warning={warning}>
       <p className="shutdown-scope-note">{caption}</p>
       <ul aria-label={label}>
-        {runs.map((run) => (
-          <li key={run.runId}>
-            <span className="shutdown-run-id">{run.runId}</span>
-            {" — owned by "}
-            {run.owner}
+        {owners.map(({ owner, count }) => (
+          <li key={owner}>
+            {owner} — {countOf(count)}
           </li>
         ))}
       </ul>

@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(23), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(24), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -7022,6 +7022,10 @@ fn a_filter_shapes_the_response_and_never_the_run() {
     assert_eq!(narrow["run"]["nodes"], wide["run"]["nodes"]);
     // Including the clock: the document describes the run, not the reading of it.
     assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+    // And the engine's telemetry fold, which is the whole run's sessions and
+    // usage however few of its events the reader asked to see.
+    assert!(wide["telemetry"].is_object(), "{wide}");
+    assert_eq!(narrow["telemetry"], wide["telemetry"]);
 }
 
 #[test]
@@ -14301,8 +14305,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     // on the held turn. Post beside the journey so a writer blocking on delivery
     // is caught by the journal and receipt checks below.
     let envelope = json!({
-        "version": 2,
-        "commands": [{ "op": "note", "id": node, "addressee": "worker", "text": HELD_TURN_NOTE }],
+        "version": 3,
+        "commands": [{ "op": "note", "id": node, "addressee": "worker", "deliver": "turn-end", "text": HELD_TURN_NOTE }],
     })
     .to_string();
     let reply = std::thread::spawn(move || {
@@ -14336,8 +14340,11 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "the conversation took the note before its turn ended, so nothing above was recorded \
          while one was waiting"
     );
+    // onepipeline #1094 answers an envelope at receiver hand-off, not at delivery.
+    // A v2 envelope has no deliver field and reads as live; v3 turn-end keeps
+    // this turn held while proving that the queued reply has already finished.
     eventually(
-        "the envelope to be acknowledged while its note waits",
+        "the queued note's reply to finish before the turn ends",
         || reply.is_finished(),
     );
     let answered = reply.join().expect("the reply thread");
@@ -14372,6 +14379,42 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
             .iter()
             .any(|event| event["kind"] == json!("note-shown"))
     });
+    let raw: Vec<Value> = fs::read_to_string(root.join(run).join("events.jsonl"))
+        .expect("the adopted run's journal")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a journal envelope"))
+        .collect();
+    let operations: Vec<&Value> = raw
+        .iter()
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .flat_map(|event| {
+            event["payload"]["operations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter(|operation| {
+            operation["kind"] == json!("note-delivered")
+                && operation["text"] == json!(HELD_TURN_NOTE)
+        })
+        .collect();
+    assert_eq!(
+        operations.len(),
+        1,
+        "the note is delivered exactly once: {raw:?}"
+    );
+    assert_eq!(
+        operations[0]["envelope"], receipt["receipt"]["reply"],
+        "{}",
+        operations[0]
+    );
+    assert_eq!(operations[0]["index"], json!(0), "{}", operations[0]);
+    assert_eq!(
+        operations[0]["turn"],
+        json!("turn-end"),
+        "{}",
+        operations[0]
+    );
     let recorded = journal();
     let delivered = recorded
         .iter()
@@ -14398,8 +14441,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     );
     // And the envelope the driver claimed is answered rather than left claimed:
     // the channel holds no unclaimed command and one outcome, for that reply —
-    // naming the note as queued when the envelope was acknowledged. Delivery
-    // is recorded in the journal above; it does not rewrite the receipt.
+    // retaining its queued result after delivery, as #1094 requires.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -17770,12 +17812,21 @@ fn strip_clock(value: &mut Value) {
         Value::Object(fields) => {
             for clock in [
                 "observed_at",
+                "started_at",
+                "wall_ms",
                 "last_progress_at",
                 "last_write_at",
                 "timing",
                 "node_work_ms",
             ] {
                 fields.remove(clock);
+            }
+            if let Some(buckets) = fields.get_mut("buckets").and_then(Value::as_array_mut) {
+                for bucket in buckets {
+                    if let Some(bucket) = bucket.as_object_mut() {
+                        bucket.remove("ms");
+                    }
+                }
             }
             fields.values_mut().for_each(strip_clock);
         }

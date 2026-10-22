@@ -114,7 +114,7 @@ The envelope carries `{scope, root, grace_seconds, forced, complete, runs, not_p
 
 `/healthz` is the one response that is not enveloped — liveness must answer without reading run storage, so it has no schema version to read one from — and it carries two fields: `status`, whose only value is `ok`, and `onepipeline_version`, the `onepipeline` release this binary links, read from that crate's own `VERSION` rather than restated here and served as a validated `MAJOR.MINOR.PATCH` — a body naming a release nobody could have published is refused at the parse rather than compared against. A host that pins the engine writing a run store and separately pins this reader of it has nothing else to prove the two are the same release, so the reader says which one it is rather than leaving it assumed.
 
-Payloads keep the telemetry schema-version discipline and serve schema 23 including `dispatch_id` — schema 10 was where `dispatch_id` landed, and 11 is that discipline exercised: an unmeasured timing is served `null` rather than `0`, so a lane nothing measured can no longer read as a measured zero. Anything the API computes that is presentation-worthy lands in the onepipeline SDK/CLI first: the agent reading the CLI must have the same or better visibility than the human in the UI.
+Payloads keep the telemetry schema-version discipline and serve schema 24 including `dispatch_id` — schema 10 was where `dispatch_id` landed, and 11 is that discipline exercised: an unmeasured timing is served `null` rather than `0`, so a lane nothing measured can no longer read as a measured zero. Anything the API computes that is presentation-worthy lands in the onepipeline SDK/CLI first: the agent reading the CLI must have the same or better visibility than the human in the UI.
 
 Schema 12 answers, per node in flight, whether the run has a turn it can address for it — the precondition a planner needs before choosing between correcting a node and cancelling it. `node_control` carries one entry for every node recorded as `running` and for no other, and each entry is `{addressable, member?, reason?}`, with `reason` present exactly when `addressable` is false. A node whose turn this run cannot address reads as `addressable: false` carrying the reason — never as an error and never as an absent value — and where an interrupt has already been attempted the reason is the producing library's own words for what it found.
 
@@ -214,3 +214,45 @@ copied from the latest `change-check` record for that name. Null, non-string,
 empty or absent values are omitted, as are malformed URLs or RFC3339 timestamps.
 Times are the producer's timestamps, never the journal observation
 time. Every field schema 22 served retains its meaning and value.
+
+**Telemetry schema 24 carries effective run labels and resolved groups.** Rows in
+`GET /api/v2/runs` and the runs nested in `GET /api/v2/projects` carry `labels`,
+the engine’s opaque string-to-string map, omitted when empty, and `group`, the
+engine’s resolved qualified project group, omitted when absent. Overlays written
+by `onepipeline label` apply to ended and pre-label runs as well as new launches.
+Resolution uses the explicit group, then the recorded copy origin, then the
+launched project. `ProjectGroup.project` is that resolved group (or `null`),
+and each group carries the same labelled rows as the flat listing. The recorded
+`project` remains the launched project; a board copy can therefore have distinct
+`project` and `group`. No other schema-23 field changes meaning.
+
+`GET /api/v2/host` also carries optional `reading`, the SDK's `HostReading`
+with its own `schema_version: 1`, unchanged: `host`, `root`, nullable
+`root_error`, `free_space` (roots with role, nullable path and measured_at;
+nullable free_bytes, total_bytes and error), `dispatches` (run, node,
+launcher, nullable age_ms, proof held/unproven and nullable unproven reason),
+`gone` (run, node, reason) and `skipped` (path, reason). The existing `rendered`
+text is preserved.
+
+Under schema 24, run detail additionally carries optional `telemetry`: the unchanged
+SDK telemetry document also served as `/telemetry`'s `telemetry` field, including its
+own schema_version, exact millisecond buckets, usage and counters. It describes the
+whole run regardless of an event filter. Existing read API routes remain available.
+
+Schema 24 also adds optional `launch.started_at`, the SDK's recorded launch time
+unchanged, on rows and detail. Projects retain activity ordering. The browser orders
+a project's runs by launch time, newest first; undated launches follow dated ones,
+ordered by last activity. A late write to an older run does not select it over a
+newer launch.
+
+Schema 24 also makes a node's status the engine's word everywhere it is served.
+`graph.node_status`, `node_states`, `node_gated_by`, `node_control`,
+`graph.node_results[NODE].status`, the run's per-node telemetry rows, and the fold's
+`node_counts` all read the engine's own `statuses()` — the word `onepipeline status`
+and `results` print — so no two views of one node show different words. The
+vocabulary gains **`ready`**, the engine's word for a node eligible now with nothing
+dispatched, which was served as `pending` before. What the run recorded for a node is
+not dropped: where the journal's settlement or the recorded `result.json` named a
+status other than the engine's (`not-completed`, `improvised`, a `blocked` the graph
+has since read as `skipped`) and recorded no outcome, that word is served as the
+node's `outcome`. A node the graph does not carry keeps the recorded result's words.
