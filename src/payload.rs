@@ -5503,6 +5503,15 @@ fn stamp_dispatch_groups(view: &Run<'_>, node: &str, payload: &mut Value) {
         .iter()
         .filter(|event| identities.insert((&event.stream, event.seq)))
         .enumerate()
+        // The canonical store's position, whichever reading this is: a group's
+        // order is where its opening sits in the whole run, not in a share of it.
+        .map(|(index, event)| {
+            let position = view
+                .positions
+                .and_then(|positions| positions.get(index).copied())
+                .unwrap_or(index);
+            (position, event)
+        })
         .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
         .collect();
     let event_key = |index: usize, event: &Envelope| (millis_of(&event.ts), index);

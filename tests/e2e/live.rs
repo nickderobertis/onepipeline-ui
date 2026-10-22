@@ -339,11 +339,36 @@ fn growing_run(root: &Path, run: &str) {
     live_journal::receipt_for(&root.join(run).join("events.jsonl"));
 }
 
-fn activity(run: &str, node: &str, seq: u64, marker: &str) -> String {
+/// Now, stamped the way a recorded record is: RFC 3339, milliseconds, UTC.
+fn now_millis() -> String {
+    let format = time::macros::format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+    );
+    time::OffsetDateTime::now_utc().format(&format).expect("a stamp")
+}
+
+/// One tool call a node's worker reported, as the next record of the run's own
+/// stream — the record a live run appends most.
+fn activity(journal: &Path, run: &str, node: &str, marker: &str) -> String {
+    let text = fs::read_to_string(journal).expect("a journal");
+    let last: Value = text
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .expect("a record to follow");
+    let stream = last["stream"].as_str().expect("a stream").to_owned();
+    let seq = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["stream"] == stream.as_str())
+        .filter_map(|record| record["seq"].as_u64())
+        .max()
+        .unwrap_or(0)
+        + 1;
     json!({
         "v": 1,
-        "ts": onepipeline_ui::payload::now_rfc3339(),
-        "stream": format!("journey-{run}"),
+        "ts": now_millis(),
+        "stream": stream,
         "seq": seq,
         "source": "agentgraph",
         "kind": "turn-activity",
@@ -362,6 +387,9 @@ fn a_tab_is_sent_trimmed_rows_for_other_runs_and_nothing_restated() {
     let live = Live::start(|root| {
         growing_run(root, fixture_run::RUN_ID);
         growing_run(root, fixture_run::OTHER_RUN_ID);
+        // The other run is still going: no driver has closed it out, so what it
+        // records next is activity its row shows.
+        fs::remove_file(root.join(fixture_run::OTHER_RUN_ID).join("result.json")).expect("unsettle it");
     });
     let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
     let rows = subscribed["initial"]["snapshot"]["sidebar"].as_array().expect("rows").clone();
@@ -375,9 +403,10 @@ fn a_tab_is_sent_trimmed_rows_for_other_runs_and_nothing_restated() {
     let mut tab = Tab::open(&live, &json!({ "type": "sidebar" }));
     let mut seen = live.refreshes().len();
     let _ = &mut seen;
+    let other = live.journal(fixture_run::OTHER_RUN_ID);
     live_journal::append_lines(
-        &live.journal(fixture_run::OTHER_RUN_ID),
-        &[activity(fixture_run::OTHER_RUN_ID, fixture_run::NODE_ID, 9_000, "elsewhere")],
+        &other,
+        &[activity(&other, fixture_run::OTHER_RUN_ID, fixture_run::NODE_ID, "elsewhere")],
     );
     let deadline = Instant::now() + PATIENCE;
     let mut frames = Vec::new();
@@ -402,7 +431,7 @@ fn a_reconnect_replays_every_frame_it_missed_exactly_once() {
     let mut tab = Tab::open(&live, &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": fixture_run::NODE_ID }));
     let journal = live.journal(run);
     let mut seen = live.refreshes().len();
-    live_journal::append_lines(&journal, &[activity(run, fixture_run::NODE_ID, 10_000, "before the drop")]);
+    live_journal::append_lines(&journal, &[activity(&journal, run, fixture_run::NODE_ID, "before the drop")]);
     live.next_refresh(run, &mut seen);
     tab.drain();
     let last_applied = tab.applied.clone();
@@ -413,8 +442,8 @@ fn a_reconnect_replays_every_frame_it_missed_exactly_once() {
         http::stream(live.address(), "/healthz", None),
     ));
     let markers = ["while away 1", "while away 2", "while away 3"];
-    for (offset, marker) in markers.iter().enumerate() {
-        live_journal::append_lines(&journal, &[activity(run, fixture_run::NODE_ID, 10_001 + offset as u64, marker)]);
+    for marker in markers {
+        live_journal::append_lines(&journal, &[activity(&journal, run, fixture_run::NODE_ID, marker)]);
         live.next_refresh(run, &mut seen);
     }
     // Reconnecting the way a browser's EventSource does: Last-Event-ID, which
@@ -433,7 +462,7 @@ fn a_reconnect_replays_every_frame_it_missed_exactly_once() {
         .expect("spans")
         .iter()
         .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
-        .filter_map(|event| event["fields"]["detail"].as_str().map(str::to_owned))
+        .filter_map(|event| event["fields"]["Detail"].as_str().map(str::to_owned))
         .collect();
     for marker in markers {
         assert_eq!(
@@ -503,16 +532,12 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
     let subscription = subscribed["subscription"].as_str().expect("an id").to_owned();
     let snapshot_id = subscribed["initial"]["snapshot"]["id"].as_str().expect("an id").to_owned();
-    let mut seq = 20_000;
     let deadline = Instant::now() + Duration::from_secs(120);
     // Every round moves every run's row; 4,096 frames is about seventy rounds.
     for _ in 0..90 {
         for run in &runs {
-            seq += 1;
-            live_journal::append_lines(
-                &live.serving.run_dir(run).join("events.jsonl"),
-                &[activity(run, fixture_run::NODE_ID, seq, "churn")],
-            );
+            let journal = live.serving.run_dir(run).join("events.jsonl");
+            live_journal::append_lines(&journal, &[activity(&journal, run, fixture_run::NODE_ID, "churn")]);
         }
         std::thread::sleep(Duration::from_millis(120));
         assert!(Instant::now() < deadline);

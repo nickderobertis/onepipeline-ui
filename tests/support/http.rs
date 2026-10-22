@@ -278,6 +278,9 @@ pub struct Stream {
     pub status: u16,
     chunked: bool,
     buffered: String,
+    /// When a bounded wait gives up, however much the server keeps the
+    /// connection alive with comments in the meantime.
+    deadline: Option<std::time::Instant>,
 }
 
 /// Open `path` as a stream, optionally resuming from a `Last-Event-ID`.
@@ -292,6 +295,7 @@ pub fn stream(address: SocketAddr, path: &str, last_event_id: Option<&str>) -> S
         status,
         chunked,
         buffered: String::new(),
+        deadline: None,
     }
 }
 
@@ -305,6 +309,16 @@ impl Stream {
             if let Some(frame) = self.take_frame() {
                 return Some(frame);
             }
+            if let Some(deadline) = self.deadline {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    return None;
+                }
+                self.reader
+                    .get_ref()
+                    .set_read_timeout(Some(left))
+                    .expect("read timeout");
+            }
             let mut line = String::new();
             let read = match self.reader.read_line(&mut line) {
                 Ok(read) => read,
@@ -316,7 +330,10 @@ impl Stream {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                     ) =>
                 {
-                    return None
+                    // Whatever of a line arrived before the wait ran out is
+                    // kept for the next read rather than dropped.
+                    self.buffered.push_str(&line);
+                    return None;
                 }
                 Err(err) => panic!("read from the stream: {err}"),
             };
@@ -342,14 +359,14 @@ impl Stream {
     /// itself — and the bound is on the socket, so it is the server's silence
     /// being measured rather than this client's.
     ///
-    /// The stream's own read timeout is restored before returning, so a bounded
-    /// wait does not leave every later read on a short fuse.
+    /// The bound is a deadline over the whole wait, not a timeout per read: a
+    /// keep-alive comment arriving inside it is not a frame and does not extend
+    /// it. The stream's own read timeout is restored before returning, so a
+    /// bounded wait does not leave every later read on a short fuse.
     pub fn frame_within(&mut self, patience: Duration) -> Option<Frame> {
-        self.reader
-            .get_ref()
-            .set_read_timeout(Some(patience))
-            .expect("read timeout");
+        self.deadline = Some(std::time::Instant::now() + patience);
         let frame = self.next_frame();
+        self.deadline = None;
         self.reader
             .get_ref()
             .set_read_timeout(Some(TIMEOUT))

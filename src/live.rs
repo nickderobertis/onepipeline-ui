@@ -256,11 +256,10 @@ impl Sidebar {
             if self.rows.get(&name).is_some_and(|(held, _)| *held == stamps) {
                 continue;
             }
-            let Ok(summary) = RunSummary::of(&paths) else {
-                continue;
-            };
+            let summary = match RunSummary::of(&paths) { Ok(s) => s, Err(e) => { eprintln!("DEBUGSIDEBAR {name}: {e}"); continue; } };
             let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths).to_string().into();
             let moved = self.rows.get(&name).is_none_or(|(_, held)| *held != row);
+            eprintln!("DEBUGSIDEBAR {name} moved={moved} read={} count={} last={:?} lw={:?} stamps={:?}", self.read, summary.event_count, summary.last_event_kind, summary.last_write_at, stamps);
             self.rows.insert(name, (stamps, Arc::clone(&row)));
             if moved && self.read {
                 changes.push(RowChange::Changed(row));
