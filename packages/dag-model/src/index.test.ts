@@ -1328,11 +1328,8 @@ describe("shutdown", () => {
   });
 
   test("names the routes, the two scopes a body takes, and the engine's default grace", () => {
-    expect(API_V2_PATHS.runShutdown("run/1")).toBe(
-      "/api/v2/runs/run%2F1/shutdown",
-    );
     expect(API_V2_PATHS.shutdown).toBe("/api/v2/shutdown");
-    expect(hostShutdownScopeSchema.options).toEqual(["mine", "host"]);
+    expect(hostShutdownScopeSchema.options).toEqual(["host"]);
     expect(SHUTDOWN_DEFAULT_GRACE_SECONDS).toBe(600);
   });
 

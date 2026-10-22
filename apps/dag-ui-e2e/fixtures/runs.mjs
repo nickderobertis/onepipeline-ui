@@ -4032,3 +4032,49 @@ function writeRecordedTimeline(root, corpus) {
       declareGraph(root, record.stream, [record.labels.member]);
   }
 }
+
+/** A converged failure with a driver proved gone on this host, for header journeys. */
+export function writeFailedHeaderRun(root) {
+  const runId = "dag-ui-header-failed";
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Show an ended failure" },
+    concurrency: 1,
+    tasks: [
+      {
+        id: "failed",
+        persona: "worker",
+        task: "## What\nExercise a failure.\n\n## Acceptance criteria\nThe failure is recorded.",
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(join(dir, "launch.json"), {
+    ...launch(runId, "codex", CODEX_SESSION, stamp(HISTORIC), 0x7ffffff0),
+    host: thisHost(),
+  });
+  writeJson(join(dir, "result.json"), {
+    run_id: runId,
+    state: "failed",
+    ok: false,
+    nodes: [{ id: "failed", status: "failed" }],
+  });
+  const journal = new Journal(dir, streamOf(runId), HISTORIC);
+  journal.emit("pipeline", "run-started", { run_id: runId }, { plan });
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    run_id: runId,
+    node: "failed",
+    persona: "worker",
+  });
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { run_id: runId, node: "failed" },
+      { status: "failed" },
+    );
+  journal.write();
+  return runId;
+}

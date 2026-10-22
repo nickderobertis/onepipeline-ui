@@ -4963,6 +4963,36 @@ pub fn timeline_harnesses(
     payload
 }
 
+/// The three owners of records within one node dispatch.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DispatchRole {
+    Worker,
+    ChangeRequest,
+    ReviewReply,
+}
+
+impl DispatchRole {
+    fn of(persona: &str) -> Self {
+        match persona {
+            "pr-author" => Self::ChangeRequest,
+            "review-reply" => Self::ReviewReply,
+            _ => Self::Worker,
+        }
+    }
+
+    fn is_drafter(self) -> bool {
+        self != Self::Worker
+    }
+
+    fn order(self) -> usize {
+        match self {
+            Self::Worker => 0,
+            Self::ChangeRequest => 1,
+            Self::ReviewReply => 2,
+        }
+    }
+}
+
 /// Group identity is folded before filtering; a reading can hide records without
 /// changing which dispatch or drafter owns the sessions that remain.
 fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
@@ -5019,11 +5049,7 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
             .checked_sub(1)?;
         (drafting || closings[group].is_none_or(|end| at <= end)).then_some(group)
     };
-    let rank = |role: &str| match role {
-        "pr-author" => 1usize,
-        "review-reply" => 2usize,
-        _ => 0usize,
-    };
+    let rank = DispatchRole::of;
     let roles: BTreeMap<String, String> = spans
         .iter()
         .filter(|span| span["kind"] == "dispatch" && span.get("harness_scope").is_none())
@@ -5047,11 +5073,11 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
         session_label(event)
             .and_then(|session| roles.get(session).map(String::as_str))
             .or_else(|| member_label(event))
-            .map_or(0, rank)
+            .map_or(DispatchRole::Worker, rank)
     };
     let mut sessions = BTreeMap::new();
     let mut streams: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
-    let mut stream_ranks: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+    let mut stream_ranks: BTreeMap<String, BTreeSet<DispatchRole>> = BTreeMap::new();
     let mut primaries: BTreeMap<usize, ((Option<i128>, usize), String)> = BTreeMap::new();
     for (session, records) in relayed_sessions(&events) {
         let Some((index, first)) = records
@@ -5063,10 +5089,14 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
         let role = records
             .iter()
             .map(|(_, event)| event_rank(event))
-            .find(|rank| *rank > 0)
-            .unwrap_or_else(|| roles.get(session).map_or(0, |role| rank(role)));
+            .find(|role| role.is_drafter())
+            .unwrap_or_else(|| {
+                roles
+                    .get(session)
+                    .map_or(DispatchRole::Worker, |role| rank(role))
+            });
         let at = event_key(*index, first);
-        let Some(group) = owner(at, role > 0) else {
+        let Some(group) = owner(at, role.is_drafter()) else {
             continue;
         };
         sessions.insert(session.to_owned(), (group, role));
@@ -5080,33 +5110,35 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
                 .or_default()
                 .insert(role);
         }
-        if role == 0 && primaries.get(&group).is_none_or(|(known, _)| at < *known) {
+        if role == DispatchRole::Worker
+            && primaries.get(&group).is_none_or(|(known, _)| at < *known)
+        {
             primaries.insert(group, (at, first.stream.clone()));
         }
     }
-    let presentation = |group: usize, role: usize| {
+    let presentation = |group: usize, role: DispatchRole| {
         let (opening_index, opening) = openings[group];
         let stream = primaries
             .get(&group)
             .map_or(opening.stream.as_str(), |(_, stream)| stream.as_str());
         let base = format!("{key}:{stream}:{}:{}", opening.stream, opening.seq);
         let (id, label) = match role {
-            1 => (
+            DispatchRole::ChangeRequest => (
                 format!("{base}:pr-author"),
                 "Change request drafter".to_owned(),
             ),
-            2 => (
+            DispatchRole::ReviewReply => (
                 format!("{base}:review-reply"),
                 "Review reply drafter".to_owned(),
             ),
-            _ => (base, format!("Dispatch {}", group + 1)),
+            DispatchRole::Worker => (base, format!("Dispatch {}", group + 1)),
         };
-        json!({ "id": id, "label": label, "order": opening_index * 3 + role, "started_at": opening.ts })
+        json!({ "id": id, "label": label, "order": opening_index * 3 + role.order(), "started_at": opening.ts })
     };
     let mut record_groups = BTreeMap::new();
     for (index, event) in &events {
         let mut role = event_rank(event);
-        if role == 0 {
+        if role == DispatchRole::Worker {
             if let Some(ranks) = stream_ranks
                 .get(&event.stream)
                 .filter(|ranks| ranks.len() == 1)
@@ -5114,7 +5146,7 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
                 role = *ranks.first().expect("one rank");
             }
         }
-        let Some(mut group) = owner(event_key(*index, event), role > 0) else {
+        let Some(mut group) = owner(event_key(*index, event), role.is_drafter()) else {
             continue;
         };
         if event.source == Source::Agentgraph {
@@ -5145,7 +5177,7 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
         let role = span["harness_scope"]
             .as_str()
             .or_else(|| span["agent_role"].as_str())
-            .map_or(0, rank);
+            .map_or(DispatchRole::Worker, rank);
         let named = span["reference"]["value"]
             .as_str()
             .and_then(|session| sessions.get(session))
@@ -5166,7 +5198,7 @@ fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
         let at = (span["started_at"].as_str().and_then(millis_of), usize::MAX);
         if let Some((group, role)) = named.or_else(|| {
             attempted
-                .or_else(|| owner(at, role > 0))
+                .or_else(|| owner(at, role.is_drafter()))
                 .map(|group| (group, role))
         }) {
             span["dispatch_group"] = presentation(group, role);
@@ -6892,7 +6924,12 @@ fn judge_span(
 pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
-    for event in &view.events {
+    let mut identities = BTreeSet::new();
+    for event in view
+        .events
+        .iter()
+        .filter(|event| identities.insert((&event.stream, event.seq)))
+    {
         if event.source != Source::Agentgraph
             || event.kind.0 != graph::TURN_ACTIVITY
             || !filter.allows(event)
@@ -6923,6 +6960,10 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
         let stamp = at as f64;
         let mut entry = Map::new();
         entry.insert("node".into(), json!(node));
+        entry.insert(
+            "event_id".into(),
+            json!(format!("{}.{}", event.stream, event.seq)),
+        );
         // The step within a lifecycle node, when the record names one: the node
         // runs several in sequence on one branch, and which of them is talking is
         // what a reader watching it needs.

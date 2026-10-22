@@ -1915,3 +1915,67 @@ button.graph-row-name {
     display: none;
   }
 }
+
+/* A run's identity, liveness, Stop and activity share one bounded header row. */
+.run-topbar {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 10px;
+  min-height: 56px;
+}
+.run-topbar .topbar-title {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.run-topbar h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.run-topbar .eyebrow,
+.run-topbar .topbar-actions > .connection:not(.last-activity) {
+  display: none;
+}
+.run-topbar .topbar-actions {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.run-topbar .run-actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+.run-topbar .run-actions-badge {
+  display: inline-flex;
+}
+.last-activity {
+  max-width: 32rem;
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+@media (max-width: 700px) {
+  .run-topbar .topbar-title {
+    max-width: 35%;
+  }
+  .run-topbar h2 {
+    font-size: 10px;
+  }
+  .run-topbar .run-actions-badge {
+    padding-inline: 4px;
+    font-size: 9px;
+  }
+  .run-topbar .run-actions,
+  .run-topbar .topbar-actions {
+    gap: 4px;
+  }
+  .run-topbar .topbar-actions > button:last-child:not(.last-activity) {
+    display: none;
+  }
+}

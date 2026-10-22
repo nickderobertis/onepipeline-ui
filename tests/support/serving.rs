@@ -75,6 +75,8 @@ pub struct Serving {
     /// captured rather than inherited.
     log: Option<Arc<Mutex<String>>>,
     stopped: bool,
+    engine_environment: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>,
+    engine_session: Option<String>,
 }
 
 impl Serving {
@@ -340,8 +342,12 @@ impl Serving {
         for name in removed {
             command.env_remove(name);
         }
+        command.envs(environment.iter().copied());
+        let engine_environment = command
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(std::ffi::OsStr::to_owned)))
+            .collect();
         let mut child = command
-            .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(if capture {
                 Stdio::piped()
@@ -374,7 +380,40 @@ impl Serving {
             workspace,
             log,
             stopped: false,
+            engine_environment,
+            engine_session: session.map(str::to_owned),
         }
+    }
+
+    /// Produce records with the pinned engine CLI, then test this server's reads.
+    pub fn drive_fixture(&self, run: &str) -> u32 {
+        let mut command = Command::new(crate::sibling::binary());
+        command.args(["adopt", run, "--attach"]);
+        for (key, value) in &self.engine_environment {
+            match value {
+                Some(value) => {
+                    command.env(key, value);
+                }
+                None => {
+                    command.env_remove(key);
+                }
+            }
+        }
+        command.env(onepipeline_ui::store::RUNS_DIR_ENV, self.runs_root());
+        if let Some(session) = &self.engine_session {
+            command.env(onepipeline_ui::cli::SESSION_ENV, session);
+        }
+        let mut child = command
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("the pinned engine starts the fixture driver");
+        let pid = child.id();
+        // Own and reap this setup process here, independently of the read API.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        pid
     }
 
     /// The serving process's pid, for a journey that reads what the kernel

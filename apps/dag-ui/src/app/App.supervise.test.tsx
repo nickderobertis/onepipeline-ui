@@ -1,5 +1,4 @@
 import {
-  act,
   cleanup,
   configure,
   render,
@@ -24,7 +23,6 @@ import {
   runAgents,
   runDetail,
   runStatus,
-  unwatched,
 } from "../test/fixtures";
 import {
   defaultResponder,
@@ -557,121 +555,6 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     );
     expect(stops.at(-1)).toBe('{"force":false}');
     expect(screen.queryByRole("button", { name: "Force stop…" })).toBeNull();
-  });
-
-  test("offers an adoption only when nothing is driving the run, and shows the pid answered", async () => {
-    const { client } = telemetryHarness((url) => {
-      if (verbOf(url) === "adopt")
-        return Response.json({
-          ...runStatus(),
-          run_id: HISTORY_RUN,
-          pid: 4242,
-        });
-      return defaultResponder(url);
-    });
-    render(<App client={client} />);
-    // The live run is ACTIVE: nothing to adopt.
-    expect(await screen.findByLabelText("Liveness ACTIVE")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Adopt" })).toBeNull();
-
-    window.history.replaceState(null, "", `/?run=${HISTORY_RUN}&view=channel`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(
-      await screen.findByLabelText("Liveness DRIVER DEAD"),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
-    expect(
-      await screen.findByRole("alert", { name: "Adopt receipt" }),
-    ).toHaveTextContent('"pid": 4242');
-    expect(screen.getByText("Driver pid 4242")).toBeInTheDocument();
-  });
-
-  test("holds the watch as a stream and reads the unwatched badge for the session", async () => {
-    let watching = false;
-    const { client, sources } = telemetryHarness((url) => {
-      if (url.pathname === "/api/v2/unwatched")
-        return Response.json(unwatched(watching ? [] : [LIVE_RUN]));
-      return defaultResponder(url);
-    });
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=watch`);
-    render(<App client={client} />);
-    expect(await screen.findByLabelText("1 unwatched")).toHaveTextContent(
-      "this run",
-    );
-    expect(screen.getByText(/Not watching/)).toBeInTheDocument();
-
-    watching = true;
-    const panel = screen.getByRole("region", { name: "Watch" });
-    await userEvent.click(within(panel).getByRole("button", { name: "Watch" }));
-    // The stream is held on the watch route under the reading's profile, and the
-    // view says so.
-    const stream = sources.find((source) => source.url.includes("/watch?"));
-    expect(stream?.url).toContain(`/api/v2/runs/${LIVE_RUN}/watch?`);
-    expect(stream?.url).toContain("timeout=none");
-    expect(stream?.url).toContain("filter=detailed");
-    expect(
-      screen.getByText(`${LIVE_RUN} is being watched by this browser.`),
-    ).toBeInTheDocument();
-    act(() =>
-      stream?.emit(
-        "event",
-        {
-          watch: "event",
-          event: {
-            kind: "node-settled",
-            ts: "2026-07-26T12:00:00Z",
-            labels: { node: "docs" },
-          },
-        },
-        "0",
-      ),
-    );
-    act(() =>
-      stream?.emit(
-        "tick",
-        {
-          watch: "heartbeat",
-          run_id: LIVE_RUN,
-          unread: {
-            count: 1,
-            oldest_seconds: 12,
-            kinds: [{ kind: "finding", count: 1 }],
-          },
-        },
-        "1",
-      ),
-    );
-    const frames = screen.getByRole("list", { name: "Watch frames" });
-    expect(within(frames).getAllByRole("listitem")).toHaveLength(2);
-    expect(frames).toHaveTextContent("node-settled");
-    expect(frames).toHaveTextContent("docs");
-    expect(frames).toHaveTextContent("1 unread, oldest 12s");
-    // The badge re-reads once the server has this browser as the watcher.
-    expect(await screen.findByLabelText("0 unwatched")).toBeInTheDocument();
-
-    // The condition that ends the wait ends the hold, and the source with it.
-    act(() =>
-      stream?.emit(
-        "returned",
-        {
-          watch: "return",
-          run_id: LIVE_RUN,
-          condition: "surface-waiting",
-          exit: 0,
-          cursor: `1:${LIVE_RUN}:40`,
-          unread: { count: 1, oldest_seconds: 12, kinds: [] },
-        },
-        "2",
-      ),
-    );
-    expect(
-      screen.getByText("The wait ended: surface-waiting."),
-    ).toBeInTheDocument();
-    expect(stream?.closed).toBe(true);
-    // Both toggles — the header's and the panel's — read the hold as released.
-    for (const toggle of screen.getAllByRole("button", { name: "Watch" }))
-      expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(frames).toHaveTextContent("returned");
   });
 
   test("shows every rendered read as the API served it", async () => {

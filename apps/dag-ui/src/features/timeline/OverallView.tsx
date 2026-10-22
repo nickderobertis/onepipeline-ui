@@ -80,9 +80,13 @@ export function OverallView({
     (span) => span.node_id === undefined,
   );
   const openedSpan = runLevel.find((span) => span.id === selectedItemId);
-  const openedEvent = runLevel
-    .flatMap((span) => span.events)
-    .find((event) => (event.record_id ?? event.id) === selectedItemId);
+  const openedEvent =
+    runLevel
+      .flatMap((span) => span.events)
+      .find((event) => (event.record_id ?? event.id) === selectedItemId) ??
+    runLevel
+      .flatMap((span) => span.events)
+      .find((event) => event.id === selectedItemId);
   const opened =
     openedSpan === undefined
       ? openedEvent === undefined

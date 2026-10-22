@@ -62,13 +62,13 @@ export interface UrlSelection {
   readonly showOverall: () => void;
   readonly selectDetail: (detail: DetailLevel) => void;
   readonly selectNodeTab: (tab: NodeTab) => void;
-  /** Open one of the run's supervising readings: the channel, the watch, or the reads. */
+  /** Open one of the run's supervising readings: the channel or the reads. */
   readonly selectView: (view: RunView) => void;
 }
 
 /**
  * The readings of one run. `graph` and `overall` are the two readings of its
- * recorded execution; `channel`, `watch` and `reads` are the supervising
+ * recorded execution; `channel` and `reads` are the supervising
  * surface — what the CLI does to a run once its plan has started, each wired to
  * the route the contract names for it.
  */
@@ -76,7 +76,6 @@ export const RUN_VIEWS = {
   graph: "graph",
   overall: "overall",
   channel: "channel",
-  watch: "watch",
   reads: "reads",
 } as const;
 export type RunView = keyof typeof RUN_VIEWS;

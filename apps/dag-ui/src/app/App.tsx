@@ -21,7 +21,6 @@ import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
   ArrowLeft,
   BookOpenText,
-  Eye,
   Inbox,
   RefreshCw,
   Route,
@@ -36,7 +35,6 @@ import { ChannelView } from "../features/control/ChannelView";
 import { ReadsView } from "../features/control/ReadsView";
 import { RunActions } from "../features/control/RunActions";
 import { useRunControl } from "../features/control/useRunControl";
-import { WatchView } from "../features/control/WatchView";
 import { DagGraph } from "../features/graph/DagGraph";
 import { RunNavigation } from "../features/navigation/RunNavigation";
 import { ProjectPage, ProjectsLanding } from "../features/projects/ProjectPage";
@@ -44,9 +42,7 @@ import { useProject, useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
   HostShutdownButtons,
-  ShutdownRunButton,
   useHostShutdowns,
-  useRunShutdown,
 } from "../features/shutdown/ShutdownControls";
 import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
@@ -111,6 +107,7 @@ export function App({
   // recomputed here.
   const runs = telemetry.list?.runs ?? [];
   const selectedRunId = telemetry.runId;
+  const lastActivity = telemetry.activity.at(-1);
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
   const projects = useProjects(
@@ -140,15 +137,9 @@ export function App({
       : undefined,
     telemetry.invalidations,
   );
-  const control = useRunControl(
-    client,
-    selectedRunId,
-    filter,
-    telemetry.invalidations,
-  );
+  const control = useRunControl(client, selectedRunId, telemetry.invalidations);
   // Held here rather than under the run's view: a shutdown is minutes long, and
   // what it is doing stays on screen whichever run or list the reader moves to.
-  const runShutdown = useRunShutdown(client, selectedRunId);
   const hostShutdowns = useHostShutdowns(client);
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
@@ -202,7 +193,6 @@ export function App({
           onSelect={selection.selectRun}
           hostActions={
             <HostShutdownButtons
-              client={client}
               list={telemetry.list}
               loadMore={telemetry.loadMore}
               loadingMore={telemetry.loadingMore}
@@ -211,7 +201,10 @@ export function App({
           }
         />
         <main className="workspace">
-          <header className="topbar">
+          <section
+            aria-label={selectedRunId ? "Run header" : "Workspace header"}
+            className={`topbar${selectedRunId ? " run-topbar" : ""}`}
+          >
             <div className="topbar-title">
               {/* The way back to the project a run was opened from, where it was. */}
               {selection.projectKey !== undefined && selectedRunId && (
@@ -242,19 +235,15 @@ export function App({
             </div>
             <div className="topbar-actions">
               {selectedRunId !== undefined && (
-                <RunActions control={control} runId={selectedRunId}>
-                  <ShutdownRunButton
-                    launched={
-                      runs.find(({ run_id }) => run_id === selectedRunId) ??
-                      (detail?.run.run_id === selectedRunId
-                        ? detail
-                        : undefined)
-                    }
-                    runId={selectedRunId}
-                    shutdown={runShutdown}
-                    unwatched={control.unwatched}
-                  />
-                </RunActions>
+                <RunActions
+                  control={control}
+                  runId={selectedRunId}
+                  ended={
+                    detail !== undefined &&
+                    (detail.run.state === "settled" ||
+                      detail.run.state.startsWith("ended-"))
+                  }
+                />
               )}
               <span className="connection">
                 <Satellite size={15} />
@@ -267,16 +256,21 @@ export function App({
                   </>
                 )}
               </span>
-              {telemetry.activity.at(-1) !== undefined && (
-                <span className="connection" aria-live="polite">
-                  {telemetry.activity.at(-1)?.node}:{" "}
-                  {[
-                    telemetry.activity.at(-1)?.name,
-                    telemetry.activity.at(-1)?.detail,
-                  ]
+              {lastActivity !== undefined && (
+                <button
+                  className="last-activity connection"
+                  type="button"
+                  title={`${lastActivity.node}: ${[lastActivity.name, lastActivity.detail].filter(Boolean).join(" ") || lastActivity.kind}`}
+                  onClick={() => {
+                    selection.selectNode(lastActivity.node);
+                    selection.selectItem(lastActivity.event_id);
+                  }}
+                >
+                  {lastActivity.node}:{" "}
+                  {[lastActivity.name, lastActivity.detail]
                     .filter(Boolean)
-                    .join(" ") || telemetry.activity.at(-1)?.kind}
-                </span>
+                    .join(" ") || lastActivity.kind}
+                </button>
               )}
               <Button
                 onClick={() => void telemetry.refresh()}
@@ -287,7 +281,7 @@ export function App({
                 <RefreshCw size={14} /> Refresh
               </Button>
             </div>
-          </header>
+          </section>
           {telemetry.error && (
             // `Alert` carries `role="alert"` itself, so the banner keeps announcing
             // itself the moment a read fails.
@@ -300,18 +294,6 @@ export function App({
               <AlertDescription>{telemetry.error.message}</AlertDescription>
             </Alert>
           )}
-          <ShutdownStatus
-            label="Run shutdown"
-            onDismiss={runShutdown.dismiss}
-            rows={runs}
-            state={runShutdown.state}
-          />
-          <ShutdownStatus
-            label="Shutdown of all my runs"
-            onDismiss={hostShutdowns.mine.dismiss}
-            rows={runs}
-            state={hostShutdowns.mine.state}
-          />
           <ShutdownStatus
             label="Shutdown of the entire host"
             onDismiss={hostShutdowns.host.dismiss}
@@ -369,9 +351,7 @@ export function App({
                   <TabsTrigger value="channel">
                     <Inbox size={15} /> Channel
                   </TabsTrigger>
-                  <TabsTrigger value="watch">
-                    <Eye size={15} /> Watch
-                  </TabsTrigger>
+
                   <TabsTrigger value="reads">
                     <BookOpenText size={15} /> Reads
                   </TabsTrigger>
@@ -422,13 +402,6 @@ export function App({
                       observedAt={detail.observed_at}
                       overrides={graph && currentOverrides(graph)}
                       runId={selectedRunId}
-                    />
-                  ) : selection.view === "watch" ? (
-                    <WatchView
-                      onToggle={control.toggleWatch}
-                      runId={selectedRunId}
-                      unwatched={control.unwatched.value}
-                      watch={control.watch}
                     />
                   ) : selection.view === "reads" ? (
                     <ReadsView

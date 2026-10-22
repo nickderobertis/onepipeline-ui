@@ -137,7 +137,7 @@ record at all reads as `Unattributed`. Select a run, then:
   that says nothing about having more beside it.
 - select a node in the graph or keyboard-accessible node list to open its
   **timeline view** (below).
-- **Channel**, **Watch** and **Reads** are the supervising surface, described in
+- **Channel** and **Reads** are the supervising surface, described in
   [Supervising a run](#supervising-a-run): every verb the CLI has once a plan is
   running, from the run it is about.
 - **Agents** is every agent the run launched, described in
@@ -185,37 +185,19 @@ act. The run view now offers every post-launch verb, each wired to its one route
 and nothing else — the routes are named verb by verb below — and every receipt and
 refusal is shown **as the API returned it** — the engine's own object, the engine's
 own words — never restated. The header of a run carries the controls that are about
-the run as a whole; three tabs beside Graph and Overall carry the rest, and a
-fourth, **Agents**, is the section after this one.
+the run as a whole; two tabs beside Graph and Overall carry the rest, and a
+third, **Agents**, is the section after this one.
 
 - **Status and liveness** in the header are `GET .../status`: the engine's own word
   for how the run is being driven, read again on every stream invalidation and on a
   ten-second clock of its own, because a driver that dies writes nothing and the
-  stream announces nothing. That word is what decides whether **Adopt** is offered:
-  only under `DRIVER DEAD` or `UNDRIVEN`, the two the engine's own `adopt` will take
-  over, and never under `ACTIVE` or `PARKED`, where offering it would be offering
-  the engine's refusal. An adoption is `POST .../adopt`, and the pid it answers is
-  shown.
+  stream announces nothing.
 - **Stop** is `POST .../stop` as the acting session, behind one confirm. A run
   another session owns comes back `409 not_owner` naming the owner as the engine
   names it — `[codex:160c290a]`, never the raw session — and that refusal is shown
   verbatim; only then is a **forced stop** offered, behind a second confirm that
   names the owner it would override. It is never the default and never the first
   dialog. The body sent is `{force}` exactly as the route takes it.
-- **Watch** holds `GET .../watch` as a server-sent stream for as long as the toggle
-  is on, under the reading's filter profile and with no clock on the wait. While it
-  is held the server is the run's registered watcher, and the Watch tab says the run
-  is being watched by this browser and lists the frames as they arrive: the events
-  under the profile, the heartbeats with the run's unread accounting, and the
-  `returned` frame that ends the wait — on which the client closes the source
-  itself, so the browser does not reopen a wait that is over. The stream asks for a
-  two-second heartbeat, and that is for the server rather than the reader: the wait
-  runs on a blocking worker that learns the browser has gone only when a write to
-  it fails, so a watch with no heartbeat keeps the watcher record for as long as
-  the run stays quiet. The **unwatched badge** beside the toggle is
-  `GET /api/v2/unwatched` for the acting session — how many runs it owns that
-  nothing is watching, and whether this is one — read again on the first frame and
-  once the server has had a heartbeat in which to notice the close.
 - **Channel** is the run's channel. The queue is `GET .../channel`, a reading that
   consumes nothing, shown as the engine keeps it: the **pending** surface (the held
   one nobody has given up on), the **waiting** ones nobody has read, an
@@ -256,40 +238,16 @@ fourth, **Agents**, is the section after this one.
   SDK's own document, and the `host` view. `monitor` is the existing timeline under
   a profile.
 
-`e2e/dag-ui-supervise.spec.ts` drives every one of these against the real API over
+`e2e/dag-ui-controls.spec.ts` drives every one of these against the real API over
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
-every other journey reads is left as it was. The run nothing drives is adopted
-twice: once to settle its human action, and once — after the composer has edited
-its graph overrides — to dispatch its two agent nodes, whose transcripts say which
-oneharness config each ran under.
+every other journey reads is left as it was.
 
-### Shutting down a run, all my runs, or the host
+### Shutting down the host
 
-The view can end the running work it shows, through the engine's own host
-shutdown — the same verb as `onepipeline shutdown`, and nothing decided here: the
-interrupt that asks each dispatch to wrap up and commit, the wait, the teardown of
-whatever is still standing, and the push that preserves every branch are all the
-engine's.
+**Shut down the entire host** stays at the top of the run listing until navigation moves it to the Host page. It calls `POST /api/v2/shutdown` with `scope: "host"`. The dialog names every listed run and its recorded launcher, reading the listing to its end before enabling confirmation. It states that shutdown acts over owners. No watcher or acting-session report is read by the run page.
 
-- **Shut down this run** sits in a run's header beside Stop and Adopt, and is
-  `POST .../runs/{run}/shutdown`.
-- **Shut down all my runs** and **Shut down the entire host** sit at the top of the
-  runs listing, and are `POST /api/v2/shutdown` with `scope` `mine` or `host`.
-
-Every one opens a **confirm dialog before anything is sent**, and nothing is sent
-unless it is confirmed; cancelling, or Escape, sends nothing. The dialog names,
-by run id, **exactly which runs it will act on and who owns each**, read off the
-runs listing the view already holds — read to its end first — and told apart by
-the acting session's own key, which `GET /api/v2/unwatched` serves: this session's
-runs as *this session's*, and every other run under its launcher and session key.
-*All my runs* acts on this session's runs and no other's. *The entire host* says
-in words that it acts on runs other sessions own, over their owners, and lists
-them apart from this session's. The dialog offers the **grace** — ten minutes by
-default, the engine's own, as a number with a minutes or seconds unit, sent as
-whole seconds — and a **force** option, never on by default, whose label says what
-it gives up: it skips the interrupt and the wait and goes straight to the
-teardown, and whatever a worker had not committed is lost.
+The grace defaults to ten minutes and is sent as whole seconds. Force defaults off and explains that it skips the interrupt and wait. Cancelling or Escape sends nothing.
 
 A shutdown waits out its grace, which is minutes, so while its request is open the
 control says it is **still proceeding and shows its evidence**: the time elapsed,
@@ -349,7 +307,7 @@ anything for it.
   the browser, and a session the store no longer holds says so in place of the
   conversation.
 
-`e2e/dag-ui-supervise.spec.ts` drives the run's, a node's and a project's agents
+`e2e/dag-ui-controls.spec.ts` drives the run's, a node's and a project's agents
 against the real API over runs whose pointer files the fixture wrote beside their
 journals, opening one session's transcript from the run and another from the
 project page, and holds both counts to the sessions those files name.
@@ -754,11 +712,7 @@ the merged event store — `serve-fixture.mjs` serves it through the compiled bi
 and `playwright.config.ts` starts both that server and Vite. Nothing between the
 browser and the read model is doubled. The server acts as the session that launched
 the supervised runs, so a stop on one of them is the owner's and a stop on any other
-is refused naming its owner; and the run an adoption takes over is recorded as
-driven on *this* host under a pid nothing can hold, with the host name pinned in the
-server's environment to the one the fixture wrote, so the engine proves the driver
-gone rather than reading the run as driven. The adopted driver is this repository's
-own binary at the engine's driver verb, settling a graph of one human action.
+is refused naming its owner. Run driving belongs to the engine CLI; this binary has no browser or hidden CLI control that adopts a run.
 
 The gallery spec lives beside the journeys because it drives the same surfaces against
 the same stack, but it asserts nothing and writes images, so `playwright.config.ts`
@@ -827,3 +781,5 @@ strict journal, so no served run fails one and not the other, and a browser only
 sees the failure with the whole API unreachable. Those branches carry a
 line-scoped `llmlint: ignore[changed_behavior_has_e2e]` naming this reason, and
 are driven through the real telemetry client in `src/app/App.test.tsx`.
+
+The run header keeps the run id, liveness, Stop and last activity on one line at every gallery viewport. Stop is absent after the run ends, including failure and explicit stop. The activity clips with an ellipsis, keeps its full text in its title, and opens the exact node timeline event named by its `event_id`.

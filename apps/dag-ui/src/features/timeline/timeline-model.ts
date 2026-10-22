@@ -709,12 +709,22 @@ export function pathTo(
   rows: readonly TimelineRow[],
   id: string,
 ): readonly TimelineRow[] {
-  for (const row of rows) {
-    if (row.id === id) return [row];
-    const nested = pathTo(row.children, id);
-    if (nested.length > 0) return [row, ...nested];
-  }
-  return [];
+  const search = (
+    held: readonly TimelineRow[],
+    legacy: boolean,
+  ): readonly TimelineRow[] => {
+    for (const row of held) {
+      if (
+        legacy ? row.rowKind === "event" && row.event.id === id : row.id === id
+      )
+        return [row];
+      const nested = search(row.children, legacy);
+      if (nested.length > 0) return [row, ...nested];
+    }
+    return [];
+  };
+  const exact = search(rows, false);
+  return exact.length > 0 ? exact : search(rows, true);
 }
 
 function spanRows(

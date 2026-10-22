@@ -14,9 +14,8 @@ use serde_json::Value;
 
 use crate::contract::{
     ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
-    Health, NextQuery, NodeId, ProjectId, RunId, RunQuery, RunShutdownRequest, RunsQuery,
-    ShutdownRequest, StopRequest, SurfaceRequest, TimelineQuery, TranscriptQuery, WatchFrame,
-    WatchQuery,
+    Health, NextQuery, NodeId, ProjectId, RunId, RunQuery, RunsQuery, ShutdownRequest, StopRequest,
+    SurfaceRequest, TimelineQuery, TranscriptQuery,
 };
 use crate::error::ApiError;
 
@@ -63,13 +62,6 @@ pub trait RunApi {
     /// `GET /api/v2/events` — a fresh snapshot, then the stream that follows it.
     fn events(&self, query: &EventsQuery) -> Result<Self::Events, ApiError>;
 
-    /// The frames one `GET /api/v2/runs/{run}/watch` connection serves, on the
-    /// terms [`Events`](Self::Events) states: every read behind it blocks, so
-    /// the server drives it on a blocking worker. The iterator ends with the
-    /// `returned` frame, and dropping it before that ends the engine's wait —
-    /// and with it the watcher record the wait wrote.
-    type Watch: Iterator<Item = WatchFrame>;
-
     /// `GET /api/v2/projects` — every run, grouped by project as `verbs::runs`
     /// groups them.
     fn projects(&self) -> Result<Envelope<Value>, ApiError>;
@@ -105,32 +97,8 @@ pub trait RunApi {
     /// `POST /api/v2/runs/{run}/stop` — end the run as the acting session.
     fn stop(&self, run: &RunId, request: &StopRequest) -> Result<Envelope<Value>, ApiError>;
 
-    /// `POST /api/v2/runs/{run}/adopt` — retain this binary as a fresh driver.
-    fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError>;
-
-    /// `POST /api/v2/runs/{run}/shutdown` — the engine's host shutdown, over
-    /// this one run, as the acting session.
-    ///
-    /// A shutdown the engine made answers its report whatever it found — a
-    /// dispatch killed at the deadline, a survivor, a branch that could not be
-    /// preserved — because the report is what an operator reads in exactly that
-    /// case. Only a request the engine refused is an error.
-    fn run_shutdown(
-        &self,
-        run: &RunId,
-        request: &RunShutdownRequest,
-    ) -> Result<Envelope<Value>, ApiError>;
-
-    /// `POST /api/v2/shutdown` — the engine's host shutdown over every run the
-    /// acting session owns, or over the whole host, on the terms
-    /// [`run_shutdown`](Self::run_shutdown) states.
+    /// Shut down the entire host, answering the SDK's report even when incomplete.
     fn shutdown(&self, request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError>;
-
-    /// `GET /api/v2/runs/{run}/watch` — the engine's wait, as frames.
-    ///
-    /// Everything the engine refuses before it waits — a cursor this run cannot
-    /// place, a node it does not hold — is refused here, before a frame exists.
-    fn watch(&self, run: &RunId, query: &WatchQuery) -> Result<Self::Watch, ApiError>;
 
     /// `GET /api/v2/unwatched` — which of the acting session's runs nothing is
     /// watching.

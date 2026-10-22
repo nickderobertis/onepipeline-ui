@@ -1,11 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { API_V2_PATHS } from "@onepipeline-ui/dag-model";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { API_V2_PATHS, runListSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { exited, startFixtureServer } from "./fixture-server";
 
 /**
- * Shutting a run, the session's runs, or the whole host down from the browser.
+ * Shutting the whole host down from the browser.
  *
  * These journeys **confirm real shutdowns**, and a shutdown really signals
  * processes and really pushes branches — so each one drives a server of its own
@@ -128,7 +130,6 @@ async function openRun(
   await expect(
     page.getByRole("heading", { name: run, exact: true }).first(),
   ).toBeVisible();
-  await expect(page.getByLabel(/^\d+ unwatched$/)).toBeVisible();
 }
 
 /** Set the dialog's grace and read back that it holds it. */
@@ -165,195 +166,7 @@ test.afterEach(async () => {
   sleeper = undefined;
 });
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: the nine journeys below took 28.5 s together on this host (1.9 s to 7.3 s each, the longest stopping two runs and waiting for each driver to read as dead), the same per-journey cost as the rest of this project (133 journeys in 4.7 min). Each needs only what `dag-ui-e2e:test` already depends on — the built bundle and the API server — and what they exercise is the app's header, navigation and shutdown feature, so an edge narrower than `dag-ui` would drop them out of `nx affected` for exactly the changes they exist to catch.
-test("shuts one run down: the dialog names it and its owner, cancel sends nothing, and the grace confirmed is the grace sent", async ({
-  page,
-}) => {
-  server = await startServer();
-  const { runs, identity, branch } = server.facts;
-  const sent = shutdownsSent(page);
-  await openRun(page, server, runs.mine);
-
-  const control = page.getByRole("button", { name: "Shut down this run" });
-  await control.click();
-  let dialog = dialogOf(page);
-  await expect(dialog).toHaveAccessibleName(`Shut down ${runs.mine}?`);
-  const named = dialog.getByRole("list", {
-    name: "Runs this shutdown acts on",
-  });
-  await expect(named.getByRole("listitem")).toHaveCount(1);
-  expect(await itemsOf(named)).toEqual([
-    expect.stringMatching(
-      new RegExp(`^${runs.mine} — owned by this session \\(Claude session · `),
-    ),
-  ]);
-  await expectForceOffAndSaid(dialog);
-  await expect(dialog.getByRole("spinbutton", { name: "Grace" })).toHaveValue(
-    "10",
-  );
-  await expect(
-    dialog.getByRole("combobox", { name: "Grace unit" }),
-  ).toHaveValue("minutes");
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(dialog).toBeHidden();
-  expect(sent).toEqual([]);
-
-  // The keyboard path, all the way to the request.
-  await control.focus();
-  await page.keyboard.press("Enter");
-  dialog = dialogOf(page);
-  await expect(dialog).toBeVisible();
-  await setGrace(dialog, "45", "seconds");
-  await dialog.getByRole("button", { name: "Shut down run" }).focus();
-  const request = page.waitForRequest(
-    (sentRequest) =>
-      sentRequest.method() === "POST" &&
-      sentRequest.url().endsWith(API_V2_PATHS.runShutdown(runs.mine)),
-  );
-  await page.keyboard.press("Enter");
-  await request;
-  await expect(dialog).toBeHidden();
-
-  // The report: this run's branch is on an identity no registry holds, so the
-  // engine could not preserve it — and the report says the shutdown is not
-  // complete rather than reading as a success.
-  const report = page.getByRole("alert", { name: "Run shutdown report" });
-  await expect(report).toContainText("Shutdown incomplete");
-  await expect(report).not.toContainText("Shutdown complete");
-  await expect(report).toContainText("Not everything went as asked");
-  await expect(report).toContainText("scope run");
-  await expect(report).toContainText("grace 45 seconds");
-  await expect(
-    report.getByRole("region", { name: `Shutdown of ${runs.mine}` }),
-  ).toContainText(`${runs.mine} · owner [mine]`);
-  await expect(report).toContainText("No live dispatch to interrupt.");
-  await expect(report).toContainText("Teardown: elsewhere");
-  await expect(
-    report.getByRole("list", { name: `Branches of ${runs.mine}` }),
-  ).toContainText(
-    `${identity}@${branch}: could not be preserved — invalid input: "${identity}" is not a registered repository`,
-  );
-  await expect(report).toContainText(
-    "Other unpublished branches on this host: none.",
-  );
-  expect(sent).toEqual([
-    {
-      path: API_V2_PATHS.runShutdown(runs.mine),
-      body: '{"grace":45,"force":false}',
-    },
-  ]);
-  expect(await shutDownRuns(server)).toEqual([runs.mine]);
-});
-
-test("shuts one run down forced when the force is ticked, and a complete shutdown reads as complete", async ({
-  page,
-}) => {
-  server = await startServer();
-  const { runs } = server.facts;
-  const sent = shutdownsSent(page);
-  await openRun(page, server, runs.idle);
-  await page.getByRole("button", { name: "Shut down this run" }).click();
-  const dialog = dialogOf(page);
-  await expect(dialog).toContainText(
-    `${runs.idle} — owned by this session (Claude session · `,
-  );
-  const force = await expectForceOffAndSaid(dialog);
-  await force.check();
-  await dialog.getByRole("button", { name: "Shut down run" }).click();
-  const report = page.getByRole("alert", { name: "Run shutdown report" });
-  await expect(report).toContainText("Shutdown complete");
-  await expect(report).toContainText("forced");
-  await expect(report).toContainText("No branch this run's records name.");
-  expect(sent).toEqual([
-    {
-      path: API_V2_PATHS.runShutdown(runs.idle),
-      body: '{"grace":600,"force":true}',
-    },
-  ]);
-});
-
-test("shuts down all my runs: the dialog names exactly the runs this session owns, and the scope and grace are what is sent", async ({
-  page,
-}) => {
-  server = await startServer();
-  const { runs } = server.facts;
-  const sent = shutdownsSent(page);
-  await page.goto(`${server.origin}/?list=runs`);
-  await page
-    .getByRole("group", { name: "Shut down runs on this host" })
-    .getByRole("button", { name: "Shut down all my runs" })
-    .click();
-  const dialog = dialogOf(page);
-  await expect(dialog).toHaveAccessibleName("Shut down all my runs?");
-  const named = dialog.getByRole("list", {
-    name: "Runs this shutdown acts on",
-  });
-  await expect(named.getByRole("listitem")).toHaveCount(2);
-  const items = await itemsOf(named);
-  for (const run of [runs.mine, runs.idle])
-    expect(items).toContainEqual(
-      expect.stringMatching(
-        new RegExp(`^${run} — owned by this session \\(Claude session · `),
-      ),
-    );
-  await expect(dialog).toContainText(
-    "It acts on the 2 runs this session owns, and on no other session's",
-  );
-  await expect(dialog).not.toContainText(runs.elsewhere);
-  await expect(dialog).not.toContainText(runs.unattributed);
-  await expectForceOffAndSaid(dialog);
-  await setGrace(dialog, "1", "minutes");
-  await dialog.getByRole("button", { name: "Shut down my runs" }).click();
-
-  const report = page.getByRole("alert", {
-    name: "Shutdown of all my runs report",
-  });
-  await expect(report).toContainText("scope mine");
-  for (const run of [runs.mine, runs.idle])
-    await expect(
-      report.getByRole("region", { name: `Shutdown of ${run}` }),
-    ).toContainText(`${run} · owner [mine]`);
-  await expect(report).not.toContainText(runs.elsewhere);
-  expect(sent).toEqual([
-    {
-      path: API_V2_PATHS.shutdown,
-      body: '{"scope":"mine","grace":60,"force":false}',
-    },
-  ]);
-  expect((await shutDownRuns(server)).sort()).toEqual(
-    [runs.idle, runs.mine].sort(),
-  );
-});
-
-test("stops every run this session owns, and the unwatched badge then says it owes nothing, in the engine's terms", async ({
-  page,
-}) => {
-  server = await startServer();
-  const { runs } = server.facts;
-  for (const run of [runs.mine, runs.idle]) {
-    await openRun(page, server, run);
-    await expect(page.getByLabel(/^\d+ unwatched$/)).toContainText(
-      "· this run",
-    );
-    await page.getByRole("button", { name: "Stop", exact: true }).click();
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Stop run" })
-      .click();
-    await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible({
-      timeout: 60_000,
-    });
-  }
-  // A stopped run is closed, and nothing else is this session's. A settled run
-  // it has not closed would still be owed, so the words are "closed", not
-  // "settled".
-  const badge = page.getByLabel(/^\d+ unwatched$/);
-  await expect(badge).toHaveText("0 unwatched", { timeout: 30_000 });
-  await badge.hover();
-  await expect(page.getByRole("tooltip")).toHaveText(
-    "Every run this session owns is watched or closed.",
-  );
-});
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these host-shutdown journeys need only the built browser and read API already owned by this tier. Each uses an isolated fixture server; the one real grace waits three seconds. There is no additional host prerequisite or reusable expensive setup to put behind a narrower project edge.
 
 test("shuts the entire host down: the dialog says in words it acts on runs other sessions own, and names them and their owners", async ({
   page,
@@ -361,6 +174,16 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
   server = await startServer();
   const { runs } = server.facts;
   const sent = shutdownsSent(page);
+  const listing = await page.request.get(`${server.origin}/api/v2/runs`);
+  expect(listing.status()).toBe(200);
+  const rows = runListSchema.parse(await listing.json()).runs;
+  const ownSession = rows.find((row) => row.run_id === runs.mine)?.launch
+    ?.session_key;
+  const otherSession = rows.find((row) => row.run_id === runs.elsewhere)?.launch
+    ?.session_key;
+  expect(ownSession).toBeDefined();
+  expect(otherSession).toBeDefined();
+  expect(otherSession).not.toBe(ownSession);
   await page.goto(`${server.origin}/?list=runs`);
   await page
     .getByRole("group", { name: "Shut down runs on this host" })
@@ -368,26 +191,19 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
     .click();
   const dialog = dialogOf(page);
   await expect(dialog).toHaveAccessibleName("Shut down the entire host?");
-  await expect(dialog).toContainText(
-    "It acts on 2 runs other sessions own (or that no session is recorded as owning), over their owners — each is interrupted, torn down and pushed as if it were yours",
+  await expect(dialog).toContainText("over their owners");
+  const items = await itemsOf(
+    dialog.getByRole("list", { name: "Runs on this host" }),
   );
-  const others = dialog.getByRole("list", { name: "Runs other sessions own" });
-  const otherItems = await itemsOf(others);
-  expect(otherItems).toHaveLength(2);
-  expect(otherItems).toContainEqual(
-    expect.stringMatching(
-      new RegExp(`^${runs.elsewhere} — owned by Codex session · `),
-    ),
+  expect(items).toHaveLength(4);
+  expect(items).toEqual(
+    expect.arrayContaining([
+      `${runs.mine} — owned by Claude session · ${ownSession}`,
+      `${runs.idle} — owned by Claude session · ${ownSession}`,
+      `${runs.elsewhere} — owned by Codex session · ${otherSession}`,
+      `${runs.unattributed} — owned by Unattributed launch · shutdown…`,
+    ]),
   );
-  expect(otherItems).toContainEqual(
-    expect.stringMatching(
-      new RegExp(`^${runs.unattributed} — owned by Unattributed launch · `),
-    ),
-  );
-  const own = await itemsOf(
-    dialog.getByRole("list", { name: "Runs this session owns" }),
-  );
-  expect(own).toHaveLength(2);
   await expectForceOffAndSaid(dialog);
   await setGrace(dialog, "30", "seconds");
   await dialog.getByRole("button", { name: "Shut down the host" }).click();
@@ -415,41 +231,38 @@ test("shuts the entire host down: the dialog says in words it acts on runs other
   );
 });
 
-test("cancelling any of the three sends nothing and holds no run", async ({
+test("confirms an empty host shutdown after correcting an invalid grace", async ({
   page,
 }) => {
   server = await startServer();
-  const { runs } = server.facts;
+  const root = join(server.workspace, "runs");
+  rmSync(root, { recursive: true });
+  mkdirSync(root);
   const sent = shutdownsSent(page);
-  await openRun(page, server, runs.mine);
-
-  await page.getByRole("button", { name: "Shut down this run" }).click();
-  await expect(dialogOf(page)).toContainText(runs.mine);
-  await dialogOf(page).getByRole("checkbox").check();
-  await dialogOf(page).getByRole("button", { name: "Cancel" }).click();
-  await expect(dialogOf(page)).toBeHidden();
-
-  const host = page.getByRole("group", { name: "Shut down runs on this host" });
-  await host.getByRole("button", { name: "Shut down all my runs" }).click();
+  await page.goto(`${server.origin}/?list=runs`);
+  await page.getByRole("button", { name: "Shut down the entire host" }).click();
+  const dialog = dialogOf(page);
+  await expect(dialog).toContainText("all 0 runs on this host");
   await expect(
-    dialogOf(page).getByRole("list", { name: "Runs this shutdown acts on" }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(dialogOf(page)).toBeHidden();
-
-  await host.getByRole("button", { name: "Shut down the entire host" }).click();
-  await expect(
-    dialogOf(page).getByRole("list", { name: "Runs other sessions own" }),
-  ).toBeVisible();
-  await dialogOf(page).getByRole("button", { name: "Cancel" }).click();
-  await expect(dialogOf(page)).toBeHidden();
-
-  // A confirm sends as it is clicked, so a dialog that sent anything has done
-  // so by now; nothing did, and no run records having been shut down.
+    dialog.getByRole("list", { name: "Runs on this host" }),
+  ).toBeAttached();
+  await expect(dialog.getByRole("listitem")).toHaveCount(0);
+  const confirm = dialog.getByRole("button", { name: "Shut down the host" });
+  await setGrace(dialog, "-1", "seconds");
+  await expect(confirm).toBeDisabled();
   expect(sent).toEqual([]);
-  expect(await shutDownRuns(server)).toEqual([]);
-  // And no control shows a shutdown under way: every status region is absent.
-  await expect(page.getByRole("region", { name: /shutdown/i })).toHaveCount(0);
+  await setGrace(dialog, "0", "seconds");
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(
+    page.getByRole("alert", { name: "Shutdown of the entire host report" }),
+  ).toContainText("Shutdown complete");
+  expect(sent).toEqual([
+    {
+      path: API_V2_PATHS.shutdown,
+      body: '{"scope":"host","grace":0,"force":false}',
+    },
+  ]);
 });
 
 // llmlint: ignore-block[e2e_not_mocked] nothing is doubled: the request is forwarded to the real `onepipeline-api serve` this journey started, the engine performs the real shutdown, and the bytes the browser reads are that server's own answer, fulfilled unchanged. What the route changes is *when* the browser receives it — the one condition this journey is about, which no corpus can produce on demand: a shutdown with nothing live to wait for answers in milliseconds, and one with a real grace to wait out answers in minutes.
@@ -463,21 +276,22 @@ test("while the answer is held open the control shows the shutdown proceeding, w
     release = resolve;
   });
   let forwarded = false;
-  await page.route(
-    `**${API_V2_PATHS.runShutdown(runs.idle)}`,
-    async (route) => {
-      const answer = await route.fetch();
-      forwarded = true;
-      await released;
-      await route.fulfill({ response: answer });
-    },
-  );
+  await page.route(`**${API_V2_PATHS.shutdown}`, async (route) => {
+    const answer = await route.fetch();
+    forwarded = true;
+    await released;
+    await route.fulfill({ response: answer });
+  });
   await openRun(page, server, runs.idle);
-  await page.getByRole("button", { name: "Shut down this run" }).click();
+  await page.getByRole("button", { name: "Shut down the entire host" }).click();
   await setGrace(dialogOf(page), "20", "seconds");
-  await dialogOf(page).getByRole("button", { name: "Shut down run" }).click();
+  await dialogOf(page)
+    .getByRole("button", { name: "Shut down the host" })
+    .click();
 
-  const status = page.getByRole("region", { name: "Run shutdown" });
+  const status = page.getByRole("region", {
+    name: "Shutdown of the entire host",
+  });
   const proceeding = status.getByRole("status");
   await expect(proceeding).toContainText("Shutdown in progress");
   await expect(proceeding).toContainText(
@@ -492,15 +306,17 @@ test("while the answer is held open the control shows the shutdown proceeding, w
   await expect(
     proceeding.getByRole("list", { name: "Recorded so far" }),
   ).toContainText(`${runs.idle}: put down — host-shutdown recorded`);
-  await expect(proceeding).toContainText("1 of 1 run has recorded");
+  await expect(proceeding).toContainText("4 of 4 runs have recorded");
   await expect(
-    page.getByRole("button", { name: "Shut down this run" }),
+    page.getByRole("button", { name: "Shut down the entire host" }),
   ).toBeDisabled();
   await expect(status.getByRole("alert")).toHaveCount(0);
 
   release();
-  const report = status.getByRole("alert", { name: "Run shutdown report" });
-  await expect(report).toContainText("Shutdown complete");
+  const report = status.getByRole("alert", {
+    name: "Shutdown of the entire host report",
+  });
+  await expect(report).toContainText("Shutdown incomplete");
   await expect(status.getByRole("status")).toHaveCount(0);
 });
 // llmlint: ignore-end[e2e_not_mocked]
@@ -515,23 +331,26 @@ test("a request whose connection drops is shown lost — not proceeding, and wit
   const dropped = new Promise<void>((resolve) => {
     drop = resolve;
   });
-  await page.route(
-    `**${API_V2_PATHS.runShutdown(runs.idle)}`,
-    async (route) => {
-      await dropped;
-      await route.abort("connectionreset");
-    },
-  );
+  await page.route(`**${API_V2_PATHS.shutdown}`, async (route) => {
+    await dropped;
+    await route.abort("connectionreset");
+  });
   await openRun(page, server, runs.idle);
-  await page.getByRole("button", { name: "Shut down this run" }).click();
-  await dialogOf(page).getByRole("button", { name: "Shut down run" }).click();
-  const status = page.getByRole("region", { name: "Run shutdown" });
+  await page.getByRole("button", { name: "Shut down the entire host" }).click();
+  await dialogOf(page)
+    .getByRole("button", { name: "Shut down the host" })
+    .click();
+  const status = page.getByRole("region", {
+    name: "Shutdown of the entire host",
+  });
   await expect(status.getByRole("status")).toContainText(
     "Shutdown in progress",
   );
 
   drop();
-  const lost = status.getByRole("alert", { name: "Run shutdown lost" });
+  const lost = status.getByRole("alert", {
+    name: "Shutdown of the entire host lost",
+  });
   await expect(lost).toContainText("Shutdown lost: no answer came back");
   await expect(lost).toContainText(
     "The engine may still be carrying out the shutdown — check the runs before sending another",
@@ -540,10 +359,10 @@ test("a request whose connection drops is shown lost — not proceeding, and wit
   await expect(status).not.toContainText("Shutdown in progress");
   await expect(status).not.toContainText(/Shutdown (complete|incomplete)/);
   await expect(
-    page.getByRole("alert", { name: "Run shutdown report" }),
+    page.getByRole("alert", { name: "Shutdown of the entire host report" }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Shut down this run" }),
+    page.getByRole("button", { name: "Shut down the entire host" }),
   ).toBeEnabled();
 });
 // llmlint: ignore-end[e2e_not_mocked]
@@ -566,14 +385,20 @@ test("a live dispatch that outlasts the grace is killed, and the report says so 
   server = await startServer(pid);
   const { runs, live_node } = server.facts;
   await openRun(page, server, runs.mine);
-  await page.getByRole("button", { name: "Shut down this run" }).click();
+  await page.getByRole("button", { name: "Shut down the entire host" }).click();
   await setGrace(dialogOf(page), "3", "seconds");
-  await dialogOf(page).getByRole("button", { name: "Shut down run" }).click();
+  await dialogOf(page)
+    .getByRole("button", { name: "Shut down the host" })
+    .click();
   await expect(
-    page.getByRole("region", { name: "Run shutdown" }).getByRole("status"),
+    page
+      .getByRole("region", { name: "Shutdown of the entire host" })
+      .getByRole("status"),
   ).toContainText(/Waiting out the 3 seconds grace until \d{2}:\d{2}:\d{2}/);
 
-  const report = page.getByRole("alert", { name: "Run shutdown report" });
+  const report = page.getByRole("alert", {
+    name: "Shutdown of the entire host report",
+  });
   await expect(report).toContainText("Shutdown incomplete");
   await expect(
     report.getByRole("list", { name: `Dispatches of ${runs.mine}` }),

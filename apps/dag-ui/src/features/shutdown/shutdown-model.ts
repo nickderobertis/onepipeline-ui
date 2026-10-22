@@ -1,5 +1,4 @@
 import {
-  type RunLaunch,
   type RunSummary,
   SHUTDOWN_DEFAULT_GRACE_SECONDS,
   type ShutdownReport,
@@ -13,7 +12,7 @@ import { launchLabel } from "../../lib/run-model";
  * the components so each rule is one function a test can hold.
  *
  * The runs a dialog names are read off the listing the view already holds and
- * the acting session's key the unwatched report serves — never off a second
+ * the recorded launch each listing row carries — never off a second
  * reading of the root — because the dialog is the reader's only chance to see
  * what the engine is about to act on, and the listing is what they have been
  * reading.
@@ -76,61 +75,14 @@ export interface ScopedRun {
   readonly runId: string;
   /** The owner in this app's words for a launching session. */
   readonly owner: string;
-  /**
-   * Whether the acting session owns it: `true` and `false` when the acting
-   * session's key has been read, and never guessed otherwise.
-   */
-  readonly mine: boolean;
-  /** Whether its launch recorded no session at all, so no session owns it. */
-  readonly unowned: boolean;
 }
 
-/**
- * The acting session as the unwatched report names it: its key, or `null` for
- * an unattributed server, which owns no run.
- */
-export type ActingSession = string | null;
-
-/**
- * Whether a run launched as `launch` is the acting session's, on the engine's
- * rule: a run is owned only by the one session its launch recorded, so a run
- * with no recorded session is nobody's — least of all an unattributed server's.
- */
-export function ownedBy(
-  launch: RunLaunch | undefined,
-  acting: ActingSession,
-): boolean {
-  const key = launch?.session_key;
-  return acting !== null && key !== undefined && key === acting;
-}
-
-/** One run as a dialog names it: by id, and by its owner in this app's words. */
-export function scopedRun(
-  runId: string,
-  launch: RunLaunch | undefined,
-  acting: ActingSession,
-): ScopedRun {
-  const mine = ownedBy(launch, acting);
-  return {
-    runId,
-    owner: mine ? `this session (${launchLabel(launch)})` : launchLabel(launch),
-    mine,
-    unowned: launch?.session_key === undefined,
-  };
-}
-
-/**
- * The runs a listing-level shutdown will act on, in the listing's own order:
- * `mine` the acting session's runs and nothing else, `host` every run listed,
- * whoever owns it — which is what the engine's two scopes enumerate.
- */
-export function runsInScope(
-  scope: "mine" | "host",
-  rows: readonly RunSummary[],
-  acting: ActingSession,
-): ScopedRun[] {
-  const named = rows.map((row) => scopedRun(row.run_id, row.launch, acting));
-  return scope === "mine" ? named.filter((run) => run.mine) : named;
+/** The host listing names each run by its recorded launcher. */
+export function runsInScope(rows: readonly RunSummary[]): ScopedRun[] {
+  return rows.map((row) => ({
+    runId: row.run_id,
+    owner: launchLabel(row.launch),
+  }));
 }
 
 /** The request as the dialog confirmed it, and when it went. */

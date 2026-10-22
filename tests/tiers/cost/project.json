@@ -21,7 +21,8 @@
         "{workspaceRoot}/tests/support/harness_history.rs",
         "{workspaceRoot}/tests/support/http.rs",
         "{workspaceRoot}/tests/support/journal_schema.rs",
-        "{workspaceRoot}/tests/support/serving.rs"
+        "{workspaceRoot}/tests/support/serving.rs",
+        "{workspaceRoot}/tests/support/sibling.rs"
       ]
     },
     "check": {

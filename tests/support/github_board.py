@@ -1,4 +1,4 @@
-"""Loopback GitHub board for the browser adoption journeys over a remote plan.
+"""Loopback GitHub board for the engine-driven read journeys over a remote plan.
 
 Answers come from mutable board state; unknown operations are refused. The real
 released GitHub plugin and engine read and project through this HTTP boundary.

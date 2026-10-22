@@ -36,15 +36,9 @@ anything new here is a proposal to make upstream first.
   its answer partly out of the process environment**: the channel — the half
   of the answer no summary carries, whether a *blocking* surface is
   outstanding — is opened under the runs root `ONEPIPELINE_RUNS_DIR` names
-  rather than under one the caller hands it, and `verbs::adopt` judges
-  ownership by `ONEPIPELINE_LAUNCHER_SESSION` rather than by a session passed
-  in the way `verbs::stop` takes one; the driver an adoption retains resolves
-  its run through the same variable. So the binary exports both from
-  `--runs-root` and `--session` before it serves anything (`src/main.rs`), and
-  an in-process reader of the store — the contract suite — sets both for the
-  length of an adoption. Each exists because the 0.39.0 SDK answers out of the
-  environment there; an SDK that takes `liveness_of(root, &RunSummary)` and an
-  `Adopt` carrying the acting session removes them.
+  rather than under one the caller hands it. The binary exports that root
+  from `--runs-root` before serving requests (`src/main.rs`). An SDK that
+  takes `liveness_of(root, &RunSummary)` would remove this environment coupling.
 - **A queue read that makes no directory.** `verbs::channel` is the whole
   `channel queue` verb, and opening the queues it reports creates the run's
   `channel/` directory when there is none — so a listing that reached for it on
@@ -62,11 +56,7 @@ anything new here is a proposal to make upstream first.
   own renderer as its presentation — `status`, `results`, `goals`,
   `transcript`, `host` — the route answers that **rendered** text beside a few
   typed facts, because a typed projection of a `RunView` would be this crate
-  inventing the record the CLI does not print. The one thing this crate adds
-  beside a verb is process hygiene the SDK cannot do for a caller that lives
-  on: `store::Reaper` waits on the drivers `adopt` retained, because a child
-  nobody waits on is a zombie and a zombie answers the SDK's own liveness probe
-  as alive.
+  inventing the record the CLI does not print.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
   from the pair. That pair addresses the node's dispatch endpoint across retries;
@@ -195,21 +185,11 @@ anything new here is a proposal to make upstream first.
 ## The server acts as one launching session, and writes to runs
 
 `onepipeline-api serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else
-unattributed) is the identity every stop and adoption is judged by, and
-`POST .../adopt` retains **this binary** at its own hidden `drive-run RUN
---adopt` verb as the run's driver — so an adopted run is driven by the engine
-this crate links, and a host pinning the engine CLI and this reader separately
-has one pin that governs a dispatch. Two SDK calls answer out of the process
-environment rather than out of their arguments — the listing's liveness reads a
-run's channel under `ONEPIPELINE_RUNS_DIR`, and an adoption is judged by
-`ONEPIPELINE_LAUNCHER_SESSION` — so `serve` exports both, from `--runs-root`
-and the resolved session, before it serves anything, and a retained driver
-inherits them. A driver the server retains is its child: `store::Reaper` waits
-on its exit status, because a child nobody waits on is a zombie and a zombie
-answers the engine's liveness probe as alive. The two hidden verbs, `drive-run`
-and `drive`, are the engine's own argument shapes run through the engine's own
-entry point, which is where the engine records that this executable answers
-its command line and gives each dispatch a process of its own.
+unattributed) is the identity every stop and channel write is judged by.
+The SDK's listing reads a run's channel under `ONEPIPELINE_RUNS_DIR`, and its
+advice reads `ONEPIPELINE_LAUNCHER_SESSION`, so `serve` exports both from
+`--runs-root` and the resolved session before serving requests. Run driving
+belongs to the engine CLI; this server retains no driver process.
 
 ## Where a reader's filter may reach, and where it may not
 
