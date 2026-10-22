@@ -17808,12 +17808,21 @@ fn strip_clock(value: &mut Value) {
         Value::Object(fields) => {
             for clock in [
                 "observed_at",
+                "started_at",
+                "wall_ms",
                 "last_progress_at",
                 "last_write_at",
                 "timing",
                 "node_work_ms",
             ] {
                 fields.remove(clock);
+            }
+            if let Some(buckets) = fields.get_mut("buckets").and_then(Value::as_array_mut) {
+                for bucket in buckets {
+                    if let Some(bucket) = bucket.as_object_mut() {
+                        bucket.remove("ms");
+                    }
+                }
             }
             fields.values_mut().for_each(strip_clock);
         }
