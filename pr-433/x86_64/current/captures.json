@@ -646,7 +646,7 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "ebccb398de491d80a45aa07a63ca6bc27cf081e729585aba9008e6fca4cc8792",
+      "hash": "e5265d36fb5fbeb89e84d77341736b2102d7f2cc0efc0721f91462189b62e0be",
       "image": "17-recorded-gate-run-1024x768.png"
     },
     {
@@ -654,7 +654,7 @@
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "8f67f92657759ada3363ed18f86d3d7dd7921c7502871dc5d49d1ab7de8d90af",
+      "hash": "d42b3cf7918cdad40a696468b1ab5e2cc5bf737fa39839c8114c5cc0a8f39996",
       "image": "17-recorded-gate-run-1280x800.png"
     },
     {
@@ -662,7 +662,7 @@
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "e4e317cf336bf14233a270ff3c12d2277f2eac6b4a5cb0d038b78af7c27a4294",
+      "hash": "f332c961c4bab9d02f53f10a19169be04bb3f485a2b89aea285a7a9dc288c069",
       "image": "17-recorded-gate-run-1440x900.png"
     },
     {
@@ -670,7 +670,7 @@
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "b3cbd655bffcc2f9d1d86133b73150cb925047d2bbb39b29d7e50c62802e0239",
+      "hash": "153050ccd8f937000ccdf61b5c1a8aee62ee3c84de91c0662e85f74df94fd30b",
       "image": "17-recorded-gate-run-1920x1080.png"
     },
     {
@@ -686,7 +686,7 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "8c23a4cbfb8eb2df0e20f6762de641552e439583008d1b97427138c7e9040a51",
+      "hash": "ceb3337dec57af623e278cef6f2764fdc27fca2237a6907bca09ace60f2a795d",
       "image": "18-recorded-session-closed-1024x768.png"
     },
     {
@@ -694,7 +694,7 @@
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "418e85081ed1b4c2babecf52965e913e91cc3d315c47100e4348814e0102146c",
+      "hash": "beb7b760f97db1ff225e7dc71217b0fe7f9c51a25966f1bdb35b9493ae405cab",
       "image": "18-recorded-session-closed-1280x800.png"
     },
     {
@@ -702,7 +702,7 @@
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "61453dc9f9f988cbf92603c1d4b81cfc216e3a44365116da99b10e4aaec872a3",
+      "hash": "5c4e59a4dfc64e6e39fe0f3a0ea13e1c56755ffef0aa30779f018f2e2670903c",
       "image": "18-recorded-session-closed-1440x900.png"
     },
     {
