@@ -25,6 +25,10 @@ export interface FixtureServer {
   /** What the corpus published about itself, unparsed: each caller holds its own shape. */
   readonly facts: unknown;
   readonly stop: () => Promise<void>;
+  /** Stop the server and keep its workspace, so `resume` serves it again. */
+  readonly pause: () => Promise<void>;
+  /** Start the server again on the same port, and wait until it answers. */
+  readonly resume: () => Promise<void>;
 }
 
 /** A port the kernel says is free now. */
@@ -62,38 +66,50 @@ export async function startFixtureServer(
   // `serve-fixture.mjs` agrees to remove and rebuild.
   const workspace = mkdtempSync(join(tmpdir(), `dag-ui-e2e-${name}-`));
   const port = await freePort();
-  const child = spawn(
-    process.execPath,
-    [
-      FIXTURE_COMMAND,
-      "--workspace",
-      workspace,
-      "--port",
-      String(port),
-      "--ui",
-      ...corpusArgs,
-    ],
-    {
-      stdio: ["ignore", "inherit", "inherit"],
-      // The main fixture retained the built server before any journeys started.
-      // Cargo install can move its output away while this tier is still running.
-      env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE },
-    },
-  );
   const origin = `http://${LOOPBACK}:${port}`;
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    if (child.exitCode !== null)
-      throw new Error(`the ${name} fixture server exited ${child.exitCode}`);
-    const ready = await fetch(`${origin}/healthz`).then(
-      (response) => response.ok,
-      () => false,
+  const serve = async (): Promise<ChildProcess> => {
+    const child = spawn(
+      process.execPath,
+      [
+        FIXTURE_COMMAND,
+        "--workspace",
+        workspace,
+        "--port",
+        String(port),
+        "--ui",
+        ...corpusArgs,
+      ],
+      {
+        stdio: ["ignore", "inherit", "inherit"],
+        // The main fixture retained the built server before any journeys started.
+        // Cargo install can move its output away while this tier is still running.
+        env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE },
+      },
     );
-    if (ready) break;
-    if (Date.now() > deadline)
-      throw new Error(`the ${name} fixture server never answered on ${origin}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      if (child.exitCode !== null)
+        throw new Error(`the ${name} fixture server exited ${child.exitCode}`);
+      const ready = await fetch(`${origin}/healthz`).then(
+        (response) => response.ok,
+        () => false,
+      );
+      if (ready) return child;
+      if (Date.now() > deadline)
+        throw new Error(
+          `the ${name} fixture server never answered on ${origin}`,
+        );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  let child: ChildProcess | undefined = await serve();
+  const halt = async (): Promise<void> => {
+    const running = child;
+    child = undefined;
+    if (running === undefined) return;
+    running.kill("SIGTERM");
+    await exited(running);
+  };
   return {
     origin,
     workspace,
@@ -101,9 +117,12 @@ export async function startFixtureServer(
       readFileSync(join(workspace, FIXTURE_FACTS_NAME), "utf8"),
     ),
     stop: async () => {
-      child.kill("SIGTERM");
-      await exited(child);
+      await halt();
       rmSync(workspace, { recursive: true, force: true });
+    },
+    pause: halt,
+    resume: async () => {
+      if (child === undefined) child = await serve();
     },
   };
 }

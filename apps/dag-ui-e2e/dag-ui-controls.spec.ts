@@ -684,6 +684,54 @@ test("preserves Reads facts as structured fields in Overall and run details", as
   }
 });
 
+test("says in run details when the status read fails, and shows the readings again once it answers", async ({
+  page,
+}) => {
+  const server = await startFixtureServer("status-outage", []);
+  try {
+    const run = z
+      .object({ runs: z.object({ history: z.string().min(1) }) })
+      .parse(server.facts).runs.history;
+    const read = async () =>
+      runStatusSchema.parse(
+        await (
+          await page.request.get(`${server.origin}/api/v2/runs/${run}/status`)
+        ).json(),
+      );
+    const before = await read();
+    await page.goto(`${server.origin}/?run=${run}&view=overall`);
+    await page.getByText("Run details", { exact: true }).click();
+    const header = page.getByRole("group", {
+      name: "Run details",
+      exact: true,
+    });
+    await expect(header).toContainText(before.summary);
+    await expect(header.getByRole("alert")).toHaveCount(0);
+
+    // The API goes away under an open page: the next status poll is refused,
+    // and the last readings stay beside the alert that says so.
+    await server.pause();
+    await expect(header.getByRole("alert")).toContainText(
+      "Status unavailable",
+      { timeout: 30_000 },
+    );
+    await expect(header).toContainText(before.summary);
+
+    await server.resume();
+    const after = await read();
+    await expect(header.getByRole("alert")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(header).toContainText(after.summary);
+    await expectStructuredFields(
+      page.getByRole("region", { name: "Node statuses", exact: true }),
+      after.node_status,
+    );
+  } finally {
+    await server.stop();
+  }
+});
+
 /**
  * The removed Results, Goals and per-node Transcript reads, line by line.
  *

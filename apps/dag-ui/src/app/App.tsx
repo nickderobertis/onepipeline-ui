@@ -271,6 +271,13 @@ export function App({
               className="run-header-details"
             >
               <p>Launching session: {launchLabel(detail.launch)}</p>
+              {/* A reading already shown stays beside this, so a failed re-read
+                  says the figures below are the last ones served. */}
+              {control.status.error && (
+                <p role="alert">
+                  Status unavailable: {control.status.error.message}
+                </p>
+              )}
               {control.status.value && (
                 <dl>
                   <dt>Summary</dt>
