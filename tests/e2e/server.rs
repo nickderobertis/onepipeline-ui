@@ -7022,6 +7022,10 @@ fn a_filter_shapes_the_response_and_never_the_run() {
     assert_eq!(narrow["run"]["nodes"], wide["run"]["nodes"]);
     // Including the clock: the document describes the run, not the reading of it.
     assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+    // And the engine's telemetry fold, which is the whole run's sessions and
+    // usage however few of its events the reader asked to see.
+    assert!(wide["telemetry"].is_object(), "{wide}");
+    assert_eq!(narrow["telemetry"], wide["telemetry"]);
 }
 
 #[test]
