@@ -109,6 +109,7 @@ const NODE_TONE: Readonly<Record<DagNodeState, StateTone | undefined>> = {
   // neither lost nor decided by a dependency — it reads as held, like `waiting`.
   parked: undefined,
   pending: undefined,
+  ready: undefined,
   running: "info",
   skipped: DEPENDENCY_DECIDED,
   unknown: undefined,

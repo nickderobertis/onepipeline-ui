@@ -918,8 +918,9 @@ fn launcher_word(launcher: &str) -> &'static str {
 /// Closed because a client switches on it exhaustively: a word outside this set
 /// has no rendering, and the run's recorded result can hold any word at all.
 // llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field the run's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
-const NODE_STATUSES: [&str; 11] = [
+const NODE_STATUSES: [&str; 12] = [
     "pending",
+    "ready",
     "running",
     "waiting",
     "blocked",
@@ -935,16 +936,12 @@ const NODE_STATUSES: [&str; 11] = [
 
 /// The status word a client renders, from whatever the run recorded.
 ///
-/// One translation: the SDK's `ready` — eligible now, nothing dispatched — has
-/// no member in the client's vocabulary, and `pending` is what that vocabulary
-/// calls a node that has not started. Anything else the vocabulary does not hold
-/// is `unknown`, rather than passed through for a client to fail on or mapped
-/// onto a neighbouring meaning it does not have. The word itself is not lost:
-/// `node_counts` reports what the run actually wrote.
+/// The engine's own words pass through unchanged — `ready` among them, since
+/// schema 24. Anything else the vocabulary does not hold is `unknown`, rather
+/// than passed through for a client to fail on or mapped onto a neighbouring
+/// meaning it does not have. The word itself is not lost: `node_counts` reports
+/// what the engine said.
 fn status_word(status: &str) -> &str {
-    if status == "ready" {
-        return "pending";
-    }
     if NODE_STATUSES.contains(&status) {
         status
     } else {
@@ -1240,31 +1237,29 @@ fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
     Value::Object(record)
 }
 
-/// Every node's status as the run itself last wrote it, in the run's own words.
+/// Every node's status in the engine's own word, beside the outcome the run
+/// recorded for it.
 ///
 /// The same derivation the graph payload renders from, so a list row and the
-/// graph it opens cannot describe different graphs — the disagreement an
-/// operator would otherwise see between the two.
+/// graph it opens cannot describe different graphs — and the same word
+/// `onepipeline status` and `results` print, because those are the engine's
+/// `statuses()` too. Two views showing a node two different words is the failure
+/// this exists to rule out, and the engine's reading is the authoritative one:
+/// it is what decides what the run does next.
 ///
-/// Three accounts, in the order they are worth: **what the journal settled for
-/// that node**, then **what the run's own recorded result held for it**, then
-/// **what the graph derives for it**. Rounds are gone, and with them the reason
-/// this used to prefer a recorded document wholesale — a closed round's result
-/// was the only account of it that survived the *next* round starting, and
-/// nothing overwrites the fold now.
+/// What the run *recorded* for a node is not lost. The outcome is the
+/// settlement's own word where the fold kept one, and the recorded result's
+/// where that holds one; a node whose recorded status differs from the engine's
+/// (`not-completed`, `improvised`, a `blocked` the graph has since read as
+/// `skipped`) carries that recorded word as its outcome when nothing else does.
+/// `result.json` stays the whole account for a node the graph does not carry —
+/// a run whose plan this host cannot read.
 ///
-/// The order is what the three *are*. The first two are records of the node; the
-/// third is a gate recomputed from its dependencies on every read, so it is what
-/// a node nothing has recorded reads as and never an overrule of something that
-/// did. `result.json` — which the SDK rewrites whenever a driver closes out —
-/// holds words no settlement carried, and is the whole account for a run whose
-/// journal this host cannot fold.
-///
-/// It is the same precedence [`node_result`] keeps, so a node's status and its
+/// It is the same reading [`node_result`] keeps, so a node's status and its
 /// result can never come from two different accounts of it.
 ///
-/// The words are unmapped on purpose: a count reports what the run wrote, where
-/// a status a client switches on cannot.
+/// The words are unmapped on purpose: a count reports what the engine said,
+/// where a status a client switches on cannot.
 fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
     let document: BTreeMap<String, Recorded> = recorded_result(view).into_iter().collect();
     let mut statuses: BTreeMap<String, Recorded> = view
@@ -1272,20 +1267,23 @@ fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
         .statuses()
         .into_iter()
         .map(|(node, derived)| {
-            let outcome = || view.state.outcomes.get(&node).cloned();
-            // What the journal settled for this node, which is an account of the
-            // node itself rather than of the graph around it.
-            let settled = view.state.recorded.get(&node).map(|status| Recorded {
-                status: status.status().as_str().to_owned(),
-                outcome: outcome(),
-            });
-            let recorded = settled
-                .or_else(|| document.get(&node).cloned())
-                .unwrap_or_else(|| Recorded {
-                    status: derived.as_str().to_owned(),
-                    outcome: outcome(),
-                });
-            (node, recorded)
+            let status = derived.as_str().to_owned();
+            // What the run itself recorded for the node: the journal's settlement
+            // first, then the document a driver wrote as it closed out.
+            let recorded = view
+                .state
+                .recorded
+                .get(&node)
+                .map(|settled| settled.status().as_str().to_owned())
+                .or_else(|| document.get(&node).map(|entry| entry.status.clone()));
+            let outcome = view
+                .state
+                .outcomes
+                .get(&node)
+                .cloned()
+                .or_else(|| document.get(&node).and_then(|entry| entry.outcome.clone()))
+                .or_else(|| recorded.filter(|word| *word != status));
+            (node, Recorded { status, outcome })
         })
         .collect();
     // A node the document names and the graph does not: a run whose plan this
@@ -2202,10 +2200,16 @@ fn graph_state(view: &RunView) -> Option<Value> {
         .filter(|(_, blockers)| !blockers.as_array().is_some_and(Vec::is_empty))
         .collect();
 
+    let engine: BTreeMap<String, String> = view
+        .state
+        .statuses()
+        .into_iter()
+        .map(|(node, derived)| (node, derived.as_str().to_owned()))
+        .collect();
     let node_results: Map<String, Value> = plan
         .tasks
         .iter()
-        .filter_map(|node| node_result(view, node, result.as_ref()))
+        .filter_map(|node| node_result(view, &engine, node, result.as_ref()))
         .collect();
 
     // Only work in flight has a turn to redirect, so this is one entry per node
@@ -2340,7 +2344,12 @@ fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
 /// account; the recorded document is what a run whose journal this host cannot
 /// fold still has, and it holds words no settlement carried. A node in neither is
 /// a node the run has nothing to say about, and it is served no entry at all.
-fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(String, Value)> {
+fn node_result(
+    view: &RunView,
+    engine: &BTreeMap<String, String>,
+    node: &Node,
+    result: Option<&Value>,
+) -> Option<(String, Value)> {
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
     if let Some(status) = view.state.recorded.get(&node.id) {
@@ -2392,6 +2401,29 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
             item.insert("completed".into(), json!(word == "done"));
             item.insert("status".into(), json!(word));
         }
+    }
+    // The engine's word for the node, which every other view of it serves too;
+    // the word the run recorded, where it differs and no outcome was recorded,
+    // rides as the outcome rather than being lost — see [`recorded_statuses`].
+    if let Some(word) = engine.get(&node.id).map(String::as_str) {
+        let recorded = view
+            .state
+            .recorded
+            .get(&node.id)
+            .map(|settled| settled.status().as_str().to_owned())
+            .or_else(|| {
+                result
+                    .and_then(|r| r["nodes"].as_array())
+                    .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))
+                    .and_then(|entry| entry["status"].as_str())
+                    .map(str::to_owned)
+            })
+            .filter(|recorded| recorded != word);
+        if let Some(recorded) = recorded.filter(|_| !item.contains_key("outcome")) {
+            item.insert("outcome".into(), json!(recorded));
+        }
+        item.insert("status".into(), json!(status_word(word)));
+        item.insert("completed".into(), json!(word == "done"));
     }
     // The release that carried this node's work, beside the change request that
     // opened it — and absent, never null, for a node the run recorded no release

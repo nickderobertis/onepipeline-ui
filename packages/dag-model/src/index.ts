@@ -900,6 +900,8 @@ export const nodeStateSchema = z.enum([
  */
 export const nodeStatusSchema = z.enum([
   "pending",
+  // The engine's word for a node eligible now with nothing dispatched (schema 24).
+  "ready",
   "running",
   "waiting",
   "blocked",

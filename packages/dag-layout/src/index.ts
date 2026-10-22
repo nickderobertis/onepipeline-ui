@@ -23,6 +23,7 @@ export interface DagNode {
  */
 export const DAG_NODE_STATES = [
   "pending",
+  "ready",
   "running",
   "waiting",
   "blocked",
@@ -96,6 +97,7 @@ const NODE_STATES: ReadonlySet<string> = new Set(DAG_NODE_STATES);
  */
 const STATUS_STYLE: Readonly<Record<DagNodeState, StatusStyleToken>> = {
   pending: "neutral",
+  ready: "neutral",
   running: "active",
   waiting: "blocked",
   blocked: "blocked",

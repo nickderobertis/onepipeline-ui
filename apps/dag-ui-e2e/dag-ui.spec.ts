@@ -479,68 +479,61 @@ test("leads a node that is not moving with the reason it is not", async ({
   );
 });
 
-test("renders the outcomes only a recorded result carries", async ({
+test("renders a recorded result's words beside the engine's status for each node", async ({
   page,
 }) => {
   // The result a driver writes as it closes out holds statuses no settlement
-  // journals. Each has to reach the canvas as itself and read as the kind of
-  // outcome it is.
+  // journals — `not-completed`, `improvised`, a `blocked` the graph has since
+  // moved past. The engine reads those nodes as skipped behind the failed
+  // migration, or ready, and that one word is what every view draws; what the
+  // run recorded is each node's outcome, and nothing it said is lost.
   await openObservatory(page, `/?run=${runs().outcomes}&view=graph`);
-  await expect(graphNodes(page, "not-completed")).toContainText("backfill");
-  await expect(graphNodes(page, "unknown")).toContainText("verify");
+  await expect(graphNodes(page, "skipped")).toHaveCount(5);
+  await expect(graphNodes(page, "ready")).toContainText("orphaned");
+  await expect(graphNodes(page, "failed")).toContainText("migrate");
+  await expect(graphNodes(page, "not-completed")).toHaveCount(0);
+  await expect(graphNodes(page, "unknown")).toHaveCount(0);
+  // Skipped is held behind another node, not lost work of its own.
+  await expect(
+    graphNodes(page, "skipped").filter({ hasText: "backfill" }),
+  ).toHaveCSS("background-color", await tokenColor(page, "--warning-surface"));
 
-  // Unfinished work is lost work, not held work; a status the vocabulary does not
-  // hold has no outcome to claim and must not borrow one.
-  await expect(graphNodes(page, "not-completed")).toHaveCSS(
-    "background-color",
-    await tokenColor(page, "--destructive-surface"),
+  const task = async (node: string) => {
+    await openObservatory(page, `/?run=${runs().outcomes}&node=${node}`);
+    await page.getByRole("tab", { name: "Task", exact: true }).click();
+    return page.getByRole("tabpanel", { name: "Task", exact: true });
+  };
+  await expect(await task("backfill")).toContainText("Settled asnot-completed");
+  await expect(await task("backfill")).toContainText(
+    "Outcomestep 'load' timed out",
   );
-  await expect(graphNodes(page, "unknown")).toHaveCSS(
-    "background-color",
-    await tokenColor(page, "--card"),
+  await expect(await task("verify")).toContainText("Settled asimprovised");
+  await expect(await task("rollback")).toContainText("Settled asgate-failed");
+  await expect(await task("retry")).toContainText(
+    "Outcomegate rejected the push",
   );
+  await expect(await task("orphaned")).toContainText("Settled asblocked");
 
-  await graphNodes(page, "not-completed").click();
-  await expect(page.getByRole("alert")).toContainText("did not complete");
-  await expect(page.getByRole("alert")).toContainText("step 'load' timed out");
-
-  // And a node that failed with nothing recorded about why says exactly that,
+  // A node that failed with nothing recorded about why says exactly that,
   // rather than leaving a banner with an empty body under a heading.
   await openObservatory(page, `/?run=${runs().outcomes}&node=migrate`);
   await expect(page.getByRole("alert")).toContainText(
     "No reason was recorded for this outcome.",
   );
 
-  // And a failure whose only recorded explanation is its outcome word still puts
-  // that word on the card, rather than saying nothing the run did not already know.
-  await openObservatory(page, `/?run=${runs().outcomes}&view=graph`);
-  await expect(
-    graphNodes(page, "failed").filter({ hasText: "rollback" }),
-  ).toContainText("gate-failed");
-  // The banner reads the same chain, so the card and the view it opens cannot
-  // explain one failure two ways.
-  await openObservatory(page, `/?run=${runs().outcomes}&node=rollback`);
-  await expect(page.getByRole("alert")).toContainText("This node failed: gate");
-  await expect(page.getByRole("alert")).toContainText("gate-failed");
-
-  // A blocked node names the human action refs its own result recorded, not only
-  // the plan nodes the server derived — the two are different locators.
+  // A skipped node names what skipped it: the plan node the engine read, and the
+  // human action ref its own result recorded — the two are different locators.
   await openObservatory(page, `/?run=${runs().outcomes}&node=stalled`);
+  await expect(page.getByRole("alert")).toContainText("This node is skipped");
+  await expect(page.getByRole("alert")).toContainText("migrate (failed)");
   await expect(page.getByRole("alert")).toContainText("migrate/sign-off");
 
-  // And one recorded blocked with nothing recorded about what blocks it — a legacy
-  // result, or one whose gate has since settled — says exactly that.
+  // A ready node is waiting on nothing, so it is shown no banner.
   await openObservatory(page, `/?run=${runs().outcomes}&node=orphaned`);
-  await expect(page.getByRole("alert")).toContainText(
-    "Nothing recorded; the run has not written what holds it.",
-  );
-
-  // The lifecycle's prose and the dispatch's error are separate fields that are
-  // sometimes the same sentence; the banner states it once, under one heading.
-  await openObservatory(page, `/?run=${runs().outcomes}&node=retry`);
-  const once = page.getByRole("alert");
-  await expect(once).toContainText("gate rejected the push");
-  await expect(once).not.toContainText("Error");
+  await expect(
+    page.getByRole("region", { name: "Timeline for orphaned" }),
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("counts a run the strict fold cannot read at all", async ({ page }) => {

@@ -1028,3 +1028,85 @@ async function expectTranscriptShown(
     ).toBeGreaterThanOrEqual(count);
   return unmapped;
 }
+
+/**
+ * One node, one status word: the engine's. A run whose recorded result names
+ * words the engine's fold has since moved past — `dag-ui-outcomes` records
+ * `improvised`, `not-completed` and `blocked` for nodes the engine reads as
+ * skipped or ready — used to show one word on its graph and another under Node
+ * statuses. Every view now renders the word `/status` serves, and the word the
+ * run recorded is the node's outcome instead of being lost.
+ */
+test("shows each node in the engine's one status word across the graph, Node statuses and Dependencies", async ({
+  page,
+}) => {
+  for (const runId of [runs().outcomes, runs().live]) {
+    const engine = (
+      await served(page, `/api/v2/runs/${runId}/status`, runStatusSchema)
+    ).node_status;
+    const detail = await served(
+      page,
+      `/api/v2/runs/${runId}?include_conversations=false`,
+      runDetailSchema,
+    );
+    expect(detail.graph?.node_status).toEqual(engine);
+    expect(
+      Object.fromEntries(
+        detail.run.nodes.map(({ node, status }) => [node, status]),
+      ),
+    ).toEqual(engine);
+    const tasks = detail.graph?.plan.tasks ?? [];
+    expect(tasks.map(({ id }) => id).sort()).toEqual(
+      Object.keys(engine).sort(),
+    );
+
+    await page.goto(`/?run=${runId}&view=graph`);
+    for (const task of tasks) {
+      const label = typeof task.name === "string" ? task.name : task.id;
+      await expect(
+        page.getByRole("article", {
+          name: `${label}: ${engine[task.id]}`,
+          exact: true,
+        }),
+      ).toBeVisible();
+    }
+    await page.getByText("Run details", { exact: true }).click();
+    const nodeStatuses = page.getByRole("region", {
+      name: "Node statuses",
+      exact: true,
+    });
+    for (const [id, word] of Object.entries(engine))
+      await expect(
+        nodeStatuses.getByRole("group", { name: `Record.${id}`, exact: true }),
+      ).toContainText(word);
+
+    for (const task of tasks) {
+      const view = await openNode(page, runId, task.id);
+      await expect(
+        view.getByText(String(engine[task.id]), { exact: true }).first(),
+      ).toBeVisible();
+      const outcome = detail.graph?.node_results[task.id]?.outcome;
+      if (typeof outcome === "string")
+        await expect(await nodeTab(view, "Task")).toContainText(
+          `Settled as${outcome}`,
+        );
+      const dependencies = await nodeTab(view, "Dependencies");
+      // A dependency on another run's node holds no status in this one.
+      for (const dep of task.deps ?? [])
+        await expect(dependencies).toContainText(
+          engine[dep] === undefined ? dep : `${dep} (${engine[dep]})`,
+        );
+    }
+  }
+  // The recorded words the engine's reading replaced, still shown as outcomes.
+  const outcomes = (
+    await served(
+      page,
+      `/api/v2/runs/${runs().outcomes}?include_conversations=false`,
+      runDetailSchema,
+    )
+  ).graph?.node_results;
+  expect(Object.values(outcomes ?? {}).map((result) => result.outcome)).toEqual(
+    expect.arrayContaining(["improvised", "not-completed"]),
+  );
+});

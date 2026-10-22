@@ -244,3 +244,15 @@ unchanged, on rows and detail. Projects retain activity ordering. The browser or
 a project's runs by launch time, newest first; undated launches follow dated ones,
 ordered by last activity. A late write to an older run does not select it over a
 newer launch.
+
+Schema 24 also makes a node's status the engine's word everywhere it is served.
+`graph.node_status`, `node_states`, `node_gated_by`, `node_control`,
+`graph.node_results[NODE].status`, the run's per-node telemetry rows, and the fold's
+`node_counts` all read the engine's own `statuses()` — the word `onepipeline status`
+and `results` print — so no two views of one node show different words. The
+vocabulary gains **`ready`**, the engine's word for a node eligible now with nothing
+dispatched, which was served as `pending` before. What the run recorded for a node is
+not dropped: where the journal's settlement or the recorded `result.json` named a
+status other than the engine's (`not-completed`, `improvised`, a `blocked` the graph
+has since read as `skipped`) and recorded no outcome, that word is served as the
+node's `outcome`. A node the graph does not carry keeps the recorded result's words.

@@ -45,6 +45,8 @@ describe("layoutDag", () => {
       Object.fromEntries(layout.nodes.map(({ id, style }) => [id, style])),
     ).toEqual({
       pending: "neutral",
+      // Eligible with nothing dispatched yet: nothing to report, as pending.
+      ready: "neutral",
       running: "active",
       waiting: "blocked",
       // Held work, not lost work: something outside it has to move. Neutral would
