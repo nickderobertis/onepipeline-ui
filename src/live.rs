@@ -42,7 +42,9 @@ use crate::contract::{
 use crate::error::ApiError;
 use crate::filter::EventFilter;
 use crate::patch::Op;
-use crate::payload::live::{DetailInputs, Indexed, LiveDetail, LiveTimeline, TimelineScope, Touched};
+use crate::payload::live::{
+    DetailInputs, Indexed, LiveDetail, LiveTimeline, TimelineScope, Touched,
+};
 use crate::payload::{self, DeclaredMembers};
 use crate::store::RunStore;
 use crate::telemetry::RunTelemetry;
@@ -146,23 +148,42 @@ impl Change {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Visible {
     Sidebar,
-    Detail { run: String, filter: String },
-    Timeline { run: String, scope: TimelineScope, filter: String },
-    Channel { run: String },
+    Detail {
+        run: String,
+        filter: String,
+    },
+    Timeline {
+        run: String,
+        scope: TimelineScope,
+        filter: String,
+    },
+    Channel {
+        run: String,
+    },
 }
 
 impl Visible {
     fn of(view: &SubscriptionView) -> Self {
         let filter = |filter: &Option<crate::filter::FilterSpec>| {
-            filter.as_ref().map(crate::filter::FilterSpec::as_query_value).unwrap_or_default()
+            filter
+                .as_ref()
+                .map(crate::filter::FilterSpec::as_query_value)
+                .unwrap_or_default()
         };
         match view {
             SubscriptionView::Sidebar => Self::Sidebar,
-            SubscriptionView::Detail { run_id, filter: spec } => Self::Detail {
+            SubscriptionView::Detail {
+                run_id,
+                filter: spec,
+            } => Self::Detail {
                 run: run_id.as_str().to_owned(),
                 filter: filter(spec),
             },
-            SubscriptionView::Timeline { run_id, scope, filter: spec } => Self::Timeline {
+            SubscriptionView::Timeline {
+                run_id,
+                scope,
+                filter: spec,
+            } => Self::Timeline {
                 run: run_id.as_str().to_owned(),
                 scope: match scope {
                     ViewScope::Run => TimelineScope::Run,
@@ -179,7 +200,9 @@ impl Visible {
     fn run(&self) -> Option<&str> {
         match self {
             Self::Sidebar => None,
-            Self::Detail { run, .. } | Self::Timeline { run, .. } | Self::Channel { run } => Some(run),
+            Self::Detail { run, .. } | Self::Timeline { run, .. } | Self::Channel { run } => {
+                Some(run)
+            }
         }
     }
 
@@ -253,13 +276,20 @@ impl Sidebar {
                 continue;
             }
             seen.insert(name.clone());
-            if self.rows.get(&name).is_some_and(|(held, _)| *held == stamps) {
+            if self
+                .rows
+                .get(&name)
+                .is_some_and(|(held, _)| *held == stamps)
+            {
                 continue;
             }
-            let summary = match RunSummary::of(&paths) { Ok(s) => s, Err(e) => { eprintln!("DEBUGSIDEBAR {name}: {e}"); continue; } };
-            let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths).to_string().into();
+            let Ok(summary) = RunSummary::of(&paths) else {
+                continue;
+            };
+            let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths)
+                .to_string()
+                .into();
             let moved = self.rows.get(&name).is_none_or(|(_, held)| *held != row);
-            eprintln!("DEBUGSIDEBAR {name} moved={moved} read={} count={} last={:?} lw={:?} stamps={:?}", self.read, summary.event_count, summary.last_event_kind, summary.last_write_at, stamps);
             self.rows.insert(name, (stamps, Arc::clone(&row)));
             if moved && self.read {
                 changes.push(RowChange::Changed(row));
@@ -382,11 +412,20 @@ impl LiveRun {
 
     /// Make sure the payloads `visible` shows are being kept, building any that
     /// are not, and answer the snapshot of them.
-    fn ensure(&mut self, store: &RunStore, visible: &Visible, spec: Option<&crate::filter::FilterSpec>) -> Result<Value, ApiError> {
+    fn ensure(
+        &mut self,
+        store: &RunStore,
+        visible: &Visible,
+        spec: Option<&crate::filter::FilterSpec>,
+    ) -> Result<Value, ApiError> {
         let filter = RunStore::resolve(&self.view, spec)?;
         let detail_key = visible.detail_filter().to_owned();
         if !self.details.contains_key(&detail_key) {
-            let detail_filter = if detail_key.is_empty() { EventFilter::default() } else { filter.clone() };
+            let detail_filter = if detail_key.is_empty() {
+                EventFilter::default()
+            } else {
+                filter.clone()
+            };
             let built = LiveDetail::build(
                 &self.view,
                 &self.indexed,
@@ -396,12 +435,19 @@ impl LiveRun {
             );
             self.details.insert(detail_key.clone(), held(built));
         }
-        let detail = enveloped(&self.details[&detail_key].payload.payload(), &self.details[&detail_key].observed_at);
+        let detail = enveloped(
+            &self.details[&detail_key].payload.payload(),
+            &self.details[&detail_key].observed_at,
+        );
         let run = self.run.as_str();
         match visible {
             Visible::Sidebar => Ok(json!({ "type": "sidebar" })),
-            Visible::Detail { .. } => Ok(json!({ "type": "detail", "run_id": run, "detail": detail })),
-            Visible::Timeline { scope, filter: key, .. } => {
+            Visible::Detail { .. } => {
+                Ok(json!({ "type": "detail", "run_id": run, "detail": detail }))
+            }
+            Visible::Timeline {
+                scope, filter: key, ..
+            } => {
                 if let TimelineScope::Node(node) = scope {
                     let known = self.view.state.statuses().contains_key(node.as_str())
                         || self
@@ -413,25 +459,25 @@ impl LiveRun {
                         return Err(ApiError::NodeNotFound(node.clone()));
                     }
                 }
-                let at = match self
-                    .timelines
-                    .iter()
-                    .position(|(held_scope, held_key, _)| held_scope == scope && held_key == key)
-                {
-                    Some(at) => at,
-                    None => {
-                        let built = LiveTimeline::build(
-                            &self.view,
-                            &self.indexed,
-                            &self.declared,
-                            scope.clone(),
-                            filter,
-                            self.agents.as_ref(),
-                        );
-                        self.timelines.push((scope.clone(), key.clone(), held(built)));
-                        self.timelines.len() - 1
-                    }
-                };
+                let at =
+                    match self.timelines.iter().position(|(held_scope, held_key, _)| {
+                        held_scope == scope && held_key == key
+                    }) {
+                        Some(at) => at,
+                        None => {
+                            let built = LiveTimeline::build(
+                                &self.view,
+                                &self.indexed,
+                                &self.declared,
+                                scope.clone(),
+                                filter,
+                                self.agents.as_ref(),
+                            );
+                            self.timelines
+                                .push((scope.clone(), key.clone(), held(built)));
+                            self.timelines.len() - 1
+                        }
+                    };
                 let (_, _, timeline) = &self.timelines[at];
                 let timeline = enveloped(timeline.payload.payload(), &timeline.observed_at);
                 Ok(match scope {
@@ -450,8 +496,13 @@ impl LiveRun {
                     let channel = channel_payload(store, &self.run)?;
                     self.channel = Some(held(channel));
                 }
-                let channel = self.channel.as_ref().map(|held| enveloped(&held.payload, &held.observed_at));
-                Ok(json!({ "type": "channel", "run_id": run, "detail": detail, "channel": channel }))
+                let channel = self
+                    .channel
+                    .as_ref()
+                    .map(|held| enveloped(&held.payload, &held.observed_at));
+                Ok(
+                    json!({ "type": "channel", "run_id": run, "detail": detail, "channel": channel }),
+                )
             }
         }
     }
@@ -591,7 +642,9 @@ impl Hub {
         let shared = &self.0;
         let visible = Visible::of(&request.view);
         let spec = match &request.view {
-            SubscriptionView::Detail { filter, .. } | SubscriptionView::Timeline { filter, .. } => filter.as_ref(),
+            SubscriptionView::Detail { filter, .. } | SubscriptionView::Timeline { filter, .. } => {
+                filter.as_ref()
+            }
             _ => None,
         };
         // The run's reading first, outside every other lock: opening a long
@@ -678,7 +731,11 @@ impl Hub {
     /// # Errors
     ///
     /// Why the subscription cannot be streamed, which the route serves as `410`.
-    pub fn connect(&self, subscription: SubscriptionId, after: Option<EventId>) -> Result<Stream, Unavailable> {
+    pub fn connect(
+        &self,
+        subscription: SubscriptionId,
+        after: Option<EventId>,
+    ) -> Result<Stream, Unavailable> {
         let shared = &self.0;
         // A reset reads the run's state, so the run is locked before the
         // subscriptions, as every tick locks them.
@@ -688,14 +745,20 @@ impl Hub {
             .map(|held| held.view.clone());
         let Some(view) = view else {
             let state = lock(&shared.state);
-            return Err(match state.retired.iter().find(|(id, _)| *id == subscription) {
-                Some((_, Retired::Expired)) => Unavailable::Expired,
-                _ if after.is_some_and(|after| after.epoch != shared.epoch) => Unavailable::ServerRestarted,
-                _ => Unavailable::Unknown,
-            });
+            return Err(
+                match state.retired.iter().find(|(id, _)| *id == subscription) {
+                    Some((_, Retired::Expired)) => Unavailable::Expired,
+                    _ if after.is_some_and(|after| after.epoch != shared.epoch) => {
+                        Unavailable::ServerRestarted
+                    }
+                    _ => Unavailable::Unknown,
+                },
+            );
         };
         let visible = Visible::of(&view);
-        let live = visible.run().and_then(|run| lock(&shared.runs).get(run).cloned());
+        let live = visible
+            .run()
+            .and_then(|run| lock(&shared.runs).get(run).cloned());
         let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
         let mut state = lock(&shared.state);
@@ -706,14 +769,20 @@ impl Hub {
         let first = held.first;
         let last = held.last;
         let boundary = held.boundary;
-        let resumable = after.filter(|after| after.epoch == shared.epoch).map(|after| after.seq);
+        let resumable = after
+            .filter(|after| after.epoch == shared.epoch)
+            .map(|after| after.seq);
         let mut replay = Vec::new();
         let reset_reason = match (after, resumable) {
             (None, _) => None,
             (Some(_), None) => Some("server-restarted"),
             (Some(_), Some(seq)) if seq > last || seq < first => Some("unknown-cursor"),
             (Some(_), Some(seq)) if seq < boundary => Some("stale-cursor"),
-            (Some(_), Some(seq)) if seq == boundary || held.frames.iter().any(|frame| frame.seq == seq) => None,
+            (Some(_), Some(seq))
+                if seq == boundary || held.frames.iter().any(|frame| frame.seq == seq) =>
+            {
+                None
+            }
             (Some(_), Some(_)) => Some("unknown-cursor"),
         };
         match (reset_reason, after) {
@@ -732,7 +801,10 @@ impl Hub {
                     "snapshot": { "id": id, "sidebar": sidebar.snapshot(), "visible": visible_state },
                 })
                 .to_string();
-                let held = state.subscriptions.get_mut(&subscription).expect("held above");
+                let held = state
+                    .subscriptions
+                    .get_mut(&subscription)
+                    .expect("held above");
                 held.frames.clear();
                 held.first = seq;
                 held.last = seq;
@@ -749,7 +821,10 @@ impl Hub {
                 );
             }
         }
-        let held = state.subscriptions.get_mut(&subscription).expect("held above");
+        let held = state
+            .subscriptions
+            .get_mut(&subscription)
+            .expect("held above");
         held.connection = Some(sender);
         held.disconnected_at = None;
         drop(state);
@@ -803,10 +878,18 @@ impl Hub {
         let wanted: Vec<Visible> = {
             let mut state = lock(&shared.state);
             state.expire();
-            state.subscriptions.values().map(|held| Visible::of(&held.view)).collect()
+            state
+                .subscriptions
+                .values()
+                .map(|held| Visible::of(&held.view))
+                .collect()
         };
         // Runs no subscription shows any more are let go.
-        lock(&shared.runs).retain(|run, _| wanted.iter().any(|visible| visible.run() == Some(run.as_str())));
+        lock(&shared.runs).retain(|run, _| {
+            wanted
+                .iter()
+                .any(|visible| visible.run() == Some(run.as_str()))
+        });
         if wanted.is_empty() {
             return;
         }
@@ -822,7 +905,9 @@ impl Hub {
                             kind: "run.changed",
                             members: format!("\"row\":{row}"),
                         },
-                        RowChange::Removed(run) => Change::new("run.removed", &json!({ "run_id": run })),
+                        RowChange::Removed(run) => {
+                            Change::new("run.removed", &json!({ "run_id": run }))
+                        }
                     };
                     for id in &ids {
                         self.emit(&mut state, *id, &change);
@@ -878,8 +963,13 @@ impl Hub {
             run.telemetry = Folded::of(&run.view);
             folded_ms = Some(folding.elapsed().as_secs_f64() * 1000.0);
         }
-        let moved = touched.as_ref().is_none_or(Touched::any) || agents_moved || liveness_moved || refold;
-        let channel_stamp = if run.channel.is_some() { channel_stamp(&paths.channel_dir()) } else { Vec::new() };
+        let moved =
+            touched.as_ref().is_none_or(Touched::any) || agents_moved || liveness_moved || refold;
+        let channel_stamp = if run.channel.is_some() {
+            channel_stamp(&paths.channel_dir())
+        } else {
+            Vec::new()
+        };
         let channel_moved = run.channel.is_some() && channel_stamp != run.channel_stamp;
         if !moved && !channel_moved {
             return;
@@ -891,17 +981,44 @@ impl Hub {
         let mut ops_count = 0;
         if moved {
             let agents = run.agent_count();
-            let LiveRun { view, indexed, declared, details, timelines, telemetry, agents: agent_list, .. } = run;
+            let LiveRun {
+                view,
+                indexed,
+                declared,
+                details,
+                timelines,
+                telemetry,
+                agents: agent_list,
+                ..
+            } = run;
             for (key, detail) in details.iter_mut() {
-                let ops = detail.payload.refreshed(view, indexed, declared, touched.as_ref(), &telemetry.inputs(agents));
+                let ops = detail.payload.refreshed(
+                    view,
+                    indexed,
+                    declared,
+                    touched.as_ref(),
+                    &telemetry.inputs(agents),
+                );
                 if touched.is_none() {
                     rebuilt_whole.push(format!("detail:{key}"));
                 }
-                if let Some(change) = patch_change("detail.patch", &mut detail.observed_at, &now, ops, |members| {
-                    members["run_id"] = json!(view.paths.run);
-                }) {
+                if let Some(change) = patch_change(
+                    "detail.patch",
+                    &mut detail.observed_at,
+                    &now,
+                    ops,
+                    |members| {
+                        members["run_id"] = json!(view.paths.run);
+                    },
+                ) {
                     ops_count += 1;
-                    changes.push((Visible::Detail { run: view.paths.run.clone(), filter: key.clone() }, change));
+                    changes.push((
+                        Visible::Detail {
+                            run: view.paths.run.clone(),
+                            filter: key.clone(),
+                        },
+                        change,
+                    ));
                 }
             }
             for (scope, key, timeline) in timelines.iter_mut() {
@@ -919,19 +1036,29 @@ impl Hub {
                     rebuilt_whole.push(format!("timeline:{key}"));
                 }
                 let scope_members = scope.clone();
-                if let Some(change) = patch_change("timeline.patch", &mut timeline.observed_at, &now, ops, |members| {
-                    members["run_id"] = json!(view.paths.run);
-                    match &scope_members {
-                        TimelineScope::Run => members["scope"] = json!("run"),
-                        TimelineScope::Node(node) => {
-                            members["scope"] = json!("node");
-                            members["node"] = json!(node);
+                if let Some(change) = patch_change(
+                    "timeline.patch",
+                    &mut timeline.observed_at,
+                    &now,
+                    ops,
+                    |members| {
+                        members["run_id"] = json!(view.paths.run);
+                        match &scope_members {
+                            TimelineScope::Run => members["scope"] = json!("run"),
+                            TimelineScope::Node(node) => {
+                                members["scope"] = json!("node");
+                                members["node"] = json!(node);
+                            }
                         }
-                    }
-                }) {
+                    },
+                ) {
                     ops_count += 1;
                     changes.push((
-                        Visible::Timeline { run: view.paths.run.clone(), scope: scope.clone(), filter: key.clone() },
+                        Visible::Timeline {
+                            run: view.paths.run.clone(),
+                            scope: scope.clone(),
+                            filter: key.clone(),
+                        },
                         change,
                     ));
                 }
@@ -939,14 +1066,28 @@ impl Hub {
         }
         if channel_moved {
             run.channel_stamp = channel_stamp;
-            if let (Ok(now_channel), Some(held)) = (channel_payload(&shared.store, &run.run), run.channel.as_mut()) {
+            if let (Ok(now_channel), Some(held)) = (
+                channel_payload(&shared.store, &run.run),
+                run.channel.as_mut(),
+            ) {
                 let mut ops = Vec::new();
                 crate::patch::diff(&held.payload, &now_channel, &mut ops);
                 held.payload = now_channel;
-                if let Some(change) = patch_change("channel.patch", &mut held.observed_at, &now, ops, |members| {
-                    members["run_id"] = json!(run.run);
-                }) {
-                    changes.push((Visible::Channel { run: run.run.as_str().to_owned() }, change));
+                if let Some(change) = patch_change(
+                    "channel.patch",
+                    &mut held.observed_at,
+                    &now,
+                    ops,
+                    |members| {
+                        members["run_id"] = json!(run.run);
+                    },
+                ) {
+                    changes.push((
+                        Visible::Channel {
+                            run: run.run.as_str().to_owned(),
+                        },
+                        change,
+                    ));
                 }
             }
         }
@@ -983,7 +1124,11 @@ impl Hub {
 
     fn trace(&self, line: &Value) {
         let Some(path) = &self.0.trace else { return };
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
             use std::io::Write;
             let _ = writeln!(file, "{line}");
         }
@@ -1015,7 +1160,10 @@ impl Hub {
             }
         }
         if let Some(connection) = &held.connection {
-            if connection.try_send(frame_event(&id, change.kind, &data)).is_err() {
+            if connection
+                .try_send(frame_event(&id, change.kind, &data))
+                .is_err()
+            {
                 // Gone, or too far behind: it reconnects and replays from what
                 // is retained.
                 held.connection = None;
@@ -1029,7 +1177,9 @@ impl Hub {
 fn reaches(visible: &Visible, target: &Visible) -> bool {
     match target {
         Visible::Detail { run, filter } => {
-            visible.run() == Some(run.as_str()) && visible.detail_filter() == filter && !matches!(visible, Visible::Sidebar)
+            visible.run() == Some(run.as_str())
+                && visible.detail_filter() == filter
+                && !matches!(visible, Visible::Sidebar)
         }
         other => visible == other,
     }
@@ -1037,7 +1187,9 @@ fn reaches(visible: &Visible, target: &Visible) -> bool {
 
 fn spec_of(view: &SubscriptionView) -> Option<&crate::filter::FilterSpec> {
     match view {
-        SubscriptionView::Detail { filter, .. } | SubscriptionView::Timeline { filter, .. } => filter.as_ref(),
+        SubscriptionView::Detail { filter, .. } | SubscriptionView::Timeline { filter, .. } => {
+            filter.as_ref()
+        }
         _ => None,
     }
 }
@@ -1084,7 +1236,11 @@ impl State {
     fn expire(&mut self) {
         let now = Instant::now();
         for held in self.subscriptions.values_mut() {
-            if held.connection.as_ref().is_some_and(mpsc::Sender::is_closed) {
+            if held
+                .connection
+                .as_ref()
+                .is_some_and(mpsc::Sender::is_closed)
+            {
                 held.connection = None;
                 held.disconnected_at = Some(now);
             }
@@ -1092,7 +1248,10 @@ impl State {
         let expired: Vec<SubscriptionId> = self
             .subscriptions
             .iter()
-            .filter(|(_, held)| held.disconnected_at.is_some_and(|at| now.duration_since(at) > DISCONNECTED_GRACE))
+            .filter(|(_, held)| {
+                held.disconnected_at
+                    .is_some_and(|at| now.duration_since(at) > DISCONNECTED_GRACE)
+            })
             .map(|(id, _)| *id)
             .collect();
         for id in expired {
@@ -1104,5 +1263,7 @@ impl State {
 /// A lock poisoned by a panicking reader is still the state every other
 /// subscription is being served from.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

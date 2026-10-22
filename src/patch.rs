@@ -384,20 +384,53 @@ mod tests {
         }
         let mut root = json!({"a": [1], "o": {}});
         for refused in [
-            Op::Set { path: vec![], value: json!({}) },
+            Op::Set {
+                path: vec![],
+                value: json!({}),
+            },
             Op::Delete { path: vec![] },
-            Op::Set { path: vec![Step::Key("missing".into()), Step::Key("x".into())], value: json!(1) },
-            Op::Set { path: vec![Step::Key("a".into()), Step::Index(5)], value: json!(1) },
-            Op::Delete { path: vec![Step::Key("a".into()), Step::Index(0)] },
-            Op::Append { path: vec![Step::Key("o".into())], values: vec![json!(1)] },
-            Op::Delete { path: vec![Step::Key("o".into()), Step::Key("none".into())] },
+            Op::Set {
+                path: vec![Step::Key("missing".into()), Step::Key("x".into())],
+                value: json!(1),
+            },
+            Op::Set {
+                path: vec![Step::Key("a".into()), Step::Index(5)],
+                value: json!(1),
+            },
+            Op::Delete {
+                path: vec![Step::Key("a".into()), Step::Index(0)],
+            },
+            Op::Append {
+                path: vec![Step::Key("o".into())],
+                values: vec![json!(1)],
+            },
+            Op::Delete {
+                path: vec![Step::Key("o".into()), Step::Key("none".into())],
+            },
         ] {
             let before = root.clone();
-            assert!(apply(&mut root, &[Op::Append { path: vec![Step::Key("a".into())], values: vec![json!(2)] }, refused]).is_err());
+            assert!(apply(
+                &mut root,
+                &[
+                    Op::Append {
+                        path: vec![Step::Key("a".into())],
+                        values: vec![json!(2)]
+                    },
+                    refused
+                ]
+            )
+            .is_err());
             assert_eq!(root, before, "a failed patch changes nothing");
         }
         let mut array_root = json!([1]);
-        apply(&mut array_root, &[Op::Append { path: vec![], values: vec![json!(2)] }]).expect("the root array appends");
+        apply(
+            &mut array_root,
+            &[Op::Append {
+                path: vec![],
+                values: vec![json!(2)],
+            }],
+        )
+        .expect("the root array appends");
         assert_eq!(array_root, json!([1, 2]));
     }
 }

@@ -37,14 +37,14 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::RunApi;
 use crate::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId,
-    EventsQuery, NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage,
-    RunsQuery, ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest,
-    TimelineQuery, TimelineScope, TranscriptQuery,
+    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
+    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
+    ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineQuery,
+    TimelineScope, TranscriptQuery,
 };
-use crate::live::Hub;
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
+use crate::live::Hub;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
 use crate::ui::View;
 
@@ -444,7 +444,9 @@ fn subscription_events(
             )));
         }
         let subscription = SubscriptionId::try_from(
-            raw.get("subscription").map(String::as_str).unwrap_or_default(),
+            raw.get("subscription")
+                .map(String::as_str)
+                .unwrap_or_default(),
         )?;
         let header = headers
             .get("last-event-id")

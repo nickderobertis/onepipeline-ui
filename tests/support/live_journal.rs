@@ -53,7 +53,11 @@ pub fn stamp_of(journal: &Path) -> Value {
 fn write_receipt(journal: &Path, epoch: &str) {
     let receipt = json!({ "schema_version": 1, "epoch": epoch, "stamp": stamp_of(journal) });
     let staged = journal.with_extension("append.json.tmp");
-    fs::write(&staged, serde_json::to_vec_pretty(&receipt).expect("serialize")).expect("stage");
+    fs::write(
+        &staged,
+        serde_json::to_vec_pretty(&receipt).expect("serialize"),
+    )
+    .expect("stage");
     fs::rename(&staged, receipt_path(journal)).expect("publish the receipt");
 }
 
@@ -61,7 +65,10 @@ fn fresh_epoch() -> String {
     format!(
         "journey-{}-{}",
         std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
     )
 }
 
@@ -83,7 +90,10 @@ pub fn append_lines(journal: &Path, lines: &[String]) {
         .filter(|receipt| receipt["schema_version"] == 1 && receipt["stamp"] == before)
         .and_then(|receipt| receipt["epoch"].as_str().map(str::to_owned))
         .unwrap_or_else(fresh_epoch);
-    let mut file = fs::OpenOptions::new().append(true).open(journal).expect("open the journal");
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(journal)
+        .expect("open the journal");
     for line in lines {
         writeln!(file, "{line}").expect("append");
     }
@@ -96,7 +106,11 @@ pub fn append_lines(journal: &Path, lines: &[String]) {
 /// disk with a receipt, and the rest, handed back to be appended one by one.
 pub fn hold_back(journal: &Path, keep: usize) -> Vec<String> {
     let text = fs::read_to_string(journal).expect("read the journal");
-    let lines: Vec<String> = text.lines().filter(|line| !line.is_empty()).map(str::to_owned).collect();
+    let lines: Vec<String> = text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect();
     let (kept, rest) = lines.split_at(keep.min(lines.len()));
     let mut body = kept.join("\n");
     body.push('\n');

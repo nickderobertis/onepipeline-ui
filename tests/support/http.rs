@@ -199,9 +199,13 @@ pub fn post_within(address: SocketAddr, path: &str, body: &str, patience: Durati
 /// `DELETE path`, read to completion.
 pub fn delete(address: SocketAddr, path: &str) -> Response {
     let mut stream = connect(address);
-    stream.set_read_timeout(Some(TIMEOUT)).expect("read timeout");
+    stream
+        .set_read_timeout(Some(TIMEOUT))
+        .expect("read timeout");
     let request = format!("DELETE {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
-    stream.write_all(request.as_bytes()).expect("write the request");
+    stream
+        .write_all(request.as_bytes())
+        .expect("write the request");
     stream.flush().expect("flush the request");
     let mut reader = BufReader::new(stream);
     let (status, chunked) = head(&mut reader);

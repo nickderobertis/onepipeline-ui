@@ -1235,7 +1235,10 @@ pub fn sidebar_row(run: &RunId, summary: &RunSummary, paths: &RunPaths) -> Value
     );
     row.insert(
         "kind".into(),
-        summary.labels.get("kind").map_or(Value::Null, |kind| json!(kind)),
+        summary
+            .labels
+            .get("kind")
+            .map_or(Value::Null, |kind| json!(kind)),
     );
     row.insert("state".into(), json!(summary_state_word(summary)));
     row.insert(
@@ -5267,9 +5270,9 @@ impl Ends {
     ) -> Self {
         let statuses = view.whole.state.statuses();
         let settled = !statuses.is_empty()
-            && statuses
-                .values()
-                .all(|status| matches!(status.as_str(), "done" | "failed" | "cancelled" | "skipped"));
+            && statuses.values().all(|status| {
+                matches!(status.as_str(), "done" | "failed" | "cancelled" | "skipped")
+            });
         let end = if settled {
             latest_settlement.map(|(_, ts)| ts.to_owned())
         } else {
@@ -6283,7 +6286,12 @@ fn record_fields(event: &Envelope) -> Map<String, Value> {
 }
 
 /// One journal envelope as a timeline event.
-fn timeline_event(index: usize, position: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
+fn timeline_event(
+    index: usize,
+    position: usize,
+    event: &Envelope,
+    turns: &[Option<Turn>],
+) -> Value {
     let turn = turns.get(index).and_then(Option::as_ref);
     let mut item = Map::new();
     item.insert(

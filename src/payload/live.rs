@@ -58,6 +58,10 @@ pub(crate) struct Touched {
     pub(crate) nodes: BTreeSet<String>,
     /// How many records were appended.
     pub(crate) records: usize,
+    /// Whether an appended record that names no node is one every node's share
+    /// reads: a release observed for a commit, which any node's work may have
+    /// landed as.
+    pub(crate) every_node: bool,
 }
 
 impl Touched {
@@ -116,7 +120,10 @@ impl Indexed {
             self.lint += measured(std::iter::once(event)).lint_records;
             if is_settlement(event) {
                 if let Some(at) = moment_of(event) {
-                    if self.latest_settlement.is_none_or(|(latest, _)| at >= latest) {
+                    if self
+                        .latest_settlement
+                        .is_none_or(|(latest, _)| at >= latest)
+                    {
                         self.latest_settlement = Some((at, index));
                     }
                 }
@@ -128,6 +135,7 @@ impl Indexed {
                 None => {
                     self.run.push(index);
                     touched.run = true;
+                    touched.every_node |= event.kind.0 == super::vcs::RELEASE_OBSERVED;
                 }
                 Some(node) => {
                     let at = *self.node_at.entry(node.to_owned()).or_insert_with(|| {
@@ -180,7 +188,10 @@ impl Indexed {
             .collect();
         indices.sort_unstable();
         indices.dedup();
-        indices.into_iter().map(|index| view.events[index].clone()).collect()
+        indices
+            .into_iter()
+            .map(|index| view.events[index].clone())
+            .collect()
     }
 
     /// The run's end, from what this index keeps.
@@ -297,7 +308,11 @@ impl LiveTimeline {
             TimelineScope::Node(node) => vec![Owner::Node(node.as_str().to_owned())],
             TimelineScope::Run if view.events.is_empty() => Vec::new(),
             TimelineScope::Run => std::iter::once(Owner::Run)
-                .chain(indexed.node_order().map(|node| Owner::Node(node.to_owned())))
+                .chain(
+                    indexed
+                        .node_order()
+                        .map(|node| Owner::Node(node.to_owned())),
+                )
                 .collect(),
         };
         for owner in owners {
@@ -344,7 +359,9 @@ impl LiveTimeline {
         for span in &spans[range] {
             for entry in span["events"].as_array().into_iter().flatten() {
                 let (Some(position), Some(id)) = (
-                    entry["journal_order"].as_u64().and_then(|at| usize::try_from(at).ok()),
+                    entry["journal_order"]
+                        .as_u64()
+                        .and_then(|at| usize::try_from(at).ok()),
                     entry["id"].as_str(),
                 ) else {
                     continue;
@@ -380,7 +397,14 @@ impl LiveTimeline {
                 Share::NodeLevel(&node)
             }
         };
-        share_spans(&run, declared, &share, &self.filter, &self.ends, &self.rendered)
+        share_spans(
+            &run,
+            declared,
+            &share,
+            &self.filter,
+            &self.ends,
+            &self.rendered,
+        )
     }
 
     /// The harness sessions the run's pointer file names, laid after the spans
@@ -397,7 +421,9 @@ impl LiveTimeline {
             return payload;
         };
         match &self.scope {
-            TimelineScope::Run => timeline_harnesses_over(payload, &Run::of(view), &Scope::Run, agents),
+            TimelineScope::Run => {
+                timeline_harnesses_over(payload, &Run::of(view), &Scope::Run, agents)
+            }
             TimelineScope::Node(node) => {
                 let (events, positions) =
                     indexed.canonical_share(view, &Owner::Node(node.as_str().to_owned()));
@@ -423,7 +449,11 @@ impl LiveTimeline {
         agents_moved: bool,
     ) -> Vec<Op> {
         let Some(touched) = touched else {
-            // A `Reread`: everything rebuilt, sent as what changed.
+            // A `Reread`: everything rebuilt, sent as what changed. The records
+            // may sit at other positions now, so nothing rendered by position
+            // is reused.
+            self.rendered.borrow_mut().entries.clear();
+            self.seeded.clear();
             let old = std::mem::take(&mut self.payload);
             let new = self.whole(view, indexed, declared, agents);
             let mut ops = Vec::new();
@@ -447,9 +477,15 @@ impl LiveTimeline {
                 self.payload = new;
                 ops
             }
-            TimelineScope::Run => {
-                self.refreshed_run(view, indexed, declared, touched, ends_moved, agents, agents_moved)
-            }
+            TimelineScope::Run => self.refreshed_run(
+                view,
+                indexed,
+                declared,
+                touched,
+                ends_moved,
+                agents,
+                agents_moved,
+            ),
         }
     }
 
@@ -477,7 +513,10 @@ impl LiveTimeline {
             .map(|node| Owner::Node(node.to_owned()))
             .filter(|owner| !known.contains(owner))
             .collect();
-        let owned_end = self.slots.last().map_or(0, |slot| slot.start + slot.openings.len());
+        let owned_end = self
+            .slots
+            .last()
+            .map_or(0, |slot| slot.start + slot.openings.len());
         let dirty_owners: Vec<Owner> = self
             .slots
             .iter()
@@ -521,7 +560,11 @@ impl LiveTimeline {
                         self.ends.close(&mut span);
                         Source::Rebuilt(span)
                     }));
-                    slots.push(Slot { owner, start, openings });
+                    slots.push(Slot {
+                        owner,
+                        start,
+                        openings,
+                    });
                 }
                 None => {
                     let old = old.expect("an untouched slot was laid out before");
@@ -572,7 +615,9 @@ impl LiveTimeline {
                 .map(|all| all[before..].iter().cloned().map(Source::Rebuilt).collect())
                 .unwrap_or_default()
         } else {
-            (owned_end..owned_end + self.harness).map(Source::Held).collect()
+            (owned_end..owned_end + self.harness)
+                .map(Source::Held)
+                .collect()
         };
         let harness_len = harness.len();
         assembled.extend(harness);
@@ -702,9 +747,11 @@ impl LiveDetail {
         inputs: &DetailInputs<'_>,
     ) -> Value {
         self.turns.clear();
-        for owner in std::iter::once(Owner::Run)
-            .chain(indexed.node_order().map(|node| Owner::Node(node.to_owned())))
-        {
+        for owner in std::iter::once(Owner::Run).chain(
+            indexed
+                .node_order()
+                .map(|node| Owner::Node(node.to_owned())),
+        ) {
             let events = indexed.merged_share(view, std::slice::from_ref(&owner));
             self.turns
                 .insert(owner, owner_turns(&Run::of(view).over(&events), declared));
@@ -756,6 +803,9 @@ impl LiveDetail {
         // A node whose engine status moved is touched too, whatever named it:
         // a settlement elsewhere can make it ready, blocked or skipped.
         let mut dirty: BTreeSet<String> = touched.nodes.clone();
+        if touched.every_node {
+            dirty.extend(indexed.node_order().map(str::to_owned));
+        }
         let statuses = view.state.statuses();
         let held_status = &self.payload["graph"]["node_status"];
         for (node, status) in &statuses {
@@ -794,7 +844,8 @@ impl LiveDetail {
         // The run: its own fields read over the whole store, its nodes merged.
         if let Some(run) = detail.get_mut("run").and_then(Value::as_object_mut) {
             run.insert("last_event".into(), super::last_event(&whole));
-            run.insert("timing_quality".into(), json!(super::timing_quality(&whole)));
+            let quality = json!(super::timing_quality(&whole));
+            run.insert("timing_quality".into(), quality.clone());
             run.insert("turns".into(), json!(self.turns.values().sum::<usize>()));
             run.insert("lint".into(), json!(indexed.lint));
             if let Some(Value::Array(nodes)) = run.get_mut("nodes") {
@@ -808,6 +859,9 @@ impl LiveDetail {
                             *entry = old.clone();
                         }
                     }
+                    // Every node's row carries the run's timing quality, which a
+                    // settlement anywhere moves.
+                    entry["timing_quality"] = quality.clone();
                 }
             }
         }
@@ -844,7 +898,8 @@ fn merge_held(
     let mut merged = Map::new();
     for node in keys {
         let entry = if keep(&node) {
-            held.and_then(|held| held.get(&node)).or_else(|| rebuilt.get(&node))
+            held.and_then(|held| held.get(&node))
+                .or_else(|| rebuilt.get(&node))
         } else {
             rebuilt.get(&node)
         };

@@ -1593,9 +1593,9 @@ impl TryFrom<&str> for SubscriptionId {
     type Error = ApiError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        canonical_uuid(value)
-            .map(Self)
-            .ok_or_else(|| ApiError::InvalidSubscription(format!("{value:?} is not a subscription id")))
+        canonical_uuid(value).map(Self).ok_or_else(|| {
+            ApiError::InvalidSubscription(format!("{value:?} is not a subscription id"))
+        })
     }
 }
 
@@ -1651,7 +1651,10 @@ impl TryFrom<&str> for EventId {
         let (epoch, seq) = value.split_once(':').ok_or_else(refused)?;
         let epoch = canonical_uuid(epoch).ok_or_else(refused)?;
         // An unsigned decimal, written the one way: no sign, no leading zero.
-        if seq.is_empty() || !seq.bytes().all(|byte| byte.is_ascii_digit()) || (seq.len() > 1 && seq.starts_with('0')) {
+        if seq.is_empty()
+            || !seq.bytes().all(|byte| byte.is_ascii_digit())
+            || (seq.len() > 1 && seq.starts_with('0'))
+        {
             return Err(refused());
         }
         let seq = seq.parse::<u64>().map_err(|_| refused())?;
@@ -1740,7 +1743,9 @@ impl SubscriptionView {
             match object.get(name) {
                 None => Ok(None),
                 Some(Value::String(text)) => Ok(Some(text.as_str())),
-                Some(_) => Err(refused(&format!("names {name} as something other than a string"))),
+                Some(_) => Err(refused(&format!(
+                    "names {name} as something other than a string"
+                ))),
             }
         };
         let run_id = || -> Result<RunId, ApiError> {
@@ -1772,7 +1777,9 @@ impl SubscriptionView {
                         NodeId::try_from(node).map_err(|error| refused(&error.to_string()))?,
                     ),
                     (Some("node"), None) => return Err(refused("scopes to a node and names none")),
-                    (Some("run"), Some(_)) => return Err(refused("covers the whole run and names a node")),
+                    (Some("run"), Some(_)) => {
+                        return Err(refused("covers the whole run and names a node"))
+                    }
                     _ => return Err(refused("names a scope other than run or node")),
                 };
                 Ok(Self::Timeline {
@@ -1795,9 +1802,9 @@ impl SubscriptionView {
     pub fn run_id(&self) -> Option<&RunId> {
         match self {
             Self::Sidebar => None,
-            Self::Detail { run_id, .. } | Self::Timeline { run_id, .. } | Self::Channel { run_id } => {
-                Some(run_id)
-            }
+            Self::Detail { run_id, .. }
+            | Self::Timeline { run_id, .. }
+            | Self::Channel { run_id } => Some(run_id),
         }
     }
 
@@ -1813,14 +1820,23 @@ impl SubscriptionView {
         };
         match self {
             Self::Sidebar => serde_json::json!({ "type": "sidebar" }),
-            Self::Detail { run_id, filter } => {
-                filtered(serde_json::json!({ "type": "detail", "run_id": run_id }), filter)
-            }
-            Self::Timeline { run_id, scope: ViewScope::Run, filter } => filtered(
+            Self::Detail { run_id, filter } => filtered(
+                serde_json::json!({ "type": "detail", "run_id": run_id }),
+                filter,
+            ),
+            Self::Timeline {
+                run_id,
+                scope: ViewScope::Run,
+                filter,
+            } => filtered(
                 serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "run" }),
                 filter,
             ),
-            Self::Timeline { run_id, scope: ViewScope::Node(node), filter } => filtered(
+            Self::Timeline {
+                run_id,
+                scope: ViewScope::Node(node),
+                filter,
+            } => filtered(
                 serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "node", "node": node }),
                 filter,
             ),
@@ -1853,9 +1869,9 @@ impl SubscribeRequest {
         let value: Value = serde_json::from_str(body).map_err(|error| {
             ApiError::InvalidSubscription(format!("the body is not JSON: {error}"))
         })?;
-        let object = value.as_object().ok_or_else(|| {
-            ApiError::InvalidSubscription("the body is not an object".to_owned())
-        })?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| ApiError::InvalidSubscription("the body is not an object".to_owned()))?;
         if let Some(extra) = object
             .keys()
             .find(|key| !["view", "replaces", "resume"].contains(&key.as_str()))
@@ -1873,16 +1889,19 @@ impl SubscribeRequest {
                 ))),
             }
         };
-        let replaces = text("replaces")?.map(SubscriptionId::try_from).transpose()?;
+        let replaces = text("replaces")?
+            .map(SubscriptionId::try_from)
+            .transpose()?;
         let resume = text("resume")?.map(EventId::try_from).transpose()?;
         if replaces.is_some() && resume.is_some() {
             return Err(ApiError::InvalidSubscription(
                 "replaces and resume are mutually exclusive".to_owned(),
             ));
         }
-        let view = SubscriptionView::parse(object.get("view").ok_or_else(|| {
-            ApiError::InvalidSubscription("the body names no view".to_owned())
-        })?)?;
+        let view =
+            SubscriptionView::parse(object.get("view").ok_or_else(|| {
+                ApiError::InvalidSubscription("the body names no view".to_owned())
+            })?)?;
         Ok(Self {
             view,
             replaces,
