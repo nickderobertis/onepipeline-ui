@@ -566,28 +566,28 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "084c80fca50d06e34d57f4820e8a67e9ef8ec828f8c4a2b9a1cfdce5ebd755b9"
+      "hash": "264bf2cb44c3fafdbc356cbabb7d86aad41d5ca9727aabb0978c0ef6abf09d2a"
     },
     {
       "name": "17-recorded-gate-run",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "73d292afecb20816efe6cdb950b1060a2cb5bf0568d73c9a7cbfbbfd10324c32"
+      "hash": "a15b47a7b0bd3db5f13f32816512a6cdeeda2a40637db4089cbab40d86ffde4e"
     },
     {
       "name": "17-recorded-gate-run",
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "bd68cb02344e26e8ae1deffb90a4d5624938025f52858c8c4a44b45ce982f446"
+      "hash": "42fa38c17f1eb776fad2a330e0b0894bffc57daa0129e6a5f366667c3dadd905"
     },
     {
       "name": "17-recorded-gate-run",
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "40f37d02b3221227fd8a81a2e482d663684e983aba0b421cda1ffb2347128994"
+      "hash": "e29055465bea5ef220f2092ba8638e6a19d81db27b7c4ce726d94c561b73d2ab"
     },
     {
       "name": "17-recorded-gate-run",
@@ -601,21 +601,21 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "149dd8f51146005410ada02934c4799d33cd99b5eb810bfcca49965ff428e722"
+      "hash": "667df69a9e738f37a0c4ace407c240aa2f0925b52ea299e9f61b5e1841666b6c"
     },
     {
       "name": "18-recorded-session-closed",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "4a5e29c15aba43ef9e278fa77f5605daf2fa2a3ded7f85e9cdcc67cbf3d3e21a"
+      "hash": "98831802f5bb63a68f9c7789585de9a8e8cc7d2a91145437270c22cedeacb14e"
     },
     {
       "name": "18-recorded-session-closed",
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "278576aa37748c87f6ce9e4f3ecaf4081a93341fa7bb31cd242abef5a0ebe825"
+      "hash": "d72796cc7ffe55fdae01cc753d7b9927fe64bbc4f5ce9b60b45f24ffaba84e5b"
     },
     {
       "name": "18-recorded-session-closed",

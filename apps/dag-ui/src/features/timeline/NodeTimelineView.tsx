@@ -452,9 +452,13 @@ function NodeExecution({
     onSelectItem(id);
     sync.scrollTo(id);
   };
+  // The hook returns a new object on each render, including a cursor update
+  // from scrolling. Only a changed selection should scroll again; depending on
+  // that object makes the selected stamp race the scroll-derived reading cursor.
+  const { scrollTo } = sync;
   useEffect(() => {
-    if (selectedItemId !== undefined) sync.scrollTo(selectedItemId);
-  }, [selectedItemId, sync]);
+    if (selectedItemId !== undefined) scrollTo(selectedItemId);
+  }, [selectedItemId, scrollTo]);
   return (
     <div className="node-execution" data-expanded={expanded}>
       <section
