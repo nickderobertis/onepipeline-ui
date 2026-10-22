@@ -474,3 +474,14 @@ engine release's own resolution. Browser adoption remains removed under the
 current contract; this binary reads runs driven by the engine CLI. This
 changes the engine types carried by ApiError::from_engine and the other
 engine-typed public items.
+0.85.0 is the engine whose `RunView` refreshes in place: `refresh` reads,
+parses and folds only the records appended since the view last read, answering
+`Unchanged`, `Appended { first }` or `Reread`, and a refreshed view equals a
+fresh `open`. The read API's subscriptions keep each subscribed run's view
+current with it and build their patches from the appended records, rather than
+re-reading the whole journal per change. `RunView` gained a private field, so
+the timeline's canonical store is read through the crate's own `payload::Run`
+rather than a rebuilt view. It links onetaskgraph 0.10.0, so the dev-only
+`onetaskgraph-*` requirements move to that release with it. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed
+public items.

@@ -30,7 +30,7 @@ use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::note::NoteTurn;
 use onepipeline::plan::{Node, Plan};
-use onepipeline::views::{liveness_word, RunPaths, RunSummary, RunView};
+use onepipeline::views::{liveness_word, DriverLiveness, RunPaths, RunSummary, RunView};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -46,6 +46,53 @@ use crate::filter::EventFilter;
 // also has a `Party`, and the two answer different questions — which side of a
 // conversation produced a record, and whose tokens a run spent.
 use crate::telemetry::{BucketName, Party as Spender, RunTelemetry};
+
+/// One reading of a run: the view's paths, launch record and fold, over the
+/// records a payload is built from.
+///
+/// Usually the whole merged store, exactly as [`RunView`] holds it. A timeline
+/// over a run that relayed one producer record twice reads its canonical store
+/// instead, which `RunView` cannot hold for it: the engine's view is built only by
+/// reading a run, never from records a reader chose.
+#[derive(Clone, Copy)]
+pub struct Run<'a> {
+    /// Where the run's state lives.
+    pub paths: &'a RunPaths,
+    /// The records this reading is built over, in merge order.
+    pub events: &'a [Envelope],
+    /// The view itself: its launch record and its fold of the whole journal,
+    /// whatever `events` holds, and what only the engine can answer about the
+    /// whole run.
+    pub whole: &'a RunView,
+}
+
+impl<'a> Run<'a> {
+    /// The whole of what `view` read.
+    #[must_use]
+    pub fn of(view: &'a RunView) -> Self {
+        Self {
+            paths: &view.paths,
+            events: &view.events,
+            whole: view,
+        }
+    }
+
+    /// The same run, read over `events` instead.
+    #[must_use]
+    pub fn over(self, events: &'a [Envelope]) -> Self {
+        Self { events, ..self }
+    }
+
+    /// How the run is being driven: the engine's answer about the whole run.
+    fn liveness(&self) -> DriverLiveness {
+        self.whole.liveness()
+    }
+
+    /// The surfaces nobody has read, off the run's own channel.
+    fn unread_surfaces(&self) -> (usize, Option<u64>) {
+        self.whole.unread_surfaces()
+    }
+}
 
 /// The bound on an artifact body served in one response.
 ///
@@ -1003,7 +1050,7 @@ fn read_json(path: &Path) -> Option<Value> {
 /// could not be asked — in which case every timing the row carries is absent,
 /// which is what an unknown clock is.
 #[must_use]
-pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
+pub(crate) fn run_summary_over(view: &Run<'_>, telemetry: Option<&RunTelemetry>) -> Value {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for recorded in node_statuses(view).values() {
         *counts.entry(recorded.status.clone()).or_insert(0) += 1;
@@ -1013,18 +1060,18 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("state".into(), json!(state_word(view)));
     summary.insert("phase".into(), json!(phase_word(view)));
     summary.insert("last_event".into(), last_event(view));
-    if let Some(at) = view.state.last_write_at {
+    if let Some(at) = view.whole.state.last_write_at {
         summary.insert("last_progress_at".into(), json!(at / 1_000));
     }
     summary.insert("timing_quality".into(), json!(timing_quality(view)));
     summary.insert("linkage_quality".into(), json!("labelled"));
-    summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
+    summary.insert("timing".into(), timing(telemetry, &measured(view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
-    if !view.launch.labels.is_empty() {
-        summary.insert("labels".into(), json!(view.launch.labels));
+    if !view.whole.launch.labels.is_empty() {
+        summary.insert("labels".into(), json!(view.whole.launch.labels));
     }
-    if let Some(group) = &view.launch.group {
+    if let Some(group) = &view.whole.launch.group {
         summary.insert("group".into(), json!(group));
     }
     // Schema 18: where the run belongs and whether anything waits on it, read
@@ -1033,10 +1080,10 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     // (which is where the summary reads it, so a run whose journal holds no
     // plan to fold still names it), the SDK's own liveness word, and the
     // channel's unread count.
-    if !view.launch.project.is_empty() {
-        summary.insert("project".into(), json!(view.launch.project));
+    if !view.whole.launch.project.is_empty() {
+        summary.insert("project".into(), json!(view.whole.launch.project));
     }
-    if let Some(name) = onepipeline::views::plan_of(&view.paths)
+    if let Some(name) = onepipeline::views::plan_of(view.paths)
         .ok()
         .and_then(|plan| plan.name)
     {
@@ -1045,6 +1092,12 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("liveness".into(), json!(view.liveness().as_str()));
     summary.insert("unread_surfaces".into(), json!(view.unread_surfaces().0));
     Value::Object(summary)
+}
+
+/// `run_summary`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
+    run_summary_over(&Run::of(view), telemetry)
 }
 
 /// The same row, read from the run's **bounded summary** rather than from a fold
@@ -1260,9 +1313,10 @@ fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
 ///
 /// The words are unmapped on purpose: a count reports what the engine said,
 /// where a status a client switches on cannot.
-fn node_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
+fn node_statuses(view: &Run<'_>) -> BTreeMap<String, Recorded> {
     let document: BTreeMap<String, Recorded> = recorded_result(view).into_iter().collect();
     let mut statuses: BTreeMap<String, Recorded> = view
+        .whole
         .state
         .statuses()
         .into_iter()
@@ -1271,12 +1325,14 @@ fn node_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
             // What the run itself recorded for the node: the journal's settlement
             // first, then the document a driver wrote as it closed out.
             let recorded = view
+                .whole
                 .state
                 .recorded
                 .get(&node)
                 .map(|settled| settled.status().as_str().to_owned())
                 .or_else(|| document.get(&node).map(|entry| entry.status.clone()));
             let outcome = view
+                .whole
                 .state
                 .outcomes
                 .get(&node)
@@ -1295,8 +1351,8 @@ fn node_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
 }
 
 /// Every node the run's own recorded result has an entry for, in its words.
-fn recorded_result(view: &RunView) -> Vec<(String, Recorded)> {
-    recorded_result_at(&view.paths)
+fn recorded_result(view: &Run<'_>) -> Vec<(String, Recorded)> {
+    recorded_result_at(view.paths)
 }
 
 /// The same, located by the run's paths alone.
@@ -1337,28 +1393,28 @@ struct Recorded {
 // llmlint: ignore-end[invalid_states_unrepresentable]
 
 /// The run's own attribution to the session that launched it.
-fn launch(view: &RunView) -> Value {
+fn launch(view: &Run<'_>) -> Value {
     let mut record = Map::new();
     record.insert("launch_id".into(), json!(view.paths.run));
     record.insert(
         "launcher".into(),
-        json!(launcher_word(&view.launch.launcher)),
+        json!(launcher_word(&view.whole.launch.launcher)),
     );
-    if let Some(at) = view.launch.launched_at() {
+    if let Some(at) = view.whole.launch.launched_at() {
         record.insert("started_at".into(), json!(at));
     }
-    if !view.launch.session.is_empty() {
+    if !view.whole.launch.session.is_empty() {
         record.insert(
             "session_key".into(),
-            json!(session_key(&view.launch.session)),
+            json!(session_key(&view.whole.launch.session)),
         );
     }
     Value::Object(record)
 }
 
 /// How the run is being driven, as one lowercase word.
-fn state_word(view: &RunView) -> String {
-    liveness_word(view).to_lowercase().replace(' ', "-")
+fn state_word(view: &Run<'_>) -> String {
+    liveness_word(view.whole).to_lowercase().replace(' ', "-")
 }
 
 /// Which part of its loop the run is in, derived from what it recorded.
@@ -1373,11 +1429,11 @@ fn state_word(view: &RunView) -> String {
 /// right now, which under rounds was a run between them and is now a run whose
 /// frontier is empty. `starting` is the run that has no graph to converge on
 /// yet, which is what a launch that has recorded nothing since really is.
-fn phase_word(view: &RunView) -> &'static str {
-    if view.state.stop_recorded() {
+fn phase_word(view: &Run<'_>) -> &'static str {
+    if view.whole.state.stop_recorded() {
         return "finished";
     }
-    let statuses = view.state.statuses();
+    let statuses = view.whole.state.statuses();
     // A run with no graph yet has not begun converging on anything: a launch that
     // has recorded nothing since, or one whose plan this host cannot read.
     if statuses.is_empty() {
@@ -1386,10 +1442,10 @@ fn phase_word(view: &RunView) -> &'static str {
     if statuses.values().all(|status| status.as_str() == "done") {
         return "settled";
     }
-    if !view.state.decisions_pending.is_empty() || view.state.awaiting_human_action() {
+    if !view.whole.state.decisions_pending.is_empty() || view.whole.state.awaiting_human_action() {
         return "deciding";
     }
-    if view.state.surfaces_queued > view.state.surfaces_read {
+    if view.whole.state.surfaces_queued > view.whole.state.surfaces_read {
         return "surfacing";
     }
     if statuses.values().any(|status| status.as_str() == "running") {
@@ -1400,7 +1456,7 @@ fn phase_word(view: &RunView) -> &'static str {
 
 /// The kind of the run's most recent event, or `null` for a run that has
 /// recorded none — which is how a just-launched run reads on disk.
-fn last_event(view: &RunView) -> Value {
+fn last_event(view: &Run<'_>) -> Value {
     view.events
         .last()
         .map_or(Value::Null, |event| json!(event.kind.0))
@@ -1411,10 +1467,10 @@ fn last_event(view: &RunView) -> Value {
 /// A run still being driven is `partial` and one that has stopped driving is
 /// `complete`, which is the same distinction the round-open flag used to draw:
 /// what a run has not finished doing it has not finished measuring.
-fn timing_quality(view: &RunView) -> &'static str {
+fn timing_quality(view: &Run<'_>) -> &'static str {
     if view.events.is_empty() {
         "legacy"
-    } else if view.state.stop_recorded() || graph_complete(view) {
+    } else if view.whole.state.stop_recorded() || graph_complete(view) {
         "complete"
     } else {
         "partial"
@@ -1422,8 +1478,8 @@ fn timing_quality(view: &RunView) -> &'static str {
 }
 
 /// Whether every node the run recorded has settled `done`.
-fn graph_complete(view: &RunView) -> bool {
-    let statuses = view.state.statuses();
+fn graph_complete(view: &Run<'_>) -> bool {
+    let statuses = view.whole.state.statuses();
     !statuses.is_empty() && statuses.values().all(|status| status.as_str() == "done")
 }
 
@@ -1605,9 +1661,9 @@ fn timing_presence(measured: &Measured) -> Value {
 /// A relayed agent-graph envelope carries the session it came from in its
 /// labels; that is the whole of what the journal links, so a session appears
 /// here exactly when one is recorded and never inferred from anything else.
-fn sessions_of(view: &RunView, node: &str, declared: &DeclaredMembers) -> Vec<Value> {
+fn sessions_of(view: &Run<'_>, node: &str, declared: &DeclaredMembers) -> Vec<Value> {
     let mut seen: BTreeMap<String, Vec<&Envelope>> = BTreeMap::new();
-    for event in &view.events {
+    for event in view.events {
         if event.source != Source::Agentgraph || event.labels.node.as_deref() != Some(node) {
             continue;
         }
@@ -1662,7 +1718,7 @@ fn is_lost(status: &str) -> bool {
 ///
 /// This is one of the computations AGENTS.md proposes moving into the SDK: the
 /// agent reading the CLI sees the outcome word and not the class.
-fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'static str> {
+fn failure_class(view: &Run<'_>, node: &str, recorded: &Recorded) -> Option<&'static str> {
     if !is_lost(status_word(&recorded.status)) {
         return None;
     }
@@ -1671,7 +1727,7 @@ fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'st
         Some("checks-failed") => "checks",
         Some("publication-failed") => "publication",
         Some("timed-out") => "timeout",
-        _ if view.state.dispatched_at.contains_key(node) => "agent",
+        _ if view.whole.state.dispatched_at.contains_key(node) => "agent",
         _ => "unknown",
     })
 }
@@ -1754,7 +1810,7 @@ fn session_label(event: &Envelope) -> Option<&str> {
 }
 
 /// The events one node recorded, whichever library produced them.
-fn events_of<'a>(view: &'a RunView, node: &str) -> Vec<&'a Envelope> {
+fn events_of<'a>(view: &Run<'a>, node: &str) -> Vec<&'a Envelope> {
     view.events
         .iter()
         .filter(|event| event.labels.node.as_deref() == Some(node))
@@ -1763,7 +1819,7 @@ fn events_of<'a>(view: &'a RunView, node: &str) -> Vec<&'a Envelope> {
 
 /// One node's telemetry row.
 fn node_telemetry(
-    view: &RunView,
+    view: &Run<'_>,
     node: &str,
     recorded: &Recorded,
     transcripts: &Transcripts<'_>,
@@ -1775,7 +1831,7 @@ fn node_telemetry(
     if let Some(outcome) = &recorded.outcome {
         row.insert("outcome".into(), json!(outcome));
     }
-    if let Some(branch) = view.state.branches.get(node) {
+    if let Some(branch) = view.whole.state.branches.get(node) {
         row.insert("branch".into(), json!(branch));
     }
     if let Some(class) = failure_class(view, node, recorded) {
@@ -1804,7 +1860,7 @@ fn node_telemetry(
 
 /// The run's own telemetry document, as `GET /api/v2/runs/{run}` serves it.
 fn run_telemetry(
-    view: &RunView,
+    view: &Run<'_>,
     telemetry: Option<&RunTelemetry>,
     transcripts: &Transcripts<'_>,
 ) -> Value {
@@ -1813,7 +1869,7 @@ fn run_telemetry(
         .iter()
         .map(|(node, recorded)| node_telemetry(view, node, recorded, transcripts))
         .collect();
-    let measurements = measured(&view.events);
+    let measurements = measured(view.events);
     // What the run measured at a node, rather than across its whole clock: the
     // same records, filtered to the ones a node's own work produced.
     let at_nodes = measured(
@@ -1826,7 +1882,7 @@ fn run_telemetry(
     run.insert("state".into(), json!(state_word(view)));
     run.insert("phase".into(), json!(phase_word(view)));
     run.insert("last_event".into(), last_event(view));
-    if let Some(at) = view.state.last_write_at {
+    if let Some(at) = view.whole.state.last_write_at {
         run.insert("last_progress_at".into(), json!(at / 1_000));
     }
     run.insert("timing".into(), timing(telemetry, &measurements));
@@ -1989,9 +2045,9 @@ fn kind_word(node: &Node) -> &'static str {
 /// writes and `Plan` is still the published shape of it — so the deserialization
 /// is this crate's while the *schema* stays the SDK's, which is the same terms
 /// every other record here is read on.
-fn plan_of(view: &RunView) -> Option<Plan> {
-    if let Some(source) = view.state.plan.as_ref() {
-        return Some(view.state.graph.to_plan(source));
+fn plan_of(view: &Run<'_>) -> Option<Plan> {
+    if let Some(source) = view.whole.state.plan.as_ref() {
+        return Some(view.whole.state.graph.to_plan(source));
     }
     let text = std::fs::read_to_string(view.paths.plan()).ok()?;
     serde_json::from_str(&text).ok()
@@ -2038,7 +2094,7 @@ enum TurnState {
 /// record is provisional for every member whatever its harness, and the control
 /// protocol's only verb is `interrupt`, which costs the turn. `src/AGENTS.md`
 /// walks each closed route and names the upstream change that opens one.
-fn member_turn_states<'a>(view: &'a RunView, node: &str) -> Vec<(&'a str, TurnState)> {
+fn member_turn_states<'a>(view: &Run<'a>, node: &str) -> Vec<(&'a str, TurnState)> {
     let mut order: Vec<&str> = Vec::new();
     let mut states: BTreeMap<&str, TurnState> = BTreeMap::new();
     let relayed = view.events.iter().filter(|event| {
@@ -2121,7 +2177,7 @@ fn member_turn_states<'a>(view: &'a RunView, node: &str) -> Vec<(&'a str, TurnSt
 /// take the redirection is onejudge's `control`, which no published component
 /// exposes for a turn in flight; naming the field for the answer we cannot get
 /// would be the overclaim a planner acts on.
-fn node_control(view: &RunView, node: &str) -> Value {
+fn node_control(view: &Run<'_>, node: &str) -> Value {
     let states = member_turn_states(view, node);
     // The latest member to have spoken wins, exactly as the engine's address does:
     // that is the turn a note aimed at this node now would be correcting.
@@ -2153,7 +2209,7 @@ fn node_control(view: &RunView, node: &str) -> Value {
 /// account of it — nothing overwrites the fold now that no next round starts —
 /// and the recorded result is the fallback for a run whose journal folded to
 /// nothing.
-fn graph_state(view: &RunView) -> Option<Value> {
+fn graph_state(view: &Run<'_>) -> Option<Value> {
     let plan = plan_of(view)?;
     let task_ids: BTreeSet<&str> = plan.tasks.iter().map(|node| node.id.as_str()).collect();
     let result = read_json(&view.paths.result());
@@ -2227,7 +2283,7 @@ fn graph_state(view: &RunView) -> Option<Value> {
     out.insert("decisions".into(), Value::Array(decisions(view)));
     out.insert(
         "attestations".into(),
-        json!(view.state.attestations.iter().collect::<Vec<_>>()),
+        json!(view.whole.state.attestations.iter().collect::<Vec<_>>()),
     );
     out.insert("result".into(), run_result(result.as_ref()));
     out.insert("last_seq".into(), json!(last_seq(view)));
@@ -2235,10 +2291,11 @@ fn graph_state(view: &RunView) -> Option<Value> {
     // accepted `set-run-node-sets`, which replaces the launch's list — an empty
     // replacement included — and the launch's where no edit has.
     let run_node_sets = view
+        .whole
         .state
         .run_node_sets
         .as_ref()
-        .unwrap_or(&view.launch.node_sets);
+        .unwrap_or(&view.whole.launch.node_sets);
     if !run_node_sets.is_empty() {
         out.insert("run_node_sets".into(), json!(run_node_sets));
     }
@@ -2257,8 +2314,9 @@ fn graph_state(view: &RunView) -> Option<Value> {
 /// Each entry is the decision's own kind and the nodes it unblocks when it is
 /// cleared, which is exactly what `decision-pending` carries and what
 /// `decision-cleared` will release.
-fn decisions(view: &RunView) -> Vec<Value> {
-    view.state
+fn decisions(view: &Run<'_>) -> Vec<Value> {
+    view.whole
+        .state
         .decisions_pending
         .iter()
         .map(|(id, pending)| {
@@ -2319,7 +2377,7 @@ const RESULT_FIELDS: &[&str] = &[
 ///
 /// The last one wins: a node that settled more than once is a node that was
 /// retried or replaced, and the latest settlement is what happened.
-fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
+fn settlement(view: &Run<'_>, node: &str) -> Option<Map<String, Value>> {
     view.events
         .iter()
         .rev()
@@ -2340,8 +2398,9 @@ fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
 struct EngineWord(&'static str);
 
 /// Every node's [`EngineWord`], from the derivation every view serves.
-fn engine_words(view: &RunView) -> BTreeMap<String, EngineWord> {
-    view.state
+fn engine_words(view: &Run<'_>) -> BTreeMap<String, EngineWord> {
+    view.whole
+        .state
         .statuses()
         .into_iter()
         .map(|(node, status)| (node, EngineWord(status.as_str())))
@@ -2357,14 +2416,14 @@ fn engine_words(view: &RunView) -> BTreeMap<String, EngineWord> {
 /// fold still has, and it holds words no settlement carried. A node in neither is
 /// a node the run has nothing to say about, and it is served no entry at all.
 fn node_result(
-    view: &RunView,
+    view: &Run<'_>,
     engine: &BTreeMap<String, EngineWord>,
     node: &Node,
     result: Option<&Value>,
 ) -> Option<(String, Value)> {
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
-    if let Some(status) = view.state.recorded.get(&node.id) {
+    if let Some(status) = view.whole.state.recorded.get(&node.id) {
         let word = status_word(status.status().as_str());
         item.insert("status".into(), json!(word));
         item.insert("completed".into(), json!(word == "done"));
@@ -2382,13 +2441,13 @@ fn node_result(
                 }
             }
         }
-        if let Some(outcome) = view.state.outcomes.get(&node.id) {
+        if let Some(outcome) = view.whole.state.outcomes.get(&node.id) {
             item.insert("outcome".into(), json!(outcome));
         }
-        if let Some(branch) = view.state.branches.get(&node.id) {
+        if let Some(branch) = view.whole.state.branches.get(&node.id) {
             item.insert("branch".into(), json!(branch));
         }
-        if let Some(url) = view.state.change_urls.get(&node.id) {
+        if let Some(url) = view.whole.state.change_urls.get(&node.id) {
             item.insert("pr".into(), json!(url));
         }
     } else {
@@ -2419,6 +2478,7 @@ fn node_result(
     // rides as the outcome rather than being lost — see [`node_statuses`].
     if let Some(EngineWord(word)) = engine.get(&node.id).copied() {
         let recorded = view
+            .whole
             .state
             .recorded
             .get(&node.id)
@@ -2450,7 +2510,7 @@ fn node_result(
     if let Some(release) = landing_commit(&mine).and_then(|commit| release_of(view, commit)) {
         item.insert("release".into(), release);
     }
-    if let Some(finished) = view.state.completed_steps.get(&node.id) {
+    if let Some(finished) = view.whole.state.completed_steps.get(&node.id) {
         let steps: Vec<Value> = node
             .steps
             .iter()
@@ -2508,7 +2568,7 @@ fn run_result(result: Option<&Value>) -> Value {
 }
 
 /// The highest per-stream sequence number the run recorded.
-fn last_seq(view: &RunView) -> u64 {
+fn last_seq(view: &Run<'_>) -> u64 {
     view.events.iter().map(|event| event.seq).max().unwrap_or(0)
 }
 
@@ -2518,8 +2578,8 @@ fn last_seq(view: &RunView) -> u64 {
 /// and a client that used to index `rounds` is reading a schema this no longer
 /// serves.
 #[must_use]
-pub fn run_detail(
-    view: &RunView,
+pub(crate) fn run_detail_over(
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     include_conversations: bool,
     telemetry: Option<&RunTelemetry>,
@@ -2549,7 +2609,7 @@ pub fn run_detail(
     payload.insert("run".into(), run);
     payload.insert(
         "telemetry".into(),
-        json!(onepipeline::telemetry::of_run(&view.paths, &view.events)),
+        json!(onepipeline::telemetry::of_run(view.paths, view.events)),
     );
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
@@ -2563,6 +2623,26 @@ pub fn run_detail(
     payload.insert("node_details".into(), node_details(view));
     payload.insert("launch".into(), launch(view));
     Value::Object(payload)
+}
+
+/// `run_detail`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn run_detail(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    include_conversations: bool,
+    telemetry: Option<&RunTelemetry>,
+    agents: Option<usize>,
+    filter: &EventFilter,
+) -> Value {
+    run_detail_over(
+        &Run::of(view),
+        declared,
+        include_conversations,
+        telemetry,
+        agents,
+        filter,
+    )
 }
 
 /// One piece of evidence a node's work stored beside the stream.
@@ -2622,7 +2702,7 @@ fn verdict_of(event: &Envelope) -> bool {
 }
 
 /// Every artifact one node's events stored, oldest first.
-fn evidence<'a>(view: &'a RunView, node: &str) -> Vec<Evidence<'a>> {
+fn evidence<'a>(view: &Run<'a>, node: &str) -> Vec<Evidence<'a>> {
     let mine: Vec<&Envelope> = view
         .events
         .iter()
@@ -2785,7 +2865,7 @@ fn landing_commit<'a>(events: &[&'a Envelope]) -> Option<&'a str> {
 /// inventing the rest is worse than serving none. `style` is the one optional
 /// field: an envelope written before that field existed carries none, and the
 /// schema the browser holds this to says so.
-fn release_of(view: &RunView, commit: &str) -> Option<Value> {
+fn release_of(view: &Run<'_>, commit: &str) -> Option<Value> {
     let observed = view.events.iter().rev().find(|event| {
         event.source == Source::Vcs
             && event.kind.0 == vcs::RELEASE_OBSERVED
@@ -2807,9 +2887,10 @@ fn release_of(view: &RunView, commit: &str) -> Option<Value> {
 /// `None` when the run recorded neither a branch for the node nor a publication
 /// record of any kind: an absent publication is a node that published nothing,
 /// where an empty one would read as a publication that reached nowhere.
-fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Value> {
+fn publication_of(view: &Run<'_>, node: &str, events: &[&Envelope]) -> Option<Value> {
     const OPENED: [&str; 2] = [vcs::CHANGE_OPENED, vcs::CHANGE_MERGED];
     let branch = view
+        .whole
         .state
         .branches
         .get(node)
@@ -2817,6 +2898,7 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
         .or_else(|| last_recorded(events, &[vcs::SESSION_OPENED], "branch"));
     let merged = recorded_any(events, &MERGED)
         || view
+            .whole
             .state
             .outcomes
             .get(node)
@@ -2830,6 +2912,7 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
     }
     publication.insert("merged".into(), json!(merged));
     if let Some(url) = view
+        .whole
         .state
         .change_urls
         .get(node)
@@ -2853,9 +2936,10 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
 }
 
 /// The publication and verification evidence each node left behind.
-fn node_details(view: &RunView) -> Value {
+fn node_details(view: &Run<'_>) -> Value {
     let mut details: Map<String, Value> = Map::new();
     let mut nodes: BTreeSet<&str> = view
+        .whole
         .state
         .branches
         .keys()
@@ -2930,12 +3014,18 @@ fn node_details(view: &RunView) -> Value {
 /// settled member's stored report where the run holds one, and out of the
 /// session's own records where it does not.
 #[must_use]
-pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
+pub(crate) fn conversations_over(view: &Run<'_>, declared: &DeclaredMembers) -> Vec<Value> {
     conversations_under(
         view,
         &Transcripts::of(view, declared),
         &EventFilter::default(),
     )
+}
+
+/// `conversations`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
+    conversations_over(&Run::of(view), declared)
 }
 
 /// The transcripts a reader's filter admits, each as the whole session it is.
@@ -2944,7 +3034,7 @@ pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
 /// empty transcript would say the session recorded nothing, which is a different
 /// fact from "this reading is not about it".
 fn conversations_under(
-    view: &RunView,
+    view: &Run<'_>,
     transcripts: &Transcripts<'_>,
     filter: &EventFilter,
 ) -> Vec<Value> {
@@ -3035,10 +3125,10 @@ struct StoredReport<'a> {
 
 impl<'a> Transcripts<'a> {
     /// Fold every session the run relayed, in the order it first relayed them.
-    fn of(view: &'a RunView, declared: &'a DeclaredMembers) -> Self {
+    fn of(view: &Run<'a>, declared: &'a DeclaredMembers) -> Self {
         let mut order: Vec<&'a str> = Vec::new();
         let mut grouped: BTreeMap<&'a str, Vec<&'a Envelope>> = BTreeMap::new();
-        for event in &view.events {
+        for event in view.events {
             if event.source != Source::Agentgraph {
                 continue;
             }
@@ -3226,7 +3316,7 @@ struct ReportedTurn {
 ///
 /// Returned rather than consumed here because it is also the moment the report
 /// was written, which is the only stamp [`judge_conclusion`] can carry.
-fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
+fn settlement_of<'a>(view: &Run<'a>, session: &str) -> Option<&'a Envelope> {
     view.events
         .iter()
         .find(|event| event.kind.0 == graph::MEMBER_SETTLED && spells_session(event, session))
@@ -3251,7 +3341,7 @@ fn spells_session(event: &Envelope, session: &str) -> bool {
 /// is not a decision this crate can state, so it is dropped rather than served
 /// with a hole. Either way the order is the one recorded, which is the panel's.
 fn judge_decisions(
-    view: &RunView,
+    view: &Run<'_>,
     session: &str,
     report: Option<&judge::Report>,
 ) -> BTreeMap<u64, Vec<Value>> {
@@ -3308,7 +3398,7 @@ fn judge_decisions(
 /// reading below takes what it says as fact. So the values are checked here and
 /// nowhere else — a caller holding a `judge::Report` is holding one whose stamps
 /// parse.
-fn read_report(view: &RunView, settlement: &Envelope) -> Option<judge::Report> {
+fn read_report(view: &Run<'_>, settlement: &Envelope) -> Option<judge::Report> {
     let bytes = fs::read(report_path(view, settlement)).ok()?;
     let report: judge::Report = serde_json::from_slice(&bytes).ok()?;
     (report.schema_version <= judge::SCHEMA_VERSION && well_stamped(&report)).then_some(report)
@@ -4115,7 +4205,7 @@ fn turn_key(event: &Envelope) -> Option<(u64, String)> {
 ///
 /// `docs/contract.md` states the same precedence for a reader of the wire.
 fn conversation_document(
-    view: &RunView,
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     transcript: &SessionTranscript<'_>,
     events: &[&Envelope],
@@ -4326,7 +4416,7 @@ fn conversation_document(
     attribution.insert("launchId".into(), json!(view.paths.run));
     attribution.insert(
         "launcher".into(),
-        json!(launcher_word(&view.launch.launcher)),
+        json!(launcher_word(&view.whole.launch.launcher)),
     );
     attribution.insert(
         "transportRole".into(),
@@ -4420,7 +4510,7 @@ fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
 /// Why the report is the only source, and why that gate rather than another:
 /// `src/AGENTS.md`, under the report a settled member left.
 fn judge_conversation(
-    view: &RunView,
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     session: &str,
     events: &[&Envelope],
@@ -4472,7 +4562,7 @@ fn judge_conversation(
     attribution.insert("launchId".into(), json!(view.paths.run));
     attribution.insert(
         "launcher".into(),
-        json!(launcher_word(&view.launch.launcher)),
+        json!(launcher_word(&view.whole.launch.launcher)),
     );
     attribution.insert("transportRole".into(), json!(transport.as_str()));
     // The member it supervised, read off the same record the agent side's role
@@ -4611,14 +4701,24 @@ fn judge_conclusion(
 
 /// One conversation by id, or `None` when the run records none by that name.
 #[must_use]
+pub(crate) fn conversation_over(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    id: &ConversationId,
+) -> Option<Value> {
+    conversations_over(view, declared)
+        .into_iter()
+        .find(|document| document["conversation"]["id"] == json!(id.as_str()))
+}
+
+/// `conversation`, over everything `view` read: the whole merged store.
+#[must_use]
 pub fn conversation(
     view: &RunView,
     declared: &DeclaredMembers,
     id: &ConversationId,
 ) -> Option<Value> {
-    conversations(view, declared)
-        .into_iter()
-        .find(|document| document["conversation"]["id"] == json!(id.as_str()))
+    conversation_over(&Run::of(view), declared, id)
 }
 
 /// One recorded artifact's bounded tail, or `None` when the run records none.
@@ -4629,7 +4729,7 @@ pub fn conversation(
 /// pointer file names — so a well-formed id naming a file the run never
 /// produced reads nothing.
 #[must_use]
-pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
+pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
     let recorded = view.events.iter().find_map(|event| {
         event
             .artifacts
@@ -4649,7 +4749,7 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
         // exactly as the `oneharness-session` record does.
         None => (
             ReferenceKind::OneharnessSession,
-            pointed_session(&view.paths, id)?,
+            pointed_session(view.paths, id)?,
         ),
     };
     let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
@@ -4660,6 +4760,12 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
         "content": String::from_utf8_lossy(tail),
         "truncated": truncated,
     }))
+}
+
+/// `artifact`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
+    artifact_over(&Run::of(view), id)
 }
 
 /// One recorded artifact's bytes, read from wherever the producing library said
@@ -4683,7 +4789,7 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
 ///
 /// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
 fn artifact_bytes(
-    view: &RunView,
+    view: &Run<'_>,
     event: &Envelope,
     id: &ArtifactId,
     kind: ReferenceKind,
@@ -4709,7 +4815,7 @@ fn artifact_bytes(
 /// behind the name is private to `onepipeline` on purpose. One function because
 /// two readers want it — the artifact route serves its bytes, and a transcript
 /// reads the document inside it.
-fn report_path(view: &RunView, settlement: &Envelope) -> std::path::PathBuf {
+fn report_path(view: &Run<'_>, settlement: &Envelope) -> std::path::PathBuf {
     view.paths.report_for(&settlement.stream, settlement.seq)
 }
 
@@ -4881,8 +4987,8 @@ impl Lens<'_> {
 
 /// The whole of `GET /api/v2/runs/{run}/timeline`'s payload.
 #[must_use]
-pub fn timeline(
-    view: &RunView,
+pub(crate) fn timeline_over(
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     scope: &Scope<'_>,
     filter: &EventFilter,
@@ -4895,21 +5001,16 @@ pub fn timeline(
         .events
         .iter()
         .any(|event| !seen.insert((&event.stream, event.seq)));
-    let canonical = repeated.then(|| {
+    let canonical: Option<Vec<Envelope>> = repeated.then(|| {
         let mut identities = BTreeSet::new();
-        RunView {
-            paths: view.paths.clone(),
-            launch: view.launch.clone(),
-            state: view.state.clone(),
-            events: view
-                .events
-                .iter()
-                .filter(|event| identities.insert((&event.stream, event.seq)))
-                .cloned()
-                .collect(),
-        }
+        view.events
+            .iter()
+            .filter(|event| identities.insert((&event.stream, event.seq)))
+            .cloned()
+            .collect()
     });
-    let view = canonical.as_ref().unwrap_or(view);
+    let canonical_run = canonical.as_deref().map(|events| view.over(events));
+    let view = canonical_run.as_ref().unwrap_or(view);
     let transcripts = Transcripts::of(view, declared);
     let turns = turn_ids(view, &transcripts);
     let lens = Lens {
@@ -4948,13 +5049,24 @@ pub fn timeline(
     })
 }
 
+/// `timeline`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn timeline(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    scope: &Scope<'_>,
+    filter: &EventFilter,
+) -> Value {
+    timeline_over(&Run::of(view), declared, scope, filter)
+}
+
 /// Add the harness sessions the SDK's pointer-file listing knows about, including
 /// sessions no graph envelope relayed. Transcript references use the same bounded
 /// artifact route as the former Agents tabs.
 #[must_use]
-pub fn timeline_harnesses(
+pub(crate) fn timeline_harnesses_over(
     mut payload: Value,
-    view: &RunView,
+    view: &Run<'_>,
     scope: &Scope<'_>,
     agents: &Agents,
 ) -> Value {
@@ -5048,6 +5160,17 @@ pub fn timeline_harnesses(
     payload
 }
 
+/// `timeline_harnesses`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn timeline_harnesses(
+    payload: Value,
+    view: &RunView,
+    scope: &Scope<'_>,
+    agents: &Agents,
+) -> Value {
+    timeline_harnesses_over(payload, &Run::of(view), scope, agents)
+}
+
 /// The three owners of records within one node dispatch.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum DispatchRole {
@@ -5080,7 +5203,7 @@ impl DispatchRole {
 
 /// Group identity is folded before filtering; a reading can hide records without
 /// changing which dispatch or drafter owns the sessions that remain.
-fn stamp_dispatch_groups(view: &RunView, node: &str, payload: &mut Value) {
+fn stamp_dispatch_groups(view: &Run<'_>, node: &str, payload: &mut Value) {
     let Some(key) = dispatch_key(&view.paths.run, node) else {
         return;
     };
@@ -5305,7 +5428,7 @@ struct Turn {
 /// pairing is the whole of how a client opens a plotted moment and finds the turn
 /// behind it. Computed once per timeline rather than per event, because the
 /// number is a position in the run and not a property of the envelope.
-fn turn_ids(view: &RunView, transcripts: &Transcripts<'_>) -> Vec<Option<Turn>> {
+fn turn_ids(view: &Run<'_>, transcripts: &Transcripts<'_>) -> Vec<Option<Turn>> {
     // The turn each of a session's records belongs to, taken from the fold
     // [`conversations`] serves: **both** records of one turn name the same turn,
     // so a reader who opened the moment the turn closed and one who opened the
@@ -5963,8 +6086,8 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
 }
 
 /// The execution boundary, independently of commands recorded after execution.
-fn timeline_end(view: &RunView) -> Option<Moment> {
-    let statuses = view.state.statuses();
+fn timeline_end(view: &Run<'_>) -> Option<Moment> {
+    let statuses = view.whole.state.statuses();
     let settled = !statuses.is_empty()
         && statuses
             .values()
@@ -6010,7 +6133,7 @@ fn timeline_end(view: &RunView) -> Option<Moment> {
 /// settle and independent branches proceed beside a decision that is holding
 /// another subtree back. Under rounds the top of this list was a stack of
 /// batches, which is a shape nothing in the engine has any more.
-fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
+fn run_spans(view: &Run<'_>, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view.events.iter().enumerate().collect();
     let Some((_, first)) = events.first() else {
@@ -6131,7 +6254,7 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
 }
 
 /// One node's span.
-fn node_span(view: &RunView, node: &str, parent: Option<&str>, lens: &Lens<'_>) -> Value {
+fn node_span(view: &Run<'_>, node: &str, parent: Option<&str>, lens: &Lens<'_>) -> Value {
     let events: Vec<(usize, &Envelope)> = view
         .events
         .iter()
@@ -6434,7 +6557,7 @@ fn lock_wait_rollup(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
 /// for a human action, which is never dispatched at all and would otherwise
 /// contribute no span but its own settlement.
 fn waiting_span(
-    view: &RunView,
+    view: &Run<'_>,
     settled: Option<&(usize, &Envelope)>,
     parent: &str,
     node: &str,
@@ -6596,7 +6719,7 @@ fn hold_reason(entry: &Value) -> Option<Value> {
 
 /// What a node kept: one span per artifact it stored, and the branch it published.
 fn kept_spans(
-    view: &RunView,
+    view: &Run<'_>,
     events: &[(usize, &Envelope)],
     parent: &str,
     node: &str,
@@ -6789,7 +6912,7 @@ impl<'r> Category<'r> {
 /// produced nothing, and every attempt is the same node doing the same work, so
 /// the node has one span and the sessions under it are all of the sessions it
 /// ran.
-fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
+fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view
         .events
@@ -7006,7 +7129,7 @@ fn judge_span(
 /// crate must not offer. Neither is one the reader's filter excluded: an activity
 /// summary is a record like any other, and this is the listing of them.
 #[must_use]
-pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
+pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
     let mut identities = BTreeSet::new();
@@ -7082,6 +7205,12 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     activity.into_iter().map(|(_, entry)| entry).collect()
 }
 
+/// `live_activity`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
+    live_activity_over(&Run::of(view), filter)
+}
+
 /// A change token for one run, as one connection sees it.
 ///
 /// How many events the run has recorded that this connection is watching for,
@@ -7101,9 +7230,12 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
 /// movement anyway. A filtered connection is therefore keyed on how many records
 /// it admitted and when the last of them was stamped.
 #[must_use]
-pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
+pub(crate) fn signature_over(view: &Run<'_>, filter: &EventFilter) -> Signature {
     if filter.admits_everything() {
-        return (view.events.len(), view.state.last_write_at.unwrap_or(0));
+        return (
+            view.events.len(),
+            view.whole.state.last_write_at.unwrap_or(0),
+        );
     }
     let admitted: Vec<&Envelope> = view
         .events
@@ -7116,6 +7248,12 @@ pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
         .and_then(|at| u64::try_from(at).ok())
         .unwrap_or(0);
     (admitted.len(), last)
+}
+
+/// `signature`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
+    signature_over(&Run::of(view), filter)
 }
 
 /// What [`signature`] compares: how much the run has recorded, and when it last
@@ -7131,8 +7269,8 @@ pub type Signature = (usize, u64);
 /// anything it is watching — and a digest over the whole store would wake it on
 /// every tool call the filter exists to keep out of its way.
 #[must_use]
-pub fn conversation_signature(
-    view: &RunView,
+pub(crate) fn conversation_signature_over(
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     filter: &EventFilter,
 ) -> String {
@@ -7148,6 +7286,16 @@ pub fn conversation_signature(
             out.push_str(&format!("{byte:02x}"));
             out
         })
+}
+
+/// `conversation_signature`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn conversation_signature(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    filter: &EventFilter,
+) -> String {
+    conversation_signature_over(&Run::of(view), declared, filter)
 }
 
 /// The grouped listing `verbs::runs` answers, projected: one entry per group in
