@@ -633,6 +633,17 @@ test("preserves Reads facts as structured fields in Overall and run details", as
     await expect(header).toContainText(
       `Oldest unread (seconds)${status.unread_surfaces.oldest_seconds ?? "None"}`,
     );
+    // How long the journal has been quiet — the age Status printed for a parked
+    // driver — read off the run's own last write, or said to be unrecorded.
+    const lastProgress = detail.run.last_progress_at;
+    if (lastProgress === undefined)
+      await expect(header).toContainText("Last progressNot recorded");
+    else
+      await expect(
+        header.locator(
+          `time[datetime="${new Date(lastProgress * 1000).toISOString()}"]`,
+        ),
+      ).toBeVisible();
     await expectStructuredFields(
       page.getByRole("region", { name: "Node statuses", exact: true }),
       status.node_status,

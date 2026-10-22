@@ -291,6 +291,21 @@ export function App({
                     {control.status.value.unread_surfaces.oldest_seconds ??
                       "None"}
                   </dd>
+                  {/* How long the run's journal has been quiet: the age Status
+                      gave a parked driver, read off the run's own last write. */}
+                  <dt>Last progress</dt>
+                  <dd>
+                    {detail.run.last_progress_at === undefined ? (
+                      "Not recorded"
+                    ) : (
+                      <Timestamp
+                        at={new Date(
+                          detail.run.last_progress_at * 1000,
+                        ).toISOString()}
+                        relative
+                      />
+                    )}
+                  </dd>
                 </dl>
               )}
               {control.status.value && (
