@@ -91,11 +91,10 @@ export function useDagTelemetry(
    */
   filter?: string,
   /**
-   * Whether an address naming no run opens the first one served. It does under
-   * the flat run list, whose whole point is the newest activity; it does not on
-   * the projects, where an address naming no run is asking for the project list
-   * rather than for a run. A run that *is* named but not served still falls back
-   * to the first, so a stale bookmark opens something rather than nothing.
+   * Whether an address naming no run opens the first one served. It does
+   * wherever a run is shown; it does not on the Host page, which is about the
+   * host rather than any run. A run that *is* named but not served still falls
+   * back to the first, so a stale bookmark opens something rather than nothing.
    */
   selectFirst = true,
 ): DagTelemetryState {

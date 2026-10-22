@@ -102,8 +102,8 @@ export function App({
     selection.runId,
     timelineScope,
     filter,
-    // Under the flat list an address naming no run opens the first served; on
-    // the projects it opens the project list.
+    // An address naming no run opens the first one served; the Host page names
+    // no run and opens none.
     !selection.host,
   );
   // The order is the server's — most recent activity first — and is never
