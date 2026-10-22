@@ -76,11 +76,12 @@ order or a count: the tallies are of the served rows, in the served words.
 
 ### The channel
 
-![The Channel tab: the queue showing a waiting surface with its kind, its source, a blocking badge and its age, the replies written under it, and a reply composer with a free-text editor and the verdict shortcuts above it](docs/screens/13-channel-1440x900.png)
+![The Channel tab: questions with their correlated replies directly beneath them, one-line message previews, an unanswered question marked waiting, and the reply composer below](docs/screens/13-channel-1440x900.png)
 
-The run's channel, shown as the engine keeps it: the pending surface nobody has given
-up on, the waiting ones nobody has read, an abandoned one where the process serving it
-exited without an answer, and the answered ones. Reading it consumes nothing. The
+The run's channel pairs each question with the replies whose correlation answers it,
+newest question first. An unanswered question says it is waiting. Each message shows
+its first line and expands to its complete text; a reply's raw envelope is one further
+expansion away. Reading consumes nothing. The
 composer sends the editor's text **byte for byte** — never a parse of it — so a manager
 can type an envelope this app has never heard of and the engine's refusal of a
 malformed one is the engine's own.
@@ -150,7 +151,7 @@ which is what its stops and shutdowns are judged by.
 <!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (22), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (23), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy

@@ -243,7 +243,7 @@ export const API_V2_FILTER_PROFILES = {
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 22;
+export const TELEMETRY_SCHEMA_VERSION = 23;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -1143,6 +1143,10 @@ export const runConversationsSchema = z.union([
 const verificationCheckSchema = openObject({
   name: z.string(),
   state: z.string(),
+  status: z.string().optional(),
+  conclusion: z.string().optional(),
+  started_at: timestamp.optional(),
+  completed_at: timestamp.optional(),
   required: z.boolean(),
   url: z.string().url().optional(),
 });
@@ -1720,6 +1724,7 @@ const verbEnvelope = {
  */
 export const channelSurfaceSchema = openObject({
   id: counter,
+  correlation: z.string().min(1).optional(),
   kind: z.string().min(1),
   message: z.string(),
   source: z.string().min(1),

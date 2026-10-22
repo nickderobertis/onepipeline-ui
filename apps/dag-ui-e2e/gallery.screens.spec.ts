@@ -432,14 +432,27 @@ const SURFACES: readonly Surface[] = [
     },
   },
   {
+    name: "21-remote",
+    title: "Remote: publication, release and each check's evidence",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&node=remote-open`);
+      await settleReads(page);
+      await page.getByRole("tab", { name: "Remote", exact: true }).click();
+      await expect(
+        page.getByRole("table", { name: "Remote checks" }),
+      ).toBeVisible();
+      await settleReads(page);
+    },
+  },
+  {
     name: "13-channel",
     title: "The channel: the queue, the composer and the surface form",
     open: async (page) => {
-      await page.goto(`/?run=${runs().supervised}&view=channel`);
+      await page.goto(`/?run=${runs().history}&view=channel`);
       await settleReads(page);
       await expect(
         page.getByRole("region", { name: "Channel queue" }),
-      ).toContainText("Replies");
+      ).toContainText("Other replies");
       await expect(page.getByRole("region", { name: "Reply" })).toBeVisible();
     },
   },

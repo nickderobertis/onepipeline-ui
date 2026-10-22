@@ -46,9 +46,9 @@ test("carries the opened moment of a node's execution", () => {
 });
 
 test("defaults, deep-links, and clears the selected node tab", () => {
-  window.history.replaceState(null, "", "/?run=run-1&node=build&tab=checks");
+  window.history.replaceState(null, "", "/?run=run-1&node=build&tab=remote");
   const { result } = renderHook(() => useUrlSelection());
-  expect(result.current.nodeTab).toBe("checks");
+  expect(result.current.nodeTab).toBe("remote");
   act(() => result.current.selectNodeTab("task"));
   expect(result.current.nodeTab).toBe("task");
   expect(window.location.search).toContain("tab=task");

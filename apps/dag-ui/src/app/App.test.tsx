@@ -864,7 +864,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=foundation`);
     const { client } = telemetryHarness();
     const view = render(<App client={client} />);
-    await userEvent.click(await screen.findByRole("tab", { name: "PR" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
     const [link] = await screen.findAllByRole("link", { name: /Pull request/ });
     expect(link).toHaveAttribute("href", PR_URL);
     expect(link).toHaveAttribute("target", "_blank");
@@ -873,7 +873,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=dashboard`);
     render(<App client={client} />);
-    await userEvent.click(await screen.findByRole("tab", { name: "PR" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
     expect(
       screen.getByText("Publication").nextElementSibling,
     ).toHaveTextContent("Not recorded");
@@ -941,7 +941,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         isRunDetail(url) ? Response.json(served) : defaultResponder(url),
       );
       render(<App client={client} />);
-      await userEvent.click(await screen.findByRole("tab", { name: "PR" }));
+      await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
       for (const name of expectedLinks) {
         expect(
           screen.getAllByRole("link", { name: new RegExp(name) }).length,

@@ -536,12 +536,15 @@ Escape key. It is a **timeline over a transcript**, both projected from
   An **edit** by an author other than the planner is named by that author on its
   row and in its facts, and the engine's own report of it is a surface like any
   other, `edit-applied`, raised by that author.
-- the node's **task, completion criteria, dependencies, PR, gate result and
-  agents** are tabs beside the timeline, one selection away rather than a wall of
-  blocks. Seven names do not fit every width, so below the breakpoint they wrap onto a second
-  row rather than hiding the ones past the edge behind a scroller — down to the
-  phone, where the same names need four rows and 170px of an 844px screen, and
-  the strip scrolls again so the timeline the view opens on has room to be drawn.
+- the node's **task, completion criteria, dependencies and Remote** are tabs
+  beside the timeline. Remote keeps the change request, branch, merge and release
+  information above a table of checks, with status, conclusion and requiredness.
+  Each recorded check URL opens its destination. The tab strip wraps at intermediate
+  widths and scrolls on the phone so the timeline has room to be drawn.
+
+The channel pairs each surface with the replies whose correlation answers it, newest
+surface first. An unanswered surface says it is waiting. Each message starts as one
+line and expands to its whole text; a reply's raw envelope is one disclosure deeper.
 
 Nothing in either surface grows with the size of the run. A run of eight or more
 consecutive same-kind siblings arrives as one grouped row, and a conversation
@@ -639,6 +642,7 @@ being photographed.
 | `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
 | `11-project-list` | the projects the app opens on, the `(no project)` group among them |
 | `12-project-page` | a project's page: its runs, newest activity first |
+| `21-remote` | publication, release and each check’s evidence |
 | `13-channel` | the channel: the queue, the composer and the surface form |
 | `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |
 | `15-recorded-node-collapsed` | the recorded worker and change request drafter in their own groups, collapsed |

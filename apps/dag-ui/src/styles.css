@@ -1979,3 +1979,69 @@ button.graph-row-name {
     display: none;
   }
 }
+
+.channel-message-details {
+  min-width: 0;
+}
+.channel-message-details > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.channel-message-details > summary::before {
+  content: "▸";
+}
+.channel-message-details[open] > summary::before {
+  content: "▾";
+}
+.channel-message-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-message-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.channel-message-details[open] .channel-message-meta {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.remote-checks {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.remote-checks th,
+.remote-checks td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts > .remote-check-facts {
+  grid-column: 1 / -1;
+  overflow-x: auto;
+}
+
+.remote-checks a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .channel-message-details:not([open])
+    .channel-message-meta
+    > :not(:first-child) {
+    display: none;
+  }
+}

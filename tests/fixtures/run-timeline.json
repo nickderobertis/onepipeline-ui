@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 22,
+  "telemetry_schema_version": 23,
   "observed_at": "2026-08-07T12:00:00Z",
   "timeline_schema_version": 13,
   "run_id": "run-20260807-a1b2c3",
@@ -424,8 +424,8 @@
             "state": "failed"
           },
           "reference": {
-            "kind": "gate_log",
-            "value": "artifact-published-smoke"
+            "kind": "pr",
+            "value": "https://example.test/checks/published-smoke"
           },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",

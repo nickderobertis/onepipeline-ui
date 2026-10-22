@@ -646,7 +646,12 @@ if (args.stall) {
     } else {
       let corpus = {
         build: (runsRoot) =>
-          buildRuns(runsRoot, workspace, args["review-corpus"] === true),
+          buildRuns(
+            runsRoot,
+            workspace,
+            args["review-corpus"] === true,
+            `http://127.0.0.1:${port}`,
+          ),
         facts: () => facts(workspace),
       };
       if (args["preserved-corpus"]) {
