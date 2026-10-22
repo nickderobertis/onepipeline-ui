@@ -3271,8 +3271,18 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
 
   // And resetting from any of them puts every one of them back.
   await runLevel.getByRole("button", { name: "Reset timeline zoom" }).click();
-  await expect.poll(() => axisTicks(graphLine(page))).toBe(before);
-  expect(await axisTicks(dashboard)).toBe(before);
+  await expect(
+    runLevel.getByRole("button", { name: "Reset timeline zoom" }),
+  ).toBeDisabled();
+  // The live range ends at the server's latest observation, which may have
+  // advanced since `before`. Its launch tick stays fixed; every row must still
+  // show the same full range after reset.
+  await expect
+    .poll(async () => (await axisTicks(graphLine(page))).split("\n")[0])
+    .toBe(before.split("\n")[0]);
+  const reset = await axisTicks(graphLine(page));
+  expect(await axisTicks(dashboard)).toBe(reset);
+  expect(await axisTicks(runLevel)).toBe(reset);
 });
 
 test("draws the stretches the run recorded nothing in", async ({ page }) => {
