@@ -48,6 +48,7 @@
       "launch": {
         "launch_id": "run-20260807-a1b2c3",
         "launcher": "claude-code",
+        "started_at": "2026-08-07T12:00:00.000Z",
         "session_key": "f4a5b11c4e92"
       },
       "group": "authoring:contract-interface",
@@ -98,6 +99,7 @@
       "launch": {
         "launch_id": "run-20260807-d4e5f6",
         "launcher": "claude-code",
+        "started_at": "2026-08-07T12:00:00.000Z",
         "session_key": "f4a5b11c4e92"
       },
       "group": "authoring:contract-interface",

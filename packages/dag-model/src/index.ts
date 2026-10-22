@@ -578,6 +578,8 @@ export const providerHealthSchema = openObject({
  * no `session_key`.
  */
 export const runLaunchSchema = openObject({
+  /** The engine’s recorded launch time, absent for older launch records. */
+  started_at: timestamp.optional(),
   launch_id: z.string().min(1),
   launcher: z.enum(["claude-code", "codex", "unknown"]),
   session_key: z.string().min(1).optional(),
@@ -1179,6 +1181,8 @@ export const nodeDetailSchema = openObject({
   }).optional(),
 });
 export const runDetailSchema = openObject({
+  /** The exact SDK telemetry document, including counters and millisecond buckets. */
+  telemetry: openObject({ schema_version: counter }).optional(),
   api_version: z.literal(2),
   telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,

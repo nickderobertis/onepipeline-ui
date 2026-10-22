@@ -233,3 +233,14 @@ nullable free_bytes, total_bytes and error), `dispatches` (run, node,
 launcher, nullable age_ms, proof held/unproven and nullable unproven reason),
 `gone` (run, node, reason) and `skipped` (path, reason). The existing `rendered`
 text is preserved.
+
+Under schema 24, run detail additionally carries optional `telemetry`: the unchanged
+SDK telemetry document also served as `/telemetry`'s `telemetry` field, including its
+own schema_version, exact millisecond buckets, usage and counters. It describes the
+whole run regardless of an event filter. Existing read API routes remain available.
+
+Schema 24 also adds optional `launch.started_at`, the SDK's recorded launch time
+unchanged, on rows and detail. Projects retain activity ordering. The browser orders
+a project's runs by launch time, newest first; undated launches follow dated ones,
+ordered by last activity. A late write to an older run does not select it over a
+newer launch.

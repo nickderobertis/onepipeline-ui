@@ -1231,6 +1231,9 @@ fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
     let mut record = Map::new();
     record.insert("launch_id".into(), json!(run));
     record.insert("launcher".into(), json!(launcher_word(&summary.launcher)));
+    if let Some(at) = &summary.started_at {
+        record.insert("started_at".into(), json!(at));
+    }
     if !summary.session.is_empty() {
         record.insert("session_key".into(), json!(session_key(&summary.session)));
     }
@@ -1343,6 +1346,9 @@ fn launch(view: &RunView) -> Value {
         "launcher".into(),
         json!(launcher_word(&view.launch.launcher)),
     );
+    if let Some(at) = view.launch.launched_at() {
+        record.insert("started_at".into(), json!(at));
+    }
     if !view.launch.session.is_empty() {
         record.insert(
             "session_key".into(),
@@ -2497,6 +2503,10 @@ pub fn run_detail(
         run["agent_count"] = json!(count);
     }
     payload.insert("run".into(), run);
+    payload.insert(
+        "telemetry".into(),
+        json!(onepipeline::telemetry::of_run(&view.paths, &view.events)),
+    );
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),
