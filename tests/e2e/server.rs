@@ -1769,14 +1769,15 @@ fn observer_sessions_on_multiple_streams_keep_their_declared_roles() {
             }
         }
     });
-    let timeline = http::get(
+    let response = http::get(
         serving.address,
         &format!(
             "/api/v2/runs/{}/timeline?scope=run",
             fixture_run::LANES_RUN_ID,
         ),
-    )
-    .json();
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let timeline = response.json();
     let spans = timeline["spans"].as_array().expect("spans");
     for stream in streams {
         for member in ["monitor", "check-in", "stranger"] {
