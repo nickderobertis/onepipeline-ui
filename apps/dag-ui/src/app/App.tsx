@@ -295,16 +295,18 @@ export function App({
                       gave a parked driver, read off the run's own last write. */}
                   <dt>Last progress</dt>
                   <dd>
-                    {detail.run.last_progress_at === undefined ? (
-                      "Not recorded"
-                    ) : (
-                      <Timestamp
-                        at={new Date(
-                          detail.run.last_progress_at * 1000,
-                        ).toISOString()}
-                        relative
-                      />
-                    )}
+                    <output aria-label="Last progress">
+                      {detail.run.last_progress_at === undefined ? (
+                        "Not recorded"
+                      ) : (
+                        <Timestamp
+                          at={new Date(
+                            detail.run.last_progress_at * 1000,
+                          ).toISOString()}
+                          relative
+                        />
+                      )}
+                    </output>
                   </dd>
                 </dl>
               )}
